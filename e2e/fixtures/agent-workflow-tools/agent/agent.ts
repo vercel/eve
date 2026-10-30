@@ -1,5 +1,12 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { latestTaskResult } from "@eve-e2e/config/mock-script";
+import { CALL_TOOL, SEARCH_TOOL, SKILL_TOOL } from "@eve-e2e/config/catalog-tools";
+import {
+  latestTaskResult,
+  outputOf,
+  playScript,
+  resultOf,
+  scriptedCallId,
+} from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
@@ -18,6 +25,39 @@ const HOOK_SCENARIO_CALLS = {
 } as const;
 
 /**
+ * public-catalog lists its tools without sign-in: connect it, which needs no
+ * sign-in, run its public tool, then its protected one, which asks the user to
+ * sign in and resumes once they have.
+ */
+function respondToPublicCatalog(request: MockModelRequest): MockModelResponse | string {
+  // The protected call is made again after its sign-in, under a new id.
+  const call = (id: string, tool: string) => ({
+    id: scriptedCallId(request, id),
+    name: CALL_TOOL,
+    input: { name: `public-catalog__${tool}`, input: {} },
+  });
+  if (resultOf(request, "public-catalog-connect") === undefined) {
+    return {
+      toolCalls: [
+        {
+          id: scriptedCallId(request, "public-catalog-connect"),
+          name: CALL_TOOL,
+          input: { name: "public-catalog" },
+        },
+      ],
+    };
+  }
+  if (resultOf(request, "public-catalog-items") === undefined) {
+    return { toolCalls: [call("public-catalog-items", "list_items")] };
+  }
+  const orders = resultOf(request, "public-catalog-orders");
+  if (orders === undefined) {
+    return { toolCalls: [call("public-catalog-orders", "list_orders")] };
+  }
+  return `PUBLIC_CATALOG_DONE ${JSON.stringify(orders.output)}`;
+}
+
+/**
  * Deterministic script: each directive names the workflow tool to call with
  * service "api"; once the turn holds a tool result the reply echoes it.
  */
@@ -28,7 +68,7 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     const skillCallId = auditing ? "audit-policy" : "initial-policy";
     if (!request.toolResults.some((entry) => entry.id === skillCallId)) {
       return {
-        toolCalls: [{ id: skillCallId, name: "load_skill", input: { skill: "delegation-policy" } }],
+        toolCalls: [{ id: skillCallId, name: SKILL_TOOL, input: { name: "delegation-policy" } }],
       };
     }
     const mode = (/SUBAGENT-HOOKS:(direct|background|waiting)/u.exec(hookScenario)?.[1] ??
@@ -47,7 +87,9 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     if (call === undefined) return { toolCalls: [{ name: tool, input }] };
     // An agent call or task returned a receipt; its result arrives in a <task_result> message.
     if (mode === "direct") {
-      return latestTaskResult(request, tool) ?? { toolCalls: [{ name: "task_wait", input: {} }] };
+      return (
+        latestTaskResult(request, tool) ?? { toolCalls: [{ name: "eve__task_wait", input: {} }] }
+      );
     }
     // Ends the step with text while the task works, which holds the turn. The
     // step takes a few seconds, so the task's helper most likely opens while it
@@ -62,51 +104,32 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     return typeof call.output === "string" ? call.output : JSON.stringify(call.output);
   }
 
+  if (request.userMessages.some((entry) => entry.startsWith("PUBLIC-CATALOG-E2E"))) {
+    return respondToPublicCatalog(request);
+  }
   const message =
-    [...request.userMessages]
-      .reverse()
-      .find((entry) => entry.startsWith("WORKFLOW-") || entry.includes("private-catalog")) ?? "";
+    [...request.userMessages].reverse().find((entry) => entry.startsWith("WORKFLOW-")) ?? "";
   const scenario = respondToTaskScenario(request, directiveOf(message));
   if (scenario !== undefined) return scenario;
-  if (message.includes("private-catalog")) {
-    const search = [...request.toolResults]
-      .reverse()
-      .find((entry) => entry.name === "connection_search");
-    if (search === undefined) {
-      return {
-        toolCalls: [
-          {
-            name: "connection_search",
-            input: { connection: "private-catalog", query: "items" },
-          },
-        ],
-      };
-    }
-    // A plain search reports the connection as requiring sign-in; `signIn` asks the user.
-    if (JSON.stringify(search.output).includes('"requiresSignIn":true')) {
-      return {
-        toolCalls: [
-          {
-            name: "connection_search",
-            input: { connection: "private-catalog", query: "items", signIn: true },
-          },
-        ],
-      };
-    }
-    const execute = request.toolResults.find((entry) => entry.name === "connection_execute");
-    if (execute === undefined) {
-      return {
-        toolCalls: [
-          {
-            name: "connection_execute",
-            input: { connection: "private-catalog", tool: "list_items", input: {} },
-          },
-        ],
-      };
-    }
-    return JSON.stringify(execute.output);
+  if (message.startsWith("WORKFLOW-CATALOG-SIGN-IN")) {
+    // A plain search finds the catalog as its sign-in entry; executing it asks
+    // the user. Sign-in drops that interrupted call from history, so the script
+    // makes it again once the turn resumes, then searches and calls a tool.
+    return playScript(
+      request,
+      [
+        { id: "catalog-search", name: SEARCH_TOOL, input: () => ({ query: "private-catalog" }) },
+        { id: "catalog-sign-in", name: CALL_TOOL, input: () => ({ name: "private-catalog" }) },
+        { id: "catalog-tools", name: SEARCH_TOOL, input: () => ({ query: "private-catalog__" }) },
+        {
+          id: "catalog-items",
+          name: CALL_TOOL,
+          input: () => ({ name: "private-catalog__list_items" }),
+        },
+      ],
+      (finished) => outputOf(finished, "catalog-items"),
+    );
   }
-
   const stepAuth = /WORKFLOW-STEP-AUTH-(IMPLICIT|EXPLICIT|REJECTED)/u.exec(message);
   if (stepAuth !== null) {
     const result = request.toolResults.find((entry) => entry.name === "authorize_service");
@@ -134,6 +157,7 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     ["WORKFLOW-FANOUT-START", "fanout_deploy"],
     ["WORKFLOW-WEBHOOK-START", "webhook_deploy"],
     ["WORKFLOW-AGENT-FANOUT-START", "fanout_agents"],
+    ["WORKFLOW-LAPSE-START", "lapsing_offer"],
   ] as const) {
     if (!message.includes(directive)) continue;
     const result = [...request.toolResults].reverse().find((entry) => entry.name === tool);

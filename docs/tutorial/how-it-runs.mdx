@@ -5,20 +5,20 @@ description: "Part 2 of the Build an Agent tutorial. Session, turn, and durable 
 
 The analytics assistant sent one message and got one answer. Three terms describe the model behind that.
 
-| Term        | Meaning                                           |
-| ----------- | ------------------------------------------------- |
-| **session** | Your whole conversation (durable, can span days). |
-| **turn**    | One message you send and the work it triggers.    |
-| **step**    | A durable checkpoint within the turn.             |
+| Term        | Meaning                                        |
+| ----------- | ---------------------------------------------- |
+| **session** | Your whole conversation. It can span days.     |
+| **turn**    | One message you send and the work it triggers. |
+| **step**    | A saved checkpoint within the turn.            |
 
-The session runs as one durable workflow, and eve saves each turn's progress at every step. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval. A turn that's waiting on you (an approval, a question) resumes whenever you answer, even if that's much later.
+A session survives restarts and redeploys, because eve saves each turn's progress at every step. A completed step never runs again; eve reuses its saved result. A step that is interrupted runs again from its start. Make side effects such as charges or emails idempotent, or gate them with approval. A turn that's waiting on you (an approval, a question) resumes whenever you answer, even if that's much later.
 
 That's why the features in the rest of this tutorial work the way they do:
 
-- The metric glossary in Step 5 survives across turns. State is checkpointed at step boundaries, so it sticks.
+- The metric glossary in Step 5 survives across turns, because eve saves state at each step.
 - The spend approval in Step 7 pauses the turn on your yes/no, then picks up exactly where it left off.
 
-You author capabilities, including tools, instructions, channels, and skills. eve drives the model-to-tool loop and decides when a turn continues, waits, or ends. You never write that loop yourself.
+You write the tools, instructions, channels, and skills. eve drives the model-to-tool loop and decides when a turn continues, waits, or ends.
 
 → Next: [Step 3: Query sample data](./query-sample-data)
 

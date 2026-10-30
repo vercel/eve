@@ -41,14 +41,17 @@ export function workflow(options: WorkflowToolOptions = {}): WorkflowTool {
     "Run an async JavaScript function body that invokes agents and returns one JSON-serializable value.",
     workflowProgramAgentContract,
     'Supply the body directly, for example: return await ctx.agent("researcher", { message: "Describe the task" });',
+    "Await every ctx.agent call before returning.",
     `The program may invoke at most ${String(normalized.maxSubagents)} agents.`,
   ].join(" ");
   return attachWorkflowProgramOptions(
-    defineWorkflowTool({
-      description,
-      inputSchema: workflowInputSchema,
-      task: runWorkflowProgramTask,
-    }),
+    frameworkTool(
+      defineWorkflowTool({
+        description,
+        inputSchema: workflowInputSchema,
+        task: runWorkflowProgramTask,
+      }),
+    ),
     normalized,
   );
 }
@@ -63,3 +66,4 @@ function normalizeWorkflowToolOptions(options: WorkflowToolOptions): {
     maxSubagents: options.maxSubagents ?? DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   });
 }
+import { frameworkTool } from "./framework-tool.js";

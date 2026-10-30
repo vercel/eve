@@ -105,7 +105,7 @@ it("emits every persisted report before the terminal outcome", async () => {
       (async function* () {
         // The body settles before the persisted report reaches its owner.
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        yield report;
+        yield [report];
       })(),
     ),
   });
@@ -194,7 +194,7 @@ it.each(["completed", "failed", "cancelled", "throw", "blocked"] as const)(
 
 it("preserves the pending inbox read across cancellation and drains the report before settling", async () => {
   const controller = new AbortController();
-  const pending = Promise.withResolvers<IteratorResult<WorkflowToolRunMessage>>();
+  const pending = Promise.withResolvers<IteratorResult<WorkflowToolRunMessage[]>>();
   const next = vi.fn(() => pending.promise);
   const report: WorkflowToolRunMessage = {
     from: {
@@ -219,7 +219,7 @@ it("preserves the pending inbox read across cancellation and drains the report b
   await vi.waitFor(() => expect(next).toHaveBeenCalledOnce());
   controller.abort(new Error("stop"));
   await vi.waitFor(() => expect(mocks.sleep).toHaveBeenCalledOnce());
-  pending.resolve({ done: false, value: report });
+  pending.resolve({ done: false, value: [report] });
   await completion;
   expect(mocks.deliver).toHaveBeenNthCalledWith(1, "parent", report, { ifPresent: false });
   expect(next).toHaveBeenCalledOnce();
@@ -233,6 +233,13 @@ it("preserves the pending inbox read across cancellation and drains the report b
     { ifPresent: true },
   );
 });
+
+/** A relay that hands the session each message in turn; owner.test covers batching. */
+function relayThrough(deliver: (message: never) => unknown) {
+  return async (messages: readonly WorkflowToolRunMessage[]): Promise<void> => {
+    for (const message of messages) await deliver(message as never);
+  };
+}
 
 function setControl(controller: AbortController) {
   const { signal } = controller;
@@ -253,6 +260,8 @@ function setControl(controller: AbortController) {
       mocks.deliver("parent", message, {
         ifPresent: message.kind === "outcome" && message.result.status === "cancelled",
       }),
+    register: async () => true,
+    relay: relayThrough((message) => mocks.deliver("parent", message, { ifPresent: false })),
   });
 }
 
@@ -286,7 +295,12 @@ it("applies cancellation buffered during the last report delivery before publish
       await vi.waitFor(() => expect(commands.landed).toHaveLength(1));
     }
   });
-  mocks.owner.mockReturnValue({ commands, handleMessage: deliver });
+  mocks.owner.mockReturnValue({
+    commands,
+    handleMessage: deliver,
+    register: async () => true,
+    relay: relayThrough(deliver),
+  });
   mocks.body.runSignal = controller.signal;
   mocks.applyCommand.mockImplementation(() => controller.abort(new Error("stop")));
   mocks.sleep.mockReturnValue(new Promise<void>(() => {}));
@@ -296,7 +310,7 @@ it("applies cancellation buffered during the last report delivery before publish
       "workflow",
       (async function* () {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        yield report;
+        yield [report];
         await new Promise<void>(() => {});
       })(),
     ),
@@ -317,6 +331,8 @@ it("keeps waiting for the body after the control hook closes", async () => {
   mocks.owner.mockReturnValue({
     commands: createChannelReader("control", (async function* () {})()),
     handleMessage: mocks.deliver,
+    relay: relayThrough(mocks.deliver),
+    register: async () => true,
   });
   mocks.body.runSignal = new AbortController().signal;
   mocks.runBody.mockResolvedValue({ status: "completed", output: "done" });
@@ -334,6 +350,137 @@ it("keeps waiting for the body after the control hook closes", async () => {
       kind: "outcome",
       result: { status: "completed", output: "done" },
     }),
+  );
+});
+
+it("reports a task started once its control hook is registered, without holding its body back", async () => {
+  const registered = Promise.withResolvers<void>();
+  const startedDelivered = Promise.withResolvers<void>();
+  const report: WorkflowToolRunMessage = {
+    from: {
+      callId: input.callId,
+      input: {},
+      runId: "run-1",
+      sequence: 0,
+      stepIndex: 0,
+      taskId: "task-1",
+      toolName: input.toolName,
+      turnId: "turn-1",
+    },
+    kind: "report",
+    update: "opened an agent",
+  };
+  const delivered: string[] = [];
+  mocks.deliver.mockImplementation(async (_inbox: string, message: WorkflowToolRunMessage) => {
+    delivered.push(message.kind);
+    if (message.kind === "started") await startedDelivered.promise;
+  });
+  mocks.owner.mockReturnValue({
+    commands: createChannelReader("control", {
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise<never>(() => {}) }),
+    }),
+    handleMessage: (message: WorkflowToolRunMessage) =>
+      mocks.deliver("parent", message, { ifPresent: false }),
+    relay: relayThrough((message) => mocks.deliver("parent", message, { ifPresent: false })),
+    register: async () => {
+      await registered.promise;
+      return true;
+    },
+  });
+  // The body sends a message at once; the session must hear started before it.
+  mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+    owner: { send: vi.fn(), sent: 1 },
+    reader: createChannelReader(
+      "workflow",
+      (async function* () {
+        yield [report];
+        await new Promise<void>(() => {});
+      })(),
+    ),
+  });
+
+  const completion = workflowToolRunWorkflow({
+    ...input,
+    entry: { entryPoint: "task", taskId: "task-1" },
+  });
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  expect(mocks.runBody).not.toHaveBeenCalled();
+  expect(delivered).toEqual([]);
+
+  registered.resolve();
+  await vi.waitFor(() => expect(delivered).toEqual(["started"]));
+  // The body started while started was still on its way.
+  expect(mocks.runBody).toHaveBeenCalledOnce();
+
+  startedDelivered.resolve();
+  await completion;
+  expect(delivered).toEqual(["started", "report", "outcome"]);
+});
+
+it("relays a question only once the control hook that takes its answer is registered", async () => {
+  const registered = Promise.withResolvers<boolean>();
+  const question: WorkflowToolRunMessage = {
+    from: {
+      callId: input.callId,
+      input: {},
+      runId: "run-1",
+      sequence: 0,
+      stepIndex: 0,
+      toolName: input.toolName,
+      turnId: "turn-1",
+    },
+    kind: "request",
+    replyTo: "run-1-ask-1",
+    request: { control: "control", kind: "ask", request: { prompt: "Deploy to production?" } },
+  };
+  mocks.owner.mockReturnValue({
+    commands: createChannelReader("control", {
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise<never>(() => {}) }),
+    }),
+    handleMessage: mocks.deliver,
+    relay: relayThrough(mocks.deliver),
+    register: () => registered.promise,
+  });
+  mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+    owner: { send: vi.fn(), sent: 1 },
+    reader: createChannelReader(
+      "workflow",
+      (async function* () {
+        yield [question];
+        await new Promise<void>(() => {});
+      })(),
+    ),
+  });
+
+  const completion = workflowToolRunWorkflow(input);
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  expect(mocks.deliver).not.toHaveBeenCalled();
+
+  registered.resolve(true);
+  await completion;
+  expect(mocks.deliver).toHaveBeenNthCalledWith(1, question);
+});
+
+it("reports a duplicate task start as started without starting its body", async () => {
+  mocks.owner.mockReturnValue({
+    commands: createChannelReader("control", (async function* () {})()),
+    handleMessage: mocks.deliver,
+    relay: relayThrough(mocks.deliver),
+    register: async () => false,
+  });
+  mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+    owner: { send: vi.fn(), sent: 0 },
+    reader: createChannelReader("workflow", (async function* () {})()),
+  });
+
+  await workflowToolRunWorkflow({ ...input, entry: { entryPoint: "task", taskId: "task-1" } });
+
+  expect(mocks.runBody).not.toHaveBeenCalled();
+  // The session may have recorded this run; its started releases the held commands to the hook.
+  expect(mocks.deliver).toHaveBeenCalledExactlyOnceWith(
+    "parent",
+    expect.objectContaining({ kind: "started" }),
+    { ifPresent: true },
   );
 });
 

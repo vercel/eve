@@ -36,6 +36,8 @@ import {
   resolveConnectionPrincipal,
   resolveConnectionPrincipalFromAuth,
 } from "#runtime/connections/principal.js";
+import { liveProjection } from "#harness/session-machine/current.js";
+import { terminalSignInFailure } from "#harness/hitl/sign-ins.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import {
   type AuthorizationDefinition,
@@ -105,6 +107,25 @@ export function createAuthorizationExecution(
         return requireAuth(scoped, error);
       }
     },
+    /**
+     * Resolves a stored token for the bound responder, who isn't part of this
+     * execution: it never starts or completes a sign-in, so a missing token
+     * fails terminally instead of reaching the interruption boundary.
+     */
+    async getResponderToken(scoped: ScopedAuthorization): Promise<TokenResult> {
+      try {
+        return await resolveScopedToken(scoped);
+      } catch (error) {
+        if (!isConnectionAuthorizationRequiredError(error)) {
+          throw error;
+        }
+        throw new ConnectionAuthorizationFailedError(scoped.scope, {
+          message: `The approver of "${scoped.scope}" has no token for this provider, and an approved call doesn't start a sign-in.`,
+          reason: "approver_authorization_required",
+          retryable: false,
+        });
+      }
+    },
     requireAuth,
     async handleError(error: unknown, scoped?: ScopedAuthorization): Promise<AuthorizationSignal> {
       if (scoped !== undefined && isConnectionAuthorizationRequiredError(error)) {
@@ -136,7 +157,8 @@ class ScopedAuthorizationRequiredError extends Error {
   }
 }
 
-function isScopedAuthorizationRequiredError(
+/** Whether `error` asks the enclosing boundary to start a sign-in. */
+export function isScopedAuthorizationRequiredError(
   error: unknown,
 ): error is ScopedAuthorizationRequiredError {
   return error instanceof Error && error.name === "ScopedAuthorizationRequiredError";
@@ -155,6 +177,24 @@ export async function handleAuthorizationError(
     throw new ConnectionAuthorizationFailedError(scoped.scope, {
       message: `Authorization for "${scoped.scope}" failed: the service rejected the token immediately after authorization.`,
       reason: "token_rejected_after_authorization",
+      retryable: false,
+    });
+  }
+
+  // A sign-in this turn already failed terminally is reported, not started again.
+  const projection = liveProjection();
+  const refused =
+    projection === undefined
+      ? undefined
+      : terminalSignInFailure(projection, {
+          grant: scoped.authorization.vercelConnect?.connector,
+          name: scoped.scope,
+          principal: resolveScopedPrincipal(scoped),
+        });
+  if (refused !== undefined) {
+    throw new ConnectionAuthorizationFailedError(scoped.scope, {
+      message: `Authorization for "${scoped.scope}" already failed in this turn and can't be retried${refused.reason === undefined ? "." : `: ${refused.reason}`}`,
+      ...(refused.reason !== undefined && { reason: refused.reason }),
       retryable: false,
     });
   }
@@ -390,7 +430,7 @@ export function resolveAuthorizationCallbackUrl(input: {
 
 /**
  * Resolves the user-facing `displayName` onto a challenge before it is
- * surfaced on `authorization.required`.
+ * surfaced on sign-in `interaction.opened`.
  *
  * The agent author's static definition-level value wins over the
  * strategy-stamped one: an author writing

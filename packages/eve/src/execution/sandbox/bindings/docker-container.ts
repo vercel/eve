@@ -4,9 +4,13 @@ import type { ResolvedDockerSandboxOptions } from "#execution/sandbox/bindings/d
 import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js";
 import { withDevelopmentSandboxTags } from "#execution/sandbox/development-run.js";
 import type { DockerSandboxNetworkPolicy } from "#public/sandbox/docker-sandbox.js";
+import { SANDBOX_AGENT_ENV } from "#public/sandbox/provider.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 
 export const DOCKER_SANDBOX_LABEL = "eve.sandbox";
+
+/** Where a template build container mounts the read-only workspace and skill resources. */
+export const DOCKER_RESOURCES_MOUNT_PATH = "/eve/resources";
 
 // PID 1 must outlive every exec'd command; the largest portable sleep
 // argument keeps the container alive without depending on GNU
@@ -37,14 +41,17 @@ export async function startDockerContainer(input: {
   for (const [key, value] of Object.entries(withDevelopmentSandboxTags(input.tags) ?? {})) {
     args.push("--label", `${DOCKER_SANDBOX_LABEL}.tag.${key}=${value}`);
   }
-  for (const [key, value] of Object.entries(input.options.env)) {
+  for (const [key, value] of Object.entries({ ...SANDBOX_AGENT_ENV, ...input.options.env })) {
     args.push("-e", `${key}=${value}`);
   }
   if (input.initialNetworkPolicy === "deny-all") {
     args.push("--network", "none");
   }
   if (input.resourcesPath !== undefined) {
-    args.push("--mount", `type=bind,src=${input.resourcesPath},dst=/eve/resources,readonly`);
+    args.push(
+      "--mount",
+      `type=bind,src=${input.resourcesPath},dst=${DOCKER_RESOURCES_MOUNT_PATH},readonly`,
+    );
   }
 
   args.push(

@@ -1,24 +1,24 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { decodeBytesToUtf8, defineCommand, MountableFs, ReadWriteFs } from "just-bash";
 import { describe, expect, it } from "vitest";
 
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
-import { createJustBashSandboxProvider } from "#execution/sandbox/bindings/just-bash.js";
-import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
-import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
+import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provider-harness.js";
+import { JustBashSandbox, type JustBashEnvironmentOptions } from "#sandbox/providers/just-bash.js";
+import { executeBashOnSandbox } from "#execution/sandbox/bash.js";
 import { executeGlobOnSandbox } from "#execution/sandbox/glob-tool.js";
-import { executeGrepOnSandbox } from "#execution/sandbox/grep-tool.js";
+import { executeGrepSearch } from "#execution/sandbox/grep-search.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
 // The whole file exercises the opt-in just-bash provider; the workspace
 // devDependency provides the `just-bash` install that applications opt
 // into explicitly.
-function createJustBashProvider(options: JustBashSandboxCreateOptions = {}) {
-  return createSandboxProviderHarness(createJustBashSandboxProvider(options), undefined);
+function createJustBashProvider(options: JustBashEnvironmentOptions = {}) {
+  return createSandboxEnvironmentHarness(JustBashSandbox.environment(options));
 }
 
 async function createTemporaryCacheDirectory(label: string): Promise<string> {
@@ -36,7 +36,6 @@ async function createPrewarmedLocalHandle(input: {
   const provider = createJustBashProvider();
   await provider.prepare({
     appRoot: input.appRoot,
-    seedFiles: [],
   });
   return await provider.openSession({
     appRoot: input.appRoot,
@@ -69,23 +68,25 @@ describe("just-bash sandbox file API", () => {
     await writeFile(join(sourceRoot, "instructions.md"), "before");
     let factoryCalls = 0;
     const provider = createJustBashProvider({
-      async filesystem(context) {
-        factoryCalls += 1;
-        expect(context.resolveProjectPath(".")).toBe(appRoot);
-        await context.defaultFilesystem.mkdir("/source", { recursive: true });
-        return new MountableFs({
-          base: context.defaultFilesystem,
-          mounts: [
-            {
-              filesystem: new ReadWriteFs({
-                allowSymlinks: false,
-                maxFileReadSize: Number.MAX_SAFE_INTEGER,
-                root: sourceRoot,
-              }),
-              mountPoint: "/source",
-            },
-          ],
-        });
+      experimental: {
+        async filesystem(context) {
+          factoryCalls += 1;
+          expect(context.resolveProjectPath(".")).toBe(appRoot);
+          await context.defaultFilesystem.mkdir("/source", { recursive: true });
+          return new MountableFs({
+            base: context.defaultFilesystem,
+            mounts: [
+              {
+                filesystem: new ReadWriteFs({
+                  allowSymlinks: false,
+                  maxFileReadSize: Number.MAX_SAFE_INTEGER,
+                  root: sourceRoot,
+                }),
+                mountPoint: "/source",
+              },
+            ],
+          });
+        },
       },
     });
 
@@ -104,12 +105,22 @@ describe("just-bash sandbox file API", () => {
       path: "/source",
     });
     await expect(
-      executeGrepOnSandbox(handle.sandbox, { path: "/source", pattern: "before" }),
-    ).resolves.toMatchObject({
-      content: "/source/instructions.md:1:before",
-      matchCount: 1,
-      path: "/source",
-    });
+      executeGrepSearch(
+        {
+          path: "/source",
+          pattern: "before",
+          outputMode: "content",
+        },
+        handle.sandbox,
+      ),
+    ).rejects.toThrow("outside the workspace");
+    await handle.sandbox.writeTextFile({ path: "/workspace/grep-note.txt", content: "before" });
+    await expect(
+      executeGrepSearch({ pattern: "before", outputMode: "content" }, handle.sandbox),
+    ).resolves.toMatchObject({ content: "/workspace/grep-note.txt:1:before", matchCount: 1 });
+    await expect(
+      executeGrepSearch({ pattern: "[", literal: false, outputMode: "content" }, handle.sandbox),
+    ).rejects.toThrow("grep failed");
     await handle.sandbox.writeTextFile({
       content: "after",
       path: "/source/instructions.md",
@@ -117,22 +128,24 @@ describe("just-bash sandbox file API", () => {
     await handle.sandbox.writeTextFile({ content: "scratch", path: "scratch.txt" });
     expect(await readFile(join(sourceRoot, "instructions.md"), "utf8")).toBe("after");
     expect(existsSync(join(sourceRoot, "scratch.txt"))).toBe(false);
-    await handle.onRuntimeShutdown();
+    await handle.connection.stop();
   });
 
   it("applies the filesystem factory only to live sessions", async () => {
     const appRoot = await createTemporaryCacheDirectory("filesystem-factory-lifecycle");
     let factoryCalls = 0;
     const provider = createJustBashProvider({
-      async filesystem({ defaultFilesystem }) {
-        factoryCalls += 1;
-        return defaultFilesystem;
+      experimental: {
+        async filesystem({ defaultFilesystem }) {
+          factoryCalls += 1;
+          return defaultFilesystem;
+        },
       },
     });
 
     await provider.prepare({
       appRoot,
-      seedFiles: [{ content: "from template", path: "/workspace/seed.txt" }],
+      workspace: [{ content: "from template", relativePath: "seed.txt" }],
     });
     expect(factoryCalls).toBe(0);
 
@@ -142,7 +155,7 @@ describe("just-bash sandbox file API", () => {
     });
     expect(factoryCalls).toBe(1);
     await expect(handle.sandbox.readTextFile({ path: "seed.txt" })).resolves.toBe("from template");
-    await handle.onRuntimeShutdown();
+    await handle.connection.stop();
   });
 
   it("writes a file via the public session and reads it back", async () => {
@@ -166,12 +179,32 @@ describe("just-bash sandbox file API", () => {
     });
 
     const result = await handle.sandbox.run({
-      command: 'echo "$DEPLOY_ENV"',
+      command: 'echo "$DEPLOY_ENV $AI_AGENT"',
       env: { DEPLOY_ENV: "staging" },
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout.trim()).toBe("staging");
+    expect(result.stdout.trim()).toBe("staging eve");
+  });
+
+  it("runs bash tool commands directly because just-bash cannot host background jobs", async () => {
+    const cacheDirectory = await createTemporaryCacheDirectory("bash-tool");
+    const handle = await createPrewarmedLocalHandle({
+      appRoot: cacheDirectory,
+      sandboxName: "session-bash-tool",
+    });
+
+    const result = await executeBashOnSandbox(handle.sandbox, {
+      command: "echo out; echo err >&2; exit 3",
+    });
+
+    expect(result).toEqual({
+      exitCode: 3,
+      status: "completed",
+      stderr: "err\n",
+      stdout: "out\n",
+      truncated: false,
+    });
   });
 
   it("passes env vars to a process spawned via the public session", async () => {
@@ -265,10 +298,9 @@ describe("just-bash sandbox file API", () => {
 
     await provider.prepare({
       appRoot,
-      seedFiles: [],
     });
 
-    const { handle: firstHandle, state } = await provider.start({
+    const { state, ...firstHandle } = await provider.start({
       appRoot,
       sandboxName: "session-reconnect",
     });
@@ -277,11 +309,11 @@ describe("just-bash sandbox file API", () => {
       path: "persisted.txt",
     });
 
-    await firstHandle.onSessionStop();
+    await firstHandle.connection.stop();
 
-    expect(state).toMatchObject({ version: 2 });
+    const { rootPath } = state as { readonly rootPath: string };
     await expect(
-      readFile(join(state.rootPath, "fs", "workspace", "persisted.txt"), "utf8"),
+      readFile(join(rootPath, "fs", "workspace", "persisted.txt"), "utf8"),
     ).resolves.toBe("survives reconnect");
 
     const reconnectedHandle = await provider.openSession({
@@ -292,6 +324,21 @@ describe("just-bash sandbox file API", () => {
     const content = await reconnectedHandle.sandbox.readTextFile({ path: "persisted.txt" });
 
     expect(content).toBe("survives reconnect");
+  });
+
+  it("removes the session root by key at session end, so the next start is fresh", async () => {
+    const appRoot = await createTemporaryCacheDirectory("session-end");
+    const provider = createJustBashProvider();
+    await provider.prepare({ appRoot });
+    const session = { appRoot, sandboxName: "session-end" };
+    const handle = await provider.start(session);
+    await handle.sandbox.writeTextFile({ content: "left behind", path: "left.txt" });
+
+    await provider.endSession({ ...session, state: null });
+    await provider.endSession({ ...session, state: null });
+
+    const fresh = await provider.openSession(session);
+    await expect(fresh.sandbox.readTextFile({ path: "left.txt" })).resolves.toBeNull();
   });
 
   it("supports readFile with line range options", async () => {
@@ -327,6 +374,47 @@ describe("just-bash sandbox file API", () => {
     expect(content).toBe("relative write");
   });
 
+  it("runs commands in any working directory, even with a trailing comment", async () => {
+    const cacheDirectory = await createTemporaryCacheDirectory("working-directory");
+    const handle = await createPrewarmedLocalHandle({
+      appRoot: cacheDirectory,
+      sandboxName: "session-working-directory",
+    });
+    await handle.sandbox.writeTextFile({ content: "nested", path: "sub/deeper/note.txt" });
+
+    await expect(handle.sandbox.run({ command: "pwd # workspace" })).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: "/workspace\n",
+    });
+    await expect(
+      handle.sandbox.run({
+        command: "pwd; exit 4 # subdirectory",
+        workingDirectory: "sub/deeper/..",
+      }),
+    ).resolves.toMatchObject({ exitCode: 4, stdout: "/workspace/sub\n" });
+    await expect(
+      handle.sandbox.run({ command: "echo unreachable", workingDirectory: "missing" }),
+    ).resolves.toMatchObject({
+      exitCode: 1,
+      stderr: expect.stringContaining("/workspace/missing"),
+      stdout: "",
+    });
+    await expect(handle.sandbox.readTextFile({ path: "sub/../sub/deeper/note.txt" })).resolves.toBe(
+      "nested",
+    );
+  });
+
+  it("rejects reading a directory instead of reporting it missing", async () => {
+    const cacheDirectory = await createTemporaryCacheDirectory("file-api");
+    const handle = await createPrewarmedLocalHandle({
+      appRoot: cacheDirectory,
+      sandboxName: "session-read-directory",
+    });
+    await handle.sandbox.writeTextFile({ content: "inside", path: "folder/file.txt" });
+
+    await expect(handle.sandbox.readTextFile({ path: "folder" })).rejects.toThrow(/EISDIR/);
+  });
+
   it("preserves Buffer bytes written through the public session", async () => {
     const cacheDirectory = await createTemporaryCacheDirectory("file-api");
     const handle = await createPrewarmedLocalHandle({
@@ -350,18 +438,20 @@ describe("just-bash custom commands", () => {
   it("forwards custom commands to live sessions", async () => {
     const appRoot = await createTemporaryCacheDirectory("custom-command");
     const provider = createJustBashProvider({
-      customCommands: [
-        defineCommand("cap", async (args, context) => {
-          if (args[0] === "fail") {
-            return { exitCode: 23, stderr: "cap failed\n", stdout: "" };
-          }
-          return {
-            exitCode: 0,
-            stderr: "",
-            stdout: decodeBytesToUtf8(context.stdin).toUpperCase(),
-          };
-        }),
-      ],
+      experimental: {
+        customCommands: [
+          defineCommand("cap", async (args, context) => {
+            if (args[0] === "fail") {
+              return { exitCode: 23, stderr: "cap failed\n", stdout: "" };
+            }
+            return {
+              exitCode: 0,
+              stderr: "",
+              stdout: decodeBytesToUtf8(context.stdin).toUpperCase(),
+            };
+          }),
+        ],
+      },
     });
     const handle = await provider.openSession({
       appRoot,
@@ -378,7 +468,7 @@ describe("just-bash custom commands", () => {
       exitCode: 23,
       stderr: "cap failed\n",
     });
-    await handle.onRuntimeShutdown();
+    await handle.connection.stop();
   });
 });
 
@@ -404,10 +494,10 @@ describe("just-bash provider", () => {
 
     await provider.prepare({
       appRoot,
-      seedFiles: [
+      workspace: [
         {
           content: "# Weather skill\n",
-          path: "/workspace/skills/weather.md",
+          relativePath: "skills/weather.md",
         },
       ],
     });
@@ -423,37 +513,90 @@ describe("just-bash provider", () => {
     expect(result.stdout.trim().split("\n")).toEqual(["/workspace/skills/weather.md"]);
   });
 
-  it("rejects existing session state from a different prepared artifact", async () => {
+  it("keeps a relative symlink from preparation usable and private in each session", async () => {
+    const appRoot = await createTemporaryCacheDirectory("relative-symlink");
+    const provider = createJustBashProvider({
+      async prepare(session) {
+        const result = await session.run({
+          command:
+            "mkdir -p data && echo template > data/notes.txt && ln -s data/notes.txt current.txt",
+        });
+        expect(result.exitCode).toBe(0);
+      },
+    });
+    await provider.prepare({ appRoot });
+
+    const alice = await provider.openSession({ appRoot, sandboxName: "session-alice" });
+    const write = await alice.sandbox.run({
+      command: "echo alice > current.txt && readlink current.txt && cat data/notes.txt",
+    });
+    expect(write).toMatchObject({ exitCode: 0, stdout: "data/notes.txt\nalice\n" });
+
+    const bob = await provider.openSession({ appRoot, sandboxName: "session-bob" });
+    await expect(bob.sandbox.readTextFile({ path: "current.txt" })).resolves.toBe("template\n");
+  });
+
+  it("opens a prewarmed template after the app moves to a different root", async () => {
+    const buildRoot = await createTemporaryCacheDirectory("build-root");
+    const runtimeRoot = await createTemporaryCacheDirectory("runtime-root");
+    const provider = createJustBashProvider();
+
+    const prepared = await provider.prepare({
+      appRoot: buildRoot,
+      workspace: [
+        {
+          content: "# Weather skill\n",
+          relativePath: "skills/weather.md",
+        },
+      ],
+    });
+    // Build in CI, then ship the cache to a different app root (#4606).
+    await cp(buildRoot, runtimeRoot, { recursive: true });
+    await rm(buildRoot, { force: true, recursive: true });
+
+    const handle = await provider.openSession({
+      appRoot: runtimeRoot,
+      prepared,
+      sandboxName: "session-after-move",
+    });
+    const result = await handle.sandbox.run({
+      command: "find /workspace -maxdepth 3 -type f | sort",
+    });
+
+    expect(result.stdout.trim().split("\n")).toEqual(["/workspace/skills/weather.md"]);
+  });
+
+  it("keeps a session's files when a later preparation changes the artifact", async () => {
     const appRoot = await createTemporaryCacheDirectory("seed-session");
     const provider = createJustBashProvider();
 
     await provider.prepare({
       appRoot,
-      seedFiles: [],
     });
 
-    const { handle: initialHandle, state: initialState } = await provider.start({
+    const { state: initialState, ...initialHandle } = await provider.start({
       appRoot,
       sandboxName: "session-seeded-later",
     });
-    await initialHandle.onRuntimeShutdown();
+    await initialHandle.sandbox.writeTextFile({ content: "kept", path: "notes.txt" });
+    await initialHandle.connection.stop();
 
     await provider.prepare({
       appRoot,
-      seedFiles: [
+      workspace: [
         {
           content: "# Weather skill\n",
-          path: "/workspace/skills/weather.md",
+          relativePath: "skills/weather.md",
         },
       ],
     });
 
-    await expect(
-      provider.openSession({
-        existing: initialState,
-        appRoot,
-        sandboxName: "session-seeded-later",
-      }),
-    ).rejects.toThrow("session state is incompatible");
+    const resumed = await provider.openSession({
+      existing: initialState,
+      appRoot,
+      sandboxName: "session-seeded-later",
+    });
+    await expect(resumed.sandbox.readTextFile({ path: "notes.txt" })).resolves.toBe("kept");
+    await expect(resumed.sandbox.readTextFile({ path: "skills/weather.md" })).resolves.toBeNull();
   });
 });

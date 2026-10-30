@@ -1,3 +1,4 @@
+export { InvalidSessionHistoryError, type SessionHistoryMessage } from "#shared/session-history.js";
 export {
   defineChannel,
   disableRoute,
@@ -10,38 +11,39 @@ export {
   DELETE,
   WS,
   type AttachSessionFn,
-  type CancelTurnResult,
-  type ClearSessionResult,
-  type CompactSessionResult,
-  type ResetSessionResult,
+  SessionStrandedError,
   type Channel,
   type ChannelAudience,
   type AudienceCaller,
   type AudienceContext,
-  type AudienceInput,
-  type AudiencePrincipal,
   type ConversationEnvironment,
   type ChannelFrom,
   type ChannelReceiveContext,
   type ChannelResolveSession,
   type ChannelRespondOptions,
+  type ChannelCreateOptions,
+  type ChannelCreateResult,
   type ChannelSendOptions,
   type ChannelSource,
   type ChannelCors,
   type ChannelCorsOptions,
   type ChannelDefinition,
+  type ChannelDelivery,
   type DisabledRouteSentinel,
+  type ChannelContext,
   type ChannelContinuationOps,
   type ChannelEvents,
   type InferChannelMetadata,
-  type Session,
-  type SessionCallback,
-  type SessionHandle,
-  type SessionRespondOptions,
-  type SessionSendOptions,
   type TurnPolicy,
   type RouteDefinition,
   type RouteHandlerArgs,
+  type AgentDescription,
+  type AgentSkillDescription,
+  type AgentSkillFileDescription,
+  type AgentToolDescription,
+  type InvokeToolFn,
+  type InvokeToolOptions,
+  type InvokeToolResult,
   type HttpRouteDefinition,
   type WebSocketMessage,
   type WebSocketPeer,
@@ -50,8 +52,22 @@ export {
   type WebSocketRouteHooks,
   type WebSocketUpgradeRequest,
   type WebSocketUpgradeResult,
-  isDisabledRouteSentinel,
+  type ChannelCommitHandler,
+  type ChannelEventContext,
+  type CommittedLine,
 } from "#public/definitions/channel.js";
+export { attachmentError } from "#public/channels/attachment-error.js";
+export type {
+  FetchFileContext,
+  FetchFileFunction,
+  FetchFileResult,
+} from "#shared/channel-definition.js";
+export type {
+  MessageContent,
+  MessageFilePart,
+  MessagePart,
+  MessageTextPart,
+} from "#shared/message-content.js";
 export {
   createWebSocketUpgradeServer,
   type WebSocketUpgradeServerBridge,
@@ -59,57 +75,37 @@ export {
 
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import type { Channel, InferChannelMetadata } from "#public/definitions/channel.js";
-/**
- * Base channel metadata shape used by framework channel kinds.
- */
-export type InstrumentationChannelMetadata = Readonly<Record<string, unknown>>;
+import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
+export type {
+  InstrumentationChannel,
+  InstrumentationChannelKind,
+  InstrumentationChannelMetadata,
+  InstrumentationChannelForKind,
+} from "#shared/instrumentation-channel.js";
 
-/**
- * Kind discriminator exposed to instrumentation and dynamic resolvers.
- */
-export type InstrumentationChannelKind =
-  | "http"
-  | "schedule"
-  | "subagent"
-  | "unknown"
-  | `channel:${string}`;
-
-/**
- * Instrumentation projection for one channel kind.
- */
-export interface InstrumentationChannelForKind<K extends InstrumentationChannelKind> {
-  readonly kind: K;
-  readonly metadata: InstrumentationChannelMetadata;
-}
-
-/**
- * Channel shape received by instrumentation callbacks and dynamic resolvers.
- * Use {@link isChannel} with a channel definition to narrow authored metadata.
- */
-export type InstrumentationChannel = InstrumentationChannelForKind<InstrumentationChannelKind>;
-
-/**
- * Instrumentation channel narrowed to the metadata projected by `TChannel`.
- */
+/** Instrumentation channel narrowed to the metadata projected by `TChannel`. */
 export type InstrumentationChannelForChannel<TChannel extends Channel<any, any, any>> = Omit<
-  InstrumentationChannelForKind<`channel:${string}`>,
-  "metadata"
+  InstrumentationChannel,
+  "kind" | "metadata"
 > & {
+  readonly kind: `channel:${string}`;
   readonly metadata: InferChannelMetadata<TChannel>;
 };
 
-/**
- * Narrows a channel by comparing it to an app-owned channel value imported
- * from `agent/channels/*`.
- *
- * Works with both instrumentation resolver inputs (`input.channel`) and
- * dynamic resolver inputs (`ctx.channel`). The comparison uses the
- * compiler's path-derived `channel:<slug>` identity. Metadata is inferred
- * directly from the target channel definition.
- */
+/** Narrows authored metadata only when the input actually carries metadata. */
 export function isChannel<TChannel extends Channel<any, any, any>>(
-  channel: InstrumentationChannel | { readonly kind?: string },
+  channel: InstrumentationChannel,
   target: TChannel,
-): channel is InstrumentationChannelForChannel<TChannel> {
+): channel is InstrumentationChannelForChannel<TChannel>;
+export function isChannel<TChannel extends Channel<any, any, any>>(
+  channel: { readonly kind?: string },
+  target: TChannel,
+): channel is { readonly kind: `channel:${string}` };
+export function isChannel(
+  channel: { readonly kind?: string },
+  target: Channel<any, any, any>,
+): boolean {
   return channel.kind === getChannelInstrumentationKind(target);
 }
+
+export type { UploadPolicyInput } from "#public/channels/upload-policy.js";

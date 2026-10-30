@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.70.2",
+  "version": "0.90.0",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -16,6 +16,7 @@
     "observability",
     "react",
     "serverless",
+    "tanstack",
     "tools",
     "vercel",
     "workflow"
@@ -36,8 +37,8 @@
   "files": [
     "bin",
     "dist",
+    "!dist/CHANGELOG.md",
     "docs",
-    "CHANGELOG.md",
     "NOTICE",
     "README.md"
   ],
@@ -65,6 +66,11 @@
       "types": "./dist/src/client/index.d.ts",
       "import": "./dist/src/client/index.js",
       "default": "./dist/src/client/index.js"
+    },
+    "./sessions": {
+      "types": "./dist/src/public/sessions/index.d.ts",
+      "import": "./dist/src/public/sessions/index.js",
+      "default": "./dist/src/public/sessions/index.js"
     },
     "./react": {
       "types": "./dist/src/react/index.d.ts",
@@ -102,6 +108,11 @@
       "import": "./dist/src/public/sveltekit/index.js",
       "default": "./dist/src/public/sveltekit/index.js"
     },
+    "./tanstack": {
+      "types": "./dist/src/public/tanstack/index.d.ts",
+      "import": "./dist/src/public/tanstack/index.js",
+      "default": "./dist/src/public/tanstack/index.js"
+    },
     "./tools/approval": {
       "types": "./dist/src/public/tools/approval/index.d.ts",
       "import": "./dist/src/public/tools/approval/index.js",
@@ -126,11 +137,6 @@
       "types": "./dist/src/public/memory/file/vercel.d.ts",
       "import": "./dist/src/public/memory/file/vercel.js",
       "default": "./dist/src/public/memory/file/vercel.js"
-    },
-    "./tools/agent-router": {
-      "types": "./dist/src/public/tools/agent-router.d.ts",
-      "import": "./dist/src/public/tools/agent-router.js",
-      "default": "./dist/src/public/tools/agent-router.js"
     },
     "./tools/sleep": {
       "types": "./dist/src/public/tools/sleep.d.ts",
@@ -182,11 +188,6 @@
       "import": "./dist/src/public/tools/web-search.js",
       "default": "./dist/src/public/tools/web-search.js"
     },
-    "./tools/load_skill": {
-      "types": "./dist/src/public/tools/load-skill.d.ts",
-      "import": "./dist/src/public/tools/load-skill.js",
-      "default": "./dist/src/public/tools/load-skill.js"
-    },
     "./tools/glob": {
       "types": "./dist/src/public/tools/glob.d.ts",
       "import": "./dist/src/public/tools/glob.js",
@@ -201,6 +202,18 @@
       "types": "./dist/src/public/tools/workflow.d.ts",
       "import": "./dist/src/public/tools/workflow.js",
       "default": "./dist/src/public/tools/workflow.js"
+    },
+    "./workflow": {
+      "eve-source": "./src/public/workflow/index.ts",
+      "types": "./dist/src/public/workflow/index.d.ts",
+      "import": "./dist/src/public/workflow/index.js",
+      "default": "./dist/src/public/workflow/index.js"
+    },
+    "./workflow/api": {
+      "eve-source": "./src/public/workflow/api.ts",
+      "types": "./dist/src/public/workflow/api.d.ts",
+      "import": "./dist/src/public/workflow/api.js",
+      "default": "./dist/src/public/workflow/api.js"
     },
     "./workflow-modules": {
       "eve-source": "./dist/src/public/workflow-modules.d.ts",
@@ -241,6 +254,11 @@
       "import": "./dist/src/public/hooks/index.js",
       "default": "./dist/src/public/hooks/index.js"
     },
+    "./events": {
+      "types": "./dist/src/public/events/index.d.ts",
+      "import": "./dist/src/public/events/index.js",
+      "default": "./dist/src/public/events/index.js"
+    },
     "./sandbox": {
       "types": "./dist/src/public/sandbox/index.d.ts",
       "import": "./dist/src/public/sandbox/index.js",
@@ -260,11 +278,6 @@
       "types": "./dist/src/public/sandbox/just-bash.d.ts",
       "import": "./dist/src/public/sandbox/just-bash.js",
       "default": "./dist/src/public/sandbox/just-bash.js"
-    },
-    "./sandbox/microsandbox": {
-      "types": "./dist/src/public/sandbox/microsandbox.d.ts",
-      "import": "./dist/src/public/sandbox/microsandbox.js",
-      "default": "./dist/src/public/sandbox/microsandbox.js"
     },
     "./sandbox/vercel": {
       "types": "./dist/src/public/sandbox/vercel.d.ts",
@@ -327,24 +340,6 @@
       "import": "./dist/src/public/local-dev.js",
       "default": "./dist/src/public/local-dev.js"
     },
-    "./self-modification": {
-      "eve-source": "./dist/src/self-modification/extension/extension.js",
-      "types": "./dist/src/self-modification/extension/extension.d.ts",
-      "import": "./dist/src/self-modification/extension/extension.js",
-      "default": "./dist/src/self-modification/extension/extension.js"
-    },
-    "./self-modification/agent": {
-      "eve-source": "./dist/src/self-modification/agent.js",
-      "types": "./dist/src/self-modification/agent.d.ts",
-      "import": "./dist/src/self-modification/agent.js",
-      "default": "./dist/src/self-modification/agent.js"
-    },
-    "./self-modification/sandbox": {
-      "eve-source": "./dist/src/self-modification/sandbox.js",
-      "types": "./dist/src/self-modification/sandbox.d.ts",
-      "import": "./dist/src/self-modification/sandbox.js",
-      "default": "./dist/src/self-modification/sandbox.js"
-    },
     "./extensions/code": {
       "eve-source": "./dist/src/extensions/code/extension/extension.js",
       "types": "./dist/src/extensions/code/extension/extension.d.ts",
@@ -358,34 +353,28 @@
       "default": "./dist/src/extensions/code/tools.js"
     },
     "./extensions/code/sandbox": {
-      "eve-source": "./dist/src/extensions/code/extension/lib/sandbox.js",
-      "types": "./dist/src/extensions/code/extension/lib/sandbox.d.ts",
-      "import": "./dist/src/extensions/code/extension/lib/sandbox.js",
-      "default": "./dist/src/extensions/code/extension/lib/sandbox.js"
+      "eve-source": "./dist/src/extensions/code/sandbox.js",
+      "types": "./dist/src/extensions/code/sandbox.d.ts",
+      "import": "./dist/src/extensions/code/sandbox.js",
+      "default": "./dist/src/extensions/code/sandbox.js"
     },
-    "./extensions/code/prwatch": {
-      "eve-source": "./dist/src/extensions/code/extension/lib/prwatch.js",
-      "types": "./dist/src/extensions/code/extension/lib/prwatch.d.ts",
-      "import": "./dist/src/extensions/code/extension/lib/prwatch.js",
-      "default": "./dist/src/extensions/code/extension/lib/prwatch.js"
+    "./extensions/git": {
+      "eve-source": "./dist/src/extensions/git/extension/extension.js",
+      "types": "./dist/src/extensions/git/extension/extension.d.ts",
+      "import": "./dist/src/extensions/git/extension/extension.js",
+      "default": "./dist/src/extensions/git/extension/extension.js"
     },
-    "./computer-use": {
-      "eve-source": "./dist/src/computer-use/extension/extension.js",
-      "types": "./dist/src/computer-use/extension/extension.d.ts",
-      "import": "./dist/src/computer-use/extension/extension.js",
-      "default": "./dist/src/computer-use/extension/extension.js"
+    "./extensions/git/tools": {
+      "eve-source": "./dist/src/extensions/git/tools.js",
+      "types": "./dist/src/extensions/git/tools.d.ts",
+      "import": "./dist/src/extensions/git/tools.js",
+      "default": "./dist/src/extensions/git/tools.js"
     },
-    "./computer-use/tools": {
-      "eve-source": "./dist/src/computer-use/tools.js",
-      "types": "./dist/src/computer-use/tools.d.ts",
-      "import": "./dist/src/computer-use/tools.js",
-      "default": "./dist/src/computer-use/tools.js"
-    },
-    "./computer-use/sandbox": {
-      "eve-source": "./dist/src/computer-use/extension/lib/sandbox.js",
-      "types": "./dist/src/computer-use/extension/lib/sandbox.d.ts",
-      "import": "./dist/src/computer-use/extension/lib/sandbox.js",
-      "default": "./dist/src/computer-use/extension/lib/sandbox.js"
+    "./extensions/git/sandbox": {
+      "eve-source": "./dist/src/extensions/git/extension/lib/sandbox.js",
+      "types": "./dist/src/extensions/git/extension/lib/sandbox.d.ts",
+      "import": "./dist/src/extensions/git/extension/lib/sandbox.js",
+      "default": "./dist/src/extensions/git/extension/lib/sandbox.js"
     },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
@@ -411,6 +400,42 @@
       "types": "./dist/src/public/server/index.d.ts",
       "import": "./dist/src/public/server/index.js",
       "default": "./dist/src/public/server/index.js"
+    },
+    "./experimental/workspace": {
+      "eve-source": "./src/public/experimental/workspace/index.ts",
+      "types": "./dist/src/public/experimental/workspace/index.d.ts",
+      "import": "./dist/src/public/experimental/workspace/index.js",
+      "default": "./dist/src/public/experimental/workspace/index.js"
+    },
+    "./experimental/sandbox/just-bash": {
+      "eve-source": "./src/public/experimental/sandbox/just-bash.ts",
+      "types": "./dist/src/public/experimental/sandbox/just-bash.d.ts",
+      "import": "./dist/src/public/experimental/sandbox/just-bash.js",
+      "default": "./dist/src/public/experimental/sandbox/just-bash.js"
+    },
+    "./experimental/channels/discord/gateway": {
+      "eve-source": "./src/public/experimental/channels/discord/gateway.ts",
+      "types": "./dist/src/public/experimental/channels/discord/gateway.d.ts",
+      "import": "./dist/src/public/experimental/channels/discord/gateway.js",
+      "default": "./dist/src/public/experimental/channels/discord/gateway.js"
+    },
+    "./experimental/schedules/testing": {
+      "eve-source": "./src/public/experimental/schedules/testing.ts",
+      "types": "./dist/src/public/experimental/schedules/testing.d.ts",
+      "import": "./dist/src/public/experimental/schedules/testing.js",
+      "default": "./dist/src/public/experimental/schedules/testing.js"
+    },
+    "./experimental/schedules": {
+      "eve-source": "./src/public/experimental/schedules/index.ts",
+      "types": "./dist/src/public/experimental/schedules/index.d.ts",
+      "import": "./dist/src/public/experimental/schedules/index.js",
+      "default": "./dist/src/public/experimental/schedules/index.js"
+    },
+    "./experimental/schedules/vercel": {
+      "eve-source": "./src/public/experimental/schedules/vercel.ts",
+      "types": "./dist/src/public/experimental/schedules/vercel.d.ts",
+      "import": "./dist/src/public/experimental/schedules/vercel.js",
+      "default": "./dist/src/public/experimental/schedules/vercel.js"
     },
     "./channels": {
       "types": "./dist/src/public/channels/index.d.ts",
@@ -483,56 +508,122 @@
       "default": "./dist/src/public/channels/linear/index.js"
     },
     "./package.json": "./package.json",
-    "./setup/scaffold": {
-      "eve-source": "./dist/src/setup/scaffold/index.js",
-      "types": "./dist/src/setup/scaffold/index.d.ts",
-      "import": "./dist/src/setup/scaffold/index.js",
-      "default": "./dist/src/setup/scaffold/index.js"
+    "./internal/self-modification/sandbox": {
+      "eve-source": "./dist/src/self-modification/sandbox.js",
+      "types": "./dist/src/self-modification/sandbox.d.ts",
+      "import": "./dist/src/self-modification/sandbox.js",
+      "default": "./dist/src/self-modification/sandbox.js"
     },
-    "./setup": {
-      "eve-source": "./dist/src/setup/index.js",
-      "types": "./dist/src/setup/index.d.ts",
-      "import": "./dist/src/setup/index.js",
-      "default": "./dist/src/setup/index.js"
+    "./internal/legacy-events": {
+      "eve-source": "./src/internal/legacy-events.ts",
+      "types": "./dist/src/internal/legacy-events.d.ts",
+      "import": "./dist/src/internal/legacy-events.js",
+      "default": "./dist/src/internal/legacy-events.js"
     },
-    "./self-modification/config": {
-      "eve-source": "./src/self-modification/config.ts",
-      "types": "./dist/src/self-modification/config.d.ts",
-      "import": "./dist/src/self-modification/config.js",
-      "default": "./dist/src/self-modification/config.js"
+    "./internal/scaffold": {
+      "eve-source": "./src/internal/scaffold.ts",
+      "types": "./dist/src/internal/scaffold.d.ts",
+      "import": "./dist/src/internal/scaffold.js",
+      "default": "./dist/src/internal/scaffold.js"
+    },
+    "./internal/code/prwatch": {
+      "eve-source": "./dist/src/extensions/code/extension/lib/prwatch.js",
+      "types": "./dist/src/extensions/code/extension/lib/prwatch.d.ts",
+      "import": "./dist/src/extensions/code/extension/lib/prwatch.js",
+      "default": "./dist/src/extensions/code/extension/lib/prwatch.js"
+    },
+    "./internal/grep": {
+      "eve-source": "./dist/src/internal/grep.js",
+      "types": "./dist/src/internal/grep.d.ts",
+      "import": "./dist/src/internal/grep.js",
+      "default": "./dist/src/internal/grep.js"
+    },
+    "./internal/workspace": {
+      "eve-source": "./dist/src/internal/workspace.js",
+      "types": "./dist/src/internal/workspace.d.ts",
+      "import": "./dist/src/internal/workspace.js",
+      "default": "./dist/src/internal/workspace.js"
+    },
+    "./internal/git": {
+      "eve-source": "./dist/src/internal/git.js",
+      "types": "./dist/src/internal/git.d.ts",
+      "import": "./dist/src/internal/git.js",
+      "default": "./dist/src/internal/git.js"
+    },
+    "./tools/agent_router": {
+      "types": "./dist/src/public/tools/agent-router.d.ts",
+      "import": "./dist/src/public/tools/agent-router.js",
+      "default": "./dist/src/public/tools/agent-router.js"
+    },
+    "./extensions/self-modification/local": {
+      "eve-source": "./dist/src/self-modification/extension/extension.js",
+      "types": "./dist/src/self-modification/extension/extension.d.ts",
+      "import": "./dist/src/self-modification/extension/extension.js",
+      "default": "./dist/src/self-modification/extension/extension.js"
+    },
+    "./extensions/self-modification/remote": {
+      "eve-source": "./dist/src/self-modification/remote/extension.js",
+      "types": "./dist/src/self-modification/remote/extension.d.ts",
+      "import": "./dist/src/self-modification/remote/extension.js",
+      "default": "./dist/src/self-modification/remote/extension.js"
+    },
+    "./extensions/computer-use": {
+      "eve-source": "./dist/src/computer-use/extension/extension.js",
+      "types": "./dist/src/computer-use/extension/extension.d.ts",
+      "import": "./dist/src/computer-use/extension/extension.js",
+      "default": "./dist/src/computer-use/extension/extension.js"
+    },
+    "./extensions/computer-use/tools": {
+      "eve-source": "./dist/src/computer-use/tools.js",
+      "types": "./dist/src/computer-use/tools.d.ts",
+      "import": "./dist/src/computer-use/tools.js",
+      "default": "./dist/src/computer-use/tools.js"
+    },
+    "./extensions/computer-use/sandbox": {
+      "eve-source": "./dist/src/computer-use/extension/lib/sandbox.js",
+      "types": "./dist/src/computer-use/extension/lib/sandbox.d.ts",
+      "import": "./dist/src/computer-use/extension/lib/sandbox.js",
+      "default": "./dist/src/computer-use/extension/lib/sandbox.js"
+    },
+    "./experimental/connections": {
+      "eve-source": "./dist/src/public/experimental/connections/index.js",
+      "types": "./dist/src/public/experimental/connections/index.d.ts",
+      "import": "./dist/src/public/experimental/connections/index.js",
+      "default": "./dist/src/public/experimental/connections/index.js"
     }
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "directory": ".package",
+    "linkDirectory": false
   },
   "scripts": {
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
-    "build": "pnpm run check:bin-runtime-dependencies && pnpm run build:js && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs",
+    "build": "pnpm run check:bin-runtime-dependencies && node ./scripts/build-js.mjs && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs && node ../../scripts/copy-package-license.mjs . && node ../../scripts/stage-package.mjs .",
     "build:compiled": "node ./scripts/vendor-compiled.mjs",
     "build:js": "node ./scripts/build-js.mjs",
-    "build:types": "pnpm run build:compiled && tsc -p tsconfig.build.json",
+    "build:types": "tsc -p tsconfig.build.json",
     "check:bin-runtime-dependencies": "node ./scripts/check-bin-runtime-dependencies.mjs",
     "dev": "pnpm run build:compiled && node ./scripts/copy-runtime-assets.mjs && tsc -p tsconfig.dev.json --watch --preserveWatchOutput",
-    "prepack": "pnpm run build && node ../../scripts/copy-package-license.mjs .",
-    "test": "pnpm run test:unit && pnpm run test:integration",
-    "test:framework-fixtures": "pnpm run build:compiled && vitest run --config vitest.framework-fixtures.config.ts",
-    "test:integration": "pnpm run build:js && vitest run --config vitest.integration.config.ts",
-    "test:scenario": "pnpm run build:compiled && vitest run --config vitest.scenario.config.ts",
-    "test:unit": "pnpm run build:compiled && vitest run --config vitest.unit.config.ts",
-    "test:watch": "pnpm run build:compiled && vitest --config vitest.unit.config.ts",
-    "typecheck": "pnpm run check:web-template && pnpm run build:compiled && tsc -p tsconfig.json --noEmit",
+    "prepack": "pnpm --workspace-root build:eve && node ../../scripts/stage-package.mjs .",
+    "test:webchat": "vitest run --config vitest.browser.config.ts",
+    "test:framework-fixtures": "vitest run --config vitest.framework-fixtures.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:scenario": "vitest run --config vitest.scenario.config.ts",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:watch": "vitest --config vitest.unit.config.ts",
+    "typecheck": "pnpm run check:web-template && tsc -p tsconfig.json --noEmit",
     "generate:web-template": "node src/setup/build.ts --write",
     "check:web-template": "node src/setup/build.ts --check",
-    "test:tui": "pnpm run build:js && tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs"
+    "test:tui": "tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs"
   },
   "dependencies": {
     "nitro": "3.0.260903-beta",
-    "undici": "8.10.2"
+    "undici": "8.12.3"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.3.0",
     "@ai-sdk/anthropic": "catalog:",
-    "@ai-sdk/code-mode": "catalog:",
     "@ai-sdk/google": "catalog:",
     "@ai-sdk/mcp": "catalog:",
     "@ai-sdk/openai": "catalog:",
@@ -540,9 +631,9 @@
     "@ai-sdk/provider": "catalog:",
     "@ai-sdk/provider-utils": "catalog:",
     "@cfworker/json-schema": "4.1.1",
-    "@chat-adapter/slack": "4.41.0",
-    "@chat-adapter/state-memory": "4.41.0",
-    "@chat-adapter/twilio": "4.41.0",
+    "@chat-adapter/slack": "4.42.0",
+    "@chat-adapter/state-memory": "4.42.0",
+    "@chat-adapter/twilio": "4.42.0",
     "@clack/core": "1.3.1",
     "@eve/catalog": "workspace:*",
     "@linqapp/chat-sdk-adapter": "^0.5.1",
@@ -554,27 +645,31 @@
     "@opentelemetry/otlp-transformer": "0.214.0",
     "@opentelemetry/sdk-trace-base": "catalog:",
     "@photon-ai/chat-adapter-imessage": "3.2.0",
+    "@shadcn/registry": "0.1.3",
     "@slack/web-api": "7.19.0",
     "@standard-schema/spec": "1.1.0",
     "@sveltejs/kit": "^2.0.0",
     "@types/json-schema": "7.0.15",
     "@types/react": "catalog:",
     "@types/react-test-renderer": "19.1.0",
+    "@vercel/agent-runs": "workspace:*",
     "@vercel/blob": "2.8.0",
     "@vercel/connect": "catalog:",
     "@vercel/detect-agent": "1.2.3",
     "@vercel/oidc": "3.8.0",
     "@vercel/otel": "catalog:",
+    "@vercel/queue": "0.5.1",
     "@vercel/sandbox": "catalog:",
+    "@vercel/schedules": "0.0.0-alpha.19",
     "@vercel/sdk": "1.28.8",
-    "@workflow/core": "5.0.1",
-    "@workflow/errors": "5.0.1",
+    "@workflow/core": "5.2.3",
+    "@workflow/errors": "5.0.5",
     "@workflow/serde": "5.0.0",
-    "@workflow/world": "5.0.1",
-    "@workflow/world-local": "5.0.1",
-    "@workflow/world-vercel": "5.0.1",
+    "@workflow/world": "5.0.5",
+    "@workflow/world-local": "5.1.2",
+    "@workflow/world-vercel": "5.2.3",
     "ai": "catalog:",
-    "chat": "4.41.0",
+    "chat": "4.42.0",
     "chokidar": "5.0.0",
     "commander": "14.0.3",
     "dd-trace": "6.13.0",
@@ -584,17 +679,16 @@
     "jose": "6.2.3",
     "js-yaml": "4.3.2",
     "jsonc-parser": "3.3.1",
-    "just-bash": "3.1.0",
+    "just-bash": "3.6.0",
     "just-secrets": "0.0.2",
     "marked": "catalog:",
-    "microsandbox": "0.5.5",
     "next": "catalog:",
     "picocolors": "catalog:",
+    "playwright-core": "1.63.0",
     "react": "catalog:",
     "react-test-renderer": "19.2.6",
-    "run": "2.1.2",
+    "run": "2.1.8",
     "semver": "7.8.4",
-    "shadcn": "4.18.0",
     "svelte": "^5.0.0",
     "turndown": "7.2.4",
     "vite": "^8.3.1",
@@ -604,15 +698,47 @@
     "zod-validation-error": "5.0.0"
   },
   "peerDependencies": {
+    "@linqapp/sdk": "^0.47.1",
+    "@nuxt/kit": "^4.0.0",
+    "@nuxt/schema": "^4.0.0",
     "@opentelemetry/api": "^1.0.0",
+    "@vercel/connect": "^2.5.2",
     "ai": "catalog:",
     "braintrust": "^3.0.0",
-    "chat": "^4.41.0",
+    "chat": "^4.42.0",
     "dd-trace": "^6.13.0",
-    "just-bash": "^3.1.0",
-    "microsandbox": "^0.5.0"
+    "just-bash": "^3.6.0",
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "svelte": "^5.0.0",
+    "vite": "^8.3.1",
+    "vue": "^3.5.0"
   },
   "peerDependenciesMeta": {
+    "@nuxt/kit": {
+      "optional": true
+    },
+    "@nuxt/schema": {
+      "optional": true
+    },
+    "@vercel/connect": {
+      "optional": true
+    },
+    "next": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "svelte": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    },
     "@opentelemetry/api": {
       "optional": true
     },
@@ -628,7 +754,7 @@
     "just-bash": {
       "optional": true
     },
-    "microsandbox": {
+    "@linqapp/sdk": {
       "optional": true
     }
   },
@@ -637,14 +763,20 @@
   },
   "eve": {
     "builtInExtensions": {
-      "./self-modification": {
-        "dist": "./dist/src/self-modification/extension"
-      },
       "./extensions/code": {
         "dist": "./dist/src/extensions/code/extension"
       },
-      "./computer-use": {
+      "./extensions/git": {
+        "dist": "./dist/src/extensions/git/extension"
+      },
+      "./extensions/computer-use": {
         "dist": "./dist/src/computer-use/extension"
+      },
+      "./extensions/self-modification/local": {
+        "dist": "./dist/src/self-modification/extension"
+      },
+      "./extensions/self-modification/remote": {
+        "dist": "./dist/src/self-modification/remote"
       }
     }
   }

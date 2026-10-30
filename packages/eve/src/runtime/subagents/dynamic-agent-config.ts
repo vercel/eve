@@ -1,12 +1,15 @@
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
+import { isDefinedAgent } from "#public/definitions/agent.js";
 import type { ContextAccessor } from "#context/key.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import { getEffectiveModelSelection } from "#reactions/kinds/model.js";
 import { resolveRuntimeModelSelection } from "#runtime/agent/resolve-model.js";
-import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
+import type { ModelMetadata } from "#internal/model-catalog.js";
 import {
   isDynamicModelDefinition,
   type AgentLimitsDefinition,
   type AgentReasoningDefinition,
+  type AgentToolExposure,
 } from "#shared/agent-definition.js";
 
 export interface DynamicSubagentAgentConfig {
@@ -15,28 +18,34 @@ export interface DynamicSubagentAgentConfig {
     readonly thresholdPercent?: number;
   };
   readonly description: string;
-  readonly limits?: AgentLimitsDefinition;
+  /** Serialized into workflow input, so it can't carry the `sessionUsage` function. */
+  readonly limits?: Pick<AgentLimitsDefinition, "sessionTimeoutMs">;
   readonly model: DynamicSubagentModelReference;
   readonly reasoning?: AgentReasoningDefinition;
-  readonly tool?: boolean;
+  readonly tool?: AgentToolExposure;
 }
 
 export type DynamicSubagentModelReference = RuntimeModelReference;
 
 export async function normalizeDynamicSubagentAgentConfig(input: {
-  readonly catalog?: RuntimeModelCatalog;
+  readonly modelMetadata: () => Promise<ModelMetadata>;
   readonly name: string;
   readonly state: ContextAccessor;
   readonly value: unknown;
 }): Promise<DynamicSubagentAgentConfig> {
   const message = `Dynamic subagent "${input.name}" must return defineAgent(...), defineRemoteAgent(...), or null.`;
+  if (!isDefinedAgent(input.value)) {
+    throw new Error(`${message} Wrap a returned agent object in defineAgent({...}) from "eve".`);
+  }
   const definition = normalizeAgentDefinition(input.value, message);
 
   if (!definition.description) {
     throw new Error(`${message} The "description" field is required.`);
   }
   if (definition.build !== undefined) {
-    throw new Error(`${message} The "build" field cannot be selected at runtime.`);
+    throw new Error(
+      `${message} The "build" field cannot be selected at runtime. Declare packaging configuration such as build.externalDependencies on the root agent in agent/agent.ts.`,
+    );
   }
   if (definition.defaultTools !== undefined) {
     throw new Error(`${message} The "defaultTools" field cannot be selected at runtime.`);
@@ -47,24 +56,29 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   if (isDynamicModelDefinition(definition.model)) {
     throw new Error(`${message} The returned "model" must be static.`);
   }
+  if (definition.limits?.sessionUsage !== undefined) {
+    throw new Error(
+      `${message} The "limits.sessionUsage" field cannot be selected at runtime; the root agent's \`sessionUsage\` applies.`,
+    );
+  }
 
   const config: {
     compaction?: DynamicSubagentAgentConfig["compaction"];
     description: string;
-    limits?: AgentLimitsDefinition;
+    limits?: DynamicSubagentAgentConfig["limits"];
     model: DynamicSubagentModelReference;
     reasoning?: AgentReasoningDefinition;
-    tool?: boolean;
+    tool?: AgentToolExposure;
   } = {
     description: definition.description,
     model: await normalizeDurableModelSelection({
-      catalog: input.catalog,
+      modelMetadata: input.modelMetadata,
       selection: {
         model: definition.model,
-        modelContextWindowTokens: definition.modelContextWindowTokens,
+        modelContextWindowTokens:
+          definition.modelContextWindowTokens ?? parentContextWindow(input.state, definition.model),
         modelOptions: definition.modelOptions,
       },
-      state: input.state,
     }),
   };
 
@@ -75,17 +89,16 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
     } = {};
     if (definition.compaction.model !== undefined) {
       compaction.model = await normalizeDurableModelSelection({
-        catalog: input.catalog,
+        modelMetadata: input.modelMetadata,
         selection: {
           model: definition.compaction.model,
           modelContextWindowTokens: definition.compaction.modelContextWindowTokens,
           modelOptions: definition.modelOptions,
         },
-        state: input.state,
       });
     }
-    if (definition.compaction.thresholdPercent !== undefined) {
-      compaction.thresholdPercent = definition.compaction.thresholdPercent;
+    if (definition.compaction.threshold !== undefined) {
+      compaction.thresholdPercent = definition.compaction.threshold;
     }
     config.compaction = compaction;
   }
@@ -103,15 +116,24 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
 }
 
 async function normalizeDurableModelSelection(input: {
-  readonly catalog?: RuntimeModelCatalog;
+  readonly modelMetadata: () => Promise<ModelMetadata>;
   readonly selection: Parameters<typeof resolveRuntimeModelSelection>[0]["selection"];
-  readonly state: ContextAccessor;
 }): Promise<DynamicSubagentModelReference> {
   const resolved = await resolveRuntimeModelSelection({
-    catalog: input.catalog,
     durability: "durable",
+    modelMetadata: input.modelMetadata,
     selection: input.selection,
-    state: input.state,
   });
   return resolved.reference;
+}
+
+/**
+ * The parent's context window, for a child that runs the parent's own model: a subagent that
+ * passes `view.model.id` along gets the metadata the parent's model already has, which a custom
+ * model's id alone doesn't carry.
+ */
+function parentContextWindow(state: ContextAccessor, model: unknown): number | undefined {
+  if (typeof model !== "string") return undefined;
+  const parent = getEffectiveModelSelection(state)?.reference;
+  return parent?.id === model ? parent.contextWindowTokens : undefined;
 }

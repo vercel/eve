@@ -38,11 +38,13 @@ export async function runRegistryAction<T>(
   logger: RegistryCommandLogger,
   _appRoot: string,
   action: () => Promise<T>,
+  options: { rethrow?: (error: unknown) => boolean } = {},
 ): Promise<T | undefined> {
   try {
     return await action();
   } catch (error) {
     if (error instanceof WizardCancelledError) return undefined;
+    if (options.rethrow?.(error) === true) throw error;
     logger.error(errorMessage(error));
     process.exitCode = 1;
     return undefined;

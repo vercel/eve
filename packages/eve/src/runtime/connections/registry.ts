@@ -1,4 +1,5 @@
 import type { Approval } from "#approval/definition.js";
+import { assertNotConnectionOwned } from "#connections/ownership.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { McpConnectionClient } from "#runtime/connections/mcp-client.js";
 import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js";
@@ -6,8 +7,9 @@ import type { ConnectionClient } from "#shared/connection-types.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 
 /**
- * Per-session container mapping connection names to lazily-initialized
- * client wrappers.
+ * Per-step container mapping connection names to lazily-initialized
+ * client wrappers. `withContextScope` builds one per step, and the connection
+ * provider disposes it when the step ends.
  *
  * The registry is protocol-agnostic: it dispatches to the client
  * implementation matching each connection's `protocol` (MCP or OpenAPI).
@@ -16,23 +18,17 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
   #clients = new Map<string, ConnectionClient>();
   #connections: readonly ResolvedConnectionDefinition[];
   readonly #staticConnections: readonly ResolvedConnectionDefinition[];
-  #sessionDynamicConnections = new Map<string, readonly ResolvedConnectionDefinition[]>();
-  #turnDynamicConnections = new Map<string, readonly ResolvedConnectionDefinition[]>();
 
   constructor(connections: readonly ResolvedConnectionDefinition[]) {
     this.#staticConnections = connections;
     this.#connections = connections;
   }
 
-  /** Replaces one complete dynamic scope and closes clients whose definition changed. */
+  /** Replaces the dynamic connections, by reaction, and closes clients whose definition changed. */
   async replaceDynamicConnections(
-    scope: "session" | "turn",
     connectionsByResolver: ReadonlyMap<string, readonly ResolvedConnectionDefinition[]>,
   ): Promise<void> {
-    const session =
-      scope === "session" ? new Map(connectionsByResolver) : this.#sessionDynamicConnections;
-    const turn = scope === "turn" ? new Map(connectionsByResolver) : this.#turnDynamicConnections;
-    const next = this.#buildEffectiveConnections(session, turn);
+    const next = this.#buildEffectiveConnections(connectionsByResolver);
     const previousByName = new Map(
       this.#connections.map((connection) => [connection.connectionName, connection]),
     );
@@ -45,19 +41,13 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
       staleClients.push(client);
     }
 
-    this.#sessionDynamicConnections = session;
-    this.#turnDynamicConnections = turn;
     this.#connections = next;
     await Promise.allSettled(staleClients.map((client) => client.close()));
   }
 
   #buildEffectiveConnections(
-    session: ReadonlyMap<string, readonly ResolvedConnectionDefinition[]>,
-    turn: ReadonlyMap<string, readonly ResolvedConnectionDefinition[]>,
+    effectiveResolvers: ReadonlyMap<string, readonly ResolvedConnectionDefinition[]>,
   ): readonly ResolvedConnectionDefinition[] {
-    const effectiveResolvers = new Map(session);
-    for (const [slug, definitions] of turn) effectiveResolvers.set(slug, definitions);
-
     const dynamicNames = new Map<string, string>();
     const connections = new Map(
       this.#staticConnections.map((connection) => [connection.connectionName, connection]),
@@ -74,6 +64,7 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
         connections.set(definition.connectionName, definition);
       }
     }
+    for (const name of dynamicNames.keys()) assertNoNestedConnection(name, connections.keys());
     return [...connections.values()];
   }
 
@@ -130,5 +121,21 @@ export class ConnectionRegistryImpl implements ConnectionRegistry {
     const closePromises = [...this.#clients.values()].map((client) => client.close());
     await Promise.allSettled(closePromises);
     this.#clients.clear();
+  }
+}
+
+/** A dynamic connection may neither own nor be owned by another connection's name. */
+function assertNoNestedConnection(dynamicName: string, connectionNames: Iterable<string>): void {
+  for (const other of connectionNames) {
+    if (other === dynamicName) continue;
+    // Only the shorter of two names can own the other.
+    const [name, owner] =
+      other.length < dynamicName.length ? [dynamicName, other] : [other, dynamicName];
+    assertNotConnectionOwned({
+      connectionNames: [owner],
+      name,
+      remedy: `Rename the dynamic connection "${dynamicName}".`,
+      subject: "Connection",
+    });
   }
 }

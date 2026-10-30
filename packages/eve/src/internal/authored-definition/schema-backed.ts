@@ -10,6 +10,11 @@ import type { JsonObject } from "#shared/json.js";
 import { isDisabledToolSentinel } from "#tools/definition.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
 import {
+  WEB_SEARCH_FALLBACK_PROVIDERS,
+  WEB_SEARCH_PROVIDERS,
+  type WebSearchSelection,
+} from "#shared/web-search.js";
+import {
   expectBoolean,
   expectFunction,
   expectObjectRecord,
@@ -31,12 +36,7 @@ import {
   UNSPECIFIED_INPUT_SCHEMA,
 } from "#tools/schema.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
-import { shouldRebindDynamicCallbacks } from "#internal/dynamic-tool-rebind.js";
-import {
-  assertResolverOnlyDynamicSentinel,
-  isDynamicSentinel,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
 /**
  * Canonical normalized shape of one authored tool default export.
@@ -77,12 +77,8 @@ type MutableNormalizedAuthoredTool = {
 type NormalizedToolEntry =
   | { readonly kind: "tool"; readonly definition: NormalizedAuthoredTool }
   | { readonly kind: "disabled" }
-  | { readonly kind: "web-search-tool"; readonly provider: "exa" | "parallel" }
-  | {
-      readonly kind: "dynamic-tool";
-      readonly eventNames: readonly DynamicToolEventName[];
-      readonly rebindMissingCallbacks: boolean;
-    };
+  | { readonly kind: "web-search-tool"; readonly selection: WebSearchSelection }
+  | { readonly kind: "dynamic-tool" };
 
 /**
  * Normalizes one authored tool default export. Recognizes real tool
@@ -93,24 +89,36 @@ type NormalizedToolEntry =
  */
 export function normalizeToolDefinition(value: unknown, message: string): NormalizedToolEntry {
   if (isDynamicSentinel(value)) {
-    assertResolverOnlyDynamicSentinel(value, message);
-    return {
-      kind: "dynamic-tool",
-      eventNames: Object.keys(value.events) as DynamicToolEventName[],
-      rebindMissingCallbacks: shouldRebindDynamicCallbacks(value),
-    };
+    assertDynamicSentinelKeys(value, message);
+    return { kind: "dynamic-tool" };
   }
   if (isDisabledToolSentinel(value)) {
     return { kind: "disabled" };
   }
   if (isWebSearchToolDefinition(value)) {
     const record = expectObjectRecord(value, message);
-    expectOnlyKnownKeys(record, ["kind", "provider"], message);
-    const provider = expectString(record.provider, message);
-    if (provider !== "exa" && provider !== "parallel") {
-      throw new Error(`${message} Expected "provider" to be one of: exa, parallel.`);
+    if (record.deferred !== undefined) {
+      throw new Error(
+        `${message} Provider tools can't be deferred: the provider has to see their definition. Remove "deferred".`,
+      );
     }
-    return { kind: "web-search-tool", provider };
+    expectOnlyKnownKeys(record, ["fallback", "kind", "provider"], message);
+    const provider = expectOneOf(record.provider, WEB_SEARCH_PROVIDERS, "provider", message);
+    if (record.fallback === undefined) {
+      return { kind: "web-search-tool", selection: { provider } };
+    }
+    if (provider !== "native") {
+      throw new Error(
+        `${message} "fallback" applies only to provider "native"; provider "${provider}" serves every AI Gateway model.`,
+      );
+    }
+    const fallback = expectOneOf(
+      record.fallback,
+      WEB_SEARCH_FALLBACK_PROVIDERS,
+      "fallback",
+      message,
+    );
+    return { kind: "web-search-tool", selection: { fallback, provider } };
   }
 
   const record = expectObjectRecord(value, message);
@@ -131,6 +139,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     record,
     [
       "availableInSubagents",
+      "deferred",
       "endsTurn",
       "label",
       "auth",
@@ -138,7 +147,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "execute",
       "inputSchema",
       "approval",
-      "approvalKey",
       "outputSchema",
       "toModelOutput",
       ...(workflow === undefined ? [] : [workflow.entryPoint]),
@@ -163,6 +171,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       record.availableInSubagents === undefined
         ? undefined
         : expectBoolean(record.availableInSubagents, message),
+    deferred: record.deferred === undefined ? undefined : expectBoolean(record.deferred, message),
     description: expectString(record.description, message),
     endsTurn:
       record.endsTurn === undefined || typeof record.endsTurn === "boolean"
@@ -213,10 +222,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     normalizeApproval(record.approval, message);
   }
 
-  if (record.approvalKey !== undefined) {
-    expectFunction(record.approvalKey, message);
-  }
-
   if (record.toModelOutput !== undefined) {
     expectFunction(record.toModelOutput, message);
   }
@@ -264,4 +269,17 @@ function assertNoOwnTaskIdInput(inputSchema: JsonObject | null, message: string)
   throw new Error(
     `${message} inputSchema declares "${TASK_ID_INPUT}", which eve adds to a serve tool's model input to send a call to a running task. Rename the field.`,
   );
+}
+
+function expectOneOf<const T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  field: string,
+  message: string,
+): T {
+  const text = expectString(value, message);
+  if (!(allowed as readonly string[]).includes(text)) {
+    throw new Error(`${message} Expected "${field}" to be one of: ${allowed.join(", ")}.`);
+  }
+  return text as T;
 }

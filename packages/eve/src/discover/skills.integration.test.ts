@@ -9,6 +9,7 @@ import {
   DISCOVER_SKILL_ENTRY_NOT_DIRECTORY,
   DISCOVER_SKILL_FRONTMATTER_INVALID,
   DISCOVER_SKILL_MARKDOWN_MISSING,
+  DISCOVER_SKILL_NAME_INVALID,
   discoverSkills,
 } from "#discover/skills.js";
 
@@ -53,11 +54,12 @@ describe("discoverSkills (memory)", () => {
     expect(result.skills).toEqual([
       {
         assetsPath: join(packagedSkillRoot, "assets"),
+        deferred: undefined,
         description: "Use the weather tool before answering forecast questions.",
         sourceKind: "skill-package",
         license: "MIT",
         logicalPath: "skills/get-weather/skill.MD",
-        markdown: "When the user asks about weather, call the weather tool before answering.",
+        content: "When the user asks about weather, call the weather tool before answering.",
         metadata: {
           audience: "forecast",
         },
@@ -77,7 +79,7 @@ describe("discoverSkills (memory)", () => {
       {
         definition: {
           description: "Research complex weather questions before replying.",
-          markdown: "Research complex weather questions before replying.",
+          content: "Research complex weather questions before replying.",
         },
         sourceKind: "markdown",
         logicalPath: "skills/weather-research.md",
@@ -134,7 +136,7 @@ describe("discoverSkills (memory)", () => {
       {
         definition: {
           description: "Use the weather tool before answering forecast questions.",
-          markdown: "Use the weather tool before answering forecast questions.",
+          content: "Use the weather tool before answering forecast questions.",
         },
         sourceKind: "markdown",
         logicalPath: "skills/get-weather.md",
@@ -160,6 +162,7 @@ describe("discoverSkills (memory)", () => {
           "name: other-name",
           "description: Use the weather tool before answering forecast questions.",
           "argument-hint: '[location]'",
+          "allowed-tools: Bash Read",
           "disable-model-invocation: true",
           "---",
           "When the user asks about weather, call the weather tool before answering.",
@@ -169,7 +172,7 @@ describe("discoverSkills (memory)", () => {
           "name: other-name",
           "description: Research complex weather questions.",
           "argument-hint: '[topic]'",
-          "disable-model-invocation: true",
+          "disable-model-invocation: false",
           "---",
           "Research weather patterns before replying.",
         ].join("\n"),
@@ -187,10 +190,16 @@ describe("discoverSkills (memory)", () => {
     ]);
     expect(result.skills).toEqual([
       {
+        assetsPath: undefined,
+        content: "When the user asks about weather, call the weather tool before answering.",
+        deferred: undefined,
         description: "Use the weather tool before answering forecast questions.",
+        license: undefined,
+        metadata: undefined,
+        referencesPath: undefined,
+        scriptsPath: undefined,
         sourceKind: "skill-package",
         logicalPath: "skills/named-package/SKILL.md",
-        markdown: "When the user asks about weather, call the weather tool before answering.",
         name: "named-package",
         rootPath: namedPackageRoot,
         skillFilePath: join(namedPackageRoot, "SKILL.md"),
@@ -200,7 +209,7 @@ describe("discoverSkills (memory)", () => {
       {
         definition: {
           description: "Research complex weather questions.",
-          markdown: "Research weather patterns before replying.",
+          content: "Research weather patterns before replying.",
         },
         sourceKind: "markdown",
         logicalPath: "skills/weather-research.md",
@@ -238,6 +247,39 @@ describe("discoverSkills (memory)", () => {
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
       DISCOVER_SKILL_COLLISION,
       DISCOVER_SKILL_COLLISION,
+    ]);
+  });
+
+  it("accepts a skill name that starts with a digit and rejects one that is not a legal name", async () => {
+    const project = buildMemoryAgentProject({
+      agentFiles: {
+        "skills/2fa-reset/SKILL.md": [
+          "---",
+          "description: Reset two-factor auth.",
+          "---",
+          "Reset.",
+        ].join("\n"),
+        "skills/release notes.md": [
+          "---",
+          "description: Write release notes.",
+          "---",
+          "Write.",
+        ].join("\n"),
+      },
+    });
+
+    const result = await discoverSkills({ agentRoot: project.agentRoot, source: project.source });
+
+    expect(
+      result.skills.map((skill) => ("skillId" in skill ? skill.skillId : skill.logicalPath)),
+    ).toEqual(["2fa-reset"]);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: DISCOVER_SKILL_NAME_INVALID,
+        message: expect.stringContaining(
+          'Skill "skills/release notes.md" has an illegal name "release notes".',
+        ),
+      }),
     ]);
   });
 });

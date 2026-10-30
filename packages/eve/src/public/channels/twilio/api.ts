@@ -1,6 +1,9 @@
+import type { TwilioChannelCredentials } from "#public/channels/twilio/credentials.js";
+export type { TwilioChannelCredentials } from "#public/channels/twilio/credentials.js";
 import {
   callTwilioApi as callPrimitive,
   encodeTwilioForm,
+  fetchTwilioMedia,
   resolveTwilioCredential,
   TwilioApiError,
   type TwilioApiResponse,
@@ -8,13 +11,25 @@ import {
   type TwilioFetch,
 } from "#compiled/@chat-adapter/twilio/api.js";
 
-import { resolveTwilioAuthToken, type TwilioAuthToken } from "#public/channels/twilio/verify.js";
+import type { FetchFileResult } from "#channel/adapter.js";
+import { EveAttachmentError } from "#internal/attachments/errors.js";
+import { limitedFetch } from "#internal/attachments/limited-read.js";
+import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
+import { resolveTwilioAuthToken } from "#public/channels/twilio/verify.js";
+
+const DEFAULT_TWILIO_API_BASE_URL = "https://api.twilio.com";
 
 /**
  * Builds the Twilio channel-local continuation token (`<from>:<to>`).
  * Eve namespaces this with the channel name before handing it to the runtime.
  */
-export function twilioContinuationToken(from: string, to: string | undefined): string {
+export function twilioContinuationToken({
+  from,
+  to,
+}: {
+  readonly from: string;
+  readonly to?: string | undefined;
+}): string {
   return `${from}:${to ?? ""}`;
 }
 
@@ -24,14 +39,10 @@ export type TwilioAccountSid = TwilioCredential;
 export type { TwilioApiResponse, TwilioFetch };
 
 /** Credentials used for Twilio REST API calls and webhook verification. */
-export interface TwilioCredentials {
-  readonly accountSid?: TwilioAccountSid;
-  readonly authToken?: TwilioAuthToken;
-}
 
 /** Shared Twilio REST API options. */
 export interface TwilioApiOptions {
-  readonly credentials?: TwilioCredentials;
+  readonly credentials?: TwilioChannelCredentials;
   readonly apiBaseUrl?: string;
   readonly fetch?: TwilioFetch;
 }
@@ -70,7 +81,7 @@ export async function resolveTwilioAccountSid(accountSid?: TwilioAccountSid): Pr
  * behavior: non-2xx Twilio responses become `{ ok: false, status, body }`.
  */
 export async function callTwilioApi(input: {
-  readonly credentials?: TwilioCredentials;
+  readonly credentials?: TwilioChannelCredentials;
   readonly apiBaseUrl?: string;
   readonly fetch?: TwilioFetch;
   readonly path: string;
@@ -129,8 +140,42 @@ export async function updateTwilioCall(input: TwilioUpdateCallInput): Promise<Tw
   );
 }
 
+/**
+ * Creates the channel's `fetchFile` for MMS media. Downloads URLs on the Twilio
+ * API origin with the account's Basic auth, and returns `null` for any other
+ * URL so it never receives the credentials.
+ */
+export function createTwilioFetchFile(
+  input: TwilioApiOptions,
+): (url: string) => Promise<FetchFileResult | null> {
+  const origin = new URL(input.apiBaseUrl ?? DEFAULT_TWILIO_API_BASE_URL).origin;
+  return async (url) => {
+    if (URL.parse(url)?.origin !== origin) return null;
+    try {
+      const bytes = await fetchTwilioMedia({
+        apiBaseUrl: input.apiBaseUrl,
+        credentials: await resolveCredentials(input.credentials),
+        fetch: limitedFetch(input.fetch ?? fetch, DEFAULT_UPLOAD_POLICY.maxBytes, "twilio"),
+        url,
+      });
+      return { bytes: Buffer.from(bytes) };
+    } catch (cause) {
+      if (cause instanceof EveAttachmentError) throw cause;
+      throw new EveAttachmentError({
+        adapterKind: "twilio",
+        cause,
+        kind: "resolver-threw",
+        message:
+          cause instanceof TwilioApiError && cause.status !== 0
+            ? `Twilio media fetch returned HTTP ${cause.status}.`
+            : "Twilio media fetch failed.",
+      });
+    }
+  };
+}
+
 async function resolveCredentials(
-  credentials: TwilioCredentials | undefined,
+  credentials: TwilioChannelCredentials | undefined,
 ): Promise<{ accountSid: string; authToken: string }> {
   return {
     accountSid: await resolveTwilioAccountSid(credentials?.accountSid),

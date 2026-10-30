@@ -12,17 +12,14 @@ export default [
           headers: { authorization: "Bearer workspace-bob" },
         },
       );
-      turn.event("turn.cancelled", { count: 1 });
+      turn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
       turn.eventOrder([
         { type: "turn.started" },
-        { type: "turn.cancelled" },
-        { type: "session.waiting" },
+        { data: { outcome: "cancelled" }, type: "turn.settled" },
       ]);
-      turn.notEvent("step.started");
-      turn.notEvent("message.completed");
-      turn.notEvent("turn.completed");
-      turn.notEvent("turn.failed");
-      turn.notEvent("session.failed");
+      turn.notEvent("model.started");
+      turn.notEvent("content.completed");
+      turn.notEvent("session.ended");
     },
   }),
   defineEval({
@@ -36,9 +33,8 @@ export default [
         },
       );
       turn.expectOk();
-      turn.event("step.started");
-      turn.event("turn.completed", { count: 1 });
-      turn.notEvent("turn.cancelled");
+      turn.event("model.started");
+      turn.event("turn.settled", { count: 1, data: { outcome: "completed" } });
     },
   }),
 ];

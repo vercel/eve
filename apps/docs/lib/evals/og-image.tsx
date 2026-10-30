@@ -1,7 +1,8 @@
-import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
+import { LogoEveSvg } from "@vercel/geistdocs/assets/logos/logo-eve-svg";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
+import { resolveLogo } from "../og-logo";
 import type { BenchmarkRow } from "./results";
 
 const evalsOgImageSize = {
@@ -50,7 +51,7 @@ export const createEvalsOgImage = async (rows: BenchmarkRow[]): Promise<ImageRes
           top: 60,
         }}
       >
-        <LogoEve height={30} />
+        {resolveLogo(<LogoEveSvg height={30} />)}
       </div>
 
       <div

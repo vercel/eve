@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import { createCurrentMessages } from "#harness/current-messages.js";
+import {
+  anchorToTurn,
+  type HarnessModelMessage,
+  type UserModelMessage,
+} from "#harness/messages.js";
+
+function input(content: string, turnId: string): UserModelMessage {
+  return anchorToTurn({ content, kind: "user", role: "user" }, turnId);
+}
+
+function said(content: string): HarnessModelMessage {
+  return { content, role: "assistant" };
+}
+
+const texts = (messages: readonly HarnessModelMessage[]) => messages.map(({ content }) => content);
 
 describe("createCurrentMessages", () => {
   it("partitions existing history by role", () => {
@@ -78,34 +93,6 @@ describe("createCurrentMessages", () => {
     ]);
   });
 
-  it("prepares tracked announcements without advancing the recorded baseline", () => {
-    const recorded = { availableSkills: "working" };
-    const current = createCurrentMessages([{ role: "user", content: "working", kind: "user" }], {
-      historyState: recorded,
-    });
-
-    current.addAnnouncements({ availableSkills: "working" });
-    current.addAnnouncements({ availableSkills: "completed" });
-    current.addAnnouncements({ availableSkills: "completed" });
-
-    expect(recorded).toEqual({ availableSkills: "working" });
-    expect(current.historyState).toEqual({ availableSkills: "completed" });
-    expect(current.history).toEqual([
-      { role: "user", content: "working", kind: "user" },
-      { role: "user", content: "completed", kind: "context.state" },
-    ]);
-  });
-
-  it("ignores empty or absent announcements", () => {
-    const current = createCurrentMessages([]);
-    current.addAnnouncements({ availableSkills: "skills" });
-    current.addAnnouncements({ availableSkills: "" });
-    current.addAnnouncements({});
-
-    expect(current.history).toEqual([{ role: "user", content: "skills", kind: "context.state" }]);
-    expect(current.historyState).toEqual({ availableSkills: "skills" });
-  });
-
   it("persists additions without storing client context or replacing projected history", () => {
     const hidden = {
       role: "user" as const,
@@ -134,41 +121,6 @@ describe("createCurrentMessages", () => {
     ]);
   });
 
-  it("defers announcements when history ends with an approval response", () => {
-    const approvalTail = {
-      role: "tool" as const,
-      content: [
-        {
-          approvalId: "approval-1",
-          approved: true,
-          type: "tool-approval-response" as const,
-        },
-      ],
-    };
-    const current = createCurrentMessages([
-      { role: "user", content: "history", kind: "user" },
-      {
-        role: "assistant",
-        content: [
-          { type: "tool-call", toolCallId: "call-1", toolName: "bash", input: {} },
-          { type: "tool-approval-request", approvalId: "approval-1", toolCallId: "call-1" },
-        ],
-      },
-      approvalTail,
-    ]);
-
-    current.addAnnouncements({
-      availableSkills: "skills",
-      keyed: { connections: { value: "[]", render: () => "connections" } },
-    });
-
-    // A system-message fallback would change the cached prefix; nothing is
-    // recorded, so the next step appends both announcements.
-    expect(current.systemMessages).toEqual([]);
-    expect(current.nonSystemMessages.at(-1)).toBe(approvalTail);
-    expect(current.historyState).toEqual({});
-  });
-
   it("keeps hierarchy-sensitive context in instructions when requested", () => {
     const current = createCurrentMessages([]);
 
@@ -191,5 +143,79 @@ describe("createCurrentMessages", () => {
       { role: "system", content: "two" },
     ]);
     expect(current.nonSystemMessages).toEqual([]);
+  });
+
+  describe("anchored context", () => {
+    /** One model call's messages, the way requestMessages builds them. */
+    function call(
+      history: readonly HarnessModelMessage[],
+      turn: readonly UserModelMessage[],
+      recalled: readonly { readonly turnId: string; readonly content: string }[],
+      announce?: string,
+    ) {
+      const current = createCurrentMessages(history, { currentTurnMessages: turn });
+      if (announce !== undefined) current.add(announce, "context.state");
+      current.addAnchored(recalled, "memory.load");
+      return current;
+    }
+
+    it("keeps each turn's context ahead of its input, so each call extends the one before", () => {
+      const first = input("first request", "turn_0");
+      const recalledFirst = [{ content: "memory A", turnId: "turn_0" }];
+      const opening = call([first], [first], recalledFirst);
+      const continuing = call([first, said("working")], [first], recalledFirst);
+      const second = input("second request", "turn_1");
+      const later = [first, said("working"), said("done"), second];
+      const recalled = [...recalledFirst, { content: "memory B", turnId: "turn_1" }];
+      const next = call(later, [second], recalled, "skills state");
+      const after = call([...next.history, said("on it")], [second], recalled);
+
+      expect(texts(opening.nonSystemMessages)).toEqual(["memory A", "first request"]);
+      expect(texts(next.nonSystemMessages)).toEqual([
+        "memory A",
+        "first request",
+        "working",
+        "done",
+        "skills state",
+        "memory B",
+        "second request",
+      ]);
+      for (const [before, then] of [
+        [opening, continuing],
+        [continuing, next],
+        [next, after],
+      ] as const) {
+        expect(then.nonSystemMessages.slice(0, before.nonSystemMessages.length)).toEqual(
+          before.nonSystemMessages,
+        );
+      }
+      expect(texts(next.history)).not.toContain("memory B");
+    });
+
+    it("puts context whose turn compaction summarized after the checkpoint", () => {
+      const latest = input("latest request", "turn_5");
+      const compacted: HarnessModelMessage[] = [
+        { content: "checkpoint", kind: "context.compaction", role: "user" },
+        said("summary"),
+        latest,
+      ];
+
+      const current = call(
+        compacted,
+        [latest],
+        [
+          { content: "memory A", turnId: "turn_0" },
+          { content: "memory C", turnId: "turn_5" },
+        ],
+      );
+
+      expect(texts(current.nonSystemMessages)).toEqual([
+        "checkpoint",
+        "summary",
+        "memory A",
+        "memory C",
+        "latest request",
+      ]);
+    });
   });
 });

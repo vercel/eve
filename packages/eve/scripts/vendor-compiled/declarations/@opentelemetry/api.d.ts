@@ -31,6 +31,10 @@ export interface Link {
   attributes?: Attributes;
 }
 
+export interface TracerProvider {
+  getTracer(name: string, version?: string): Tracer;
+}
+
 export interface Tracer {
   startSpan(
     name: string,

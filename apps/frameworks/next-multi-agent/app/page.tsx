@@ -48,9 +48,13 @@ function AgentPanel({
     readonly name: AgentName;
   };
 }) {
-  const eve = useEveAgent({ agent: agent.name });
   const [message, setMessage] = useState(agent.initialPrompt);
-  const isBusy = eve.status === "submitted" || eve.status === "streaming";
+  const [hasEditedMessage, setHasEditedMessage] = useState(false);
+  const eve = useEveAgent({
+    agent: agent.name,
+    prewarm: hasEditedMessage && message.trim().length > 0,
+  });
+  const isBusy = eve.status === "busy";
 
   const submit: ComponentProps<"form">["onSubmit"] = async (event) => {
     event.preventDefault();
@@ -71,10 +75,10 @@ function AgentPanel({
       </div>
 
       <div className="messages">
-        {eve.data.messages.length === 0 ? (
+        {eve.messages.length === 0 ? (
           <p className="empty">Send a short prompt to the {agent.name} agent.</p>
         ) : (
-          eve.data.messages.map((item) => (
+          eve.messages.map((item) => (
             <div className="message" data-role={item.role} key={item.id}>
               <strong>{item.role}</strong>
               {item.parts.map((part, index) =>
@@ -88,7 +92,10 @@ function AgentPanel({
       <form onSubmit={submit}>
         <textarea
           aria-label={`Message ${agent.name} agent`}
-          onChange={(event) => setMessage(event.currentTarget.value)}
+          onChange={(event) => {
+            setHasEditedMessage(true);
+            setMessage(event.currentTarget.value);
+          }}
           value={message}
         />
         <button disabled={isBusy || message.trim().length === 0} type="submit">

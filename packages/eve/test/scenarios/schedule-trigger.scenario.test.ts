@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -5,7 +6,6 @@ import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { expectScheduleRun, SCHEDULE_ADAPTER_KIND, ScheduleDispatcher } from "#channel/schedule.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { RunHandle, Runtime } from "#channel/types.js";
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ContextContainer } from "#context/container.js";
@@ -64,7 +64,7 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
       });
 
       const handle: RunHandle = {
-        events: new ReadableStream<MessageStreamEvent>(),
+        events: new ReadableStream<SessionStreamEvent>(),
         sessionId: "scenario-session",
       };
       return handle;
@@ -75,8 +75,11 @@ function createCapturingRuntime(captured: CapturedRun[]): Runtime {
     async dispatchSession() {
       throw new Error("dispatchSession should not be called in this scenario");
     },
+    async getLineStream() {
+      return new ReadableStream();
+    },
     async getEventStream() {
-      return new ReadableStream<MessageStreamEvent>();
+      return new ReadableStream<SessionStreamEvent>();
     },
     async getStreamTailIndex() {
       return -1;
@@ -113,7 +116,10 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
     );
 
     await mkdir(join(agentRoot, "schedules"), { recursive: true });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     // Markdown schedules cannot declare a channel
     // (`internal/helpers/markdown.ts`), so this is the broken-by-default
@@ -168,7 +174,7 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
       // \"schedule\"".
       const rehydrated = await simulateStepBoundary(captured[0]!.adapter, bundle);
 
-      expect(rehydrated).toEqual({ kind: SCHEDULE_ADAPTER_KIND, state: {} });
+      expect(rehydrated).toMatchObject({ kind: SCHEDULE_ADAPTER_KIND, state: {} });
     });
   });
 
@@ -179,14 +185,17 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
     );
 
     await mkdir(join(agentRoot, "schedules"), { recursive: true });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     // TS schedule without a `channel` — the bug is not actually
     // markdown-specific; the markdown form only stood out because it
     // is the form that's forbidden from declaring a channel.
     await writeFile(
       join(agentRoot, "schedules", "heartbeat.mjs"),
-      'export default { cron: "*/1 * * * *", markdown: "Heartbeat — no channel." };\n',
+      'export default { cron: "*/1 * * * *", content: "Heartbeat — no channel." };\n',
     );
 
     await compileAgent({ startPath: appRoot });
@@ -224,7 +233,7 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
 
       const rehydrated = await simulateStepBoundary(captured[0]!.adapter, bundle);
 
-      expect(rehydrated).toEqual({ kind: SCHEDULE_ADAPTER_KIND, state: {} });
+      expect(rehydrated).toMatchObject({ kind: SCHEDULE_ADAPTER_KIND, state: {} });
     });
   });
 
@@ -242,7 +251,10 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
     );
 
     await mkdir(join(agentRoot, "schedules"), { recursive: true });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     // `defineSchedule` is identity; the literal object avoids depending
     // on the framework package being resolvable from the temp app root.

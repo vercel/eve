@@ -1,11 +1,14 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
-import type { InputResponse } from "#shared/input.js";
+import type { InvokeToolFn } from "#channel/invoke-tool.js";
+import type { Answer } from "#shared/input.js";
 import type { Session } from "#channel/session.js";
 import type { JsonObject } from "#shared/json.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ChannelMethod } from "#public/definitions/channel.js";
+import type { AgentDescription, AgentSkillFileDescription } from "#channel/agent-description.js";
 
 type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Record<string, string>;
 
@@ -32,18 +35,46 @@ export interface RouteHandlerArgs<TState = undefined> {
   waitUntil: (task: Promise<unknown>) => void;
   /** Best-effort client IP reported by the host, or `null` when unavailable. */
   requestIp: string | null;
+  /**
+   * Describes the agent for callers: its name, description, the compiled
+   * tools that can run outside a turn, and the name and description of each
+   * compiled skill, sorted by name. Reads the compiled manifest only, no
+   * skill file, and carries none of the inspection detail of `GET /eve/v1/info`.
+   */
+  describe(): Promise<AgentDescription>;
+  /**
+   * Lists the regular files of one compiled skill, each with its path under
+   * the skill root and its size in bytes, sorted by path. Rejects a skill
+   * the agent does not have.
+   */
+  listSkillFiles(skill: string): Promise<readonly AgentSkillFileDescription[]>;
+  /**
+   * Reads one file of a compiled skill as raw bytes. `path` is relative to
+   * the skill root and defaults to its `SKILL.md`. Rejects paths that are
+   * absolute or contain `.`, `..`, or empty segments, files the skill does
+   * not list, and files over 512 KiB. Production builds ship skill files as
+   * server assets, so they count toward the deployed function's size.
+   */
+  readSkill(skill: string, path?: string): Promise<Uint8Array>;
+  /** Runs one of the agent's tools as `auth`, outside any conversation. */
+  readonly invokeTool: InvokeToolFn;
 }
 
 export interface SendPayload {
-  readonly message?: string | UserContent;
+  readonly message?: MessageContent;
   readonly [key: string]: unknown;
-  readonly inputResponses?: readonly InputResponse[];
+  readonly answers?: readonly Answer[];
   /**
    * Context strings contributed by the channel. eve appends each entry
    * as a `role: "user"` message to `session.history` before the delivery
    * message and persists it across the session.
    */
   readonly context?: readonly string[];
+  /**
+   * Prior conversation added as user and assistant turns before this
+   * delivery's `context` and message.
+   */
+  readonly history?: readonly SessionHistoryMessage[];
   /**
    * Run-scoped JSON schema the turn's result must match.
    */

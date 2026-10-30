@@ -1,7 +1,8 @@
-import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
+import { LogoEveSvg } from "@vercel/geistdocs/assets/logos/logo-eve-svg";
 import { ImageResponse } from "next/og";
 import { PNG } from "pngjs";
 import { Children, cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { resolveLogo } from "../og-logo";
 import type { Integration } from "./data";
 import { logos } from "./logos";
 
@@ -18,23 +19,6 @@ type LogoElementProps = Record<string, unknown> & {
   stroke?: string;
   viewBox?: string;
   width?: number;
-};
-
-const resolveLogo = (node: ReactNode): ReactNode => {
-  if (!isValidElement(node)) return node;
-
-  const element = node as ReactElement<LogoElementProps>;
-  if (element.type === "title" || element.type === "desc") return null;
-  if (typeof element.type === "function") {
-    const component = element.type as (props: LogoElementProps) => ReactNode;
-    return resolveLogo(component(element.props));
-  }
-  if (typeof element.type === "object" && "render" in element.type) {
-    const component = element.type as { render: (props: LogoElementProps) => ReactNode };
-    return resolveLogo(component.render(element.props));
-  }
-
-  return cloneElement(element, element.props, Children.map(element.props.children, resolveLogo));
 };
 
 const fitLogo = (node: ReactNode, maxWidth: number, maxHeight: number): ReactNode => {
@@ -237,7 +221,9 @@ const balanceLogoWeight = (logo: RasterizedLogo, referenceCoverage: number): Siz
 let eveInkCoverage: Promise<number> | undefined;
 
 const getEveInkCoverage = (): Promise<number> => {
-  eveInkCoverage ??= rasterizeLogo(resolveLogo(<LogoEve />)).then((logo) => logo.inkCoverage);
+  eveInkCoverage ??= rasterizeLogo(resolveLogo(<LogoEveSvg height={18} />)).then(
+    (logo) => logo.inkCoverage,
+  );
   return eveInkCoverage;
 };
 
@@ -296,7 +282,7 @@ export const createIntegrationOgImage = async (
             width: 240,
           }}
         >
-          <LogoEve height={70} />
+          {resolveLogo(<LogoEveSvg height={70} />)}
         </div>
         <div
           style={{

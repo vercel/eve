@@ -3,23 +3,41 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
-import { ContextContainer } from "#context/container.js";
-import { RuntimeModelMetadataCacheKey } from "#context/keys.js";
-import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { defineDynamic } from "#dynamic/definition.js";
-import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
+import { defineDynamic, dynamicEvaluate } from "#dynamic/definition.js";
+import { createModelMetadata, type ModelMetadata } from "#internal/model-catalog.js";
 import {
+  InvalidRuntimeModelSelectionError,
   loadDynamicRuntimeModelDefinition,
   resolveRuntimeModelReference,
   resolveRuntimeModelSelection,
 } from "#runtime/agent/resolve-model.js";
 
 const DYNAMIC_MODEL_SOURCE = {
-  eventNames: ["session.started"],
   logicalPath: "agent.ts",
   sourceId: "agent-config",
   sourceKind: "module" as const,
 };
+
+const BUILD_METADATA = createModelMetadata({
+  catalog: {
+    models: [
+      {
+        slug: "openai/gpt-5.5",
+        providers: [
+          { contextWindowTokens: 256_000, provider: "openai", providerModelId: "gpt-5.5" },
+        ],
+      },
+      {
+        slug: "anthropic/claude-opus-5",
+        providers: [
+          { contextWindowTokens: 200_000, provider: "anthropic", providerModelId: "claude-opus-5" },
+        ],
+      },
+    ],
+    providerAliases: {},
+  },
+  fetchedAt: "2026-10-27T00:00:00.000Z",
+});
 
 describe("dynamic runtime model resolution", () => {
   it.each(["gateway", "provider"])("retains reasoning for a %s selection", async (kind) => {
@@ -28,23 +46,63 @@ describe("dynamic runtime model resolution", () => {
     const result = await resolveRuntimeModelSelection({
       selection: { model, reasoning: "low", modelContextWindowTokens: 128_000 },
       durability: kind === "gateway" ? "durable" : "live",
-      state: new ContextContainer(),
+      modelMetadata: metadataSource(),
     });
     expect(result.reference.reasoning).toBe("low");
     if (kind === "provider") expect(result.model).toBe(model);
   });
 
-  it("rejects invalid reasoning before resolving model metadata", async () => {
-    const catalog = createCatalog();
+  it("rejects invalid reasoning before reading model metadata", async () => {
+    const modelMetadata = metadataSource();
     await expect(
       resolveRuntimeModelSelection({
-        catalog,
+        modelMetadata,
         selection: { model: "openai/gpt-5.5", reasoning: "maximum" } as never,
         durability: "live",
-        state: new ContextContainer(),
       }),
-    ).rejects.toThrow("invalid reasoning");
-    expect(catalog.getByGatewayId).not.toHaveBeenCalled();
+    ).rejects.toBeInstanceOf(InvalidRuntimeModelSelectionError);
+    expect(modelMetadata).not.toHaveBeenCalled();
+  });
+
+  it("keeps model metadata load failures retryable", async () => {
+    const failure = new Error("model-metadata.json could not be read.");
+
+    await expect(
+      resolveRuntimeModelSelection({
+        modelMetadata: vi.fn(async () => Promise.reject(failure)),
+        selection: "openai/gpt-5.5",
+        durability: "durable",
+      }),
+    ).rejects.toBe(failure);
+  });
+
+  it("carries prompt cache options on a direct provider selection", async () => {
+    const result = await resolveRuntimeModelSelection({
+      selection: {
+        model: createLanguageModel("amazon-bedrock", "application-inference-profile/abc"),
+        modelContextWindowTokens: 200_000,
+        modelOptions: { promptCache: { anthropic: { ttl: "1h" } } },
+      },
+      durability: "live",
+      modelMetadata: metadataSource(),
+    });
+
+    expect(result.reference.promptCache).toEqual({ anthropic: { ttl: "1h" } });
+  });
+
+  it("rejects prompt cache options on an AI Gateway selection", async () => {
+    const modelMetadata = metadataSource();
+    await expect(
+      resolveRuntimeModelSelection({
+        modelMetadata,
+        selection: {
+          model: "anthropic/claude-opus-5",
+          modelOptions: { promptCache: { anthropic: {} } },
+        },
+        durability: "durable",
+      }),
+    ).rejects.toThrow('modelOptions.promptCache for "anthropic/claude-opus-5"');
+    expect(modelMetadata).not.toHaveBeenCalled();
   });
 
   afterEach(() => {
@@ -75,17 +133,13 @@ describe("dynamic runtime model resolution", () => {
   it("loads resolver-only definitions and normalizes explicit metadata", async () => {
     const moduleMap = createModuleMap({
       default: {
-        model: defineDynamic({
-          events: {
-            "session.started": (_event, ctx) => ({
-              model: ctx.channel.kind === "slack" ? "openai/gpt-5.5-mini" : "openai/gpt-5.5",
-              modelContextWindowTokens: 128_000,
-              modelOptions: {
-                providerOptions: { gateway: { order: ["openai"] } },
-              },
-            }),
+        model: defineDynamic((ctx) => ({
+          model: ctx.channel.kind === "channel:slack" ? "openai/gpt-5.5-mini" : "openai/gpt-5.5",
+          modelContextWindowTokens: 128_000,
+          modelOptions: {
+            providerOptions: { gateway: { order: ["openai"] } },
           },
-        }),
+        })),
       },
     });
 
@@ -93,215 +147,138 @@ describe("dynamic runtime model resolution", () => {
       dynamicModel: DYNAMIC_MODEL_SOURCE,
       scope: { moduleMap, nodeId: undefined },
     });
-    const result = await definition.events["session.started"]?.(
-      { type: "session.started" },
-      {
-        model: { id: "openai/gpt-5.5" },
-        channel: { kind: "slack" },
-        messages: [{ content: "Hi", role: "user" }],
-        session: { auth: { current: null, initiator: null }, id: "session-1" },
-      },
-    );
+    const result = await dynamicEvaluate(definition)({
+      channel: { kind: "channel:slack", metadata: {} },
+    } as never);
+    const modelMetadata = metadataSource();
 
     const resolved = await resolveRuntimeModelSelection({
       durability: "live",
+      modelMetadata,
       selection: result as never,
-      state: new ContextContainer(),
     });
 
     expect(resolved).toEqual({
       reference: {
         contextWindowTokens: 128_000,
         id: "openai/gpt-5.5-mini",
-        maxOutputTokens: undefined,
         providerOptions: { gateway: { order: ["openai"] } },
       },
     });
+    expect(modelMetadata).not.toHaveBeenCalled();
   });
 
-  it("resolves omitted metadata from the catalog and caches successful selections", async () => {
-    const state = new ContextContainer();
-    const catalog = createCatalog();
-
-    const first = await resolveRuntimeModelSelection({
-      catalog,
-      durability: "live",
-      selection: "openai/gpt-5.5",
-      state,
-    });
-    const second = await resolveRuntimeModelSelection({
-      catalog,
-      durability: "live",
-      selection: "openai/gpt-5.5",
-      state,
+  it.each([
+    { selection: "openai/gpt-5.5", id: "openai/gpt-5.5" },
+    // A -thinking variant keeps its Gateway id and takes its base model's window.
+    { selection: "openai/gpt-5.5-thinking", id: "openai/gpt-5.5-thinking" },
+  ])("resolves an omitted context window for $selection from the build", async (input) => {
+    const resolved = await resolveRuntimeModelSelection({
+      durability: "durable",
+      modelMetadata: metadataSource(),
+      selection: input.selection,
     });
 
-    expect(first.reference).toMatchObject({
-      contextWindowTokens: 256_000,
-      id: "openai/gpt-5.5",
-      maxOutputTokens: 32_000,
-    });
-    expect(second).toEqual(first);
-    expect(catalog.getByGatewayId).toHaveBeenCalledTimes(1);
+    expect(resolved.reference).toMatchObject({ contextWindowTokens: 256_000, id: input.id });
   });
 
-  it("reuses cached metadata after durable context serialization", async () => {
-    const state = new ContextContainer();
-    await resolveRuntimeModelSelection({
-      catalog: createCatalog(),
-      durability: "live",
-      selection: "openai/gpt-5.5",
-      state,
-    });
-    const resumedState = await deserializeContext(serializeContext(state));
-    const resumedCatalog = createCatalog();
-
-    await expect(
-      resolveRuntimeModelSelection({
-        catalog: resumedCatalog,
+  it.each([undefined, 128_000])(
+    "names a gateway() model by its Gateway id (window %s)",
+    async (modelContextWindowTokens) => {
+      const resolved = await resolveRuntimeModelSelection({
         durability: "live",
-        selection: "openai/gpt-5.5",
-        state: resumedState,
-      }),
-    ).resolves.toMatchObject({ reference: { id: "openai/gpt-5.5" } });
-    expect(resumedCatalog.getByGatewayId).not.toHaveBeenCalled();
-  });
-
-  it("prunes expired entries during successful cache writes", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(2_000);
-    const state = new ContextContainer();
-    state.set(RuntimeModelMetadataCacheKey, {
-      "gateway:expired/model": {
-        contextWindowTokens: 1,
-        expiresAt: 1_999,
-        resolvedModelId: "expired/model",
-      },
-    });
-
-    await resolveRuntimeModelSelection({
-      catalog: createCatalog(),
-      durability: "live",
-      selection: "openai/gpt-5.5",
-      state,
-    });
-
-    expect(state.get(RuntimeModelMetadataCacheKey)).not.toHaveProperty("gateway:expired/model");
-    expect(state.get(RuntimeModelMetadataCacheKey)).toHaveProperty("gateway:openai/gpt-5.5");
-  });
-
-  it("does not cache failed catalog requests", async () => {
-    const getByGatewayId = vi
-      .fn<RuntimeModelCatalog["getByGatewayId"]>()
-      .mockRejectedValueOnce(new Error("catalog unavailable"))
-      .mockResolvedValueOnce({
-        contextWindowTokens: 256_000,
-        resolvedModelId: "openai/gpt-5.5",
+        modelMetadata: metadataSource(),
+        selection: {
+          model: createLanguageModel("gateway", "openai/gpt-5.5"),
+          modelContextWindowTokens,
+        },
       });
-    const catalog: RuntimeModelCatalog = {
-      getByGatewayId,
-      getByProviderModelId: vi.fn(),
-    };
-    const state = new ContextContainer();
 
-    await expect(
-      resolveRuntimeModelSelection({
-        catalog,
-        durability: "live",
-        selection: "openai/gpt-5.5",
-        state,
-      }),
-    ).rejects.toThrow("catalog unavailable");
-    await expect(
-      resolveRuntimeModelSelection({
-        catalog,
-        durability: "live",
-        selection: "openai/gpt-5.5",
-        state,
-      }),
-    ).resolves.toMatchObject({ reference: { id: "openai/gpt-5.5" } });
+      expect(resolved.reference).toMatchObject({
+        contextWindowTokens: modelContextWindowTokens ?? 256_000,
+        id: "openai/gpt-5.5",
+      });
+    },
+  );
 
-    expect(getByGatewayId).toHaveBeenCalledTimes(2);
-  });
-
-  it("normalizes live provider objects through the same catalog path", async () => {
-    const model = createLanguageModel("openai.responses", "gpt-5.5");
-    const catalog = createCatalog();
+  it("names a direct provider model by its Gateway slug, as the compiler does", async () => {
+    const model = createLanguageModel("anthropic.messages", "claude-opus-5");
 
     const resolved = await resolveRuntimeModelSelection({
-      catalog,
       durability: "live",
+      modelMetadata: metadataSource(),
       selection: model,
-      state: new ContextContainer(),
     });
 
-    expect(catalog.getByProviderModelId).toHaveBeenCalledWith("openai.responses", "gpt-5.5");
     expect(resolved).toMatchObject({
       model,
-      reference: {
-        contextWindowTokens: 256_000,
-        id: "openai/gpt-5.5",
-        maxOutputTokens: 32_000,
-      },
+      reference: { contextWindowTokens: 200_000, id: "anthropic/claude-opus-5" },
     });
   });
 
   it("rejects missing, malformed, and unknown selections", async () => {
-    const state = new ContextContainer();
+    const modelMetadata = metadataSource();
 
     await expect(
-      resolveRuntimeModelSelection({ durability: "live", selection: null as never, state }),
+      resolveRuntimeModelSelection({ durability: "live", modelMetadata, selection: null as never }),
     ).rejects.toThrow(/returned no model/);
     await expect(
       resolveRuntimeModelSelection({
         durability: "live",
+        modelMetadata,
         selection: {
           contextWindowTokens: 128_000,
           model: "openai/gpt-5.5-mini",
         } as never,
-        state,
       }),
-    ).rejects.toThrow(/unknown key\(s\): contextWindowTokens/);
+    ).rejects.toThrow(/returned "contextWindowTokens", which can't vary per session/);
     await expect(
       resolveRuntimeModelSelection({
-        catalog: createCatalog(null),
         durability: "live",
-        selection: "custom/unknown",
-        state,
+        modelMetadata,
+        selection: { build: {}, defaultTools: false, model: "openai/gpt-5.5-mini" } as never,
       }),
-    ).rejects.toThrow(/Return modelContextWindowTokens/);
+    ).rejects.toThrow(/returned "build", "defaultTools".*declare them on defineAgent\(\) instead/);
+    await expect(
+      resolveRuntimeModelSelection({
+        durability: "live",
+        modelMetadata,
+        selection: "custom/unknown",
+      }),
+    ).rejects.toThrow(
+      'Cannot select model "custom/unknown" because the AI Gateway model catalog this build read at 2026-10-27T00:00:00.000Z has no context window for it. Return modelContextWindowTokens',
+    );
   });
 
-  it("rejects durable provider objects before catalog lookup", async () => {
-    const catalog = createCatalog();
+  it("explains a build that couldn't read the catalog", async () => {
+    await expect(
+      resolveRuntimeModelSelection({
+        durability: "durable",
+        modelMetadata: metadataSource(createModelMetadata(null)),
+        selection: "openai/gpt-5.5",
+      }),
+    ).rejects.toThrow(
+      "this build couldn't read the AI Gateway model catalog, so it has no context window for the model",
+    );
+  });
+
+  it("rejects durable provider objects before reading model metadata", async () => {
+    const modelMetadata = metadataSource();
 
     await expect(
       resolveRuntimeModelSelection({
-        catalog,
         durability: "durable",
+        modelMetadata,
         selection: createLanguageModel("openai.responses", "gpt-5.5"),
-        state: new ContextContainer(),
       }),
     ).rejects.toThrow(/durable model selections must be serializable/);
 
-    expect(catalog.getByGatewayId).not.toHaveBeenCalled();
-    expect(catalog.getByProviderModelId).not.toHaveBeenCalled();
+    expect(modelMetadata).not.toHaveBeenCalled();
   });
 });
 
-function createCatalog(
-  result: Awaited<ReturnType<RuntimeModelCatalog["getByGatewayId"]>> = {
-    contextWindowTokens: 256_000,
-    maxOutputTokens: 32_000,
-    resolvedModelId: "openai/gpt-5.5",
-  },
-): RuntimeModelCatalog & {
-  getByGatewayId: ReturnType<typeof vi.fn<RuntimeModelCatalog["getByGatewayId"]>>;
-  getByProviderModelId: ReturnType<typeof vi.fn<RuntimeModelCatalog["getByProviderModelId"]>>;
-} {
-  return {
-    getByGatewayId: vi.fn(async () => result),
-    getByProviderModelId: vi.fn(async () => result),
-  };
+function metadataSource(metadata: ModelMetadata = BUILD_METADATA) {
+  return vi.fn(async () => metadata);
 }
 
 function createModuleMap(moduleNamespace: Record<string, unknown>): CompiledModuleMap {

@@ -3,10 +3,9 @@ import { defineAgent, defineDynamic } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 import { continuationModel } from "./lib/continuation/model.ts";
+import { humanInputModel } from "./lib/hitl/model.ts";
 
 const AUTH_PROBE_DIRECTIVE = /call the auth-probe tool exactly once with marker "([^"]+)"/iu;
-const SCOPED_APPROVAL_DIRECTIVE =
-  /call the dynamic_scoped_approval tool exactly once with scope "([^"]+)"/iu;
 const REPLY_DIRECTIVE = /reply with exactly ([A-Z0-9-]+)/iu;
 const APPROVAL_FOLLOWUP_DIRECTIVE =
   /call the (gate|read-draft-status) tool exactly once with marker "([^"]+)"/iu;
@@ -38,17 +37,6 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   const reply = REPLY_DIRECTIVE.exec(message);
   if (reply?.[1] !== undefined) {
     return reply[1];
-  }
-
-  const scopedApproval = SCOPED_APPROVAL_DIRECTIVE.exec(message);
-  if (scopedApproval?.[1] !== undefined) {
-    const roles = request.messages.map((entry) => entry.role);
-    if (roles.lastIndexOf("tool") < roles.lastIndexOf("user")) {
-      return {
-        toolCalls: [{ input: { scope: scopedApproval[1] }, name: "dynamic_scoped_approval" }],
-      };
-    }
-    return `Approved scope: ${scopedApproval[1]}`;
   }
 
   const askQuestion = ASK_QUESTION_DIRECTIVE.exec(message);
@@ -98,17 +86,15 @@ export default defineAgent({
   experimental: base.experimental,
   reasoning: "high",
   // Budget evals exhaust this with synthetic usage; ordinary HITL sessions do not.
-  limits: { maxOutputTokensPerSession: 1_000_000 },
-  model: defineDynamic({
-    events: {
-      "session.started": () => ({
-        model: typeof base.model === "string" ? base.model : "openai/gpt-6-sol",
-        modelContextWindowTokens: base.modelContextWindowTokens,
-      }),
-      "step.started": (_event, ctx) =>
-        ctx.session.auth.initiator?.attributes?.model === "continuation"
-          ? { model: continuationModel(), modelContextWindowTokens: 1_000_000 }
-          : { model: base.model, modelContextWindowTokens: base.modelContextWindowTokens },
-    },
+  limits: { sessionUsage: ({ window }) => window.outputTokens >= 1_000_000 },
+  model: defineDynamic((ctx) => {
+    switch (ctx.session.auth.initiator?.attributes?.model) {
+      case "continuation":
+        return { model: continuationModel(), modelContextWindowTokens: 1_000_000 };
+      case "hitl":
+        return { model: humanInputModel(), modelContextWindowTokens: 1_000_000 };
+      default:
+        return { model: base.model, modelContextWindowTokens: base.modelContextWindowTokens };
+    }
   }),
 });

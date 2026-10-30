@@ -285,6 +285,7 @@ export interface CreateAgentSourceManifestInput {
  */
 interface CreateSkillPackageSourceRefInput {
   assetsPath?: string;
+  deferred?: boolean;
   description: string;
   license?: string;
   logicalPath: string;
@@ -445,10 +446,11 @@ export function createSkillPackageSourceRef(
 ): NamedSkillDefinition & SkillPackageSourceRef {
   const skillSourceRef: NamedSkillDefinition & SkillPackageSourceRef = {
     assetsPath: input.assetsPath,
+    deferred: input.deferred,
     description: input.description,
     license: input.license,
     logicalPath: normalizeLogicalPath(input.logicalPath),
-    markdown: input.markdown,
+    content: input.markdown,
     metadata: input.metadata !== undefined ? { ...input.metadata } : undefined,
     name: input.name,
     referencesPath: input.referencesPath,

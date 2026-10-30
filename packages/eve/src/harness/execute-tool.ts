@@ -15,15 +15,17 @@ import type { PreparedToolBehavior } from "#tools/behavior.js";
 export interface HarnessToolDefinition {
   readonly availableInSubagents?: boolean;
   readonly label?: InternalToolLabelDefinition;
-  readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
   readonly behavior?: PreparedToolBehavior;
+  /** Kept out of the model's tool list; the model reaches it through `eve__search` and `eve__tool`. */
+  readonly deferred?: boolean;
   readonly description: string;
   /** A successful call ends the turn without a final reply; see `ToolDefinition.endsTurn`. */
   readonly endsTurn?: InternalToolDefinition["endsTurn"];
   readonly execute?: (input: any, options: ToolExecuteOptions) => any;
   /** Optional JSON input substituted when this tool starts its workflow body. */
   readonly executeInput?: (input: unknown) => JsonValue;
-  readonly frameworkAction?: "load-skill" | "task-cancel" | "task-wait";
+  readonly frameworkTool?: boolean;
+  readonly frameworkAction?: "task-cancel" | "task-wait";
   readonly inputSchema: FlexibleSchema;
   readonly name: string;
   readonly approval?: Approval;
@@ -35,6 +37,11 @@ export interface HarnessToolDefinition {
    */
   readonly rootOnly?: boolean;
   readonly toModelOutput?: (output: unknown) => unknown;
+  /**
+   * The version of a dynamically sourced entry the model was offered. A call made from one
+   * version runs only while the entry still has it.
+   */
+  readonly version?: string;
   /** Present when this tool starts an associated durable workflow. */
   readonly workflowId?: string;
 }

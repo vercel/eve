@@ -1,31 +1,33 @@
-import { deliverWorkflowAuthorization } from "#execution/tools/workflow/owner.js";
+import { deliverWorkflowRelay } from "#execution/tools/workflow/owner.js";
+import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import {
-  emitAgentStartedStep,
-  emitWorkflowToolRunReportStep,
-} from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
-import type {
-  WorkflowToolAskRequest,
-  WorkflowToolRunAgentStartedMessage,
-  WorkflowToolRunMessage,
-  WorkflowToolRunOutcomeMessage,
-  WorkflowToolRunRequestMessage,
-  WorkflowToolRunWithdrawMessage,
+  isAgentSessionMessage,
+  runMessageBatchBudget,
+  type WorkflowToolAskRequest,
+  type WorkflowToolRunMessage,
+  type WorkflowToolRunOutcomeMessage,
+  type WorkflowToolRunRequestMessage,
+  type WorkflowToolRunWithdrawMessage,
 } from "#execution/tools/workflow/messages.js";
 import {
   withdrawFinishedRunQuestionsStep,
   withdrawWorkflowToolRunQuestionStep,
 } from "#execution/tools/workflow/withdraw-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { isWorkflowMessage, type SessionInboxReader } from "#execution/session-inbox/inbox.js";
+import { isTaskRunMessage } from "#execution/tasks/session.js";
+import { isActiveTaskRun, readTaskTable } from "#execution/tasks/table.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import {
   workflowToolRunOutcomeToToolResult,
-  workflowToolRunRequestToInputRequestPayload,
+  workflowAskPayload,
 } from "#execution/tools/workflow/owner-inbox.js";
 import {
   findBlockingWorkflowToolRun,
   isInboxToolResultFromRecordedWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
-import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
+import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 interface HandlerInput<T> {
@@ -33,12 +35,34 @@ interface HandlerInput<T> {
   readonly message: T;
 }
 
+export function isAppliedRunMessage(message: WorkflowToolRunMessage): message is AppliedRunMessage {
+  return isAgentSessionMessage(message) || message.kind === "report" || isTaskRunMessage(message);
+}
+
+/**
+ * Removes the applied run messages at the front of the inbox, in arrival
+ * order, while `admits` takes them. One batch's caller passes its budget on.
+ */
+export function takeLeadingAppliedRunMessages(
+  inbox: SessionInboxReader,
+  admits = runMessageBatchBudget(),
+): AppliedRunMessage[] {
+  return inbox.takeLeading(
+    (payload): payload is AppliedRunMessage =>
+      isWorkflowMessage(payload) && isAppliedRunMessage(payload) && admits(payload),
+  );
+}
+
+/**
+ * Handles a run message the session does not apply as it reads it: a
+ * question, its withdrawal, or an `execute` run's outcome.
+ */
 export async function handleWorkflowToolRunMessage(
-  input: HandlerInput<WorkflowToolRunMessage>,
+  input: HandlerInput<Exclude<WorkflowToolRunMessage, AppliedRunMessage>>,
 ): Promise<RuntimeActionResult | undefined> {
   const { message } = input;
   switch (message.kind) {
-    // Only task runs report started, reply, or usage, and the session applies those to the task table.
+    // Only task runs report started, reply, or usage, and the session applies those as it reads them.
     case "started":
     case "reply":
     case "usage":
@@ -51,34 +75,7 @@ export async function handleWorkflowToolRunMessage(
     case "withdraw":
       await handleWorkflowToolRunWithdraw({ ...input, message });
       return undefined;
-    case "report":
-      await input.cursor.advance((state) =>
-        emitWorkflowToolRunReportStep({ ...state, from: message.from, update: message.update }),
-      );
-      return undefined;
-    case "agent-started":
-      await input.cursor.advance((state) =>
-        emitAgentStartedStep({ ...state, messages: [message] }),
-      );
-      return undefined;
   }
-}
-
-/** Boundary messages in admission order, with consecutive `agent-started` messages grouped. */
-type BoundaryBatch =
-  | { readonly kind: "agent-started"; readonly messages: WorkflowToolRunAgentStartedMessage[] }
-  | { readonly kind: "message"; readonly message: WorkflowToolRunMessage };
-
-/** Groups consecutive `agent-started` messages so one `emitAgentStartedStep` publishes each group. */
-export function batchAgentStarts(messages: readonly WorkflowToolRunMessage[]): BoundaryBatch[] {
-  const batches: BoundaryBatch[] = [];
-  for (const message of messages) {
-    const last = batches.at(-1);
-    if (message.kind !== "agent-started") batches.push({ kind: "message", message });
-    else if (last?.kind === "agent-started") last.messages.push(message);
-    else batches.push({ kind: "agent-started", messages: [message] });
-  }
-  return batches;
 }
 
 /**
@@ -109,22 +106,28 @@ async function handleWorkflowToolRunRequest(
   input: HandlerInput<WorkflowToolRunRequestMessage>,
 ): Promise<void> {
   const { cursor, message } = input;
-  if (message.request.kind === "authorization-request") {
-    const request = message.request;
-    await deliverWorkflowAuthorization({ ...message, request }, async () => {
+  const { runId, taskId } = message.from;
+  const state = cursor.sessionState.snapshot.session.state;
+  if (
+    taskId !== undefined &&
+    (!isActiveTaskRun(readTaskTable(state), taskId, runId) ||
+      storedProjection(state).view?.tasks[taskId]?.status === "ended")
+  )
+    return;
+  const { request } = message;
+  if (request.kind === "relay") {
+    await deliverWorkflowRelay({ ...message, request }, async () => {
       await cursor.advance((state) =>
-        runProxySubagentEventStep({ hookPayload: request.event, ...state }),
+        runProxySubagentEventStep({ hookPayload: request.event, runId, ...state }),
       );
     });
     return;
   }
   await cursor.advance((state) =>
     runProxySubagentEventStep({
-      ...(message.request.kind === "ask" && {
-        workflowAsk: createWorkflowAskRoute(message.request),
-      }),
-      hookPayload: workflowToolRunRequestToInputRequestPayload(message),
-      runId: message.from.runId,
+      hookPayload: workflowAskPayload({ ...message, request }),
+      runId,
+      workflowAsk: createWorkflowAskRoute(request),
       ...state,
     }),
   );
@@ -150,12 +153,5 @@ async function handleWorkflowToolRunWithdraw(
 }
 
 function createWorkflowAskRoute(ask: WorkflowToolAskRequest): WorkflowAskRoute {
-  const { allowFreeform, options } = ask.request;
-  return {
-    control: ask.control,
-    question: {
-      ...(allowFreeform !== undefined && { allowFreeform }),
-      ...(options !== undefined && { options: [...options] }),
-    },
-  };
+  return { control: ask.control };
 }

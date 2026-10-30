@@ -3,6 +3,7 @@ import type { SkillSourceRef } from "#discover/manifest.js";
 import type { SkillPackageSourceRef } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import { normalizeSkillDefinition } from "#internal/authored-definition/core.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import type {
   CompiledDynamicSkillDefinition,
   CompiledSkillDefinition,
@@ -12,11 +13,7 @@ import {
   requireModuleBackedDefinitionLoadOptions,
   type SourceDefinitionCompileOptions,
 } from "#compiler/normalize-helpers.js";
-import {
-  assertResolverOnlyDynamicSentinel,
-  isDynamicSentinel,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
 /**
  * Compiled skill entry produced from one authored `skills/*` file.
@@ -27,6 +24,19 @@ import {
 type CompiledSkillEntry =
   | { readonly kind: "skill"; readonly definition: CompiledSkillDefinition }
   | { readonly kind: "dynamic-skill"; readonly definition: CompiledDynamicSkillDefinition };
+
+/** Throws when an authored skill takes a name in eve's namespace. */
+export function assertSkillNameAvailable(skill: {
+  readonly logicalPath: string;
+  readonly name: string;
+}): void {
+  const reservation = eveNamespaceReservation(skill.name);
+  if (reservation !== undefined) {
+    throw new Error(
+      `Skill "${skill.logicalPath}" uses the reserved name "${skill.name}". Rename its path; ${reservation}.`,
+    );
+  }
+}
 
 /**
  * Compiles one authored skill source (markdown, module, or skill
@@ -50,12 +60,13 @@ export async function compileSkillSource(
     return {
       kind: "skill",
       definition: {
+        deferred: definition.deferred,
         description: definition.description,
         files: definition.files,
         license: definition.license,
         logicalPath: source.logicalPath,
         owner: options.owner,
-        markdown: definition.markdown,
+        content: definition.content,
         metadata:
           definition.metadata === undefined
             ? undefined
@@ -79,15 +90,12 @@ export async function compileSkillSource(
   });
 
   if (isDynamicSentinel(exportValue)) {
-    assertResolverOnlyDynamicSentinel(
-      exportValue,
-      `Expected the skill export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
-    );
+    const message = `Expected the skill export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
+    assertDynamicSentinelKeys(exportValue, message);
     const slug = stripLogicalPathExtension(source.logicalPath).replace(/^skills\//, "");
     return {
       kind: "dynamic-skill",
       definition: {
-        eventNames: Object.keys(exportValue.events) as DynamicToolEventName[],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
         slug,
@@ -105,11 +113,12 @@ export async function compileSkillSource(
   return {
     kind: "skill",
     definition: {
+      deferred: definition.deferred,
       description: definition.description,
       files: definition.files,
       license: definition.license,
       logicalPath: source.logicalPath,
-      markdown: definition.markdown,
+      content: definition.content,
       metadata:
         definition.metadata === undefined
           ? undefined
@@ -129,11 +138,12 @@ function compileSkillPackageSource(
 ): CompiledSkillDefinition {
   return {
     assetsPath: source.assetsPath,
+    deferred: source.deferred,
     description: source.description,
     license: source.license,
     logicalPath: source.logicalPath,
     owner,
-    markdown: source.markdown,
+    content: source.content,
     metadata:
       source.metadata === undefined
         ? undefined

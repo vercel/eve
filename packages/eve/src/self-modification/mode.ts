@@ -1,11 +1,25 @@
+import type { SessionAuthContext } from "#context/keys.js";
+import { isVercelDevelopmentUser } from "#runtime/connections/principal.js";
+
 import type { ResolvedSelfModificationConfig } from "./config.js";
 
-type SelfModificationMode = "local" | "disabled" | "deployed";
+/** Local self-modification runs only inside the development runtime. */
+export function isLocalSelfModificationEnabled(config: ResolvedSelfModificationConfig): boolean {
+  return process.env.EVE_DEV === "1" && config.localEnabled;
+}
 
-/** Resolves the mutually exclusive local or deployed editing mode. */
-export function resolveSelfModificationMode(
-  config: ResolvedSelfModificationConfig,
-): SelfModificationMode {
-  if (process.env.EVE_DEV === "1") return config.localEnabled ? "local" : "disabled";
-  return config.deployed === undefined ? "disabled" : "deployed";
+/**
+ * Whether the caller is the developer running `eve dev`: the `localDev()`
+ * principal, or the Vercel user whose development token the dev TUI sends for
+ * a linked project. Other authenticated callers, such as chat users reaching
+ * the server through a tunnel, must not edit the developer's authored source.
+ */
+export function isLocalDeveloper(principal: SessionAuthContext | null): boolean {
+  if (principal === null) return false;
+  return principal.authenticator === "local-dev" || isVercelDevelopmentUser(principal);
+}
+
+/** Deployed self-modification is offered only outside the development runtime. */
+export function isDeployedRuntime(): boolean {
+  return process.env.EVE_DEV !== "1";
 }

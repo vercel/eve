@@ -11,14 +11,10 @@ export { mockModel } from "#evals/mock-model.js";
 // Types
 // ---------------------------------------------------------------------------
 
-export type { RuntimeIdentity, RuntimeTraceContext } from "#protocol/message.js";
-export type { InputRequest } from "#shared/input.js";
-export type { CancelSessionResult } from "#client/types.js";
-
 export type {
   EveEvalCountMatcher,
   EveEvalEventMatch,
-  EveEvalInputRequestMatchOptions,
+  EveEvalInteractionMatchOptions,
   EveEvalValueMatcher,
   EveEvalToolCallMatchOptions,
   EveEvalSkillLoadMatchOptions,
@@ -39,8 +35,11 @@ export type {
   EveEvalJudgeConfig,
   EveEvalRunSummary,
   EveEvalSession,
+  EveEvalSendTiming,
+  EveEvalSessionClock,
   EveEvalSessionResult,
   EveEvalScheduleDispatchResult,
+  EveEvalSkillLoad,
   EveEvalSubagentCall,
   EveEval,
   EveEvalConfig,
@@ -49,6 +48,7 @@ export type {
   EveEvalDefinition,
   EveEvalInput,
   EveEvalLiveTurn,
+  EveEvalWatchOptions,
   EveEvalResult,
   EveEvalTarget,
   EveEvalTargetCapabilities,
@@ -65,6 +65,7 @@ export type {
   JudgeQuestion,
   JudgeContext,
   JudgeOpts,
+  ScoreInput,
 } from "#evals/types.js";
 
 export type {
@@ -78,3 +79,4 @@ export type {
   MockModelToolResult,
   MockModelUsage,
 } from "#evals/mock-model.js";
+export type { ToolStub, ToolStubOutcome } from "#tool-stubs/types.js";

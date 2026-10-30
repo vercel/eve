@@ -1,5 +1,5 @@
 import { defineEval } from "eve/evals";
-import { expectCacheReuse, expectHealthyTurn } from "../cache-checks";
+import { expectCacheReuse, expectHealthyTurn } from "@eve-e2e/config/cache-checks";
 import { EVENT_OVERVIEW } from "../event-overview";
 import { purchasingSheets } from "../purchasing-sheets";
 
@@ -35,7 +35,8 @@ export default defineEval({
       expectHealthyTurn(turn);
       turn.usedNoTools();
     }
-    for (const turn of [shown, tables, stage]) turn.notEvent("compaction.completed");
+    for (const turn of [shown, tables, stage])
+      turn.notEvent("context.settled", { data: { kind: "compaction", outcome: "completed" } });
 
     // Live vision answers vary, so they are tracked rather than gated.
     tables.messageIncludes(/\b(8|eight)\b/iu).soft();

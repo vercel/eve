@@ -3,12 +3,18 @@ import {
   type PlatformCall,
   type RenderedOption,
   recordingFetch,
+  linkTargets,
+  type SentFile,
+  serveFile,
 } from "#internal/testing/channel-conformance/harness.js";
 import { linearChannel } from "#public/channels/linear/index.js";
 import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
 
 const SECRET = "linear-conformance-secret";
 let nextConversation = 0;
+
+// Anyone in the workspace can reply in an issue's agent session.
+const PEOPLE = { alice: "user_1", bob: "user_2" } as const;
 
 /** Drives Linear Agent Session webhooks and Agent Activity GraphQL mutations. */
 export function linearDriver(): ChannelDriver {
@@ -40,7 +46,26 @@ export function linearDriver(): ChannelDriver {
     });
   }
 
+  /** Files a person uploaded, by the `uploads.linear.app` URL their Markdown links to. */
+  const uploads = new Map<string, SentFile>();
+  /** A person's words with each file inlined as Linear writes an upload: an image or a link. */
+  function withUploads(text: string, files: readonly SentFile[]): string {
+    const links = files.map((file) => {
+      const url = `https://uploads.linear.app/conformance/${uploads.size + 1}/${file.name}`;
+      uploads.set(url, file);
+      return `${file.mediaType.startsWith("image/") ? "!" : ""}[${file.name}](${url})`;
+    });
+    return [text, ...links].join("\n\n");
+  }
+
   async function decode(request: Request): Promise<PlatformCall> {
+    if (new URL(request.url).hostname === "uploads.linear.app") {
+      return {
+        body: {},
+        method: `GET ${request.url}`,
+        response: serveFile(uploads.get(request.url)),
+      };
+    }
     const body = JSON.parse(await request.text()) as {
       readonly query?: string;
       readonly variables?: unknown;
@@ -62,18 +87,23 @@ export function linearDriver(): ChannelDriver {
 
   return {
     name: "linear",
-    capabilities: ["text-replies"],
+    personId: PEOPLE.alice,
+    capabilities: ["another-person", "attachments", "text-replies"],
+    // An agent session lives on an issue the whole workspace can see.
+    surface: "shared",
     createChannel: (record) =>
       linearChannel({
         api: { fetch: recordingFetch(record, decode) },
         credentials: { accessToken: "linear-token", webhookSecret: SECRET },
       }),
-    message: (text) => {
+    message: (words, person, files = []) => {
+      const text = withUploads(words, files);
+      const user = PEOPLE[person];
       if (delivery === 0) {
         return webhook({
           action: "created",
           agentSession: {
-            creator: { id: "user_1" },
+            creator: { id: user },
             id: sessionId,
             issue: { id: issueId, identifier: issueIdentifier, title: "Conformance test" },
             issueId,
@@ -87,8 +117,8 @@ export function linearDriver(): ChannelDriver {
         agentActivity: {
           content: { body: text, type: "prompt" },
           id: `prompt-${delivery}`,
-          user: { id: "user_1" },
-          userId: "user_1",
+          user: { id: user },
+          userId: user,
         },
       });
     },
@@ -110,11 +140,31 @@ export function linearDriver(): ChannelDriver {
         .variables?.input;
       return input?.content?.type === "response" ? input.content.body : undefined;
     },
+    shownMessage(call) {
+      if (call.method !== "AgentActivityCreate") return undefined;
+      const input = (call.body as { readonly variables?: { readonly input?: LinearActivityInput } })
+        .variables?.input;
+      if (input?.content === undefined) return undefined;
+      const response = call.response as {
+        readonly data: {
+          readonly agentActivityCreate: { readonly agentActivity: { readonly id: string } };
+        };
+      };
+      return {
+        id: response.data.agentActivityCreate.agentActivity.id,
+        // An `auth` elicitation's sign-in link rides in its signal metadata.
+        links: linkTargets(input.signalMetadata),
+        // The driver can't press Linear's native select, so nothing here is pressable.
+        options: [],
+        text: input.content.body,
+      };
+    },
   };
 }
 
 interface LinearActivityInput {
   readonly content?: { readonly body: string; readonly type: string };
+  readonly signalMetadata?: unknown;
 }
 
 function parseVisibleOptions(body: string): RenderedOption[] {

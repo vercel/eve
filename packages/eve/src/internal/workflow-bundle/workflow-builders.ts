@@ -113,10 +113,19 @@ function isPackageTestFixtureModule(absolutePath: string): boolean {
 }
 
 export function isAuthoredApplicationModule(absolutePath: string, appRoot: string): boolean {
+  // Bundler virtual ids such as `\0rolldown/runtime.js` would otherwise resolve against the cwd.
+  if (!isAbsolute(absolutePath)) return false;
   const normalizedRoot = toRealPath(appRoot).replace(/\\/g, "/").replace(/\/$/, "");
   const normalizedPath = toRealPath(absolutePath).replace(/\\/g, "/");
-  if (!normalizedPath.startsWith(`${normalizedRoot}/`)) return false;
   if (isInNodeModules(normalizedPath)) return false;
+  if (!normalizedPath.startsWith(`${normalizedRoot}/`)) {
+    // An app root without its own package.json, such as a workspace member,
+    // shares the enclosing package, so that package's other modules are application code.
+    const appPackageRoot = findPackageRoot(normalizedRoot);
+    if (appPackageRoot === null || findPackageRoot(dirname(normalizedPath)) !== appPackageRoot) {
+      return false;
+    }
+  }
   return findPackageJson(normalizedPath)?.name !== EVE_PACKAGE_NAME;
 }
 
@@ -125,7 +134,23 @@ function authoredRelativePath(absolutePath: string, appRoot: string): string {
 }
 
 function authoredModuleIdBase(absolutePath: string, appRoot: string): string {
-  return `./${stripJavaScriptExtension(authoredRelativePath(absolutePath, appRoot))}`;
+  const idBase = stripJavaScriptExtension(authoredRelativePath(absolutePath, appRoot));
+  return idBase.startsWith("../") ? idBase : `./${idBase}`;
+}
+
+const packageRootCache = new Map<string, string | null>();
+
+function findPackageRoot(directory: string): string | null {
+  const cached = packageRootCache.get(directory);
+  if (cached !== undefined) return cached;
+  const parent = dirname(directory);
+  const packageRoot = existsSync(join(directory, "package.json"))
+    ? directory
+    : parent === directory
+      ? null
+      : findPackageRoot(parent);
+  packageRootCache.set(directory, packageRoot);
+  return packageRoot;
 }
 
 // Bundlers hand back real paths while configuration carries the spelled

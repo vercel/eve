@@ -1,7 +1,5 @@
 export const SERIALIZED_INSTRUMENTATION_STATE_KEYS = {
   activeChannelDeliveries: "eve.activeChannelDeliveries",
-  actionScopes: "eve.harness.instrumentationActionScopes",
-  inputScopes: "eve.harness.instrumentationInputScopes",
   providerState: "eve.harness.instrumentationState",
 } as const;
 

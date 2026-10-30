@@ -8,7 +8,7 @@ describe("presentPreparingTool", () => {
     expect(presentPreparingTool("bash").title).toBe("Run …");
     expect(presentPreparingTool("write_file").title).toBe("Write …");
     expect(presentPreparingTool("eve.web_search").title).toBe("Search …");
-    expect(presentPreparingTool("final_output").title).toBe("Return final output");
+    expect(presentPreparingTool("eve__reply").title).toBe("Reply");
   });
 
   it("leads unknown tools with their name", () => {
@@ -60,7 +60,6 @@ describe("presentTool", () => {
     expect(presentTool("bash", { command: "pnpm test" }).title).toBe("Run pnpm test");
     expect(presentTool("glob", { pattern: "**/*.ts" }).title).toBe("Glob **/*.ts");
     expect(presentTool("grep", { pattern: "useEve" }).title).toBe("Grep useEve");
-    expect(presentTool("load_skill", { skill: "commit" }).title).toBe("Load commit");
     expect(presentTool("read_file", { filePath: "/workspace/agent.ts" })).toMatchObject({
       title: "Read /workspace/agent.ts",
       group: { verb: "Read", singularNoun: "file", pluralNoun: "files" },
@@ -146,13 +145,7 @@ describe("presentTool", () => {
     expect(presentTool("agent", { message: "Audit the auth flow.\nDetails…" }).title).toBe(
       "Delegate Audit the auth flow.",
     );
-    expect(presentTool("connection_search", { query: "linear issues" }).title).toBe(
-      "Search linear issues",
-    );
-    expect(
-      presentTool("connection_execute", { connection: "linear", tool: "list_issues" }).title,
-    ).toBe("Call linear.list_issues");
-    expect(presentTool("final_output", { anything: true }).title).toBe("Return final output");
+    expect(presentTool("eve__reply", { anything: true }).title).toBe("Reply");
   });
 
   it("covers the builtin presentation table with semantic copy", () => {
@@ -162,7 +155,6 @@ describe("presentTool", () => {
       bash: { command: "ls" },
       glob: { pattern: "**/*.ts" },
       grep: { pattern: "useEve" },
-      load_skill: { skill: "commit" },
       read_file: { filePath: "/workspace/a.ts" },
       web_fetch: { url: "https://example.com" },
       web_search: { query: "eve framework" },

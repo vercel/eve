@@ -5,11 +5,12 @@ import {
 import { listDevelopmentGenerationIds } from "#internal/nitro/dev-runtime-generation-metadata.js";
 
 import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
+import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
 import type { ValidQueueName, World } from "#compiled/@workflow/world/index.js";
 import { createWorld } from "#compiled/@workflow/world-local/index.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
-  LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH,
+  displayLocalWorkflowWorldDataDirectory,
   resolveLocalWorkflowWorldDataDirectory,
 } from "#internal/workflow/local-world-data-directory.js";
 import { applyLocalWorkflowWorldDeliveryTimeoutDefaults } from "#internal/workflow/local-world-delivery-timeouts.js";
@@ -126,6 +127,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       if (!this.#resume) return;
       const skippedGenerations = new Set<string>();
       await reenqueueActiveDevelopmentRuns({
+        appRoot: this.#appRoot,
         enqueue: this.#queue.bind(this),
         prefix: deriveEveWorkflowQueuePrefix(this.#agentName),
         world: this.#world,
@@ -202,7 +204,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
         } catch (error) {
           throw new Error(
             `Failed to read the app's active local Workflow runs. ` +
-              `Remove "${LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH}" to discard them.`,
+              `Remove "${displayLocalWorkflowWorldDataDirectory(this.#appRoot)}" to discard them.`,
             { cause: error },
           );
         }
@@ -297,9 +299,10 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       const run = await this.#world.runs.get(hook.runId, { resolveData: "none" });
       const availability = await this.#generationAvailability(run.deploymentId);
       if (availability.kind === "dormant" || availability.kind === "ineligible") {
-        throw new Error(
-          "Local Workflow run was not resumed. Start a new conversation, or restart eve dev with --resume to attempt recovery.",
-        );
+        throw new DevelopmentRunUnavailableError({
+          availability: availability.kind,
+          runId: hook.runId,
+        });
       }
       return hook;
     }
@@ -353,6 +356,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 async function reenqueueActiveDevelopmentRuns(input: {
+  readonly appRoot: string;
   readonly enqueue: World["queue"];
   readonly canRecover: (generationId: string) => Promise<boolean>;
   readonly prefix: string;
@@ -371,7 +375,7 @@ async function reenqueueActiveDevelopmentRuns(input: {
       } catch (error) {
         throw new Error(
           `Failed to read the app's active local Workflow runs. ` +
-            `Remove "${LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH}" to discard them.`,
+            `Remove "${displayLocalWorkflowWorldDataDirectory(input.appRoot)}" to discard them.`,
           { cause: error },
         );
       }

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { GitHubCredentialProvider, GitHubRepository } from "./config.js";
+import type { GitHubCredentialProvider, GitHubRepository } from "./remote/config.js";
 import type { PreparedSelfModificationWorkspace } from "./git-workspace.js";
 import { assertFullSha, assertGitRef, assertOperationId } from "./identifiers.js";
 import {
@@ -219,6 +219,7 @@ function validateText(value: string, name: string, maximum: number, multiline: b
   if (
     value.trim().length === 0 ||
     value.length > maximum ||
+    // eslint-disable-next-line no-control-regex -- Single-line PR metadata must reject ASCII control characters.
     (!multiline && /[\x00-\x1f\x7f]/u.test(value))
   )
     throw new Error(`Self-modification pull request ${name} is invalid.`);

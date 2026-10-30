@@ -5,6 +5,11 @@ import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { encodeLegacyCommand, resumeLegacyInbox, UnsupportedLegacySessionError } from "./inbox.js";
 const { get, resume } = vi.hoisted(() => ({ get: vi.fn(), resume: vi.fn() }));
 vi.mock("#internal/workflow/runtime.js", () => ({ getHookByToken: get, resumeHook: resume }));
+// Owner classification has its own tests; every owner here is runnable.
+vi.mock("#execution/session-inbox/owner.js", () => ({
+  lookupSessionOwnerHook: (token: string) => get(token),
+  resumeRunnableHook: (token: string, payload: unknown) => resume(token, payload),
+}));
 beforeEach(() => {
   get.mockReset();
   resume.mockReset();
@@ -46,8 +51,14 @@ describe("legacy ingress", () => {
         : { runId: "new", token, metadata: { sessionId: "old" } },
     );
     resume.mockResolvedValue({ runId: "new" });
-    const receipt = await resumeLegacyInbox("slack:old", { kind: "clear" });
-    expect(resume).toHaveBeenCalledExactlyOnceWith(token, { kind: "clear" });
+    const receipt = await resumeLegacyInbox("slack:old", {
+      deliveryId: "clear-delivery",
+      kind: "clear",
+    });
+    expect(resume).toHaveBeenCalledExactlyOnceWith(token, {
+      deliveryId: "clear-delivery",
+      kind: "clear",
+    });
     await expect(receipt.sessionId).resolves.toBe("old");
   });
   it("delivers to an original driver when it has not imported yet", async () => {
@@ -65,7 +76,9 @@ describe("legacy ingress", () => {
   it("does not retry ambiguous delivery errors", async () => {
     get.mockResolvedValue({ runId: "old", token: "alias", metadata: {} });
     resume.mockRejectedValue(new Error("accepted but wake failed"));
-    await expect(resumeLegacyInbox("alias", { kind: "clear" })).rejects.toThrow("wake failed");
+    await expect(
+      resumeLegacyInbox("alias", { deliveryId: "clear-delivery", kind: "clear" }),
+    ).rejects.toThrow("wake failed");
     expect(resume).toHaveBeenCalledOnce();
   });
 });

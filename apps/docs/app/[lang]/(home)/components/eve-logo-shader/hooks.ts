@@ -8,8 +8,20 @@ import { useEffect, useState } from "react";
 function getCurrentTheme(prefersDarkTheme: boolean): "light" | "dark" {
   if (typeof document === "undefined") return "light";
   const root = document.documentElement;
-  if (root.classList.contains("dark") || root.dataset.theme === "dark") return "dark";
-  if (root.classList.contains("light") || root.dataset.theme === "light") return "light";
+  if (
+    root.classList.contains("dark") ||
+    root.classList.contains("dark-theme") ||
+    root.dataset.theme === "dark"
+  ) {
+    return "dark";
+  }
+  if (
+    root.classList.contains("light") ||
+    root.classList.contains("light-theme") ||
+    root.dataset.theme === "light"
+  ) {
+    return "light";
+  }
   return prefersDarkTheme ? "dark" : "light";
 }
 

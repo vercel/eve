@@ -9,14 +9,22 @@ import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools
  * workflow tool calls; the session answers them instead of a workflow run.
  */
 export type TaskToolCall =
-  | { readonly callId: string; readonly kind: "task_wait"; readonly timeoutMs?: number }
-  | { readonly callId: string; readonly kind: "task_cancel"; readonly taskId: string };
+  | {
+      readonly callId: string;
+      readonly kind: typeof TASK_WAIT_TOOL_NAME;
+      readonly timeoutMs?: number;
+    }
+  | {
+      readonly callId: string;
+      readonly kind: typeof TASK_CANCEL_TOOL_NAME;
+      readonly taskId: string;
+    };
 
 /**
  * The task tool calls a parked step's response still waits on. The response
  * is the one record of these calls: a call without a result is pending, and
- * a call with invalid input already carries its error result. The names are
- * reserved, so no authored tool's call matches.
+ * a call with invalid input already carries its error result. The `eve`
+ * namespace is reserved, so no authored tool's call matches.
  */
 export function pendingTaskToolCalls(messages: readonly ModelMessage[]): TaskToolCall[] {
   const answered = new Set<string>();
@@ -34,14 +42,18 @@ export function pendingTaskToolCalls(messages: readonly ModelMessage[]): TaskToo
       const input = typeof part.input === "object" && part.input !== null ? part.input : {};
       if (part.toolName === TASK_CANCEL_TOOL_NAME) {
         const taskId = String(Reflect.get(input, "taskId"));
-        calls.push({ callId: part.toolCallId, kind: "task_cancel", taskId });
+        calls.push({ callId: part.toolCallId, kind: TASK_CANCEL_TOOL_NAME, taskId });
       } else if (part.toolName === TASK_WAIT_TOOL_NAME) {
         // Seconds, to match `sleep`.
         const timeoutSeconds: unknown = Reflect.get(input, "timeoutSeconds");
         calls.push(
           typeof timeoutSeconds === "number"
-            ? { callId: part.toolCallId, kind: "task_wait", timeoutMs: timeoutSeconds * 1_000 }
-            : { callId: part.toolCallId, kind: "task_wait" },
+            ? {
+                callId: part.toolCallId,
+                kind: TASK_WAIT_TOOL_NAME,
+                timeoutMs: timeoutSeconds * 1_000,
+              }
+            : { callId: part.toolCallId, kind: TASK_WAIT_TOOL_NAME },
         );
       }
     }
@@ -49,7 +61,7 @@ export function pendingTaskToolCalls(messages: readonly ModelMessage[]): TaskToo
   return calls;
 }
 
-/** Why a `task_wait` call, or a held turn, stopped waiting. */
+/** Why an `eve__task_wait` call, or a held turn, stopped waiting. */
 export type TaskWaitResult =
   | {
       readonly status: "settled";

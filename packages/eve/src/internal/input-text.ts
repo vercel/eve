@@ -7,7 +7,8 @@ type InputTextCarrier = {
 /**
  * Attaches the text a person typed, for channels whose model-visible message
  * wraps it in an envelope. Pending input requests resolve against this text, so
- * a typed `approve` or option label still answers them.
+ * a typed `approve` or option label still answers them. Empty text answers
+ * nothing.
  */
 export function attachInputText<T extends object>(target: T, text: string | undefined): T {
   if (text !== undefined) {

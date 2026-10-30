@@ -171,8 +171,8 @@ export interface VercelEveSandboxEntry {
 /**
  * One authored skill exposed to the dashboard.
  *
- * Skills are markdown procedures the model loads on demand through the
- * framework-owned `load_skill` tool. The summary lists the available
+ * Skills are markdown procedures the model loads on demand with
+ * `eve__skill({ name })`. The summary lists the available
  * skills by `name` + `description` so the dashboard can render the
  * surface without pulling each skill's full markdown body. Consumers
  * that need the full content can drill in through a dedicated endpoint

@@ -33,6 +33,7 @@ function operations(config?: string): SelfModificationSetupOperations & {
     })),
     findOrCreateConnector: vi.fn(async () => "github/selfmod-acme-agents"),
     readConfig: vi.fn(async () => config),
+    readLocalConfig: vi.fn(async () => config),
     writeConfig: vi.fn(async () => {}),
   };
 }
@@ -44,7 +45,7 @@ function applyDependencies(): SelfModificationApplyDependencies & {
   return {
     ensurePackageDependencies: vi.fn(async () => [
       {
-        dependencies: ["@vercel/connect", "microsandbox"],
+        dependencies: ["@vercel/connect"],
         devDependencies: [],
         path: "/project/package.json",
         scripts: [],
@@ -150,11 +151,16 @@ describe("self-modification integration setup", () => {
       projectId: "project",
     });
     expect(deps.ensurePackageDependencies).toHaveBeenCalledWith({
-      dependencies: { "@vercel/connect": "2.2.0", microsandbox: "0.5.5" },
+      dependencies: { "@vercel/connect": "2.5.2" },
       projectRoot: "/project",
     });
     expect(deps.installScaffoldDependencies).toHaveBeenCalledWith(
       expect.objectContaining({ changed: true, projectPath: "/project" }),
+    );
+    expect(effects.writeConfig).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'import selfModification from "eve/extensions/self-modification/remote"',
+      ),
     );
     expect(effects.writeConfig).toHaveBeenCalledWith(
       expect.stringContaining('repository: "github.com/acme/agents"'),
@@ -162,7 +168,7 @@ describe("self-modification integration setup", () => {
     expect(effects.writeConfig).toHaveBeenCalledWith(
       expect.stringContaining('case "channel:slack"'),
     );
-    expect(effects.writeConfig).toHaveBeenCalledWith(expect.stringContaining('case "http"'));
+    expect(effects.writeConfig).toHaveBeenCalledWith(expect.stringContaining('case "channel:eve"'));
     expect(effects.writeConfig).toHaveBeenCalledWith(
       expect.stringContaining('import { getToken } from "@vercel/connect"'),
     );
@@ -193,7 +199,7 @@ describe("self-modification integration setup", () => {
     await applySelfModificationSetup(plan, ctx.apply, effects);
 
     expect(ctx.resolveVercelProject).toHaveBeenCalledWith("self-modification");
-    expect(effects.writeConfig).toHaveBeenCalledWith(expect.stringContaining('case "http"'));
+    expect(effects.writeConfig).toHaveBeenCalledWith(expect.stringContaining('case "channel:eve"'));
   });
 
   it("registers the production setup separately from local setup", () => {

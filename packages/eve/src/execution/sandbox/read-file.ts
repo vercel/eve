@@ -6,7 +6,13 @@ import {
   setReadFileStamp,
 } from "#execution/tools/file-state.js";
 import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
-import { readMediaMetadata, type MediaMetadata } from "#internal/attachments/media-metadata.js";
+import {
+  detectImageMediaType,
+  hasPdfHeader,
+  type MediaMetadata,
+} from "#internal/attachments/media-metadata.js";
+import { readMediaMetadata } from "#internal/attachments/read-media-metadata.js";
+import { inlinesSandboxRefAsBytes } from "#internal/attachments/sandbox-refs.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
 
@@ -16,16 +22,6 @@ import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-out
 
 const DEFAULT_OFFSET = 1;
 const DEFAULT_LIMIT = 2000;
-
-// Matches the inline cap for inbound image attachments.
-const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
-const IMAGE_MEDIA_TYPES: Readonly<Record<string, string>> = {
-  gif: "image/gif",
-  jpeg: "image/jpeg",
-  jpg: "image/jpeg",
-  png: "image/png",
-  webp: "image/webp",
-};
 
 // ---------------------------------------------------------------------------
 // Input / result shapes
@@ -46,10 +42,10 @@ export interface ReadFileInput {
 export interface ReadFileResult {
   readonly content: string;
   /**
-   * Set when the file is a PNG, JPEG, GIF, or WebP image the model sees as
-   * an image. Carries no bytes, so `action.result` stays small.
+   * Set when the file is a PNG, JPEG, GIF, or WebP image or a PDF that the
+   * model reads natively. Carries no bytes, so `call.settled` stays small.
    */
-  readonly image?: MediaMetadata;
+  readonly file?: MediaMetadata;
   readonly nextOffset?: number;
   readonly path: string;
   readonly totalLines: number;
@@ -63,8 +59,8 @@ export interface ReadFileResult {
 /**
  * Reads one text file from the sandbox, applies output shaping
  * (offset, limit, line numbering, truncation), and persists a full-file
- * stamp into durable read-file state for stale-write detection. Image
- * files return their bytes for the model to view instead.
+ * stamp into durable read-file state for stale-write detection. Images and
+ * PDFs return their bytes for the model to view instead.
  *
  * Used by the framework `read_file` tool and authored wrappers around its
  * exported definition.
@@ -78,9 +74,29 @@ export async function executeReadFileOnSandbox(
   const resolvedPath = await resolveAbsoluteFilePath(sandbox, filePath);
   const normalizedPath = normalizeModelPath(resolvedPath);
 
-  const imageMediaType = IMAGE_MEDIA_TYPES[normalizedPath.split(".").pop()?.toLowerCase() ?? ""];
-  if (imageMediaType !== undefined) {
-    return await readImageFile(sandbox, resolvedPath, normalizedPath, imageMediaType);
+  const bytes = await sandbox.readBinaryFile({ path: resolvedPath });
+  if (bytes === null) {
+    throw new Error(
+      `File not found: ${normalizedPath}. Verify the path exists and is accessible in the sandbox.`,
+    );
+  }
+
+  // ── Classify as PDF, text, image, or unsupported binary ───────────
+  if (hasPdfHeader(bytes)) {
+    return buildFileReadResult(bytes, normalizedPath, "application/pdf");
+  }
+  // Clean text stays text even behind an ASCII image signature such as
+  // `GIF89a`; real images always carry NUL or non-UTF-8 bytes.
+  const rawContent = decodeUtf8(bytes);
+  if (rawContent === undefined || rawContent.includes("\0")) {
+    const imageMediaType = detectImageMediaType(bytes);
+    if (imageMediaType !== undefined) {
+      return buildFileReadResult(bytes, normalizedPath, imageMediaType);
+    }
+    throw new Error(
+      `File "${normalizedPath}" appears to be a binary file. ` +
+        "read_file only supports text files, PNG, JPEG, GIF, or WebP images, and PDFs.",
+    );
   }
 
   // ── Validate offset / limit ─────────────────────────────────────────
@@ -89,23 +105,6 @@ export async function executeReadFileOnSandbox(
 
   if (effectiveOffset < 1) {
     throw new Error(`offset must be >= 1. Received: ${effectiveOffset}.`);
-  }
-
-  // ── Read full file for fingerprinting ───────────────────────────────
-  const rawContent = await sandbox.readTextFile({ path: resolvedPath });
-
-  if (rawContent === null) {
-    throw new Error(
-      `File not found: ${filePath}. Verify the path exists and is accessible in the sandbox.`,
-    );
-  }
-
-  // ── Reject non-text (NUL bytes) ─────────────────────────────────────
-  if (rawContent.includes("\0")) {
-    throw new Error(
-      `File "${filePath}" contains NUL bytes and appears to be a binary file. ` +
-        "read_file only supports text files.",
-    );
   }
 
   // ── Split into lines ────────────────────────────────────────────────
@@ -202,29 +201,42 @@ export async function executeReadFileOnSandbox(
   };
 }
 
-async function readImageFile(
-  sandbox: SandboxSession,
-  resolvedPath: string,
-  path: string,
-  mediaType: string,
-): Promise<ReadFileResult> {
-  const bytes = await sandbox.readBinaryFile({ path: resolvedPath });
-  if (bytes === null) {
+// Decodes exactly like `readTextFile` so write_file's stale-write check
+// fingerprints the same text this read stamps.
+function decodeUtf8(bytes: Uint8Array): string | undefined {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+// Uses the same rule as attachments, so every file read_file accepts reaches
+// the model as bytes.
+function buildFileReadResult(bytes: Uint8Array, path: string, mediaType: string): ReadFileResult {
+  const file = readMediaMetadata(bytes, mediaType);
+  const pdf = mediaType === "application/pdf";
+  if (!inlinesSandboxRefAsBytes({ ...file, path })) {
     throw new Error(
-      `File not found: ${path}. Verify the path exists and is accessible in the sandbox.`,
+      pdf
+        ? `PDF "${path}" is ${bytes.byteLength} bytes; read_file shows PDFs up to 20 MiB. ` +
+            "Split it or extract its text in the sandbox first."
+        : `Image "${path}" is ${describeImage(file)}; read_file shows images up to 3 MiB and ` +
+            "8000 pixels per side. Resize or crop it in the sandbox first.",
     );
   }
-  if (bytes.byteLength > MAX_IMAGE_BYTES) {
-    throw new Error(
-      `Image "${path}" is ${bytes.byteLength} bytes; read_file shows images up to 3 MiB. ` +
-        "Resize or crop it in the sandbox first.",
-    );
-  }
+  const pages =
+    file.pages === undefined ? "" : `, ${file.pages} ${file.pages === 1 ? "page" : "pages"}`;
   return {
-    content: `Image ${path} (${mediaType}, ${bytes.byteLength} bytes).`,
-    image: readMediaMetadata(bytes, mediaType),
+    content: `${pdf ? "PDF" : "Image"} ${path} (${mediaType}, ${bytes.byteLength} bytes${pages}).`,
+    file,
     path,
     totalLines: 0,
     truncated: false,
   };
+}
+
+function describeImage(file: MediaMetadata): string {
+  const size = `${file.size} bytes`;
+  return file.width === undefined ? size : `${file.width}x${file.height} pixels, ${size}`;
 }

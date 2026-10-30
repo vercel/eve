@@ -28,9 +28,10 @@ import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operati
 import { isConnectionAuthorizationFailedError } from "#public/connections/errors.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import { eveChannel, type EveChannelInput } from "#public/channels/eve.js";
+import { eveChannel, type EveChannelConfig } from "#public/channels/eve.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 const ROUTER_CALLER: SessionAuthContext = {
   attributes: {},
@@ -64,7 +65,7 @@ function createEmptySkillBundle(): CompiledBundle {
     adapterRegistry: undefined as never,
     compiledArtifactsSource: { kind: "bundled" },
     graph: undefined as never,
-    hookRegistry: undefined as never,
+    modelMetadata: undefined as never,
     moduleMap: undefined as never,
     nodeId: undefined,
     resolvedAgent: { skills: [] } as never,
@@ -76,7 +77,7 @@ function createEmptySkillBundle(): CompiledBundle {
 
 const EMPTY_SKILL_BUNDLE = createEmptySkillBundle();
 
-function createEveCreateHandler(input: EveChannelInput) {
+function createEveCreateHandler(input: EveChannelConfig) {
   const channel = eveChannel(input);
   const createRoute = channel.routes.find(
     (route) => route.method === "POST" && route.path === "/eve/v1/session",
@@ -93,6 +94,7 @@ function createEveCreateHandler(input: EveChannelInput) {
     async fetch(req: Request) {
       const args = attachRouteSessionCreator<RouteHandlerArgs>(
         {
+          ...mockAgentRouteArgs(),
           ...mockChannelContext(vi.fn()),
           attachSession: vi.fn() as any,
           to: vi.fn() as never,

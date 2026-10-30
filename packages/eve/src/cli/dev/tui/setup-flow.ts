@@ -11,6 +11,7 @@ export type SetupEditableSelectResult =
 
 interface SetupSelectRequestBase {
   message: string;
+  helpText?: string;
   description?: string;
   metadata?: readonly SelectMetadata[];
   options: readonly SetupPanelOption[];

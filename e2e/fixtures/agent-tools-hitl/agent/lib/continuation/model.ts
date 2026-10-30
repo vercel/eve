@@ -3,8 +3,8 @@ import { respond } from "./respond.ts";
 
 export function continuationModel() {
   const model = mockModel({ modelId: "hitl-continuation", respond });
-  if (typeof model === "string" || model.specificationVersion !== "v3") {
-    throw new Error("This fixture expects mockModel's v3 provider boundary.");
+  if (typeof model === "string" || model.specificationVersion !== "v4") {
+    throw new Error("This fixture expects mockModel's v4 provider boundary.");
   }
   const generate = model.doGenerate.bind(model);
   model.doGenerate = async (options) => {

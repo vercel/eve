@@ -3,10 +3,12 @@ import type { SandboxSession } from "#shared/sandbox-session.js";
 type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 };
-import { renderTextInputRequest } from "#channel/resolve-text.js";
+import { postedIn, type SignInSurface } from "#channel/sign-in.js";
+import { surfaceEvents } from "#channel/surface.js";
+import { renderTextInteraction } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
+import { createLogger, logError } from "#internal/logging.js";
 import type { GitHubApiOptions } from "#public/channels/github/api.js";
 import type {
   GitHubBotNameResolver,
@@ -19,6 +21,7 @@ import {
 } from "#public/channels/github/inbound.js";
 import type {
   GitHubChannelEvents,
+  GitHubEventContext,
   GitHubInboundContext,
   GitHubInboundResult,
   GitHubProgressConfig,
@@ -26,7 +29,7 @@ import type {
 import { splitGitHubCommentBody } from "#public/channels/github/limits.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { RuntimeSandboxSession } from "#shared/sandbox-session.js";
-import type { InputRequest } from "#shared/input.js";
+import type { Interaction } from "#channel/interaction-prompts.js";
 
 const log = createLogger("github.defaults");
 
@@ -91,8 +94,24 @@ interface GitHubDefaultEventOptions {
 
 /** Builds GitHub's built-in event handlers for acknowledgement and terminal output. */
 export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): GitHubChannelEvents {
+  async function showPrompt(channel: GitHubEventContext, request: Interaction): Promise<void> {
+    const sections = [renderInteraction(request)];
+    const replyInstruction = renderReplyInstruction(request, await options.botName?.());
+    if (replyInstruction !== undefined) sections.push(replyInstruction);
+    await postCommentChunks(channel, sections.join("\n\n"));
+  }
+
   return {
-    async "turn.started"(_event, channel, ctx) {
+    ...surfaceEvents<GitHubEventContext>({
+      post: postCommentChunks,
+      restart: "comment",
+      // A comment can only answer the prompt it sees, so prompts post one at a time.
+      requests: { showOne: showPrompt },
+      signIns: gitHubSignIns,
+    }),
+
+    async "turn.started"(_event, ctx) {
+      const { channel } = ctx;
       if (options.progress?.reactions !== false) {
         try {
           await channel.thread.react("eyes");
@@ -103,49 +122,12 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
 
       await checkoutRepositoryForTurn(channel, ctx, options);
     },
-
-    async "message.completed"(event, channel, _ctx) {
-      if (event.finishReason === "tool-calls" || !event.message) return;
-      await postCommentChunks(channel, event.message);
-    },
-
-    async "input.requested"(event, channel, _ctx) {
-      if (event.requests.length === 0) return;
-      const sections = event.requests.map(renderInputRequest);
-      const replyInstruction = renderReplyInstruction(event.requests, await options.botName?.());
-      if (replyInstruction !== undefined) sections.push(replyInstruction);
-      await postCommentChunks(channel, sections.join("\n\n"));
-    },
-
-    async "session.failed"(event, channel) {
-      const hint = formatErrorHint(event);
-      const errorId = extractErrorId(event.details);
-      const message = [
-        `This session could not recover from an error${hint}.`,
-        "",
-        "Start a new comment to continue.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n");
-      await postFailure(channel, message);
-    },
-
-    async "turn.failed"(event, channel, _ctx) {
-      const hint = formatErrorHint(event);
-      const errorId = extractErrorId(event.details);
-      const message = [
-        `I hit an error while handling your request${hint}.`,
-        "",
-        "Please try again, rephrase, or reach out if it keeps failing.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n");
-      await postFailure(channel, message);
-    },
   };
 }
 
-function renderInputRequest(request: InputRequest): string {
-  const body = renderTextInputRequest(request);
-  return request.allowFreeform === true
+function renderInteraction(request: Interaction): string {
+  const body = renderTextInteraction(request.request);
+  return request.request.allowFreeform === true
     ? `${body}\n\nYou can also reply with a custom answer.`
     : body;
 }
@@ -153,18 +135,17 @@ function renderInputRequest(request: InputRequest): string {
 // The default onComment hook only dispatches comments that @mention the bot,
 // so a prompt without this instruction invites replies that are silently ignored.
 function renderReplyInstruction(
-  requests: readonly InputRequest[],
+  request: Interaction,
   botName: string | undefined,
 ): string | undefined {
   const name = botName?.trim();
   if (!name) return undefined;
-  const firstOption = requests.find((request) => (request.options?.length ?? 0) > 0)?.options?.[0];
-  const example = firstOption?.label ?? "<your answer>";
+  const example = request.request.options?.[0]?.label ?? "<your answer>";
   return `Answer by mentioning me in a reply, e.g. \`@${name} ${example}\`.`;
 }
 
 async function checkoutRepositoryForTurn(
-  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1],
+  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1]["channel"],
   ctx: SessionContext,
   options: GitHubDefaultEventOptions,
 ): Promise<void> {
@@ -199,18 +180,32 @@ async function checkoutRepositoryForTurn(
   }
 }
 
+/**
+ * A GitHub conversation as a sign-in shows on it: comments are public and can't reach one person,
+ * so it shows only a link-free status saying the person who asked must sign in.
+ */
+function gitHubSignIns(channel: GitHubEventContext): SignInSurface {
+  const post = async (text: string) => {
+    await postCommentChunks(channel, text);
+    return undefined;
+  };
+  return {
+    private: false,
+    postChallenge: async () => undefined,
+    post,
+    postStatus: (signIn) =>
+      post(
+        `Authorization required for ${signIn.displayName}. The person who asked must sign in before I can continue.`,
+      ),
+    posted: postedIn(channel.state, "pendingSignIns"),
+  };
+}
+
 async function postCommentChunks(
-  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1],
+  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1]["channel"],
   body: string,
 ): Promise<void> {
   for (const chunk of splitGitHubCommentBody(body)) {
     await channel.thread.post(chunk);
   }
-}
-
-async function postFailure(
-  channel: Parameters<NonNullable<GitHubChannelEvents["turn.started"]>>[1],
-  message: string,
-): Promise<void> {
-  await postCommentChunks(channel, message);
 }

@@ -1,12 +1,21 @@
 # Contributing to eve
 
-Thanks for your interest in contributing! This guide covers everything you need to get the repo running locally and land a change.
+Thanks for your interest in contributing to eve! We greatly appreciate bug
+reports, feature proposals, and prompts or implementation plans shared through
+issues.
+
+If you are an external contributor, start with an
+[issue](https://github.com/vercel/eve/issues/new/choose) rather than a pull
+request. See [Proposing a change](#proposing-a-change) for what to include.
+
+The rest of this guide covers local development and the team's implementation
+and pull request workflow.
 
 ## Signed commits
 
 This repository requires verified commit signatures on protected branches.
 
-Before contributing, configure Git to sign your commits with a GitHub-verified
+Before committing code, configure Git to sign your commits with a GitHub-verified
 GPG, SSH, or S/MIME key. Unsigned commits will be rejected by repository rules
 and need to be rewritten as signed commits before they can be merged.
 
@@ -35,9 +44,9 @@ pnpm build
 The repo is a pnpm workspace orchestrated with [Turborepo](https://turborepo.com):
 
 - [`packages/eve`](./packages/eve) — the framework and `eve` CLI
-- [`packages/eve-scaffold`](./packages/eve-scaffold) / [`packages/eve-catalog`](./packages/eve-catalog) — internal (unpublished) scaffolding libraries
+- [`packages/eve-catalog`](./packages/eve-catalog) — internal (unpublished) integration catalog
 - [`apps/fixtures`](./apps/fixtures) — shared agent fixtures used by e2e tests, TUI smoke tests, local dev, and bundle analysis
-- [`apps/frameworks`](./apps/frameworks) — framework integration apps for Next.js, Nuxt, and SvelteKit
+- [`apps/frameworks`](./apps/frameworks) — framework integration apps for Next.js, Nuxt, SvelteKit, and TanStack Start
 - [`apps/templates`](./apps/templates) — source apps for generated templates
 - [`docs`](./docs) — the published documentation content
 - [`e2e/`](./e2e) — fixture-owned `eve eval` end-to-end tests
@@ -56,8 +65,8 @@ This runs the `eve` package build in watch mode alongside the [`apps/fixtures/we
 pnpm test               # unit + integration
 pnpm test:unit          # unit tests
 pnpm test:integration   # integration tests
-pnpm test:scenario      # scenario tests (requires pnpm build first)
-pnpm test:framework-fixtures # apps/frameworks smoke builds (requires pnpm build first)
+pnpm test:scenario      # scenario tests (Turbo builds prerequisites)
+pnpm test:framework-fixtures # apps/frameworks smoke builds (Turbo builds prerequisites)
 pnpm test:e2e           # fixture-owned eve eval suites
 pnpm test:tui           # TUI smoke scripts (not e2e)
 ```
@@ -80,6 +89,19 @@ credentials.
 
 Do not commit fixture trees under `packages/eve/test/fixtures/` — scenario app content is defined inline as `ScenarioAppDescriptor` objects under `packages/eve/src/internal/testing/scenario-apps/` (CI enforces this).
 
+### Testing packaged builds
+
+`pkg.eve.dev` serves `main` and same-repository PR builds. It does not serve fork
+PRs or direct branch deployments. A PR package is available after its Vercel –
+eve-pkg deployment succeeds.
+
+```bash
+pnpm dlx https://pkg.eve.dev/pr/<pull-request-id>/eve.tgz dev
+```
+
+`pnpm dlx` may reuse a cached package for the same PR URL. To test a newer
+commit, use its full-SHA URL: `https://pkg.eve.dev/<full-sha>/eve.tgz`.
+
 ## Linting and formatting
 
 ```bash
@@ -93,35 +115,22 @@ pnpm docs:check    # docs frontmatter and nav validation
 
 All of these run in CI, so running them locally before pushing saves a round trip.
 
-### Extension capability contracts
+### Extension distribution compatibility
 
-The extension capabilities in
-[`extension-compatibility.ts`](./packages/eve/src/compiler/extension-compatibility.ts)
-have immutable API reports keyed by epoch. If an extension-facing type or
-signature changes, CI fails with the affected capability. Classify whether the
-new consumer retains the previous epoch while bumping it automatically:
+`eve extension build` records its exact eve build version and a distribution
+contract generation in `_manifest.json`. Build against the oldest eve release
+your extension intends to support, then test that same distribution against
+newer releases. A consumer rejects distributions built by a newer eve release
+or against an unsupported distribution generation before executing extension
+code. The first release of this manifest format rejects older epoch-based
+distributions. If the release candidate's distribution contract remains
+compatible, 1.0 continues to support its generation without a rebuild; a
+breaking change requires an explicit generation change and rebuild guidance.
 
-```bash
-pnpm update:extension-contracts --update hook
-```
-
-The command bumps changes it can prove structurally backward compatible,
-retains the previous epoch, and scaffolds the required fixture under
-`packages/eve/extension-contracts/compatibility/`. Replace the scaffold with a
-representative example of the retained authoring contract, then rerun
-`pnpm update:extension-contracts` to generate the new epoch report. If the
-change cannot be classified automatically, pass `--retain` after verifying
-runtime compatibility. To stop accepting the previous epoch, pass
-`--drop "why the old contract cannot run"`; this bumps the capability and
-records the reason.
-
-Every historical epoch must be classified exactly once as supported or dropped.
-Supported historical epochs require compiling fixtures. Each epoch also retains
-a readable `vN.api.md` declaration report and compact `vN.json` metadata; do not
-edit or delete either file after merge. The invariant guard verifies the support
-history, fixtures, report integrity, and assignment of every public authoring
-export to a capability. Reports and fixtures cover structural compatibility;
-behavior changes still need focused compatibility tests.
+Review changes to extension-facing APIs and runtime behavior for backwards
+compatibility within a supported generation. An API change does not require an
+epoch bump; a TypeScript-compatible signature alone does not prove an older
+prebuilt distribution still runs.
 
 ## Adding an integration to the registry
 
@@ -168,18 +177,31 @@ User-facing docs live in [`docs/`](./docs) and are published with the `eve` npm 
 
 ## Proposing a change
 
-If you are an external contributor and have not been invited to implement a
-change, open an issue instead of a pull request. Search the existing issues,
-discussions, and pull requests first so you do not duplicate active work. Use
-the relevant issue template to describe the problem, use case, or bug
-reproduction. You may also include a suggested implementation prompt that a
-maintainer or coding agent could use after the proposal is accepted.
+External contributions should come through issues rather than unsolicited
+pull requests. Search the existing issues, discussions, and pull requests
+first so you do not duplicate active work, then use the
+[relevant issue template](https://github.com/vercel/eve/issues/new/choose).
 
-For changes to public APIs, agent behavior, compiler/runtime internals,
-dependencies, generated artifacts, fixture contracts, or any non-trivial
-implementation detail, wait for maintainer agreement before investing in an
-implementation. The goal is to agree that the problem is real and that the
-proposed direction fits eve before review shifts to code.
+We use our own coding agents to implement accepted proposals. This lets us
+control which models and skills the agents use and how changes are validated.
+We welcome prompts as issues. Your investigation, prompt, or implementation
+plan helps us understand the problem and gives our agents a concrete starting
+point.
+You do not need to write the code or open a pull request to contribute.
+
+Describe the problem, use case, or bug reproduction. If you have a change in
+mind, include a prompt or short implementation plan that the team can review
+and run with its own agents. Useful details include:
+
+- Explain the desired behavior and give a concrete user story or reproduction.
+- Identify the relevant code or docs and outline the changes you recommend.
+- Note constraints, trade-offs, and any public API or dependency changes.
+- Describe how to validate the result, including relevant tests and docs updates.
+
+Start with a short prompt or plan focused on the outcome. Once a maintainer
+agrees on the direction, they may ask for more detail. Prompts and plans are
+optional: you can report a bug or request a feature without knowing how to
+implement it. Share what you know, even if your proposal is incomplete.
 
 To make a proposal easier to evaluate:
 
@@ -191,9 +213,9 @@ To make a proposal easier to evaluate:
   package should keep runtime dependencies minimal.
 - Do not propose public behavior based only on a hypothetical use case. Include
   a concrete user story or, for bugs, a reproduction.
-- Do not claim an issue silently. Wait for a maintainer to invite an
-  implementation, and check the thread first in case someone else is already
-  working on it.
+- Check the issue thread before developing a prompt or plan in case someone
+  else is already working on it. Coordinate with maintainers rather than
+  assuming an issue is assigned to you.
 
 ## Submitting a pull request
 
@@ -215,6 +237,28 @@ on when one exists. Do not create an issue solely to accompany a pull request.
    or decision behind the change before describing the solution.
 
 Releases are managed with [Changesets](https://github.com/changesets/changesets) by the maintainers.
+
+### Changeset summaries
+
+Start the changeset summary with one complete sentence:
+
+```md
+---
+"eve": patch
+---
+
+Restore the connection sign-in page after an authorization error.
+
+Thanks @octocat for reporting this in #1234.
+```
+
+For a PR with a changeset, start the PR title with `feat:`, `perf:`, or `fix:`. For documentation changes, use `docs(feature):` or `docs(bugfix):` to choose the release-note section. Use `chore:`, `refactor:`, `test:`, `ci:`, `build:`, or `internal:` for changes that should not appear in either section. Except for `docs`, these types also accept a scope, such as `fix(eve):`. A stacked PR prefix such as `[1/2]` is also allowed. GitHub uses the PR title as the squash-merge subject; keep the prefix in that subject, which selects the category. A `minor` or `major` changeset always appears under **Breaking Changes**, whatever its prefix. Put migration details and contributor credits in following paragraphs; release notes retain them. Use `Thanks @handle` to credit a contributor.
+
+Run `pnpm guard:invariants` to validate changeset summaries. CI also checks the actual PR title.
+
+The release workflow classifies from the immutable commit that introduced the changeset, not the editable PR title. Unrecognized commit subjects do not block the release; review them through the compare link under the version heading. That link compares with the newest earlier version that has a tag; without one, it opens the repository history at the new tag. To generate a release locally, run `pnpm version-packages` with `GITHUB_TOKEN` or `GH_TOKEN` set; use this command rather than `changeset version` so the release sections are assembled. The date is the UTC date when the release notes are generated, which can be earlier than the publication date.
+
+The published packages contain only their own release notes in `CHANGELOG.md`, with a link to the full changelog at that release's tag. Packing fails if the package version has no changelog entry. Git preview builds use the base version's notes, identify them as such, and link to the source commit when it contains that version's newest notes. Use `pnpm pack` in the package directory; the build stages the package without modifying the repository changelog.
 
 ## Developer Certificate of Origin (DCO)
 

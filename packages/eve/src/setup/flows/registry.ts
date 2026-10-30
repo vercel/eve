@@ -44,6 +44,8 @@ export async function runRegistryFlow(input: {
   signal?: AbortSignal;
   /** Registry item supplied by `/add <item>`, installed directly. */
   initialAddress?: string;
+  /** Rerun the item's setup only; its source is already installed. */
+  skipInstall?: boolean;
   onScreen?: (input: { screen: "registry_install"; registrySelectedCount?: number }) => void;
   onItemStart?: (item: Item, index: number, total: number) => void;
   /** Gives each installation its own cancellation boundary without ending the batch. */
@@ -102,13 +104,17 @@ export async function runRegistryFlow(input: {
         const install = (signal = input.signal) =>
           installRegistryItem(installRoot, item.address, {
             silent: true,
+            ...(input.skipInstall === true && { skipInstall: true }),
             prompter: input.prompter,
             signal,
           });
         const run = () => (input.runItem === undefined ? install() : input.runItem(install));
         const installed = await (input.prompter.withExclusiveTerminal?.(run) ?? run());
         if (installed.setupIncomplete !== undefined) {
-          activeSession.addIncomplete(label(item), installed.setupIncomplete.resumeCommand);
+          activeSession.addIncomplete(label(item), {
+            address: item.address,
+            ...installed.setupIncomplete,
+          });
         } else {
           activeSession.add(label(item), installed.output, installed.setup);
         }

@@ -253,7 +253,7 @@ describe("stateless MCP Streamable HTTP server", () => {
     );
   });
 
-  it("enforces the advertised tool input schema before dispatch", async () => {
+  it("rejects arguments outside the advertised input schema as invalid_input before dispatch", async () => {
     const { call, handle } = server();
     const response = await handle(
       modernRequest({
@@ -267,8 +267,17 @@ describe("stateless MCP Streamable HTTP server", () => {
     expect(await jsonRpcResponse(response)).toMatchObject({
       id: "invalid-call",
       result: {
-        content: [{ text: expect.stringContaining("Input validation error"), type: "text" }],
+        content: [
+          { text: expect.stringContaining("Invalid arguments for tool echo"), type: "text" },
+        ],
         isError: true,
+        structuredContent: {
+          error: {
+            code: "invalid_input",
+            message: expect.stringContaining("value"),
+            retryable: false,
+          },
+        },
       },
     });
     expect(call).not.toHaveBeenCalled();

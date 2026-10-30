@@ -1,49 +1,39 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
-import type { RuntimeActionResult } from "#shared/action-types.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineTool } from "#tools/definition.js";
 import {
+  connectionDefinitionKey,
   registerDefinitionSource,
-  stampDefinitionKey,
 } from "#internal/authored-definition/source-identity.js";
 import {
   toolResultFrom,
   type MatchedConnectionResult,
   type MatchedToolResult,
+  type ToolResultSource,
 } from "#public/tools/result.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function toolResult(toolName: string, output: unknown, isError?: boolean): RuntimeActionResult {
-  const base: RuntimeActionResult = {
+import { call, emptySessionView, foldEvents } from "#protocol/session-projection/public-view.js";
+import { stampTestEvents } from "#internal/testing/events.js";
+import type { JsonValue } from "#shared/json.js";
+
+function toolResult(toolName: string, output: JsonValue, isError?: boolean): ToolResultSource {
+  return {
     callId: "call_1",
-    kind: "tool-result",
-    output: output as RuntimeActionResult extends { output: infer O } ? O : never,
-    toolName,
+    kind: "tool",
+    name: toolName,
+    state: isError === true ? "failed" : "completed",
+    output,
   };
-  if (isError !== undefined) {
-    return { ...base, isError };
-  }
-  return base;
 }
 
-function subagentResult(): RuntimeActionResult {
-  return {
-    callId: "call_2",
-    kind: "subagent-result",
-    origin: "child",
-    outcome: {
-      kind: "terminal",
-      result: { kind: "succeeded", output: "done" },
-      usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
-    },
-    output: "done",
-    subagentName: "sub",
-  };
+function subagentResult(): ToolResultSource {
+  return { callId: "call_2", kind: "agent", name: "sub", state: "completed", output: "done" };
 }
 
 describe("toolResultFrom", () => {
@@ -58,14 +48,16 @@ describe("toolResultFrom", () => {
     description: "Linear",
   });
 
-  registerDefinitionSource("tool:Get the current weather for a city.", {
-    kind: "tool",
-    name: "get_weather",
-  });
-  registerDefinitionSource("connection:https://mcp.linear.app", {
-    kind: "connection",
-    name: "linear",
-  });
+  registerDefinitionSource(
+    weatherTool,
+    { kind: "tool", name: "get_weather" },
+    "tool:Get the current weather for a city.",
+  );
+  registerDefinitionSource(
+    linearConnection,
+    { kind: "connection", name: "linear" },
+    connectionDefinitionKey("https://mcp.linear.app", "Linear"),
+  );
 
   it("matches an authored tool result and returns typed output", () => {
     const result = toolResultFrom(
@@ -83,6 +75,41 @@ describe("toolResultFrom", () => {
       const _check: MatchedToolResult<{ city: string; tempF: number }> = result;
       void _check;
     }
+  });
+
+  it("matches a completed call observation from an opaque snapshot", () => {
+    const view = foldEvents(
+      emptySessionView(),
+      stampTestEvents([
+        {
+          type: "call.requested",
+          data: {
+            callId: "call_3",
+            owner: { runId: "run_0" },
+            capability: { kind: "tool", name: "get_weather" },
+          },
+        },
+        {
+          type: "call.settled",
+          data: { callId: "call_3", outcome: "completed", output: { city: "SF", tempF: 72 } },
+        },
+      ]),
+    );
+    const row = call(view, "call_3")!;
+
+    expect(toolResultFrom(row, weatherTool)).toEqual({
+      callId: "call_3",
+      output: { city: "SF", tempF: 72 },
+      toolName: "get_weather",
+    });
+    expect(toolResultFrom({ ...row, state: "failed" }, weatherTool)).toBeUndefined();
+    expect(
+      toolResultFrom({ ...row, kind: "agent", name: "get_weather" }, weatherTool),
+    ).toBeUndefined();
+    expect(toolResultFrom(undefined, weatherTool)).toBeUndefined();
+    expect(
+      toolResultFrom({ ...row, kind: "tool", name: "linear__list_issues" }, linearConnection),
+    ).toMatchObject({ connectionToolName: "list_issues" });
   });
 
   it("preserves structured output — not a JSON string", () => {
@@ -133,7 +160,7 @@ describe("toolResultFrom", () => {
     expect(result!.output).toEqual({ city: "NY", tempF: 65 });
   });
 
-  it("uses source-derived keys to distinguish tools with the same description", () => {
+  it("uses loaded definitions to distinguish tools with the same description", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const first = defineTool({
       description: "Run the shared action.",
@@ -146,49 +173,27 @@ describe("toolResultFrom", () => {
       inputSchema: z.object({}),
     });
 
-    stampDefinitionKey(first, "tool-source:first-source");
-    stampDefinitionKey(second, "tool-source:second-source");
-    registerDefinitionSource("tool-source:first-source", {
-      kind: "tool",
-      logicalPath: "tools/first.ts",
-      name: "first_tool",
-    });
-    registerDefinitionSource("tool-source:second-source", {
-      kind: "tool",
-      logicalPath: "tools/second.ts",
-      name: "second_tool",
-    });
-    registerDefinitionSource("tool:Run the shared action.", {
-      kind: "tool",
-      logicalPath: "tools/first.ts",
-      name: "first_tool",
-    });
-    registerDefinitionSource("tool:Run the shared action.", {
-      kind: "tool",
-      logicalPath: "tools/second.ts",
-      name: "second_tool",
-    });
+    registerDefinitionSource(
+      first,
+      { kind: "tool", logicalPath: "tools/first.ts", name: "first_tool" },
+      "tool:Run the shared action.",
+    );
+    registerDefinitionSource(
+      second,
+      { kind: "tool", logicalPath: "tools/second.ts", name: "second_tool" },
+      "tool:Run the shared action.",
+    );
 
-    expect(warn).toHaveBeenCalledOnce();
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'eve could not assign a unique toolResultFrom identity for "tool:Run the shared action."',
-      ),
-    );
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'Conflicting definitions: tool "first_tool" from "tools/first.ts" and tool "second_tool" from "tools/second.ts".',
-      ),
-    );
     expect(toolResultFrom(toolResult("first_tool", { source: "first" }), first)).toEqual({
       callId: "call_1",
       output: { source: "first" },
       toolName: "first_tool",
     });
     expect(toolResultFrom(toolResult("first_tool", { source: "first" }), second)).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
   });
 
-  it("does not use a colliding description fallback to narrow the wrong tool", () => {
+  it("does not use a colliding description fallback to narrow the wrong tool, and warns once", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const copy = defineTool({
       description: "Run the fallback action.",
@@ -196,19 +201,31 @@ describe("toolResultFrom", () => {
       inputSchema: z.object({}),
     });
 
-    registerDefinitionSource("tool:Run the fallback action.", {
-      kind: "tool",
-      logicalPath: "tools/first.ts",
-      name: "first_tool",
-    });
-    registerDefinitionSource("tool:Run the fallback action.", {
-      kind: "tool",
-      logicalPath: "tools/second.ts",
-      name: "second_tool",
-    });
+    registerDefinitionSource(
+      {},
+      { kind: "tool", logicalPath: "tools/first.ts", name: "first_tool" },
+      "tool:Run the fallback action.",
+    );
+    registerDefinitionSource(
+      {},
+      { kind: "tool", logicalPath: "tools/second.ts", name: "second_tool" },
+      "tool:Run the fallback action.",
+    );
 
-    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).not.toHaveBeenCalled();
     expect(toolResultFrom(toolResult("first_tool", { source: "first" }), copy)).toBeUndefined();
+    expect(toolResultFrom(toolResult("second_tool", { source: "second" }), copy)).toBeUndefined();
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'eve could not assign a unique toolResultFrom identity for "tool:Run the fallback action."',
+      ),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Conflicting definitions: tool "first_tool" from "tools/first.ts" and tool "second_tool" from "tools/second.ts".',
+      ),
+    );
   });
 
   it("matches a connection tool result with qualified name", () => {
@@ -232,51 +249,28 @@ describe("toolResultFrom", () => {
     expect(result).toBeUndefined();
   });
 
-  it("uses source-derived keys to distinguish connections with the same URL", () => {
+  it("uses loaded definitions to distinguish connections with the same URL and description", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const first = defineMcpClientConnection({
       url: "https://mcp.example.test",
-      description: "First",
+      description: "Shared",
     });
     const second = defineMcpClientConnection({
       url: "https://mcp.example.test",
-      description: "Second",
+      description: "Shared",
     });
 
-    stampDefinitionKey(first, "connection-source:first-source");
-    stampDefinitionKey(second, "connection-source:second-source");
-    registerDefinitionSource("connection-source:first-source", {
-      kind: "connection",
-      logicalPath: "connections/first.ts",
-      name: "first",
-    });
-    registerDefinitionSource("connection-source:second-source", {
-      kind: "connection",
-      logicalPath: "connections/second.ts",
-      name: "second",
-    });
-    registerDefinitionSource("connection:https://mcp.example.test", {
-      kind: "connection",
-      logicalPath: "connections/first.ts",
-      name: "first",
-    });
-    registerDefinitionSource("connection:https://mcp.example.test", {
-      kind: "connection",
-      logicalPath: "connections/second.ts",
-      name: "second",
-    });
+    registerDefinitionSource(
+      first,
+      { kind: "connection", logicalPath: "connections/first.ts", name: "first" },
+      connectionDefinitionKey("https://mcp.example.test", "Shared"),
+    );
+    registerDefinitionSource(
+      second,
+      { kind: "connection", logicalPath: "connections/second.ts", name: "second" },
+      connectionDefinitionKey("https://mcp.example.test", "Shared"),
+    );
 
-    expect(warn).toHaveBeenCalledOnce();
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'eve could not assign a unique toolResultFrom identity for "connection:https://mcp.example.test"',
-      ),
-    );
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'Conflicting definitions: connection "first" from "connections/first.ts" and connection "second" from "connections/second.ts".',
-      ),
-    );
     expect(toolResultFrom(toolResult("first__search", []), first)).toEqual({
       callId: "call_1",
       connectionToolName: "search",
@@ -284,5 +278,40 @@ describe("toolResultFrom", () => {
       toolName: "first__search",
     });
     expect(toolResultFrom(toolResult("first__search", []), second)).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // #3085: loaded definitions match by source identity, so a shared fallback
+  // key alone should not warn at registration time.
+  it("does not warn when loaded connections share a fallback identity", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const key = connectionDefinitionKey("https://api.githubcopilot.com/mcp/", "GitHub");
+    const github = defineMcpClientConnection({
+      url: "https://api.githubcopilot.com/mcp/",
+      description: "GitHub",
+    });
+    const githubWrite = defineMcpClientConnection({
+      url: "https://api.githubcopilot.com/mcp/",
+      description: "GitHub",
+    });
+
+    registerDefinitionSource(
+      github,
+      { kind: "connection", logicalPath: "connections/github.ts", name: "github" },
+      key,
+    );
+    registerDefinitionSource(
+      githubWrite,
+      { kind: "connection", logicalPath: "connections/githubwrite.ts", name: "githubwrite" },
+      key,
+    );
+
+    expect(toolResultFrom(toolResult("github__search", []), github)?.connectionToolName).toBe(
+      "search",
+    );
+    expect(
+      toolResultFrom(toolResult("githubwrite__search", []), githubWrite)?.connectionToolName,
+    ).toBe("search");
+    expect(warn).not.toHaveBeenCalled();
   });
 });

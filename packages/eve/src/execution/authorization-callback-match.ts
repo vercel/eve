@@ -1,9 +1,5 @@
 import type { DeliverPayload } from "#channel/types.js";
-import type {
-  AuthorizationChallenge,
-  AuthorizationResult,
-  PendingAuthorizationState,
-} from "#harness/authorization.js";
+import type { AuthorizationChallenge, AuthorizationResult } from "#harness/authorization.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 
 export interface MatchedAuthorizationCallback {
@@ -13,7 +9,7 @@ export interface MatchedAuthorizationCallback {
 
 /** Matches each callback to exactly one pending authorization attempt. */
 export function matchAuthorizationCallbacks(
-  pending: PendingAuthorizationState,
+  signIns: readonly AuthorizationChallenge[],
   payloads: readonly DeliverPayload[],
 ): {
   readonly matches: readonly MatchedAuthorizationCallback[];
@@ -36,7 +32,7 @@ export function matchAuthorizationCallbacks(
       continue;
     }
 
-    const challenge = pending.challenges.find((candidate) => {
+    const challenge = signIns.find((candidate) => {
       if (candidate.name !== callback.connectionName) return false;
       return typeof callback.attemptId === "string" && candidate.attemptId === callback.attemptId;
     });

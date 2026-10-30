@@ -110,6 +110,20 @@ That's a working agent. Add human-in-the-loop prompts, subagents, and schedules 
 Follow the [first-agent tutorial](https://eve.dev/docs/tutorial/first-agent) for a complete
 walkthrough.
 
+### Add Web Chat
+
+From your agent's directory, link a Vercel project and add Web Chat:
+
+```bash
+npx eve link
+npx eve add channel/web
+```
+
+Choose a hosting layout, then **Sign in with Vercel** to provision authentication for members of the project's team.
+You can also select **Web Chat** from the terminal UI's `/add` channel picker.
+Run `npx eve deploy` when ready to publish. Local development works without browser sign-in.
+See the [Web Chat setup guide](https://eve.dev/docs/channels/eve#web-chat-with-sign-in-with-vercel) for permissions and recovery.
+
 ## Community
 
 The eve community lives on [GitHub Discussions](https://github.com/vercel/eve/discussions),

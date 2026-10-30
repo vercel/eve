@@ -82,7 +82,7 @@ describe("defineEvalConfig", () => {
     expect(config.judge).toBeUndefined();
   });
 
-  it("allows judge settings to use the default evaluation model", () => {
+  it("allows judge settings to use the default decision model", () => {
     expect(defineEvalConfig({ judge: {} }).judge).toEqual({});
   });
 
@@ -96,6 +96,12 @@ describe("defineEvalConfig", () => {
     expect(() => defineInvalidConfig({ maxConcurrency: 1.5 })).toThrow(
       "`maxConcurrency` must be a positive integer",
     );
+  });
+
+  it("rejects a non-positive or non-integer repeat", () => {
+    for (const repeat of [0, -1, 1.5]) {
+      expect(() => defineInvalidConfig({ repeat })).toThrow("`repeat` must be a positive integer");
+    }
   });
 
   it("rejects an invalid timeoutMs", () => {

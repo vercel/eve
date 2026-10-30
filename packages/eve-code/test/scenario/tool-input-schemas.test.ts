@@ -3,22 +3,44 @@ import { readdir } from "node:fs/promises";
 import { basename } from "node:path";
 import test from "node:test";
 
-import { z } from "zod";
+import extension from "../../extension/extension.ts";
 
 const toolsDir = new URL("../../extension/tools/", import.meta.url);
 
 // Claude rejects the whole model request when any advertised tool's input schema has a root
 // union, even if that tool is never called. Every eve-code tool must serialize to an object root.
+// Dynamic tools are resolved with every optional capability configured so none is skipped.
 test("every extension tool advertises an object-root input schema without root unions", async () => {
   const files = (await readdir(toolsDir)).filter(
     (file) => file.endsWith(".ts") && !file.endsWith(".test.ts"),
   );
-  assert.ok(files.length >= 3, `found ${files.join(", ")}`);
+  assert.ok(files.length > 0, `found ${files.join(", ")}`);
+  extension({});
   for (const file of files) {
-    const tool = (await import(new URL(file, toolsDir).href)).default as { inputSchema: z.ZodType };
-    const schema = z.toJSONSchema(tool.inputSchema, { io: "input" });
+    const tool = await resolveTool((await import(new URL(file, toolsDir).href)).default);
+    const schema = tool.inputSchema["~standard"].jsonSchema.input({ target: "draft-07" });
     assert.equal(schema.type, "object", basename(file));
     for (const keyword of ["oneOf", "anyOf", "allOf"])
       assert.equal(keyword in schema, false, `${basename(file)} has root ${keyword}`);
   }
 });
+
+// A defineDynamic() value is opaque; eve keeps its function under this cross-instance brand.
+const DYNAMIC_SENTINEL = Symbol.for("eve.dynamic");
+
+type ToolModule =
+  | { readonly inputSchema: Schema }
+  | { readonly [DYNAMIC_SENTINEL]: (ctx: never) => unknown };
+
+async function resolveTool(definition: ToolModule): Promise<{ inputSchema: Schema }> {
+  if ("inputSchema" in definition) return definition;
+  const tool = (await definition[DYNAMIC_SENTINEL]({} as never)) as { inputSchema: Schema } | null;
+  assert.ok(tool, "dynamic tool resolved to null with every capability configured");
+  return tool;
+}
+
+interface Schema {
+  readonly "~standard": {
+    readonly jsonSchema: { input(options: { target: "draft-07" }): Record<string, unknown> };
+  };
+}

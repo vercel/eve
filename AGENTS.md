@@ -41,6 +41,11 @@ report only checks actually run. Never create an issue solely to accompany a PR.
 Use the [`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md)
 skill when drafting or updating one.
 
+Once the first implementation is done, use the
+[`pr-shepherd`](./.agents/skills/pr-shepherd/SKILL.md) skill to open the PR
+early, run a fresh-context review, address and resolve comments, get CI green,
+and merge.
+
 ## Commands
 
 ```sh
@@ -56,9 +61,10 @@ pnpm docs:check         # docs frontmatter and nav validation
 
 pnpm test               # unit + integration
 pnpm test:unit          # unit tests (<3s)
-pnpm test:integration   # integration tests (<10s)
-pnpm test:scenario      # scenario tests (2–5 min; requires pnpm build first)
-pnpm test:framework-fixtures # apps/frameworks smoke builds (requires pnpm build first)
+pnpm test:integration   # integration tests (several minutes; leave the full run to CI)
+pnpm test:scenario      # scenario tests (2–5 min; Turbo builds prerequisites)
+pnpm test:framework-fixtures # apps/frameworks smoke builds (Turbo builds prerequisites)
+pnpm test:webchat       # web chat template in headless Chromium (needs playwright-core's chromium-headless-shell)
 pnpm test:e2e           # fixture-owned eve eval suites (CI only)
 pnpm test:tui           # TUI smoke scripts (not e2e)
 ```
@@ -71,6 +77,13 @@ narrowest relevant test when a change needs behavioral validation. Copy edits,
 typo fixes, small code reorganizations, and similar non-behavioral changes can
 proceed without local integration or scenario runs. CI is always the official
 line of defense, and every required check must pass before merge.
+
+Do not run a whole integration or scenario tier, or a whole multi-channel
+suite such as the channel conformance suite, locally unless the task
+expressly needs it (for example, the user asks, or you are chasing a failure
+only the full run reproduces). Scope local runs to the files and test names
+your change touches with a path and `-t` filter, and leave the full suites to
+CI.
 
 ## Agent-ready product principles
 
@@ -189,7 +202,7 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts <path-or-patter
 ```
 
 Add `-t "<name>"` to filter by test name. If you touched anything under
-`#compiled/*`, run `pnpm --filter eve build:compiled` first — the tier configs
+`#compiled/*`, run `pnpm build:compiled` first — the tier configs
 do not rebuild it.
 
 Do not commit fixture trees under `packages/eve/test/fixtures/` — scenario app
@@ -243,11 +256,38 @@ live under `packages/eve/test/tui-client` and run with `pnpm test:tui`. See
 Every PR that touches the published `eve` package must include a
 changeset (`pnpm changeset`). Because eve is pre-1.0, use `patch` in most
 cases, including bug fixes and new features. Use `minor` only when the change
-breaks a public API. Write the body for someone reading release notes — what
-changed and what they'll see differently, in 1–2 sentences.
+breaks a public API. Start the changeset body with one sentence for someone
+reading release notes; put migration details and contributor thanks in later
+paragraphs. For PRs with changesets, use `feat:`, `perf:`, `fix:`,
+`docs(feature):`, `docs(bugfix):`, or an internal type (`chore:`, `refactor:`,
+`test:`, `ci:`, `build:`, or `internal:`) in the PR title. An optional scope is
+allowed for all types except `docs`, where the scope selects the feature or bug
+fix section. CI checks the PR title because GitHub uses it as the squash-merge
+subject. Keep the prefix in the squash commit; its subject determines the
+release section. A `minor` or `major` changeset always appears under Breaking
+Changes, and other internal changes are omitted from the release notes. Run `pnpm guard:invariants` to validate changeset summaries. See
+[Changeset summaries](./CONTRIBUTING.md#changeset-summaries).
 
 Docs-only, internal-tooling, and fixture changes do not need a changeset. When
 in doubt, add one.
+
+## Crediting contributors
+
+External contributors propose changes through issues, prompts, and plans, and
+maintainers implement them (see [CONTRIBUTING.md](./CONTRIBUTING.md)). When a
+change builds on someone else's work, such as an issue, reproduction, prompt,
+implementation plan, or a closed outside pull request, credit them by GitHub
+handle:
+
+- Thank them in the changeset body, for example: "Thanks @octocat for the
+  original implementation in #1234." or "Thanks @octocat for reporting this in
+  #1234." If the change needs no changeset, put the thanks in the PR
+  description.
+- When they wrote code or an implementation plan that the change follows, add
+  a `Co-authored-by: Name <email>` trailer to the commit and keep it in the
+  squash-merge message. Use their GitHub noreply address
+  (`<id>+<login>@users.noreply.github.com`) when they have no public email.
+- Link their issue or pull request from the PR description.
 
 ## Security
 

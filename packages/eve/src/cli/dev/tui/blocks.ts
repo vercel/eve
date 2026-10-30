@@ -10,7 +10,7 @@
  * given width, so the live region can place rows verbatim.
  */
 
-import { renderMarkdown } from "./markdown.js";
+import { renderMarkdown, renderHyperlink } from "./markdown.js";
 import type { ToolDetailLine } from "./line-diff.js";
 import type { TaskKind } from "./task-activity.js";
 import type { Theme } from "./theme.js";
@@ -91,6 +91,12 @@ export interface Block {
    * (stopped) mark it ending.
    */
   status?: ToolStatus;
+  /**
+   * Connection-auth only: the sign-in URL. Its body row is hard-wrapped like
+   * any other, but every wrapped row is an OSC 8 hyperlink to this full URL,
+   * so Cmd-click opens the whole link whatever the terminal width.
+   */
+  link?: string;
   /** When true, treat `body` as pre-styled and only wrap + indent it. */
   preformatted?: boolean;
   /** Reasoning only: collapse the trace to a single "thinking" line. */
@@ -474,8 +480,9 @@ function renderPreformatted(block: Block, width: number, theme: Theme): string[]
           index === 0 ? `${glyph} ${theme.colors.bold(line)}` : `  ${theme.colors.bold(line)}`,
         );
   for (const raw of (block.body ?? "").split("\n")) {
+    const isLink = block.link !== undefined && raw === block.link;
     for (const line of wrapVisibleLine(raw, Math.max(1, width - bodyIndent.length))) {
-      rows.push(`${bodyIndent}${line}`);
+      rows.push(`${bodyIndent}${isLink ? renderHyperlink(line, raw) : line}`);
     }
   }
   return rows;

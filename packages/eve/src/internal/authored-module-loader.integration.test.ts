@@ -1,18 +1,25 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { compileAgent } from "#compiler/compile-agent.js";
+import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { discoverAgent } from "#discover/discover-agent.js";
+import { resolveDiscoveryProject } from "#discover/project.js";
 import {
   bundleAuthoredModuleCode,
   bundleAuthoredModuleForGeneration,
   bundleAuthoredModuleMapForGeneration,
   loadAuthoredModuleNamespace,
 } from "#internal/authored-module-loader.js";
+import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
+import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 
 describe("loadAuthoredModuleNamespace", () => {
   const createAppRoot = useTemporaryAppRoots();
@@ -33,7 +40,8 @@ describe("loadAuthoredModuleNamespace", () => {
 } }`;
       const app = await createApp({
         files: {
-          "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+          "agent/agent.ts":
+            'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
           "agent/tools/probe.ts": `import { defineTool } from "eve/tools";\nexport default ${kind === "defineTool" ? `defineTool(${definition})` : definition};`,
         },
         name: "legacy-workflow-tool",
@@ -51,7 +59,8 @@ describe("loadAuthoredModuleNamespace", () => {
   it("rejects a named workflow channel handler during compilation", async () => {
     const app = await createApp({
       files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
         "agent/channels/probe.ts": `import { defineChannel, POST } from "eve/channels";
 export default defineChannel({ routes: [POST("/probe", handler)] });
 async function handler() {
@@ -86,7 +95,8 @@ async function handler() {
     async (_kind, execute, helper) => {
       const app = await createApp({
         files: {
-          "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+          "agent/agent.ts":
+            'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
           "agent/tools/probe.ts": `import { defineWorkflowTool } from "eve/tools";
 export default defineWorkflowTool({ description: "Probe", inputSchema: {}, ${execute} });
 ${helper}`,
@@ -109,7 +119,8 @@ ${helper}`,
   ])("validates a workflow tool through its compiled definition: %s", async (binding, definer) => {
     const app = await createApp({
       files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/tools/probe.ts": `${binding}
 import { run } from "../lib/run";
 export default ${definer}({ description: "Probe", inputSchema: {}, execute: run });`,
@@ -132,7 +143,8 @@ export default ${definer}({ description: "Probe", inputSchema: {}, execute: run 
   it("compiles a workflow tool that calls agent through an imported helper", async () => {
     const app = await createApp({
       files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
         "agent/tools/probe.ts": `import { defineWorkflowTool } from "eve/tools";
 import { delegate } from "../lib/delegate";
 export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "object" }, async execute(input, ctx) {
@@ -168,7 +180,8 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     async (path, kind, binding, definition) => {
       const app = await createApp({
         files: {
-          "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
+          "agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
           [`agent/${path}`]: `${binding}\nimport { handler } from "../lib/handler";\nexport default ${definition};\n`,
           "agent/lib/handler.ts": `export async function handler() {
   "use workflow";
@@ -187,44 +200,6 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     },
   );
 
-  it("stamps dynamic callbacks while building the generation module map", async () => {
-    const app = await createApp({
-      files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
-        "agent/tools/dynamic.ts": [
-          'import { defineDynamic, defineTool } from "eve/tools";',
-          "",
-          "const marker = defineTool({",
-          '  description: "Return a marker.",',
-          '  inputSchema: { type: "object" },',
-          '  execute: () => ({ marker: "generation" }),',
-          "});",
-          "",
-          "export default defineDynamic({",
-          "  events: {",
-          '    "session.started": () => marker,',
-          "  },",
-          "});",
-          "",
-        ].join("\n"),
-      },
-      name: "generation-dynamic-callback",
-    });
-    const discovered = await discoverAgent({
-      agentRoot: join(app.appRoot, "agent"),
-      appRoot: app.appRoot,
-    });
-    const manifest = await compileAgentManifest(discovered.manifest);
-
-    const { code } = await bundleAuthoredModuleMapForGeneration({
-      appRoot: app.appRoot,
-      manifest,
-      moduleMapPath: join(app.appRoot, ".eve", "compile", "module-map.mjs"),
-    });
-
-    expect(code).toContain("eve:durable-dynamic-callback");
-  });
-
   it("explains when an installed package contains Node-incompatible extensionless ESM", async () => {
     const app = await createApp({
       files: {
@@ -234,10 +209,10 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
           'export const result = matchRoute("/");',
           "",
         ].join("\n"),
-        "node_modules/compiler-oriented-sdk/dist/server/index.js":
-          'export { matchRoute } from "./routeMatcher";\n',
-        "node_modules/compiler-oriented-sdk/dist/server/routeMatcher.js":
-          "export const matchRoute = () => true;\n",
+        "node_modules/compiler-oriented-sdk/dist/server/index.js": `export { matchRoute } from "./routeMatcher";
+`,
+        "node_modules/compiler-oriented-sdk/dist/server/routeMatcher.js": `export const matchRoute = () => true;
+`,
         "node_modules/compiler-oriented-sdk/package.json": JSON.stringify({
           exports: { "./server": "./dist/server/index.js" },
           name: "compiler-oriented-sdk",
@@ -275,8 +250,11 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   it("does not infer a compiler requirement when package output is simply missing", async () => {
     const app = await createApp({
       files: {
-        "agent/tools/use_sdk.ts": 'import "incomplete-sdk";\nexport const result = true;\n',
-        "node_modules/incomplete-sdk/index.js": 'import "./generated";\n',
+        "agent/tools/use_sdk.ts": `import "incomplete-sdk";
+export const result = true;
+`,
+        "node_modules/incomplete-sdk/index.js": `import "./generated";
+`,
         "node_modules/incomplete-sdk/package.json": JSON.stringify({
           exports: "./index.js",
           name: "incomplete-sdk",
@@ -511,7 +489,8 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
       );
       await writeFile(
         join(packageRoot, "src", "exa-client.ts"),
-        'export function getExaClient() { return "linked"; }\n',
+        `export function getExaClient() { return "linked"; }
+`,
       );
       await writeFile(
         join(packageNodeModules, "package.json"),
@@ -540,6 +519,54 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
       );
 
       expect(moduleNamespace.result).toBe("linked");
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("applies a workspace package's sideEffects to modules it imports by relative path", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/probe.ts": [
+          'import { report } from "@repo/shared/report";',
+          "",
+          "export const result = report;",
+          "",
+        ].join("\n"),
+      },
+      name: "side-effect-free-relative-import",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-side-effect-free-package-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "shared");
+      await mkdir(join(packageRoot, "src"), { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify({
+          exports: { "./*": "./src/*.ts" },
+          name: "@repo/shared",
+          sideEffects: false,
+          type: "module",
+        }),
+      );
+      await writeFile(
+        join(packageRoot, "src", "registry.ts"),
+        "globalThis.sharedRegistryLoaded = true;\nexport const registry = {};\n",
+      );
+      await writeFile(
+        join(packageRoot, "src", "report.ts"),
+        'import "./registry";\nexport const report = "weekly report";\n',
+      );
+      await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
+      await symlink(packageRoot, join(app.appRoot, "node_modules", "@repo", "shared"), "junction");
+
+      const code = await bundleAuthoredModuleForGeneration(
+        join(app.appRoot, "agent", "tools", "probe.ts"),
+      );
+
+      expect(code).toContain("weekly report");
+      expect(code).not.toContain("sharedRegistryLoaded");
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -658,7 +685,8 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
       );
       await writeFile(
         join(packageRoot, "src", "internal", "exa-client.ts"),
-        'export function getExaClient() { return "package-local-paths"; }\n',
+        `export function getExaClient() { return "package-local-paths"; }
+`,
       );
 
       await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
@@ -699,7 +727,11 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
         join(packageRoot, "package.json"),
         JSON.stringify({ name: "@repo/extension", type: "module" }),
       );
-      await writeFile(join(packageRoot, "dist", "entry.mjs"), 'export const result = "linked";\n');
+      await writeFile(
+        join(packageRoot, "dist", "entry.mjs"),
+        `export const result = "linked";
+`,
+      );
       await symlink(packageRoot, linkedPackageRoot, "junction");
 
       const moduleNamespace = await loadAuthoredModuleNamespace(
@@ -1150,10 +1182,11 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     const app = await createApp({
       files: {
         "agent/agent.ts": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  model: "anthropic/claude-sonnet-5",',
           '  build: { externalDependencies: ["external-only"] },',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "agent/tools/read_external.ts": [
@@ -1248,17 +1281,19 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     const app = await createApp({
       files: {
         "agent/agent.ts": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  model: "anthropic/claude-sonnet-5",',
           '  build: { externalDependencies: ["external-only"] },',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "agent/subagents/signal-gatherer/agent.ts": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  description: "Gather abuse signals.",',
           '  model: "anthropic/claude-sonnet-5",',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "agent/subagents/signal-gatherer/tools/read_external.ts": [
@@ -1354,6 +1389,177 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     }
   });
 
+  it.each([
+    [
+      "transpiled CommonJS",
+      'Object.defineProperty(exports, "__esModule", { value: true }); exports.default = tool;',
+    ],
+    ["CommonJS", "module.exports = tool;"],
+  ])("compiles %s authored tool exports", async (_kind, exportStatement) => {
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/tools/legacy.cjs": [
+          'const tool = { description: "Legacy tool.", execute() { return "ok"; } };',
+          exportStatement,
+          "",
+        ].join("\n"),
+      },
+      name: "commonjs-authored-tool",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+
+    const compiled = await compileAgentManifest(discovered.manifest);
+
+    expect(compiled.tools.find((tool) => tool.logicalPath === "tools/legacy.cjs")).toMatchObject({
+      description: "Legacy tool.",
+      hasExecute: true,
+    });
+  });
+
+  it("resolves transpiled CommonJS authored modules from the runtime module map", async () => {
+    const esModuleFlag = 'Object.defineProperty(exports, "__esModule", { value: true });';
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/instructions.md": "Use the legacy tool.",
+        "agent/sandbox/sandbox.cjs": [
+          'const { DefaultSandbox, defineSandbox } = require("eve/sandbox");',
+          esModuleFlag,
+          "const environment = DefaultSandbox.environment();",
+          "exports.environment = environment;",
+          "exports.default = defineSandbox(async () => await environment.open());",
+          "",
+        ].join("\n"),
+        "agent/tools/legacy.cjs": [
+          esModuleFlag,
+          'exports.default = { description: "Legacy tool.", execute() { return "ok"; } };',
+          "",
+        ].join("\n"),
+      },
+      name: "commonjs-runtime-module-map",
+    });
+    const { manifest } = await compileAgent({ startPath: app.appRoot });
+    const moduleMapPath = join(app.appRoot, ".eve", "compile", "generation-module-map.mjs");
+    const { code } = await bundleAuthoredModuleMapForGeneration({
+      appRoot: app.appRoot,
+      manifest,
+      moduleMapPath,
+    });
+    await writeFile(moduleMapPath, code);
+    const moduleMaps = {
+      // What `eve build` output and the `eve dev` host import.
+      generation: (
+        (await import(pathToFileURL(moduleMapPath).href)) as { default: CompiledModuleMap }
+      ).default,
+      // What `eve eval`, sandbox prewarm, and the compiled-agent cache hydrate from source.
+      authoredSource: await loadCompiledModuleMapFromAuthoredSource({
+        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
+      }),
+    };
+
+    for (const [path, moduleMap] of Object.entries(moduleMaps)) {
+      const { root } = await resolveRuntimeAgentGraph({ manifest, moduleMap });
+      const tool = root.agent.tools.find((entry) => entry.logicalPath === "tools/legacy.cjs");
+      expect(await tool?.execute?.({}, {} as never), path).toBe("ok");
+      expect(root.agent.sandbox, path).toMatchObject({ logicalPath: "sandbox/sandbox.cjs" });
+    }
+  });
+
+  it("evaluates a module shared by authored tools once per compilation", async () => {
+    const evaluationsKey = "__eveSharedAuthoredModuleEvaluations";
+    const tool = (sharedImport: string) =>
+      [
+        `import { shared } from ${JSON.stringify(sharedImport)};`,
+        "",
+        "export default {",
+        '  description: "Read the shared value.",',
+        "  execute() {",
+        "    return shared;",
+        "  },",
+        "};",
+        "",
+      ].join("\n");
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/lib/shared.ts": [
+          `globalThis.${evaluationsKey} = (globalThis.${evaluationsKey} ?? 0) + 1;`,
+          'export const shared = "shared";',
+          "",
+        ].join("\n"),
+        "agent/tools/first.ts": tool("../lib/shared"),
+        "agent/tools/second.ts": tool("../lib/shared"),
+        "agent/subagents/helper/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ description: "Help.", model: "openai/gpt-5.4" });',
+        "agent/subagents/helper/tools/third.ts": tool("../../../lib/shared"),
+      },
+      name: "shared-authored-module",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    const scope = globalThis as Record<string, unknown>;
+
+    try {
+      await compileAgentManifest(discovered.manifest);
+
+      expect(scope[evaluationsKey]).toBe(1);
+    } finally {
+      delete scope[evaluationsKey];
+    }
+  });
+
+  // Rolldown can host its runtime helpers in a shared chunk that imports back
+  // from a chunk needing them, so the source graph is acyclic but the chunks
+  // are not: rolldown/rolldown#11341.
+  it("evaluates authored modules whose shared chunks import each other", async () => {
+    const tool = (body: readonly string[]) =>
+      [...body, 'export default { description: "Read the schema.", execute() { return value; } };']
+        .join("\n")
+        .concat("\n");
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/lib/look.ts": 'export const lookSchema = { type: "object" };\n',
+        "agent/lib/index.ts": 'export * from "./look";\n',
+        "agent/lib/loader.ts": [
+          'import { lookSchema } from "./index";',
+          'export const loaders = [lookSchema, () => import("./look")];',
+          "",
+        ].join("\n"),
+        "agent/tools/email.ts": tool([
+          'import { lookSchema } from "../lib/index";',
+          "const value = lookSchema.type;",
+        ]),
+        "agent/tools/load.ts": tool([
+          'import * as loader from "../lib/loader";',
+          'import { lookSchema } from "../lib/index";',
+          "const value = [loader, lookSchema];",
+        ]),
+        "agent/tools/list.ts": tool([
+          'import { loaders } from "../lib/loader";',
+          "const value = loaders;",
+        ]),
+      },
+      name: "authored-chunk-cycle",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+
+    await expect(compileAgentManifest(discovered.manifest)).resolves.toBeDefined();
+  });
+
   it("loads authored modules that use asset imports", async () => {
     const app = await createApp({
       files: {
@@ -1402,7 +1608,8 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   it("rejects asset imports outside the authored package", async () => {
     const app = await createApp({
       files: {
-        "agent/tools/outside_asset.ts": "export default {};\n",
+        "agent/tools/outside_asset.ts": `export default {};
+`,
       },
       name: "outside-asset-import",
     });
@@ -1424,6 +1631,88 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
       );
     } finally {
       await rm(outsidePath, { force: true });
+    }
+  });
+
+  it("loads ?raw imports inside a symlinked workspace package", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_image.ts": [
+          'import { image } from "@repo/sandbox-image";',
+          "",
+          "export default image;",
+          "",
+        ].join("\n"),
+      },
+      name: "workspace-package-asset-import",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-workspace-package-asset-import-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "sandbox-image");
+      await writeWorkspaceSourcePackage(packageRoot, {
+        "image.ts": [
+          'import config from "./config.json?raw";',
+          'import dockerfile from "./Dockerfile?raw";',
+          'import tools from "./mise.toml?raw";',
+          "",
+          "export const image = { config, dockerfile, tools };",
+          "",
+        ].join("\n"),
+        "config.json": '{ "telemetry": false }\n',
+        Dockerfile: "FROM ubuntu:26.04\n",
+        "mise.toml": '[tools]\nnode = "24"\n',
+      });
+      await linkWorkspacePackage(app.appRoot, packageRoot);
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "tools", "use_image.ts"),
+      );
+
+      expect(moduleNamespace.default).toEqual({
+        config: '{ "telemetry": false }\n',
+        dockerfile: "FROM ubuntu:26.04\n",
+        tools: '[tools]\nnode = "24"\n',
+      });
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects asset imports that leave a symlinked workspace package", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_image.ts": [
+          'import { image } from "@repo/sandbox-image";',
+          "",
+          "export default image;",
+          "",
+        ].join("\n"),
+      },
+      name: "workspace-package-outside-asset-import",
+    });
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "eve-workspace-package-outside-asset-import-"),
+    );
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "sandbox-image");
+      await writeWorkspaceSourcePackage(packageRoot, {
+        "image.ts": [
+          'import secret from "../../secret.txt?raw";',
+          "",
+          "export const image = secret;",
+          "",
+        ].join("\n"),
+      });
+      await writeFile(join(workspaceRoot, "secret.txt"), "outside\n");
+      await linkWorkspacePackage(app.appRoot, packageRoot);
+
+      await expect(
+        loadAuthoredModuleNamespace(join(app.appRoot, "agent", "tools", "use_image.ts")),
+      ).rejects.toThrow(/resolves outside package root/);
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
     }
   });
 
@@ -1471,7 +1760,11 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
         2,
       ),
     );
-    await writeFile(join(storeRoot, "sub.js"), 'export const value = "installed";\n');
+    await writeFile(
+      join(storeRoot, "sub.js"),
+      `export const value = "installed";
+`,
+    );
     await mkdir(join(app.appRoot, "node_modules", "@scope"), { recursive: true });
     await symlink(storeRoot, join(app.appRoot, "node_modules", "@scope", "late-dep"), "junction");
 
@@ -1499,3 +1792,117 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     ).rejects.toThrow(/build\.externalDependencies|asset import/);
   });
 });
+
+describe("workspace member workflow ids", () => {
+  const createAppRoot = useTemporaryAppRoots();
+
+  const workflowTool = `import { defineWorkflowTool } from "eve/tools";
+export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "object" }, async execute() { "use workflow"; return 1; } });
+`;
+
+  // Members have no package.json, so the package root is the workspace root
+  // while the app root, which owns workflow ids, is the member directory.
+  async function compileMember(files: Record<string, string>) {
+    const workspace = await createAppRoot("eve-workspace-member-workflow-ids-", {
+      files: {
+        "package.json": JSON.stringify({ dependencies: { eve: "*" }, type: "module" }),
+        ...files,
+      },
+    });
+    await rm(workspace.agentRoot, { recursive: true });
+    const project = await resolveDiscoveryProject(join(workspace.appRoot, "agents", "assistant"));
+    const manifest = await compileAgentManifest((await discoverAgent(project)).manifest);
+    const generation = await bundleAuthoredModuleMapForGeneration({
+      appRoot: project.appRoot,
+      manifest,
+      moduleMapPath: join(project.appRoot, ".eve", "compile", "module-map.mjs"),
+    });
+    return { generation, manifest, project };
+  }
+
+  it("compiles root and subagent tool ids that match the generation bundle", async () => {
+    const { generation, manifest } = await compileMember({
+      "agents/assistant/agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
+      "agents/assistant/agent/tools/plan.ts": workflowTool,
+      "agents/assistant/agent/subagents/reviewer/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ description: "Review plans.", model: "openai/gpt-5.4" });
+`,
+      "agents/assistant/agent/subagents/reviewer/tools/approve.ts": workflowTool,
+    });
+    const reviewer = manifest.subagents.find((subagent) => subagent.name === "reviewer");
+    const toolId = "workflow//./agent/tools/plan//execute";
+    const subagentToolId = "workflow//./agent/subagents/reviewer/tools/approve//execute";
+
+    expect(manifest.tools.find((tool) => tool.name === "plan")?.behavior?.handling).toEqual({
+      entryPoint: "execute",
+      kind: "workflow-tool",
+      workflowId: toolId,
+    });
+    expect(
+      reviewer?.agent.tools.find((tool) => tool.name === "approve")?.behavior?.handling,
+    ).toEqual({ entryPoint: "execute", kind: "workflow-tool", workflowId: subagentToolId });
+    expect(generation.code).toContain(JSON.stringify(toolId));
+    expect(generation.code).toContain(JSON.stringify(subagentToolId));
+  });
+
+  it("compiles workflow modules from the shared package but not from sibling packages", async () => {
+    const { generation, manifest, project } = await compileMember({
+      "agents/assistant/agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
+      "agents/assistant/agent/tools/plan.ts": `import { defineWorkflowTool } from "eve/tools";
+import "../../../../packages/shared/index";
+import { run } from "../../../../lib/run";
+export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "object" }, execute: run });
+`,
+      "lib/run.ts": `import { add } from "./steps";
+export async function run() { "use workflow"; return add(1); }
+`,
+      "lib/steps.ts": `export async function add(n) { "use step"; return n + 1; }
+`,
+      "packages/shared/package.json": JSON.stringify({ name: "shared", version: "1.0.0" }),
+      "packages/shared/index.ts": `export async function other() { "use step"; return 1; }
+`,
+    });
+    const workflowId = "workflow//../../lib/run//run";
+    const sharedModule = (name: string) => join(project.appRoot, "..", "..", "lib", name);
+
+    expect(manifest.tools.find((tool) => tool.name === "plan")?.behavior?.handling).toEqual({
+      entryPoint: "execute",
+      kind: "workflow-tool",
+      workflowId,
+    });
+    expect(generation.code).toContain(JSON.stringify(workflowId));
+    expect(generation.authoredWorkflowModules).toEqual({
+      directiveModules: [sharedModule("run.ts"), sharedModule("steps.ts")],
+      workflowModules: [sharedModule("run.ts")],
+    });
+    expect(generation.sourceModules).toEqual(
+      expect.arrayContaining([sharedModule("run.ts"), sharedModule("steps.ts")]),
+    );
+    expect(generation.sourceModules.some((id) => id.includes("/packages/shared/"))).toBe(false);
+  });
+});
+
+async function writeWorkspaceSourcePackage(
+  packageRoot: string,
+  files: Readonly<Record<string, string>>,
+): Promise<void> {
+  await mkdir(packageRoot, { recursive: true });
+  await writeFile(
+    join(packageRoot, "package.json"),
+    JSON.stringify(
+      { exports: { ".": "./image.ts" }, name: "@repo/sandbox-image", type: "module" },
+      null,
+      2,
+    ),
+  );
+  await Promise.all(
+    Object.entries(files).map(([path, content]) => writeFile(join(packageRoot, path), content)),
+  );
+}
+
+/** Links the package into the app's `node_modules`, as a pnpm workspace does. */
+async function linkWorkspacePackage(appRoot: string, packageRoot: string): Promise<void> {
+  await mkdir(join(appRoot, "node_modules", "@repo"), { recursive: true });
+  await symlink(packageRoot, join(appRoot, "node_modules", "@repo", "sandbox-image"), "junction");
+}

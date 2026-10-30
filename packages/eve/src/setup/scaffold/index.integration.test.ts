@@ -272,10 +272,17 @@ describe("ensureChannel", () => {
     expect(agentChatSource).toMatch(/<PromptInputTextarea\s+disabled=\{isResuming\}/);
     expect(agentChatSource).toContain('turnPolicy: "steer"');
     expect(agentChatSource).toContain('const isResuming = agent.status === "resuming"');
+    expect(agentChatSource).toContain("prewarm: hasInputText");
+    expect(agentChatSource).toContain("hasSubmittedMessage.current && session !== undefined");
     expect(agentChatSource).toContain(
-      '!isResuming && agent.data.inputs[requestId]?.status === "open"',
+      "if (agent.session !== undefined) replaceSessionRoute(agent.session.sessionId)",
     );
-    expect(agentChatSource).toContain("{showPendingThinking ? <PendingThinking /> : null}");
+    expect(agentChatSource).toContain(
+      '!isResuming && !sessionEnded && interaction(agent.view, interactionId)?.status === "open"',
+    );
+    await expect(readFile(join(projectRoot, "components/ui/trace.tsx"), "utf8")).resolves.toMatch(
+      /export\s*\{[^}]*\bTraceLine\b/s,
+    );
     expect(agentChatSource).not.toContain("StatusDot");
     await expect(readFile(join(projectRoot, "app/icon.svg"), "utf8")).resolves.toContain(
       'viewBox="0 0 102 102"',
@@ -553,16 +560,19 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-message.tsx"),
       "utf8",
     );
-    const questionSource = await readFile(
-      join(projectRoot, "components/ai-elements/question.tsx"),
+    const questionnaireSource = await readFile(
+      join(projectRoot, "components/ui/questionnaire.tsx"),
       "utf8",
     );
-    expect(agentMessageSource).toContain('inputRequest?.kind === "question"');
+    const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8"));
+    expect(agentMessageSource).toContain("questionsFor(part.callId)");
     expect(agentMessageSource).toContain("<QuestionRequest");
-    expect(agentMessageSource).toContain("onInputResponses");
-    expect(questionSource).toContain("export const Question");
-    expect(questionSource).toContain("export const QuestionInput");
-    expect(questionSource).toContain("export const QuestionOption");
+    expect(agentMessageSource).toContain("onAnswers");
+    expect(questionnaireSource).toContain('from "@shadcn/react/questionnaire"');
+    expect(packageJson.dependencies).toHaveProperty("@shadcn/react");
+    await expect(
+      pathExists(join(projectRoot, "components/ai-elements/question.tsx")),
+    ).resolves.toBe(false);
   });
 
   test("scaffolds a Web Chat Stop button with the agent cancellation API", async () => {
@@ -912,6 +922,8 @@ describe("hasVercelHostFramework", () => {
     ["Nuxt edge", { "nuxt-edge": "3.0.0-rc.13" }],
     ["Nuxt nightly", { "nuxt-nightly": "3.0.0-27575307.749db41" }],
     ["SvelteKit", { "@sveltejs/kit": "2.60.0" }],
+    ["TanStack Start (React)", { "@tanstack/react-start": "1.168.60" }],
+    ["TanStack Start (Solid)", { "@tanstack/solid-start": "1.168.60" }],
   ])("recognizes %s as the root Vercel framework", async (_label, dependencies) => {
     const projectRoot = await createTempDir();
     await writeFile(
@@ -994,6 +1006,8 @@ describe("resolveVercelHostFrameworkPreset", () => {
     ["Nuxt 3", { nuxt3: "3.19.7" }, "nuxtjs"],
     ["Nuxt edge", { "nuxt-edge": "3.0.0-rc.13" }, "nuxtjs"],
     ["SvelteKit", { "@sveltejs/kit": "2.60.0" }, "sveltekit"],
+    ["TanStack Start (React)", { "@tanstack/react-start": "1.168.60" }, "tanstack-start"],
+    ["TanStack Start (Solid)", { "@tanstack/solid-start": "1.168.60" }, "tanstack-start"],
   ])("maps %s to its Vercel Framework Preset slug", async (_label, dependencies, preset) => {
     const projectRoot = await createTempDir();
     await writeFile(
@@ -1157,7 +1171,7 @@ describe("scaffoldBaseProject", () => {
       compilerOptions: { types?: string[] };
       include?: string[];
     };
-    expect(tsconfig.compilerOptions.types).toEqual(["node", "eve/workflow-modules"]);
+    expect(tsconfig.compilerOptions.types).toEqual(["node"]);
     expect(tsconfig.include).toEqual(["agent/**/*.ts", "evals/**/*.ts"]);
     await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       PNPM_WORKSPACE_CONTENT,

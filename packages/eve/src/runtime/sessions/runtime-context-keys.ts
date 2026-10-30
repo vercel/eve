@@ -6,7 +6,7 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import { ContextKey } from "#context/key.js";
-import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import { BUNDLE_CONTEXT_KEY_NAME, CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import { deserializeRuntimeAdapter } from "#runtime/channels/registry.js";
 import {
   type DurableCompiledArtifactsSource,
@@ -54,7 +54,7 @@ export const ChannelKey = new ContextKey<ChannelAdapter>(CHANNEL_CONTEXT_KEY_NAM
   },
 });
 
-export const BundleKey = new ContextKey<CompiledBundle>("eve.bundle", {
+export const BundleKey = new ContextKey<CompiledBundle>(BUNDLE_CONTEXT_KEY_NAME, {
   codec: {
     serialize: (bundle): SerializedBundle => ({
       nodeId: bundle.nodeId,

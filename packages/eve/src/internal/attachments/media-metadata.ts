@@ -23,20 +23,6 @@ const MAX_IMAGE_TOKENS = 4_784;
 // page is the upper end of that range.
 const PDF_PAGE_TOKENS = 3_000;
 
-/** Reads the dimensions or page count of a payload, as far as its header allows. */
-export function readMediaMetadata(bytes: Uint8Array, mediaType: string): MediaMetadata {
-  const metadata = { mediaType, size: bytes.byteLength };
-  if (mediaType.startsWith("image/")) {
-    const dimensions = readImageDimensions(bytes);
-    return dimensions === undefined ? metadata : { ...metadata, ...dimensions };
-  }
-  if (mediaType === "application/pdf") {
-    const pages = countPdfPages(bytes);
-    return pages === undefined ? metadata : { ...metadata, pages };
-  }
-  return metadata;
-}
-
 /**
  * Estimates the input tokens a provider bills for one file. Images and PDFs
  * use provider-style costs; anything else falls back to the size of its
@@ -55,13 +41,77 @@ export function estimateMediaTokens(metadata: MediaMetadata): number {
   return Math.ceil(metadata.size / 3);
 }
 
+const GENERIC_MEDIA_TYPE = "application/octet-stream";
+const PDF_MEDIA_TYPE = "application/pdf";
+
+/**
+ * The media type a staged file carries: the format its bytes prove for an
+ * image, PDF, or untyped file, or the declared type otherwise. A declared
+ * PNG, JPEG, GIF, WebP, or PDF that the bytes don't confirm becomes
+ * `application/octet-stream`, so no provider receives bytes it would reject.
+ */
+export function verifyMediaType(bytes: Uint8Array, declared: string): string {
+  const normalized = declared.toLowerCase();
+  const checkable =
+    normalized.startsWith("image/") ||
+    normalized === PDF_MEDIA_TYPE ||
+    normalized === GENERIC_MEDIA_TYPE;
+  if (!checkable) return declared;
+  const detected =
+    detectImageMediaType(bytes) ?? (hasPdfHeader(bytes) ? PDF_MEDIA_TYPE : undefined);
+  if (detected !== undefined) return detected;
+  return VERIFIABLE_MEDIA_TYPES.has(normalized) ? GENERIC_MEDIA_TYPE : declared;
+}
+
+/** The image formats eve can verify from bytes, and that every major provider reads. */
+export const INLINE_IMAGE_MEDIA_TYPES: ReadonlySet<string> = new Set([
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+const VERIFIABLE_MEDIA_TYPES: ReadonlySet<string> = new Set([
+  ...INLINE_IMAGE_MEDIA_TYPES,
+  "image/jpg",
+  PDF_MEDIA_TYPE,
+]);
+
+/**
+ * Whether the bytes start with a PDF header. The format allows leading bytes,
+ * but providers expect the header first, and a match deeper in would mark text
+ * that only mentions it.
+ */
+export function hasPdfHeader(bytes: Uint8Array): boolean {
+  return readAscii(bytes, 0, 5) === "%PDF-";
+}
+
+/** Names the PNG, GIF, JPEG, or WebP format its leading bytes identify. */
+export function detectImageMediaType(bytes: Uint8Array): string | undefined {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const ascii = (start: number, end: number) => readAscii(bytes, start, end);
+
+  if (
+    bytes.byteLength >= 8 &&
+    view.getUint32(0) === 0x89504e47 &&
+    view.getUint32(4) === 0x0d0a1a0a
+  ) {
+    return "image/png";
+  }
+  if (bytes.byteLength >= 3 && view.getUint16(0) === 0xffd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a") return "image/gif";
+  if (ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return "image/webp";
+  return undefined;
+}
+
 /** Reads PNG, GIF, JPEG, or WebP dimensions from the leading bytes. */
 export function readImageDimensions(
   bytes: Uint8Array,
 ): { readonly width: number; readonly height: number } | undefined {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const ascii = (start: number, end: number) =>
-    String.fromCharCode(...bytes.subarray(start, Math.min(end, bytes.byteLength)));
+  const ascii = (start: number, end: number) => readAscii(bytes, start, end);
 
   if (bytes.byteLength >= 24 && view.getUint32(0) === 0x89504e47) {
     return dimensions(view.getUint32(16), view.getUint32(20));
@@ -109,12 +159,8 @@ function readJpegDimensions(
   return undefined;
 }
 
-function countPdfPages(bytes: Uint8Array): number | undefined {
-  const text = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("latin1");
-  // Page objects in compressed object streams are invisible here; the
-  // estimate then falls back to the payload size.
-  const pages = text.match(/\/Type\s*\/Page(?![A-Za-z])/g)?.length ?? 0;
-  return pages > 0 ? pages : undefined;
+function readAscii(bytes: Uint8Array, start: number, end: number): string {
+  return String.fromCharCode(...bytes.subarray(start, Math.min(end, bytes.byteLength)));
 }
 
 function readUint24(bytes: Uint8Array, offset: number): number {

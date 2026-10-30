@@ -1,3 +1,5 @@
+import type { TeamsChannelCredentials } from "#public/channels/teams/credentials.js";
+export type { TeamsChannelCredentials } from "#public/channels/teams/credentials.js";
 /**
  * Minimal Microsoft Teams Bot Framework Connector REST wrapper.
  *
@@ -33,16 +35,10 @@ export type TeamsAccessTokenResult =
 export type TeamsTokenProvider = () => TeamsAccessTokenResult | Promise<TeamsAccessTokenResult>;
 
 /** Credentials used by the native Teams channel. */
-export interface TeamsCredentials {
-  readonly appId?: TeamsAppId;
-  readonly appPassword?: TeamsAppPassword;
-  readonly tenantId?: TeamsTenantId;
-  readonly tokenProvider?: TeamsTokenProvider;
-}
 
 /** Shared Teams API options. */
 export interface TeamsApiOptions {
-  readonly credentials?: TeamsCredentials;
+  readonly credentials?: TeamsChannelCredentials;
   /** Fetch override for tests or non-standard runtimes. */
   readonly fetch?: TeamsFetch;
   /**
@@ -244,6 +240,19 @@ export async function callTeamsConnectorApi(
     readonly serviceUrl: string;
   },
 ): Promise<TeamsApiResponse> {
+  const destination = URL.parse(input.serviceUrl);
+  if (
+    destination === null ||
+    destination.protocol !== "https:" ||
+    destination.username !== "" ||
+    destination.password !== "" ||
+    destination.search !== "" ||
+    destination.hash !== ""
+  ) {
+    throw new Error(
+      "Teams Connector service URL must be an absolute HTTPS URL without credentials, query, or fragment.",
+    );
+  }
   const apiFetch = input.fetch ?? fetch;
   const headers = new Headers();
   headers.set("authorization", `Bearer ${await resolveTeamsAccessToken(input)}`);
@@ -252,6 +261,7 @@ export async function callTeamsConnectorApi(
   const init: RequestInit = {
     headers,
     method: input.method ?? "POST",
+    redirect: "error",
   };
   if (input.body !== undefined) {
     init.body = JSON.stringify(parseJsonObject(input.body));

@@ -1,13 +1,10 @@
-import { createActionsRequestedEvent } from "#protocol/message.js";
-import {
-  collectActionPresentation,
-  type RuntimeActionRequestProjection,
-} from "#harness/action-presentation.js";
+import type { RuntimeActionRequestProjection } from "#harness/action-presentation.js";
+import { callRequested, callStarted } from "#harness/call-facts.js";
 import type { HarnessEmitFn } from "#harness/types.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 
 interface ActionEventCoordinates {
-  readonly sequence: number;
-  readonly stepIndex: number;
+  readonly runId?: string;
   readonly turnId: string;
 }
 
@@ -36,17 +33,15 @@ export function createProviderStreamActionBatch(input: {
     }
     if (pendingActions.size === 0) return;
 
-    const projections = [...pendingActions.values()];
+    const actions = [...pendingActions.values()];
     pendingActions.clear();
-    await input.emitFn(
-      createActionsRequestedEvent({
-        actions: projections.map(({ action }) => action),
-        presentation: collectActionPresentation(projections),
-        sequence: input.state.sequence,
-        stepIndex: input.state.stepIndex,
-        turnId: input.state.turnId,
-      }),
-    );
+    // The provider runs these as it streams: each is requested and started in one commit.
+    const runId = input.state.runId ?? `${input.state.turnId}.run`;
+    const commit: SessionEvent[] = actions.flatMap(({ action, presentationLabel }) => [
+      callRequested({ action, owner: { runId }, label: presentationLabel }),
+      callStarted(action.callId, { clearedBy: { policy: "provider" } }),
+    ]);
+    await input.emitFn(commit);
   };
 
   const scheduleFlush = (): void => {

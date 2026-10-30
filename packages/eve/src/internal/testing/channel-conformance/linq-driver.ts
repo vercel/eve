@@ -4,15 +4,21 @@ import { linqChannel } from "#public/channels/linq/index.js";
 import {
   type ChannelDriver,
   type PlatformCall,
+  type Surface,
   numberedOptions,
   recordingFetch,
+  type SentFile,
+  serveFile,
 } from "#internal/testing/channel-conformance/harness.js";
 
 const API_KEY = "linq-conformance-api-key";
 const SIGNING_KEY = Buffer.from("linq-conformance-signing-key");
 const SIGNING_SECRET = `whsec_${SIGNING_KEY.toString("base64")}`;
 const BASE_URL = "https://linq-conformance.invalid/api/partner";
-const PERSON = "alice";
+// Stands in for cdn.linqapp.com; `.invalid` never resolves, so nothing that bypasses the fake reaches the network.
+const CDN_HOST = "cdn.linq-conformance.invalid";
+// As on Linq, a handle's `id` is opaque; only `handle`, a phone number or email, can be messaged.
+const PERSON = { handle: "+15550100", id: "handle-alice" };
 let nextChat = 0;
 
 interface LinqPart {
@@ -22,24 +28,44 @@ interface LinqPart {
 
 interface LinqMessageBody {
   readonly message?: { readonly parts?: readonly LinqPart[] };
+  /** An edit's replacement text. */
+  readonly text?: string;
 }
 
-/** Drives the real Linq adapter through a signed direct-message webhook. */
-export function linqDriver(): ChannelDriver {
+/** Drives the real Linq adapter through signed webhooks, in a group chat by default or 1:1. */
+export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): ChannelDriver {
+  const group = surface === "shared";
   nextChat += 1;
   const chatId = `linq-conformance-chat-${nextChat}`;
   let messageId = 0;
+  let outbound = 0;
   let restoreFetch: (() => void) | undefined;
+  /** Files a person sent, by the permanent CDN URL Linq lists each under. */
+  const uploads = new Map<string, SentFile>();
 
-  function signedMessage(text: string): Request {
+  function signedMessage(text: string, files: readonly SentFile[] = []): Request {
     messageId += 1;
+    // Linq sends each file as a `media` part beside the text.
+    const media = files.map((file, index) => {
+      const url = `https://${CDN_HOST}/${chatId}/${messageId}-${index}/${file.name}`;
+      uploads.set(url, file);
+      return {
+        filename: file.name,
+        id: `media-${messageId}-${index}`,
+        mime_type: file.mediaType,
+        size_bytes: file.bytes.length,
+        type: "media",
+        url,
+      };
+    });
     const body = JSON.stringify({
       data: {
-        chat: { id: chatId, is_group: false },
+        // Linq's bridge hears every group message; a mention would route past its handler.
+        chat: { id: chatId, is_group: group },
         direction: "inbound",
         id: `linq-inbound-${messageId}`,
-        parts: [{ type: "text", value: text }],
-        sender_handle: { handle: PERSON, id: PERSON, is_me: false },
+        parts: [{ type: "text", value: text }, ...media],
+        sender_handle: { ...PERSON, is_me: false },
       },
       event_type: "message.received",
     });
@@ -61,23 +87,47 @@ export function linqDriver(): ChannelDriver {
   }
 
   return {
-    name: "linq",
-    capabilities: ["text-replies"],
+    name: group ? "linq" : "linq-dm",
+    personId: PERSON.id,
+    capabilities: ["attachments", "text-replies"],
+    surface,
     createChannel(record) {
       const previousFetch = globalThis.fetch;
       const fakeFetch = recordingFetch(record, async (request) => {
         const url = new URL(request.url);
+        if (url.hostname === CDN_HOST) {
+          return {
+            body: {},
+            method: `GET ${url.pathname}`,
+            response: serveFile(uploads.get(url.href)),
+          };
+        }
         const bodyText = await request.text();
+        const body = bodyText === "" ? {} : (JSON.parse(bodyText) as { readonly to?: unknown });
+        // Starting a chat (`messages.create`) needs a handle Linq can reach.
+        if (Array.isArray(body.to) && body.to.some((to) => to !== PERSON.handle)) {
+          return {
+            body,
+            // Never delivered, so no reader takes it for a sent message.
+            method: `${request.method} ${url.pathname} (rejected)`,
+            response: Response.json({ error: "invalid recipient" }, { status: 400 }),
+          };
+        }
+        outbound += 1;
+        const id = `linq-outbound-${outbound}`;
         return {
-          body: bodyText === "" ? {} : JSON.parse(bodyText),
+          body,
           method: `${request.method} ${url.pathname}`,
-          response: {},
+          // The adapter reads the sent or edited message's id back to edit it later.
+          response: { chat_id: chatId, id, message: { id } },
         };
       });
       // The adapter accepts no fetch option, so route only its test host globally and preserve other fetches.
       globalThis.fetch = async (input, init) => {
         const url = new URL(input instanceof Request ? input.url : input.toString());
-        if (url.hostname === new URL(BASE_URL).hostname) return fakeFetch(input, init);
+        if (url.hostname === new URL(BASE_URL).hostname || url.hostname === CDN_HOST) {
+          return fakeFetch(input, init);
+        }
         return previousFetch(input, init);
       };
       restoreFetch = () => {
@@ -92,7 +142,7 @@ export function linqDriver(): ChannelDriver {
     dispose() {
       restoreFetch?.();
     },
-    message: signedMessage,
+    message: (text, _person, files) => signedMessage(text, files),
     findOptions(call, prompt) {
       if (!call.method.endsWith("/messages") || !postedText(call)?.includes(prompt))
         return undefined;
@@ -106,9 +156,12 @@ export function linqDriver(): ChannelDriver {
   };
 }
 
+/** Text the bot sent (`POST …/messages`) or edited a message to (`PATCH /messages/:id`). */
 function postedText(call: PlatformCall): string | undefined {
+  const body = call.body as LinqMessageBody;
+  if (call.method.startsWith("PATCH ") && call.method.includes("/messages/")) return body.text;
   if (!call.method.endsWith("/messages")) return undefined;
-  const parts = (call.body as LinqMessageBody).message?.parts;
+  const parts = body.message?.parts;
   return parts
     ?.filter((part) => part.type === "text")
     .map((part) => part.value ?? "")

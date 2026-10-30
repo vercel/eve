@@ -5,8 +5,8 @@ import type { AssertionResult, EveEvalVerdict } from "#evals/types.js";
  * assertions. An execution error or a failed gate assertion is a hard
  * failure; a below-threshold soft assertion at worst demotes the eval to
  * `"scored"` (which `eve eval --strict` later promotes to a failing exit
- * code). Soft assertions without a threshold are tracked-only and never
- * demote the verdict.
+ * code). Entries without an acceptance rule carry no verdict and never
+ * demote the eval.
  */
 export function computeEvalVerdict(input: {
   readonly error?: string;
@@ -17,7 +17,7 @@ export function computeEvalVerdict(input: {
 
   let demoted = false;
   for (const assertion of input.assertions) {
-    if (assertion.passed) continue;
+    if (assertion.passed !== false) continue;
     if (assertion.severity === "gate") return "failed";
     demoted = true;
   }

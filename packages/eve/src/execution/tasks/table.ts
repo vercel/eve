@@ -1,23 +1,23 @@
 import type { TaskCancelResult, TaskWaitResult } from "#execution/tasks/calls.js";
 import type { WorkflowToolRunCall } from "#execution/tools/workflow/messages.js";
 import type { SessionStateMap } from "#harness/types.js";
+import { readRunningWork, writeRunningWork } from "#harness/running-work.js";
+import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { TaskCancelReason, TaskStartedStreamEvent } from "#protocol/message.js";
 import { UNREADABLE_TASK_ERROR } from "#execution/tasks/render.js";
 
-// The session's task table. Every write to a task record goes through this
-// module; callers read with the helpers below and write with `writeTaskTable`.
-// Readers run inside the workflow driver, so validation avoids schema runtimes.
-
-const TASK_TABLE_STATE_KEY = "eve.taskTable";
-const TASK_TABLE_VERSION = 1;
+// The session's task table: the tasks part of its record of running work
+// (`harness/running-work.ts`), which also holds the workflow runs a turn waits on.
+// Every write to a task record goes through this module; callers read with the
+// helpers below and write with `writeTaskTable`. Readers run inside the workflow
+// driver, so validation avoids schema runtimes.
 
 /** At most this many tasks work at once in one session: a backstop normal use shouldn't reach. */
 export const MAX_WORKING_TASKS = 32;
 
-/** Finished records kept so `task_cancel` can still answer `already_finished`. */
+/** Finished records kept so `eve__task_cancel` can still answer `already_finished`. */
 const MAX_FINISHED_RECORDS = 100;
 
 /** Idle resumable tasks the `[Tasks]` note lists: the most recently used ones. */
@@ -58,7 +58,7 @@ export interface TaskRunCommands {
   readonly run: TaskRunAddress;
 }
 
-/** How a task call ended, as `task.settled` reports it. */
+/** How a task call ended, as `call.settled` reports it. */
 export type TaskOutcome =
   | { readonly output: JsonValue; readonly status: "completed" }
   | { readonly error: string; readonly status: "failed" }
@@ -68,12 +68,18 @@ export type TaskOutcome =
  * An outcome the model receives, one per reply or run end, however many calls
  * it settled. Cancelled work never reports back.
  */
-export type TaskResult = Exclude<TaskOutcome, { readonly status: "cancelled" }>;
+export type TaskResult = Exclude<TaskOutcome, { readonly status: "cancelled" }> & {
+  /**
+   * Keep original call and turn IDs so output-processing failures in a later turn
+   * can be recorded against the stubbed call.
+   */
+  readonly calls?: readonly TaskCall[];
+};
 
 export interface TaskRecord {
   readonly id: string;
   /** Whether the tool is an agent's, as `task.started` reports it. */
-  readonly kind: TaskStartedStreamEvent["data"]["kind"];
+  readonly kind: "agent" | "tool";
   /** The tool whose call started the task. */
   readonly name: string;
   /** A `serve` tool's task: it takes more calls by its id, and is idle between results. */
@@ -82,6 +88,8 @@ export interface TaskRecord {
   readonly calls: readonly TaskCall[];
   /** Results not yet delivered to the model. */
   readonly results: readonly TaskResult[];
+  /** A one-shot task cancelled while its run may still report messages. */
+  readonly cancelled?: boolean;
   /** The task's run, from its start until it finishes. */
   readonly run?: TaskRun;
   /** Commands issued before the run could take them, sent in order once it reports started. */
@@ -95,11 +103,9 @@ export interface TaskTable {
 const EMPTY_TABLE: TaskTable = { tasks: [] };
 
 export function readTaskTable(state: SessionStateMap | undefined): TaskTable {
-  const stored = state?.[TASK_TABLE_STATE_KEY];
-  if (!isObject(stored) || stored.version !== TASK_TABLE_VERSION || !Array.isArray(stored.tasks)) {
-    return EMPTY_TABLE;
-  }
-  const tasks = Array.from(stored.tasks as unknown[]).flatMap((value) => {
+  const stored = readRunningWork(state).tasks;
+  if (stored.length === 0) return EMPTY_TABLE;
+  const tasks = stored.flatMap((value) => {
     const record = decodeTaskRecord(value);
     return record === undefined ? [] : [record];
   });
@@ -110,14 +116,10 @@ export function writeTaskTable<T extends { readonly state?: SessionStateMap }>(
   session: T,
   table: TaskTable,
 ): T {
-  const tasks = pruneFinishedRecords(table.tasks);
-  if (tasks.length === 0) {
-    const state = { ...session.state };
-    delete state[TASK_TABLE_STATE_KEY];
-    return { ...session, state: Object.keys(state).length === 0 ? undefined : state };
-  }
-  const stored = { tasks, version: TASK_TABLE_VERSION };
-  return { ...session, state: { ...session.state, [TASK_TABLE_STATE_KEY]: stored } };
+  return {
+    ...session,
+    state: writeRunningWork(session.state, { tasks: pruneFinishedRecords(table.tasks) }),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +128,18 @@ export function writeTaskTable<T extends { readonly state?: SessionStateMap }>(
 
 export function findTask(table: TaskTable, taskId: string): TaskRecord | undefined {
   return table.tasks.find((record) => record.id === taskId);
+}
+
+/** A task message belongs to a live, uncancelled run of this session. */
+export function isActiveTaskRun(table: TaskTable, taskId: string, runId: string): boolean {
+  const record = findTask(table, taskId);
+  return record?.cancelled !== true && record?.run?.runId === runId;
+}
+
+/** Only the recorded cancelled run can confirm its outcome and relinquish ownership. */
+export function isCancelledTaskRun(table: TaskTable, taskId: string, runId: string): boolean {
+  const record = findTask(table, taskId);
+  return record?.cancelled === true && record.run?.runId === runId;
 }
 
 export function isTaskWorking(record: TaskRecord): boolean {
@@ -153,7 +167,11 @@ export function isTaskAvailable(
   toolName: string,
 ): record is TaskRecord & { readonly run: TaskRun } {
   return (
-    record !== undefined && record.resumable && record.run !== undefined && record.name === toolName
+    record !== undefined &&
+    record.resumable &&
+    !record.cancelled &&
+    record.run !== undefined &&
+    record.name === toolName
   );
 }
 
@@ -183,17 +201,28 @@ export function taskWaitResult(
 }
 
 /**
- * What `task_cancel` answers, or `undefined` for a task that doesn't exist.
+ * What `eve__task_cancel` answers, or `undefined` for a task that doesn't exist.
  * `cancelled` means the caller cancels the working task.
  */
 export function taskCancelResult(table: TaskTable, taskId: string): TaskCancelResult | undefined {
   const record = findTask(table, taskId);
   if (record === undefined) return undefined;
   return {
-    resumable: record.resumable,
+    resumable: record.resumable && record.kind !== "agent",
     status: isTaskWorking(record) ? "cancelled" : "already_finished",
     tool: record.name,
   };
+}
+
+/**
+ * Every run the session started and hasn't seen finish: the calls a turn waits on, and every
+ * task's run, including cancelled runs that haven't confirmed yet.
+ */
+export function liveRuns(state: SessionStateMap | undefined): readonly TaskRunAddress[] {
+  return [
+    ...getBlockingWorkflowToolRuns(state).map((run) => run.address),
+    ...liveTaskRuns(readTaskTable(state)),
+  ];
 }
 
 /** Runs that may still be doing work, including cancelled runs that haven't confirmed yet. */
@@ -286,7 +315,7 @@ export function recordTaskCall(
 
 /**
  * Settles calls that share one outcome, as one reply does, in one step. Each
- * call settles once, with its own `task.settled`; the first outcome wins, so a
+ * call settles once, with its own `call.settled`; the first outcome wins, so a
  * call already settled, including one its owner cancelled, is dropped. The
  * model receives the outcome once, since every call it settles would repeat it.
  */
@@ -306,7 +335,10 @@ export function settleTaskCalls(
   const next = updateTask(table, input.taskId, (current) => ({
     ...current,
     calls: current.calls.filter((call) => !settling.has(call.callId)),
-    results: outcome.status === "cancelled" ? current.results : [...current.results, outcome],
+    results:
+      outcome.status === "cancelled"
+        ? current.results
+        : [...current.results, { ...outcome, calls: settled }],
   }));
   return { settled, table: next };
 }
@@ -351,21 +383,24 @@ export interface TaskCancellation {
 /**
  * Cancels a task's current work: its calls settle as cancelled and never
  * report back, and a live run is told to stop. A run that hasn't started
- * holds the cancel. A resumable task stays available and becomes idle.
+ * holds the cancel only for a non-agent resumable task. Cancelling an agent or
+ * one-shot task ends it; another resumable task stays available and becomes idle.
  */
 export function cancelTask(table: TaskTable, taskId: string): TaskCancellation {
   const record = findTask(table, taskId);
   if (record === undefined) return { settled: [], table };
-  if (record.resumable) return cancelResumableTask(table, record);
+  if (record.resumable && record.kind !== "agent") return cancelResumableTask(table, record);
   const settled = cancelledCalls(record);
   const run = record.run;
-  const next = updateTask(table, taskId, (current) => {
-    const cancelled: TaskRecord = { ...current, calls: [] };
-    if (run === undefined || run.started) return cancelled;
-    return { ...cancelled, held: [{ kind: "cancel" }] };
-  });
-  if (run === undefined || !run.started) return { settled, table: next };
-  return { send: cancelCommand(run), settled, table: next };
+  const next = updateTask(table, taskId, (current) => ({
+    ...current,
+    calls: [],
+    cancelled: true,
+    held: undefined,
+  }));
+  return run === undefined || record.cancelled
+    ? { settled, table: next }
+    : { send: cancelCommand(run), settled, table: next };
 }
 
 /**
@@ -439,7 +474,9 @@ function createTaskId(table: TaskTable, name: string): string {
 }
 
 function isResumableTaskIdle(record: TaskRecord): boolean {
-  return record.resumable && record.run !== undefined && !isTaskWorking(record);
+  return (
+    record.resumable && !record.cancelled && record.run !== undefined && !isTaskWorking(record)
+  );
 }
 
 function isFinishedRecord(record: TaskRecord): boolean {
@@ -495,6 +532,12 @@ function isTaskRunCommand(value: unknown): value is TaskRunCommand {
 
 function isTaskResult(value: unknown): value is TaskResult {
   if (!isObject(value)) return false;
+  // Older saved results do not include call IDs.
+  if (
+    value.calls !== undefined &&
+    (!Array.isArray(value.calls) || !Array.from(value.calls as unknown[]).every(isTaskCall))
+  )
+    return false;
   if (value.status === "completed") return "output" in value;
   return value.status === "failed" && typeof value.error === "string";
 }
@@ -512,3 +555,6 @@ function isTaskRun(value: unknown): value is TaskRun {
 function isTaskCall(value: unknown): value is TaskCall {
   return isObject(value) && isNonEmptyString(value.callId) && typeof value.turnId === "string";
 }
+
+/** Why a task's current work was cancelled. */
+export type TaskCancelReason = "task-cancel" | "turn-cancelled" | "turn-ended";

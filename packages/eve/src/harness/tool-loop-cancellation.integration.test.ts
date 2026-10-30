@@ -1,11 +1,12 @@
+import type { SessionEvent } from "#protocol/session-event.js";
+import { eachEvent } from "#internal/testing/session-machine.js";
 import { jsonSchema, type LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
-import { DynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
+import { DynamicModelSelectionError } from "#reactions/kinds/model.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
@@ -35,12 +36,12 @@ function createSession(): HarnessSession {
 
 function createEventCollector(): {
   emit: HarnessEmitFn;
-  events: UnstampedMessageStreamEvent[];
+  events: SessionEvent[];
 } {
-  const events: UnstampedMessageStreamEvent[] = [];
-  const emit: HarnessEmitFn = async (event) => {
+  const events: SessionEvent[] = [];
+  const emit: HarnessEmitFn = eachEvent(async (event) => {
     events.push(event);
-  };
+  });
   return { emit, events };
 }
 
@@ -97,6 +98,40 @@ describe("tool loop cancellation (real AI SDK)", () => {
     }
   });
 
+  // #5025: a cancelled model call is not a failed attempt; instrumentation hears `model.retried`
+  // as one.
+  it("neither fails nor retries the model call a cancellation cuts short", async () => {
+    const abortController = new AbortController();
+    const model = new MockLanguageModelV3({
+      modelId: "integration-model",
+      provider: "eve-integration-mock",
+      doStream: async () => {
+        // A cancellation can reach the step without its reason, so the stream rejects with the
+        // platform's plain AbortError.
+        abortController.abort();
+        throw abortController.signal.reason;
+      },
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createConfig(model, emit, { abortSignal: abortController.signal }),
+    );
+
+    await expect(
+      runStep(createSession(), { message: "Summarize Alice's notes." }),
+    ).rejects.toBeInstanceOf(TurnCancelledError);
+
+    expect(events.filter((event) => event.type === "model.started")).toHaveLength(1);
+    expect(
+      events.filter(
+        (event) =>
+          event.type === "model.retried" ||
+          (event.type === "model.settled" && event.data.outcome === "failed"),
+      ),
+    ).toEqual([]);
+  });
+
+  // #4273: a resolver can raise the cancellation before the turn's signal fires.
   it.each([
     { label: "directly", wrap: (error: Error): Error => error },
     {
@@ -118,15 +153,34 @@ describe("tool loop cancellation (real AI SDK)", () => {
 
       await expect(runStep(createSession(), { message: "Hi" })).rejects.toBe(thrown);
 
-      const eventTypes = events.map((event) => event.type);
-      for (const failureType of FAILURE_EVENT_TYPES) {
-        expect(eventTypes).not.toContain(failureType);
-      }
+      expect(events.map((event) => event.type)).not.toContain("session.ended");
       expect(logs.records).not.toContainEqual(
         expect.objectContaining({ message: "model selection failed terminally" }),
       );
     },
   );
+
+  it("fails the session when the model resolver throws an ordinary error", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createConfig(new MockLanguageModelV3(), emit, {
+        abortSignal: new AbortController().signal,
+        resolveModel: vi.fn().mockRejectedValue(new Error("No provider for integration-model.")),
+      }),
+    );
+
+    await runStep(createSession(), { message: "Hi" });
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          error: expect.objectContaining({ code: "MODEL_SELECTION_FAILED" }),
+          outcome: "failed",
+        }),
+        type: "session.ended",
+      }),
+    );
+  });
 
   it("forwards a live signal to executing tools and discards the straggler result", async () => {
     const logs = captureLogRecords();

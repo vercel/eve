@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { InteractionRequired, select } from "./ask.js";
+import { HumanActionRequiredError } from "./human-action.js";
 import { createRegistrySetupClient, type RegistrySetupClient } from "./registry-setup-client.js";
 import type { RegistrySetupChildMessage } from "./registry-setup-protocol.js";
 
@@ -67,6 +68,35 @@ describe("createRegistrySetupClient", () => {
       outcome: {
         kind: "blocked",
         blocker: { status: "input_required", question: { key: "mode" } },
+      },
+    });
+  });
+
+  it("reports a Vercel human action as a command prerequisite, not a flattened failure", () => {
+    const processStub = new SetupProcessStub();
+    const setup = client(processStub);
+
+    setup.fail(
+      new HumanActionRequiredError({
+        kind: "vercel-login",
+        command: "vercel login",
+        reason: "The Vercel CLI is not logged in.",
+      }),
+    );
+
+    expect(processStub.sent.at(-1)).toEqual({
+      type: "result",
+      outcome: {
+        kind: "blocked",
+        blocker: {
+          status: "prerequisite_required",
+          prerequisite: {
+            kind: "command",
+            code: "vercel-login",
+            message: "The Vercel CLI is not logged in.",
+            command: "vercel login",
+          },
+        },
       },
     });
   });

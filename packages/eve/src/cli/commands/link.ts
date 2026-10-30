@@ -6,6 +6,7 @@ import { hasInteractiveTerminal, validateWorkspaceProjectCommand } from "./preco
 import {
   isNonInteractiveProjectCommand,
   runNonInteractiveLink,
+  type NonInteractiveLinkDependencies,
   type VercelProjectCliOptions,
 } from "./vercel-non-interactive.js";
 
@@ -20,6 +21,7 @@ export interface LinkCommandDependencies {
   isEveProject?: typeof isEveProject;
   /** Test seam into the flow's detection and box effects. */
   flowDeps?: Partial<LinkFlowDeps>;
+  nonInteractiveLinkDeps?: NonInteractiveLinkDependencies;
 }
 
 const defaultDependencies: LinkCommandDependencies = {
@@ -53,7 +55,14 @@ export async function runLinkCommand(
     return;
   }
   if (isNonInteractiveProjectCommand(options)) {
-    await runNonInteractiveLink({ logger, appRoot, options });
+    const prompter = dependencies.createPrompter?.() ?? createPrompter();
+    await runNonInteractiveLink({
+      logger,
+      appRoot,
+      options,
+      prompter,
+      dependencies: dependencies.nonInteractiveLinkDeps,
+    });
     return;
   }
   if (!dependencies.hasInteractiveTerminal()) {

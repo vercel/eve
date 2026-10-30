@@ -3,7 +3,7 @@ import type { PreparedDispatchTarget } from "#tools/behavior.js";
 import type { WorkflowToolEntryPoint } from "#tools/workflow-entry-point.js";
 
 /**
- * The entry point a deferred tool's calls run through. Every agent tool is a
+ * The entry point a workflow tool's calls run through. Every agent tool is a
  * `serve` tool; tools that dispatch nowhere are called like `execute`.
  */
 export function entryPointOf(

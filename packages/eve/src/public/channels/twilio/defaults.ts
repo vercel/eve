@@ -1,7 +1,8 @@
-import { renderTextInputRequest } from "#channel/resolve-text.js";
+import { postedIn, signInChallengeText, type SignInSurface } from "#channel/sign-in.js";
+import { surfaceEvents } from "#channel/surface.js";
+import { renderTextInteraction } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type {
   TwilioTextMessage,
   TwilioVoiceCall,
@@ -10,10 +11,11 @@ import type {
 import type {
   TwilioChannelEvents,
   TwilioContext,
+  TwilioEventContext,
   TwilioInboundResult,
   TwilioVoiceResult,
 } from "#public/channels/twilio/twilioChannel.js";
-import type { InputRequest } from "#shared/input.js";
+import type { Interaction } from "#channel/interaction-prompts.js";
 
 /** Default phone-number auth projection for Twilio webhook actors. */
 function defaultTwilioAuth(input: {
@@ -69,60 +71,36 @@ export function defaultOnVoiceTranscription(
   };
 }
 
-/** Built-in Twilio event handlers for text delivery and terminal errors. */
-export const defaultEvents: TwilioChannelEvents = {
-  async "message.completed"(event, channel, _ctx) {
-    if (event.finishReason === "tool-calls" || !event.message) return;
-    await channel.twilio.sendMessage(event.message);
-  },
+function twilioSignIns(channel: TwilioEventContext): SignInSurface {
+  const send = async (text: string) => {
+    await channel.twilio.sendMessage(text);
+    return undefined;
+  };
+  return {
+    private: true,
+    postChallenge: (signIn) => send(signInChallengeText(signIn)),
+    post: send,
+    posted: postedIn(channel.state, "pendingSignIns"),
+  };
+}
 
-  async "input.requested"(event, channel, _ctx) {
-    if (event.requests.length === 0) return;
-    await channel.twilio.sendMessage(renderTwilioInputRequests(event.requests));
-  },
+export const defaultEvents: TwilioChannelEvents = surfaceEvents<TwilioEventContext>({
+  post: (channel, text) => channel.twilio.sendMessage(text),
+  restart: "message",
+  // SMS has no buttons, so a reply can only answer the request it sees.
+  requests: { showOne: showPrompt },
+  signIns: twilioSignIns,
+});
 
-  async "turn.failed"(event, channel, _ctx) {
-    const hint = formatErrorHint(event);
-    const errorId = extractErrorId(event.details);
-    await channel.twilio.sendMessage(
-      [
-        `I hit an error while handling your request${hint}.`,
-        "",
-        "Please try again, rephrase, or reach out if it keeps failing.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n"),
-    );
-  },
-
-  async "session.failed"(event, channel) {
-    const hint = formatErrorHint(event);
-    const errorId = extractErrorId(event.details);
-    await channel.twilio.sendMessage(
-      [
-        `This session could not recover from an error${hint}.`,
-        "",
-        "Start a new message to continue.",
-        ...(errorId ? ["", `Error id: ${errorId}`] : []),
-      ].join("\n"),
-    );
-  },
-};
-
-// SMS has no buttons, so options are numbered. The batch goes out as one message
-// because a text reply resolves against every pending request at once.
-function renderTwilioInputRequests(requests: readonly InputRequest[]): string {
-  const sections = requests.map(renderTextInputRequest);
-  const hasOptions = requests.some((request) => (request.options ?? []).length > 0);
-  if (hasOptions) {
-    const freeform = requests.some((request) => request.allowFreeform === true);
-    sections.push(
-      [
-        freeform
-          ? "Reply with a number, or with your own answer."
-          : "Reply with a number to choose.",
-        ...(requests.length > 1 ? ["Your reply answers each of these."] : []),
-      ].join(" "),
-    );
+async function showPrompt(channel: TwilioEventContext, request: Interaction): Promise<void> {
+  const body = renderTextInteraction(request.request);
+  if ((request.request.options ?? []).length === 0) {
+    await channel.twilio.sendMessage(body);
+    return;
   }
-  return sections.join("\n\n");
+  const instruction =
+    request.request.allowFreeform === true
+      ? "Reply with a number, or with your own answer."
+      : "Reply with a number to choose.";
+  await channel.twilio.sendMessage(`${body}\n\n${instruction}`);
 }

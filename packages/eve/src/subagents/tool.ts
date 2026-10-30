@@ -1,9 +1,9 @@
+import type { MessageContent } from "#shared/message-content.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { formatSubagentInput, type SubagentParentContext } from "#subagents/invocation.js";
 import type { JsonObject } from "#shared/json.js";
 import type {
   ChannelInstrumentationProjection,
-  RunSessionLimits,
   SessionAuthContext,
   SessionCapabilities,
   RunInput,
@@ -63,6 +63,7 @@ export function buildSubagentRunInput(input: {
    * parent capabilities produce an undefined child capability set.
    */
   readonly capabilities?: SessionCapabilities;
+  readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
   readonly channelMetadata?: ChannelInstrumentationProjection;
   /** Replay-stable key the child's continuation token derives from. */
   readonly continuationKey: string;
@@ -77,8 +78,6 @@ export function buildSubagentRunInput(input: {
   /** Durable session identity of the sandbox currently used by the parent. */
   readonly sandboxSessionId?: string;
   readonly selfAgent: boolean;
-  /** Session token limits the child inherits. */
-  readonly limits: RunSessionLimits;
   readonly parent: SubagentParentContext;
   readonly session: Pick<HarnessSession, "continuationToken" | "sandboxState" | "sessionId">;
   readonly source: SubagentInputSource;
@@ -120,6 +119,7 @@ export function buildSubagentRunInput(input: {
     },
     auth,
     capabilities,
+    schedule: input.schedule,
     channelMetadata,
     inheritedConversation,
     continuationToken: childContinuationToken,
@@ -132,7 +132,6 @@ export function buildSubagentRunInput(input: {
       // `ctx.agent` already dropped an empty schema, so what arrives is one to honor.
       outputSchema: action.input.outputSchema as JsonObject | undefined,
     },
-    limits: input.limits,
     conversationId: input.parent.conversationId,
     parent: input.parent.lineage,
     parentTraceContext: input.parent.traceContext,
@@ -147,8 +146,8 @@ export function buildSubagentRunInput(input: {
 function formatSubagentCallInputMessage(input: {
   readonly action: Pick<RuntimeSubagentDispatchRequest, "input" | "subagentName">;
   readonly source: SubagentInputSource;
-}): string {
-  const { message } = input.action.input as { message: string };
+}): MessageContent<string | URL> {
+  const { message } = input.action.input as { message: MessageContent<string | URL> };
 
   switch (input.source.type) {
     case "local":

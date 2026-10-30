@@ -1,4 +1,8 @@
+import { findStubTarget, stubCallId } from "#tool-stubs/target.js";
+import { toolStubOutput } from "#tool-stubs/output.js";
+import type { StubScope } from "#tool-stubs/types.js";
 import type { SessionContext } from "#context/session-context.js";
+import { callToolStubStep } from "#execution/tool-stubs/steps.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { createAgentSessions } from "#execution/agent-sessions/session.js";
 import { createRunUsageTally, type RunUsageTally } from "#execution/agent-sessions/usage.js";
@@ -14,6 +18,7 @@ import {
   createWorkflowBodyRef,
   resolveWorkflowEntryPoint,
   toFailedOutcome,
+  toWorkflowOutput,
   WorkflowToolRunCancelledError,
   type StartedWorkflowBody,
   type WorkflowBodyControl,
@@ -30,7 +35,6 @@ import type { JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { ToolContext } from "#tools/definition.js";
 import type {
-  AgentSession,
   WorkflowServeCall,
   WorkflowServeContext,
   WorkflowServeReceive,
@@ -151,7 +155,7 @@ class WorkflowServeCalls implements WorkflowBodyControl {
 
   /**
    * The call the body serves now: the latest call it received. Steps,
-   * questions, sign-ins, and `agent.started` belong to this call, so they
+   * questions, sign-ins, and `child.opened` belong to this call, so they
    * carry its `callId` and turn; `ctx.session` is its view of the session,
    * `ctx.agents` lists the agents it may open, a session opened now is its
    * child, and a message sent now carries its auth.
@@ -375,9 +379,13 @@ async function executeServeBody(
 ): Promise<WorkflowToolRunOutcome> {
   let outcome: WorkflowToolRunOutcome;
   try {
-    const serve = resolveWorkflowEntryPoint<ServeEntryPoint>(input);
-    const output = await serve(() => calls.receive(), ctx);
-    outcome = { output, status: "completed" };
+    const target = findStubTarget(input.agentContext.toolStubs, input.toolName);
+    const receive = () => calls.receive();
+    const output =
+      target === undefined
+        ? await resolveWorkflowEntryPoint<ServeEntryPoint>(input)(receive, ctx)
+        : await serveStub(target.scope, target.tool, receive, ctx);
+    outcome = { output: toWorkflowOutput(input, output), status: "completed" };
   } catch (error) {
     outcome = toFailedOutcome(error, calls.runSignal);
   }
@@ -396,7 +404,7 @@ async function executeServeBody(
 function createServeContext(
   input: WorkflowBodyInput,
   calls: WorkflowServeCalls,
-  agent: (name: string) => AgentSession,
+  agent: WorkflowSharedContext["agent"],
 ): ServeContext {
   const ctx: ServeContext = {
     ...createSharedContext(input, agent, (request, options) => {
@@ -415,7 +423,8 @@ function createServeContext(
     get session() {
       return calls.current.session;
     },
-    reply: (output) => calls.reply(output),
+    reply: (output) =>
+      calls.reply(toWorkflowOutput({ callId: ctx.callId, toolName: input.toolName }, output)),
   };
   return ctx;
 }
@@ -428,4 +437,29 @@ function createPendingReceive(): PendingReceive {
     reject = rejectPromise;
   });
   return { promise, reject, resolve };
+}
+
+async function serveStub(
+  scope: StubScope,
+  tool: string,
+  receive: WorkflowServeReceive<JsonValue>,
+  ctx: ServeContext,
+): Promise<JsonValue> {
+  // reply() answers every received call. Reply before receiving the next call
+  // so each call consumes its own stub response.
+  while (true) {
+    const call = await receive();
+    if (call.abortSignal.aborted) continue;
+    const result = await callToolStubStep(scope, {
+      callId: stubCallId(ctx.session.id, ctx.session.turn.id, call.callId),
+      input: call.input,
+      tool,
+      persistent: true,
+    });
+    if (result.kind !== "stub")
+      throw new Error(
+        result.kind === "error" ? result.error : "Persistent stub configuration changed.",
+      );
+    ctx.reply(toolStubOutput(result.outcome));
+  }
 }

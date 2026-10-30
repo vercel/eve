@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 
-const model = process.env.EVE_E2E_MODEL ?? "openai/gpt-6-sol";
+const model = process.env.EVE_E2E_MODEL ?? "openai/gpt-6.1-sol";
 
 export default defineEval({
   tags: ["real-model"],
@@ -19,7 +19,7 @@ export default defineEval({
     second.expectOk();
     second.messageIncludes("catalog two");
     second.eventsSatisfy("the model call is attributed to the selected model", (events) =>
-      events.some((event) => event.type === "step.started" && event.data.modelId === model),
+      events.some((event) => event.type === "model.started" && event.data.modelId === model),
     );
 
     t.succeeded();

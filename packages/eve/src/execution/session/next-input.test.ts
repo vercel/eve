@@ -5,30 +5,47 @@ import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/session/next-input.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
+import type {
+  SessionInbox,
+  SessionInboxHandle,
+  SessionInboxPayload,
+} from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { pendingContinuation } from "#reactions/continuation.js";
 
-vi.mock("#compiled/@workflow/core/index.js", () => ({
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
 }));
 vi.mock("../route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
 }));
+vi.mock("#reactions/continuation.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#reactions/continuation.js")>()),
+  pendingContinuation: vi.fn(),
+}));
 
 beforeEach(() => {
   vi.mocked(routeDeliverToChildren).mockReset();
+  vi.mocked(pendingContinuation).mockReset();
 });
 
 interface ScriptedRead {
   readonly result: IteratorResult<SessionInboxPayload>;
 }
 
+type MockInbox = SessionInbox &
+  Pick<SessionInboxHandle, "awaitingHandover" | "whenHandoverSettled">;
+
 /** Scripted inbox: serves reads in order. */
-function createMockInbox(reads: readonly ScriptedRead[]): SessionInbox {
+function createMockInbox(reads: readonly ScriptedRead[]): MockInbox {
   const remaining = [...reads];
 
   return {
+    awaitingHandover: false,
+    async whenHandoverSettled() {},
     claimedTokens: [],
+    takeLeading: () => [],
     async claimSessionHook() {},
     async claimSessionHooks() {},
     drain() {
@@ -85,13 +102,14 @@ type WaitInput = {
   >[0][K];
 };
 
-function waitInput(inbox: SessionInbox): WaitInput {
+function waitInput(inbox: MockInbox): WaitInput {
   const cursor = createCursor(inbox);
   return {
     hasWorkingTasks: () => false,
+    ignore: async () => {},
     inbox: inbox,
     cursor,
-    queue: new SessionInputQueue(),
+    queue: new SessionInputQueue([]),
   };
 }
 
@@ -109,12 +127,66 @@ function createCursor(
 }
 
 function queueOf(...deliveries: DeliverHookPayload[]): SessionInputQueue {
-  const queue = new SessionInputQueue();
+  const queue = new SessionInputQueue([]);
   for (const delivery of deliveries) queue.enqueueDelivery(delivery);
   return queue;
 }
 
 describe("nextTurnDelivery", () => {
+  const continuation: DeliverHookPayload = {
+    idempotencyKey: "ses:continue:turn_0",
+    kind: "deliver",
+    payloads: [{ message: "Keep going." }],
+    turnPolicy: "queue",
+  };
+
+  it("admits a hook's continuation once nothing else waits", async () => {
+    vi.mocked(pendingContinuation).mockReturnValue(continuation);
+    const input = batchingInputFor([]);
+
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      delivery: { payloads: [{ message: "Keep going." }] },
+      kind: "turn",
+    });
+  });
+
+  it("holds a continuation behind input an awaited handover still holds back", async () => {
+    vi.mocked(pendingContinuation).mockReturnValue(continuation);
+    // Alice's message arrived before the handover, and reads once it settles.
+    let settled = false;
+    const reads = [messageRead("Alice asks for the appendix.")];
+    const inbox = {
+      ...createMockInbox(reads),
+      get awaitingHandover() {
+        return !settled;
+      },
+      hasPending: () => settled && reads.length > 0,
+      async next() {
+        return reads.shift()?.result.value;
+      },
+      async whenHandoverSettled() {
+        settled = true;
+      },
+    };
+
+    await expect(nextTurnDelivery({ ...batchingInputFor([]), inbox })).resolves.toMatchObject({
+      delivery: { payloads: [{ message: "Alice asks for the appendix." }] },
+      kind: "turn",
+    });
+  });
+
+  it("retains an accepted cancel's identity when background tasks must stop", async () => {
+    const inbox = createMockInbox([
+      { result: { done: false, value: { kind: "cancel", deliveryId: "cancel-tasks" } } },
+    ]);
+    const input = waitInput(inbox);
+    input.hasWorkingTasks = () => true;
+    expect(await nextTurnDelivery(input)).toEqual({
+      kind: "cancel-working-tasks",
+      origin: { deliveryId: "cancel-tasks" },
+    });
+  });
+
   it("batches one principal's adjacent queued deliveries with their latest claims", async () => {
     const auth: SessionAuthContext = {
       attributes: { scopes: ["read"], team: "support" },

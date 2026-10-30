@@ -9,6 +9,7 @@ import {
   loadAuthoredModuleNamespace,
   type AuthoredModuleLoadOptions,
 } from "#internal/authored-module-loader.js";
+import type { AuthoredModuleGraph } from "#internal/authored-module-graph.js";
 
 export type CompiledBindingNamespaceLoader = (
   sourceId: string,
@@ -32,7 +33,13 @@ function ancestorMountEntries(mounts: ReadonlyMap<string, ExtensionCompileMount>
 
 /** Loads one node's selected bindings with dependency ordering and per-phase caching. */
 export function createCompiledBindingNamespaceLoader(input: {
+  /**
+   * Selected app root; application modules stamp Workflow ids relative to it. Required so
+   * no caller silently falls back to the package root, which differs in workspace members.
+   */
+  readonly appRoot: string | undefined;
   readonly bindings?: Readonly<Record<string, AgentModuleBinding>>;
+  readonly graph?: AuthoredModuleGraph;
   readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
   readonly evaluationId?: string;
   readonly mountSourceId?: (binding: AgentModuleBinding) => string | undefined;
@@ -66,7 +73,9 @@ export function createCompiledBindingNamespaceLoader(input: {
         await load(mountSourceId, nextLineage);
       }
       return await loadCompiledBindingNamespace({
+        appRoot: input.appRoot,
         binding,
+        graph: input.graph,
         loadDependency: (dependencySourceId) => load(dependencySourceId, nextLineage),
         registries: input.registries,
         mounts: input.mounts,
@@ -81,7 +90,9 @@ export function createCompiledBindingNamespaceLoader(input: {
 }
 
 async function loadCompiledBindingNamespace(input: {
+  readonly appRoot: string | undefined;
   readonly binding: AgentModuleBinding;
+  readonly graph?: AuthoredModuleGraph;
   readonly loadDependency: CompiledBindingNamespaceLoader;
   readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
   readonly evaluationId?: string;
@@ -105,8 +116,10 @@ async function loadCompiledBindingNamespace(input: {
               input.mounts === undefined ? undefined : ancestorMountEntries(input.mounts, mountId),
           };
     return await loadAuthoredModuleNamespace(input.binding.backing.sourcePath, {
+      appRoot: input.binding.owner.kind === "application" ? input.appRoot : undefined,
       externalDependencies: input.binding.backing.externalDependencies,
       extension,
+      graph: input.graph,
     });
   }
   const dependencyNamespaces = Object.fromEntries(

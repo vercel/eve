@@ -1,22 +1,21 @@
 import { createHmac } from "node:crypto";
 
-import {
-  resolveTwilioCredential,
-  TwilioApiError,
-  type TwilioCredential,
-} from "#compiled/@chat-adapter/twilio/api.js";
+import { resolveTwilioCredential, TwilioApiError } from "#compiled/@chat-adapter/twilio/api.js";
 import {
   twilioSignatureBase,
   verifyTwilioRequest as verifyPrimitive,
   TwilioWebhookVerificationError,
-  type TwilioVerifiedRequest,
-  type TwilioWebhookUrl,
 } from "#compiled/@chat-adapter/twilio/webhook.js";
 
 /** Twilio auth token, materialized directly or from an async secret provider. */
-export type TwilioAuthToken = TwilioCredential;
+export type TwilioAuthToken = string | (() => string | Promise<string>);
 
-export type { TwilioVerifiedRequest, TwilioWebhookUrl };
+export type TwilioWebhookUrl = string | ((request: Request) => string | Promise<string>);
+
+export interface TwilioVerifiedRequest {
+  readonly body: string;
+  readonly params: URLSearchParams;
+}
 
 /** Options for verifying Twilio inbound webhooks. */
 export interface TwilioVerifyOptions {

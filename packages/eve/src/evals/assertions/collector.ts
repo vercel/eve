@@ -1,4 +1,5 @@
 import { toErrorMessage } from "#shared/errors.js";
+import { outputOf } from "#evals/output.js";
 import { formatAssertionName } from "#evals/diagnostics.js";
 import type {
   AssertionEvaluation,
@@ -6,7 +7,9 @@ import type {
   AssertionResult,
   AssertionSeverity,
   EveEvalTaskResult,
+  ScoreInput,
 } from "#evals/types.js";
+import type { TargetTools } from "#evals/target.js";
 import type { EveEvalAssertionSubject } from "#evals/assertions/run.js";
 
 export type AssertionOutcome = AssertionEvaluation;
@@ -23,12 +26,14 @@ export interface RunAssertion {
 interface MutableEntry {
   readonly baseName: string;
   name: string;
+  key: string | undefined;
   severity: AssertionSeverity;
   threshold: number | undefined;
   readonly kind: "deferred" | "resolved";
   readonly spec?: RunAssertion;
   readonly selectSubject?: (result: EveEvalTaskResult) => EveEvalAssertionSubject;
-  score: number;
+  /** The measurement once produced; stays `undefined` when the scorer threw. */
+  score: number | undefined;
   message?: string;
   metadata?: Readonly<Record<string, unknown>>;
   /** A model/value assertion that threw — a hard failure regardless of severity. */
@@ -46,6 +51,13 @@ export class AssertionCollector {
   readonly #entries: MutableEntry[] = [];
   readonly #pending: Promise<void>[] = [];
 
+  /** The target's root agent tools, which tool-name assertions are checked against. */
+  readonly tools: TargetTools | undefined;
+
+  constructor(tools?: TargetTools) {
+    this.tools = tools;
+  }
+
   /** Whether the eval has already recorded an assertion. */
   get hasEntries(): boolean {
     return this.#entries.length > 0;
@@ -57,60 +69,39 @@ export class AssertionCollector {
     selectSubject: (result: EveEvalTaskResult) => EveEvalAssertionSubject,
     severity: AssertionSeverity = "gate",
   ): AssertionHandle {
-    const entry: MutableEntry = {
-      baseName: spec.name,
-      name: spec.name,
-      severity,
-      threshold: undefined,
-      kind: "deferred",
-      spec,
-      selectSubject,
-      score: 0,
-      errored: false,
-    };
-    this.#entries.push(entry);
+    const entry = this.#add({ name: spec.name, severity, kind: "deferred", spec, selectSubject });
     return makeHandle(entry);
   }
 
   /** Register a value/judge assertion, evaluating the captured value now. */
   recordValue(input: {
     readonly name: string;
+    readonly key?: string;
     readonly severity: AssertionSeverity;
     readonly threshold?: number;
     readonly score: () => Promise<AssertionOutcome>;
   }): AssertionHandle {
-    const entry: MutableEntry = {
-      baseName: input.name,
-      name: input.name,
-      severity: input.severity,
-      threshold: input.threshold,
-      kind: "resolved",
-      score: 0,
-      errored: false,
-    };
-    this.#entries.push(entry);
-
-    const pending = settleEntry(entry, input.score);
-
-    this.#pending.push(pending);
+    const entry = this.#add({ ...input, kind: "resolved" });
+    this.#pending.push(settleEntry(entry, input.score));
     return makeHandle(entry);
+  }
+
+  /** Record a score. It has no verdict unless the handle chains `.gate()` or `.atLeast()`. */
+  recordScore(evaluation: ScoreInput): AssertionHandle {
+    return this.recordValue({
+      name: "score",
+      severity: "soft",
+      score: async () => toOutcome(await evaluation),
+    });
   }
 
   /** Record an already-computed assertion outcome and return whether it passed. */
   recordOutcome(input: { readonly name: string; readonly outcome: AssertionOutcome }): boolean {
-    const entry: MutableEntry = {
-      baseName: input.name,
-      name: input.name,
-      severity: "gate",
-      threshold: undefined,
-      kind: "resolved",
-      score: input.outcome.score,
-      message: input.outcome.message,
-      metadata: input.outcome.metadata,
-      errored: false,
-    };
-    this.#entries.push(entry);
-    return computePassed(entry.severity, entry.threshold, entry.score, entry.errored);
+    const entry = this.#add({ name: input.name, severity: "gate", kind: "resolved" });
+    entry.score = input.outcome.score;
+    entry.message = input.outcome.message;
+    entry.metadata = input.outcome.metadata;
+    return computePassed(entry) === true;
   }
 
   /** Record and await a required value assertion, returning whether it passed. */
@@ -119,18 +110,9 @@ export class AssertionCollector {
     readonly threshold?: number;
     readonly score: () => Promise<AssertionOutcome>;
   }): Promise<boolean> {
-    const entry: MutableEntry = {
-      baseName: input.name,
-      name: input.name,
-      severity: "gate",
-      threshold: input.threshold,
-      kind: "resolved",
-      score: 0,
-      errored: false,
-    };
-    this.#entries.push(entry);
+    const entry = this.#add({ ...input, severity: "gate", kind: "resolved" });
     await settleEntry(entry, input.score);
-    return computePassed(entry.severity, entry.threshold, entry.score, entry.errored);
+    return computePassed(entry) === true;
   }
 
   /**
@@ -143,40 +125,80 @@ export class AssertionCollector {
     const results: AssertionResult[] = [];
     for (const entry of this.#entries) {
       if (entry.kind === "deferred" && entry.spec !== undefined) {
-        const outcome = await entry.spec.evaluate(entry.selectSubject?.(result) ?? result);
+        const outcome = await entry.spec.evaluate(
+          entry.selectSubject?.(result) ?? { ...result, output: outputOf(result) },
+        );
         entry.score = outcome.score;
         entry.message = outcome.message;
         entry.metadata = outcome.metadata;
       }
-      results.push({
-        name: entry.name,
-        score: entry.score,
-        severity: entry.severity,
-        threshold: entry.threshold,
-        passed: computePassed(entry.severity, entry.threshold, entry.score, entry.errored),
-        errored: entry.errored,
-        message: entry.message,
-        metadata: entry.metadata,
-      });
+      results.push(toResult(entry));
     }
     return results;
   }
+
+  #add(input: {
+    readonly name: string;
+    readonly key?: string;
+    readonly severity: AssertionSeverity;
+    readonly threshold?: number;
+    readonly kind: MutableEntry["kind"];
+    readonly spec?: RunAssertion;
+    readonly selectSubject?: MutableEntry["selectSubject"];
+  }): MutableEntry {
+    const entry: MutableEntry = {
+      baseName: input.name,
+      name: input.name,
+      key: input.key,
+      severity: input.severity,
+      threshold: input.threshold,
+      kind: input.kind,
+      spec: input.spec,
+      selectSubject: input.selectSubject,
+      score: undefined,
+      errored: false,
+    };
+    this.#entries.push(entry);
+    return entry;
+  }
+}
+
+function toResult(entry: MutableEntry): AssertionResult {
+  return {
+    name: entry.name,
+    key: entry.key,
+    score: entry.score,
+    severity: entry.severity,
+    threshold: entry.errored ? undefined : ruleThreshold(entry),
+    passed: computePassed(entry),
+    errored: entry.errored,
+    message: entry.message,
+    metadata: entry.metadata,
+  };
+}
+
+/** The effective minimum passing score: a gate defaults to 1, a soft entry has none. */
+function ruleThreshold(entry: MutableEntry): number | undefined {
+  return entry.threshold ?? (entry.severity === "gate" ? 1 : undefined);
 }
 
 /**
- * Whether an assertion meets its bar. A gate defaults to threshold 1; a soft
- * assertion with no threshold is tracked-only and always "passes". A hard
- * thrown failure never passes.
+ * Verdict of the entry's rule. A thrown scorer fails; an entry without a rule
+ * (soft, no threshold) has no verdict.
  */
-function computePassed(
-  severity: AssertionSeverity,
-  threshold: number | undefined,
-  score: number,
-  errored: boolean,
-): boolean {
-  if (errored) return false;
-  const min = threshold ?? (severity === "gate" ? 1 : undefined);
-  return min === undefined || score >= min;
+function computePassed(entry: MutableEntry): boolean | undefined {
+  if (entry.errored) return false;
+  const threshold = ruleThreshold(entry);
+  if (threshold === undefined) return undefined;
+  return entry.score !== undefined && entry.score >= threshold;
+}
+
+function toOutcome(value: number | AssertionOutcome): AssertionOutcome {
+  const outcome = typeof value === "number" ? { score: value } : value;
+  if (typeof outcome.score !== "number" || !(outcome.score >= 0 && outcome.score <= 1)) {
+    throw new TypeError(`Scores must be numbers from 0 to 1; received ${String(outcome.score)}.`);
+  }
+  return outcome;
 }
 
 async function settleEntry(
@@ -191,7 +213,7 @@ async function settleEntry(
   } catch (error: unknown) {
     // A judge/value assertion that throws (e.g. a judge model error) is a
     // hard failure, surfaced as a failed gate rather than aborting the run.
-    entry.score = 0;
+    // A thrown scorer produces no measurement, so the score stays absent.
     entry.severity = "gate";
     entry.threshold = undefined;
     entry.message = toErrorMessage(error);
@@ -218,6 +240,7 @@ function makeHandle(entry: MutableEntry): AssertionHandle {
     },
     label(label) {
       entry.name = formatAssertionName(entry.baseName, label);
+      entry.key = label.trim();
       return handle;
     },
   };

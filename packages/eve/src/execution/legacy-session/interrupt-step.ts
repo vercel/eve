@@ -1,3 +1,5 @@
+import { readDurableSession } from "#execution/durable-session-store.js";
+import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
 import {
   EntityConflictError,
   RunExpiredError,
@@ -69,7 +71,10 @@ export async function interruptLegacySessionStep(prepared: PreparedLegacySession
         throw error;
     }
   }
-  if (prepared.input.inputCommitted || prepared.sessionState.emissionState.turnId === "")
+  if (
+    prepared.input.inputCommitted ||
+    isBetweenTurns(storedProjection(readDurableSession(prepared.sessionState).state))
+  )
     return {
       history: prepared.history,
       sessionState: prepared.sessionState,

@@ -1,13 +1,21 @@
+import { ConnectionEventActions, isEventAction } from "#runtime/connections/events/actions.js";
 import { createMCPClient, type MCPClient } from "#compiled/@ai-sdk/mcp/index.js";
 import type { ToolSet } from "ai";
 
-import { buildCallbackContext } from "#context/build-callback-context.js";
-import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
-import type { SessionContext } from "#context/session-context.js";
+import {
+  ConnectionAuthorizationRequiredError,
+  isConnectionAuthorizationRequiredError,
+} from "#connections/errors.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
+import { buildConnectionCallbackContext } from "#runtime/connections/approval-scope.js";
 import { isObject } from "#shared/guards.js";
+import { readTurnPrincipals } from "#context/turn-principals.js";
+import {
+  encodeForwardedPrincipalHeader,
+  FORWARDED_PRINCIPAL_HEADER,
+} from "#internal/mcp/forwarded-principal-header.js";
 import {
   omitProvidedArgumentsFromSchema,
   resolveProvidedArguments,
@@ -19,6 +27,7 @@ import {
 } from "#runtime/connections/mcp-tracing.js";
 import type {
   AuthorizationDefinition,
+  ConnectionCallbackContext,
   ConnectionClient,
   ConnectionToolExecuteOptions,
   ConnectionToolMetadata,
@@ -32,11 +41,39 @@ interface McpToolCache {
   readonly tools: ToolSet;
 }
 
+/** Carries the failing request's auth state through SDK error wrappers. */
+class McpUnauthorizedError extends Error {
+  readonly statusCode = 401;
+  readonly anonymous: boolean;
+
+  constructor(anonymous: boolean) {
+    super("MCP HTTP request failed (HTTP 401).");
+    this.anonymous = anonymous;
+  }
+}
+
+async function checkAuthorizationResponse(
+  response: Response,
+  anonymous: boolean,
+): Promise<Response> {
+  if (response.status === 401) {
+    await response.body?.cancel();
+    throw new McpUnauthorizedError(anonymous);
+  }
+  return response;
+}
+
 /**
  * Wraps one `MCPClient` from `@ai-sdk/mcp` for a single connection.
  *
- * Created lazily per-connection per-session. Caches tool metadata after
+ * Created lazily per connection per step. Caches tool metadata after
  * the first `getToolMetadata()` call.
+ *
+ * When the connection declares `authorization` but no token is available
+ * yet (`getToken` throws {@link ConnectionAuthorizationRequiredError}), the
+ * client connects anonymously instead of failing. Sign-in is only requested
+ * once the server asks for it: an HTTP `401` on any request, or a tool
+ * result that carries an `mcp/www_authenticate` challenge.
  */
 export class McpConnectionClient implements ConnectionClient {
   #clientPromise: Promise<MCPClient> | undefined;
@@ -44,9 +81,36 @@ export class McpConnectionClient implements ConnectionClient {
   #toolsPromise: Promise<McpToolCache> | undefined;
   #tools: McpToolCache | undefined;
   #connection: ResolvedConnectionDefinition;
+  readonly eventActions: ConnectionClient["eventActions"];
 
   constructor(connection: ResolvedConnectionDefinition) {
     this.#connection = connection;
+    if (connection.experimental_events !== undefined) {
+      const events = new ConnectionEventActions(
+        connection,
+        connection.experimental_events,
+        () => resolveHeaders(connection),
+        this.#forwardingFetch(),
+      );
+      this.eventActions = {
+        ownsName: isEventAction,
+        recoveryMetadata: () => events.recoveryMetadata(),
+        metadata: async () => {
+          try {
+            return await events.metadata();
+          } catch (error) {
+            return await this.#rethrowClassified(error);
+          }
+        },
+        execute: async (name, args, options) => {
+          try {
+            return await events.execute(name, args, options);
+          } catch (error) {
+            return await this.#rethrowClassified(error);
+          }
+        },
+      };
+    }
   }
 
   /**
@@ -76,10 +140,13 @@ export class McpConnectionClient implements ConnectionClient {
   }
 
   async #createClient(): Promise<MCPClient> {
-    const headers = await resolveHeaders(this.#connection);
+    const { headers } = await resolveConnectionHeaders(this.#connection, {
+      anonymousWhenAuthorizationRequired: true,
+    });
     const url = this.#connection.url;
     const fetch = createMcpTraceFetch({
       connectionName: this.#connection.connectionName,
+      fetcher: this.#authorizedFetch(Object.keys(headers)),
       getProtocolVersion: () => this.#client?.initializeResult?.protocolVersion,
     });
 
@@ -99,9 +166,67 @@ export class McpConnectionClient implements ConnectionClient {
     }
   }
 
+  /** Keep eve's token provider on the request path instead of capturing one bearer forever. */
+  #authorizedFetch(connectionHeaderNames: readonly string[]): typeof fetch {
+    const fetcher = this.#forwardingFetch() ?? globalThis.fetch;
+    return async (request, init) => {
+      const resolve = () =>
+        resolveConnectionHeaders(this.#connection, { anonymousWhenAuthorizationRequired: true });
+      const send = async (resolved: ResolvedConnectionHeaders) => {
+        const headers = new Headers(init?.headers);
+        for (const name of connectionHeaderNames) headers.delete(name);
+        for (const [name, value] of Object.entries(resolved.headers)) headers.set(name, value);
+        return await fetcher(request, { ...init, headers });
+      };
+
+      const resolved = await resolve();
+      const response = await send(resolved);
+      if (
+        response.status !== 401 ||
+        resolved.anonymous ||
+        this.#connection.authorization === undefined ||
+        init?.signal?.aborted
+      ) {
+        return await checkAuthorizationResponse(response, resolved.anonymous);
+      }
+
+      // A rejected access token need not mean the refresh grant needs consent.
+      await this.#evictCachedToken();
+      const refreshed = await resolve();
+      if (refreshed.anonymous) {
+        return await checkAuthorizationResponse(response, true);
+      }
+      await response.body?.cancel();
+      return await checkAuthorizationResponse(await send(refreshed), refreshed.anonymous);
+    };
+  }
+
   /**
-   * Returns cached tool metadata for all tools this connection exposes,
-   * after applying any configured tool filter.
+   * With `forwardPrincipal`, adds `eve-forwarded-principal` to every request,
+   * read per request: one client can serve turns from different people in a
+   * shared session.
+   */
+  #forwardingFetch(): typeof fetch | undefined {
+    if (this.#connection.forwardPrincipal !== true) return undefined;
+    const connectionName = this.#connection.connectionName;
+    return async (request, init) => {
+      const principals = readTurnPrincipals();
+      if (principals === undefined) return await globalThis.fetch(request, init);
+      const headers = new Headers(init?.headers);
+      headers.set(
+        FORWARDED_PRINCIPAL_HEADER,
+        encodeForwardedPrincipalHeader(principals, connectionName),
+      );
+      // Fetch keeps custom headers across a cross-origin redirect, unlike
+      // `Authorization`, so following one would hand the user's identity to
+      // another host.
+      return await globalThis.fetch(request, { ...init, headers, redirect: "error" });
+    };
+  }
+
+  /**
+   * Returns cached tool metadata for all tools this connection exposes. The
+   * catalog applies the connection's tool filter to the listing.
    *
    * The first call fetches tools from the server via `listTools()` and
    * creates the AI SDK tool set in parallel. Subsequent calls return
@@ -109,8 +234,7 @@ export class McpConnectionClient implements ConnectionClient {
    * promise.
    */
   async getToolMetadata(): Promise<readonly ConnectionToolMetadata[]> {
-    const cache = await this.#ensureTools();
-    return cache.metadata;
+    return (await this.#ensureTools()).metadata;
   }
 
   /**
@@ -120,13 +244,15 @@ export class McpConnectionClient implements ConnectionClient {
    * A `401`/`invalid_token` from the remote server is translated into
    * {@link ConnectionAuthorizationRequiredError} via {@link #rethrowClassified}
    * so callers re-enter the authorization flow instead of surfacing an
-   * opaque transport error.
+   * opaque transport error. A tool error result carrying an
+   * `_meta["mcp/www_authenticate"]` challenge is treated the same way.
    */
   async executeTool(
     toolName: string,
     args: unknown,
     options: ConnectionToolExecuteOptions,
   ): Promise<unknown> {
+    let result: unknown;
     try {
       const { tools } = await this.#ensureTools();
 
@@ -145,7 +271,7 @@ export class McpConnectionClient implements ConnectionClient {
         toolName,
       });
 
-      return await withMcpToolCallSpan({
+      result = await withMcpToolCallSpan({
         arguments: args,
         connectionName: this.#connection.connectionName,
         execute: async () =>
@@ -156,6 +282,10 @@ export class McpConnectionClient implements ConnectionClient {
     } catch (error) {
       return await this.#rethrowClassified(error);
     }
+    if (isMcpAuthChallengeResult(result)) {
+      return await this.#requireAuthorization(`the server asked for sign-in to call "${toolName}"`);
+    }
+    return result;
   }
 
   async #ensureTools(): Promise<McpToolCache> {
@@ -193,18 +323,12 @@ export class McpConnectionClient implements ConnectionClient {
       protocolVersion: client.initializeResult?.protocolVersion,
     });
 
-    const filter = this.#connection.tools;
-    const filteredTools =
-      filter !== undefined
-        ? listResult.tools.filter((t) => passesToolFilter(t.name, filter))
-        : listResult.tools;
-
     // `toolsFromDefinitions` returns `McpToolSet<"automatic">`, whose
     // elements are `Tool<unknown, CallToolResult>`. The AI SDK's
     // `ToolSet` constraint only admits `Tool<any | never, any | never>`,
     // so a single-hop cast is required — the runtime shape is identical.
     const providedArgumentNames = Object.keys(this.#connection.toolCall?.providedArguments ?? {});
-    const projectedTools = filteredTools.map((tool) => ({
+    const projectedTools = listResult.tools.map((tool) => ({
       ...tool,
       inputSchema: omitProvidedArgumentsFromSchema(tool.inputSchema, providedArgumentNames),
     }));
@@ -238,22 +362,46 @@ export class McpConnectionClient implements ConnectionClient {
   /**
    * Always rethrows — this only classifies the error first. A non-auth
    * error (timeout, `5xx`, `403`, "tool not found", network failure) is
-   * rethrown unchanged. Only a server rejection of the bearer
-   * (`401`/`invalid_token`) is translated: evict the stale cached token,
-   * tear down the connection so the retry reconnects with a fresh bearer,
-   * and rethrow as {@link ConnectionAuthorizationRequiredError} so the
-   * re-authorization flow takes over.
+   * rethrown unchanged. Only a `401` is translated, via
+   * {@link #requireAuthorization}.
    */
   async #rethrowClassified(error: unknown): Promise<never> {
     if (!isMcpAuthRequiredError(error)) {
       throw error;
     }
-    await this.#evictCachedToken();
+    const requestError = [...walkErrorChain(error)].find(
+      (candidate) => candidate instanceof McpUnauthorizedError,
+    );
+    const anonymous =
+      requestError?.anonymous ??
+      (
+        await resolveConnectionHeaders(this.#connection, {
+          anonymousWhenAuthorizationRequired: true,
+        })
+      ).anonymous;
+    return await this.#requireAuthorization(
+      anonymous ? "the server requires sign-in" : "the server rejected the token",
+      anonymous,
+    );
+  }
+
+  /**
+   * Evicts the stale cached token (when the request carried one), tears
+   * down the connection so the retry reconnects with a fresh bearer and
+   * reloads the tool list, and throws
+   * {@link ConnectionAuthorizationRequiredError} so the authorization flow
+   * takes over.
+   */
+  async #requireAuthorization(reason: string, anonymous?: boolean): Promise<never> {
+    anonymous ??= (
+      await resolveConnectionHeaders(this.#connection, { anonymousWhenAuthorizationRequired: true })
+    ).anonymous;
+    if (!anonymous) {
+      await this.#evictCachedToken();
+    }
     await this.close();
     throw new ConnectionAuthorizationRequiredError(this.#connection.connectionName, {
-      message:
-        `Connection "${this.#connection.connectionName}" requires authorization ` +
-        `(the server rejected the token).`,
+      message: `Connection "${this.#connection.connectionName}" requires authorization (${reason}).`,
     });
   }
 
@@ -289,6 +437,25 @@ export function isMcpAuthRequiredError(error: unknown): boolean {
   return readHttpStatus(error) === 401;
 }
 
+/** `_meta` key a tool result uses to ask for sign-in (OpenAI Apps SDK convention). */
+export const MCP_WWW_AUTHENTICATE_META_KEY = "mcp/www_authenticate";
+
+/**
+ * Returns `true` for a `tools/call` error result that asks the client to
+ * sign in: `isError: true` plus a non-empty `_meta["mcp/www_authenticate"]`
+ * (a `WWW-Authenticate` challenge string or list of them). Servers that
+ * accept anonymous `initialize`/`tools/list` use this to protect individual
+ * tools without failing the whole HTTP request.
+ */
+export function isMcpAuthChallengeResult(result: unknown): boolean {
+  if (!isObject(result) || result.isError !== true || !isObject(result._meta)) {
+    return false;
+  }
+  const challenge = result._meta[MCP_WWW_AUTHENTICATE_META_KEY];
+  if (typeof challenge === "string") return challenge.length > 0;
+  return Array.isArray(challenge) && challenge.length > 0;
+}
+
 /**
  * Decides whether an error thrown while creating a streamable HTTP MCP
  * client should trigger a fallback attempt against the legacy SSE
@@ -307,7 +474,7 @@ function isMcpHttpFallbackRetryableError(error: unknown): boolean {
   return status === 400 || status === 404 || status === 405;
 }
 
-function readHttpStatus(error: unknown): number | undefined {
+export function readHttpStatus(error: unknown): number | undefined {
   for (const candidate of walkErrorChain(error)) {
     if (!isObject(candidate)) {
       continue;
@@ -363,19 +530,22 @@ function* walkErrorChain(error: unknown): Generator<unknown> {
 }
 
 /**
- * Returns `true` when a tool name passes the configured filter.
+ * Returns `true` when a tool passes the configured filter. A tool may be known
+ * by more than one name, such as an OpenAPI tool's name and the `operationId`
+ * it was derived from; `allow` admits it when any name is listed, and `block`
+ * hides it when any name is listed.
  */
 export function passesToolFilter(
-  toolName: string,
+  names: readonly string[],
   filter: Readonly<ToolFilterDefinition> | undefined,
 ): boolean {
   if (filter === undefined) {
     return true;
   }
   if ("allow" in filter) {
-    return filter.allow.includes(toolName);
+    return names.some((name) => filter.allow.includes(name));
   }
-  return !filter.block.includes(toolName);
+  return !names.some((name) => filter.block.includes(name));
 }
 
 /**
@@ -383,7 +553,7 @@ export function passesToolFilter(
  * flat `Record<string, string>` for the transport layer.
  *
  * Resolves dynamic `auth` and `headers` callbacks with the active
- * {@link SessionContext}, then resolves the {@link ConnectionPrincipal}
+ * session context, then resolves the {@link ConnectionPrincipal}
  * and invokes `authorization.getToken({ principal })` to produce the bearer.
  * `getToken` may throw {@link ConnectionAuthorizationRequiredError};
  * callers catch it and it propagates as-is from here.
@@ -391,22 +561,53 @@ export function passesToolFilter(
 export async function resolveHeaders(
   connection: ResolvedConnectionDefinition,
 ): Promise<Record<string, string>> {
-  const merged: Record<string, string> = {};
-  let callbackContext: SessionContext | undefined;
-  const getCallbackContext = (): SessionContext => (callbackContext ??= buildCallbackContext());
+  const { headers } = await resolveConnectionHeaders(connection, {
+    anonymousWhenAuthorizationRequired: false,
+  });
+  return headers;
+}
 
-  const authorization = await resolveConnectionAuthorization(
-    connection,
-    typeof connection.authorization === "function" ? getCallbackContext() : undefined,
-  );
+interface ResolvedConnectionHeaders {
+  /** `true` when `authorization` is declared but no token was available, so no bearer was set. */
+  readonly anonymous: boolean;
+  readonly headers: Record<string, string>;
+}
+
+/**
+ * {@link resolveHeaders}, optionally tolerating a missing token: with
+ * `anonymousWhenAuthorizationRequired`, a {@link ConnectionAuthorizationRequiredError}
+ * from `getToken` leaves the `Authorization` header unset and reports
+ * `anonymous: true` instead of throwing. Every other error still propagates.
+ */
+async function resolveConnectionHeaders(
+  connection: ResolvedConnectionDefinition,
+  options: { readonly anonymousWhenAuthorizationRequired: boolean },
+): Promise<ResolvedConnectionHeaders> {
+  const merged: Record<string, string> = {};
+  let anonymous = false;
+  const authorization = await resolveConnectionAuthorization(connection);
 
   if (authorization !== undefined) {
-    const result = await resolveToken(connection, authorization);
-    merged.Authorization = `Bearer ${result.token}`;
+    try {
+      const result = await resolveToken(connection, authorization);
+      merged.Authorization = `Bearer ${result.token}`;
+    } catch (error) {
+      if (
+        !options.anonymousWhenAuthorizationRequired ||
+        !isConnectionAuthorizationRequiredError(error)
+      ) {
+        throw error;
+      }
+      anonymous = true;
+    }
   }
 
   if (connection.headers !== undefined) {
-    const resolved = await resolveHeadersDefinition(connection.headers, getCallbackContext);
+    let context: ConnectionCallbackContext | undefined;
+    const resolved = await resolveHeadersDefinition(
+      connection.headers,
+      () => (context ??= buildConnectionCallbackContext()),
+    );
     for (const [key, value] of Object.entries(resolved)) {
       if (authorization !== undefined && key.toLowerCase() === "authorization") {
         throw new Error(
@@ -417,7 +618,7 @@ export async function resolveHeaders(
     }
   }
 
-  return merged;
+  return { anonymous, headers: merged };
 }
 
 /**
@@ -439,7 +640,7 @@ async function resolveToken(
 
 async function resolveHeadersDefinition(
   headers: Readonly<HeadersDefinition>,
-  getContext: () => SessionContext,
+  getContext: () => ConnectionCallbackContext,
 ): Promise<Record<string, string>> {
   if (typeof headers === "function") {
     return { ...(await headers(getContext())) };
@@ -457,7 +658,7 @@ async function resolveHeadersDefinition(
 
 async function resolveHeaderValue(
   value: HeaderValue,
-  getContext: () => SessionContext,
+  getContext: () => ConnectionCallbackContext,
 ): Promise<string> {
   if (typeof value === "function") {
     return await value(getContext());

@@ -1,3 +1,4 @@
+import type { SetupPrerequisite } from "#setup/integrations/shared/prerequisite.js";
 import type { Prompter } from "#setup/prompter.js";
 import { detectDeployment } from "#setup/project-resolution.js";
 import type { RegistrySetupCompletion, RegistrySetupFact } from "#setup/registry-setup-protocol.js";
@@ -16,8 +17,17 @@ export type RegistrySessionOutcome =
       facts: readonly RegistrySetupFact[];
       output: readonly string[];
     }
-  /** Files were added, but the item's setup was cancelled or skipped. */
-  | { kind: "incomplete"; title: string; resumeCommand: string }
+  /** Files were added, but the item's setup was cancelled, skipped, or failed. */
+  | {
+      kind: "incomplete";
+      title: string;
+      /** Registry address, used to resume setup without reinstalling. */
+      address: string;
+      resumeCommand: string;
+      /** Why setup failed; absent when it was cancelled or skipped. */
+      reason?: string;
+      prerequisite?: SetupPrerequisite;
+    }
   /** User-facing installation error, including any actionable follow-up lines. */
   | { kind: "failed"; title: string; message: string }
   /** Stopped before anything was written. */
@@ -33,7 +43,10 @@ export interface RegistrySessionResult {
 
 interface RegistrySession {
   add(title: string, output: readonly string[], setup?: RegistrySetupCompletion): void;
-  addIncomplete(title: string, resumeCommand: string): void;
+  addIncomplete(
+    title: string,
+    incomplete: Omit<Extract<RegistrySessionOutcome, { kind: "incomplete" }>, "kind" | "title">,
+  ): void;
   addFailure(title: string, message: string): void;
   addCancellation(title: string): void;
   result(deployed?: "production"): RegistrySessionResult;
@@ -61,8 +74,8 @@ export function createRegistrySession(deps: RegistrySessionDeps): RegistrySessio
       deploymentRequired ||= setup.deploymentRequired === true;
     },
 
-    addIncomplete(title, resumeCommand) {
-      outcomes.push({ kind: "incomplete", title, resumeCommand });
+    addIncomplete(title, incomplete) {
+      outcomes.push({ kind: "incomplete", title, ...incomplete });
     },
 
     addFailure(title, message) {

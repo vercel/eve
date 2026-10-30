@@ -1,6 +1,8 @@
 import { access } from "node:fs/promises";
 
+import { createLogger } from "#internal/logging.js";
 import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
+import { isStoredLine } from "#protocol/session-events/envelope.js";
 
 const RUNS_PAGE_LIMIT = 100;
 /**
@@ -9,6 +11,8 @@ const RUNS_PAGE_LIMIT = 100;
  * such a stream would otherwise wait forever for the next chunk.
  */
 const STREAM_IDLE_TIMEOUT_MS = 1_000;
+
+const log = createLogger("cli.logs");
 
 /**
  * One session event read back from the local workflow store, shaped like a
@@ -43,6 +47,8 @@ export interface DevSessionEventWindow {
  * (crashed processes) are drained with an idle-timeout cancel instead of
  * waiting for chunks that will never arrive.
  *
+ * A run an eve before v27 recorded is skipped with a warning naming it.
+ *
  * Returns an empty list when the store does not exist. Selection is by
  * time window: events from any `eve dev` process in the window are
  * included, since the store does not attribute runs to processes.
@@ -70,7 +76,17 @@ export async function readDevSessionEvents(
   const lines: DevSessionEventLine[] = [];
   for (const run of await listRunsOverlappingWindow(world, window)) {
     const text = await drainRunStream(runtime, world, run.runId);
-    lines.push(...parseSessionEventLines(text, run, window));
+    const runLines = parseSessionEventLines(text, run, window);
+    if (runLines === undefined) {
+      log.warn(
+        `Skipped run ${run.runId} in the local workflow store: it was recorded by eve < 27, ` +
+          "whose session events this version cannot read. Inspect this run with the eve " +
+          "version that recorded it.",
+        { runId: run.runId },
+      );
+      continue;
+    }
+    lines.push(...runLines);
   }
   return lines.sort((a, b) => a.at.localeCompare(b.at));
 }
@@ -152,45 +168,56 @@ async function drainRunStream(
   return text;
 }
 
+/** Returns `undefined` for a run an eve before v27 recorded. */
 function parseSessionEventLines(
   text: string,
   run: RunSummary,
   window: DevSessionEventWindow,
-): DevSessionEventLine[] {
+): DevSessionEventLine[] | undefined {
   const lines: DevSessionEventLine[] = [];
+  // A progress record has no time of its own; it streamed after the latest commit.
+  let lastAt = run.createdAt.toISOString();
   for (const raw of text.split("\n")) {
-    const event = parseSessionEvent(raw);
-    if (event === undefined) continue;
-    const at = event.at ?? run.createdAt.toISOString();
-    if (at < window.from.toISOString() || at > window.to.toISOString()) continue;
-    const line: { -readonly [Key in keyof DevSessionEventLine]: DevSessionEventLine[Key] } = {
-      at,
-      source: "event",
-      runId: run.runId,
-      type: event.type,
-    };
-    if (event.data !== undefined) line.data = event.data;
-    lines.push(line);
+    const parsed = parseJsonLine(raw);
+    if (isPreV27Line(parsed)) return undefined;
+    if (!isStoredLine(parsed)) continue;
+    if ("facts" in parsed) lastAt = parsed.at;
+    const records: readonly unknown[] = "facts" in parsed ? parsed.facts : [parsed.progress];
+    for (const value of records) {
+      const record = readRecord(value);
+      if (record === undefined) continue;
+      if (lastAt < window.from.toISOString() || lastAt > window.to.toISOString()) continue;
+      const line: { -readonly [Key in keyof DevSessionEventLine]: DevSessionEventLine[Key] } = {
+        at: lastAt,
+        source: "event",
+        runId: run.runId,
+        type: record.type,
+      };
+      if (record.data !== undefined) line.data = record.data;
+      lines.push(line);
+    }
   }
   return lines;
 }
 
-function parseSessionEvent(raw: string): { type: string; at?: string; data?: unknown } | undefined {
+function parseJsonLine(raw: string): unknown {
   if (raw.trim().length === 0) return undefined;
   try {
-    const parsed: unknown = JSON.parse(raw);
-    if (parsed === null || typeof parsed !== "object") return undefined;
-    const { type, data, meta } = parsed as { type?: unknown; data?: unknown; meta?: unknown };
-    if (typeof type !== "string") return undefined;
-    const at =
-      meta !== null && typeof meta === "object" && typeof (meta as { at?: unknown }).at === "string"
-        ? (meta as { at: string }).at
-        : undefined;
-    const event: { type: string; at?: string; data?: unknown } = { type };
-    if (at !== undefined) event.at = at;
-    if (data !== undefined) event.data = data;
-    return event;
+    return JSON.parse(raw);
   } catch {
     return undefined;
   }
+}
+
+/** eve < 27 stored one `{ type, data, meta }` event per line instead of a commit. */
+function isPreV27Line(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  const { meta, type } = value as { meta?: unknown; type?: unknown };
+  return typeof type === "string" && meta !== null && typeof meta === "object";
+}
+
+function readRecord(value: unknown): { type: string; data?: unknown } | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const { type, data } = value as { type?: unknown; data?: unknown };
+  return typeof type === "string" ? { data, type } : undefined;
 }

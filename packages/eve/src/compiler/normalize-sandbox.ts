@@ -23,7 +23,10 @@ export async function compileSandboxDefinition(
     ? namespace.environment
     : getBoundSandboxEnvironment(selector);
   if (!inheritsParent && candidate === undefined)
-    throw new Error(`Sandbox "${source.logicalPath}" must export an environment.`);
+    throw new Error(
+      `Sandbox "${source.logicalPath}" must export an environment. ` +
+        "Add `export const environment = DefaultSandbox.environment();` (or another provider's environment) and open it in the selector.",
+    );
   const authoredSource =
     options.binding.backing.kind === "programmatic"
       ? (options.binding.backing.semanticRevision ?? options.binding.backing.revision)

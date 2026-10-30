@@ -106,7 +106,7 @@ export function lowerScheduleMarkdown(source: string): ScheduleDefinition {
 
   const rawDefinition: Record<string, unknown> = {
     ...document.frontmatter,
-    markdown: document.markdown,
+    content: document.markdown,
   };
 
   return defineSchedule(
@@ -148,7 +148,7 @@ export function lowerSkillMarkdown(
 
   const rawDefinition: Record<string, unknown> = {
     description,
-    markdown: document.markdown,
+    content: document.markdown,
   };
 
   applyOptionalSkillFrontmatter(rawDefinition, frontmatter);
@@ -174,9 +174,17 @@ function applyOptionalSkillFrontmatter(
     rawDefinition.license = license;
   }
 
-  const metadata = toOptionalStringRecord(frontmatter.metadata, "metadata");
+  const metadata = toOptionalStringRecord(frontmatter.metadata);
   if (metadata !== undefined) {
     rawDefinition.metadata = metadata;
+  }
+
+  const deferred = frontmatter.deferred;
+  if (deferred !== undefined && deferred !== null) {
+    if (typeof deferred !== "boolean") {
+      throw new Error('Expected "deferred" frontmatter to be true or false.');
+    }
+    rawDefinition.deferred = deferred;
   }
 }
 
@@ -202,27 +210,17 @@ function requireStringFrontmatter(value: unknown, fieldName: string): string {
   return normalizedValue;
 }
 
-function toOptionalStringRecord(
-  value: unknown,
-  fieldName: string,
-): Record<string, string> | undefined {
-  if (value === undefined || value === null) {
+function toOptionalStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!isObject(value)) {
     return undefined;
   }
 
-  if (!isObject(value)) {
-    throw new Error(`Expected "${fieldName}" frontmatter to be an object.`);
+  const entries = Object.entries(value);
+  if (entries.some(([, entryValue]) => typeof entryValue !== "string")) {
+    return undefined;
   }
 
-  const stringEntries = Object.entries(value).map(([key, entryValue]) => {
-    if (typeof entryValue !== "string") {
-      throw new Error(`Expected "${fieldName}.${key}" frontmatter to be a string.`);
-    }
-
-    return [key, entryValue] as const;
-  });
-
-  return Object.fromEntries(stringEntries);
+  return Object.fromEntries(entries) as Record<string, string>;
 }
 
 function deriveFlatSkillDescription(markdown: string, name: string): string {

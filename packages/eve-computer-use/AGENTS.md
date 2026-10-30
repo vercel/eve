@@ -1,6 +1,6 @@
 # @eve/computer-use Extension Package
 
-This private package is the source of the `eve/computer-use` extension. It contributes the `computer_use` tool and the sandbox helpers that install and start the desktop and driver.
+This private package is the source of the `eve/extensions/computer-use` extension. It contributes the `computer_use` tool and the sandbox helpers that install and start the desktop and driver.
 
 Before writing code, read the installed eve package docs for extensions, tools, and sandboxes as applicable.
 

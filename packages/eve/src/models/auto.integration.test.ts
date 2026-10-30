@@ -1,15 +1,17 @@
-import { Experimental_EvaluationMockModelV4 } from "ai/test";
+import { Experimental_DecisionMockModelV4 } from "ai/test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
-import { deserializeContext, serializeContext } from "#context/serialize.js";
-import type { DynamicResolveContext } from "#dynamic/definition.js";
+import { dynamicEvaluate } from "#dynamic/definition.js";
 import { anthropic } from "#public/models/anthropic/index.js";
+
+import { openMemos } from "#reactions/records.js";
+import { latestTurn } from "#reactions/turn.js";
 
 import { auto } from "./auto.js";
 
 const runtime = vi.hoisted(() => ({
-  localEvaluationModel: vi.fn(),
+  localDecisionModel: vi.fn(),
   logWarn: vi.fn(),
   state: undefined as ContextContainer | undefined,
 }));
@@ -28,7 +30,7 @@ vi.mock("#internal/logging.js", async (importOriginal) => ({
 }));
 vi.mock("#internal/model-auth/transport.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#internal/model-auth/transport.js")>()),
-  localGatewayEvaluationModel: runtime.localEvaluationModel,
+  localGatewayDecisionModel: runtime.localDecisionModel,
 }));
 
 const options = {
@@ -39,50 +41,82 @@ const options = {
 function context(
   text = "Alice requests a routine summary.",
   abortSignal = new AbortController().signal,
-): DynamicResolveContext {
-  return {
-    model: null,
+) {
+  return { abortSignal, text };
+}
+
+/** A session whose latest turn opened with `text`, as the projection records it. */
+function view(text: string) {
+  const tables = {
+    deliveries: {
+      d1: { deliveryId: "d1", introducedAt: 1, parts: [{ kind: "text", text }], turnId: "t1" },
+    },
+    parts: {},
+    session: { latestTurnId: "t1" },
+    turns: {
+      t1: {
+        cause: { deliveryId: "d1" },
+        follows: null,
+        introducedAt: 2,
+        status: "running",
+        turnId: "t1",
+      },
+    },
+  } as never;
+  return { ...(tables as object), turn: latestTurn(tables) } as never;
+}
+
+/** Evaluates the model as the runner does: its memo decides, and the option is the model. */
+async function run(definition: ReturnType<typeof auto>, input: ReturnType<typeof context>) {
+  const tables = view(input.text) as { readonly turn: unknown };
+  const memos = openMemos({
+    abortSignal: input.abortSignal,
+    kept: undefined,
+    label: "agent.ts#model",
+    scope: "model:agent",
+    sessionId: "test",
+  });
+  return await dynamicEvaluate(definition)({
     channel: {},
-    session: { id: "test", auth: { current: null, initiator: null } },
-    messages: [{ role: "user", content: text }],
-    abortSignal,
-  };
+    memo: memos.memo,
+    messages: async () => [],
+    now: new Date(0),
+    session: { auth: { current: null, initiator: null }, id: "test" },
+    turn: tables.turn,
+    view: tables,
+  } as never);
 }
 
-function event(turnId = "turn_1") {
-  return { type: "step.started", data: { turnId } };
-}
-
-function evaluationModel(choice = "openai/small", modelId = "fixture-evaluator") {
-  const doEvaluate = vi.fn(async () => ({
+function decisionModel(choice = "openai/small", modelId = "fixture-decider") {
+  const doDecide = vi.fn(async () => ({
     answers: { route: { type: "choice" as const, choice } },
     usage: { inputTokens: 42, outputTokens: 3 },
     warnings: [],
     response: { modelId },
   }));
   return {
-    doEvaluate,
-    model: new Experimental_EvaluationMockModelV4({ modelId, doEvaluate }),
+    doDecide,
+    model: new Experimental_DecisionMockModelV4({ modelId, doDecide }),
   };
 }
 
 beforeEach(() => {
   runtime.state = new ContextContainer();
-  runtime.localEvaluationModel.mockReset();
+  runtime.localDecisionModel.mockReset();
   runtime.logWarn.mockReset();
 });
 
 describe("auto", () => {
   it("defaults to Jev through the AI SDK default provider", async () => {
-    const evaluator = evaluationModel();
-    const evaluationModelFactory = vi.fn(() => evaluator.model);
+    const decider = decisionModel();
+    const decisionModelFactory = vi.fn(() => decider.model);
     const previous = Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER");
-    Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", { evaluationModel: evaluationModelFactory });
+    Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", { decisionModel: decisionModelFactory });
     try {
-      const handler = auto({ options }).events["step.started"]!;
-      await expect(handler(event(), context())).resolves.toBe("openai/small");
-      expect(runtime.localEvaluationModel).not.toHaveBeenCalled();
-      expect(evaluationModelFactory).toHaveBeenCalledWith("typesafe-ai/jev");
+      const handler = auto({ options });
+      await expect(run(handler, context())).resolves.toBe("openai/small");
+      expect(runtime.localDecisionModel).not.toHaveBeenCalled();
+      expect(decisionModelFactory).toHaveBeenCalledWith("typesafe-ai/jev");
     } finally {
       if (previous === undefined) Reflect.deleteProperty(globalThis, "AI_SDK_DEFAULT_PROVIDER");
       else Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", previous);
@@ -90,41 +124,41 @@ describe("auto", () => {
   });
 
   it("preserves a custom default provider when the local Gateway connection is available", async () => {
-    const evaluator = evaluationModel();
-    const localEvaluator = evaluationModel("openai/large");
-    runtime.localEvaluationModel.mockReturnValue(localEvaluator.model);
-    const evaluationModelFactory = vi.fn(() => evaluator.model);
+    const decider = decisionModel();
+    const localDecider = decisionModel("openai/large");
+    runtime.localDecisionModel.mockReturnValue(localDecider.model);
+    const decisionModelFactory = vi.fn(() => decider.model);
     const previous = Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER");
-    Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", { evaluationModel: evaluationModelFactory });
+    Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", { decisionModel: decisionModelFactory });
     try {
-      const handler = auto({ model: "internal-router", options }).events["step.started"]!;
-      await expect(handler(event(), context())).resolves.toBe("openai/small");
-      expect(evaluationModelFactory).toHaveBeenCalledWith("internal-router");
-      expect(evaluator.doEvaluate).toHaveBeenCalledOnce();
-      expect(runtime.localEvaluationModel).not.toHaveBeenCalled();
-      expect(localEvaluator.doEvaluate).not.toHaveBeenCalled();
+      const handler = auto({ model: "internal-router", options });
+      await expect(run(handler, context())).resolves.toBe("openai/small");
+      expect(decisionModelFactory).toHaveBeenCalledWith("internal-router");
+      expect(decider.doDecide).toHaveBeenCalledOnce();
+      expect(runtime.localDecisionModel).not.toHaveBeenCalled();
+      expect(localDecider.doDecide).not.toHaveBeenCalled();
     } finally {
       if (previous === undefined) Reflect.deleteProperty(globalThis, "AI_SDK_DEFAULT_PROVIDER");
       else Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", previous);
     }
   });
 
-  it("uses the local Gateway connection for a string evaluation model", async () => {
-    const evaluator = evaluationModel();
-    runtime.localEvaluationModel.mockReturnValue(evaluator.model);
+  it("uses the local Gateway connection for a string decision model", async () => {
+    const decider = decisionModel();
+    runtime.localDecisionModel.mockReturnValue(decider.model);
 
-    const handler = auto({ options }).events["step.started"]!;
+    const handler = auto({ options });
 
-    await expect(handler(event(), context())).resolves.toBe("openai/small");
-    expect(runtime.localEvaluationModel).toHaveBeenCalledWith("typesafe-ai/jev");
-    expect(evaluator.doEvaluate).toHaveBeenCalledOnce();
+    await expect(run(handler, context())).resolves.toBe("openai/small");
+    expect(runtime.localDecisionModel).toHaveBeenCalledWith("typesafe-ai/jev");
+    expect(decider.doDecide).toHaveBeenCalledOnce();
   });
 
   it("routes provider language models by alias and preserves reasoning", async () => {
     const languageModel = anthropic("sonnet-5");
-    const evaluator = evaluationModel("private");
+    const decider = decisionModel("private");
     const handler = auto({
-      model: evaluator.model,
+      model: decider.model,
       options: {
         ...options,
         private: {
@@ -133,15 +167,20 @@ describe("auto", () => {
           reasoning: "low",
         },
       },
-    }).events["step.started"]!;
+    });
 
-    await expect(handler(event(), context())).resolves.toEqual({
+    await expect(run(handler, context())).resolves.toEqual({
       model: languageModel,
       reasoning: "low",
     });
-    expect(evaluator.doEvaluate).toHaveBeenCalledWith(
+    expect(decider.doDecide).toHaveBeenCalledWith(
       expect.objectContaining({
-        state: { messages: [{ role: "user", text: "Alice requests a routine summary." }] },
+        state: [
+          {
+            type: "json",
+            value: { messages: [{ role: "user", text: "Alice requests a routine summary." }] },
+          },
+        ],
         questions: {
           route: expect.objectContaining({
             criteria: {
@@ -154,83 +193,66 @@ describe("auto", () => {
     );
   });
 
-  it("evaluates once per turn and restores the selection from durable context", async () => {
-    const evaluator = evaluationModel();
-    const handler = auto({ model: evaluator.model, options }).events["step.started"]!;
-
-    await handler(event(), context());
-    runtime.state = await deserializeContext(serializeContext(runtime.state!));
-    await handler(event(), context());
-    await handler(event("turn_2"), context());
-
-    expect(evaluator.doEvaluate).toHaveBeenCalledTimes(2);
-    expect(Object.keys(serializeContext(runtime.state!))).toEqual([
-      expect.stringMatching(/^eve\.experimental\.evaluate\.model\./),
-    ]);
-  });
-
-  it("uses and retains the fallback model when evaluation fails", async () => {
-    const providerError = new Error("evaluation unavailable");
-    const doEvaluate = vi.fn(async () => {
+  it("uses and retains the fallback model when decision fails", async () => {
+    const providerError = new Error("decision unavailable");
+    const doDecide = vi.fn(async () => {
       throw providerError;
     });
-    const failed = new Experimental_EvaluationMockModelV4({ doEvaluate });
+    const failed = new Experimental_DecisionMockModelV4({ doDecide });
     const handler = auto({
       model: failed,
       fallback: "anthropic/claude-sonnet-5",
       options,
-    }).events["step.started"]!;
+    });
 
-    await expect(handler(event(), context())).resolves.toBe("anthropic/claude-sonnet-5");
-    await expect(handler(event(), context())).resolves.toBe("anthropic/claude-sonnet-5");
-    expect(doEvaluate).toHaveBeenCalledOnce();
+    await expect(run(handler, context())).resolves.toBe("anthropic/claude-sonnet-5");
+    expect(doDecide).toHaveBeenCalledOnce();
     expect(runtime.logWarn).toHaveBeenCalledOnce();
-    expect(runtime.logWarn).toHaveBeenCalledWith("model evaluation failed; using fallback", {
+    expect(runtime.logWarn).toHaveBeenCalledWith("model decision failed; using fallback", {
       error: expect.objectContaining({
-        message: expect.stringContaining("evaluation unavailable"),
+        message: expect.stringContaining("decision unavailable"),
       }),
       fallback: "anthropic/claude-sonnet-5",
-      turnId: "turn_1",
     });
   });
 
   it("supports a provider model and reasoning as the fallback", async () => {
     const fallback = anthropic("sonnet-5");
-    const failed = new Experimental_EvaluationMockModelV4({
-      doEvaluate: async () => {
-        throw new Error("evaluation unavailable");
+    const failed = new Experimental_DecisionMockModelV4({
+      doDecide: async () => {
+        throw new Error("decision unavailable");
       },
     });
     const handler = auto({
       model: failed,
       fallback: { model: fallback, reasoning: "low" },
       options,
-    }).events["step.started"]!;
+    });
 
-    await expect(handler(event(), context())).resolves.toEqual({
+    await expect(run(handler, context())).resolves.toEqual({
       model: fallback,
       reasoning: "low",
     });
     expect(runtime.logWarn).toHaveBeenCalledWith(
-      "model evaluation failed; using fallback",
+      "model decision failed; using fallback",
       expect.objectContaining({ fallback: "anthropic.messages/sonnet-5" }),
     );
   });
 
   it("propagates provider errors without a fallback and always propagates cancellation", async () => {
-    const providerError = new Error("evaluation unavailable");
-    const failed = new Experimental_EvaluationMockModelV4({
-      doEvaluate: async () => {
+    const providerError = new Error("decision unavailable");
+    const failed = new Experimental_DecisionMockModelV4({
+      doDecide: async () => {
         throw providerError;
       },
     });
-    const failedHandler = auto({ model: failed, options }).events["step.started"]!;
-    await expect(failedHandler(event(), context())).rejects.toBe(providerError);
+    const failedHandler = auto({ model: failed, options });
+    await expect(run(failedHandler, context())).rejects.toBe(providerError);
 
     runtime.state = new ContextContainer();
     const controller = new AbortController();
-    const pendingModel = new Experimental_EvaluationMockModelV4({
-      doEvaluate: ({ abortSignal }) =>
+    const pendingModel = new Experimental_DecisionMockModelV4({
+      doDecide: ({ abortSignal }) =>
         new Promise((_, reject) => {
           abortSignal?.addEventListener("abort", () => reject(abortSignal.reason), { once: true });
         }),
@@ -239,32 +261,32 @@ describe("auto", () => {
       model: pendingModel,
       fallback: "anthropic/claude-sonnet-5",
       options,
-    }).events["step.started"]!;
-    const pending = pendingHandler(event(), context("Alice needs help.", controller.signal));
+    });
+    const pending = run(pendingHandler, context("Alice needs help.", controller.signal));
     const reason = new Error("cancelled");
     controller.abort(reason);
     await expect(pending).rejects.toBe(reason);
   });
 
   it("rejects invalid configurations and input", async () => {
-    const evaluator = evaluationModel().model;
-    expect(() => auto({ model: evaluator, options: {} })).toThrow("at least one option");
-    expect(() => auto({ model: evaluator, options: { broken: "" } })).toThrow();
-    expect(() => auto({ model: "", options })).toThrow("valid evaluation model");
-    expect(() => auto({ model: evaluator, fallback: "", options })).toThrow("fallback model");
-    expect(() => auto({ model: evaluator, fallback: {} as never, options })).toThrow(
+    const decider = decisionModel().model;
+    expect(() => auto({ model: decider, options: {} })).toThrow("at least one option");
+    expect(() => auto({ model: decider, options: { broken: "" } })).toThrow();
+    expect(() => auto({ model: "", options })).toThrow("valid decision model");
+    expect(() => auto({ model: decider, fallback: "", options })).toThrow("fallback model");
+    expect(() => auto({ model: decider, fallback: {} as never, options })).toThrow(
       "fallback model",
     );
     expect(() =>
       auto({
-        model: evaluator,
+        model: decider,
         options: {
           broken: { model: "openai/large", description: "Difficult", reasoning: "maximum" },
         },
       } as never),
     ).toThrow();
 
-    const handler = auto({ model: evaluator, options }).events["step.started"]!;
-    await expect(handler(event(), context(" "))).rejects.toThrow("requires user text");
+    const handler = auto({ model: decider, options });
+    await expect(run(handler, context(" "))).rejects.toThrow("requires user text");
   });
 });

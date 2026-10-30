@@ -9,7 +9,8 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
+import { lookupSessionOwnerHook, resumeRunnableHook } from "#execution/session-inbox/owner.js";
+import { getHookByToken } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
 type Command = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
@@ -38,14 +39,16 @@ const MAX_LEGACY_WIRE_VERSION = 7;
 export async function resolveLegacyInbox(
   token: string,
 ): Promise<{ hook: Hook; sessionId: string; current: boolean }> {
-  const legacy = await getHookByToken(token);
+  const legacy = await lookupSessionOwnerHook(token);
   const metadata = await legacy.metadata;
   const sessionId =
     isObject(metadata) && typeof metadata.sessionId === "string"
       ? metadata.sessionId
       : legacy.runId;
   try {
-    const hook = await getHookByToken(sessionInboxHookToken(sessionCommandHookToken(sessionId)));
+    const hook = await lookupSessionOwnerHook(
+      sessionInboxHookToken(sessionCommandHookToken(sessionId)),
+    );
     return { hook, sessionId, current: true };
   } catch (error) {
     if (!HookNotFoundError.is(error)) throw error;
@@ -63,7 +66,7 @@ export async function resumeLegacyInbox(token: string, command: Command) {
       isObject(metadata) ? metadata.sessionInboxWireVersion : undefined,
     );
   }
-  const hook = await resumeHook(target.hook.token, payload);
+  const hook = await resumeRunnableHook(target.hook.token, payload);
   return { ownerRunId: hook.runId, sessionId: Promise.resolve(target.sessionId) };
 }
 

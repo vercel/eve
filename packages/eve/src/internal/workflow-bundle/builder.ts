@@ -11,6 +11,8 @@ import {
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
 import { runQueuedWorkflowBuild } from "#internal/workflow-bundle/build-queue.js";
+import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
+import { findAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
 import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
 import {
@@ -26,7 +28,6 @@ import {
   createWorkflowImport,
   createWorkflowNodeBuiltinGuardPlugin,
   createWorkflowDriverAliasPlugin,
-  createWorkflowPseudoPackagePlugin,
   createWorkflowTransformPlugin,
   createWorkflowVirtualEntryPlugin,
   WORKFLOW_SOURCE_EXTENSIONS,
@@ -67,6 +68,7 @@ export class WorkflowBundleBuilder {
     const dirs = [
       resolvePackageSourceDirectoryPath("src/execution"),
       resolvePackageSourceDirectoryPath("src/runtime/subagents"),
+      resolvePackageSourceDirectoryPath("src/runtime/connections/events"),
       resolvePackageSourceDirectoryPath("src/subagents"),
       resolvePackageSourceDirectoryPath("src/tools/provided"),
     ];
@@ -325,10 +327,15 @@ export class WorkflowBundleBuilder {
       platform: "neutral",
       plugins: [
         createWorkflowVirtualEntryPlugin(virtualEntrySource),
-        createWorkflowPseudoPackagePlugin(),
         createWorkflowDriverAliasPlugin(this.config.workingDir),
         createAuthoredRelativeExtensionResolverPlugin({
           extensions: WORKFLOW_SOURCE_EXTENSIONS,
+        }),
+        createAuthoredAssetImportPlugin({
+          authoredSourceOnly: true,
+          // A workspace member without its own package.json shares the enclosing package.
+          packageRoot:
+            findAuthoredPackageRoot(this.transformProjectRoot) ?? this.transformProjectRoot,
         }),
         createAuthoredPackageTsConfigPathsPlugin({
           appPackageRoot: this.transformProjectRoot,

@@ -1,6 +1,6 @@
 import type { ToolContext } from "eve/tools";
 
-import { parseLocalTraceSegment, type LocalTraceSpan } from "#tracing/local-trace-reader.js";
+import { parseLocalTraceSegment, type LocalTraceSpan } from "#tracing/local/trace-reader.js";
 
 export interface LocalTraceSpanSource {
   readonly segmentFile: string;
