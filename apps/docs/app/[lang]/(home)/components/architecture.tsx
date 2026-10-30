@@ -205,7 +205,7 @@ function PrimitiveCard({
 }
 
 export function ArchitectureDiagram() {
-  const [mode, setMode] = useState<Mode>("self-hosted");
+  const [mode, setMode] = useState<Mode>("managed");
   const selfHosted = mode === "self-hosted";
 
   return (
