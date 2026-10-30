@@ -43,5 +43,8 @@
     "packages/eve/src/tools/provided/web-search.ts",
     "packages/eve/src/tools/provided/workflow.ts",
     "packages/eve/src/tools/provided/write-file.ts"
+  ],
+  "rule59_nitroVirtualIdAllowlist": [
+    "packages/eve/src/internal/nitro/host/nitro-routing-import-specifier-plugin.ts"
   ]
 }

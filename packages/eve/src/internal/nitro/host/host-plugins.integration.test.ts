@@ -165,15 +165,4 @@ describe("createHostPlugins", () => {
     expect(await firstResult(list, "resolveId", instrumentation)).toEqual(kept(instrumentation));
     expect(await firstResult(list, "resolveId", "/tmp/other-module.mjs")).toBeNull();
   });
-
-  it("rewrites Windows drive paths only in Nitro's generated routing modules", async () => {
-    const list = plugins();
-    const source = 'import handler from "G:\\projects\\app\\dist\\route.js";';
-
-    expect(await firstResult(list, "transform", source, "#nitro/virtual/routing")).toEqual({
-      code: 'import handler from "file:///G:/projects/app/dist/route.js";',
-      map: null,
-    });
-    expect(await firstResult(list, "transform", source, "/tmp/other.js")).toBeNull();
-  });
 });

@@ -164,6 +164,18 @@
  *             and no entry exports a name `stripInternal` drops (`@internal`).
  *   rule 56 — Retired: dangling references to stripped declarations are caught
  *             by `packages/eve/test/scenarios/packed-public-types.scenario.test.ts`.
+ *   rule 57 — No `rollup:before` hooks under `packages/eve/src`. eve's build
+ *             plugins are one ordered list passed as `rolldownConfig.plugins`;
+ *             hooks that splice plugins into Nitro's bundler config reorder
+ *             them behind the host's back.
+ *   rule 58 — No writes to `nitro.options` (assignment, `.push(`, `.unshift(`)
+ *             under `packages/eve/src` outside an explicit allowlist. eve's
+ *             host is configured entirely by the config it passes to
+ *             `createNitro`; options written afterward bypass the host spec.
+ *   rule 59 — No `#nitro/` string literals under `packages/eve/src`. Every
+ *             eve-owned Nitro id uses `#eve/`, and nothing pins Nitro's
+ *             private virtual ids. Files that predate the rule are baselined
+ *             and may only leave the baseline.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -287,6 +299,9 @@ function isTsLike(relPath) {
  *   rule51: Violation[];
  *   rule52: Violation[];
  *   rule53: Violation[];
+ *   rule57: Violation[];
+ *   rule58: Violation[];
+ *   rule59: { allowlist: Set<string>; violations: Violation[] };
  *   symlinks: string[];
  * }} state
  */
@@ -369,6 +384,9 @@ async function scanRepo(state) {
       });
     }
     checkRule53(posix, lines, state.rule53);
+    checkRule57(posix, lines, state.rule57);
+    checkRule58(posix, lines, state.rule58);
+    checkRule59(posix, lines, state.rule59);
   }
 }
 
@@ -783,6 +801,81 @@ function checkRule51(posix, lines, violations) {
           "imports the session machine's private state or event builders. Read execution state through `#harness/session-machine/view.js`; change it with a transition.",
       });
     }
+  });
+}
+
+// ---------- Rules 57–59: eve's Nitro host is configured through its spec ----------
+
+const EVE_SRC_DIR = "packages/eve/src/";
+const NITRO_OPTIONS_WRITE_RE =
+  /\bnitro\.options(?:\.[A-Za-z_$][\w$]*|\[[^\]]+\])+\s*(?:(?:\|\||&&|\?\?|[-+*/%])?=(?![=>])|\.(?:push|unshift)\()/;
+const NITRO_ID_LITERAL_RE = /["'`]#nitro\//;
+
+// Nitro modules that must act after Nitro resolves its options. The host's
+// entry swap runs in a config-declared build:before hook, after the preset
+// picks its entry; the server-assets module drops the asset base Nitro always
+// adds while resolving options; the TanStack module configures the host app's
+// own Nitro, not eve's.
+const RULE58_NITRO_OPTIONS_WRITERS = new Set([
+  "packages/eve/src/internal/nitro/host/create-host-nitro.ts",
+  "packages/eve/src/internal/nitro/host/instrumentation-entry.ts",
+  "packages/eve/src/public/tanstack/index.ts",
+]);
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule57(posix, lines, violations) {
+  if (!posix.startsWith(EVE_SRC_DIR)) return;
+  lines.forEach((line, idx) => {
+    if (!line.includes("rollup:before")) return;
+    violations.push({
+      rule: 57,
+      file: posix,
+      line: idx + 1,
+      message:
+        "`rollup:before` hook detected. Add eve build plugins to the ordered list in internal/nitro/host/host-plugins.ts, which the host passes as `rolldownConfig.plugins`, instead of splicing them into Nitro's bundler config.",
+    });
+  });
+}
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule58(posix, lines, violations) {
+  if (!posix.startsWith(EVE_SRC_DIR) || RULE58_NITRO_OPTIONS_WRITERS.has(posix)) return;
+  lines.forEach((line, idx) => {
+    if (!NITRO_OPTIONS_WRITE_RE.test(line)) return;
+    violations.push({
+      rule: 58,
+      file: posix,
+      line: idx + 1,
+      message:
+        "`nitro.options` write detected. eve's host is configured entirely by the config passed to `createNitro`: derive the value in internal/nitro/host/host-spec.ts and render it in create-host-nitro.ts's `toNitroConfig`.",
+    });
+  });
+}
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {{ allowlist: Set<string>; violations: Violation[] }} state
+ */
+function checkRule59(posix, lines, state) {
+  if (!posix.startsWith(EVE_SRC_DIR) || state.allowlist.has(posix)) return;
+  lines.forEach((line, idx) => {
+    if (/^\s*(?:\*|\/\/)/.test(line) || !NITRO_ID_LITERAL_RE.test(line)) return;
+    state.violations.push({
+      rule: 59,
+      file: posix,
+      line: idx + 1,
+      message:
+        "`#nitro/` id literal detected. Name eve-owned Nitro virtual modules under `#eve/`, and assert on routes and handler behavior rather than Nitro's private virtual ids.",
+    });
   });
 }
 
@@ -1845,6 +1938,12 @@ async function main() {
     rule51: /** @type {Violation[]} */ ([]),
     rule52: /** @type {Violation[]} */ ([]),
     rule53: /** @type {Violation[]} */ ([]),
+    rule57: /** @type {Violation[]} */ ([]),
+    rule58: /** @type {Violation[]} */ ([]),
+    rule59: {
+      allowlist: new Set(baseline.rule59_nitroVirtualIdAllowlist),
+      violations: /** @type {Violation[]} */ ([]),
+    },
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1955,6 +2054,9 @@ async function main() {
   violations.push(...state.rule51);
   violations.push(...state.rule52);
   violations.push(...state.rule53);
+  violations.push(...state.rule57);
+  violations.push(...state.rule58);
+  violations.push(...state.rule59.violations);
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });
