@@ -58,11 +58,10 @@ On worlds without deployment routing, follow the [stranded-session recovery guid
 
 Every local `agent.ts`, root or subagent, must export the value `defineAgent` returns. A dynamic subagent resolver that selects a local agent must also return `defineAgent({...})`, `defineRemoteAgent(...)`, or `null`.
 
-```diff
--export default { model: "anthropic/claude-sonnet-5" };
-+import { defineAgent } from "eve";
-+
-+export default defineAgent({ model: "anthropic/claude-sonnet-5" });
+```ts
+export default { model: "anthropic/claude-sonnet-5" }; // [!code --]
+import { defineAgent } from "eve"; // [!code ++]
+export default defineAgent({ model: "anthropic/claude-sonnet-5" }); // [!code ++]
 ```
 
 Create sentinels only with `defineDynamic()`, `disableTool()`, and `disableRoute()`. `DynamicSentinel`, `DisabledToolSentinel`, and `DisabledRouteSentinel` are opaque, and hand-written objects of the same shape are rejected.
@@ -71,11 +70,11 @@ Create sentinels only with `defineDynamic()`, `disableTool()`, and `disableRoute
 
 Rename the field and keep its value. Despite its old name, the value was always a fraction from `0` through `1`, not a percentage, so `0.7` stays `0.7`. The default stays `0.9`. See [Compaction](../agent-config#compaction).
 
-```diff
- export default defineAgent({
--  compaction: { thresholdPercent: 0.7 },
-+  compaction: { threshold: 0.7 },
- });
+```ts
+export default defineAgent({
+  compaction: { thresholdPercent: 0.7 }, // [!code --]
+  compaction: { threshold: 0.7 }, // [!code ++]
+});
 ```
 
 To turn off the token-usage limit, including one inherited from a parent agent, set `limits.sessionUsage: false`.
@@ -84,11 +83,10 @@ To turn off the token-usage limit, including one inherited from a parent agent, 
 
 eve doesn't assume a plain exported object is an MCP connection. Wrap each connection in `defineMcpClientConnection` or `defineOpenAPIConnection`. For a dynamic connection, call the helper inside its factory. See [Connections](../connections).
 
-```diff
--export default { url: "https://issues.example/mcp" };
-+import { defineMcpClientConnection } from "eve/connections";
-+
-+export default defineMcpClientConnection({ url: "https://issues.example/mcp" });
+```ts
+export default { url: "https://issues.example/mcp" }; // [!code --]
+import { defineMcpClientConnection } from "eve/connections"; // [!code ++]
+export default defineMcpClientConnection({ url: "https://issues.example/mcp" }); // [!code ++]
 ```
 
 Replace connection auth's `credentialOwner` with `principalType: "app" | "user"`. With `getToken` alone, an omitted `principalType` means `"app"`; set `"user"` for per-user tokens. See [connection credential ownership](../connections#choose-app-vs-user-auth).
@@ -172,11 +170,11 @@ export default git({
 
 The `agents/<name>/` workspace layout and `withEve` from `eve/vercel` are stable. `JustBashSandbox`, `autoInstall`, and `prepare` stay on `eve/sandbox/just-bash`, but `customCommands` and `filesystem` move under `experimental`:
 
-```diff
- export const environment = JustBashSandbox.environment({
--  customCommands: [today],
-+  experimental: { customCommands: [today] },
- });
+```ts
+export const environment = JustBashSandbox.environment({
+  customCommands: [today], // [!code --]
+  experimental: { customCommands: [today] }, // [!code ++]
+});
 ```
 
 ### Use eve's own types
@@ -256,18 +254,18 @@ Hooks keep the `(event, ctx)` signature. To update a hook:
 
 See [Hooks](./hooks).
 
-```diff
- import { defineHook } from "eve/hooks";
+```ts
+import { defineHook } from "eve/hooks";
 
- export default defineHook({
-   events: {
--    "message.completed"(event) {
--      console.log(event.data.message);
-+    "content.completed"(event) {
-+      if (event.data.phase === "reply") console.log(event.data.value);
-     },
-   },
- });
+export default defineHook({
+  events: {
+    "message.completed"(event) { // [!code --]
+      console.log(event.data.message); // [!code --]
+    "content.completed"(event) { // [!code ++]
+      if (event.data.phase === "reply") console.log(event.data.value); // [!code ++]
+    },
+  },
+});
 ```
 
 ### Channel `events` handlers
@@ -347,9 +345,9 @@ Each read is independent and accepts a signal. Results don't include an `events`
 
 Rename `reset()` to `end()` on client sessions, `SessionStore`, the React, Vue, and Svelte bindings, channel session handles, `ChannelSource` from `eve/channels`, and the Slack handler context (`ctx.end()`). `end()` resolves with a delivery.
 
-```diff
--await session.reset({ reason: "Conversation finished" });
-+await session.end({ reason: "Conversation finished" });
+```ts
+await session.reset({ reason: "Conversation finished" }); // [!code --]
+await session.end({ reason: "Conversation finished" }); // [!code ++]
 ```
 
 Move HTTP callers from `POST …/reset` to `POST …/end`. The server still serves `/reset`, and the stream still records the control as `source: { control: "reset" }` on `delivery.admitted`.
@@ -396,18 +394,18 @@ Save events and the cursor as they arrive, not only when a turn ends, so a turn 
 
 Replace `streamReconnectPolicy` with `reconnect`. Move the fields from `streamOpenReconnectPolicy` directly into `reconnect`, and rename `retryableErrorStatuses` to `retryableStatuses`. Defaults are unchanged. Use the `ReconnectOptions` type from `eve/client` instead of `StreamReconnectPolicy` or `StreamReconnectRetryPolicy`. See [Reconnection](./client/streaming#reconnection).
 
-```diff
- const delivery = await session.send("Continue the review.", {
--  streamReconnectPolicy: {
--    streamOpenReconnectPolicy: { maxAttempts: 3, baseDelayMs: 250, maxDelayMs: 5000 },
--    retryableErrorStatuses: [429, 503],
-+  reconnect: {
-+    maxAttempts: 3,
-+    baseDelayMs: 250,
-+    maxDelayMs: 5000,
-+    retryableStatuses: [429, 503],
-   },
- });
+```ts
+const delivery = await session.send("Continue the review.", {
+  streamReconnectPolicy: { // [!code --]
+    streamOpenReconnectPolicy: { maxAttempts: 3, baseDelayMs: 250, maxDelayMs: 5000 }, // [!code --]
+    retryableErrorStatuses: [429, 503], // [!code --]
+  reconnect: { // [!code ++]
+    maxAttempts: 3, // [!code ++]
+    baseDelayMs: 250, // [!code ++]
+    maxDelayMs: 5000, // [!code ++]
+    retryableStatuses: [429, 503], // [!code ++]
+  },
+});
 ```
 
 To turn off automatic reconnects, replace `streamReconnectPolicy: { reconnect: false }` with `reconnect: false`.
@@ -416,11 +414,11 @@ To turn off automatic reconnects, replace `streamReconnectPolicy: { reconnect: f
 
 Every error from `eve/client` extends `EveError` and has a stable snake_case `code`. Narrow with each class's static `is()` instead of `instanceof`, so errors from a separately bundled copy of eve still match.
 
-```diff
--if (error instanceof SessionNotActiveError && error.code === "EVE_SESSION_NOT_ACTIVE") {
-+if (SessionNotActiveError.is(error) && error.code === "session_not_active") {
-   // Start a new session.
- }
+```ts
+if (error instanceof SessionNotActiveError && error.code === "EVE_SESSION_NOT_ACTIVE") { // [!code --]
+if (SessionNotActiveError.is(error) && error.code === "session_not_active") { // [!code ++]
+  // Start a new session.
+}
 ```
 
 `SessionNotActiveError` has one of two codes:
@@ -481,9 +479,9 @@ The built-in channels' default handlers keep internal fields in channel state. T
 
 - **Cards.** Call card builders with their data forms, use `CardText` for labels, and use `cardToFallbackText` for whole cards. Remove imports of `Modal*`, `TextInput*`, `ExternalSelect*`, `CardJSXElement`, `CardJSXProps`, `isCardElement`, `cardChildToFallbackText`, `ChatElement`, `ContainerProps`, and the builder `*Props` types. Use native Slack view data for custom modals. See [Slack cards](../channels/slack#cards).
 
-  ```diff
-  -Actions({ children: [Button({ id: "approve", children: "Approve" })] });
-  +Actions([Button({ id: "approve", label: "Approve" })]);
+  ```ts
+  Actions({ children: [Button({ id: "approve", children: "Approve" })] }); // [!code --]
+  Actions([Button({ id: "approve", label: "Approve" })]); // [!code ++]
   ```
 
 - **Renderers.** `renderers.taskCard` receives a `TaskCard`; use `callState` and `callLabel` from `eve/events` to render calls. `SlackTaskCard` is `SlackCardMessage`. To restyle approval and question cards, use `renderers.interactionCard`. See [Restyle approval and question cards](../channels/slack#restyle-approval-and-question-cards).
@@ -497,25 +495,39 @@ The built-in channels' default handlers keep internal fields in channel state. T
 - **MCP.** An `input_required` status can mean a sign-in as well as an approval or a question. Answer approvals and questions with `responses: [{ interactionId, optionId?, text? }]`. A sign-in completes outside MCP. Direct `invokeTool` calls return the call's outcome instead of pausing the conversation. See [MCP](../channels/mcp).
 - **Vercel OIDC tool stubs.** `vercelOidc` from `eve/channels/auth` only authenticates. If a `subjects` entry sets `allowToolStubs`, switch to `eveVercelOidc` from `eve/channels/eve`, which takes the same options. Type a custom callback that returns `allowToolStubs` as `EveAuthFn` or `EveAuthResult`.
 
-```diff
--import { vercelOidc } from "eve/channels/auth";
-+import { eveVercelOidc } from "eve/channels/eve";
+```ts
+import { vercelOidc } from "eve/channels/auth"; // [!code --]
+import { eveVercelOidc } from "eve/channels/eve"; // [!code ++]
 
--vercelOidc({
-+eveVercelOidc({
-   subjects: [{ subject: evalRunner, allowToolStubs: true }],
- });
+vercelOidc({ // [!code --]
+eveVercelOidc({ // [!code ++]
+  subjects: [{ subject: evalRunner, allowToolStubs: true }],
+});
 ```
 
 ## Workflow imports
 
 Workflow tools import the Workflow SDK through eve. Import durable primitives from `eve/workflow` and run and hook operations from `eve/workflow/api`. Bare `workflow` and `workflow/*` imports fail the build.
 
-```diff
--import { createHook, createWebhook, sleep, FatalError, RetryableError, getWorkflowMetadata } from "workflow";
--import { start, getRun, resumeHook } from "workflow/api";
-+import { createHook, createWebhook, sleep, FatalError, RetryableError, getWorkflowMetadata } from "eve/workflow";
-+import { start, getRun, resumeHook } from "eve/workflow/api";
+```ts
+import {
+  createHook,
+  createWebhook,
+  sleep,
+  FatalError,
+  RetryableError,
+  getWorkflowMetadata,
+} from "workflow"; // [!code --]
+import { start, getRun, resumeHook } from "workflow/api"; // [!code --]
+import {
+  createHook,
+  createWebhook,
+  sleep,
+  FatalError,
+  RetryableError,
+  getWorkflowMetadata,
+} from "eve/workflow"; // [!code ++]
+import { start, getRun, resumeHook } from "eve/workflow/api"; // [!code ++]
 ```
 
 Only the exports shown above are public. Other Workflow SDK subpaths, helpers, and options aren't available, and the public ones use eve's own types:
@@ -525,10 +537,10 @@ Only the exports shown above are public. Other Workflow SDK subpaths, helpers, a
 - `start` and `getRun` return a `WorkflowRun` with only `runId`, `status`, `returnValue`, and `cancel()`.
 - `agent` and `ask` aren't exported. Use `defineWorkflowTool()` from `eve/tools`, and call `ctx.agent(target, input)` or `ctx.ask(request)` in its executor.
 
-```diff
--const hook = await getHookByToken(token);
--await resumeHook(hook, payload);
-+await resumeHook(token, payload);
+```ts
+const hook = await getHookByToken(token); // [!code --]
+await resumeHook(hook, payload); // [!code --]
+await resumeHook(token, payload); // [!code ++]
 ```
 
 Annotate with `WorkflowHook`, `WorkflowWebhook`, and `WorkflowMetadata` from `eve/workflow`, and `WorkflowRun` and `WorkflowRunStatus` from `eve/workflow/api`. Call `eve/workflow/api` operations from routes or `"use step"` helpers, not from replayed workflow bodies. Don't install another Workflow SDK; both entries use eve's bundled copy. You can remove `eve/workflow-modules` from tsconfig `types` and reference directives. See [Workflow imports](../tools/workflows#workflow-imports).
