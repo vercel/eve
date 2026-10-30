@@ -437,6 +437,8 @@ export class EveAcpAdapter {
     switch (event.type) {
       case "content.delta": {
         const { partId, kind, delta } = event.data;
+        // A draft's chunks wait: the harness's reply arrives as its own part.
+        if (event.data.draft === true) return;
         if (kind === "text") session.parts.set(partId, "text");
         else if (kind === "reasoning") session.parts.set(partId, "reasoning");
         const partKind = session.parts.get(partId);
@@ -450,6 +452,7 @@ export class EveAcpAdapter {
       }
       case "content.completed": {
         const { partId, kind, value } = event.data;
+        if (event.data.phase === "draft") return;
         if (session.parts.has(partId) || typeof value !== "string") return;
         if (kind !== "text" && kind !== "reasoning") return;
         session.parts.set(partId, kind === "text" ? "text" : "reasoning");

@@ -58,7 +58,7 @@ export default defineHarness((ctx) => {
 
 While the turn's tasks are working, `settle` can't end it. eve waits for the tasks and calls the model with their results. Under an output schema, the turn ends with the value the model delivered.
 
-In a turn under a harness, the model's answers are drafts (content phase `"draft"`) until the harness settles. A reply the harness rejects with a note is never posted as the turn's reply.
+In a turn under a harness, the model's answers are drafts until the harness settles: a draft part's first `content.delta` carries `draft: true`, and its `content.completed` has phase `"draft"`. The turn's reply arrives as its own part. eve's channels and the ACP server skip drafts and post only the reply, so a reply the harness rejects with a note is never posted.
 
 ## Call tools from the harness
 

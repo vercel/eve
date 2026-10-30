@@ -363,7 +363,12 @@ async function consumeStreamContent(
           await emitFn(
             announces
               ? {
-                  data: { delta: part.text, kind: "text", partId: messagePartId },
+                  data: {
+                    delta: part.text,
+                    kind: "text",
+                    partId: messagePartId,
+                    ...(options?.draft === true && { draft: true }),
+                  },
                   scope,
                   type: "content.delta",
                 }

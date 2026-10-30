@@ -20,6 +20,11 @@ export interface ContentDeltaData {
   readonly partId: string;
   /** On the announcing record only. */
   readonly kind?: ContentKind;
+  /**
+   * On the announcing record only, for text the agent's harness may not keep: a surface that
+   * posts replies waits for the turn's reply instead of streaming this part.
+   */
+  readonly draft?: true;
   readonly delta: string;
 }
 
@@ -70,7 +75,12 @@ export const contentProgressSchemas = {
   "content.delta": envelopeOf(
     "content.delta",
     conforming<ContentDeltaData>()(
-      z.object({ delta: z.string(), kind: z.string().optional(), partId: id }),
+      z.object({
+        delta: z.string(),
+        draft: z.literal(true).optional(),
+        kind: z.string().optional(),
+        partId: id,
+      }),
     ),
   ),
 };

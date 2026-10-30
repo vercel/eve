@@ -507,6 +507,9 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     },
     async "content.delta"({ data }, { channel }) {
       if (!channel.thread || !canStream(channel)) return;
+      // A draft isn't streamed: the harness's reply posts on its own, and later deltas of a part
+      // that never started streaming are skipped.
+      if (data.draft === true) return;
       // Only text streams: a part announces its kind with its first delta.
       const streaming = channel.state.streamPartId === data.partId;
       if (data.kind === undefined ? !streaming : data.kind !== "text") return;
@@ -558,6 +561,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     async "content.completed"({ data }, { channel, session }) {
       if (data.kind !== "text") return;
       const text = typeof data.value === "string" ? data.value : "";
+      if (data.phase === "draft") return;
       if (contentPhase(data.phase) === "narration") {
         channel.state.pendingToolCallMessage = text ? (firstNonEmptyLine(text) ?? null) : null;
         // Finalize the streamed anchor so it shows the complete pre-tool-call
