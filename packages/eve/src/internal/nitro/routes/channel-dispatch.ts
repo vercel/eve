@@ -230,8 +230,8 @@ async function buildRouteArgs(input: {
   const channelName = channel.name;
   const requestId = readVercelRequestId(event.req.headers);
   const requestIp = extractRequestIp(event, config);
-  // A bare `waitUntil(allSettled(tasks))` never rejects and so silently
-  // discards failed post-ack work (the Slack inbound dispatch).
+  // Each task gets its own catch, so failed post-ack work (such as the Slack
+  // inbound dispatch) is logged instead of dropped by the platform.
   const waitUntil = (task: Promise<unknown>) => {
     event.waitUntil(
       task.catch((error: unknown) => {
