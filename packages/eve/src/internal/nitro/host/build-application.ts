@@ -29,7 +29,7 @@ import {
   materializeVercelWorkflowFunctionOutput,
   normalizeEveVercelFunctionOutput,
 } from "#internal/workflow-bundle/vercel-workflow-output.js";
-import { createProductionApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
+import { createHostNitro } from "#internal/nitro/host/create-host-nitro.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { emitConnectManifest } from "#internal/external-resources.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
@@ -321,12 +321,16 @@ async function buildApplicationInWorkspace(
   const publicRoutePrefix = options.publicRoutePrefix ?? inferredPublicRoutePrefix;
   const sandboxScope = createProductionNitroArtifactsConfig(workspace.appRoot).sandboxScope;
   const nitro = await measureBuildPhase(profiler, "nitro.create", () =>
-    createProductionApplicationNitro(preparedHost, {
-      buildDir: workspace.nitro.buildDir,
-      outputDir: workspace.publication.output.stagedDir,
-      publicRoutePrefix,
-      workspaceMember: options.workspaceMember,
-    }),
+    createHostNitro(
+      preparedHost,
+      {
+        kind: "production",
+        preset: isVercelBuild ? "vercel" : undefined,
+        publicRoutePrefix,
+        workspaceMember: options.workspaceMember,
+      },
+      { buildDir: workspace.nitro.buildDir, outputDir: workspace.publication.output.stagedDir },
+    ),
   );
 
   try {

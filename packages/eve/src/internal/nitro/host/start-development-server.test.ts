@@ -71,7 +71,7 @@ const mocks = vi.hoisted(() => {
     createDevelopmentAuthoredRebuildCoordinator: vi.fn(async () => ({
       rebuild: vi.fn(),
     })),
-    createDevelopmentApplicationNitro: vi.fn(async () => nitro),
+    createHostNitro: vi.fn(async () => nitro),
     createDevServer: vi.fn(function createDevServerMock() {
       return devServer;
     }),
@@ -185,8 +185,8 @@ vi.mock("#internal/nitro/development-generation.js", () => ({
   discardDevelopmentGeneration: mocks.discardDevelopmentGeneration,
 }));
 
-vi.mock("./create-application-nitro.js", () => ({
-  createDevelopmentApplicationNitro: mocks.createDevelopmentApplicationNitro,
+vi.mock("./create-host-nitro.js", () => ({
+  createHostNitro: mocks.createHostNitro,
 }));
 
 vi.mock("./dev-authored-source-watcher.js", () => ({
@@ -655,7 +655,7 @@ describe("createDevelopmentServer", () => {
 
     await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow("permission denied");
 
-    expect(mocks.createDevelopmentApplicationNitro).not.toHaveBeenCalled();
+    expect(mocks.createHostNitro).not.toHaveBeenCalled();
   });
 
   it("reports a healthy recorded server when starting another server", async () => {
@@ -668,7 +668,7 @@ describe("createDevelopmentServer", () => {
         "To connect to the existing instance, run: pnpm exec eve remote connect --url http://localhost:2000/",
       ].join("\n"),
     );
-    expect(mocks.createDevelopmentApplicationNitro).not.toHaveBeenCalled();
+    expect(mocks.createHostNitro).not.toHaveBeenCalled();
   });
 
   it("reuses the active server recorded for the same app root when requested", async () => {
@@ -685,7 +685,7 @@ describe("createDevelopmentServer", () => {
 
     expect(attached.kind).toBe("existing");
     expect(attached.url).toBe(owner.url);
-    expect(mocks.createDevelopmentApplicationNitro).toHaveBeenCalledOnce();
+    expect(mocks.createHostNitro).toHaveBeenCalledOnce();
     expect(mocks.fetch).toHaveBeenCalledWith(new URL("/eve/v1/dev/runtime-artifacts", owner.url), {
       redirect: "error",
       signal: expect.any(AbortSignal),
@@ -781,7 +781,7 @@ describe("createDevelopmentServer", () => {
     await expect(
       startDevelopmentServer("/tmp/eve-test", { existing: "attach-if-unconfigured" }),
     ).rejects.toThrow("A dev server is already running for this eve agent.");
-    expect(mocks.createDevelopmentApplicationNitro).not.toHaveBeenCalled();
+    expect(mocks.createHostNitro).not.toHaveBeenCalled();
     expect(mocks.fetch).toHaveBeenCalledOnce();
   });
 
@@ -793,7 +793,7 @@ describe("createDevelopmentServer", () => {
     await expect(
       startDevelopmentServer("/tmp/eve-test", { existing: "attach-if-unconfigured" }),
     ).rejects.toThrow("A dev server is already running for this eve agent.");
-    expect(mocks.createDevelopmentApplicationNitro).not.toHaveBeenCalled();
+    expect(mocks.createHostNitro).not.toHaveBeenCalled();
     expect(mocks.fetch).toHaveBeenCalledOnce();
   });
 
@@ -814,7 +814,7 @@ describe("createDevelopmentServer", () => {
       },
     );
     expect(mocks.fetch).toHaveBeenCalledOnce();
-    expect(mocks.createDevelopmentApplicationNitro).toHaveBeenCalledOnce();
+    expect(mocks.createHostNitro).toHaveBeenCalledOnce();
     expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
 
     await server.close();
@@ -829,7 +829,7 @@ describe("createDevelopmentServer", () => {
     });
 
     expect(mocks.fetch).not.toHaveBeenCalled();
-    expect(mocks.createDevelopmentApplicationNitro).toHaveBeenCalledOnce();
+    expect(mocks.createHostNitro).toHaveBeenCalledOnce();
 
     await server.close();
   });
@@ -848,7 +848,7 @@ describe("createDevelopmentServer", () => {
     });
 
     expect(server.url).toBe("http://localhost:2000/");
-    expect(mocks.createDevelopmentApplicationNitro).toHaveBeenCalledOnce();
+    expect(mocks.createHostNitro).toHaveBeenCalledOnce();
 
     if (server.kind !== "started") {
       throw new Error("Expected to start the server for the requested app root.");

@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
     workerData: {},
   })),
   computeDevelopmentHostFingerprint: vi.fn(async () => "host-1"),
-  createDevelopmentApplicationNitro: vi.fn(async () => ({})),
+  createHostNitro: vi.fn(async () => ({})),
   discardDevelopmentGeneration: vi.fn(async () => undefined),
   environmentCommit: vi.fn(),
   environmentRollback: vi.fn(),
@@ -38,8 +38,8 @@ vi.mock("#internal/nitro/host/prepare-application-host.js", () => ({
 vi.mock("#internal/nitro/host/dev-host-fingerprint.js", () => ({
   computeDevelopmentHostFingerprint: mocks.computeDevelopmentHostFingerprint,
 }));
-vi.mock("#internal/nitro/host/create-application-nitro.js", () => ({
-  createDevelopmentApplicationNitro: mocks.createDevelopmentApplicationNitro,
+vi.mock("#internal/nitro/host/create-host-nitro.js", () => ({
+  createHostNitro: mocks.createHostNitro,
 }));
 vi.mock("#internal/nitro/host/dev-host-candidate.js", () => ({
   buildDevelopmentHostCandidate: mocks.buildDevelopmentHostCandidate,
@@ -315,7 +315,7 @@ describe("transactional authored rebuild coordinator", () => {
       );
 
       expect(mocks.computeDevelopmentHostFingerprint).toHaveBeenCalledOnce();
-      expect(mocks.createDevelopmentApplicationNitro).not.toHaveBeenCalled();
+      expect(mocks.createHostNitro).not.toHaveBeenCalled();
       expect(mocks.buildDevelopmentHostCandidate).not.toHaveBeenCalled();
       expect(mocks.removeDevelopmentHostWorkspace).toHaveBeenCalledWith(candidate.workspace);
       expect(mocks.discardDevelopmentGeneration).toHaveBeenCalledWith(candidate.generation);

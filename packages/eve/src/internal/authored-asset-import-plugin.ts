@@ -32,7 +32,7 @@ export function createAuthoredAssetImportPlugin(input: {
    * installed dependency imports stay with the host bundler.
    */
   readonly authoredSourceOnly?: boolean;
-}): Record<string, unknown> {
+}) {
   const packageRoot = toCanonicalPath(input.packageRoot);
   const handles = (path: string): boolean =>
     input.authoredSourceOnly !== true || (isAbsolute(path) && !isNodeModulesPath(path));
