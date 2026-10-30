@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire, isBuiltin } from "node:module";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
@@ -9,6 +9,7 @@ import {
   resolvePackageRoot,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 export const RESOLVE_EXTENSIONS = [
   ".ts",
@@ -517,13 +518,4 @@ function toCanonicalPath(path: string): string {
   } catch {
     return resolve(path);
   }
-}
-
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
-
-  return (
-    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
-  );
 }

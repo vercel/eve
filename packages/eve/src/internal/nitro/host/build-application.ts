@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { build as buildNitro, copyPublicAssets, prepare, prerender } from "nitro/builder";
 import type { Nitro } from "nitro/types";
@@ -50,6 +50,7 @@ import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-arti
 import { isObject } from "#shared/guards.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { normalizePublicRoutePrefix } from "#shared/public-route-prefix.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 function trimTrailingSlash(path: string): string {
   return path.replace(/[\\/]+$/, "");
@@ -63,19 +64,11 @@ async function measureBuildPhase<T>(
   return profiler === undefined ? operation() : profiler.measure(name, operation);
 }
 
-function isPathInside(directoryPath: string, candidatePath: string): boolean {
-  const relativePath = relative(directoryPath, candidatePath);
-  return (
-    relativePath.length === 0 ||
-    (!relativePath.startsWith(`..${sep}`) && relativePath !== ".." && !isAbsolute(relativePath))
-  );
-}
-
 function assertProfileOutputOutsideBuildOutput(
   profileOutputPath: string | undefined,
   outputDirectory: string,
 ): void {
-  if (profileOutputPath !== undefined && isPathInside(outputDirectory, profileOutputPath)) {
+  if (profileOutputPath !== undefined && isPathInsideOrEqual(profileOutputPath, outputDirectory)) {
     throw new Error(
       `Build profile path ${profileOutputPath} must be outside the published output directory ${outputDirectory}.`,
     );

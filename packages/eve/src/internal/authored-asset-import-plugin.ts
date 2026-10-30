@@ -1,8 +1,9 @@
 import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, extname, isAbsolute, resolve } from "node:path";
 
 import { findAuthoredPackageRoot, isNodeModulesPath } from "#internal/authored-package-boundary.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 const AUTHORED_ASSET_CODE_EXTENSIONS = [
   ".ts",
@@ -111,11 +112,6 @@ export function createAuthoredAssetImportPlugin(input: {
       },
     },
   };
-}
-
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const relativePath = relative(directory, resolve(path));
-  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
 
 function toCanonicalPath(path: string): string {

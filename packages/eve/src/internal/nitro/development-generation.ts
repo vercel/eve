@@ -10,7 +10,7 @@ import {
   stageDevelopmentRuntimeArtifactsSnapshot,
   type DevelopmentRuntimeArtifactsSnapshot,
 } from "#internal/nitro/dev-runtime-artifacts.js";
-import { isPathInsideOrEqual } from "#internal/nitro/dev-runtime-source-snapshot-local-roots.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 export interface DevelopmentGeneration extends DevelopmentRuntimeArtifactsSnapshot {
   readonly authoredWorkflowModules?: AuthoredWorkflowModules;

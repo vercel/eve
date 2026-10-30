@@ -11,7 +11,7 @@ import {
   resolveConfiguredExternalDependency,
 } from "#internal/authored-package-boundary.js";
 import type { RolldownOutputAsset, RolldownOutputChunk } from "#internal/bundler/nitro-rolldown.js";
-import { isPathInsideOrEqual } from "#internal/nitro/dev-runtime-source-snapshot-local-roots.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 interface ExternalImport {
   readonly chunk: string;

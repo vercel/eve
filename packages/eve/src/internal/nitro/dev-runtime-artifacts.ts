@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { resolveDevelopmentStateDirectory } from "#internal/application/dev-environment.js";
@@ -21,6 +21,7 @@ import {
 import { renameWithTransientBusyRetry } from "#shared/rename-with-retry.js";
 import { resolvePackageRoot } from "#internal/application/package.js";
 import { resolveDevelopmentRuntimeArtifactsSnapshotsDirectory } from "#internal/nitro/dev-runtime-generation-metadata.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 const DEV_RUNTIME_ARTIFACTS_DIRECTORY = "dev-runtime";
 const DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA = "generation.json";
@@ -618,13 +619,4 @@ function collectManifestRootPaths(value: unknown): string[] {
   }
 
   return paths;
-}
-
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
-
-  return (
-    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
-  );
 }
