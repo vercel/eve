@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createKernel } from "#harness/tool-loop.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { foldingHandler, withOpenTurn } from "#internal/testing/session-machine.js";
 
@@ -25,7 +25,7 @@ describe("tool-result media staging", () => {
         { type: "finish", finishReason: { unified: "tool-calls", raw: undefined }, usage },
       ]),
     }));
-    const step = createToolLoopHarness({
+    const step = createKernel({
       handleEvent: foldingHandler(),
       resolveModel: async () => new MockLanguageModelV4({ doStream }),
       tools: new Map([

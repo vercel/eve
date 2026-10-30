@@ -3,14 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { eventsOf } from "#harness/publication.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createKernel } from "#harness/tool-loop.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
-import { nativeNext, nativeProgram } from "./native.js";
-import type { Next, Program, ProgramContext } from "./program.js";
+import { nativeNext, nativePolicy } from "./native.js";
+import type { Next, Policy, PolicyContext } from "./policy.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -80,9 +80,9 @@ function lastUserText(prompt: Prompt): string {
   return message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
 }
 
-/** Runs one turn of Alice's question under `program`, answering each model call with `answers`. */
+/** Runs one turn of Alice's question under `policy`, answering each model call with `answers`. */
 async function runTurn(
-  program: Program,
+  policy: Policy,
   answers: readonly unknown[],
   options: {
     readonly outputSchema?: HarnessSession["outputSchema"];
@@ -119,7 +119,7 @@ async function runTurn(
   let stepped: StepResult | undefined;
   await contextStorage.run(new ContextContainer(), async () => {
     const fold = foldingHandler();
-    stepped = await createToolLoopHarness({
+    stepped = await createKernel({
       ...(options.compactOnly === true && { compactOnly: true }),
       handleEvent: async (publication, messages) => {
         const facts = eventsOf(publication);
@@ -127,7 +127,7 @@ async function runTurn(
         issues.push(...checker.check({ at, facts }, position++));
         await fold(publication, messages);
       },
-      program,
+      policy,
       resolveModel: async () => model,
       tools: new Map(),
     })(
@@ -140,9 +140,7 @@ async function runTurn(
 }
 
 /** eve's own loop, except that `review` can send a settling output back to the model. */
-function reviewing(
-  review: (output: unknown, continuations: number) => string | undefined,
-): Program {
+function reviewing(review: (output: unknown, continuations: number) => string | undefined): Policy {
   return (ctx) => ({
     next: (): Next => {
       const next = nativeNext(ctx);
@@ -153,8 +151,8 @@ function reviewing(
   });
 }
 
-describe("session programs", () => {
-  it("continues the turn with a program's note, and the turn settles once with the later reply", async () => {
+describe("harness policies", () => {
+  it("continues the turn with a policy's note, and the turn settles once with the later reply", async () => {
     const seen: unknown[] = [];
     const { events, issues, prompts, result } = await runTurn(
       reviewing((output, continuations) => {
@@ -228,7 +226,7 @@ describe("session programs", () => {
     expect(result.settledTurn).toEqual({ output: "Fourth draft." });
   });
 
-  it("fails the turn with a generic error when the program throws", async () => {
+  it("fails the turn with a generic error when the policy throws", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     const { events, issues, result } = await runTurn(
@@ -240,7 +238,7 @@ describe("session programs", () => {
       ["Two court cases back it."],
     );
 
-    expect(result.settledTurn).toEqual({ isError: true, output: "The agent's program failed." });
+    expect(result.settledTurn).toEqual({ isError: true, output: "The agent's harness failed." });
     expect(events.filter((event) => event.type === "turn.settled")).toMatchObject([
       { data: { outcome: "failed" } },
     ]);
@@ -248,7 +246,7 @@ describe("session programs", () => {
     expect(issues).toEqual([]);
   });
 
-  it("fails the turn when a program calls the model again with nothing new to read", async () => {
+  it("fails the turn when a policy calls the model again with nothing new to read", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     const { events, result } = await runTurn(
@@ -257,7 +255,7 @@ describe("session programs", () => {
     );
 
     expect(events.filter((event) => event.type === "model.started")).toHaveLength(1);
-    expect(result.settledTurn).toEqual({ isError: true, output: "The agent's program failed." });
+    expect(result.settledTurn).toEqual({ isError: true, output: "The agent's harness failed." });
   });
 });
 
@@ -273,16 +271,16 @@ const older: HarnessSession["history"] = Array.from({ length: 6 }, (_, index) =>
 
 /** eve's own loop, with `history` deciding what the model reads about the past. */
 function withHistory(
-  history: (ctx: ProgramContext) => ProgramContext["history"] | undefined,
-): Program {
-  return (ctx) => ({ ...nativeProgram(ctx), history: () => history(ctx) });
+  history: (ctx: PolicyContext) => PolicyContext["history"] | undefined,
+): Policy {
+  return (ctx) => ({ ...nativePolicy(ctx), history: () => history(ctx) });
 }
 
 describe("eve's own loop", () => {
   it("keeps the turn's input in history when the model call fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const { result } = await runTurn(nativeProgram, [new Error("upstream unavailable")]);
+    const { result } = await runTurn(nativePolicy, [new Error("upstream unavailable")]);
 
     expect(result.settledTurn).toMatchObject({ isError: true });
     expect(result.session.history).toMatchObject([
@@ -291,7 +289,7 @@ describe("eve's own loop", () => {
   });
 });
 
-describe("a session program's history", () => {
+describe("a harness policy's history", () => {
   it("is asked before every model call, with the call's size", async () => {
     const seen: unknown[] = [];
     const { events, result } = await runTurn(
@@ -321,7 +319,7 @@ describe("a session program's history", () => {
     expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
       { data: { kind: "compaction", outcome: "completed" } },
     ]);
-    // No summary run: the program's history needed none.
+    // No summary run: the policy's history needed none.
     expect(
       events.filter((event) => event.type === "model.requested" && "changeId" in event.data.owner),
     ).toEqual([]);
@@ -340,7 +338,7 @@ describe("a session program's history", () => {
       { compactOnly: true, history: older },
     );
 
-    // The second is eve checking that the program keeps what it returned.
+    // The second is eve checking that the policy keeps what it returned.
     expect(seen).toEqual([
       { compact: true, turn: null },
       { compact: undefined, turn: null },
@@ -396,7 +394,7 @@ describe("a session program's history", () => {
     ]);
   });
 
-  it("fails the turn with a generic error when the program's history throws", async () => {
+  it("fails the turn with a generic error when the policy's history throws", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     const { events, prompts, result } = await runTurn(

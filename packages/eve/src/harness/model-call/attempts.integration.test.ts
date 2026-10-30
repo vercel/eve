@@ -2,7 +2,7 @@ import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createKernel } from "#harness/tool-loop.js";
 import type { HarnessSession } from "#harness/types.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -60,7 +60,7 @@ async function runTurn(doStream: MockLanguageModelV3["doStream"]): Promise<Sessi
     history: [],
     sessionId: "attempts",
   };
-  await createToolLoopHarness({
+  await createKernel({
     handleEvent: eachEvent(async (event) => {
       events.push(event);
     }),

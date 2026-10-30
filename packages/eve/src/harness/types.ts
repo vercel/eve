@@ -17,7 +17,7 @@ import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentReasoningDefinition, SessionUsageLimit } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
-import type { Program } from "#harness/program/program.js";
+import type { Policy } from "#harness/policy/policy.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
@@ -300,7 +300,7 @@ export type HandleEventFn = (
 /**
  * Dependencies injected into the tool-loop harness at construction time.
  */
-export interface ToolLoopHarnessConfig {
+export interface KernelConfig {
   readonly steeringSignal?: AbortSignal;
   /** Cancellation signal for the active turn. */
   readonly abortSignal?: AbortSignal;
@@ -319,7 +319,7 @@ export interface ToolLoopHarnessConfig {
   readonly controlDelivery?: ControlDelivery;
   readonly handleEvent?: HandleEventFn;
   /** What decides the turn's next step. Absent, eve's own loop: production installs no other. */
-  readonly program?: Program;
+  readonly policy?: Policy;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.

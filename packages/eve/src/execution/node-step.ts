@@ -4,7 +4,7 @@ import { isFrameworkTool } from "#tools/provided/framework-tool.js";
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createKernel } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
@@ -29,7 +29,7 @@ import {
   resolveWebSearchActivityLabel,
   WEB_SEARCH_TOOL_NAME,
 } from "#harness/provider-tool-schemas.js";
-import type { ToolLoopHarnessConfig } from "#harness/types.js";
+import type { KernelConfig } from "#harness/types.js";
 
 const log = createLogger("execution.node-step");
 
@@ -60,20 +60,20 @@ interface CreateExecutionNodeStepInput {
   readonly clearOnly?: boolean;
   /** Runs only a forced context compaction and returns to the parked session. */
   readonly compactOnly?: boolean;
-  readonly controlDelivery?: ToolLoopHarnessConfig["controlDelivery"];
+  readonly controlDelivery?: KernelConfig["controlDelivery"];
   /**
    * Runtime constructor used by the subagent tool executor to start
    * delegated child runs on the same workflow runtime as the parent.
    */
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
-  readonly signInCompletions?: ToolLoopHarnessConfig["signInCompletions"];
-  readonly typedAnswers?: ToolLoopHarnessConfig["typedAnswers"];
+  readonly signInCompletions?: KernelConfig["signInCompletions"];
+  readonly typedAnswers?: KernelConfig["typedAnswers"];
   readonly instrumentation: ExecutionInstrumentation | undefined;
-  readonly titleAttributeWrite?: ToolLoopHarnessConfig["titleAttributeWrite"];
+  readonly titleAttributeWrite?: KernelConfig["titleAttributeWrite"];
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
-  readonly sessionUsageLimit?: ToolLoopHarnessConfig["sessionUsageLimit"];
+  readonly sessionUsageLimit?: KernelConfig["sessionUsageLimit"];
 }
 
 /**
@@ -85,7 +85,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   const tools = createNodeHarnessTools({ node: input.node });
   const instrumentation = input.instrumentation;
   const sessionInstrumentation = instrumentation?.prepareExecution();
-  const step = createToolLoopHarness({
+  const step = createKernel({
     steeringSignal: input.steeringSignal,
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,

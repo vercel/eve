@@ -6,8 +6,8 @@ import type { ApprovalContext } from "#approval/definition.js";
 import { contextStorage } from "#context/container.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { runtimeWait } from "#harness/session-machine/view.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
-import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import { createKernel } from "#harness/tool-loop.js";
+import type { HarnessSession, KernelConfig } from "#harness/types.js";
 import {
   createApprovalContext,
   textStreamResult,
@@ -54,7 +54,7 @@ function setup(
     provider: "eve-integration-mock",
   });
   const recorder = createProjectionRecorder();
-  const config: ToolLoopHarnessConfig = {
+  const config: KernelConfig = {
     capabilities: { requestInput: true },
     // Each publication commits as one line, as the session's sink writes it.
     handleEvent: async (publication) => {
@@ -75,12 +75,9 @@ function setup(
     history: [],
     sessionId: "approved-call-recheck",
   };
-  const step = (
-    current: HarnessSession,
-    input?: Parameters<ReturnType<typeof createToolLoopHarness>>[1],
-  ) =>
+  const step = (current: HarnessSession, input?: Parameters<ReturnType<typeof createKernel>>[1]) =>
     contextStorage.run(recorder.enter(createApprovalContext()), () =>
-      createToolLoopHarness(config)(current, input),
+      createKernel(config)(current, input),
     );
   return { events, session, step };
 }

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { nativeNext } from "./native.js";
-import type { ModelStep, ProgramTurn } from "./program.js";
+import type { ModelStep, PolicyTurn } from "./policy.js";
 
-function after(lastStep: Partial<ModelStep>, turn: Partial<ProgramTurn> = {}) {
+function after(lastStep: Partial<ModelStep>, turn: Partial<PolicyTurn> = {}) {
   return nativeNext({
     turn: {
       continuations: 0,

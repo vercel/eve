@@ -10,7 +10,7 @@ import {
 import { estimateTokens } from "#harness/token-estimate.js";
 
 /**
- * A program's history, checked before it replaces the session's: every user message keeps its
+ * A policy's history, checked before it replaces the session's: every user message keeps its
  * kind, no call loses its result, a checkpoint opens the history, a running turn's input stays, and
  * it fits the model's window.
  */
@@ -28,21 +28,21 @@ export function checkHistory(
   try {
     messages = validateHarnessModelMessages(after);
   } catch {
-    throw new Error("The session program's history has a user message without a kind.");
+    throw new Error("The harness policy's history has a user message without a kind.");
   }
   const was = callsAndResults(before);
   const now = callsAndResults(messages);
   for (const callId of now.calls) {
     if (!now.results.has(callId) && (was.results.has(callId) || !was.calls.has(callId))) {
       throw new Error(
-        `The session program's history keeps tool call ${callId} but not its result. Keep or remove a call together with its result.`,
+        `The harness policy's history keeps tool call ${callId} but not its result. Keep or remove a call together with its result.`,
       );
     }
   }
   for (const callId of now.results) {
     if (!now.calls.has(callId)) {
       throw new Error(
-        `The session program's history keeps the result of tool call ${callId} but not the call. Keep or remove a call together with its result.`,
+        `The harness policy's history keeps the result of tool call ${callId} but not the call. Keep or remove a call together with its result.`,
       );
     }
   }
@@ -51,7 +51,7 @@ export function checkHistory(
   );
   if (checkpoints.some((index) => index !== 0) || checkpoints.length > 1) {
     throw new Error(
-      "The session program's history has a checkpoint after other messages. A checkpoint goes first.",
+      "The harness policy's history has a checkpoint after other messages. A checkpoint goes first.",
     );
   }
   const turnInput = before.findLast(
@@ -63,13 +63,13 @@ export function checkHistory(
     !messages.some((message) => JSON.stringify(message) === JSON.stringify(turnInput))
   ) {
     throw new Error(
-      "The session program's history drops the turn's input. Keep the latest user message: the model answers it next.",
+      "The harness policy's history drops the turn's input. Keep the latest user message: the model answers it next.",
     );
   }
   const size = estimateTokens(messages);
   if (size > input.limit) {
     throw new CompactionOverLimitError(
-      `The session program's history is ~${Math.round(size)} tokens; the limit is ~${Math.round(input.limit)}.`,
+      `The harness policy's history is ~${Math.round(size)} tokens; the limit is ~${Math.round(input.limit)}.`,
     );
   }
   return messages;

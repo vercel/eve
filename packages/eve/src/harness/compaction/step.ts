@@ -29,9 +29,9 @@ import {
   getInputTokenCount,
 } from "#harness/compaction/engine.js";
 import { takeCompactionCaptureFailure } from "#reactions/kinds/memory.js";
-import { programHistory } from "#harness/program/kernel.js";
-import { checkHistory } from "#harness/program/check.js";
-import type { HistorySize, Summarize } from "#harness/program/program.js";
+import { policyHistory } from "#harness/policy/kernel.js";
+import { checkHistory } from "#harness/policy/check.js";
+import type { HistorySize, Summarize } from "#harness/policy/policy.js";
 import { checksHistory } from "#harness/session-machine/history.js";
 import { isDeepStrictEqual } from "node:util";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -83,7 +83,7 @@ export function assertFixedPartFits(input: {
 }
 
 /**
- * `session.compact()`: asks the session's program for the history with a compaction requested,
+ * `session.compact()`: asks the session's policy for the history with a compaction requested,
  * then the session waits. The control is a delivery: it's admitted first, and applied once the
  * history is decided.
  */
@@ -137,7 +137,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
 }
 
 /**
- * Asks the session's program for the history the next model call reads, and commits it: the
+ * Asks the session's policy for the history the next model call reads, and commits it: the
  * messages the call reads, or `undefined` when the history stays. A failure is rethrown, after settling any change it opened; `step.session` counts the summary calls that
  * finished.
  */
@@ -227,10 +227,10 @@ function lazyChange(
 }
 
 /**
- * The program's history for the next call, committed. Unchanged, nothing happens. Changed only
+ * The policy's history for the next call, committed. Unchanged, nothing happens. Changed only
  * where the model hasn't read yet, it joins the history as new messages do. Changed where the
  * model has read, it's checked, then rewrites the history under a compaction change. eve's
- * summaries apply as they are. Under `eve dev` and in tests, the program must return the same
+ * summaries apply as they are. Under `eve dev` and in tests, the policy must return the same
  * history when asked again about what it returned.
  */
 async function decideHistory(
@@ -292,7 +292,7 @@ async function decideHistory(
   const before = validateHarnessModelMessages(input.messages);
   let messages: HarnessModelMessage[] | undefined;
   try {
-    const history = await programHistory(step, {
+    const history = await policyHistory(step, {
       compact: input.compact,
       messages: before,
       size: input.size,
@@ -394,7 +394,7 @@ function fitLimit(input: {
 }
 
 /**
- * Under `eve dev` and in tests, a program asked about the history it returned returns it again:
+ * Under `eve dev` and in tests, a policy asked about the history it returned returns it again:
  * one that keeps rewriting the past would rewrite it on every call.
  */
 async function assertFixpoint(
@@ -403,19 +403,19 @@ async function assertFixpoint(
   input: { readonly requestEnvelopeTokens: number | undefined; readonly size: HistorySize },
 ): Promise<void> {
   if (!checksHistory()) return;
-  const again = await programHistory(step, {
+  const again = await policyHistory(step, {
     messages: history,
     size: {
       ...input.size,
       tokens: estimateTokens(history) + (input.requestEnvelopeTokens ?? 0),
     },
     summarize: () => {
-      throw new Error("The session program's history summarizes what it already returned.");
+      throw new Error("The harness policy's history summarizes what it already returned.");
     },
   });
   if (again !== history && !isDeepStrictEqual(again, history)) {
     throw new Error(
-      "The session program's history changes what it returned when asked again. Return the history as it is when nothing needs to change.",
+      "The harness policy's history changes what it returned when asked again. Return the history as it is when nothing needs to change.",
     );
   }
 }

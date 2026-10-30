@@ -5,12 +5,12 @@ import {
   createNodeEsmCompatBannerPlugin,
 } from "#internal/node-esm-compat-banner.js";
 
-type TestProgram = Parameters<typeof buildNodeEsmCompatBanner>[0];
+type TestPolicy = Parameters<typeof buildNodeEsmCompatBanner>[0];
 type TestPlugin = ReturnType<typeof createNodeEsmCompatBannerPlugin>;
 
-const EMPTY_PROGRAM: TestProgram = { body: [] };
+const EMPTY_PROGRAM: TestPolicy = { body: [] };
 
-function programWithTopLevelBindings(...names: string[]): TestProgram {
+function programWithTopLevelBindings(...names: string[]): TestPolicy {
   return {
     body: [
       {
@@ -24,7 +24,7 @@ function programWithTopLevelBindings(...names: string[]): TestProgram {
 function renderChunk(
   plugin: TestPlugin,
   code: string,
-  program: TestProgram = EMPTY_PROGRAM,
+  program: TestPolicy = EMPTY_PROGRAM,
   chunk?: { readonly fileName?: string },
 ) {
   return plugin.renderChunk.call({ parse: () => program }, code, chunk);

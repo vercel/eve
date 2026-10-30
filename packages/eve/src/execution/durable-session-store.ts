@@ -67,7 +67,7 @@ export interface DurableSession {
   readonly compaction?: CompactionState;
 }
 
-/** Session program memory persisted atomically with Workflow step results. */
+/** Harness policy memory persisted atomically with Workflow step results. */
 export interface DurableSessionSnapshot {
   readonly session: DurableSession;
 }
@@ -90,7 +90,7 @@ export function createDurableSessionValues(session: HarnessSession): {
   return { history: session.history, sessionState: createDurableSessionState({ session }) };
 }
 
-/** Replaces session program memory and refreshes its workflow projections. */
+/** Replaces harness policy memory and refreshes its workflow projections. */
 export function replaceDurableSessionSnapshot(input: {
   readonly session: DurableSession;
   readonly state: DurableSessionState;

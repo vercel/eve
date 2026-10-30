@@ -9,36 +9,36 @@ import type { StepResult } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
 import type { JsonValue } from "#shared/json.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
-import { nativeHistory, nativeNext, nativeProgram } from "./native.js";
+import { nativeHistory, nativeNext, nativePolicy } from "./native.js";
 import {
   force,
   type HistorySize,
   type ModelStep,
   type Next,
-  type Program,
-  type ProgramContext,
+  type Policy,
+  type PolicyContext,
   type Summarize,
-} from "./program.js";
+} from "./policy.js";
 
-// The kernel side of a program: eve asks it where it decides, then applies the answer through
-// the rules no program can change. A turn doesn't end while its tasks work, a note needs to say
+// The kernel side of a policy: eve asks it where it decides, then applies the answer through
+// the rules no policy can change. A turn doesn't end while its tasks work, a note needs to say
 // something, a turn gets a bounded number of notes, a history passes eve's checks, and a failing
-// program fails with a message that doesn't reveal why. A field the program leaves out is eve's.
+// policy fails with a message that doesn't reveal why. A field the policy leaves out is eve's.
 
 const log = createLogger("harness.program");
 
-/** How many notes a program can add to one turn. At the cap, eve's own loop decides. */
+/** How many notes a policy can add to one turn. At the cap, eve's own loop decides. */
 export const MAX_CONTINUATIONS = 3;
 
-/** Marks the notes a program adds, with the turn they continued. */
+/** Marks the notes a policy adds, with the turn they continued. */
 const NOTE_KEY = "eve.program";
 
-const PROGRAM_FAILED = {
-  code: "PROGRAM_FAILED",
-  message: "The agent's program failed.",
+const HARNESS_FAILED = {
+  code: "HARNESS_FAILED",
+  message: "The agent's harness failed.",
 } as const;
 
-/** Ends the turn with a program's output, through eve's own checks. */
+/** Ends the turn with a policy's output, through eve's own checks. */
 export type Settle = (step: Step, output: JsonValue | null) => Promise<StepResult>;
 
 /** What eve knows where it decides, beyond the session itself. */
@@ -55,7 +55,7 @@ const NO_SUMMARIZER: Summarize = () => {
   throw new Error("eve summarizes the history only where it asks for the history.");
 };
 
-function programContext(step: Step, decision: Decision): ProgramContext {
+function policyContext(step: Step, decision: Decision): PolicyContext {
   const turnId = activeTurnIdOf(step.view().projection);
   const history = decision.history ?? step.session.history;
   return {
@@ -77,31 +77,31 @@ function programContext(step: Step, decision: Decision): ProgramContext {
   };
 }
 
-function programOf(step: Step): Program {
-  return step.config.program ?? nativeProgram;
+function policyOf(step: Step): Policy {
+  return step.config.policy ?? nativePolicy;
 }
 
-/** Asks the session's program what the turn does after a model step, and does it. */
+/** Asks the session's policy what the turn does after a model step, and does it. */
 export async function decideAfterModel(
   step: Step,
   lastStep: ModelStep,
   settle: Settle,
 ): Promise<StepResult> {
-  const ctx = programContext(step, { lastStep });
+  const ctx = policyContext(step, { lastStep });
   let next: Next;
   try {
-    next = (await force(programOf(step)(ctx).next)) ?? nativeNext(ctx);
+    next = (await force(policyOf(step)(ctx).next)) ?? nativeNext(ctx);
   } catch (error) {
     throwIfTurnAborted(step.config.abortSignal);
-    log.error("the session program threw; failing the turn", { error, turnId: ctx.turn?.id });
-    return await failProgram(step);
+    log.error("the harness policy threw; failing the turn", { error, turnId: ctx.turn?.id });
+    return await failPolicy(step);
   }
   return await applyNext(step, ctx, next, settle);
 }
 
 async function applyNext(
   step: Step,
-  ctx: ProgramContext,
+  ctx: PolicyContext,
   next: Next,
   settle: Settle,
 ): Promise<StepResult> {
@@ -142,11 +142,11 @@ async function applyNext(
 }
 
 /**
- * The history the session's program says the model reads about the past, or eve's own when it
- * leaves that out. A program that throws fails with a message that doesn't reveal why; a failure of
+ * The history the session's policy says the model reads about the past, or eve's own when it
+ * leaves that out. A policy that throws fails with a message that doesn't reveal why; a failure of
  * eve's summarizer is its own.
  */
-export async function programHistory(
+export async function policyHistory(
   step: Step,
   input: {
     readonly messages: readonly HarnessModelMessage[];
@@ -171,40 +171,40 @@ export async function programHistory(
       thresholdPercent: compaction.thresholdPercent,
     }),
   };
-  const ctx = programContext(step, {
+  const ctx = policyContext(step, {
     ...(input.compact !== undefined && { compact: input.compact }),
     history: input.messages,
     size: input.size,
     summarize,
   });
   try {
-    return (await force(programOf(step)(ctx).history)) ?? (await nativeHistory(ctx, options));
+    return (await force(policyOf(step)(ctx).history)) ?? (await nativeHistory(ctx, options));
   } catch (error) {
     throwIfTurnAborted(step.config.abortSignal);
     if (typeof error === "object" && error !== null && failures.has(error)) throw error;
-    log.error("the session program's history threw", { error, turnId: ctx.turn?.id });
-    throw new Error(PROGRAM_FAILED.message, { cause: error });
+    log.error("the harness policy's history threw", { error, turnId: ctx.turn?.id });
+    throw new Error(HARNESS_FAILED.message, { cause: error });
   }
 }
 
 async function invalid(step: Step, reason: string): Promise<StepResult> {
-  log.error(`the session program ${reason}; failing the turn`, {
+  log.error(`the harness policy ${reason}; failing the turn`, {
     turnId: step.position().turnId,
   });
-  return await failProgram(step);
+  return await failPolicy(step);
 }
 
-async function failProgram(step: Step): Promise<StepResult> {
+async function failPolicy(step: Step): Promise<StepResult> {
   step.session = { ...clearTurnClientContextState(step.session), outputSchema: undefined };
-  await step.apply(fail(step.view(), PROGRAM_FAILED));
+  await step.apply(fail(step.view(), HARNESS_FAILED));
   return {
     next: null,
     session: step.session,
-    settledTurn: { isError: true, output: PROGRAM_FAILED.message },
+    settledTurn: { isError: true, output: HARNESS_FAILED.message },
   };
 }
 
-/** The notes programs added to this turn, which compaction may have summarized away. */
+/** The notes policies added to this turn, which compaction may have summarized away. */
 function continuationsOf(history: readonly HarnessModelMessage[], turnId: string): number {
   return history.filter(
     (message) =>

@@ -29,7 +29,7 @@ describe("durable session checkpoints", () => {
     expect(state.snapshot.session).not.toHaveProperty("history");
   });
 
-  it("refreshes projections when replacing session program memory", () => {
+  it("refreshes projections when replacing harness policy memory", () => {
     const state = createDurableSessionState({
       session: buildSession({ sessionId: "session", continuationToken: "old" }),
     });

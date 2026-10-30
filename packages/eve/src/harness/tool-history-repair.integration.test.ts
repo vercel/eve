@@ -6,7 +6,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { createUserMessage } from "#harness/messages.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { repairToolHistory } from "#harness/tool-history-repair.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createKernel } from "#harness/tool-loop.js";
 import { setTurnClientContextState } from "#harness/turn-client-context.js";
 import type { HarnessSession } from "#harness/types.js";
 import { foldingHandler, withOpenTurn } from "#internal/testing/session-machine.js";
@@ -66,7 +66,7 @@ describe("saved tool history", () => {
         inputSchema: jsonSchema({ type: "object" }),
         execute,
       };
-      const step = createToolLoopHarness({
+      const step = createKernel({
         handleEvent: foldingHandler(),
         resolveModel: async () => new MockLanguageModelV4({ doStream }),
         tools: new Map([["work", tool]]),

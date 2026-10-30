@@ -600,7 +600,7 @@ export default workflow({ maxSubagents: 20 });
 ```
 
 The model supplies an async function body through the tool's `js` input. Each call runs as a
-[task](#run-calls-as-tasks-task), so the program's return value reaches the model in a
+[task](#run-calls-as-tasks-task), so the policy's return value reaches the model in a
 `task.result` message.
 
 The program can only call `ctx.agent(name, { message, outputSchema? })`. It sends the message to a

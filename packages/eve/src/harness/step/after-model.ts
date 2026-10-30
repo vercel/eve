@@ -26,8 +26,8 @@ import {
 } from "#harness/action-result-helpers.js";
 import { askStepApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
 import { hasQueuedTurnInput, park } from "#harness/step/park.js";
-import { decideAfterModel } from "#harness/program/kernel.js";
-import type { ModelStep } from "#harness/program/program.js";
+import { decideAfterModel } from "#harness/policy/kernel.js";
+import type { ModelStep } from "#harness/policy/policy.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
@@ -177,7 +177,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       : responseTail;
   step.session = changeHistory(step.session, { extend: [...promptMessages, ...historyTail] });
 
-  // Two continues are eve's own, before any program decides: a provider-run call's outcome the
+  // Two continues are eve's own, before any policy decides: a provider-run call's outcome the
   // model hasn't answered, and input that joined the turn while the model ran.
   const delivered = calledFinalOutput && !finalOutputRejected;
   if (

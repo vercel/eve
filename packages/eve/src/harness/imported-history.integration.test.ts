@@ -1,7 +1,7 @@
 import { MockLanguageModelV3 } from "ai/test";
 import { expect, it, vi } from "vitest";
 
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createKernel } from "#harness/tool-loop.js";
 import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
 import { eachEvent, withPublished } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -72,7 +72,7 @@ const prompted = (call: MockLanguageModelV3["doStreamCalls"][number] | undefined
 it("reads imported history before each turn's context and message, and records it consumed", async () => {
   const llm = model();
   const events: SessionEvent[] = [];
-  const harness = createToolLoopHarness({
+  const harness = createKernel({
     handleEvent: eachEvent(async (event) => {
       events.push(event);
     }),

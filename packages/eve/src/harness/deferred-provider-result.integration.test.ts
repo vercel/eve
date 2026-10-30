@@ -6,7 +6,7 @@ import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.
 import { takeDeferredMessage } from "#harness/hitl/index.js";
 import { eventsOf } from "#harness/publication.js";
 import { cascade } from "#harness/session-machine/cascade.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createKernel } from "#harness/tool-loop.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
@@ -74,7 +74,7 @@ function deferredHarness(later: (StreamPart[] | Error)[]) {
   const violations: unknown[] = [];
   const searchFacts: string[] = [];
   let position = 0;
-  const runStep = createToolLoopHarness({
+  const runStep = createKernel({
     handleEvent: async (publication) => {
       // As the session's writer stores them: an owner's end closes what it still holds.
       const facts = cascade(written, eventsOf(publication));

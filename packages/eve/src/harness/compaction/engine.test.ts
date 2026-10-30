@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { COMPACTION_PROMPT_ENVELOPE } from "#harness/compaction/prompt.js";
 import { compactMessages, getInputTokenCount } from "#harness/compaction/engine.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
-import { nativeHistory } from "#harness/program/native.js";
+import { nativeHistory } from "#harness/policy/native.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";

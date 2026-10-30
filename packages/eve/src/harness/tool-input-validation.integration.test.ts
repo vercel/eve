@@ -2,9 +2,9 @@ import { jsonSchema, type LanguageModel, type ModelMessage } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createKernel } from "#harness/tool-loop.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
-import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import type { HarnessSession, KernelConfig } from "#harness/types.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot
@@ -83,7 +83,7 @@ describe("framework tool input validation (real AI SDK)", () => {
       modelId: "final-output-validation-model",
       provider: "eve-integration-mock",
     });
-    const config: ToolLoopHarnessConfig = {
+    const config: KernelConfig = {
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map(),
     };
@@ -99,7 +99,7 @@ describe("framework tool input validation (real AI SDK)", () => {
       outputSchema,
       sessionId: "final-output-validation-session",
     };
-    const runStep = createToolLoopHarness(config);
+    const runStep = createKernel(config);
 
     const invalidStep = await runStep(session, { message: "Finish the task." });
 
@@ -149,7 +149,7 @@ describe("framework tool input validation (real AI SDK)", () => {
       provider: "eve-integration-mock",
     });
     const execute = vi.fn(async () => ({ text: "Meeting moved to Friday." }));
-    const runStep = createToolLoopHarness({
+    const runStep = createKernel({
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map([
         [
@@ -221,7 +221,7 @@ describe("framework tool input validation (real AI SDK)", () => {
       provider: "eve-integration-mock",
     });
     const events: string[] = [];
-    const runStep = createToolLoopHarness({
+    const runStep = createKernel({
       handleEvent: eachEvent((event) => {
         if (event.type === "call.requested") events.push(`call.requested:${event.data.callId}`);
         if (event.type === "call.settled") {

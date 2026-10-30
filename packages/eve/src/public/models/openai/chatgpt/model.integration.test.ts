@@ -2,7 +2,7 @@ import { jsonSchema } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDurableSessionValues } from "#execution/durable-session-store.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createKernel } from "#harness/tool-loop.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createCodexSubscriptionModel } from "./model.js";
 
@@ -38,7 +38,7 @@ describe("ChatGPT streamed reasoning replay", () => {
       },
     );
     const execute = vi.fn(async () => ({ id: "invoice-1", total: 42 }));
-    const runStep = createToolLoopHarness({
+    const runStep = createKernel({
       handleEvent: async () => {},
       resolveModel: async () => model,
       tools: new Map([

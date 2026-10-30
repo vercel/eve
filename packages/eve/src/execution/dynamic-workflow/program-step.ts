@@ -42,10 +42,10 @@ const WORKFLOW_PROGRAM_CPU_TIMEOUT_MS = 30_000;
 const WORKFLOW_PROGRAM_TIMEOUT_MS = 300_000;
 
 /**
- * Converts the program's values to JSON inside the sandbox, where run's limits
+ * Converts the policy's values to JSON inside the sandbox, where run's limits
  * bound the work. run transfers values with shared references intact, so a
  * small value can expand without limit if the host converts it. The prelude
- * shares the program's first line, so stack line numbers match its source.
+ * shares the policy's first line, so stack line numbers match its source.
  */
 function wrapWorkflowProgram(js: string): string {
   return `const ctx = Object.freeze({ agent: (target, input) => ${WORKFLOW_PROGRAM_HOST_NAMESPACE}.agent(JSON.stringify({ target, input })) }); return JSON.stringify(await (async () => {${js}\n})());`;
@@ -69,7 +69,7 @@ const WORKFLOW_PROGRAM_LIMITS: RunLimits = {
   maxHostFunctionOutputBytes: runEncodingLimit(WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES),
   maxInFlightBridgeRequests: WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
   maxResultBytes: runEncodingLimit(WORKFLOW_PROGRAM_MAX_JSON_BYTES),
-  // eve checks the program's own size; the ASCII wrapper's length is its byte count.
+  // eve checks the policy's own size; the ASCII wrapper's length is its byte count.
   maxSourceBytes: WORKFLOW_PROGRAM_MAX_SOURCE_BYTES + wrapWorkflowProgram("").length,
   maxStackSizeBytes: 2 * 1024 * 1024,
   memoryLimitBytes: 64 * 1024 * 1024,

@@ -1,9 +1,9 @@
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { JsonValue } from "#shared/json.js";
 
-// A session program is a function of the session that says what should happen next. eve
+// A harness policy is a function of the session that says what should happen next. eve
 // evaluates it where it decides, and applies what it returns through its own gates. eve's loop is
-// one program among others; nothing outside the harness can install another yet.
+// one policy among others; nothing outside the harness can install another yet.
 
 /** A value, or a function eve calls only where it needs the value. */
 export type Lazy<T> = T | (() => T | Promise<T>);
@@ -25,9 +25,9 @@ export interface ModelStep {
   readonly endsTurn: boolean;
 }
 
-export interface ProgramTurn {
+export interface PolicyTurn {
   readonly id: string;
-  /** Notes a program added to this turn that are still in history. */
+  /** Notes a policy added to this turn that are still in history. */
   readonly continuations: number;
   /** History ends with tool results the model hasn't read. */
   readonly unread: boolean;
@@ -52,9 +52,9 @@ export type Summarize = (
   },
 ) => Promise<HarnessModelMessage[]>;
 
-export interface ProgramContext {
+export interface PolicyContext {
   /** The running turn, or `null` between turns. */
-  readonly turn: ProgramTurn | null;
+  readonly turn: PolicyTurn | null;
   readonly history: readonly HarnessModelMessage[];
   /** The next model call's size, where eve asks for the history. */
   readonly size?: HistorySize;
@@ -77,7 +77,7 @@ export type Next =
    */
   | { readonly settle: { readonly output: JsonValue | null } };
 
-/** What a program says should be true. A field it leaves out is eve's own. */
+/** What a policy says should be true. A field it leaves out is eve's own. */
 export interface Plan {
   /**
    * What the model reads about the past, which becomes the session's history. eve asks before
@@ -89,4 +89,4 @@ export interface Plan {
 }
 
 /** Cheap and synchronous: it says what each field is. Work belongs in the lazy fields. */
-export type Program = (ctx: ProgramContext) => Plan;
+export type Policy = (ctx: PolicyContext) => Plan;
