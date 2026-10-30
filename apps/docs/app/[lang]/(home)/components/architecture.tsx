@@ -1,11 +1,10 @@
 "use client";
 
-import { SiDocker, SiPostgresql, SiSnowflake } from "@icons-pack/react-simple-icons";
+import { SiAnthropic, SiDocker, SiPostgresql, SiSnowflake } from "@icons-pack/react-simple-icons";
 import {
   IconArrowUpRightSmall,
   IconLinked,
   IconMessage,
-  IconOpenai,
   IconSandbox,
   IconSparkles,
   IconWorkflow,
@@ -61,7 +60,7 @@ const RUNTIME_ITEMS: Primitive[] = [
     href: "https://ai-sdk.dev/",
     backend: {
       managed: { label: "AI Gateway", Logo: VercelLogo },
-      "self-hosted": { label: "GPT-5.4 API", Logo: IconOpenai },
+      "self-hosted": { label: "Claude Opus 5.5 API", Logo: SiAnthropic },
     },
   },
   {
