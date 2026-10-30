@@ -1,4 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rename, rm } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -6,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { createNuxtEveServiceDescriptor } from "../../src/internal/testing/scenario-apps/nuxt-eve-service.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { runPnpmCommand } from "../../src/internal/testing/run-pnpm-command.js";
+import { stopChildProcess, waitForCondition } from "./dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
 
@@ -55,7 +60,161 @@ function isFilesystemHandle(route: unknown): boolean {
   );
 }
 
+async function findFreePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (address === null || typeof address === "string") throw new Error("Expected a TCP port.");
+  return address.port;
+}
+
+async function assertNuxtHealth(deployment: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const port = await findFreePort();
+  let output = "";
+  const child = spawn(process.execPath, [join(deployment, ".output/server/index.mjs")], {
+    cwd: deployment,
+    env: { ...env, PORT: String(port), NITRO_PORT: String(port), HOST: "127.0.0.1" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
+  child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
+  try {
+    await waitForCondition(
+      async () => {
+        if (child.exitCode !== null || child.signalCode !== null) {
+          throw new Error(`Nuxt exited before serving eve.\n${output}`);
+        }
+        try {
+          const response = await fetch(`http://127.0.0.1:${port}/eve/v1/health`, {
+            signal: AbortSignal.timeout(2_000),
+          });
+          await response.body?.cancel();
+          return response.status === 200;
+        } catch {
+          return false;
+        }
+      },
+      () => `Nuxt did not serve eve.\n${output}`,
+      60_000,
+    );
+    const health = await fetch(`http://127.0.0.1:${port}/eve/v1/health`);
+    expect(await health.json()).toEqual(expect.objectContaining({ ok: true, status: "ready" }));
+    expect(output).not.toContain("failed to start the eve production server");
+  } finally {
+    await stopChildProcess(child);
+  }
+}
+
 describe("framework-nuxt build", () => {
+  it("does not manage eve during static generation or for a build-time external origin", async () => {
+    const app = await scenarioApp(NUXT_EVE_SERVICE_DESCRIPTOR);
+    const env = {
+      ...process.env,
+      VERCEL: "",
+      EVE_NUXT_PRODUCTION_ORIGIN: "",
+      NITRO_PRESET: "node-server",
+    };
+    const generated = await runPnpmCommand({
+      args: ["exec", "nuxt", "generate"],
+      cwd: app.appRoot,
+      env: { ...env, NITRO_PRESET: undefined },
+    });
+    expect(generated.stdout + generated.stderr).not.toContain(
+      "failed to start the eve production server",
+    );
+    expect(await readFile(join(app.appRoot, ".output/public/index.html"), "utf8")).toContain(
+      "eve nuxt deployment",
+    );
+
+    const backend = createHttpServer((_request, response) => {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ ok: true, status: "ready" }));
+    });
+    await new Promise<void>((resolve) => backend.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = backend.address();
+      if (address === null || typeof address === "string") throw new Error("Expected a TCP port.");
+      await runPnpmCommand({
+        args: ["exec", "nuxt", "build"],
+        cwd: app.appRoot,
+        env: {
+          ...env,
+          EVE_NUXT_PRODUCTION_ORIGIN: `http://127.0.0.1:${address.port}`,
+        },
+      });
+      // No eve build exists here, and the origin variable is absent at runtime.
+      await assertNuxtHealth(app.appRoot, { ...env, EVE_NUXT_PRODUCTION_ORIGIN: undefined });
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        backend.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  }, 300_000);
+
+  it("serves a relocated production eve build with the build-time port and portable root", async () => {
+    const descriptor = NUXT_EVE_SERVICE_DESCRIPTOR;
+    const app = await scenarioApp({
+      ...descriptor,
+      files: {
+        ...descriptor.files,
+        "backend/package.json":
+          '{ "private": true, "type": "module", "dependencies": { "eve": "*" } }',
+        "backend/agent/agent.mjs": descriptor.files["agent/agent.mjs"]!,
+        "backend/agent/instructions.md": "You are a test agent.\n",
+        "nuxt.config.ts": `export default defineNuxtConfig({
+  compatibilityDate: "2026-05-27",
+  eve: { eveRoot: "backend" },
+  modules: ["eve/nuxt"],
+  routeRules: { "/": { prerender: true } },
+  telemetry: false,
+});`,
+      },
+    });
+    const evePort = await findFreePort();
+    const env = {
+      ...process.env,
+      NITRO_PRESET: "node-server",
+      VERCEL: "",
+      EVE_NUXT_PRODUCTION_ORIGIN: "",
+      EVE_NUXT_PRODUCTION_PORT: String(evePort),
+    };
+    await runPnpmCommand({
+      args: [
+        "exec",
+        process.execPath,
+        join(app.appRoot, "node_modules/eve/bin/eve.js"),
+        "build",
+        "--skip-sandbox-prewarm",
+      ],
+      cwd: join(app.appRoot, "backend"),
+      env,
+    });
+    const build = await runPnpmCommand({
+      args: ["exec", "nuxt", "build"],
+      cwd: app.appRoot,
+      env,
+    });
+    expect(build.stdout + build.stderr).not.toContain("failed to start the eve production server");
+
+    // No ancestor node_modules can mask missing traced runtime imports.
+    const deployment = await mkdtemp(join(tmpdir(), "eve-nuxt-production-"));
+    try {
+      await rename(join(app.appRoot, ".output"), join(deployment, ".output"));
+      await rename(join(app.appRoot, "backend"), join(deployment, "backend"));
+      for (const root of [undefined, "./relocated-agent"]) {
+        if (root) await rename(join(deployment, "backend"), join(deployment, "relocated-agent"));
+        await assertNuxtHealth(deployment, {
+          ...env,
+          EVE_NUXT_PRODUCTION_PORT: undefined,
+          EVE_NUXT_PRODUCTION_ROOT: root,
+        });
+      }
+    } finally {
+      await rm(deployment, { recursive: true, force: true });
+    }
+  }, 300_000);
+
   it("emits the eve service and route into the Vercel Build Output", async () => {
     const app = await scenarioApp(NUXT_EVE_SERVICE_DESCRIPTOR);
 

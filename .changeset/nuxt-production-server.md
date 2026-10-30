@@ -2,4 +2,6 @@
 "eve": patch
 ---
 
-`eve/nuxt` now starts the built eve service in non-Vercel production, matching `eve/next`. `nuxt build && node .output/server/index.mjs` serves `/eve/v1/**` without running eve separately. The eve output is read from the Nuxt server's working directory, or from `EVE_NUXT_PRODUCTION_ROOT`, and setting `EVE_NUXT_PRODUCTION_ORIGIN` still hands eve routes to a service you run yourself.
+`eve/nuxt` starts a separately built eve service from `eveRoot` in non-Vercel production, using the same build-time port as its proxy.
+
+`EVE_NUXT_PRODUCTION_ROOT` can override the deployed root at startup; externally managed origins, prerendering, and static generation skip startup, and shared Nuxt/eve output is rejected to prevent self-spawning.

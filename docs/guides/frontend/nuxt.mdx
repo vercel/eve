@@ -96,21 +96,29 @@ The browser still needs a production authentication policy. See [Authenticate br
   });
   ```
 
-- **Non-Vercel hosts.** `nuxt build` writes a proxy rule that sends `/eve/v1/**` to `EVE_NUXT_PRODUCTION_ORIGIN`, or to `http://127.0.0.1:4274` when that variable is unset. Override the local port with `EVE_NUXT_PRODUCTION_PORT`. Set these variables when you run `nuxt build`, because the destination is fixed in the build output:
+- **Non-Vercel hosts.** The built Nuxt server starts your built eve service and proxies `/eve/v1/**` to it at `http://127.0.0.1:4274`. Set `EVE_NUXT_PRODUCTION_PORT` during `nuxt build` to select another port. The build fixes both the proxy destination and the managed server's port.
+
+  `eve build` and `nuxt build` both write `.output/`. Use a separate eve project directory with its own `package.json` declaring `eve` as a dependency, and set `eveRoot` to that directory. Sharing the Nuxt project root overwrites the outputs; managed startup rejects that layout. For example, with `eveRoot: "./backend"`:
 
   ```bash
-  EVE_NUXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build
+  (cd backend && npx eve build)
+  npx nuxt build
+  node .output/server/index.mjs
   ```
 
-  `eve build` and `nuxt build` both write `.output/`. When the agent lives in the Nuxt project root, the two outputs overwrite each other. Build and serve eve from a separate directory instead, and set `eveRoot` to it. See [Self-host eve](../deployment/self-hosting) for running the eve service.
-
-  When `EVE_NUXT_PRODUCTION_ORIGIN` is unset, the Nuxt server starts the built eve service itself on the loopback port, so `nuxt build && node .output/server/index.mjs` serves `/eve/v1/**` without a second process. It serves the eve build output in the working directory of the Nuxt server process, and refuses to start when that output is the Nuxt server itself. Set `EVE_NUXT_PRODUCTION_ROOT` when the agent builds into another directory:
+  Run the Nuxt server from the deployed Nuxt project root. Deploy both output directories, preserving the relative location of `eveRoot`. To move eve's output elsewhere, set `EVE_NUXT_PRODUCTION_ROOT` at startup. Relative values resolve from the Nuxt server's working directory:
 
   ```bash
-  EVE_NUXT_PRODUCTION_ROOT=./agent node .output/server/index.mjs
+  EVE_NUXT_PRODUCTION_ROOT=./relocated-backend node .output/server/index.mjs
   ```
 
-  Set `EVE_NUXT_PRODUCTION_ORIGIN` to run the eve service yourself instead.
+  To manage eve separately, set `EVE_NUXT_PRODUCTION_ORIGIN` during `nuxt build`. That build proxies to the configured origin and does not start eve, even when the variable is absent at runtime:
+
+  ```bash
+  EVE_NUXT_PRODUCTION_ORIGIN=https://agent.example.com npx nuxt build
+  ```
+
+  See [Self-host eve](../deployment/self-hosting) for running the separate service. Managed startup does not run during prerendering or `nuxt generate`. Static output has no server-side eve proxy; use a server deployment for this topology.
 
 ## Managing vercel.json yourself
 

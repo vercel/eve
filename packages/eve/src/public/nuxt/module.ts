@@ -1,10 +1,10 @@
 import type { ChildProcess } from "node:child_process";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 
 import {
   addImports,
   addServerPlugin,
-  createResolver,
+  addTemplate,
   defineNuxtModule,
   extendRouteRules,
 } from "@nuxt/kit";
@@ -39,8 +39,9 @@ export interface EveNuxtModuleOptions {
   /**
    * Path to the eve application root, resolved relative to the Nuxt project
    * root unless absolute. Defaults to the Nuxt project root. The dev server is
-   * spawned here, and on Vercel it is the root the generated eve service
-   * builds from.
+   * spawned here, and the generated Vercel service builds from this root.
+   * Managed non-Vercel production serves this root's existing eve build;
+   * use a separate directory so eve and Nuxt do not overwrite `.output/`.
    */
   eveRoot?: string;
   /**
@@ -70,7 +71,7 @@ function resolveApplicationRoot(nuxtRoot: string, appPath: string | undefined): 
  */
 interface NitroConfigHost {
   externals?: {
-    traceInclude?: string[];
+    external?: string[];
     [key: string]: unknown;
   };
   vercel?: {
@@ -180,21 +181,6 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
       // module setup. `modules:done` still runs before Nitro is configured, so
       // the proxy route rule is registered in time while other modules' setup
       // isn't blocked behind the spawn.
-      if (!nuxt.options.dev) {
-        // `node .output/server/index.mjs` never runs module setup, so the
-        // built eve server has to start from a Nitro plugin at boot. The
-        // plugin imports eve at runtime, so Nitro has to trace the package
-        // into the server output.
-        addServerPlugin(
-          createResolver(import.meta.url).resolve("./runtime/production-server-plugin.js"),
-        );
-        const nitro = readNitroConfig(nuxt.options);
-        nitro.externals = {
-          ...nitro.externals,
-          traceInclude: [...(nitro.externals?.traceInclude ?? []), "eve"],
-        };
-      }
-
       nuxt.hook("modules:done", async () => {
         const proxyTarget = await resolveEveProxyTarget({
           appRoot,
@@ -212,6 +198,40 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
             });
           },
         });
+
+        const configuredOrigin = process.env.EVE_NUXT_PRODUCTION_ORIGIN?.trim();
+        if (
+          !nuxt.options.dev &&
+          !(nuxt.options as { _generate?: boolean })._generate &&
+          !configuredOrigin
+        ) {
+          // Keep startup and the proxy tied to the same build-time destination.
+          const config = {
+            origin: new URL(proxyTarget).origin,
+            relativeRoot: relative(nuxtRoot, appRoot),
+          };
+          const plugin = addTemplate({
+            filename: "eve-production-server.mjs",
+            write: true,
+            getContents:
+              () => `import { ensureEveProductionServer } from "eve/nuxt/production-server";
+export default function () {
+  if (import.meta.prerender) return;
+  void ensureEveProductionServer(${JSON.stringify(config)}).catch((error) => {
+    console.error("[eve] failed to start the eve production server.", error);
+  });
+}
+`,
+          });
+          addServerPlugin(plugin.dst);
+          // A literal external import lets Nitro trace eve's package imports
+          // without trying to bundle its private # aliases into the host.
+          const nitro = readNitroConfig(nuxt.options);
+          nitro.externals = {
+            ...nitro.externals,
+            external: [...(nitro.externals?.external ?? []), "eve"],
+          };
+        }
 
         extendRouteRules(`${EVE_ROUTE_PREFIX}/**`, {
           proxy: `${proxyTarget}/**`,

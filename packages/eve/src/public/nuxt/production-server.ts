@@ -1,3 +1,4 @@
+import { existsSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import {
@@ -6,10 +7,6 @@ import {
   type EveProcessHandle,
 } from "#shared/framework-eve-server.js";
 
-import { readLocalProductionOrigin } from "./routing.js";
-
-const EVE_NUXT_PRODUCTION_ORIGIN_ENV = "EVE_NUXT_PRODUCTION_ORIGIN";
-const EVE_NUXT_PRODUCTION_ROOT_ENV = "EVE_NUXT_PRODUCTION_ROOT";
 const EVE_NUXT_HOST: EveFrameworkHost = { label: "Nuxt", slug: "nuxt" };
 const globalStateSymbol = Symbol.for("eve.nuxt.production-server");
 
@@ -23,66 +20,41 @@ function getGlobalState(): EveNuxtProductionServerState {
   };
 
   globalWithState[globalStateSymbol] ??= {};
-
   return globalWithState[globalStateSymbol];
 }
 
-/**
- * Root the built eve output is served from. Defaults to the working directory
- * of the Nuxt server process, which is the project root for
- * `node .output/server/index.mjs`. Override with `EVE_NUXT_PRODUCTION_ROOT`
- * when the agent builds into another directory.
- */
-function resolveProductionRoot(): string {
-  const configuredRoot = process.env[EVE_NUXT_PRODUCTION_ROOT_ENV]?.trim();
-  return configuredRoot === undefined || configuredRoot.length === 0
-    ? process.cwd()
-    : configuredRoot;
-}
-
-/**
- * `eve build` and `nuxt build` both write `.output/`, so an eve root that is
- * also the Nuxt root points at the running Nuxt server, which would respawn
- * itself for every boot.
- */
 function assertDistinctServerOutput(appRoot: string): void {
   const serverEntry = join(appRoot, ".output", "server", "index.mjs");
   const runningEntry = process.argv[1];
+  const sameEntry =
+    runningEntry !== undefined &&
+    (resolve(serverEntry) === resolve(runningEntry) ||
+      (existsSync(serverEntry) &&
+        existsSync(runningEntry) &&
+        realpathSync.native(serverEntry) === realpathSync.native(runningEntry)));
 
-  if (runningEntry !== undefined && resolve(serverEntry) === resolve(runningEntry)) {
+  if (appRoot === process.cwd() || sameEntry) {
     throw new Error(
-      `${serverEntry} is the running Nuxt server, not an eve build. Build eve into another directory and set ${EVE_NUXT_PRODUCTION_ROOT_ENV} to it, or set ${EVE_NUXT_PRODUCTION_ORIGIN_ENV} to run eve yourself.`,
+      `${serverEntry} is the Nuxt server output, not a separate eve build. Build eve from a separate eveRoot directory, or set EVE_NUXT_PRODUCTION_ROOT to that directory at startup. To manage eve yourself, set EVE_NUXT_PRODUCTION_ORIGIN when building Nuxt.`,
     );
   }
 }
 
-/**
- * Start the built eve server once per Nuxt server process so `/eve/v1/**`
- * resolves without a separately managed eve service.
- *
- * Does nothing on Vercel, where eve deploys as a sibling service, or when
- * `EVE_NUXT_PRODUCTION_ORIGIN` points eve routes at an origin the deployment
- * does not own.
- */
-export async function ensureEveProductionServer(): Promise<void> {
-  if (process.env.VERCEL) {
-    return;
-  }
-
-  const configuredOrigin = process.env[EVE_NUXT_PRODUCTION_ORIGIN_ENV]?.trim();
-  if (configuredOrigin !== undefined && configuredOrigin.length > 0) {
-    return;
-  }
-
-  const appRoot = resolveProductionRoot();
+/** Start the built eve server once per process using the Nuxt build's proxy destination. */
+export async function ensureEveProductionServer(config: {
+  readonly origin: string;
+  readonly relativeRoot: string;
+}): Promise<void> {
+  const configuredRoot = process.env.EVE_NUXT_PRODUCTION_ROOT?.trim();
+  const appRoot = resolve(process.cwd(), configuredRoot || config.relativeRoot);
   assertDistinctServerOutput(appRoot);
 
   const state = getGlobalState();
   state.server ??= startEveProductionServer({
     appRoot,
     host: EVE_NUXT_HOST,
-    origin: readLocalProductionOrigin(),
-    portRetryHint: "set EVE_NUXT_PRODUCTION_PORT to another port",
+    origin: config.origin,
+    portRetryHint: "set EVE_NUXT_PRODUCTION_PORT to another port and rebuild Nuxt",
   }).catch((error: unknown) => {
     state.server = undefined;
     throw error;
