@@ -5,6 +5,7 @@ import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-
 import type { CompileMetadata } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { stringifyEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import { modelMetadataSchema, type ModelMetadata } from "#internal/model-catalog.js";
 import {
   resolvePackageCompiledFilePath,
   resolvePackageSourceFilePath,
@@ -81,6 +82,9 @@ export async function writeCompiledArtifactsFiles(input: {
   const sandboxPreparedArtifacts = sandboxPreparedArtifactsManifestSchema.parse(
     JSON.parse(await readFile(input.compileResult.paths.sandboxPreparedArtifactsPath, "utf8")),
   );
+  const modelMetadata = modelMetadataSchema.parse(
+    JSON.parse(await readFile(input.compileResult.paths.modelMetadataPath, "utf8")),
+  );
   const prepared = await prepareAuthoredRuntimeModules({
     appRoot: input.compileResult.project.appRoot,
     manifest: input.compileResult.manifest,
@@ -95,6 +99,7 @@ export async function writeCompiledArtifactsFiles(input: {
       compileResult: input.compileResult,
       installModulePath: resolvePackageSourceFilePath("src/runtime/loaders/bundled-artifacts.ts"),
       metadata: input.compileResult.metadata,
+      modelMetadata,
       moduleMapImportPath: moduleMapPath,
       sandboxPreparedArtifacts,
     }),
@@ -260,6 +265,7 @@ export function createCompiledArtifactsBootstrapSource(input: {
   compileResult: CompileAgentResult;
   installModulePath: string;
   metadata: CompileMetadata;
+  modelMetadata: ModelMetadata;
   moduleMapImportPath: string;
   sandboxPreparedArtifacts: SandboxPreparedArtifactsManifest;
 }): string {
@@ -279,12 +285,15 @@ export function createCompiledArtifactsBootstrapSource(input: {
     "",
     `const sandboxPreparedArtifacts = ${JSON.stringify(input.sandboxPreparedArtifacts, null, 2)};`,
     "",
+    `const modelMetadata = ${JSON.stringify(input.modelMetadata)};`,
+    "",
     "export { moduleMap };",
     "",
     "export function installCompiledArtifactsBootstrap() {",
     "  installBundledCompiledArtifacts({",
     "    manifest,",
     "    metadata,",
+    "    modelMetadata,",
     "    moduleMap,",
     "    sandboxPreparedArtifacts,",
     "  });",

@@ -9,5 +9,14 @@ export {
   type SkillFileContent,
   type SkillPackageDefinition,
 } from "#public/definitions/skill.js";
-export { defineDynamic } from "#dynamic/definition.js";
-export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
+export { defineDynamic, type DynamicSkillResult } from "#public/definitions/skill.js";
+export type {
+  DynamicContext,
+  DynamicKey,
+  DynamicModelContext,
+  DynamicSentinel,
+  DynamicTurn,
+  Memo,
+  Occurrence,
+  SessionFrame,
+} from "#dynamic/definition.js";

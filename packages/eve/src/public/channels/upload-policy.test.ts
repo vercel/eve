@@ -1,4 +1,4 @@
-import type { FilePart, UserContent } from "ai";
+import type { MessageContent, MessageFilePart } from "#shared/message-content.js";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -20,7 +20,7 @@ function makeBytes(byteCount: number): Uint8Array {
   return new Uint8Array(byteCount).fill(0x61);
 }
 
-function filePart(overrides: Partial<FilePart> = {}): FilePart {
+function filePart(overrides: Partial<MessageFilePart> = {}): MessageFilePart {
   return {
     data: overrides.data ?? makeBytes(32),
     filename: overrides.filename ?? "report.csv",
@@ -179,7 +179,7 @@ describe("evaluateFilePart", () => {
 
   it("omits filename from the violation when the part has none", () => {
     const policy: UploadPolicy = { allowedMediaTypes: "*", maxBytes: 4 };
-    const part: FilePart = {
+    const part: MessageFilePart = {
       data: makeBytes(16),
       mediaType: "application/octet-stream",
       type: "file",
@@ -247,7 +247,7 @@ describe("collectUploadPolicyViolations", () => {
       allowedMediaTypes: ["text/csv"],
       maxBytes: 4,
     };
-    const content: UserContent = [
+    const content: MessageContent = [
       { type: "text", text: "summarize" },
       filePart({ data: makeBytes(64), filename: "too-big.csv", mediaType: "text/csv" }),
       filePart({ filename: "nope.png", mediaType: "image/png" }),
@@ -263,11 +263,8 @@ describe("collectUploadPolicyViolations", () => {
     expect(violations[1]?.filename).toBe("nope.png");
   });
 
-  it("skips non-file parts", () => {
-    const content: UserContent = [
-      { type: "text", text: "hello" },
-      { type: "image", mediaType: "image/png", image: makeBytes(8) },
-    ];
+  it("skips text parts", () => {
+    const content: MessageContent = [{ type: "text", text: "hello" }];
 
     expect(collectUploadPolicyViolations(content, { allowedMediaTypes: [], maxBytes: 1 })).toEqual(
       [],

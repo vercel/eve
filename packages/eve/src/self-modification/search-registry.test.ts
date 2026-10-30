@@ -166,7 +166,7 @@ describe("parseRegistryIndex", () => {
     ]);
   });
 
-  it("reads whether an item declares a setup flow, used by selfmod__registry_add's split rule", () => {
+  it("reads whether an item declares a setup flow for registry installation", () => {
     const entries = parseRegistryIndex({
       items: [
         {

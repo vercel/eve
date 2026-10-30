@@ -1,3 +1,4 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { PassThrough } from "node:stream";
 
 import { describe, expect, it, vi } from "vitest";
@@ -5,7 +6,6 @@ import { describe, expect, it, vi } from "vitest";
 import { ACP_MAX_LINE_BYTES } from "#acp/line-limit.js";
 import { runAcpServerOnStreams } from "#acp/server.js";
 import type { SendTurnInput } from "#client/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
 
 function streams() {
   const input = new PassThrough();
@@ -27,17 +27,17 @@ describe("runAcpServerOnStreams", () => {
   });
 
   it("closes the transport without creating an eve session before the first prompt", async () => {
-    const reset = vi.fn(async () => ({ status: "reset" }));
+    const end = vi.fn(async () => ({ status: "reset" }));
     const session = {
       cancel: vi.fn(async () => ({ sessionId: "session_test", status: "accepted" })),
-      reset,
-      respond: vi.fn(async () => emptyEvents()),
-      send: vi.fn(async (_message: SendTurnInput["message"]) => emptyEvents()),
+      end,
+      respond: vi.fn(async () => ({ stream: emptyEvents })),
+      send: vi.fn(async (_message: SendTurnInput["message"]) => ({ stream: emptyEvents })),
     };
     const client = {
       sessions: {
         async create(input: SendTurnInput) {
-          return { response: await session.send(input.message), session };
+          return { delivery: await session.send(input.message), session };
         },
       },
     };
@@ -70,8 +70,8 @@ describe("runAcpServerOnStreams", () => {
     controller.abort();
 
     await expect(server).resolves.toBeUndefined();
-    expect(reset).not.toHaveBeenCalled();
+    expect(end).not.toHaveBeenCalled();
   });
 });
 
-async function* emptyEvents(): AsyncIterable<HandleMessageStreamEvent> {}
+async function* emptyEvents(): AsyncIterable<SessionStreamEvent> {}

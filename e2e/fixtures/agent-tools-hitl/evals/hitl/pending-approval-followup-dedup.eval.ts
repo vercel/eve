@@ -23,7 +23,7 @@ export default defineEval({
     const held = await t.send(`Call the ${TOOL_NAME} tool exactly once with marker "${MARKER}".`);
     const session = held.session;
     held.calledTool(TOOL_NAME, { status: "pending", count: 1 });
-    const approval = session.requireInputRequest({
+    const approval = session.requireInteraction({
       display: "confirmation",
       toolName: TOOL_NAME,
     });
@@ -32,31 +32,23 @@ export default defineEval({
       const followup = await session.send(question);
 
       followup.expectOk();
-      followup.notEvent("actions.requested");
-      followup.notEvent("input.requested");
+      followup.notEvent("call.requested");
+      followup.notEvent("interaction.opened");
       if (index === 0) {
         // The steer cancels the held call, so its not-run result lands in this turn.
         followup.calledTool(TOOL_NAME, { status: "completed", count: 0 });
-        followup.event("input.resolved", {
+        followup.event("interaction.settled", {
           count: 1,
-          data: {
-            resolutions: (resolutions) =>
-              resolutions.some(
-                (resolution) =>
-                  resolution.requestId === approval.requestId && resolution.outcome === "ignored",
-              ),
-          },
+          data: { interactionId: approval.interactionId, outcome: "withdrawn" },
         });
       } else {
         followup.usedNoTools();
       }
-      followup.event("session.waiting", { count: 1 });
+      followup.event("turn.settled", { count: 1, data: { outcome: "completed" } });
     }
 
     t.succeeded();
-    t.check(session.pendingInputRequests.length, equals(0));
-    t.notEvent("action.result", {
-      data: { result: { output: new RegExp(MARKER), toolName: TOOL_NAME } },
-    });
+    t.check(session.pendingInteractions.length, equals(0));
+    t.calledTool(TOOL_NAME, { output: new RegExp(MARKER), count: 0 });
   },
 });

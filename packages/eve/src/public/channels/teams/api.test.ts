@@ -136,8 +136,24 @@ describe("Teams Connector API wrapper", () => {
     });
     expect(apiFetch).toHaveBeenCalledWith(
       "https://service.example/v3/conversations/C/activities",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({ method: "POST", redirect: "error" }),
     );
+  });
+
+  it("rejects non-HTTPS connector destinations before resolving credentials", async () => {
+    const tokenProvider = vi.fn(() => "test-only-token");
+    const apiFetch = vi.fn().mockResolvedValue(Response.json({ ok: true }));
+
+    await expect(
+      callTeamsConnectorApi({
+        credentials: { tokenProvider },
+        fetch: apiFetch,
+        path: "/v3/conversations/C/activities",
+        serviceUrl: "http://service.example/teams",
+      }),
+    ).rejects.toThrow("HTTPS");
+    expect(tokenProvider).not.toHaveBeenCalled();
+    expect(apiFetch).not.toHaveBeenCalled();
   });
 
   it("splits long text under the conservative Teams message budget", () => {

@@ -14,7 +14,7 @@ export default defineChannel({
       const session = await from(params.threadId ?? "").send(body.message ?? "", {
         auth: AUTH,
       });
-      return Response.json({ sessionId: session.id });
+      return Response.json({ sessionId: session.sessionId });
     }),
     POST("/threads/:threadId/owner", async (_request, { params, resolveSession }) => {
       const session = await resolveSession(params.threadId ?? "");

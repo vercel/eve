@@ -1,3 +1,4 @@
+import { templateGalleryUrl } from "../templates/links";
 import { defaultLanguage } from "./languages";
 
 interface DocsRedirect {
@@ -86,6 +87,11 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/getting-started/first-agent", "/tutorial/first-agent"),
   ...createDocsRedirects("/guides/evaluate", "/guides/decide"),
   ...createDocsRedirects("/sandbox/microsandbox", "/sandbox"),
+  ...createDocsRedirects("/tools/tasks-upgrade", "/tools/tasks"),
+  ...createDocsRedirects(
+    "/observability/instrumentation-migration",
+    "/observability/instrumentation",
+  ),
 ];
 
 export const rootMarkdownRedirects: DocsRedirect[] = [
@@ -110,6 +116,46 @@ export const rootMarkdownRedirects: DocsRedirect[] = [
 
 export const compatibilityRedirects: DocsRedirect[] = [
   ...createIntegrationRedirects("chat-sdk-photon", "photon"),
+  ...["", `/${defaultLanguage}`].flatMap((prefix) => [
+    ...[
+      ["eve-chat-template", "eve-chat-template"],
+      ["eve-agent-with-python", "eve-agent-with-python"],
+      ["eve-slack-agent", "eve-slack-agent"],
+      ["eve-data-analyst-template", "eve-data-analyst"],
+      ["eve-contentful-agent-template", "eve-contentful-agent"],
+      ["eve-vercel-drives-starter", "eve-vercel-drives-starter"],
+      ["eve-memory-agent-template", "eve-memory-agent"],
+      ["eve-tanstack-start-template", "eve-tanstack-agent"],
+      ["eve-software-factory-template", "eve-software-factory"],
+      ["marketing-team-eve-template", "eve-marketing-team"],
+      ["openinstinct-eve-template", "openinstinct-eve-agent"],
+      ["kody-eve-template", "eve-github-maintainer"],
+      ["typefully-eve-template", "eve-typefully-agent"],
+      ["eve-sre-agent-template", "eve-incident-response-agent"],
+      ["sanity-copilot-eve-template", "eve-sanity-copilot"],
+    ].flatMap(([source, destination]) =>
+      extensions.map((extension) => ({
+        source: `${prefix}/templates/${source}${extension}`,
+        destination: `${templateGalleryUrl}/${destination}`,
+        permanent: true as const,
+      })),
+    ),
+    ...extensions.map((extension) => ({
+      source: `${prefix}/templates${extension}`,
+      destination: templateGalleryUrl,
+      permanent: true as const,
+    })),
+    {
+      source: `${prefix}/templates/:path+`,
+      destination: templateGalleryUrl,
+      permanent: true as const,
+    },
+    {
+      source: `${prefix}/resources`,
+      destination: templateGalleryUrl,
+      permanent: true as const,
+    },
+  ]),
   {
     source: "/r/extension/arcana.json",
     destination: "/r/memory/arcana.json",
@@ -150,11 +196,6 @@ export const defaultLanguageRedirects: DocsRedirect[] = [
   {
     source: `/${defaultLanguage}/docs`,
     destination: "/docs/getting-started",
-    permanent: true,
-  },
-  {
-    source: `/${defaultLanguage}/resources`,
-    destination: "/templates",
     permanent: true,
   },
   {

@@ -1,8 +1,14 @@
 import { readSerializedSessionSchedule } from "#context/session-schedule.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import { failSession, runPreparedSession, type SessionBoot } from "#execution/session/program.js";
 import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload, RunInput, SessionCapabilities } from "#channel/types.js";
+import type {
+  DeliverHookPayload,
+  RunInput,
+  SessionCapabilities,
+  SessionAuthContext,
+} from "#channel/types.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
@@ -25,6 +31,7 @@ import { hasDelegatedSessionContext } from "#execution/delegated-session-context
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
 import {
   SESSION_INBOX_CONTEXT_KEY,
@@ -32,10 +39,11 @@ import {
 } from "#execution/session-inbox/address.js";
 import {
   prepareSuccessorStep,
+  readSessionStreamTailStep,
   signalSessionOwnerActivationStep,
-  stopUntrackedChildSessionsStep,
 } from "#execution/session/handoff-steps.js";
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
+import { preV27Projection, withProjection } from "#execution/session/pre-v27-checkpoint.js";
 import {
   HANDOFF_LEASE_RETENTION,
   handoffLeaseToken,
@@ -200,6 +208,8 @@ export async function bootInitialOwner(
         });
       }
       await inbox.dispose();
+      // This run never becomes the session, so nothing else would end its stream.
+      await closeSessionStreamStep({ sessionWritable });
       return undefined;
     }
     const caller = unwrapSettled(callerResolution);
@@ -241,8 +251,9 @@ export async function bootInitialOwner(
 /** A successor that may continue the session, before it owns any of its hooks. */
 interface PreparedSuccessor {
   readonly checkpoint: SessionCheckpoint;
-  readonly childRunIdsToStop: readonly string[];
   readonly serializedContext: Record<string, unknown>;
+  /** A session from an owner before v27: the turns it numbered, so the next takes the next. */
+  readonly importedTurnCount?: number;
 }
 
 /** Migrates and validates the checkpoint; tells the source and returns `undefined` when it is unreadable here. */
@@ -253,6 +264,12 @@ async function prepareSuccessor(
   const { sessionId } = input;
   // The previous owner may run an older eve build; read its checkpoint in this build's shape.
   const migration = migrateSessionCheckpoint(input.checkpoint);
+  if (migration.kind === "busy") {
+    // Not `incompatible`, which an owner before v27 remembers for this deployment: once its work
+    // finishes, its next delivery tries again.
+    await signalFailedActivation(input, new Error(migration.detail), { payloads: [] });
+    return undefined;
+  }
   const validation = await prepareSuccessorStep({
     handoffVersion: input.handoffVersion,
     migration,
@@ -277,12 +294,33 @@ async function prepareSuccessor(
     await signalFailedActivation(input, error, { payloads: [] });
     return undefined;
   }
-  const { checkpoint, childRunIdsToStop } = migration;
+  if (migration.kind === "current") {
+    const { checkpoint } = migration;
+    return {
+      checkpoint,
+      serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
+    };
+  }
+  const { checkpoint, turnCount } = migration.imported;
   return {
     checkpoint,
-    childRunIdsToStop,
+    importedTurnCount: turnCount,
     serializedContext: stampSessionIdentity(checkpoint.serializedContext, sessionId),
   };
+}
+
+/**
+ * An imported session continues its stream after the lines its earlier owner wrote. Read once this
+ * run holds the session, so no line the earlier owner writes lands after the position.
+ */
+async function placeImportedSession(
+  sessionId: string,
+  prepared: PreparedSuccessor,
+): Promise<PreparedSuccessor> {
+  if (prepared.importedTurnCount === undefined) return prepared;
+  const tailIndex = await readSessionStreamTailStep({ sessionId });
+  const projection = preV27Projection(tailIndex, prepared.importedTurnCount);
+  return { ...prepared, checkpoint: withProjection(prepared.checkpoint, projection) };
 }
 
 async function signalFailedActivation(
@@ -342,6 +380,7 @@ async function bootForcedHandoffOwner(
   const inbox = createSessionInbox(sessionId);
   try {
     await inbox.claimSessionHooks(hookTokens, { force: true, handover: attemptKey });
+    prepared = await placeImportedSession(sessionId, prepared);
   } catch (error) {
     const claimedHooks = inbox.claimedTokens.length > 0;
     await signalFailedActivation(input, error, { claimedHooks, payloads: [] });
@@ -398,6 +437,7 @@ async function bootReleasedHandoffOwner(
         sessionState: prepared.checkpoint.sessionState,
       }),
     );
+    prepared = await placeImportedSession(input.sessionId, prepared);
     await signalSessionOwnerActivationStep({
       activation: { kind: "active" },
       token: input.activationToken,
@@ -415,10 +455,7 @@ async function startSuccessor(
   prepared: PreparedSuccessor,
 ): Promise<BootOutcome> {
   const { sessionId } = input;
-  const { checkpoint, childRunIdsToStop, serializedContext } = prepared;
-  if (childRunIdsToStop.length > 0) {
-    await stopUntrackedChildSessionsStep({ runIds: childRunIdsToStop, sessionId });
-  }
+  const { checkpoint, serializedContext } = prepared;
   return {
     inbox,
     session: {
@@ -426,10 +463,18 @@ async function startSuccessor(
       admittedDeliveryKeys: checkpoint.admittedDeliveryKeys,
       caller: input.delivery?.caller,
       capabilities: checkpoint.capabilities,
+      // The earlier build's history follows its own message conventions, such as memory recalls
+      // and task notices; this build's model reads it only as a summary.
+      compactFirst: prepared.importedTurnCount !== undefined && checkpoint.history.length > 0,
       deploymentId: input.ownerDeploymentId,
       history: checkpoint.history,
       start:
-        input.delivery === undefined ? { kind: "parked" } : { input: input.delivery, kind: "turn" },
+        input.delivery !== undefined
+          ? { input: input.delivery, kind: "turn" }
+          : storedProjection(checkpoint.sessionState.snapshot.session.state).view.session.status ===
+              "new"
+            ? { kind: "first-message" }
+            : { kind: "parked" },
       retention: checkpoint.retention,
       serializedContext,
       sessionId,
@@ -451,6 +496,7 @@ function createInitialDelivery(
 ): DeliverHookPayload | undefined {
   if (input.input.message === undefined) return undefined;
   return {
+    auth: serializedContext["eve.auth"] as SessionAuthContext | null | undefined,
     idempotencyKey: input.idempotencyKey,
     schedule: readSerializedSessionSchedule(serializedContext),
     deliveryMetadata:

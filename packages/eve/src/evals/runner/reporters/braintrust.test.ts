@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Braintrust, type BraintrustReporterConfig } from "#evals/reporters/index.js";
+import { braintrustReporter, type BraintrustReporterConfig } from "#evals/reporters/index.js";
 import type { EveEval, EveEvalResult, EveEvalTarget } from "#evals/types.js";
 
 const braintrustMocks = vi.hoisted(() => ({
@@ -39,13 +39,15 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
   return {
     id: "eval-1",
     result: {
-      output: "actual output",
-      finalMessage: "actual output",
+      sessionEnded: false,
+      data: "actual output",
+      reply: "actual output",
       status: "completed",
       events: [],
       derived: {
         toolCalls: [
           {
+            callId: "call-1",
             name: "search",
             input: { query: "test" },
             output: null,
@@ -58,7 +60,7 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
         skillLoads: [],
         subagentCalls: [],
         subagentCallCount: 0,
-        inputRequests: [],
+        interactions: [],
         parked: false,
         messageCount: 1,
         reasoningBlockCount: 0,
@@ -97,7 +99,7 @@ function makeEval(): EveEval {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("Braintrust", () => {
+describe("braintrustReporter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     braintrustMocks.init.mockResolvedValue({
@@ -108,14 +110,14 @@ describe("Braintrust", () => {
   });
 
   it("onEvalComplete is a no-op when experiment is not initialized", () => {
-    const reporter = Braintrust(makeConfig());
+    const reporter = braintrustReporter(makeConfig());
 
     // Should not throw when called before onRunStart
     reporter.onEvalComplete(makeEvalResult());
   });
 
   it("onRunComplete is a no-op when experiment is not initialized", async () => {
-    const reporter = Braintrust(makeConfig());
+    const reporter = braintrustReporter(makeConfig());
 
     // Should not throw when called before onRunStart
     await reporter.onRunComplete({
@@ -132,7 +134,7 @@ describe("Braintrust", () => {
   });
 
   it("uploads complete failed assertion diagnostics", async () => {
-    const reporter = Braintrust(makeConfig());
+    const reporter = braintrustReporter(makeConfig());
     await reporter.onRunStart([makeEval()], makeTarget());
 
     reporter.onEvalComplete(
@@ -182,7 +184,7 @@ describe("Braintrust", () => {
   });
 
   it("uploads eve trace ids and contexts", async () => {
-    const reporter = Braintrust(makeConfig());
+    const reporter = braintrustReporter(makeConfig());
     await reporter.onRunStart([makeEval()], makeTarget());
     const result = makeEvalResult();
     const traceContext = {
@@ -209,7 +211,7 @@ describe("Braintrust", () => {
   });
 
   it("logs each repeated attempt as its own row", async () => {
-    const reporter = Braintrust(makeConfig());
+    const reporter = braintrustReporter(makeConfig());
     await reporter.onRunStart([makeEval()], makeTarget());
 
     reporter.onEvalComplete(makeEvalResult({ attempt: 1 }));
@@ -223,14 +225,14 @@ describe("Braintrust", () => {
     ]);
   });
 
-  it("logs an empty output for an eval that produced no agent output", async () => {
-    const reporter = Braintrust(makeConfig());
+  it("does not replace structured null with accompanying reply text", async () => {
+    const reporter = braintrustReporter(makeConfig());
     await reporter.onRunStart([makeEval()], makeTarget());
     const result = makeEvalResult();
 
     reporter.onEvalComplete({
       ...result,
-      result: { ...result.result, finalMessage: null, output: null },
+      result: { ...result.result, reply: "Not the structured output.", data: null },
     });
 
     // Braintrust rejects a null or undefined output with "output must be specified".
@@ -238,7 +240,7 @@ describe("Braintrust", () => {
   });
 
   it("scores repeated assertions by their lowest member and keeps each score in metadata", async () => {
-    const reporter = Braintrust(makeConfig());
+    const reporter = braintrustReporter(makeConfig());
     await reporter.onRunStart([makeEval()], makeTarget());
 
     reporter.onEvalComplete(
@@ -266,7 +268,7 @@ describe("Braintrust", () => {
   });
 
   it("logs labeled assertions under their label", async () => {
-    const reporter = Braintrust(makeConfig());
+    const reporter = braintrustReporter(makeConfig());
     await reporter.onRunStart([makeEval()], makeTarget());
 
     reporter.onEvalComplete(

@@ -1,4 +1,5 @@
-import type { MessageStreamEvent } from "eve/client";
+import { emptySessionView, foldEvents, calls } from "eve/events";
+import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const BASH_TOOL = "bash";
@@ -29,7 +30,7 @@ export default defineEval({
     turn.expectOk();
 
     t.log(JSON.stringify(bashOutputs(turn.events)));
-    turn.noFailedActions();
+    turn.noFailedCalls();
     turn.eventsSatisfy("the slow command yields, keeps running, then stops with kill", (events) =>
       jobWasObservedAndStopped(bashOutputs(events)),
     );
@@ -54,11 +55,12 @@ function jobWasObservedAndStopped(outputs: readonly BashOutput[]): boolean {
   );
 }
 
-function bashOutputs(events: readonly MessageStreamEvent[]): readonly BashOutput[] {
-  return events.flatMap((event) => {
-    if (event.type !== "action.result" || event.data.result.kind !== "tool-result") return [];
-    if (event.data.result.toolName !== BASH_TOOL) return [];
-    const output = event.data.result.output;
+function bashOutputs(events: readonly SessionStreamEvent[]): readonly BashOutput[] {
+  const view = foldEvents(emptySessionView(), events);
+
+  return calls(view).flatMap((call) => {
+    if (call.name !== BASH_TOOL || call.outcome !== "completed") return [];
+    const output = call.output;
     if (typeof output !== "object" || output === null || Array.isArray(output)) return [];
     return [output as BashOutput];
   });

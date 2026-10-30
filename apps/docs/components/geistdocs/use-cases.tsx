@@ -19,8 +19,7 @@ import {
 } from "@vercel/geistdocs/assets/icons";
 import Link from "next/link";
 import type { JSX, ReactNode } from "react";
-import { integrationIcons } from "@/app/[lang]/templates/integration-icons";
-import { templatePath } from "@/lib/geistdocs/canonical";
+import { integrationIcons } from "@/components/geistdocs/template-integration-icons";
 import { logos } from "@/lib/integrations/logos";
 import { templateManifest } from "@/lib/templates/manifest";
 
@@ -130,7 +129,7 @@ export function TemplateCards({ children }: { children: ReactNode }): JSX.Elemen
   );
 }
 
-/** Opens a template from the gallery, showing its integrations. */
+/** Opens a template's source, showing its integrations. */
 export function TemplateCard({
   title,
   template: slug,
@@ -139,14 +138,19 @@ export function TemplateCard({
 }: {
   title: string;
   template: string;
-  /** Shorter link label for templates whose gallery title is long. */
+  /** Shorter link label for templates whose title is long. */
   label?: string;
   children: ReactNode;
 }): JSX.Element {
   const template = templateManifest.find((entry) => entry.slug === slug);
   if (!template) throw new Error(`Unknown template "${slug}" in a TemplateCard.`);
   return (
-    <Link className={`${cardClassName} gap-2`} href={templatePath(slug)} prefetch={true}>
+    <a
+      className={`${cardClassName} gap-2`}
+      href={template.sourceHref}
+      rel="noopener noreferrer"
+      target="_blank"
+    >
       <span className="flex items-start justify-between gap-2 text-gray-1000 text-heading-16">
         {title}
         <IconArrowUpRightSmall
@@ -177,7 +181,7 @@ export function TemplateCard({
         </span>
         <span className="text-copy-13 text-gray-900">{label ?? template.title} template</span>
       </span>
-    </Link>
+    </a>
   );
 }
 

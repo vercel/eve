@@ -116,7 +116,12 @@ export async function listToolMetadata(
   });
   try {
     const tools = await listConnectionMetadata(connectionName, client, deadline);
-    return tools.filter((tool) => passesToolFilter(tool.name, connection.tools));
+    return tools.filter((tool) =>
+      passesToolFilter(
+        tool.operationId === undefined ? [tool.name] : [tool.name, tool.operationId],
+        connection.tools,
+      ),
+    );
   } finally {
     clearTimeout(timer);
   }

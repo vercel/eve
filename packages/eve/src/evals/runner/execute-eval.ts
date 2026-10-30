@@ -66,8 +66,9 @@ export async function executeEval(options: ExecuteEvalOptions): Promise<EveEvalR
   } catch (err) {
     error = toErrorMessage(err);
     result = {
-      output: null,
-      finalMessage: null,
+      data: undefined,
+      reply: undefined,
+      sessionEnded: false,
       status: "failed",
       events: [],
       derived: createEmptyDerivedFacts(),

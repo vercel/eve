@@ -30,14 +30,16 @@ export default defineEval({
       ),
     );
 
-    const initialTurn = await t.target.watchTurn(first.sessionId!).result();
+    const initialTurn = await t.target.attach(first.sessionId!).watch().result();
     initialTurn.succeeded();
-    initialTurn.event("message.completed");
+    initialTurn.event("content.completed", { data: { phase: "reply" } });
     initialTurn.messageIncludes("first-turn");
 
-    const followUpTurn = t.target.watchTurn(first.sessionId!, {
-      startIndex: initialTurn.events.length,
-    });
+    const followUpTurn = t.target
+      .attach(first.sessionId!, {
+        startIndex: (initialTurn.events.at(-1)?.meta.position.line ?? -1) + 1,
+      })
+      .watch();
     const second = await postChannel<MessageResponse>(t.target, "/webhook", {
       message: "Reply with exactly: second-turn",
       sessionRef,
@@ -46,7 +48,7 @@ export default defineEval({
 
     const followUp = await followUpTurn.result();
     followUp.succeeded();
-    followUp.event("message.completed");
+    followUp.event("content.completed", { data: { phase: "reply" } });
     followUp.messageIncludes("second-turn");
   },
 });

@@ -1,220 +1,311 @@
 {
   "id": "static-tools/ends-turn-function",
   "verdict": "passed",
-  "startedAt": "2026-10-05T23:35:48.752Z",
-  "completedAt": "2026-10-05T23:35:49.802Z",
+  "startedAt": "2026-10-27T07:43:23.322Z",
+  "completedAt": "2026-10-27T07:43:23.618Z",
   "result": {
     "derived": {
       "usage": {
         "cacheReadTokens": 0,
         "cacheWriteTokens": 0,
-        "inputTokens": 1117,
+        "inputTokens": 1126,
         "outputTokens": 29
       }
     },
-    "sessionId": "wrun_01M476RTSJ569Y4TN0BBRB2ED0",
+    "sessionId": "wrun_01M5Y50PP56494TX3DF4AK0K3D",
     "runtimeIdentity": {
-      "eveVersion": "0.71.2"
+      "agentId": "agent-tools",
+      "agentName": "agent-tools",
+      "eveVersion": "0.84.0"
     },
     "sessions": [
       {
-        "sessionId": "wrun_01M476RTSJ569Y4TN0BBRB2ED0",
+        "sessionId": "wrun_01M5Y50PP56494TX3DF4AK0K3D",
+        "primary": true,
         "events": [
           {
-            "type": "turn.started",
-            "meta": {
-              "id": "evt_01M476RV3PFF8YGR8F46VHK6NW",
-              "at": "2026-10-05T23:35:49.110Z"
-            },
+            "type": "session.started",
             "data": {
-              "turnId": "turn_0"
-            }
+              "runtime": {
+                "agentId": "agent-tools",
+                "agentName": "agent-tools",
+                "eveVersion": "0.84.0"
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:23.408Z", "position": { "index": 0, "line": 0 } }
           },
           {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476RV3RZCCW92ZXEJWBW8WM",
-              "at": "2026-10-05T23:35:49.112Z"
-            },
+            "type": "delivery.admitted",
             "data": {
-              "turnId": "turn_0",
-              "stepIndex": 0
-            }
-          },
-          {
-            "type": "actions.requested",
-            "meta": {
-              "id": "evt_01M476RV41G16Z7FSF37GAG635",
-              "at": "2026-10-05T23:35:49.121Z"
+              "deliveryId": "917e324b-e5dd-4eec-ac7f-3d12d356bedd",
+              "principal": { "id": "local-dev", "type": "local-dev" },
+              "source": { "channel": "channel:eve" }
             },
-            "data": {
-              "actions": [
-                {
-                  "callId": "mock-tool-call-1-0-1",
-                  "kind": "tool-call"
-                }
-              ]
-            }
-          },
-          {
-            "type": "action.result",
-            "meta": {
-              "id": "evt_01M476RV4325FKVY9H3VTMBSEW",
-              "at": "2026-10-05T23:35:49.123Z"
-            },
-            "data": {
-              "result": {
-                "callId": "mock-tool-call-1-0-1"
-              },
-              "status": "completed"
-            }
-          },
-          {
-            "type": "step.completed",
-            "meta": {
-              "id": "evt_01M476RV45DWXA28BBVBFY5HQF",
-              "at": "2026-10-05T23:35:49.125Z"
-            },
-            "data": {
-              "turnId": "turn_0",
-              "stepIndex": 0,
-              "usage": {
-                "inputTokens": 344,
-                "outputTokens": 4,
-                "cacheReadTokens": 0,
-                "cacheWriteTokens": 0
-              },
-              "finishReason": "tool-calls"
-            }
-          },
-          {
-            "type": "turn.completed",
-            "meta": {
-              "id": "evt_01M476RV4NAD1MEWDF4H2CBQWB",
-              "at": "2026-10-05T23:35:49.141Z"
-            },
-            "data": {
-              "turnId": "turn_0"
-            }
+            "meta": { "at": "2026-10-27T07:43:23.408Z", "position": { "index": 1, "line": 0 } }
           },
           {
             "type": "turn.started",
-            "meta": {
-              "id": "evt_01M476RVPD601TWZ4WEK2RYKCG",
-              "at": "2026-10-05T23:35:49.709Z"
-            },
             "data": {
-              "turnId": "turn_1"
-            }
-          },
-          {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476RVPD601TWZ4WEK2RYKCJ",
-              "at": "2026-10-05T23:35:49.709Z"
-            },
-            "data": {
-              "turnId": "turn_1",
-              "stepIndex": 0
-            }
-          },
-          {
-            "type": "actions.requested",
-            "meta": {
-              "id": "evt_01M476RVPFWRV23DNSPJERPZRX",
-              "at": "2026-10-05T23:35:49.711Z"
-            },
-            "data": {
-              "actions": [
-                {
-                  "callId": "mock-tool-call-2-1-1",
-                  "kind": "tool-call"
-                }
-              ]
-            }
-          },
-          {
-            "type": "action.result",
-            "meta": {
-              "id": "evt_01M476RVPGVTS0HK0BT3DHYRNB",
-              "at": "2026-10-05T23:35:49.712Z"
-            },
-            "data": {
-              "result": {
-                "callId": "mock-tool-call-2-1-1"
+              "cause": { "deliveryId": "917e324b-e5dd-4eec-ac7f-3d12d356bedd" },
+              "follows": null,
+              "trace": {
+                "decision": { "action": "record", "recordInputs": true, "recordOutputs": true },
+                "spanId": "911be69ed4adfa82",
+                "traceFlags": 1,
+                "traceId": "1619018c2baa9292ba055bca…"
               },
-              "status": "completed"
-            }
+              "turnId": "turn_0"
+            },
+            "meta": { "at": "2026-10-27T07:43:23.410Z", "position": { "index": 0, "line": 1 } }
           },
           {
-            "type": "step.completed",
-            "meta": {
-              "id": "evt_01M476RVPGVTS0HK0BT3DHYRNC",
-              "at": "2026-10-05T23:35:49.712Z"
-            },
+            "type": "delivery.consumed",
             "data": {
-              "turnId": "turn_1",
-              "stepIndex": 0,
+              "deliveryId": "917e324b-e5dd-4eec-ac7f-3d12d356bedd",
+              "parts": [{ "kind": "text", "text": "Alice shared that the re…" }],
+              "turnId": "turn_0"
+            },
+            "meta": { "at": "2026-10-27T07:43:23.410Z", "position": { "index": 1, "line": 1 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_0" }, "runId": "run_0" },
+            "meta": { "at": "2026-10-27T07:43:23.416Z", "position": { "index": 0, "line": 2 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/model", "runId": "run_0" },
+            "meta": { "at": "2026-10-27T07:43:23.417Z", "position": { "index": 0, "line": 3 } }
+          },
+          {
+            "type": "call.requested",
+            "data": {
+              "callId": "mock-tool-call-1-0-1-9",
+              "capability": { "kind": "tool", "name": "react_to_note" },
+              "input": { "emoji": "tada" },
+              "owner": { "runId": "run_0" }
+            },
+            "meta": { "at": "2026-10-27T07:43:23.426Z", "position": { "index": 0, "line": 4 } }
+          },
+          {
+            "type": "call.started",
+            "data": { "callId": "mock-tool-call-1-0-1-9" },
+            "meta": { "at": "2026-10-27T07:43:23.428Z", "position": { "index": 0, "line": 5 } }
+          },
+          {
+            "type": "call.settled",
+            "data": {
+              "callId": "mock-tool-call-1-0-1-9",
+              "outcome": "completed",
+              "output": { "emoji": "tada", "posted": true }
+            },
+            "meta": { "at": "2026-10-27T07:43:23.429Z", "position": { "index": 0, "line": 6 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "tool-calls", "outcome": "completed", "runId": "run_0" },
+            "meta": { "at": "2026-10-27T07:43:23.430Z", "position": { "index": 0, "line": 7 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_0" },
               "usage": {
-                "inputTokens": 382,
-                "outputTokens": 5,
                 "cacheReadTokens": 0,
-                "cacheWriteTokens": 0
+                "cacheWriteTokens": 0,
+                "inputTokens": 347,
+                "outputTokens": 4
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:23.430Z", "position": { "index": 1, "line": 7 } }
+          },
+          {
+            "type": "turn.settled",
+            "data": { "outcome": "completed", "turnId": "turn_0" },
+            "meta": { "at": "2026-10-27T07:43:23.441Z", "position": { "index": 0, "line": 8 } }
+          },
+          {
+            "type": "delivery.settled",
+            "data": {
+              "deliveryId": "917e324b-e5dd-4eec-ac7f-3d12d356bedd",
+              "outcome": "handled",
+              "turnId": "turn_0"
+            },
+            "meta": { "at": "2026-10-27T07:43:23.441Z", "position": { "index": 1, "line": 8 } }
+          },
+          {
+            "type": "delivery.admitted",
+            "data": {
+              "deliveryId": "dd18fdcd-805b-4c50-8b7d-21f8f41472f3",
+              "principal": { "id": "local-dev", "type": "local-dev" },
+              "source": { "channel": "channel:eve" }
+            },
+            "meta": { "at": "2026-10-27T07:43:23.545Z", "position": { "index": 0, "line": 9 } }
+          },
+          {
+            "type": "turn.started",
+            "data": {
+              "cause": { "deliveryId": "dd18fdcd-805b-4c50-8b7d-21f8f41472f3" },
+              "follows": "turn_0",
+              "trace": {
+                "decision": { "action": "record", "recordInputs": true, "recordOutputs": true },
+                "spanId": "4df1fd2bfcd87c42",
+                "traceFlags": 1,
+                "traceId": "4df1fd2bfcd87c422ed828b9…"
               },
-              "finishReason": "tool-calls"
-            }
-          },
-          {
-            "type": "step.started",
-            "meta": {
-              "id": "evt_01M476RVRMAYSTN1F5WH1BDHGM",
-              "at": "2026-10-05T23:35:49.780Z"
-            },
-            "data": {
-              "turnId": "turn_1",
-              "stepIndex": 1
-            }
-          },
-          {
-            "type": "message.appended",
-            "meta": {
-              "id": "evt_01M476RVRRACG4V1029E45SH2D",
-              "at": "2026-10-05T23:35:49.784Z"
-            },
-            "data": {
-              "turnId": "turn_1",
-              "stepIndex": 1
-            }
-          },
-          {
-            "type": "step.completed",
-            "meta": {
-              "id": "evt_01M476RVRRACG4V1029E45SH2H",
-              "at": "2026-10-05T23:35:49.784Z"
-            },
-            "data": {
-              "turnId": "turn_1",
-              "stepIndex": 1,
-              "usage": {
-                "inputTokens": 391,
-                "outputTokens": 20,
-                "cacheReadTokens": 0,
-                "cacheWriteTokens": 0
-              },
-              "finishReason": "stop"
-            }
-          },
-          {
-            "type": "turn.completed",
-            "meta": {
-              "id": "evt_01M476RVS25WY95VK1961T35DH",
-              "at": "2026-10-05T23:35:49.794Z"
-            },
-            "data": {
               "turnId": "turn_1"
-            }
+            },
+            "meta": { "at": "2026-10-27T07:43:23.546Z", "position": { "index": 0, "line": 10 } }
+          },
+          {
+            "type": "delivery.consumed",
+            "data": {
+              "deliveryId": "dd18fdcd-805b-4c50-8b7d-21f8f41472f3",
+              "parts": [{ "kind": "text", "text": "Bob would also like to a…" }],
+              "turnId": "turn_1"
+            },
+            "meta": { "at": "2026-10-27T07:43:23.546Z", "position": { "index": 1, "line": 10 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_1" }, "runId": "run_1" },
+            "meta": { "at": "2026-10-27T07:43:23.552Z", "position": { "index": 0, "line": 11 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/model", "runId": "run_1" },
+            "meta": { "at": "2026-10-27T07:43:23.554Z", "position": { "index": 0, "line": 12 } }
+          },
+          {
+            "type": "call.requested",
+            "data": {
+              "callId": "mock-tool-call-2-1-1-10",
+              "capability": { "kind": "tool", "name": "react_to_note" },
+              "input": { "emoji": "rocket" },
+              "owner": { "runId": "run_1" }
+            },
+            "meta": { "at": "2026-10-27T07:43:23.562Z", "position": { "index": 0, "line": 13 } }
+          },
+          {
+            "type": "call.started",
+            "data": { "callId": "mock-tool-call-2-1-1-10" },
+            "meta": { "at": "2026-10-27T07:43:23.566Z", "position": { "index": 0, "line": 14 } }
+          },
+          {
+            "type": "call.settled",
+            "data": {
+              "callId": "mock-tool-call-2-1-1-10",
+              "outcome": "completed",
+              "output": { "emoji": "rocket", "posted": false }
+            },
+            "meta": { "at": "2026-10-27T07:43:23.567Z", "position": { "index": 0, "line": 15 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "tool-calls", "outcome": "completed", "runId": "run_1" },
+            "meta": { "at": "2026-10-27T07:43:23.568Z", "position": { "index": 0, "line": 16 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_1" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 385,
+                "outputTokens": 5
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:23.568Z", "position": { "index": 1, "line": 16 } }
+          },
+          {
+            "type": "model.requested",
+            "data": { "owner": { "turnId": "turn_1" }, "runId": "run_2" },
+            "meta": { "at": "2026-10-27T07:43:23.585Z", "position": { "index": 0, "line": 17 } }
+          },
+          {
+            "type": "model.started",
+            "data": { "attempt": 0, "modelId": "eve-mock/model", "runId": "run_2" },
+            "meta": { "at": "2026-10-27T07:43:23.587Z", "position": { "index": 0, "line": 18 } }
+          },
+          {
+            "type": "content.delta",
+            "data": { "delta": "The rocket reaction isn'…", "kind": "text", "partId": "run_2.0" },
+            "meta": { "at": "2026-10-27T07:43:23.587Z", "position": { "index": 0, "line": 19 } }
+          },
+          {
+            "type": "content.completed",
+            "data": {
+              "kind": "text",
+              "partId": "run_2.0",
+              "phase": "reply",
+              "runId": "run_2",
+              "value": "The rocket reaction isn'…"
+            },
+            "meta": { "at": "2026-10-27T07:43:23.595Z", "position": { "index": 0, "line": 20 } }
+          },
+          {
+            "type": "model.settled",
+            "data": { "finishReason": "stop", "outcome": "completed", "runId": "run_2" },
+            "meta": { "at": "2026-10-27T07:43:23.596Z", "position": { "index": 0, "line": 21 } }
+          },
+          {
+            "type": "usage.recorded",
+            "data": {
+              "kind": "model",
+              "owner": { "runId": "run_2" },
+              "usage": {
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "inputTokens": 394,
+                "outputTokens": 20
+              }
+            },
+            "meta": { "at": "2026-10-27T07:43:23.596Z", "position": { "index": 1, "line": 21 } }
+          },
+          {
+            "type": "turn.settled",
+            "data": { "outcome": "completed", "reply": ["run_2.0"], "turnId": "turn_1" },
+            "meta": { "at": "2026-10-27T07:43:23.607Z", "position": { "index": 0, "line": 22 } }
+          },
+          {
+            "type": "delivery.settled",
+            "data": {
+              "deliveryId": "dd18fdcd-805b-4c50-8b7d-21f8f41472f3",
+              "outcome": "handled",
+              "turnId": "turn_1"
+            },
+            "meta": { "at": "2026-10-27T07:43:23.607Z", "position": { "index": 1, "line": 22 } }
           }
-        ]
+        ],
+        "clock": {
+          "receivedAt": [
+            1793087003444, 1793087003444, 1793087003450, 1793087003450, 1793087003450,
+            1793087003451, 1793087003451, 1793087003451, 1793087003451, 1793087003451,
+            1793087003451, 1793087003460, 1793087003460, 1793087003575, 1793087003578,
+            1793087003578, 1793087003578, 1793087003578, 1793087003579, 1793087003579,
+            1793087003579, 1793087003580, 1793087003580, 1793087003604, 1793087003609,
+            1793087003609, 1793087003609, 1793087003609, 1793087003609, 1793087003615, 1793087003615
+          ],
+          "sends": [
+            {
+              "kind": "create",
+              "deliveryId": "917e324b-e5dd-4eec-ac7f-3d12d356bedd",
+              "startedAt": 1793087003322,
+              "notReadyMs": 0,
+              "acceptedAt": 1793087003350
+            },
+            {
+              "kind": "message",
+              "startedAt": 1793087003462,
+              "notReadyMs": 0,
+              "acceptedAt": 1793087003492,
+              "deliveryId": "dd18fdcd-805b-4c50-8b7d-21f8f41472f3"
+            }
+          ]
+        }
       }
     ]
   }

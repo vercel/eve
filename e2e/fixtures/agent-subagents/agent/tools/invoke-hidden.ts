@@ -19,7 +19,7 @@ async function execute({ target }: Input, ctx: WorkflowToolContext) {
     throw new Error(`Missing workflow metadata for internal subagent ${target}.`);
   }
   const response = await ctx.agent(target).send("Return your fixed marker.");
-  const { message } = await response.result();
+  const { reply: message } = await response.result();
   return { description, result: message ?? null };
 }
 

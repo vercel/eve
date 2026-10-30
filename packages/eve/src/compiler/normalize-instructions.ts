@@ -10,12 +10,7 @@ import {
   requireModuleBackedDefinitionLoadOptions,
   type SourceDefinitionCompileOptions,
 } from "#compiler/normalize-helpers.js";
-import {
-  assertResolverOnlyDynamicSentinel,
-  ALLOWED_DYNAMIC_INSTRUCTION_EVENTS,
-  isDynamicSentinel,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
 /**
  * Compiled instructions entry produced from one authored `instructions/*`
@@ -77,24 +72,12 @@ export async function compileInstructionsEntry(
   });
 
   if (isDynamicSentinel(exportValue)) {
-    assertResolverOnlyDynamicSentinel(
-      exportValue,
-      `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
-    );
-    const eventNames = Object.keys(exportValue.events);
-    const unsupportedEvent = eventNames.find(
-      (eventName) => !ALLOWED_DYNAMIC_INSTRUCTION_EVENTS.has(eventName),
-    );
-    if (unsupportedEvent !== undefined) {
-      throw new Error(
-        `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to use only "session.started" or "turn.started" events. Unsupported event: "${unsupportedEvent}".`,
-      );
-    }
+    const message = `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
+    assertDynamicSentinelKeys(exportValue, message);
     const slug = stripLogicalPathExtension(source.logicalPath).replace(/^instructions\//, "");
     return {
       kind: "dynamic-instructions",
       definition: {
-        eventNames: eventNames as DynamicToolEventName[],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
         slug,

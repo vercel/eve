@@ -8,7 +8,6 @@ import {
   defineNuxtModule,
   extendRouteRules,
 } from "@nuxt/kit";
-import type { NuxtModule } from "@nuxt/schema";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import {
@@ -50,6 +49,11 @@ export interface EveNuxtModuleOptions {
    * dependencies (`node <path-to>/eve/bin/eve.js build`).
    */
   eveBuildCommand?: string;
+}
+
+/** Opaque setup entry consumed by Nuxt. Register it in `modules`, rather than invoking it directly. */
+export interface EveNuxtModule {
+  (options: EveNuxtModuleOptions, nuxt: object): void;
 }
 
 function resolveApplicationRoot(nuxtRoot: string, appPath: string | undefined): string {
@@ -124,7 +128,7 @@ async function resolveEveProxyTarget(input: {
  * Nuxt >= 4.0.0. Configure via
  * {@link EveNuxtModuleOptions}.
  */
-const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxtModuleOptions>({
+const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
   meta: {
     name: "eve",
     configKey: "eve",
@@ -141,6 +145,14 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
     // Auto-import the Vue composable so app code can call `useEveAgent()`
     // without an explicit import, matching Nuxt's composable conventions.
     addImports({ name: "useEveAgent", from: "eve/vue" });
+
+    // Vite's dependency scan never sees an auto-import, so without this it
+    // serves `eve/vue`'s CommonJS dependencies (such as `@vercel/oidc`) to the
+    // browser unbundled in dev, and the app fails to hydrate.
+    nuxt.options.vite.optimizeDeps = {
+      ...nuxt.options.vite.optimizeDeps,
+      include: [...(nuxt.options.vite.optimizeDeps?.include ?? []), "eve/vue"],
+    };
 
     // On Vercel the eve app deploys as a sibling service. A Nitro runtime
     // `proxy` rule can't reach it — the proxied request loops back into the
@@ -207,6 +219,6 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
       });
     }
   },
-});
+}) as EveNuxtModule;
 
 export default eveNuxtModule;

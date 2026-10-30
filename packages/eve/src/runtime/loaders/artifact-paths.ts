@@ -9,6 +9,7 @@ interface RuntimeCompilerArtifactPaths {
   readonly diagnosticsPath: string;
   readonly discoveryManifestPath: string;
   readonly discoveryDirectoryPath: string;
+  readonly modelMetadataPath: string;
   readonly moduleMapPath: string;
   readonly sandboxPreparedArtifactsPath: string;
 }
@@ -30,6 +31,7 @@ export function resolveRuntimeCompilerArtifactPaths(appRoot: string): RuntimeCom
     diagnosticsPath: `${discoveryDirectoryPath}/diagnostics.json`,
     discoveryDirectoryPath,
     discoveryManifestPath: `${discoveryDirectoryPath}/agent-discovery-manifest.json`,
+    modelMetadataPath: `${compileDirectoryPath}/model-metadata.json`,
     moduleMapPath: `${compileDirectoryPath}/module-map.mjs`,
     sandboxPreparedArtifactsPath: `${compileDirectoryPath}/sandbox-prepared-artifacts.json`,
   };

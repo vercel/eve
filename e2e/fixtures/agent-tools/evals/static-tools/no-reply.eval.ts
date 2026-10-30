@@ -12,7 +12,7 @@ export default defineEval({
     quiet.expectOk();
     quiet.requireToolCall("no_reply");
     t.check(
-      quiet.message,
+      quiet.reply,
       satisfies((message) => message === undefined, "the turn sends no reply"),
     );
 
@@ -21,7 +21,7 @@ export default defineEval({
     );
     followUp.expectOk();
     t.check(
-      followUp.message,
+      followUp.reply,
       satisfies(
         (message) => typeof message === "string" && /backup/iu.test(message),
         "the next turn replies normally",

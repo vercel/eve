@@ -8,10 +8,8 @@ import {
 } from "#execution/durable-session-store.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { hydrateDurableSession, projectToDurableSession } from "#execution/session.js";
-import {
-  withSessionStateDelta,
-  type SessionStateTransition,
-} from "#execution/session/state-delta.js";
+import type { SessionStateTransition } from "#execution/session/state-delta.js";
+import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import { createLogger } from "#internal/logging.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 

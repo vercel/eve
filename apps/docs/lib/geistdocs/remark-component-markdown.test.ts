@@ -101,7 +101,7 @@ describe("component Markdown export", () => {
       "- **[Business agents](#business-agents)** (For your team): Automate a company function.",
     );
     expect(markdown).toContain(
-      "- **iMessage agent**: A multi-tenant iMessage service. See the [iMessage template](/templates/openinstinct-eve-template).",
+      "- **iMessage agent**: A multi-tenant iMessage service. See the [iMessage template](https://github.com/Merit-Systems/OpenInstinct/tree/main).",
     );
     expect(markdown).toContain(
       "- **Meet employees where they work**: One agent serves Slack and your own web apps. See [Channels](/docs/channels/overview).",
