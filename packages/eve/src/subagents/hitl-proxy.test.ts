@@ -7,7 +7,7 @@ import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 
 function createSession(): HarnessSession {
   return {
-    agent: { modelReference: { id: "test-model" }, system: "", tools: [] },
+    agent: { modelReference: { id: "test-model" }, tools: [] },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "parent-token",
     history: [],

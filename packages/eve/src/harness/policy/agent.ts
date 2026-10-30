@@ -168,7 +168,7 @@ export function declaredNow(ctx: ContextReader): HarnessDeclaredAgent {
   for (const connection of ctx.get(ConnectionRegistryKey)?.getConnections() ?? []) {
     add({ ...connection, deferred: true, name: connection.connectionName }, "connection");
   }
-  const workspace = bundle?.turnAgent.workspaceSpec;
+  const workspace = bundle?.turnAgent.promptWorkspaceSpec ?? bundle?.turnAgent.workspaceSpec;
   return {
     instructions,
     model: { [DECLARED]: "model" },
@@ -268,36 +268,10 @@ function renderTasks(facts: RenderFacts | undefined): string {
   return facts.finalReplyOnly ? FINAL_REPLY_TASK_SYSTEM_BLOCK : TASK_SYSTEM_BLOCK;
 }
 
-/**
- * eve's own harness's system prompt: the default prompt, from the session's slots and bundle.
- * Where the session's stored prompt isn't what the bundle renders (a session from elsewhere, or
- * one with no bundle), it's that prompt.
- */
+/** eve's own prompt: its default prompt for what the agent's files declare now. */
 export function nativeInstructions(
   ctx: ContextReader | undefined,
-  input: { readonly system: string; readonly facts: RenderFacts },
+  facts: RenderFacts,
 ): string | readonly string[] {
-  const files = ctx === undefined ? undefined : declaredNow(ctx);
-  const fromBundle =
-    files !== undefined && defaultPrompt(withoutDynamic(files), undefined) === input.system;
-  const prompt = defaultPrompt(
-    fromBundle
-      ? files
-      : {
-          instructions: {
-            ...files?.instructions,
-            agent: { content: input.system, role: "system" },
-          },
-          model: { [DECLARED]: "model" },
-          skills: [],
-          tools: {},
-        },
-    input.facts,
-  );
-  return prompt;
-}
-
-/** `files` with only what eve's stored prompt holds: its static parts. */
-function withoutDynamic(files: HarnessDeclaredAgent): HarnessDeclaredAgent {
-  return { ...files, instructions: { agent: files.instructions.agent! } };
+  return ctx === undefined ? "" : defaultPrompt(declaredNow(ctx), facts);
 }

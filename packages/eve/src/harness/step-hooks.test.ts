@@ -11,7 +11,6 @@ function createSession(): HarnessSession {
   return {
     agent: {
       modelReference: { id: "test-model" },
-      system: "test",
       tools: [],
     },
     compaction: { recentWindowSize: 10, threshold: 100_000 },

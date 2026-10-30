@@ -79,7 +79,7 @@ it("reads imported history before each turn's context and message, and records i
     tools: new Map(),
   });
   const session: HarnessSession = {
-    agent: { modelReference: { id: "m" }, system: "You help Alice.", tools: [] },
+    agent: { modelReference: { id: "m" }, tools: [] },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "http:history",
     history: [],

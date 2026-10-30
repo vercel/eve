@@ -97,7 +97,7 @@ async function compactWith(
   handleEvent: (events: readonly SessionEvent[]) => Promise<void> = async () => {},
 ) {
   const session: HarnessSession = {
-    agent: { modelReference: { id: "summary-model" }, system: "You help Alice.", tools: [] },
+    agent: { modelReference: { id: "summary-model" }, tools: [] },
     compaction: { recentWindowSize: 1, threshold: 100_000 },
     continuationToken: "http:compaction-session",
     history: [
@@ -140,7 +140,7 @@ describe("compaction summary call", () => {
         tools: new Map(),
       })(
         {
-          agent: { modelReference: { id: "summary-model" }, system: "You help Alice.", tools: [] },
+          agent: { modelReference: { id: "summary-model" }, tools: [] },
           compaction: { recentWindowSize: 1, threshold: 2_000 },
           continuationToken: "http:late-compaction-failure",
           history: [{ content: "Earlier notes. ".repeat(2_000), kind: "user", role: "user" }],
@@ -183,7 +183,7 @@ describe("compaction summary call", () => {
     const model = new MockLanguageModelV3({
       doStream: async ({ prompt }) => {
         const system = prompt[0]?.role === "system" ? prompt[0].content : "";
-        if (system.includes("You help Alice.")) return await turnCalls();
+        if (!system.includes("CONTEXT CHECKPOINT COMPACTION")) return await turnCalls();
         throw new APICallError({
           // eve's retry policy still retries the 429; this skips the AI SDK's slower inner retry.
           isRetryable: false,
@@ -207,7 +207,7 @@ describe("compaction summary call", () => {
         tools: new Map(),
       })(
         {
-          agent: { modelReference: { id: "step-model" }, system: "You help Alice.", tools: [] },
+          agent: { modelReference: { id: "step-model" }, tools: [] },
           // Small enough that the long brief compacts before the turn's first model call.
           compaction: { recentWindowSize: 1, threshold: 2_000 },
           continuationToken: "http:rate-limited-compaction",
@@ -236,12 +236,22 @@ describe("compaction summary call", () => {
     const result = await createKernel({
       handleEvent: async (publication) => void events.push(...eventsOf(publication)),
       resolveModel: async () => new MockLanguageModelV3({ doStream }),
-      tools: new Map(),
+      // A tool description no compaction can shrink, over the limit by itself.
+      tools: new Map([
+        [
+          "policy_lookup",
+          {
+            description: "Protected policy. ".repeat(1_000),
+            execute: async () => ({}),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "policy_lookup",
+          },
+        ],
+      ]),
     })(
       {
         agent: {
           modelReference: { id: "summary-model" },
-          system: "Protected instructions. ".repeat(1_000),
           tools: [],
         },
         compaction: { recentWindowSize: 1, threshold: 2_000 },
@@ -392,7 +402,7 @@ describe("compaction summary call", () => {
     let position = 0;
     // Over the threshold, but capping the old search output fits it without a summary.
     const session: HarnessSession = {
-      agent: { modelReference: { id: "turn-model" }, system: "You help Alice.", tools: [] },
+      agent: { modelReference: { id: "turn-model" }, tools: [] },
       compaction: { recentWindowSize: 1, threshold: 20_000 },
       continuationToken: "http:compaction-capped",
       history: [
@@ -452,7 +462,7 @@ describe("announcements after a compaction during a turn", () => {
     const model = new MockLanguageModelV3({
       doStream: async ({ prompt }) => {
         const system = prompt[0]?.role === "system" ? prompt[0].content : "";
-        if (!system.includes("You help Alice.")) return summaryStream();
+        if (system.includes("CONTEXT CHECKPOINT COMPACTION")) return summaryStream();
         requests.push(userTexts(prompt));
         // A long first reply pushes the second step over the threshold, so compaction runs
         // between the turn's steps and folds the first announcement into the summary.
@@ -462,7 +472,7 @@ describe("announcements after a compaction during a turn", () => {
       },
     });
     const session: HarnessSession = {
-      agent: { modelReference: { id: "step-model" }, system: "You help Alice.", tools: [] },
+      agent: { modelReference: { id: "step-model" }, tools: [] },
       compaction: { recentWindowSize: 1, threshold: 2_000 },
       continuationToken: "http:announcement-compaction-session",
       history: [],

@@ -22,7 +22,6 @@ function createSession(): HarnessSession {
   return {
     agent: {
       modelReference: { id: "integration-model" },
-      system: "You are a test assistant.",
       tools: [],
     },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
@@ -241,7 +240,6 @@ describe("tool loop cancellation (real AI SDK)", () => {
       ...createSession(),
       agent: {
         modelReference: { id: "integration-model" },
-        system: "You are a test assistant.",
         tools: [
           {
             description: "Waits until the turn is cancelled.",
@@ -299,10 +297,9 @@ describe("tool loop cancellation (real AI SDK)", () => {
     )(createSession(), { message: "Hi" });
 
     const bare = createEventCollector();
-    const bareResult = await createKernel(createConfig(buildModel(), bare.emit))(
-      createSession(),
-      { message: "Hi" },
-    );
+    const bareResult = await createKernel(createConfig(buildModel(), bare.emit))(createSession(), {
+      message: "Hi",
+    });
 
     expect(inertResult.next).toBe(bareResult.next);
     expect(inert.events.map((event) => event.type)).toEqual(bare.events.map((event) => event.type));

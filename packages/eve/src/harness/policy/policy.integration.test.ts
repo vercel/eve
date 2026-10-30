@@ -110,7 +110,7 @@ async function runTurn(
     },
   });
   const session: HarnessSession = {
-    agent: { modelReference: { id: "step-model" }, system: "You help Alice.", tools: [] },
+    agent: { modelReference: { id: "step-model" }, tools: [] },
     compaction: { recentWindowSize: 10, threshold: options.threshold ?? 100_000 },
     continuationToken: "http:program-session",
     history: options.history ?? [],
@@ -146,9 +146,7 @@ async function runTurn(
 }
 
 /** eve's own loop, except that `review` can send a settling output back to the model. */
-function reviewing(
-  review: (output: unknown, continuations: number) => string | undefined,
-): Policy {
+function reviewing(review: (output: unknown, continuations: number) => string | undefined): Policy {
   return (ctx) => ({
     next: (): Next => {
       const next = nativeNext(ctx);

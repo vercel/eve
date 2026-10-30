@@ -87,8 +87,8 @@ export function stepInstructions(
   return (
     harnessInstructions(step.ctx) ??
     nativeInstructions(step.ctx, {
-      facts: { finalReplyOnly: step.finalReplyOnly, offersTasks: catalog.offersTasks },
-      system: step.session.agent.system,
+      finalReplyOnly: step.finalReplyOnly,
+      offersTasks: catalog.offersTasks,
     })
   );
 }

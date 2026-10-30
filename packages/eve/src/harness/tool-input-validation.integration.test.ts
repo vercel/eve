@@ -89,7 +89,6 @@ describe("framework tool input validation (real AI SDK)", () => {
     const session: HarnessSession = {
       agent: {
         modelReference: { id: "final-output-validation-model" },
-        system: "Return structured output.",
         tools: [],
       },
       compaction: { recentWindowSize: 10, threshold: 100_000 },
@@ -169,7 +168,6 @@ describe("framework tool input validation (real AI SDK)", () => {
     const session: HarnessSession = {
       agent: {
         modelReference: { id: "output-limit-model" },
-        system: "Help Alice with her notes.",
         tools: [],
       },
       compaction: { recentWindowSize: 10, threshold: 100_000 },
@@ -248,7 +246,6 @@ describe("framework tool input validation (real AI SDK)", () => {
       {
         agent: {
           modelReference: { id: "output-limit-model" },
-          system: "Help Alice with her notes.",
           tools: [],
         },
         compaction: { recentWindowSize: 10, threshold: 100_000 },

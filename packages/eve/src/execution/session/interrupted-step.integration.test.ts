@@ -18,7 +18,7 @@ it.each([
   "adopts a recorded $outcome session ending without restoring providers",
   async ({ outcome, isError }) => {
     const session: HarnessSession = {
-      agent: { system: "", tools: [], dynamicModel: true },
+      agent: { tools: [], dynamicModel: true },
       compaction: createCompactionConfig(),
       continuationToken: "test",
       history: [],
@@ -50,7 +50,7 @@ it.each([
 
 function openTurnSession(sessionId: string) {
   const session: HarnessSession = {
-    agent: { system: "", tools: [], dynamicModel: true },
+    agent: { tools: [], dynamicModel: true },
     compaction: createCompactionConfig(),
     continuationToken: "test",
     history: [],

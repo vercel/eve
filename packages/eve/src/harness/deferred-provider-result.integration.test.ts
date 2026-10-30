@@ -87,7 +87,7 @@ function deferredHarness(later: (StreamPart[] | Error)[]) {
     tools: new Map([["bash", bash]]),
   });
   const session: HarnessSession = {
-    agent: { modelReference: { id: "deferred-result" }, system: "You help Alice.", tools: [] },
+    agent: { modelReference: { id: "deferred-result" }, tools: [] },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "http:deferred-result",
     history: [],
