@@ -31,6 +31,7 @@ export interface Prompt {
 
 export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> {
   const repaired = repairToolHistory({
+    endsRequest: turn.messages.length === 0,
     messages: step.session.history,
     insertionIndex: turn.storedClientContext?.insertionIndex,
   });

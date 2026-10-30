@@ -18,9 +18,7 @@ Choose a model, provider, and channel that meet your data-processing and complia
 
 ## Create a project
 
-Start with one agent in `agent/`.
-
-Run `eve init` with a project name:
+Run `eve init` with a project name to create a project with one agent in `agent/`:
 
 ```bash
 npx eve@latest init my-agent
@@ -28,9 +26,9 @@ npx eve@latest init my-agent
 
 The command creates the project, installs dependencies, initializes Git, and opens the terminal UI. eve reuses an available model connection or opens `/login`. Once connected, type your first message. Channel and integration setup is optional; use `/add` when you need it.
 
-In `/add`, search by name or capability, such as `iMessage` or `SMS`. The picker matches item names, addresses, titles, and descriptions. Select an item to install it and complete its required setup.
+In `/add`, search by name or by what an item does, such as `iMessage` or `SMS`. Select an item to install it and complete its setup.
 
-During startup, the status line shows what eve is waiting for. If you choose a Vercel account, finish signing in in your browser and select a team when prompted. eve checks that team's AI Gateway access and applies the connection before returning to the composer. Changing only the account, team, or key does not rebuild your agent. Once connected, you can send your first message while the agent information refreshes in the background; no restart is required.
+During startup, the status line shows what eve is waiting for. If you choose a Vercel account, finish signing in in your browser and select a team when prompted. eve checks that team's AI Gateway access before returning to the composer. Changing the account, team, or key needs no rebuild or restart.
 
 To add eve to a project that already has a `package.json`, run this command from its root before you create any `agent/` files:
 
@@ -105,4 +103,4 @@ After the tutorial, continue with the task you need:
 | Test agent behavior                                                | [Evals](/docs/evals/overview)                                                                                 |
 | Secure and deploy the agent                                        | [Authentication](/docs/guides/auth-and-route-protection), then [Deployment](/docs/guides/deployment/overview) |
 
-Read [Execution Model and Durability](/docs/concepts/execution-model-and-durability) for the mental model behind sessions, turns, durable steps, and parked work.
+Read [Execution Model and Durability](/docs/concepts/execution-model-and-durability) to learn how sessions, turns, and steps run, and how waiting work survives restarts.

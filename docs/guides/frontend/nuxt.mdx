@@ -3,7 +3,7 @@ title: "Nuxt"
 description: "Run an eve agent and a Nuxt app as one project with the eve/nuxt module."
 ---
 
-The `eve/nuxt` module runs a Nuxt frontend and an eve agent as a single project from one dev server and one Vercel deploy. The auto-imported [`useEveAgent`](./use-eve-agent-vue) composable finds the mounted routes on its own, so there's no CORS to configure and no URL env vars to keep in sync.
+The `eve/nuxt` module runs a Nuxt frontend and an eve agent as one project, with one dev server and one Vercel deploy. The auto-imported [`useEveAgent`](./use-eve-agent-vue) composable finds the mounted routes on its own, so you configure no CORS or URL env vars.
 
 ## Prerequisites
 
@@ -80,12 +80,12 @@ async function handleSubmit() {
 </template>
 ```
 
-The browser still needs a production authentication policy. See [Authenticate browser requests](./overview#authenticate-browser-requests) for the default fail-closed behavior and channel configuration.
+The browser still needs a production authentication policy. See [Authenticate browser requests](./overview#authenticate-browser-requests) for the default policy, which rejects unverified requests, and for channel configuration.
 
 ## Dev vs deploy topology
 
-- **Local dev.** `npm run dev` starts the eve dev server next to `nuxt dev` and proxies the eve routes through it. As far as the browser knows, everything is the Nuxt origin. Concurrent Nuxt processes for the same eve root share one eve dev server. Set `EVE_BASE_URL` to proxy to an eve dev server you already run instead.
-- **Vercel.** The web app and the eve runtime deploy as a single project. On Vercel builds the module adds Build Output [`services`](https://vercel.com/docs/services) for eve and `routes` that send `/eve/v1/**` to that service before filesystem routing; the Nuxt app itself remains the default app. No `vercel.json` is required. By default the generated service runs the installed eve binary from the agent root, so the agent directory does not need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
+- **Local dev.** `npm run dev` starts the eve dev server next to `nuxt dev` and proxies the eve routes to it. The browser talks only to the Nuxt origin. Concurrent Nuxt processes for the same eve root share one eve dev server. Set `EVE_BASE_URL` to proxy to an eve dev server you already run instead.
+- **Vercel.** The web app and the eve runtime deploy as a single project. On Vercel builds, the module adds an eve [service](https://vercel.com/docs/services) and routes `/eve/v1/**` to it before filesystem routing. The Nuxt app serves everything else, and no `vercel.json` is required. By default, the generated service runs the installed eve binary from the agent root, so the agent directory doesn't need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
 
   ```ts
   export default defineNuxtConfig({
@@ -96,17 +96,17 @@ The browser still needs a production authentication policy. See [Authenticate br
   });
   ```
 
-- **Non-Vercel hosts.** The module does not start eve in production; run the eve service yourself. `nuxt build` writes a proxy rule that sends `/eve/v1/**` to `EVE_NUXT_PRODUCTION_ORIGIN`, or to `http://127.0.0.1:4274` when that variable is unset. Override the local port with `EVE_NUXT_PRODUCTION_PORT`. Set these variables when you run `nuxt build`, because the destination is fixed in the build output:
+- **Non-Vercel hosts.** The module doesn't start eve in production; run the eve service yourself. `nuxt build` writes a proxy rule that sends `/eve/v1/**` to `EVE_NUXT_PRODUCTION_ORIGIN`, or to `http://127.0.0.1:4274` when that variable is unset. Override the local port with `EVE_NUXT_PRODUCTION_PORT`. Set these variables when you run `nuxt build`, because the destination is fixed in the build output:
 
   ```bash
   EVE_NUXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build
   ```
 
-  `eve build` and `nuxt build` both write `.output/`. When the agent lives in the Nuxt project root, build and serve eve from a separate directory (set `eveRoot` to it) so the two outputs do not overwrite each other. See [Self-host eve](../deployment/self-hosting) for running the eve service.
+  `eve build` and `nuxt build` both write `.output/`. When the agent lives in the Nuxt project root, the two outputs overwrite each other. Build and serve eve from a separate directory instead, and set `eveRoot` to it. See [Self-host eve](../deployment/self-hosting) for running the eve service.
 
 ## Managing vercel.json yourself
 
-When `vercel.json` declares [`services`](https://vercel.com/docs/services), the module generates nothing and your configuration owns routing. It must include the eve service (`framework: "eve"`) and a rewrite that exposes the eve transport, or the module fails the build:
+When `vercel.json` declares [`services`](https://vercel.com/docs/services), the module generates nothing, and your configuration controls routing. It must include the eve service (`framework: "eve"`) and a rewrite that sends `/eve/v1/*` requests to it, or the module fails the build:
 
 ```json title="vercel.json"
 {
@@ -118,12 +118,12 @@ When `vercel.json` declares [`services`](https://vercel.com/docs/services), the 
 }
 ```
 
-### Migrating from experimentalServices
+### Remove `experimentalServices`
 
-Earlier versions of the module wrote the legacy `experimentalServices` field into `vercel.json`. Vercel no longer routes that model — deployments build both services but every `/eve/v1/*` request returns a platform NOT_FOUND — so the module now ignores the field and warns when it sees one. Migrate either way:
+Vercel doesn't route the `experimentalServices` field in `vercel.json`: both services build, but every `/eve/v1/*` request returns `NOT_FOUND`. The module ignores the field and warns that `vercel.json defines experimentalServices`. Remove it in one of two ways:
 
-- **Generated (default).** Delete `vercel.json` (or just its `experimentalServices` block) and set the project's Framework Preset back to Nuxt.js. The module generates the eve service and its routing on every Vercel build.
-- **Hand-maintained.** Replace `experimentalServices` with the stable `services` and `rewrites` shown above, and keep the "Services" Framework Preset.
+- **Generated (default).** Delete `vercel.json` (or its `experimentalServices` block) and set the project's Framework Preset to Nuxt.js. The module generates the eve service and its routing on every Vercel build.
+- **Hand-maintained.** Replace `experimentalServices` with the `services` and `rewrites` shown above, and keep the "Services" Framework Preset.
 
 ## What to read next
 

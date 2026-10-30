@@ -4,7 +4,9 @@ description: "Reach your agent from GitHub App webhooks, with comment invocation
 type: integration
 ---
 
-The GitHub channel lets the agent work directly on a repository. Add its invocation token, such as `@my-agent`, to a new issue, PR, or review comment and the agent answers in that thread, with the PR diff already in context and the repo checked out into the sandbox. The token is an eve convention: GitHub may not autocomplete it or render it as a linked mention. The channel takes GitHub App webhooks at `/eve/v1/github`, checks the signature, derives auth from whoever triggered the event, and replies on the native surface. Credentials can run through [Vercel Connect](../guides/auth-and-route-protection), which manages the GitHub App, the installation token, and inbound webhook verification, so there's no app private key or webhook secret for you to hold. See [Channels](./overview) for the contract this builds on.
+The GitHub channel lets people reach your agent from issues and pull requests. It lives in `agent/channels/github.ts`. Write the agent's invocation token, such as `@my-agent`, in a new issue, PR, or review comment, and the agent replies in that thread. It sees the PR diff and works in a checkout of the repo.
+
+[Vercel Connect](../guides/auth-and-route-protection) can manage the GitHub App, its token, and webhook checks, so you hold no private key or webhook secret. See [Channels](./overview) for what all channels share.
 
 ## Guided Connect setup
 
@@ -14,11 +16,7 @@ Run the registry setup from the agent directory:
 eve add channel/github
 ```
 
-The flow signs you in to Vercel when needed, creates or links a Vercel project, provisions an app-scoped GitHub Connect client, and registers `/eve/v1/github` as a trigger destination. It then installs `@vercel/connect` and writes `agent/channels/github.ts` with the connector UID.
-
-Vercel Connect creates the GitHub App, receives and verifies its webhooks, and forwards them to the deployed agent. After deploying, open the GitHub App in the Connect dashboard and install it in the organization or account where you want to use it. Add the generated invocation token (for example, `@my-agent`) to a new issue, pull request, or review comment to start a conversation. GitHub may not autocomplete the token or render it as a linked mention.
-
-The generated channel uses Connect-managed credentials:
+The command signs you in to Vercel, links a project, and creates an app-scoped GitHub Connect client that sends webhooks to `/eve/v1/github`. It then installs `@vercel/connect` and writes the channel file:
 
 ```ts title="agent/channels/github.ts"
 import { connectGitHubCredentials } from "@vercel/connect/eve";
@@ -30,11 +28,11 @@ export default githubChannel({
 });
 ```
 
-`connectGitHubCredentials` returns `{ installationToken, webhookVerifier }`: eve uses the Connect-managed installation token directly for GitHub API calls, skipping its native App JWT exchange, and verifies Connect-forwarded webhooks by their Vercel OIDC signature instead of a GitHub webhook secret. Token rotation, refresh, and multi-installation tenancy stay inside Connect, so there is no `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, or `GITHUB_WEBHOOK_SECRET` to manage.
+Connect creates the GitHub App and forwards its webhooks, and eve checks their Vercel OIDC signature. Connect also handles token rotation and multiple installations. After you deploy, open the GitHub App in the Connect dashboard and install it in your organization or account.
 
 ### Bring your own GitHub App
 
-To run a GitHub App you manage yourself, pass its credentials directly instead:
+To run a GitHub App you manage yourself, pass its credentials directly:
 
 ```ts title="agent/channels/github.ts"
 import { githubChannel } from "eve/channels/github";
@@ -49,7 +47,7 @@ export default githubChannel({
 });
 ```
 
-Every field falls back to an env var, so you can drop the `credentials` block entirely once these are set:
+Omit any field, or the whole `credentials` block, to read it from these env vars:
 
 ```bash
 GITHUB_APP_ID=...            # GitHub App id
@@ -58,17 +56,19 @@ GITHUB_WEBHOOK_SECRET=...    # verifies the webhook signature
 GITHUB_APP_SLUG=...          # supplies botName when it is not set in config
 ```
 
-`appId`/`privateKey`/`webhookSecret` also take a lazy resolver function if you'd rather fetch them on demand, and so does `botName`: it resolves on first use inside request handling, caches on success, and retries on the next event after a failure, so a resolver that depends on request-scoped credentials works in production. When `botName` is not configured, the channel falls back to the credentials' `appSlug`, then to `GITHUB_APP_SLUG`.
+`appId`, `privateKey`, `webhookSecret`, and `botName` also accept a function. A `botName` function runs when a webhook arrives, so it can use that request's credentials. eve keeps its result, or tries again on the next event if it fails. Omit `botName` to use the credentials' `appSlug`, then `GITHUB_APP_SLUG`.
 
-Point the GitHub App webhook URL at `https://<deployment>/eve/v1/github`. For comment-invoked turns, subscribe to `issue_comment` and `pull_request_review_comment`; add `issues`, `pull_request`, `check_suite`, `check_run`, or `workflow_run` if you wire up their opt-in hooks. After installing the App for the repository, a new comment that includes `@botName` starts a turn. This is a text invocation token, not a GitHub-native mention: GitHub may display the App as `botName[bot]`, but it may not autocomplete or link `@botName`.
+Point the GitHub App webhook URL at `https://<deployment>/eve/v1/github`. Subscribe to `issue_comment` and `pull_request_review_comment` so comments reach the agent. Add `issues`, `pull_request`, `check_suite`, `check_run`, or `workflow_run` for their opt-in hooks. Install the App on the repository, and a new comment that includes `@botName` starts a turn.
+
+The invocation token is plain text, not a GitHub mention, so GitHub may not autocomplete or link `@botName`. GitHub may show the App as `botName[bot]`.
 
 ## How the channel handles messages
 
 ### Dispatch
 
-Inbound hooks return `{ auth }` to dispatch, or `null` to ignore. Return `title` alongside `auth` to set the title when the dispatch starts a run. Use `defaultGitHubAuth(ctx)` to derive auth from the actor.
+Each hook returns `{ auth }` to start a turn or `null` to ignore the event. Add `title` to set the run title when the event starts a run. `defaultGitHubAuth(ctx)` builds auth from the person who triggered the event.
 
-The model-visible `<github_context>` includes `sender`, `bot_name` when resolved, and `is_mentioned` for comments. eve computes `is_mentioned` before removing the invocation token.
+The model sees a `<github_context>` block with `sender` and, when known, `bot_name`. For comments it also has `is_mentioned`, which eve sets before it removes the invocation token from the text.
 
 ```ts
 import { defaultGitHubAuth, githubChannel } from "eve/channels/github";
@@ -93,37 +93,39 @@ export default githubChannel({
 });
 ```
 
-The CI hooks expose normalized `action`, `status`, `conclusion`, `app.slug`, `headSha`, and `pullRequests` fields, plus `checkSuiteId`, `checkRunId`, or `workflowRunId`. `workflow_run` is a GitHub Actions-only event, so its normalized `app.slug` is `"github-actions"`. A dispatched CI turn is anchored to the first number in `pullRequests`; the hook still runs when the array is empty, but it must return `null` because there is no issue or PR thread for the session.
+The CI hooks expose normalized `action`, `status`, `conclusion`, `app.slug`, `headSha`, and `pullRequests` fields, plus `checkSuiteId`, `checkRunId`, or `workflowRunId`. For `workflow_run`, which only GitHub Actions sends, `app.slug` is `"github-actions"`. A CI turn replies on the first PR in `pullRequests`. When the array is empty, the hook still runs but must return `null`, because there is no thread to reply in.
 
 ### Delivery
 
-When a turn starts, the channel adds an `eyes` reaction to the triggering comment (turn this off with `progress: { reactions: false }`). The reply comes back as a comment, on the timeline or in the review thread, and splits across multiple comments when it runs long. If the turn fails, you get a short error comment carrying an error id.
+When a turn starts, the channel adds an `eyes` reaction to the comment that triggered it. Set `progress: { reactions: false }` to skip it. The reply posts as a comment on the timeline or in the review thread, split across several comments when long. A failed turn posts a short error comment with an error id.
 
 ### Human-in-the-loop (HITL)
 
-GitHub comments have no interactive button or card affordance. A human-in-the-loop (HITL) request, an `interaction.opened` fact, is posted as a comment prompt, and the user's reply comment maps back to the pending request. Declare an `events["interaction.opened"]` handler to customize the prompt.
+GitHub comments have no buttons or cards, so an approval or question posts as a comment. The user answers it with a reply comment. Declare an `events["interaction.opened"]` handler to change the prompt.
 
 ### Proactive sessions
 
-Start a session without an inbound comment invocation through `to(github, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(github, target).send(message, { auth })` from another channel. The target requires `owner`, `repo`, and exactly one of `issueNumber` or `pullRequestNumber`. This sends turn input to the agent; it is not a direct GitHub comment.
+To start a session without a comment, call `to(github, target).send(message, { auth })` from a schedule's `run` handler. From another channel, call `ctx.to(github, target).send(message, { auth })`. The target needs `owner`, `repo`, and exactly one of `issueNumber` or `pullRequestNumber`. This sends a message to the agent, not a comment to GitHub.
 
-To post without invoking the model, use `ctx.channel.thread.post(...)` inside a GitHub event handler. For application-managed retries and deduplication across providers, see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
+To post without invoking the model, use `ctx.channel.thread.post(...)` inside a GitHub event handler. To retry and deduplicate notifications across providers yourself, see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
 
 ### Attachments
 
-Inbound file attachments are not supported on this channel today. Repository contents reach the agent through the sandbox checkout below, not as message attachments.
+The channel doesn't accept inbound file attachments. Repository contents reach the agent through the [sandbox checkout](#sandbox-checkout).
 
 ### PR context
 
-Summon the agent on a PR and it always sees the diff. PR metadata and the changed-file patch land in `context`. Large generated files still appear in the list, but their patch body is dropped; add more paths to the skip list with `pullRequestContext.excludedFiles`.
+On a PR, the agent always gets the PR metadata and the patch of each changed file in `context`. Large generated files stay in the file list without their patch. Add more paths to skip with `pullRequestContext.excludedFiles`.
 
 ### Sandbox checkout
 
-Before the first model call, every triggered turn checks out the relevant ref into the sandbox, so `read_file`/`glob`/`grep`/`bash` all run against the real tree. The installation token never enters the sandbox. `git` fetches a token-free URL, and the platform injects auth on egress at the firewall. That requires a firewall-capable backend (Vercel); the local backend skips checkout. Within a session, checkout is incremental across turns.
+Before the first model call, each turn checks out the repo into the sandbox. `read_file`, `glob`, `grep`, and `bash` then work on the real files.
+
+The installation token never enters the sandbox, because the sandbox firewall adds auth to outbound `git` requests. Checkout needs a sandbox with a firewall (Vercel), so the local sandbox skips it.
 
 ### Arbitrary API calls
 
-For anything the channel doesn't wrap, call `ctx.github.request({ method, path, body })`. It carries installation-token auth.
+For any other GitHub API call, use `ctx.github.request({ method, path, body })`. It sends the installation token.
 
 ## What to read next
 

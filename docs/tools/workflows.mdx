@@ -4,27 +4,29 @@ description: "Define durable workflow tools that wait for people, webhooks, or t
 url: /tools/workflows
 ---
 
-A workflow tool is a static tool defined with `defineWorkflowTool` from `eve/tools`, with
-`"use workflow"` as the first statement of its executor. Each call starts a durable Workflow run. Use one when a tool must wait for a person, webhook, or timer,
-delegate work to subagents, or coordinate retryable steps over a long period.
+A workflow tool is a tool whose calls can wait for a person, a webhook, or a timer without holding
+compute. Define one with `defineWorkflowTool` from `eve/tools` under `agent/tools/`. The model sees
+it under its path-derived name, such as `deploy`.
 
-A workflow tool defines exactly one entry point, and the entry point decides how its calls run. A
-call to an `execute(input, ctx)` tool blocks its turn until the workflow settles, and the parent
-agent receives the workflow's output as the tool result. While the body waits durably, the turn
-parks without holding compute. A `task(input, ctx)` tool runs each call as a
-[task](#run-calls-as-tasks-task) instead: the model gets a receipt at once and the result arrives
-later. A `serve(receive, ctx)` tool runs a [resumable task](#resumable-tasks-serve), which the
-model can send more calls by its `taskId`. See [Tasks](/docs/tools/tasks) for choosing
-between them and for what the model sees while tasks work.
+Use a workflow tool when a call must wait for input, delegate work to subagents, or run retryable
+steps over a long period. Each call starts a Workflow run that survives restarts. For a tool that
+returns in one step, use [`defineTool`](/docs/tools) instead.
 
-Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
-`createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
-the session's channel, `ctx.agents` for effective callable-agent descriptions, and `ctx.agent` for sessions with other agents. Use `yield` to report
-progress and `await` on a workflow operation to wait durably. Values needed after a durable wait
-stay in local variables in the workflow body.
+A workflow tool defines exactly one entry point, which decides how its calls run:
 
-A workflow tool runs code you wrote and appears to the model under its path-derived tool name, such
-as `deploy`.
+| Entry point           | How a call runs                                                                                             |
+| --------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `execute(input, ctx)` | The turn waits until the workflow finishes, then gets its output as the tool result. Waits hold no compute. |
+| `task(input, ctx)`    | A [task](#run-calls-as-tasks-task): the model gets a receipt at once, and the result arrives later.         |
+| `serve(receive, ctx)` | A [resumable task](#resumable-tasks-serve) that the model can send more calls by its `taskId`.              |
+
+See [Tasks](/docs/tools/tasks) for choosing between them and for what the model sees while tasks
+work.
+
+Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`,
+`createHook`, `createWebhook`, `sleep`, retries, and replay. eve adds `ctx.ask` to ask a person a
+question and `ctx.agent` to open a session with another agent. `ctx.agents` lists the agents the
+call can open.
 
 ## Define a workflow tool
 
@@ -66,215 +68,93 @@ async function applyDeploy(plan: DeployPlan) {
 }
 ```
 
-The model calls `deploy`. The turn parks while the human reads the plan. When they answer, minutes
-or days later, the run resumes, deploys, and returns. The model sees one tool result.
+The turn waits while the person reads the plan. When they answer, minutes or days later, the run
+continues, deploys, and returns one tool result.
 
 ### Rules
 
-- Export `defineWorkflowTool({ ... })` as the default export. Define exactly one entry point,
-  `execute`, `task`, or `serve`, written inline or referenced as a top-level `async function` in
-  the same module or an imported application module. `execute` and `task` can be async functions
-  or async generators; `serve` is an async function. Defining none, or more than one, throws at
-  definition time. Start the entry point with `"use workflow"` as its
-  first statement. A missing directive is a build error, even if another function in the module
-  has one.
+- Default-export `defineWorkflowTool({ ... })` with exactly one entry point: `execute`, `task`, or
+  `serve`. Defining none, or more than one, throws when the tool is defined.
+- Write the entry point inline, or reference a top-level `async function` in the same module or an
+  imported application module. `execute` and `task` can be async generators; `serve` can't.
+- Start the entry point with `"use workflow"`. A missing directive is a build error, even if another
+  function in the module has one.
 - `"use step"` marks a top-level `async function` in the tool module, or any module it imports, as a
-  step. Side effects, clocks, randomness, `process.env`, and Node.js APIs belong in steps; the body
-  is replayed and must stay deterministic.
-- Import `createHook`, `createWebhook`, `sleep`, `FatalError`, `RetryableError`, and `getWorkflowMetadata` from
-  `eve/workflow` in the body. Import `start`, `getRun`, and `resumeHook` from
-  `eve/workflow/api` in routes or steps, not in replayed bodies. Both entries use eve's bundled
-  SDK; no separate `workflow` dependency or ambient tsconfig `types` entry is needed.
-- In an `execute` or `task` body, `ctx` is a `WorkflowToolContext` with `session`, `callId`,
-  `toolName`, `abortSignal`, `channel`, `agent`, `agents`, and `ask`. A `serve` body gets a
-  `WorkflowServeContext` with `session`, `toolName`, `channel`,
-  `agent`, `agents`, `ask`, and `reply`; each call it receives carries its own `callId` and
-  `abortSignal`.
-  A `"use step"` helper that receives `ctx` directly gets a restricted `WorkflowStepToolContext` with
-  `session`, `callId`, `toolName`, `abortSignal`, `channel`, `getSandbox`, `getToken`, `requireAuth`, and `to`. Read `ctx.agents`, and call
-  `ctx.agent()` and `ctx.ask()` in the workflow body; pass only the serializable values the step needs.
-  Call `getSandbox`, `getToken`, `requireAuth`, and `to` in a step: the workflow body throws when it calls them.
-- The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
-  not tools a `defineDynamic` function returns.
+  step. The workflow body replays and must stay deterministic, so put side effects, clocks,
+  randomness, `process.env`, and Node.js APIs in steps. Keep values you need after a wait in local
+  variables in the body.
+- Import durable primitives such as `createHook`, `sleep`, and `FatalError` from `eve/workflow` in
+  the body. Call `start`, `getRun`, and `resumeHook` from `eve/workflow/api` in routes or steps, not
+  in the body. Both use eve's bundled Workflow SDK, so your app needs no `workflow` dependency. See
+  [Workflow imports](#workflow-imports).
+- The tool's input must be a JSON object.
+- Workflow bodies are for static tools under `agent/tools/`, not tools a `defineDynamic` function
+  returns. `"use workflow"` in `defineTool`, a bare tool object, a channel handler, or a schedule
+  handler fails the build. To start a session from a channel or schedule, use the
+  [channel operations](/docs/channels/custom#channel-operations-and-session-handles) or
+  [schedule handler](/docs/schedules#handler-form-run) APIs.
+- Workflow imports resolve `paths` aliases from `tsconfig.json` or `jsconfig.json`, including in a
+  workspace package. An [agent workspace](/docs/concepts/project-structure#several-root-agents)
+  member can import workflow and step modules from the shared root package, such as `lib/`. An
+  unresolved workflow import fails the build and names the missing import.
 
-`ctx.agent`, `ctx.agents`, and `ctx.ask` are available only on `WorkflowToolContext` and
-`WorkflowServeContext` in the workflow body.
-Ordinary tools, channel handlers, schedule handlers, and workflow steps do not receive these methods. Type
-step helpers with `WorkflowStepToolContext` from `eve/tools` when they need step-safe context capabilities.
+The context depends on where your code runs:
 
-Workflow executors require `defineWorkflowTool`. Adding `"use workflow"` to `defineTool`, a bare
-tool object, a channel handler, or a schedule handler fails the build. To start a session from a
-channel or schedule, use the [channel operations](/docs/channels/custom#channel-operations-and-session-handles)
-or [schedule handler](/docs/schedules#handler-form-run) APIs.
+| Where                               | Type                      | Members                                                                                                                    |
+| ----------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `execute` or `task` body            | `WorkflowToolContext`     | `session`, `callId`, `toolName`, `abortSignal`, `channel`, `agent`, `agents`, `ask`                                        |
+| `serve` body                        | `WorkflowServeContext`    | `session`, `toolName`, `channel`, `agent`, `agents`, `ask`, `reply`; each received call carries `callId` and `abortSignal` |
+| `"use step"` helper that gets `ctx` | `WorkflowStepToolContext` | `session`, `callId`, `toolName`, `abortSignal`, `channel`, `getSandbox`, `getToken`, `requireAuth`, `to`                   |
 
-Workflow imports resolve `paths` aliases from your application's `tsconfig.json` or
-`jsconfig.json`, including when the application is a workspace package. A member of an
-[agent workspace](/docs/concepts/project-structure#several-root-agents) can also import
-workflow and step modules from the shared root package, such as a root `lib/` directory.
-eve includes only workflow and step modules reachable from the agent's runtime modules.
-Unrelated workflows in the host application stay outside the agent bundle. An unresolved
-workflow import fails the build with the missing import in the error.
+Call `ctx.agent()` and `ctx.ask()` and read `ctx.agents` in the workflow body. Pass a step only the
+serializable values it needs. Call `getSandbox`, `getToken`, `requireAuth`, and `to` in a step, because
+the workflow body throws when it calls them. Ordinary tools, channel handlers, and schedule handlers
+don't receive `agent`, `agents`, or `ask`. Import `WorkflowStepToolContext` from `eve/tools` to type
+step helpers.
 
 ### Workflow imports
 
-Use `eve/workflow` for durable primitives and `eve/workflow/api` for run and hook operations:
+Import durable primitives from `eve/workflow`, and run and hook operations from `eve/workflow/api`:
 
 ```ts
 import { createHook, sleep } from "eve/workflow";
 import { resumeHook } from "eve/workflow/api";
 ```
 
-`eve/workflow` exports:
+| Export                                 | Entry              | What it does                                                                                                                                                                             |
+| -------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createHook<T>({ token?, metadata? })` | `eve/workflow`     | Returns a `WorkflowHook<T>`. Await it for the next payload, or iterate it with `for await`. `metadata` is JSON stored with the hook.                                                     |
+| `createWebhook({ respondWith? })`      | `eve/workflow`     | Returns a `WorkflowWebhook` whose `url` resumes it with the incoming `Request`. With `respondWith: "manual"`, answer each `WorkflowWebhookRequest` with `request.respondWith(response)`. |
+| `sleep(duration)`                      | `eve/workflow`     | Waits for a duration such as `"1h"` or a number of milliseconds, or until a `Date`.                                                                                                      |
+| `getWorkflowMetadata()`                | `eve/workflow`     | Returns the run's `workflowName`, `workflowRunId`, `workflowStartedAt`, and `url`.                                                                                                       |
+| `FatalError`, `RetryableError`         | `eve/workflow`     | Throw `FatalError` to fail without a retry. Throw `RetryableError`, with an optional `{ retryAfter }`, to retry a step.                                                                  |
+| `start(workflow, args)`                | `eve/workflow/api` | Starts a `"use workflow"` function on the agent's own workflow queue and deployment. It takes no options; omit `args` when the function takes none.                                      |
+| `getRun(runId)`                        | `eve/workflow/api` | Returns a `WorkflowRun<T>` with `runId`, `status`, `returnValue`, and `cancel()`. `start` returns the same type.                                                                         |
+| `resumeHook(token, payload)`           | `eve/workflow/api` | Sends a payload to the hook with that token.                                                                                                                                             |
 
-- `createHook<T>({ token?, metadata? })` returns a `WorkflowHook<T>`. Await it for the next payload
-  or iterate it with `for await`. Its `token` resumes it; `metadata` is JSON stored with the hook.
-  `await hook.getConflict()` registers the hook before you hand out its token and resolves the run
-  that already owns the token, or `null`. `dispose()`, or `using`, releases the token.
-- `createWebhook({ respondWith? })` returns a `WorkflowWebhook` whose `url` resumes it with the
-  incoming `Request`. With `respondWith: "manual"`, each request is a `WorkflowWebhookRequest`
-  that you answer with `request.respondWith(response)`.
-- `sleep(duration)` takes a duration such as `"1h"`, milliseconds, or a `Date` to wait until.
-- `getWorkflowMetadata()` returns the current run's `workflowName`, `workflowRunId`,
-  `workflowStartedAt`, and `url`.
-- Throw `FatalError` to fail without retrying, or `RetryableError` with an optional
-  `{ retryAfter }` to retry a step.
+A hook's `token` resumes it. Pass a fixed `token` to `createHook` when a route must find the hook later. `await hook.getConflict()` registers the hook before you hand out its token, and resolves to the run that already holds the token, or `null`. Call `dispose()`, or declare the hook with `using`, to release the token.
 
-Import `WorkflowHook`, `WorkflowHookOptions`, `WorkflowWebhook`, `WorkflowWebhookOptions`,
-`WorkflowWebhookRequest`, and `WorkflowMetadata` from `eve/workflow` when you need explicit types.
+Import `WorkflowHook`, `WorkflowHookOptions`, `WorkflowWebhook`, `WorkflowWebhookOptions`, `WorkflowWebhookRequest`, and `WorkflowMetadata` from `eve/workflow` for explicit types.
 
-`eve/workflow/api` exports:
-
-- `start(workflow, args)` starts a `"use workflow"` function; omit `args` when it takes none. eve
-  routes the run to the agent's own workflow queue and deployment, so `start` takes no options.
-- `start` and `getRun(runId)` return a `WorkflowRun<T>` with `runId`, `status` (a promise of
-  `WorkflowRunStatus`), `returnValue`, and `cancel()`.
-- `resumeHook(token, payload)` delivers a payload to the hook with that token. Pass a
-  deterministic `token` to `createHook` when a route must find the hook later.
-
-Bare `workflow` and `workflow/*` imports in application modules fail the build with an error
-naming these entries. Only the exports listed above are public; other SDK subpaths, helpers, and
-options are not supported by these entries. Existing `"types": ["eve/workflow-modules"]` tsconfig entries and reference
-directives still resolve through 1.x, but the compatibility entry declares no ambient modules.
-You can remove those references when updating your imports.
-
-### Add a runtime-generated workflow tool
-
-Create `agent/tools/workflow.ts` and export the provided `workflow` factory when the model should
-supply the JavaScript program at runtime:
-
-```ts title="agent/tools/workflow.ts"
-import { workflow } from "eve/tools/workflow";
-
-export default workflow({ maxSubagents: 20 });
-```
-
-The `workflow` tool runs each call as a [task](#run-calls-as-tasks-task), so the program's return
-value reaches the model in a `task.result` message. The model supplies an async function body
-through the tool's `js` input. Its only host capability is
-`ctx.agent(name, { message, outputSchema? })`, which sends the message to a new session with that
-agent and resolves to its reply, or to the structured value when `outputSchema` is set. This can invoke subagents configured with `tool: false` or hidden by a same-named `disableTool()` file. Include those path-derived names in the workflow tool description or agent instructions when the model writes the program. For example:
-
-```js
-const [triage, review] = await Promise.all([
-  ctx.agent("ticket-triage", { message: JSON.stringify(tickets) }),
-  ctx.agent("ticket-review", { message: JSON.stringify(tickets) }),
-]);
-return { triage, review };
-```
-
-`maxSubagents` defaults to `100` and must be an integer from `1` through `128`. The generated
-program cannot access the workflow context, session state,
-credentials, imports, or ordinary tools. Each call starts a new child session; a program cannot
-continue a child from an earlier call. Agent authorization, questions, approvals, and cancellation
-behave as they do for sessions an authored workflow tool opens with `ctx.agent`.
-
-The sandbox resumes after every pending call in the current batch settles. `Promise.all` supports
-fan-out followed by fan-in. The program must await every `ctx.agent` call before it returns. A call
-that is still pending at that point, such as one that is never awaited or one that loses a
-`Promise.race` or `Promise.any`, fails the workflow.
-
-A failed child turn, an invalid call, or a call over the `maxSubagents` budget throws a
-`WorkflowProgramAgentError` at that `ctx.agent` call, which the program can catch; the message
-says which.
-
-The sandbox converts the program's return value and each `ctx.agent` input with `JSON.stringify`,
-so a `Date` becomes a string and functions and `undefined` members drop. A return value that
-converts to nothing, such as `undefined`, becomes `null`. Each converted value may be up to 1 MiB of
-JSON, each child reply up to 4 MiB of JSON, and the program source up to 256 KiB.
-
-Each start or resume may spend up to 30 seconds running JavaScript and up to 5 minutes in total.
-Time spent waiting for child agents does not count toward either limit.
-
-### Migrate from `experimental_workflow`
-
-The experimental uppercase `Workflow` framework tool and its exports have been removed. Replace the
-old sentinel:
-
-```diff
--import { experimental_workflow } from "eve/tools/workflow";
--
--export default experimental_workflow({ maxSubagents: 20 });
-```
-
-with the lowercase factory:
-
-```ts
-import { workflow } from "eve/tools/workflow";
-
-export default workflow({ maxSubagents: 20 });
-```
-
-The path gives the authored tool the model-facing name `workflow`. eve does not discover or inject
-an agent catalog. Calls use the same target resolution, availability, and authorization checks as
-`ctx.agent` in any other authored workflow tool.
-
-### Migrate an authored workflow tool
-
-Replace `defineTool` with `defineWorkflowTool`, keep the executor's `"use workflow"` directive,
-and replace `agent(ctx, input)` and `ask(ctx, request)` with an agent session from
-[`ctx.agent(name)`](#delegate-work-ctxagent) and `ctx.ask(request)`. The old `agent` and `ask`
-helpers are not exported from `eve/workflow`; that entry exposes durable primitives instead.
-Import `WorkflowToolContext`, `AgentSession`,
-`ToolQuestion`, `ToolAskOptions`, and `ToolAnswer` from `eve/tools` when you
-need explicit types.
-
-`ctx.ask` no longer accepts `dismissible`, and its `dismissed` status is now `cancelled`. A
-steering message withdraws a question an `execute` call asks, so drop the option. To keep a
-question open while the conversation continues, ask it from a [`task`](#run-calls-as-tasks-task).
-
-```diff
--const answer = await ctx.ask({ prompt, dismissible: true });
-+const answer = await ctx.ask({ prompt });
-```
-
-See [Upgrade to Tasks](/docs/tools/tasks-upgrade) for `task` replacing `execution: "background"`
-and the other changes in this release.
+Only these exports are public. A bare `workflow` or `workflow/*` import in an application module fails the build with an error that names these entries.
 
 ## Wait for the result
 
-A call to an `execute` tool works like any other tool call from the model's point of view:
-
-- **Tool result:** the workflow's output after the body finishes.
-- **Parent turn:** waits for the call to settle, then continues with the result.
-- **Durable wait inside the body:** suspends the workflow while the tool call stays pending.
-- **Cancel:** cancelling the turn cancels the run.
-- **Steering:** a new message aborts the call's `ctx.abortSignal`, and the call settles with what
-  the body returns. See [Stop early for a new message](#stop-early-for-a-new-message).
+An `execute` call works like any other tool call. The turn waits for the body to finish and gets its
+output as the tool result. A wait inside the body pauses the workflow while the call stays pending.
+Cancelling the turn cancels the run, and a new message aborts `ctx.abortSignal`; see
+[Stop early for a new message](#stop-early-for-a-new-message).
 
 To keep the conversation going while a call works, [define `task` instead](#run-calls-as-tasks-task).
 
-`defineWorkflowTool` does not accept an `execution` option. Passing one throws
-`"execution" was replaced by task(). Define task(input, ctx) to run each call as a task.`
-
 ### How suspension works
 
-Suspension happens when a workflow must wait for an unresolved durable operation, such as
-`ctx.ask`, an awaited hook or webhook, or `sleep`. The runtime persists the wait and releases the
-workflow's compute. When the answer, event, or timer arrives, the runtime replays the workflow,
-reuses recorded step results, and continues past the wait. Put side effects in `"use step"`
-functions so replay does not repeat completed effects.
+A workflow pauses, holding no compute, when it awaits an unresolved `ctx.ask`, hook, webhook, or
+`sleep`. When the answer, event, or timer arrives, the workflow replays, reuses recorded step
+results, and continues past the wait. Put side effects in `"use step"` functions so replay doesn't
+repeat them.
 
-Consider a body that reports progress and then asks for approval:
+In this body, the yield reports progress and the await pauses:
 
 ```ts
 async *execute(input, ctx) {
@@ -285,21 +165,15 @@ async *execute(input, ctx) {
 }
 ```
 
-The yield reports a snapshot, and eve advances the generator to `ctx.ask`. Awaiting the unanswered
-request is the durable wait. The original tool call remains pending until the answer arrives and
-the body returns.
-
-`yield` itself does not wait for approval. An ordinary
-Promise or Node.js timer inside a step also does not create a durable workflow suspension; use
-the workflow operations for waits that must survive a restart.
+The tool call stays pending until the answer arrives and the body returns. An ordinary Promise or
+Node.js timer inside a step doesn't pause the workflow or survive a restart.
 
 ## Run calls as tasks: `task`
 
 Define `task(input, ctx)` in place of `execute` when the conversation should continue while a call
-works, such as a twenty-minute deploy or research the model may not need right away. An `execute`
-tool holds the conversation until each call settles, however long it runs. A question, a sleep, or
-an approval inside an `execute` call already parks durably and holds no compute, so waiting alone
-doesn't need a task.
+works. Examples are a twenty-minute deploy or research the model may not need right away. Waiting
+alone doesn't need a task, because a question, sleep, or approval in an `execute` call already holds
+no compute.
 
 ```ts title="agent/tools/deploy.ts"
 import { defineWorkflowTool } from "eve/tools";
@@ -316,9 +190,8 @@ export default defineWorkflowTool({
 });
 ```
 
-A `task` body is written like an `execute` body, with the same `WorkflowToolContext`: returning
-settles the call, a throw fails it, and an `async *task` generator can `yield` progress. A
-steering message never aborts a task's `abortSignal`.
+A `task` body gets the same `WorkflowToolContext` as an `execute` body. Returning finishes the call,
+a throw fails it, and an `async *task` generator can `yield` progress. Steering never aborts a task.
 
 Each call is a task with its own id, `<tool>-<6 characters>`:
 
@@ -326,20 +199,18 @@ Each call is a task with its own id, `<tool>-<6 characters>`:
   `Started task deploy-4hd8sa. Its result will arrive in a <task_result> message.`, and the model
   continues at once.
 - **Result:** the body's return value or its error arrives later as a `<task_result>` block in a
-  `task.result` message, which eve appends at the next step boundary. `toModelOutput` projects the
-  result, not the receipt.
+  `task.result` message. eve adds the message before the model's next step. `toModelOutput` applies
+  to the result, not the receipt.
 
-The model waits for results with `eve__task_wait` and stops a task with `eve__task_cancel`, and a turn can't
-end while tasks are working. `eve__task_cancel`, `session.cancel()`, a failed turn, and the
-end of the session abort the call's `abortSignal`; the run waits up to 30 seconds for the body to
-finish unwinding, then ends as cancelled. See [Tasks](/docs/tools/tasks) for what the model sees,
-how held turns look on the stream, steering, events, and limits.
+The model waits for results with `eve__task_wait` and stops a task with `eve__task_cancel`. A turn
+can't end while tasks are working. See [Cancel and clean up](#cancel-and-clean-up-ctxabortsignal)
+for what aborts a task, and [Tasks](/docs/tools/tasks) for what the model sees, held turns, events,
+and limits.
 
 ## Resumable tasks: `serve`
 
 Define `serve(receive, ctx)` when the model should be able to send a running task more input, such
-as a revision request. A `serve` body runs once per task and gets its calls from `receive()`
-instead of taking an input:
+as a revision request. A `serve` body runs once per task and gets its calls from `receive()`:
 
 ```ts title="agent/tools/release-plan.ts"
 import { defineWorkflowTool } from "eve/tools";
@@ -366,190 +237,80 @@ export default defineWorkflowTool({
 ```
 
 A `serve` tool's calls are tasks, with the receipts and results
-[described above](#run-calls-as-tasks-task) and the waiting, turn rule, ownership, and limit
-described in [Tasks](/docs/tools/tasks). What differs:
+[described above](#run-calls-as-tasks-task). [Tasks](/docs/tools/tasks) covers waiting, the turn
+rule, who can continue a task, and the task limit.
 
-- **`receive()`:** resolves with the next call, `{ input, callId, abortSignal }`, with `input`
-  validated by `inputSchema`. The first `receive()` resolves at once with the call that started
-  the task, without a step or a durable wait, and replays deterministically. After that, it
-  resolves with each call made with the task's `taskId`, in arrival order. Calls that arrive while
-  the body isn't waiting are kept. A pending `receive()` is shared, so calling it again returns the
-  same promise. A call counts as received as soon as its promise resolves, even if that promise
-  lost a `Promise.race`, and the next `ctx.reply()` settles it. If you race `receive()`, keep its
-  promise until you read the call instead of calling `receive()` again.
-- **`taskId` on the model input:** eve adds an optional `taskId` to the tool's model input and
-  appends a sentence explaining it to the description. A call without `taskId` starts a new task,
-  whose receipt names it and ends with
-  `To send it another message, call release-plan again with taskId release-plan-7k2m9q.` A call
-  with `taskId` goes to that task and returns a receipt that starts
-  `Sent to task release-plan-7k2m9q.` The build fails if `inputSchema` declares its own
-  `taskId`.
-- **Unknown tasks:** the id must name an unfinished task this tool started; otherwise the call
-  fails with `UNKNOWN_TASK`. The call can come from any caller in the session.
-- **`ctx.session` and `ctx.agents` describe the call being served:** a later call can come in a
-  later turn than the one that started the task. Its `call.started` and `call.settled` carry that
-  call's `callId` and turn, and so do the questions and sign-ins the body opens while serving
-  it. From the moment `receive()` resolves with a call, `ctx.session` is that call's view of
-  the session, including in a step that receives `ctx`: `ctx.session.turn` is the call's turn, and
-  `ctx.session.auth` is the auth the session admitted the call with, which may belong to a
-  different caller than the one that started the task. `getToken`, `requireAuth`, and connections
-  in a step use the current call's auth. `ctx.agents` lists the
-  agents the current call may open, including dynamic agents selected in its turn.
-- **Body state spans callers:** variables the body keeps between calls, such as `plan` in the
-  example, may hold what an earlier call from another caller produced. Key per-caller data on
-  the whole principal in `ctx.session.auth.current`: `authenticator`, `issuer`, `principalType`,
-  and `principalId` together, because a `principalId` is unique only within its authenticator and
-  issuer. Anonymous callers, whose `current` is `null` or whose `principalType` is `"anonymous"`,
-  share one identity, so don't keep per-person data for them. Any caller in the session can
-  continue or cancel the task; see [Tasks](/docs/tools/tasks#ownership-and-limits).
-- **Agents belong to the call that opened them:** a session the body opens with `ctx.agent` while
-  serving a call is that call's child. Its `session.parent` names the call's `callId` and turn.
-  The first turn of a local child uses the call's tool span as its parent when trace context is
-  available. A remote child starts its own trace; its first turn links to the call's tool span
-  with `eve.link.type=agent.dispatch` when trace context is available. Later child turns start new
-  traces. Parent session lineage stays tied to the opening call, even after the task receives
-  another call; a remote receiver accepts that lineage only from a trusted forwarder. Each message
-  uses the auth of the call being served; remote identity follows the
+### Receive calls and reply
+
+eve adds an optional `taskId` to the tool's model input and explains it in the description. The
+build fails if `inputSchema` declares its own `taskId`. A call without `taskId` starts a new task. Its
+receipt ends with
+`To send it another message, call release-plan again with taskId release-plan-7k2m9q.` A call with
+`taskId` goes to that task. Its receipt starts `Sent to task release-plan-7k2m9q.` The
+`taskId` must name an unfinished task this tool started, or the call fails with `UNKNOWN_TASK`.
+Any caller in the session can send it.
+
+- `receive()` resolves with the next call, `{ input, callId, abortSignal }`, with `input` validated
+  by `inputSchema`. The first call is the one that started the task. Later calls arrive in order.
+- eve keeps calls that arrive while the body isn't waiting. A second `receive()` while one is
+  pending returns the same promise.
+- A call counts as received once its promise resolves, even if it lost a `Promise.race`. The next
+  `ctx.reply()` answers it, so keep a raced `receive()` promise until you read the call.
+- `ctx.reply(output)` answers every call received so far. Each call reports its own
+  `call.settled`, the model receives the reply once, and the task goes idle until its next call.
+- A reply with no call waiting is dropped, and `ctx.ask` throws while no call is waiting.
+- A reply withdraws the open questions of the calls it answers. It doesn't abort their
+  `abortSignal`, so work after the reply keeps running.
+- Returning answers the calls still waiting and ends the task; a throw fails them. `serve` isn't a
+  generator, so it can't `yield` progress.
+
+### Working, idle, and cancelled tasks
+
+- A resumable task is working while one of its calls has no result, and idle otherwise. Only a
+  working task holds the turn and counts toward the
+  [task limit](/docs/tools/tasks#ownership-and-limits).
+- One stretch of work runs from a call reaching an idle task until a reply or cancel ends its
+  calls. Calls in a stretch share one `abortSignal`. The next stretch gets a new one, so a task can
+  be cancelled any number of times.
+- `eve__task_cancel`, `session.cancel()`, and a failed turn end the waiting calls as `cancelled`,
+  abort the stretch's signal, and make the task idle.
+- To stay available after a cancel, the body must catch the abort and return to `receive()` within
+  30 seconds, as the example does. Otherwise the task finishes. A body that ignores the signal keeps
+  working, and its reply is dropped.
+- The task finishes when its body returns or throws, or when the session ends. The end of the
+  session aborts the current signal and rejects a pending `receive()`.
+
+### Calls from several callers
+
+A later call can come in a later turn, from a different caller than the one that started the task.
+Once `receive()` resolves with a call, the context describes that call:
+
+- `ctx.session.turn` is the call's turn, and `ctx.session.auth` is the auth the session accepted the
+  call with. Steps that receive `ctx` see the same values, so `getToken`, `requireAuth`, and
+  connections use that call's auth.
+- `ctx.agents` lists the agents the call may open, including dynamic agents selected in its turn.
+- The call's `call.started` and `call.settled` events carry its `callId` and turn. So do the
+  questions and sign-ins the body opens while serving it.
+- A session the body opens with `ctx.agent` belongs to that call. Its `session.parent` names the
+  call's `callId` and turn, even after later calls. A remote receiver accepts that parent only from
+  a trusted forwarder.
+- Each message to that child uses the call's auth. Remote identity follows the
   [forwarding rules](../guides/remote-agents#forwarding-the-caller-identity).
-- **Results:** `ctx.reply(output)` settles every call received so far with `output`, all at once.
-  Each settled call reports its own `call.settled`, and the model receives the reply once. The task
-  then goes idle until its next call. A reply with
-  no call left to settle is dropped, and `ctx.ask` throws while no call is waiting for a result.
-  A reply also withdraws the questions still pending for the calls it settles, but doesn't abort
-  their `abortSignal`, so work the body continues after replying keeps running.
-  Returning settles the calls still waiting and ends the task; a throw fails them. `serve` is not
-  a generator, so it can't `yield` progress.
-- **Working and idle:** a resumable task is working while one of its calls has no result, and idle
-  otherwise. An idle task doesn't hold the turn and doesn't count toward the limit of 32; a call
-  that makes it work again does. The `[Tasks]` note lists the 10 most recently used idle tasks
-  after the working ones, so the model can find them again.
-- **One `abortSignal` per stretch of work:** a stretch starts when a call reaches an idle task and
-  ends when a reply or a cancel settles its calls. Calls that arrive during a stretch share its
-  signal, and the next stretch gets a new one, so a task can be cancelled any number of times.
-- **Cancellation:** `eve__task_cancel`, `session.cancel()`, and a failed turn settle the task's waiting
-  calls as `cancelled` and abort the stretch's `abortSignal`. The run keeps waiting for more calls,
-  so the task becomes idle and stays available. `eve__task_cancel` on an idle task says the task had no
-  work to stop. To stay available, a body must catch its stretch's abort and
-  return to `receive()`, as the example does; an abort that escapes the body finishes the task. A
-  body that ignores the signal keeps working and its reply is dropped, but a body that doesn't
-  return to `receive()` within 30 seconds of a cancel ends, and the task finishes.
-- **Finishing:** the task finishes when its body returns or throws, or when the session ends,
-  which aborts the current stretch's signal and rejects a pending `receive()`.
+- When trace context is available, a local child's first turn uses the call's tool span as its
+  parent. A remote child's first turn starts its own trace, linked to that span with
+  `eve.link.type=agent.dispatch`. Later child turns start new traces.
+
+Variables the body keeps between calls, such as `plan`, can hold another caller's output. Key
+per-caller data on these `ctx.session.auth.current` fields together: `authenticator`, `issuer`,
+`principalType`, and `principalId`. A `principalId` is unique only within its authenticator and
+issuer. Anonymous callers, whose `current` is `null` or whose `principalType` is `"anonymous"`,
+share one identity, so don't keep per-person data for them. Any caller in the session can continue
+or cancel the task; see [Tasks](/docs/tools/tasks#ownership-and-limits).
 
 Every [agent tool](/docs/subagents), including the built-in `agent` tool and remote agents, is a
-`serve` tool that eve builds this way on public API: each task opens one session with
-[`ctx.agent`](#delegate-work-ctxagent), sends each call's `message` with that call's `abortSignal`,
-and replies with the final response of each agent turn. Unlike other `serve` tasks, cancelling an
-agent task ends it; start a new task to delegate again.
-
-## Authorize inside a step
-
-Pass `ctx` directly to a step helper and call `ctx.getToken(provider)` there. User-scoped providers
-resolve as whoever launched this workflow tool, even if another person speaks in the session while it waits.
-The provider declaration and the API request both stay inside the step:
-
-```ts
-import { connect } from "@vercel/connect/eve";
-import type { WorkflowStepToolContext } from "eve/tools";
-
-async function readRepository(ctx: WorkflowStepToolContext, repository: string) {
-  "use step";
-  const provider = connect("github/my-agent");
-  const { token } = await ctx.getToken(provider);
-  const response = await fetch(`https://api.github.com/repos/${repository}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (response.status === 401) ctx.requireAuth(provider);
-  if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
-  return response.json();
-}
-```
-
-Connection tools, ordinary tools, and workflow steps use the same
-authorization machinery for requester identity, token caching, callback completion, and rejection
-after sign-in. The execution runtime owns the wait: an agent returns to its model after authorization,
-while a workflow retries the interrupted step and continues the authored body.
-
-The workflow body calls `await readRepository(ctx, repository)`.
-
-<Callout type="warning" title="Keep tokens out of step results">
-  Step results enter the workflow's durable history, so do not return the token from the helper.
-  eve's token cache stays inside the step. The step input is recorded too and, after sign-in,
-  carries the provider's callback parameters, such as a one-time authorization code. This matches
-  how agent turns record callbacks. Bearer tokens are never written.
-</Callout>
-
-When sign-in is required, the step attempt ends and the workflow waits on its own callback hook,
-without holding compute. The channel renders the sign-in challenge. After the callback, eve retries
-**the whole interrupted step**, resolves the token, and continues. Previously completed steps are
-not rerun. Resolve auth before other side effects in that step, and make operations before
-`requireAuth` safe to retry. A token rejected immediately after sign-in fails instead of prompting
-again. Provider declarations can be shared imports, but context must be passed directly, not nested
-inside another argument or captured in a closure.
-
-After a successful callback exchange, eve records a completion marker before returning to authored
-code. If that code later fails and the step retries, eve reads the token from the provider instead
-of exchanging the same callback again. The provider must persist the grant or token; the marker
-itself contains no credentials.
-
-Cancelling an authorization wait withdraws its callback. Cancellation uses the existing turn
-cancellation path rather than a separate authorization completion event.
-
-## Use the session sandbox in a step
-
-Pass `ctx` directly to a step helper and call `ctx.getSandbox()` there. The step opens the
-[sandbox](/docs/sandbox) of the session that called the tool, the same sandbox that session's
-turns use. When the session shares its parent's sandbox, as a copy started by the built-in `agent`
-tool does, the step opens that shared sandbox. The step sees files the session wrote, and the
-session's later tool calls see files the step writes:
-
-```ts title="agent/tools/analyze.ts"
-import { defineWorkflowTool, type WorkflowStepToolContext } from "eve/tools";
-import { z } from "zod";
-
-export default defineWorkflowTool({
-  description: "Prepare the input file for an analysis run.",
-  inputSchema: z.object({ value: z.string() }),
-  async task(input, ctx) {
-    "use workflow";
-    await prepareInput(ctx, input);
-    return { path: "/workspace/input.json" };
-  },
-});
-
-async function prepareInput(ctx: WorkflowStepToolContext, input: { value: string }) {
-  "use step";
-  const sandbox = await ctx.getSandbox();
-  await sandbox.writeTextFile({ path: "/workspace/input.json", content: JSON.stringify(input) });
-}
-```
-
-- The workflow body cannot open the sandbox, because it replays. `ctx.getSandbox()` in the body
-  throws and tells you to pass `ctx` to a step helper.
-- The step opens the sandbox directly, with any sandbox provider. If the session recorded its
-  sandbox before it called the tool, the step resumes it. Otherwise, or if that sandbox is gone by
-  the time the step runs, the step opens it the way the session's first turn would: it runs your
-  `defineSandbox()` definition, and the provider finds or creates the sandbox by the session's id. The session's later turns open the same sandbox. Your
-  definition can run once for each caller that opens the sandbox before the session records it,
-  so make its initialization safe to repeat.
-- The step does not own the sandbox. When the step ends, even by throwing, eve lets go of the
-  step's handle and leaves the sandbox running for the session. eve never stops or deletes the
-  sandbox for a step, and `sandbox.stop()` and `sandbox.delete()` in a step fail without a retry,
-  because the session's turns may be using the sandbox.
-- The session removes the sandbox when the session ends, even when only a step opened it. A step
-  that is still running when the session ends can open the sandbox again after that cleanup, and
-  nothing removes the new one.
-- When the eve server shuts down, it stops the sandboxes its sessions opened, but not one that
-  only a step opened. With Docker, that container keeps running until the session ends or you
-  stop it.
-- A step can use the sandbox while the session's turns use it too, as subagents that share a
-  sandbox do. Give each one its own files to write.
-- Steps run at least once and retry after a failure, so make sandbox writes safe to repeat. Write
-  whole files instead of appending to them, or check for earlier output first.
-- When the session shares its parent's sandbox, the step opens it by the parent's session id with
-  the parent's sandbox definition, and the parent removes it when the parent ends.
-- A step runs wherever the workflow runs. A sandbox that lives on one machine, such as just-bash
-  on the local disk, is reachable from a step only on that machine, as in local development.
+`serve` tool. Each agent task holds one session with the agent and replies with the final response
+of each agent turn. Unlike other `serve` tasks, cancelling an agent task ends it, so start a new
+task to delegate again.
 
 ## Ask a human: `ctx.ask`
 
@@ -569,24 +330,21 @@ const answer = await ctx.ask(
 // | { status: "unavailable" }
 ```
 
-`ctx.ask` opens an interaction on the session (`interaction.opened`) — rendered the way channels
-render tool approvals — and returns an awaitable answer. Awaiting it suspends the run until a response arrives.
-The `ask_question` tool is a workflow tool built on `ctx.ask`.
+`ctx.ask` opens a question on the session, reported as `interaction.opened`, and channels show it
+like a tool approval. Awaiting the answer pauses the run. The provided `ask_question` tool is built
+on `ctx.ask`.
 
-The answer's `status` tells the body what happened:
+| `status`      | Meaning                                                                                                                                                                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `answered`    | The person picked an option (`optionId`) or typed a reply (`text`).                                                                                                                                                                  |
+| `cancelled`   | The question was withdrawn before anyone answered, because `signal` or the call's `abortSignal` aborted or a `serve` body replied to the call. The stream reports `interaction.settled` as `withdrawn`, so clients stop offering it. |
+| `unavailable` | The session cannot ask for input, such as a scheduled run. `ctx.ask` returns this immediately.                                                                                                                                       |
 
-- `answered`: the person picked an option (`optionId`) or typed a reply (`text`).
-- `cancelled`: the request was withdrawn before anyone answered it, because the `signal` passed to
-  `ctx.ask` or the call's `abortSignal` aborted, or because a `serve` body replied to the call. The
-  session settles the interaction `withdrawn`, so clients stop offering the question.
-- `unavailable`: the session cannot request input, such as a scheduled run. `ctx.ask` returns this
-  immediately instead of waiting for an answer no one can give.
+A plain follow-up message answers the question when it is the only one open. The message must match
+an option, or the question must allow free text. Answer a question from a subagent with a structured
+response.
 
-A plain follow-up message answers the request when it is the only pending question and the message
-matches an option or the request allows free text. Answer a question from a subagent with a
-structured response.
-
-`ctx.ask` composes with the SDK's own constructs; race it against a deadline:
+Race `ctx.ask` against `sleep` for a deadline:
 
 ```ts
 const pending = ctx.ask({ prompt: `Deploy ${service}?`, options: APPROVE_OR_CANCEL });
@@ -594,24 +352,23 @@ const answer = await Promise.race([pending, sleep("4h")]);
 if (answer === undefined) return { deployed: false, reason: "timed out" };
 ```
 
-- The request belongs to the run, not the turn. It stays answerable until it is answered, withdrawn,
-  or the run ends.
-- A request is answered once. Ask again for the next answer.
-- Choose option `id`s that read well on their own, such as `approve` or the option's label. A
-  response carries only the `id`. If a person answers after the request has already resolved, for
-  example from an old Slack menu, the agent receives the `id` as a new message, not the label.
-- Ending the run, by returning, throwing, or cancellation, withdraws its pending requests.
-- Several requests may be outstanding at once.
-- A response never steers. A new human message that does not answer a pending request follows the
-  session's normal `turnPolicy`. A steering message aborts the `abortSignal` of each `execute` call
-  the turn waits on, which withdraws that call's questions, such as `ask_question`'s. A task's
-  questions stay open.
-- An aborted `signal` asks the session to withdraw the question, and the session decides. If a
-  person's answer reached the session first, the ask resolves as `answered` even though the signal
-  aborted, and the channel shows it answered. Branch on `status`, not on the signal.
+- The question belongs to the run, not the turn. It stays open until someone answers it, it is
+  withdrawn, or the run ends by returning, throwing, or cancellation.
+- Each question is answered once, so ask again for the next answer. Several questions can be open
+  at once.
+- A response carries only the option `id`, so choose ids that read well on their own, such as
+  `approve`. If a person answers after the question ended, for example from an old Slack menu, the
+  agent receives the `id` as a new message.
+- A response never steers. A new message that answers no open question follows the session's
+  `turnPolicy`. Steering withdraws the questions of the `execute` calls the turn waits on, such as
+  `ask_question`'s, but not a task's. See [Stop early for a new message](#stop-early-for-a-new-message).
+- An aborted `signal` asks the session to withdraw the question. If a person's answer reached the
+  session first, the ask resolves as `answered` and the channel shows it answered. Branch on
+  `status`, not on the signal.
 
 Compare the [`approval`](/docs/human-in-the-loop) policy, which gates the call before `execute` runs
-and can only show the model's input. Both compose: `approval` before the run, `ctx.ask` inside it.
+and can only show the model's input. Use both together: `approval` before the run, `ctx.ask` inside
+it.
 
 ## Delegate work: `ctx.agent`
 
@@ -630,8 +387,8 @@ const response = await reviewer.send("Review the deployment plan for security ri
 const { data, reply, status } = await response.result();
 ```
 
-Set `model` when the workflow should run a local child with a different AI Gateway model. The
-selection belongs to the returned session, so every message sent through that handle uses it:
+Set `model` to run a local child on a different AI Gateway model. Every message sent through the
+returned session uses it:
 
 ```ts
 const reviewer = ctx.agent("agent", {
@@ -657,24 +414,26 @@ const reviewer = ctx.agent("agent", {
 });
 ```
 
-Without `modelContextWindowTokens`, eve reads the model's context window from the AI Gateway model
-catalog recorded when the agent was built. Set it for a model that catalog doesn't list; otherwise
-the first `send` rejects.
+Omit `modelContextWindowTokens` to read the context window from the AI Gateway model catalog
+recorded at build time. Set it for a model the catalog doesn't list; otherwise the first `send`
+rejects.
 
-The selection must contain an AI Gateway model id. A live AI SDK `LanguageModel` cannot cross the
-durable workflow boundary. A remote agent rejects the option because its deployment owns its model
+The selection must contain an AI Gateway model id, because a live AI SDK `LanguageModel` can't be
+saved across waits. A remote agent rejects `model`, because its deployment owns its model
 configuration.
 
-The name is an available agent target. On the root agent, `"agent"` starts a copy of the root agent.
-A declared subagent uses its path-derived name and remains callable when hidden with `tool: false`
-or `disableTool()`. Delegated root copies and declared subagent contexts do not expose the built-in
-root-copy target. The invocation name `agent` is reserved, so a declared subagent cannot shadow it.
-An unavailable name rejects the first `send`.
+The name is an available agent target:
 
-`send(message, options?)` accepts text or `MessageContent<string | URL>`: up to 64 text and
-file parts. File `data` must be an HTTP(S) URL, as a string or `URL` object. Inline bytes, base64,
-and `data:` URLs are rejected before dispatch so attachment bytes do not enter durable workflow
-inputs. Upload a local file first, then send its URL:
+- On the root agent, `"agent"` starts a copy of the root agent. Delegated root copies and declared
+  subagents can't open that copy.
+- A declared subagent uses its path-derived name, and stays callable when hidden with `tool: false`
+  or `disableTool()`.
+- The name `agent` is reserved, so a declared subagent can't use it.
+- An unavailable name rejects the first `send`.
+
+`send(message, options?)` accepts text or `MessageContent<string | URL>`: up to 64 text and file
+parts. File `data` must be an HTTP(S) URL, as a string or `URL` object. eve rejects inline bytes,
+base64, and `data:` URLs before sending, so upload a local file first and send its URL:
 
 ```ts
 await reviewer.send([
@@ -683,46 +442,50 @@ await reviewer.send([
 ]);
 ```
 
-The options are:
-
 | Option         | Description                                                                                              |
 | -------------- | -------------------------------------------------------------------------------------------------------- |
 | `outputSchema` | Structured output for the turn, as a Standard JSON Schema such as a Zod schema, or a JSON Schema object. |
 | `signal`       | Aborting it cancels the turn the message started or joined. The turn still reports, as cancelled.        |
 
-A message sent while the session's turn is running joins that turn, and its response resolves with
-that turn's result. If the turn ends before the agent reads the message, the message starts the next
-turn instead, and its response resolves with that turn's result. The responses of earlier messages
-that are still waiting resolve with the same result. A message sent while the session is idle starts
-the next turn, and the session keeps its conversation between turns. `result()` returns:
+A message sent while the child's turn is running joins that turn, and its response resolves with
+that turn's result. If the turn ends before the agent reads the message, the message starts the
+next turn. Its response, and those of earlier messages still waiting, resolve with that turn's
+result. A message sent while the session is idle starts the next turn. The session keeps its
+conversation between turns.
+
+`result()` returns:
 
 | Field          | Description                                                                                               |
 | -------------- | --------------------------------------------------------------------------------------------------------- |
 | `data`         | The structured value, when the turn requested `outputSchema`.                                             |
 | `reply`        | The agent's final reply text, when available.                                                             |
 | `status`       | `"completed"`, `"failed"`, or `"cancelled"`. Completion does not by itself mean the session ended.        |
-| `sessionEnded` | Whether the session ended in the response's final commit.                                                 |
+| `sessionEnded` | Whether the session ended with this turn.                                                                 |
 | `error`        | `{ message }` with the reason the turn failed. Required when `status` is `"failed"` and absent otherwise. |
 
-Every `ctx.agent(name, options?)` call returns a new session that only the workflow run can address.
-The model does not see it; it sees what the tool returns. A local child runs as the caller's principal with the
-caller's capabilities. A remote child does not inherit the caller's session principal by default;
-the receiving deployment determines its identity from the outbound request. To forward the caller's
-identity, set `forwardPrincipal: true` on the remote agent and configure the receiver's
-`trustedForwarders` (see [Forwarding the caller identity](../guides/remote-agents#forwarding-the-caller-identity)).
-A person answers the child's questions and sign-ins at the root session, as for any subagent.
-The session ends when the run finishes, which cancels any turn still running.
+Each `ctx.agent(name, options?)` call returns a new session that only this workflow run can send to.
+The model sees only what the tool returns. The session ends when the run finishes, which cancels any
+turn still running.
 
-The parent stream announces each session with `child.opened`, which carries its `owner` (the
-task whose run opened the session, or the tool call when the call doesn't run as a task), the
-agent `name`, the child's `sessionId`, and its `stream` path. Pass the event to
-[`session.agent(opened).stream()`](/docs/guides/client/streaming#follow-a-subagent) to follow the child.
+- **Local child:** runs with the caller's auth.
+- **Remote child:** its identity comes from the outbound request, not the caller's session. To
+  forward the caller's identity, set `forwardPrincipal: true` on the remote agent and configure the
+  receiver's `trustedForwarders`. See
+  [Forwarding the caller identity](../guides/remote-agents#forwarding-the-caller-identity).
+- **Questions and sign-ins:** a person answers the child's questions and sign-ins at the root
+  session, as for any subagent.
+
+The parent stream announces each session with `child.opened`. The event carries the agent `name`,
+the child's `sessionId`, its `stream` path, and its `owner`. `owner` is the task whose run opened
+the session, or the tool call when the call doesn't run as a task. Pass the event to
+[`session.agent(opened).stream()`](/docs/guides/client/streaming#follow-a-subagent) to follow the
+child.
 
 ### Route to a hidden subagent with Jev
 
-Use an authored workflow tool when the parent model should decide to delegate, but [Jev](https://vercel.com/i/what-is-jev) should choose the specialist. Set `tool: false` on each specialist so the parent model sees only the routing tool. The specialists remain available through `ctx.agents` and callable through `ctx.agent()`.
+Use an authored workflow tool when the parent model should decide to delegate, but [Jev](https://vercel.com/i/what-is-jev) should choose the specialist. Set `tool: false` on each specialist so the parent model sees only the routing tool. `ctx.agents` and `ctx.agent()` still reach the specialists.
 
-If the router may select the root-copy `agent`, author a root `description` that explains which work should stay with a copy of the root. `ctx.agents.agent` always exists in a top-level root workflow, but its `description` is an empty string when omitted from `agent.ts`. `agentRouter()` considers only entries with a non-empty description, so it does not route to an undescribed root copy.
+If the router may select the root-copy `agent`, give the root a `description` that says which work should stay with a copy of the root. Without one, `ctx.agents.agent.description` is an empty string, which `agentRouter()` skips.
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -753,7 +516,7 @@ export default defineAgent({
 });
 ```
 
-Define the model-visible router under `agent/tools/`. Build the Jev criteria from the subagents' effective descriptions, then pass its typed choice directly to `ctx.agent()`:
+Define the model-visible router under `agent/tools/`. Build the Jev criteria from the subagents' descriptions, then pass its typed choice to `ctx.agent()`:
 
 ```ts title="agent/tools/agent-router.ts"
 import { decide } from "eve/ai";
@@ -805,9 +568,9 @@ export default defineWorkflowTool({
 });
 ```
 
-The decision runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `agent-router`, but not `researcher` or `operator`. Jev returns the typed `"researcher" | "operator"` choice, and the selected subagent's reply becomes the `agent-router` tool result.
+The decision runs in a step, so replay reuses it instead of repeating the routing request. The parent model sees only `agent-router`, and the selected subagent's reply becomes its tool result.
 
-`ctx.agents` is a replay-stable metadata snapshot taken when the session admits the call. In a `serve` task, it follows the call being served. In a top-level root workflow, `ctx.agents.agent` always represents the root-copy target and carries the root's authored `description` when provided. The snapshot also includes declared agents hidden from the parent model with `tool: false` or `disableTool()`, but exposes no model definitions, credentials, or callbacks. A delegated root copy omits `agent`, so `agentRouter()` cannot select another root copy recursively. Invocation still checks each target's availability through `ctx.agent()`.
+`ctx.agents` holds agent metadata as it was when the session accepted the call, and replay doesn't change it. In a `serve` task, it follows the call being served. It includes agents hidden with `tool: false` or `disableTool()`, but no model definitions, credentials, or callbacks. In a top-level root workflow, `ctx.agents.agent` always exists as the root-copy target. A delegated root copy omits `agent`, so `agentRouter()` can't select another root copy. `ctx.agent()` still checks each target's availability.
 
 #### Route across every agent target
 
@@ -819,12 +582,67 @@ import { agentRouter } from "eve/tools/agent_router";
 export default agentRouter();
 ```
 
-Its input is `{ message: string }`. `agentRouter()` ignores entries without a non-empty description. With two or more described targets, it sends the message and effective descriptions to Jev, then sends the message to a new session with the selected agent through `ctx.agent()` and returns its reply. It invokes a sole target without decision. Each call
-runs as a [task](#run-calls-as-tasks-task), so the reply reaches the model as the task's result. In a top-level root session, the candidates include the root-copy `agent`; delegated root copies and declared subagent contexts include only their declared targets.
+Its input is `{ message: string }`. `agentRouter()` considers only targets with a non-empty description. With two or more, Jev picks one from the message and descriptions; a sole target gets the message directly. The router sends the message to a new session with that agent. Each call runs as a [task](#run-calls-as-tasks-task), so the reply reaches the model as the task's result. In a top-level root session, the candidates include the root-copy `agent`; delegated root copies and declared subagent contexts include only their declared targets.
 
 When an authored tool accepts a JSON Schema supplied by the model, represent that input with a permissive object such as `z.looseObject({})`. Avoid `z.record(z.string(), z.json())`: its generated JSON Schema uses `propertyNames`, which OpenAI does not support. Validate the supplied value at the point where your tool consumes it.
 
 This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through Jev.
+
+## Add a runtime-generated workflow tool
+
+Export the provided `workflow` factory from `agent/tools/workflow.ts` when the model should write the
+JavaScript program at runtime:
+
+```ts title="agent/tools/workflow.ts"
+import { workflow } from "eve/tools/workflow";
+
+export default workflow({ maxSubagents: 20 });
+```
+
+The model supplies an async function body through the tool's `js` input. Each call runs as a
+[task](#run-calls-as-tasks-task), so the program's return value reaches the model in a
+`task.result` message.
+
+The program can only call `ctx.agent(name, { message, outputSchema? })`. It sends the message to a
+new session with that agent, and resolves to the reply or, when `outputSchema` is set, to the
+structured value. The program can call subagents hidden with `tool: false` or a same-named
+`disableTool()` file, so list their path-derived names in the tool description or agent
+instructions:
+
+```js
+const [triage, review] = await Promise.all([
+  ctx.agent("ticket-triage", { message: JSON.stringify(tickets) }),
+  ctx.agent("ticket-review", { message: JSON.stringify(tickets) }),
+]);
+return { triage, review };
+```
+
+Omit `maxSubagents` to allow `100` agent calls; set an integer from `1` through `128`. The program
+can't use the workflow context, session state, credentials, imports, or ordinary tools. Each
+`ctx.agent` call starts a new child session, so a program can't continue a child from an earlier
+call. Agent authorization, questions, approvals, and cancellation work as they do for sessions an
+authored workflow tool opens with `ctx.agent`.
+
+The program continues after every pending call in the current batch finishes, so `Promise.all`
+supports fan-out followed by fan-in. A `ctx.agent` call still pending when the program returns
+fails the workflow, such as one never awaited or one that loses a `Promise.race` or `Promise.any`.
+
+A failed child turn, an invalid call, or a call over the `maxSubagents` budget throws a catchable
+`WorkflowProgramAgentError` at that `ctx.agent` call. The error message names the cause.
+
+The return value and each `ctx.agent` input pass through `JSON.stringify`, so a `Date` becomes a
+string, and functions and `undefined` members drop. A return value that converts to nothing, such
+as `undefined`, becomes `null`.
+
+| Limit                                     | Value      |
+| ----------------------------------------- | ---------- |
+| Return value or `ctx.agent` input as JSON | 1 MiB      |
+| Child reply as JSON                       | 4 MiB      |
+| Program source                            | 256 KiB    |
+| JavaScript time per start or resume       | 30 seconds |
+| Total time per start or resume            | 5 minutes  |
+
+Time spent waiting for child agents does not count toward either time limit.
 
 ## Start channel sessions: `ctx.to`
 
@@ -864,27 +682,24 @@ async function openIncident(ctx: WorkflowStepToolContext, channelId: string, sum
 }
 ```
 
-A step that fails retries, so pass an `idempotencyKey` the retry repeats. The destination session dedupes keys from every sender, and `ctx.callId` is unique only within the calling session and is the same for every step of the call, so include `ctx.session.id` and add a label for each send. Create the channel in its own step: a retried send step then reuses the recorded `channelId` instead of creating another channel.
+A failed step retries, so pass an `idempotencyKey` that the retry repeats. Include `ctx.session.id`, because the target session dedupes keys from every sender. Add a label for each send, because `ctx.callId` is the same for every step of the call. Create the channel in its own step, so a retried send step reuses the saved `channelId` instead of creating another channel.
 
 `ctx.channel` holds the `kind`, `continuationToken`, and `metadata` of the channel serving the calling session, in the workflow body and in steps, as in [ordinary tools](/docs/tools#the-ctx-parameter).
 
 ## Report progress: `yield`
 
-A workflow body may be an async generator whose yields report progress. After processing a yield,
-eve advances the generator; use an awaited workflow operation when the body needs to suspend.
+A workflow body can be an async generator whose yields report progress. A yield doesn't pause the
+body; await a workflow operation to pause.
 
 | Operation       | Behavior                                                          |
 | --------------- | ----------------------------------------------------------------- |
 | `yield value`   | Emits a `call.progress` snapshot for the pending tool call.       |
-| `return value`  | Settles the tool call with its output.                            |
+| `return value`  | Ends the tool call with its output.                               |
 | No return value | Uses the last yield as output, or `null` if there were no yields. |
 
-An explicit `return null` also falls back to the last yield. Prefer an
-explicit object return when progress snapshots and the final result have different shapes.
-Progress snapshots are last-write-wins by tool call id and do not enter model history as
-intermediate tool results. A snapshot used as the final output does enter history as the tool result.
-
-This workflow reports progress, then suspends until its timer expires:
+An explicit `return null` also falls back to the last yield, so return an object when progress
+snapshots and the final result have different shapes. Each snapshot replaces the previous one and
+stays out of the model's history, unless it becomes the final output.
 
 ```ts title="agent/tools/remind_with_progress.ts"
 import { defineWorkflowTool } from "eve/tools";
@@ -903,16 +718,15 @@ export default defineWorkflowTool({
 });
 ```
 
-Use [`ctx.ask`](#ask-a-human-ctxask) when the workflow needs a human answer. See
-[yield and return](/docs/tools#yield-and-return) for the final-output rules.
+See [yield and return](/docs/tools#yield-and-return) for the final-output rules.
 
 ## Cancel and clean up: `ctx.abortSignal`
 
-`ctx.abortSignal` aborts when the call is cancelled: by `session.cancel()`, or, for a task, by
-`eve__task_cancel`, a failed turn, or the end of the session. A steering message also aborts it for an
-`execute` call; see [Stop early for a new message](#stop-early-for-a-new-message). It is durable:
-it survives replay, and a step that receives it observes the abort. Pass it into the steps that
-should stop, and clean up in `try/finally`:
+`ctx.abortSignal` aborts when the call is cancelled by `session.cancel()`. For a task, it also aborts
+on `eve__task_cancel`, a failed turn, or the end of the session. For an `execute` call, a steering
+message aborts it too; see [Stop early for a new message](#stop-early-for-a-new-message). The signal
+survives replay, and a step that receives it sees the abort. Pass it into the steps that should
+stop, and clean up in `try/finally`:
 
 ```ts
 async execute({ projectId }, ctx) {
@@ -926,34 +740,33 @@ async execute({ projectId }, ctx) {
 }
 ```
 
-After a cancel aborts the signal, the run waits up to 30 seconds for the body to finish unwinding,
-then ends as cancelled whether or not it did. A body parked on a hook or a `sleep` does not observe
-the signal; it is abandoned when the grace period ends. Steps that received the signal are how you
-clean up first.
+After a cancel, the run waits up to 30 seconds for the body to stop, then ends as cancelled whether
+or not it did. A body paused on a hook or a `sleep` doesn't see the signal. eve abandons it when
+the 30 seconds end, so clean up in steps that received the signal.
 
-The caller waits up to 35 seconds for a cooperatively cancelled run to settle before forcing it
-to stop. This includes time for the run to publish its outcome after body cleanup.
+The caller waits up to 35 seconds for a cancelled run to report its outcome, then forces the run to
+stop.
 
 ## Stop early for a new message
 
-A steering message aborts the `ctx.abortSignal` of each `execute` call the turn waits on. A
-steering message is one sent with `turnPolicy: "steer"`, the default, that does not answer a pending
-question; a message that answers a question never stops a call. Steering never touches a
+A steering message is one sent with `turnPolicy: "steer"` (the default) that answers no open
+question. It aborts the `ctx.abortSignal` of each `execute` call the turn waits on. A message that
+answers a question never stops a call, and steering never touches a
 [task](#run-calls-as-tasks-task).
 
-Steering does not cancel the call or end the turn. The call settles with what the body returns, and
-the model reads the new message after the step's workflow tool calls settle:
+Steering does not cancel the call or end the turn. The call ends with what the body returns, and the
+model reads the new message after the step's workflow tool calls finish:
 
-- **Questions:** a pending `ctx.ask` question is withdrawn and resolves as `cancelled`, unless a
+- **Questions:** an open `ctx.ask` question is withdrawn and resolves as `cancelled`, unless a
   person's answer reached the session first.
 - **Rejections:** a body that rejects after the abort, such as one whose step received the signal,
-  settles as `{ interrupted: true }` instead of failing.
-- **No grace period:** a body that doesn't observe the signal, such as one parked on a hook or a
-  `sleep`, keeps the turn waiting until it finishes.
+  ends as `{ interrupted: true }` instead of failing.
+- **Paused bodies:** a body paused on a hook or a `sleep` doesn't see the signal, and it keeps the
+  turn waiting until it finishes.
 
-The body doesn't need to tell a steering message from a cancel: in both cases, stop and return what
-you have. After a cancel, eve discards the result. The provided `sleep` tool races its timer
-against the signal:
+The body doesn't need to tell a steering message from a cancel: stop and return what you have.
+After a cancel, eve discards the result. The provided `sleep` tool races its timer against the
+signal:
 
 ```ts
 import { sleep } from "eve/workflow";
@@ -971,6 +784,101 @@ async execute(input, ctx) {
 
 To keep a question or long work going while the conversation continues, define
 [`task`](#run-calls-as-tasks-task) instead of `execute`.
+
+## Authorize inside a step
+
+Pass `ctx` directly to a step helper and call `ctx.getToken(provider)` there, with the provider
+declaration and the API request inside the step. User-scoped providers resolve as the person whose
+call started the workflow tool, even if another person speaks in the session while it waits:
+
+```ts
+import { connect } from "@vercel/connect/eve";
+import type { WorkflowStepToolContext } from "eve/tools";
+
+async function readRepository(ctx: WorkflowStepToolContext, repository: string) {
+  "use step";
+  const provider = connect("github/my-agent");
+  const { token } = await ctx.getToken(provider);
+  const response = await fetch(`https://api.github.com/repos/${repository}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (response.status === 401) ctx.requireAuth(provider);
+  if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+  return response.json();
+}
+```
+
+The workflow body calls `await readRepository(ctx, repository)`.
+
+<Callout type="warning" title="Keep tokens out of step results">
+  eve records step results in the workflow's history, so do not return the token from the helper.
+  The step input is recorded too and, after sign-in, carries the provider's callback parameters,
+  such as a one-time authorization code. Bearer tokens are never written.
+</Callout>
+
+When sign-in is required, the step attempt ends and the channel shows the sign-in prompt. The
+workflow waits for the callback without holding compute. After the callback, eve retries **the whole
+interrupted step**, resolves the token, and continues. Completed steps don't run again.
+
+- Resolve auth before other side effects in that step, and make operations before `requireAuth`
+  safe to retry.
+- A token rejected immediately after sign-in fails instead of prompting again.
+- Provider declarations can be shared imports. Pass `ctx` directly, not nested inside another
+  argument or captured in a closure.
+- If the step fails and retries after a successful sign-in, eve reads the token from the provider
+  instead of reusing the callback. The provider must therefore persist the grant or token.
+- Cancelling an authorization wait withdraws its callback.
+
+## Use the session sandbox in a step
+
+Pass `ctx` directly to a step helper and call `ctx.getSandbox()` there. The step opens the
+[sandbox](/docs/sandbox) that the calling session's turns use. That includes a sandbox shared with
+a parent session, as in a copy started by the built-in `agent` tool. The step and the session see
+each other's files:
+
+```ts title="agent/tools/analyze.ts"
+import { defineWorkflowTool, type WorkflowStepToolContext } from "eve/tools";
+import { z } from "zod";
+
+export default defineWorkflowTool({
+  description: "Prepare the input file for an analysis run.",
+  inputSchema: z.object({ value: z.string() }),
+  async task(input, ctx) {
+    "use workflow";
+    await prepareInput(ctx, input);
+    return { path: "/workspace/input.json" };
+  },
+});
+
+async function prepareInput(ctx: WorkflowStepToolContext, input: { value: string }) {
+  "use step";
+  const sandbox = await ctx.getSandbox();
+  await sandbox.writeTextFile({ path: "/workspace/input.json", content: JSON.stringify(input) });
+}
+```
+
+- The workflow body can't open the sandbox, because it replays. `ctx.getSandbox()` in the body
+  throws and tells you to pass `ctx` to a step helper.
+- The step works with any sandbox provider. If the session recorded its sandbox before it called
+  the tool, the step resumes it. Otherwise, or if that sandbox is gone, the step runs your
+  `defineSandbox()` definition as the session's first turn would. Later turns open the same sandbox.
+- Your definition can run once for each caller that opens the sandbox before the session records
+  it, so make its setup safe to repeat.
+- The sandbox belongs to the session, not the step. When the step ends, even by throwing, the
+  sandbox keeps running. `sandbox.stop()` and `sandbox.delete()` in a step fail without a retry,
+  because the session's turns may be using the sandbox.
+- The session removes the sandbox when it ends, even when only a step opened it. A step still
+  running at that point can open the sandbox again, and nothing removes the new one.
+- When the eve server shuts down, it stops the sandboxes its sessions opened, but not one that only
+  a step opened. With Docker, that container keeps running until the session ends or you stop it.
+- A step can use the sandbox while the session's turns use it, as subagents that share a sandbox
+  do. Give each one its own files to write.
+- Steps run at least once and retry after a failure, so make sandbox writes safe to repeat. Write
+  whole files instead of appending, or check for earlier output first.
+- When the session shares its parent's sandbox, the step opens it with the parent's sandbox
+  definition, and the parent removes it when the parent ends.
+- A step runs wherever the workflow runs. A sandbox on one machine's disk, such as just-bash, is
+  reachable from a step only on that machine, as in local development.
 
 ## Workflow tool examples
 
@@ -996,9 +904,9 @@ async task({ service }, ctx) {
 }
 ```
 
-One request stays on the channel the whole time. As a `task`, the call doesn't hold the
-conversation, and a steering message doesn't withdraw the request. `sleep` is the deadline,
-`pageOnCall` is a step, and returning withdraws the request.
+One question stays on the channel the whole time. As a `task`, the call doesn't hold the
+conversation, and steering doesn't withdraw the question. `pageOnCall` is a step, and returning
+withdraws the question.
 
 ### Wait for an external system to call back
 
@@ -1025,9 +933,9 @@ export default defineWorkflowTool({
 ```
 
 `createWebhook` mints a URL under `/.well-known/workflow/v1/webhook/` that eve serves. The external
-system posts to it when it is done. Nothing runs in between. Webhook tokens are generated for
-you; use `createHook` with `resumeHook` if you need a deterministic token. To customize the HTTP
-response, pass `respondWith: new Response(...)` to `createWebhook`.
+system posts to it when it is done, and nothing runs in between. Use `createHook` with `resumeHook`
+for a deterministic token. To customize the HTTP response, pass `respondWith: new Response(...)` to
+`createWebhook`.
 
 ### Ask now, act when answered
 
@@ -1058,29 +966,25 @@ export default defineWorkflowTool({
 });
 ```
 
-The turn parks while the approval card stays on the channel. When it is answered, the refund runs
+The turn waits while the approval card stays on the channel. When someone answers, the refund runs
 and the agent receives the outcome as the tool result.
 
 ## Semantics
 
-One call, one result. A workflow tool call resolves once, with the return value, the error, or a
-cancellation.
+A workflow tool call ends once, with the return value, the error, or a cancellation.
 
-While an `execute` call runs, the turn is parked. A `queue` message waits for it. A `steer` message
-that answers no pending question aborts the call's `ctx.abortSignal` and reaches the model once the
-call settles; it never cancels the run. Input responses never steer. A task doesn't park the
-turn, and steering never touches it.
+While an `execute` call runs, the turn waits, and a message sent with `turnPolicy: "queue"` waits
+for it. A task doesn't hold the turn. See [Stop early for a new message](#stop-early-for-a-new-message)
+for `steer` messages.
 
 Errors follow the SDK. A thrown error in a step retries per the step's policy; `FatalError` does
-not. An error that escapes the body fails the tool invocation.
+not. An error that escapes the body fails the tool call.
 
-Starting a workflow tool can also be retried. If dispatch is interrupted after starting a
-run, its retry starts another run, and both may execute. The parent tracks the run returned by the
-successful dispatch attempt. Use an application idempotency key for side effects that must happen
-only once.
+An interrupted dispatch can start a second run for the same call, and both runs may execute. Use an
+application idempotency key for side effects that must happen only once.
 
-The workflow id derives from the entry point's module path and function name. Inline entry points
-use the tool module and the name `execute`, `task`, or `serve`; imported ones use their declaring module and
-name.
-Renaming or moving that function creates a new workflow. Runs in flight finish on the deployment that started them; a run that
-resumes on a deployment without its tool fails with an error naming the missing workflow.
+The workflow id comes from the entry point's module path and function name. Inline entry points use
+the tool module and the name `execute`, `task`, or `serve`. Imported ones use their declaring module
+and name. Renaming or moving that function creates a new workflow. Runs in flight finish on the
+deployment that started them. A run that resumes on a deployment without its tool fails with an
+error naming the missing workflow.

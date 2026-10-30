@@ -3,22 +3,22 @@ title: "Your First Agent"
 description: "Scaffold the analytics assistant, give it an analyst persona, run it, and ask a question."
 ---
 
-For a bespoke learning experience, start with the [eve template gallery](https://vercel.com/templates/eve) or ask your coding agent to build your use case. For example:
+To start from your own use case, use the [eve template gallery](https://vercel.com/templates/eve) or ask your coding agent to build your use case. For example:
 
 - “Build an eve Slack agent that answers questions from our team’s documentation.”
 - “Build an eve incident-response agent that investigates alerts using our observability tools.”
 - “Build an eve GitHub maintainer that triages issues and summarizes pull requests.”
 
-If you prefer a step-by-step walkthrough, continue with this tutorial. It constructs one app end to end: a data analytics assistant. You ask in natural language, and over eight steps it learns to query sample data, run analysis in a sandbox, remember your team's metric definitions, and refuse to exceed your query budget without asking.
+For a step-by-step walkthrough, continue with this tutorial. Over eight steps you build a data analytics assistant. It answers natural-language questions, queries sample data, and runs analysis in a sandbox. It also remembers your team's metric definitions and asks before exceeding your query budget.
 
-Step 1 gets it talking. In Step 3 you create a small local dataset that you use throughout the tutorial. You can complete the tutorial without a warehouse or Vercel Connect account. [Connect a warehouse](./connect-a-warehouse) is an optional follow-up once your agent works.
+Step 1 gets it talking. Step 3 creates a small local dataset that you use throughout, so you need no warehouse or Vercel Connect account. [Connect a warehouse](./connect-a-warehouse) is an optional follow-up once your agent works.
 
 ## Prerequisites
 
 - Node 24 or newer and npm.
-- A working model credential, configured through [Getting Started](../getting-started). Keep the model and credential you already tested there.
+- A working model credential, configured through [Getting Started](../getting-started).
 
-If you have not run eve before, complete [Getting Started](../getting-started) first. Without a credential, "Run the agent" below fails when the runtime tries to reach the model; the dev TUI's `/model` flow walks you through pasting a key or linking a project.
+Without a credential, "Run the agent" below fails when eve tries to reach the model. The dev TUI's `/model` flow walks you through pasting a key or linking a project.
 
 ## Scaffold the agent
 
@@ -27,19 +27,17 @@ npx eve@latest init analytics-assistant
 cd analytics-assistant
 ```
 
-The command writes the starter agent and built-in HTTP API channel
-(`agent/channels/eve.ts`), installs dependencies, initializes Git, and offers
-to start the development server. Stop the server if you started it before
-continuing with the edits below. It does not create a Vercel project or deploy. `init` creates the
-`analytics-assistant/` directory, so `cd` into it before running further
-commands.
+`init` creates the `analytics-assistant/` directory with the starter agent and
+built-in HTTP API channel (`agent/channels/eve.ts`). It also installs
+dependencies, initializes Git, and offers to start the development server. If
+you started the server, stop it before you continue with the edits below. `init`
+does not create a Vercel project or deploy.
 
 ## Keep your configured model
 
 `agent/agent.ts` holds the model and config. Use the same model and credentials
-that worked in Getting Started. The tutorial does not require switching providers.
-If you need to configure this new project, use `/model` in the dev TUI before
-sending your first question.
+that worked in Getting Started; the tutorial works with any provider. To configure
+this new project, use `/model` in the dev TUI before sending your first question.
 
 ## Give it an analyst persona
 
@@ -62,13 +60,13 @@ Instructions are identity and standing rules. On-demand procedures belong in ski
 npm run dev
 ```
 
-The `init` scaffold writes a `dev` script that runs the `eve dev` binary from the project's `node_modules`. The local runtime boots and the dev TUI opens. Ask it something it can answer from general knowledge first:
+The `dev` script runs `eve dev` from the project's `node_modules`. The agent starts locally and the dev TUI opens. Ask it something it can answer from general knowledge first:
 
 ```text
 What's a good way to measure week-over-week retention?
 ```
 
-You get a reply that follows the analyst persona. It can't see your data yet (that comes in Step 3). First, a look at what happened under the hood.
+You get a reply that follows the analyst persona. It can't see your data yet (that comes in Step 3). First, look at what happened when you sent the question.
 
 → Next: [How it runs](./how-it-runs)
 

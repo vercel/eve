@@ -3,9 +3,9 @@ title: "Client SDK"
 description: "Call an eve agent from TypeScript with Client, sessions, auth, and health checks."
 ---
 
-The `eve/client` entrypoint is the typed client for eve's default HTTP API. Use it from scripts, server-to-server integrations, tests, evals, backend jobs, or custom UIs that want the session protocol without hand-writing the POST and NDJSON (newline-delimited JSON) stream loop.
+The `eve/client` entrypoint is the typed TypeScript client for eve's default HTTP API. It replaces a hand-written POST and NDJSON (newline-delimited JSON) stream loop in scripts, server-to-server integrations, tests, evals, backend jobs, and custom UIs.
 
-For browser chat UIs, start with [`useEveAgent`](../frontend/overview). For wire-level details, read [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming). The client sits between those two: lower level than the frontend hooks, higher level than raw HTTP.
+For browser chat UIs, start with [`useEveAgent`](../frontend/overview). For wire-level details, read [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming).
 
 ## Create a client
 
@@ -19,35 +19,46 @@ const client = new Client({
 });
 ```
 
-`baseUrl` is the URL where the eve routes are mounted. In a same-origin browser integration this is often `""`; scripts and backend services usually name the full URL. Any query parameters on `baseUrl` are included on every request, including session POSTs and event streams. Request-specific parameters, such as a stream cursor, take precedence when names overlap.
+`baseUrl` is the URL where the eve routes are mounted, often `""` in a same-origin browser integration. Query parameters on `baseUrl` are sent on every request, including event streams. When names overlap, request-specific parameters such as a stream cursor win.
 
 ## Check health
 
-Use `health()` when a script needs to fail early before creating a session:
+`health()` lets a script fail early before creating a session:
 
 ```ts
 const health = await client.health();
 console.log(health.status, health.workflowId);
 ```
 
-The client requires the successful response to match `{ ok: true, status: "ready", workflowId: string }`. Non-2xx responses throw `ClientError`, which carries the HTTP `status` and response `body`; invalid JSON or a malformed successful payload throws `HealthResponseError`.
+A successful response must match `{ ok: true, status: "ready", workflowId: string }`. A non-2xx response throws `ClientError` with the HTTP `status` and response `body`; invalid JSON or a malformed payload throws `HealthResponseError`.
 
 ## Inspect an agent
 
-Use `info()` to inspect an agent. The client requires a complete agent-info version 5 response before returning it:
+`info()` returns the agent's inspection payload. The client accepts only a complete agent-info version 5 response:
 
 ```ts
 const info = await client.info();
 console.log(info.agent.name, info.agent.model.id);
 ```
 
-Pass `info({ signal })` to cancel the HTTP request. The signal is checked only after custom header and credential callbacks resolve; it does not limit how long those callbacks or the complete `info()` call can take.
+Pass `info({ signal })` to cancel the HTTP request. The signal applies only after custom header and credential callbacks resolve, so it doesn't bound how long those callbacks take.
 
-The response separates active static definitions from dynamic resolvers, includes binding-backed source ownership and composition history, reports first-class memory slots and their provider-tool wrapper dependencies, reports local and remote agents separately, and returns the exact compiled channel route order. It includes authored instruction content, skill and schedule markdown, and server paths, so the server answers only operator principals (`service`, `runtime`, or `local-dev`) unless the channel's auth grants `allowAgentInfo`. Authenticate the client with an operator credential, such as Vercel OIDC, `jwtHmac()`, `jwtEcdsa()`, or a custom `AuthFn` that returns `principalType: "service"`; any other principal gets a `ClientError` with `status` `403` and `code` `"info_forbidden"`.
+The response contains:
 
-The version changes only for breaking reshapes; a server adds fields and enum values within a version. The client ignores fields it does not know, and enum-like fields holding a string it cannot interpret (such as `mode`, `sourceKind`, or a channel `method`) read as `"unrecognized"`, so handle that value when you switch on them. A missing or non-string value still throws `AgentInfoResponseError`. `kind` discriminants, such as an owner's, a model endpoint's, or a module's backing `kind`, are closed: a new variant comes with a version bump, and an unknown one throws `AgentInfoResponseError`.
+- static definitions and dynamic resolvers, each with the source that defines it
+- composition diagnostics and memory slots
+- local and remote agents, listed separately
+- the compiled channel route order
 
-A non-success response throws `ClientError`. Invalid JSON, a different agent-info version, duplicate identities, inconsistent totals, or mismatched source provenance throws `AgentInfoResponseError`. For a version mismatch, its `issues` name which side to upgrade: eve in the agent, or the eve package the client runs from.
+The response includes authored instructions, skill and schedule Markdown, and server paths. So the server answers only operator callers, with `principalType` `service`, `runtime`, or `local-dev`, unless the channel's auth grants `allowAgentInfo`. Authenticate the client with an operator credential, such as Vercel OIDC, `jwtHmac()`, `jwtEcdsa()`, or a custom `AuthFn` that returns `principalType: "service"`. Any other caller gets a `ClientError` with `status` `403` and `code` `"info_forbidden"`.
+
+The version changes only when the response shape breaks. Within a version, a server can add fields and enum values:
+
+- The client ignores fields it doesn't know.
+- An enum-like field with a string the client can't interpret, such as `mode`, `sourceKind`, or a channel `method`, reads as `"unrecognized"`. Handle that value when you switch on these fields.
+- `kind` discriminants are closed. A new variant comes with a version change, and an unknown one throws `AgentInfoResponseError`.
+
+A non-success response throws `ClientError`. Invalid JSON, a missing or non-string enum value, a different agent-info version, duplicate identities, inconsistent totals, or mismatched source provenance throws `AgentInfoResponseError`. For a version mismatch, its `issues` say which side to upgrade: eve in the agent, or the eve package the client runs from.
 
 ## Authentication
 
@@ -76,7 +87,7 @@ const client = new Client({
 });
 ```
 
-For a Vercel OIDC-protected deployment, use `vercelOidc`. The client resolves the token once per request and sends it as both the bearer credential and Vercel's trusted-OIDC header:
+For a Vercel OIDC-protected deployment, use `vercelOidc`. The client resolves the token once per request and sends it as both the bearer credential and the `x-vercel-trusted-oidc-idp-token` header:
 
 ```ts
 import { getVercelOidcToken } from "@vercel/oidc";
@@ -91,7 +102,7 @@ const client = new Client({
 });
 ```
 
-Use `headers` for route-specific credentials such as bypass tokens or tenant hints. Like `auth`, it can be static or dynamic:
+Use `headers`, static or dynamic, for route-specific credentials such as bypass tokens or tenant hints:
 
 ```ts
 const client = new Client({
@@ -103,9 +114,15 @@ const client = new Client({
 });
 ```
 
-Clients reject redirects by default (`redirect: "error"`) so fetch cannot forward custom credentials to a redirected destination. Use `redirect: "manual"` to stop at a redirect without following it. Node.js exposes the response status and headers; browsers return an opaque redirect response with no readable status, headers, or body. The policy applies to inspection requests, custom fetches, session creation, and event streams, and overrides per-request redirect settings. Only opt into `redirect: "follow"` when you trust every possible redirect destination to receive your custom headers and request data.
+Clients reject redirects by default (`redirect: "error"`), so fetch can't forward your custom credentials to another destination. The policy applies to every request the client makes, including event streams, and overrides per-request settings.
 
-Per-request headers can be attached to an individual turn:
+| `redirect`          | Behavior                                                                                                        |
+| ------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `"error"` (default) | Rejects any redirect.                                                                                           |
+| `"manual"`          | Stops at a redirect. Node.js shows its status and headers; browsers return an opaque response with neither.     |
+| `"follow"`          | Follows redirects. Use it only when you trust every possible destination with your custom headers and requests. |
+
+Attach per-request headers to an individual turn:
 
 ```ts
 const response = await session.send("Run the check.", {
@@ -115,36 +132,23 @@ const response = await session.send("Run the check.", {
 await response.result();
 ```
 
-Per-request headers override client-level values with the same name. For example, a turn can set its application user's `Authorization` header while `vercelOidc` continues to send the deployment-protection credential in `x-vercel-trusted-oidc-idp-token`.
+Per-request headers override client-level headers with the same name. For example, a turn can set its application user's `Authorization` header while `vercelOidc` still sends the deployment-protection credential in `x-vercel-trusted-oidc-idp-token`.
 
 ## Faster sends with `inbox`
 
-Keep the complete `session.state` when saving and restoring a conversation. It can include an
-opaque `inbox` value issued by the server. The client sends it back with later messages to avoid
-another hook lookup. Persist it and pass it back unchanged: do
-not inspect, edit, or construct it, because eve may change or extend its contents in any release.
-A missing, stale, or rejected value only costs a slower lookup.
+`session.state` can include an opaque `inbox` value from the server, so save the complete state and pass it back unchanged. Later messages that carry it skip a server-side session lookup. Don't inspect, edit, or construct it, because its contents can change in any release. A missing, stale, or rejected value only costs a slower lookup.
 
-Set `EVE_INBOX_HANDLE_SECRET` to the same server-only random secret (at least 32 characters)
-on the deployments that share sessions. Without this key, handles are neither issued nor used.
-The signature authenticates all routing and encryption fields before use. Rotation falls back
-to ordinary token resolution.
+Set `EVE_INBOX_HANDLE_SECRET` to the same server-only random secret, at least 32 characters, on every deployment that shares sessions. Omit it to disable handles. The server verifies a handle's signature before using it. After a secret rotation, the server ignores old handles and looks the session up as usual.
 
-Reuse also requires a Workflow SDK with `parseHookResumeHandle`, an adapter that declares
-`resolvedHookResume`, and a backend with the guarded resolved-hook endpoint.
-Older SDKs do not issue or use handles, even when the secret
-is configured. This change keeps the released SDK dependencies; adopting the SDK update
-enables the optimization. Handles exclude user metadata, live capabilities, and trace carriers,
-which may contain private server baggage. The signature authenticates a handle; it does not hide its contents.
+Handles also require a Workflow SDK that exports `parseHookResumeHandle`, a world adapter that declares `resolvedHookResume`, and a backend that supports resolved hook resumes. Without all three, the server neither issues nor uses handles, even with the secret set.
 
-The server checks that the handle addresses the requested session's inbox. Workflow still validates the
-hook, persists the message, and wakes the workflow. A definite stale-owner rejection resolves
-the current inbox again. An uncertain write is surfaced without submitting a second delivery.
+Handles contain no user metadata, short-lived runtime access, or trace data. The signature proves a handle is authentic but doesn't hide its contents.
+
+A handle can't route a message to a session other than the one requested. When a handle is stale, the server looks up the current session again. When a write's outcome is uncertain, the request reports an error instead of delivering the message twice.
 
 ## Sessions
 
-Create and park an ID-addressed conversation before its first turn when you can start session work
-while the user is still composing:
+Create a session before its first turn so it starts while the user is still typing:
 
 ```ts
 const { session } = await client.sessions.create();
@@ -153,9 +157,7 @@ const response = await session.send("Summarize account A.");
 await response.result();
 ```
 
-The create promise resolves when the server accepts the durable workflow. It does not open the
-event stream or wait for initialization; an early `session.send()` uses the
-same bounded startup retries as other follow-ups.
+`create()` resolves when the server accepts the session. It doesn't open the event stream or wait for the session to start. An early `session.send()` retries for a limited time while the session starts, like any follow-up.
 
 To create the session and start its first turn in one request, include the message:
 
@@ -168,13 +170,13 @@ await session.compact();
 await session.clear();
 ```
 
-If you already know the durable ID, attach a fixed handle without performing I/O:
+If you already know the session ID, attach a handle without making a request:
 
 ```ts
 const session = client.sessions.attach("wrun_A");
 ```
 
-The fixed client handle exposes the full lifecycle around that ID. The calls below show the available shapes independently:
+The handle exposes every session operation for that ID:
 
 ```ts
 const response = await session.send("Continue the analysis.");
@@ -191,9 +193,9 @@ for await (const event of session.stream({ follow: false })) {
 await session.end({ reason: "User requested a fresh session" });
 ```
 
-`client.sessions` stores the session ID, stream cursor, and optional opaque `inbox` value. Every method calls an ID-addressed `/eve/v1/session/:sessionId/...` route. Sending through a handle for an unknown or terminal ID fails instead of creating a replacement, and `end()` leaves the handle pinned to the retired ID. Replace calls to the old `reset()` method with `end()`; use `client.sessions.create()` to start a different session. Upgrade the server before using a new client's `end()` method: earlier servers do not serve `/end`.
+Each handle stores the session ID, stream cursor, and optional `inbox` value. Every method calls a `/eve/v1/session/:sessionId/...` route for that ID. Sending to an unknown or ended session fails instead of creating a new one. After `end()`, the handle keeps pointing at the retired ID; call `client.sessions.create()` to start a different session. A server must serve `/end` before a client can call `end()` on it.
 
-A client can own many independent fixed sessions at once:
+One client can run many independent sessions at once:
 
 ```ts
 const { session: alice, delivery: aliceDelivery } = await client.sessions.create({
@@ -206,7 +208,7 @@ const { session: bob, delivery: bobDelivery } = await client.sessions.create({
 await Promise.all([aliceDelivery.result(), bobDelivery.result()]);
 ```
 
-The next pages cover the session lifecycle:
+Read more about working with sessions:
 
 - [Messages](./messages): send turns and collect results
 - [Continuations](./continuations): persist and resume sessions

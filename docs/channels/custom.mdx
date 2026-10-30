@@ -3,19 +3,46 @@ title: "Custom Channels"
 description: "Author custom HTTP and WebSocket channels with routes, events, metadata, continuation tokens, and file uploads."
 ---
 
-Build a custom channel to connect an HTTP or WebSocket endpoint to your agent. It can host a conversation or pass incoming events to another channel.
+A custom channel connects your own HTTP or WebSocket endpoint to your agent. Each one is a file under `agent/channels/` that default-exports `defineChannel(...)` from `eve/channels`. Use one for an internal webhook, a WebSocket client, or a platform eve has no channel for. A custom channel can host a conversation or pass incoming events to another channel.
 
 ## File location and identity
 
-Custom channels live in `agent/channels/` at the root agent or in an [extension](../extensions) mounted there. Local subagents do not declare channels today.
+Custom channels live in `agent/channels/` at the root agent or in an [extension](../extensions) mounted there. Local subagents don't declare channels.
 
-The channel file stem becomes the channel id, so `agent/channels/internal-webhook.ts` is addressed as `internal-webhook`. Export the channel definition as the module's default export.
-
-Hooks, instrumentation, and `delivery.admitted.data.source.channel` identify an authored channel as `channel:<name>`, including channels that only declare routes. Use `isChannel(ctx.channel, importedChannel)` from `eve/channels` to match a channel in a hook.
+The file stem is the channel id, so `agent/channels/internal-webhook.ts` is addressed as `internal-webhook`. Hooks, instrumentation, and `delivery.admitted.data.source.channel` identify it as `channel:<name>`, including channels that only declare routes. Use `isChannel(ctx.channel, importedChannel)` from `eve/channels` to match a channel in a hook.
 
 ## Define a channel
 
-Pass the platform's conversation identity to each operation:
+Declare routes, and pass the platform's conversation ID to `from(...)` in each one. A message to a new ID starts a session; later messages to the same ID continue it:
+
+```ts title="agent/channels/support.ts"
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    // required: one or more routes; the path is the app URL, with no channel prefix
+    POST("/threads/:threadId/messages", async (request, { from, params }) => {
+      const body = await request.json();
+      // from(address) names the conversation; the same address reaches the same session
+      const delivery = await from(params.threadId).send(body.message, { auth: null });
+      return Response.json(delivery, { status: 202 });
+    }),
+  ],
+});
+```
+
+A route's `path` is its app URL, without a channel-name prefix. The route above answers at `POST /threads/:threadId/messages`, not `/support/threads/:threadId/messages`. Give each route a unique method and path outside `/eve/v1/*`, which eve reserves.
+
+Each route handler receives:
+
+- `from(address)` binds `send`, `respond`, `cancel`, `compact`, `clear`, and `end` to an address: your channel's ID for one conversation, such as a thread ID. See [Continuation tokens](#continuation-tokens).
+- `resolveSession(address)` returns the session that currently uses an address.
+- `attachSession(sessionId)` returns a handle for one session ID, without a lookup.
+- `to(channel, target).send(message, options)` hands work to another authored channel.
+- `params`, `waitUntil`, and `requestIp` provide request metadata and lifetime control.
+- `describe()`, `invokeTool()`, `listSkillFiles()`, and `readSkill()` describe the agent and run its tools without a conversation. See [Describe the agent and run tools directly](#describe-the-agent-and-run-tools-directly).
+
+This fuller version adds commands, a stream route, and an event handler:
 
 ```ts title="agent/channels/support.ts"
 import { defineChannel, GET, POST } from "eve/channels";
@@ -78,46 +105,40 @@ export default defineChannel({
 });
 ```
 
-A route's `path` is its app URL; the channel filename does not prefix it. The route above answers at `POST /threads/:threadId/messages`, not `/support/threads/:threadId/messages`. Use a unique method-and-path pair for each route, and do not use the framework-owned `/eve/v1/*` namespace.
+Event handlers receive `(event, ctx)`. The event has `type`, `data`, and `scope` (the turn or call it belongs to). Handlers run after eve records the event, so they can't change it.
 
-Each route receives these operation surfaces:
+- `ctx.session.id` identifies the session.
+- `ctx.position` locates the event on the stream, and `ctx.view` is a read-only snapshot of the session at that point.
+- `ctx.channel` is the channel's own context. `ctx.channel.continuation.token` is the address that `from()`, `resolveSession()`, and `alias()` accept, without eve's prefixes. `alias()` adds another address.
 
-- `from(address)` binds `send`, `respond`, `cancel`, `compact`, `clear`, and `end` to a channel-local continuation address.
-- `resolveSession(address)` snapshots the session currently owning a channel-local continuation address.
-- `attachSession(sessionId)` creates an I/O-free handle pinned to one durable session ID.
-- `to(channel, target).send(message, options)` hands work to another authored channel.
-- `params`, `waitUntil`, and `requestIp` provide request metadata and lifetime control.
-- `describe()` returns the agent's name, description, the compiled tools a caller can run outside a turn, with their JSON schemas, and the compiled skills, each with its `name` and `description`, sorted by name. It reads the compiled manifest only, never a skill file, and carries no other paths, config, or inspection detail, so a channel can publish it to its callers. Tools that need a turn (framework tools, workflow and provider tools, tools without `execute`) and tools and skills added by dynamic resolvers or subagents are left out.
-- `invokeTool(name, input, { auth, key })` runs one of those tools as `auth`, outside any conversation: no model, turn, or workflow run. Authored state starts from its initial value and is not kept. Without `key`, each call gets its own session, and a sandbox the tool opens is deleted when the call ends. With `key` (1 to 512 characters), calls from the same `auth` principal with the same key share a session id and a sandbox, which is kept between calls; this needs Vercel Sandbox, just-bash, or a custom provider that sets `toolSessions: true`, and an authenticated `auth` (a keyed call from the anonymous principal is `denied`); see [MCP tool sessions](./mcp#tool-sessions). When a trusted forwarder asserted `auth`, pass the principal your route verified as `forwardedBy`: it is part of the session, so one user reached through two forwarders gets two sessions. It returns `outcome: "completed"` with output, `"failed"` with an error (including invalid input), or `"rejected"` with a reason (including approval or sign-in requirements); a direct call cannot pause for a person.
+One stream line can hold several events. Use `committed(line, ctx)` to update a status or card once per line instead of once per event. It runs after the line's event handlers, with `line.facts`, `line.position`, and the line's snapshot at `ctx.view`.
 
-  A direct call doesn't go through the AI SDK, so AI SDK telemetry integrations never see it. Conversation tool calls do: an integration that an `agent/instrumentation/*.ts` module registers with `registerTelemetry()` from `ai` receives `onToolExecutionStart` and `onToolExecutionEnd` for each of them. A direct call is traced by eve itself instead. It gets an `execute_tool` span under the caller's trace and emits `call.requested` and `call.settled` to instrumentation, as a conversation's calls do. Over MCP, the caller's trace comes from the request's `_meta` trace context (see [Trace context](./mcp#trace-context)).
+Handle `interaction.settled` to remove a question or approval you posted once it ends, whether it was answered, withdrawn, or interrupted. Match by `interactionId` and check its `outcome`.
 
-- `listSkillFiles(skill)` resolves to the skill's regular files, each with its `path` under the skill root and its `size` in bytes, sorted by path. It rejects a skill the agent does not have.
-- `readSkill(skill, path?)` resolves to one skill file's raw bytes as a `Uint8Array`; decode text yourself, for example with `new TextDecoder().decode(bytes)`. `path` is relative to the skill root, such as `references/api.md`, and defaults to the skill's `SKILL.md`. It rejects absolute paths, paths with `.`, `..`, or empty segments, files the skill does not list, and files over 512 KiB.
+### Describe the agent and run tools directly
 
-Event handlers receive `(event, ctx)`: the whole fact, with its `type`, `data`, and
-`scope`, and a context. `ctx.session.id` identifies the exact session, `ctx.position`
-and `ctx.view` locate the fact on the stream and expose an opaque snapshot of its whole commit,
-and `ctx.channel` is the channel's own context. `ctx.channel.continuation` exposes the
-current address and `alias()` when this channel needs to add another address. Handlers
-run after the line is written, so they observe facts and never shape them.
+A route handler can also describe the agent and run its tools without a conversation, as the [MCP channel](./mcp) does:
 
-Use `committed(line, ctx)` when you need to update a status or card once per committed line, rather than once per fact. It runs after the line's fact handlers, with `line.facts`, `line.position`, and the whole line's snapshot at `ctx.view`.
+- `describe()` returns the agent's name and description, the tools a caller can run outside a turn, and the agent's skills. Tools carry their JSON schemas, skills carry `name` and `description`, and both are sorted by name.
+- `invokeTool(name, input, { auth, key })` runs one of those tools as `auth` outside any conversation.
+- `listSkillFiles(skill)` resolves to the skill's regular files, each with its `path` under the skill root and `size` in bytes, sorted by path. It rejects a skill the agent doesn't have.
+- `readSkill(skill, path?)` resolves to one skill file's raw bytes as a `Uint8Array`; decode text yourself, for example with `new TextDecoder().decode(bytes)`. `path` is relative to the skill root, such as `references/api.md`; omit it to read `SKILL.md`. It rejects absolute paths, paths with `.`, `..`, or empty segments, files the skill doesn't list, and files over 512 KiB.
 
-Handle `interaction.settled` to retire a rendered question or approval, whether it was answered, withdrawn, or interrupted. Match by `interactionId` and check its `outcome`.
+`describe()` carries no skill file contents, paths, config, or inspection detail, so a channel can publish it to callers. It leaves out tools that need a turn: framework tools, workflow and provider tools, and tools without `execute`. It also leaves out tools and skills that dynamic resolvers or subagents add.
 
-`ctx.channel.continuation.token` is always the channel-local address accepted by
-`from()`, `resolveSession()`, and `alias()`. Framework namespace prefixes are not
-part of the authored channel API.
+`invokeTool()` runs no model, turn, or workflow run. Authored state starts from its initial value and isn't kept. It returns one of these outcomes:
+
+- `"completed"` with output.
+- `"failed"` with an error, including for invalid input.
+- `"rejected"` with a reason, including for approval or sign-in requirements, because a direct call can't pause for a person.
+
+Omit `key` to give each call its own session and delete any sandbox the tool opens when the call ends. Pass a `key` of 1 to 512 characters to share a session ID and sandbox across calls from the same `auth` identity. Keyed calls need Vercel Sandbox, just-bash, or a custom provider that sets `toolSessions: true`. They also need an authenticated `auth`; a keyed call without one is `denied`. See [MCP tool sessions](./mcp#tool-sessions). When a trusted forwarder passes `auth` for someone else, pass the forwarder identity your route verified as `forwardedBy`. It's part of the session, so one user reached through two forwarders gets two sessions.
+
+A direct call doesn't go through the AI SDK. AI SDK telemetry integrations registered with `registerTelemetry()` from `ai` in an `agent/instrumentation/*.ts` module receive `onToolExecutionStart` and `onToolExecutionEnd` only for conversation tool calls. eve traces a direct call itself, with an `execute_tool` span under the caller's trace. Instrumentation also receives `call.requested` and `call.settled`. Over MCP, the caller's trace comes from the request's `_meta` trace context (see [Trace context](./mcp#trace-context)).
 
 ## Channel operations and session handles
 
-Channel operations are dynamic: every call targets whichever session currently
-owns the address. `create()` and `send()` can create a session when the address is unowned.
-Without an [idempotency key](#retried-deliveries), a new session's handle can
-return before it claims the address. If another send wins the address, eve
-forwards the message to that session. Call `resolveSession(address)` after
-startup to get the winning session's handle.
+Channel operations reach whichever session currently uses the address. `create()` and `send()` create a session when no session uses it. Without an [idempotency key](#retried-deliveries), a new session's handle can return before the session takes the address. If another send takes it first, eve forwards the message to that session. Call `resolveSession(address)` after startup to get the handle of the session that won.
 
 ```ts
 const source = from(threadId);
@@ -133,21 +154,11 @@ await source.end({ reason: "Start over" });
 const currentSession = await resolveSession(threadId);
 ```
 
-When the session at an address is
-[stranded](../guides/deployment/self-hosted-operations#recover-a-stranded-session) because another eve version
-built it, `send()` ends that session and starts a fresh one. The message becomes the fresh
-session's first turn, and the fresh session can read recent text from the earlier conversation;
-see [Recover a stranded session](../guides/deployment/self-hosted-operations#recover-a-stranded-session). Concurrent sends to the same stranded address still
-produce one fresh session. A `respond()` call, or a `deliver()` that includes input responses,
-carries answers a fresh session has no request for, so it throws `SessionStrandedError` and leaves
-the stranded session in place.
+When another eve version built the session at an address, the session is [stranded](../guides/deployment/self-hosted-operations#recover-a-stranded-session). `send()` ends it and starts one fresh session, even for concurrent sends. The message becomes the fresh session's first turn, which can read recent text from the earlier conversation. A `respond()` call, or a `deliver()` with input responses, throws `SessionStrandedError` because a fresh session has no request to answer. The stranded session stays in place.
 
-`Session` from `eve/sessions` is fixed: every call targets exactly one durable ID. It never
-creates, follows, or resolves a replacement. Shared `Delivery`, `DeliveryResult`, `SessionReader`,
-stream/read options, and `SessionNotActiveError` also come from `eve/sessions`, not `eve/channels`.
-Accepted commands return reusable deliveries: call `stream({ signal })` for events or
-`result({ signal })` for a settled summary with its `outcome` and failure `error`. Aborting a read
-does not cancel the command or other readers.
+`Session` from `eve/sessions` is fixed to one session ID and never creates, follows, or finds a replacement. `Delivery`, `DeliveryResult`, `SessionReader`, stream and read options, and `SessionNotActiveError` also come from `eve/sessions`, not `eve/channels`.
+
+Each accepted operation returns a `Delivery` receipt that you can read more than once. Call `stream({ signal })` for its events, or `result({ signal })` for a summary once it finishes, with its `outcome` and failure `error`. Aborting a read doesn't cancel the operation or other readers.
 
 ```ts
 const session = attachSession(sessionId);
@@ -161,15 +172,9 @@ await session.end({ reason: "Retire this session" });
 for await (const event of session.stream({ startIndex: 12 })) render(event);
 ```
 
-A following `getEventStream()` rejects before it returns a stream when the session does not exist
-or its recorded history has expired, so a route can answer with an error status before it sends any
-bytes.
+Attaching does no lookup; the first operation reports whether the ID is active. A following `stream()` rejects on its first read when the session doesn't exist or its history has expired. A route can read once before sending headers, as the example above does, to answer with an error status.
 
-For a stranded session, `Session.send()`, `Session.respond()`, and a following
-read through `Session.stream()` throw `SessionStrandedError` from `eve/channels` and deliver nothing.
-`stream({ follow: false })` still reads the recorded history up to the current tail without
-changing the session. `error.owner.eveVersion` names the eve release that built the session when it recorded one. Call
-`end()` to retire the stranded session, then start a new one:
+For a stranded session, `Session.send()`, `Session.respond()`, and a following `Session.stream()` throw `SessionStrandedError` from `eve/channels` and send nothing. `stream({ follow: false })` still reads the recorded history up to the current tail. `error.owner.eveVersion` names the eve release that built the session, when recorded. Call `end()` to retire the stranded session, then start a new one:
 
 ```ts
 import { SessionStrandedError } from "eve/channels";
@@ -182,10 +187,7 @@ try {
 }
 ```
 
-`respond()` accepts exact response literals directly. If responses have already
-been widened to `Answer[]`—for example, after decoding a platform
-payload—validate them with eve's strict schema before delivery. The validated
-type preserves that proof across channel wrappers:
+`respond()` accepts exact response literals. Validate responses already widened to `Answer[]`, for example decoded from a platform payload, with `parseAnswers`; the validated type carries that proof across channel wrappers:
 
 ```ts
 import { parseAnswers } from "eve/client";
@@ -194,15 +196,17 @@ const answers = parseAnswers(decodedResponses);
 await source.respond(answers, { auth });
 ```
 
-Message sends use the channel's `turnPolicy`, which defaults to `"steer"`. Before assistant answer output or local tool execution begins, steering interrupts pending model generation and applies the correction in the same turn. Executing tools finish and checkpoint their results first. After answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output, and interrupted provider-managed search may run again. The turn ID stays the same.
+Message sends use the channel's `turnPolicy`, which defaults to `"steer"`; see [Overlapping messages](./overview#overlapping-messages). A sent message can interrupt the model before your `deliver` hook runs. Filter events before `send(...)` when they should never interrupt the model.
 
-A sent delivery can interrupt generation before your `deliver` hook runs. If the hook ignores the correction, eve resumes the original request with its original auth, delivery provenance, and channel state. Filter events before `send(...)` when they should never interrupt generation.
+Every `send()` and `respond()` passes its `state` option to the channel's `deliver(payload, channel)` hook as `payload.state`, including sends to an existing session. Use it for per-message values such as a message's author. The hook decides what to merge into `channel.state`; eve seeds `channel.state` from `state` only when `send()` creates the session.
 
-Every `send()` and `respond()` delivery passes its `state` option to your channel's `deliver(payload, channel)` hook as `payload.state`, including deliveries to an existing session. Use it for values that belong to one delivery, such as the author of a message. The hook decides what to merge into `channel.state`; eve seeds `channel.state` from `state` only when `send()` creates the session.
+The payload is `ChannelDelivery<TState>` from `eve/channels`: `message`, `answers`, `context`, `outputSchema`, and `state?: Partial<TState>`. The hook's return value decides what reaches the session:
 
-The `state` you pass to `defineChannel(...)` is the seed for every session's `channel.state`, and must be plain JSON-like data. At each step boundary, eve restores any top-level seed field missing from the session's state, so a field you add to the seed in a later deploy holds its seed value in older sessions too, including in `context(state)` and event handlers. A field you `delete` is restored the same way; to clear one, set it to `null` (or `undefined`). eve doesn't merge nested objects: a stored object replaces the seed's object whole.
+- Return nothing to keep it unchanged.
+- Return a replacement with `message`, `answers`, `context`, or `outputSchema` to change it. Other fields, including `state`, are not accepted; change saved state through `channel.state`.
+- Return `{}` to ignore it.
 
-The payload is `ChannelDelivery<TState>` from `eve/channels`: `message`, `answers`, `context`, `outputSchema`, and `state?: Partial<TState>`. Return a replacement with `message`, `answers`, `context`, or `outputSchema` to change the delivery, or return nothing to keep it unchanged. Change durable state through `channel.state`, not a `state` field on the replacement. To ignore a delivery, return `{}`. The hook does not return a harness input or accept arbitrary extra fields.
+The `state` you pass to `defineChannel(...)` is the starting value of every session's `channel.state`, and must be plain JSON-like data. eve restores any top-level field from it that a session's state is missing, so a field you add in a later deploy also appears in existing sessions, including in `context(state)` and event handlers. A field you `delete` comes back the same way; to clear one, set it to `null` or `undefined`. eve doesn't merge nested objects: a saved object replaces the starting object whole.
 
 ```ts
 import { defineChannel } from "eve/channels";
@@ -219,7 +223,7 @@ export default defineChannel({
 });
 ```
 
-Configure `turnPolicy: "queue"` on `defineChannel(...)` when messages should wait for the active turn to finish, or override one send:
+Set `turnPolicy: "queue"` on `defineChannel(...)` when messages should wait for the active turn to finish, or override one send:
 
 ```ts
 export default defineChannel({
@@ -237,11 +241,23 @@ export default defineChannel({
 });
 ```
 
-The same override is available on fixed `Session.send(...)` and cross-channel `to(...).send(...)`. `respond(...)` never steers: it delivers only addressed answers. Use `cancel()` when you need to stop work without a replacement message.
+The same override works on fixed `Session.send(...)` and cross-channel `to(...).send(...)`. `respond(...)` never joins a running turn; it sends only the answers it names. Use `cancel()` to stop work without a replacement message.
 
-Attaching does no lookup. The first operation reports whether the ID is active.
-Call `resolveSession(address)` only when you explicitly need to snapshot an
-address's current owner as a fixed handle.
+## Operation semantics
+
+- `cancel` asks the running turn to stop. Confirm it with `turn.settled` and
+  `outcome: "cancelled"`; the session accepts another message afterward.
+- `compact` summarizes model context without adding a user message. The stream
+  shows `context.started`, then `context.settled` with `kind: "compaction"`.
+- `clear` cancels the running turn and every working task, then removes
+  model-message history in place. It keeps the system prompt, skills, tools,
+  state, limits, addresses, and session sandbox.
+- `end` ends the current session for good. A later `send()` to the address creates
+  a new session; a fixed `Session` handle still points at the ended ID.
+
+Control operations never create a session. Unknown or inactive targets throw
+`SessionNotActiveError`. A cancel with nothing to stop ends with `outcome: "ignored"`. Authenticate and deduplicate command webhooks before
+calling `end`, because a delayed duplicate can end a newer session at the same address.
 
 ## Retried deliveries
 
@@ -255,22 +271,342 @@ const session = await from(conversationId).send(message, {
 });
 ```
 
-Channel and fixed-session `send()` and `respond()` calls accept this option,
-as does the Chat SDK bridge. Keys must contain 1–256 characters and identify one
-delivery. Prefix IDs with the provider or event type if they can overlap.
-Reusing a retained key ignores the new input, even if the message changed.
+Channel and fixed-session `send()` and `respond()` accept `idempotencyKey`, as does the Chat SDK bridge. A key has 1–256 characters and identifies one message or answer; prefix IDs with the provider or event type if they can overlap.
 
-Each session retains its last 1,024 distinct keys; reuse after eviction, after the session ends, or in another session can run again. Replicas must share the same durable Workflow World. A known duplicate returns a new receipt settled `ignored`, without repeating the original reply. Use `result()` to read a send's settlement.
+Reusing a remembered key ignores the new input, even if the message changed. It returns a new receipt whose result is `ignored`, and doesn't repeat the original reply. Use `result()` to read how a send ended. Each session remembers its last 1,024 keys. An older key runs again, and so does a key reused after the session ends or in another session. All replicas must use the same Workflow World.
 
-Await `send()` before acknowledging a webhook when the provider allows it.
-Acknowledging sooner can lose work. This does not make tool calls, outbound
-posts, or work done before `send()` exactly once.
+Await `send()` before acknowledging a webhook when the provider allows it, because acknowledging sooner can lose work. Keys don't make tool calls, outbound posts, or work done before `send()` exactly once.
+
+## File uploads
+
+`from(address).send()` and `Session.send()` accept `MessageContent`: a string, or an array mixing text and file parts:
+
+```ts
+await from(continuationToken).send(
+  [
+    { type: "text", text: body.message },
+    { type: "file", data: imageBytes, mediaType: "image/png" },
+  ],
+  { auth },
+);
+```
+
+For files behind authenticated URLs, as on Slack, put a `URL` object in the file part's `data` and declare `fetchFile` on the channel config:
+
+```ts
+defineChannel({
+  fetchFile(url) {
+    if (!url.startsWith("https://files.slack.com/")) return null;
+    return fetch(url, { headers: { authorization: `Bearer ${token}` } })
+      .then((r) => r.arrayBuffer())
+      .then((b) => ({ bytes: Buffer.from(b) }));
+  },
+
+  routes: [
+    POST("/webhook", async (req, { from }) => {
+      await from(continuationToken).send(
+        [
+          { type: "text", text: message.text },
+          ...message.attachments.map((a) => ({
+            type: "file" as const,
+            data: new URL(a.url),
+            mediaType: a.mediaType,
+          })),
+        ],
+        {
+          auth,
+          state,
+        },
+      );
+    }),
+  ],
+});
+```
+
+If `fetchFile` throws, eve replaces that attachment with a model-visible note and continues the turn. To tell the model why, throw `attachmentError` from `eve/channels`:
+
+```ts
+import { attachmentError } from "eve/channels";
+
+async function fetchUpload(url: string) {
+  const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  if (response.status === 413) {
+    throw attachmentError("The file is over 100 MB. Ask for a smaller file.");
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+```
+
+The model then reads `Attachment report.pdf could not be retrieved: The file is over 100 MB. Ask for a smaller file.` The message reaches the model as written. Keep it to details the person can act on, such as a size limit or a missing permission. Never include URLs, tokens, or upstream response text. Pass the original error as `attachmentError(message, { cause })` to keep it in operator logs. Any other thrown error becomes a generic note, with the original in operator logs.
+
+`fetchFile` receives the URL as a string (its `href`), so the example matches with `url.startsWith(...)`. A string with a URL scheme in `data`, such as `https://...` or `myapp-file:abc`, works the same as a `URL` object. The second argument carries the channel's `state` and the attachment's `session`, so a resolver can check a file against the caller in `session.auth`.
+
+Return bytes to save the file to the sandbox. Return `null` for a URL your channel doesn't resolve, and eve downloads a public `https:` URL itself. eve's downloads have these limits:
+
+- 25 MB by default, with a 30-second timeout.
+- No private or reserved addresses.
+- At most 10 URLs per message, fetched one at a time.
+
+Any other URL, or a failed download, reaches the model as a note. The model provider never fetches an attachment, so a link that expires or needs credentials can't fail later model calls.
+
+Set `uploadPolicy` on `defineChannel` to cap what eve saves for the channel, for example `uploadPolicy: { maxBytes: 10 * 1024 * 1024, allowedMediaTypes: ["image/*", "application/pdf"] }`. eve checks every saved file, including its own downloads, by its actual bytes and detected media type. A violating file reaches the model as a note. Omit `uploadPolicy` to rely on your `fetchFile` checks, with eve's own downloads capped at 25 MB.
+
+See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
+
+## Cross-channel hand-off
+
+A cross-channel hand-off starts or resumes a conversation on another channel from a route handler with `ctx.to(channel, target).send(message, { auth })`. The agent runs and replies on the destination channel. The source channel starts no session and returns only its HTTP response.
+
+This webhook filters incoming events and asks the agent to investigate in Slack. Import the destination channel's default export; `verifyAndParseEvent` is your own helper.
+
+```ts title="agent/channels/intake.ts"
+import { defineChannel, POST } from "eve/channels";
+
+import { verifyAndParseEvent } from "../lib/inbound-events";
+import slack from "./slack";
+
+export default defineChannel({
+  routes: [
+    POST("/intake/events", async (req, ctx) => {
+      const event = await verifyAndParseEvent(req);
+      if (!event) return new Response("unauthorized", { status: 401 });
+      if (event.kind !== "actionable") return new Response("ok");
+
+      ctx.waitUntil(
+        ctx
+          .to(slack, { channelId: "C0123ABC" })
+          .send(`Investigate ${event.reference}: ${event.summary}`, {
+            auth: {
+              authenticator: "intake",
+              principalType: "service",
+              principalId: event.source,
+              attributes: {},
+            },
+            idempotencyKey: `intake:${event.id}`,
+          }),
+      );
+      return new Response("ok");
+    }),
+  ],
+});
+```
+
+Before sending:
+
+- Verify the provider's signature and validate the payload, including size limits. Derive `event.source` from the verified sender, not an untrusted payload field.
+- Filter out events that should not reach the agent.
+- Pass the provider's stable event ID as `idempotencyKey`, so a redelivered webhook doesn't deliver the message twice. See [Retried deliveries](#retried-deliveries) for the limits.
+
+The supplied `auth` identifies who started the session, and tools and event handlers read it as `session.auth.initiator`.
+
+The destination's `receive` hook defines the target fields and how they map to a session; see [Slack proactive sessions](./slack#proactive-sessions) for Slack's. To let people continue the conversation, configure the destination's inbound handlers to accept follow-ups.
+
+`send` takes the same options as `from(address).send()` and `Session.send()`: `auth`, `context`, `history`, `idempotencyKey`, `outputSchema`, `title`, and `turnPolicy`. The destination's `receive` hook gets them with the message and target, and every built-in channel passes them on to the session.
+
+The destination session dedupes keys from every sender. Prefix each key with its source, such as `pagerduty:${event.id}`, so keys stay unique across senders. Two senders that pick the same key reach the same session, and the second message is `ignored`. A Slack target with only a `channelId` uses the key to choose the session, so a retry reaches the same session.
+
+A key still dedupes only within that session's remembered keys. A retry after the key is dropped runs another turn. A retry after the session ends starts a new session, which on Slack is a new thread. Work a `receive` hook does before sending also repeats on retry. Examples are posting an `initialMessage` (Slack, Teams, Discord, GitHub, and Telegram) and creating a Linear Agent Session for an `issueId` or `commentId` target.
+
+### Write a receive hook
+
+A custom channel's `receive` hook maps the target to an address. Pass the rest of the input to `from(address).send()`, so the session gets every option the sender set:
+
+```ts
+async receive({ message, target, ...send }, { from }) {
+  return await from(`inbox:${target.inboxId}`).send(message, { ...send, state: { inboxId: target.inboxId } });
+},
+```
+
+Route handlers, [handler-form schedules](../schedules#handler-form-run), and [tools](../tools#start-channel-sessions-ctxto) provide `to(...)`; other platform callbacks don't.
+
+For notifications that don't need an agent turn, use the platform's API instead. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) when those posts also need retries.
+
+## CORS
+
+Custom HTTP channels send no CORS headers by default. Pass `cors: true` for permissive browser access with preflight handling, or a serializable options object to narrow origins, methods, and headers:
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  cors: {
+    origin: ["https://app.example.com"],
+    methods: ["POST"],
+    allowHeaders: ["authorization", "content-type"],
+  },
+  routes: [POST("/message", async () => new Response("ok"))],
+});
+```
+
+## WebSocket routes
+
+`WS()` declares a WebSocket route. Its handler runs once per upgrade request and returns the hooks for that connection:
+
+```ts
+import { defineChannel, WS } from "eve/channels";
+
+export default defineChannel({
+  routes: [
+    WS("/voice/ws", async (_req, { from }) => ({
+      async message(_peer, message) {
+        await from("voice-demo").send(message.text(), { auth: null });
+      },
+    })),
+  ],
+});
+```
+
+`WS()` handlers receive the same `from`, `to`, `attachSession`, `params`, `waitUntil`, and `requestIp` arguments as HTTP route handlers. The returned hooks, `upgrade`, `open`, `message`, `close`, and `error`, are compatible with Nitro/H3 websocket routing.
+
+### Node upgrade server escape hatch
+
+Use `createWebSocketUpgradeServer()` only when a third-party SDK or framework expects to bind to a Node `http.Server` with `server.on("upgrade", ...)`. Otherwise, use the `WS()` lifecycle hooks.
+
+```ts
+import { defineChannel, WS, createWebSocketUpgradeServer } from "eve/channels";
+
+const bridge = createWebSocketUpgradeServer();
+
+thirdPartySdk.attach(bridge.server);
+
+export default defineChannel({
+  routes: [WS("/vendor/ws", bridge.route)],
+});
+```
+
+The bridge server doesn't listen on its own port. It receives only upgrade events that matched the eve route, and only on hosts where Nitro exposes the raw Node upgrade request, socket, and head.
+
+## Channel metadata
+
+Channel metadata is the part of a channel's state that instrumentation and dynamic tools, skills, and instructions can read in their `select`. Define a `metadata(state)` function that returns it:
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  state: {
+    topic: null as string | null,
+    contextMessages: [] as string[],
+    internalCounter: 0,
+  },
+
+  metadata(state) {
+    return {
+      topic: state.topic,
+      contextMessages: state.contextMessages,
+    };
+  },
+
+  routes: [
+    POST("/start", async (req, { from }) => {
+      const body = await req.json();
+      await from(body.token).send(body.message, {
+        auth: null,
+        state: { topic: body.topic, contextMessages: body.context, internalCounter: 0 },
+      });
+
+      return new Response("ok");
+    }),
+  ],
+  events: {
+    "turn.started"(_event, ctx) {
+      ctx.channel.state.internalCounter += 1;
+    },
+  },
+});
+```
+
+eve recomputes the metadata when channel event handlers change state. A dynamic tool's or skill's `select` reads it as `ctx.channel.metadata` and narrows it with `isChannel`. See [Dynamic capabilities](../guides/dynamic-capabilities) for the full consumption pattern.
+
+### Conversation audience
+
+`audience(input)` sets the session's audience, which controls whether traces may capture conversation content. It runs after route authentication and before the session is created:
+
+```ts
+import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel({
+  state: { visibility: "workspace" as "workspace" | "private" | "unknown" },
+  audience({ state, caller }) {
+    if (state.visibility === "workspace") return "public";
+    if (caller.type === "principal" && caller.principal.kind === "user") return "private";
+    return "unknown";
+  },
+  routes: [POST("/webhook", async () => new Response("ok"))],
+});
+```
+
+The input, typed `AudienceContext<TState>`, contains the channel's `state`, `caller`, `channel`, and `environment`. An authenticated caller (`caller.type === "principal"`) omits `principalId`, `issuer`, and `subject`. Its `attributes` come from route auth and can still identify the person.
+
+Return `"public"`, `"private"`, or `"unknown"`. Return `"unknown"` when the channel can't tell; traces treat it as non-public. A missing, throwing, asynchronous, or malformed `audience` function also falls back to `"unknown"`. An `audience` field returned from `metadata()` sets nothing.
+
+The audience is fixed when the session is created, so turns from a different caller don't change it. A local subagent inherits its parent's audience, and eve forwards the parent's custom channel metadata separately.
+
+## Continuation tokens
+
+A continuation token is the address that each channel operation accepts: your channel's ID for one conversation. Each token belongs to its channel, so tokens from different channels never collide.
+
+```ts
+import { slackContinuationToken } from "eve/channels/slack";
+import { twilioContinuationToken } from "eve/channels/twilio";
+
+slackContinuationToken({ channelId: "C0123ABC", threadTs: "1800000000.001234" }); // "C0123ABC:1800000000.001234"
+twilioContinuationToken({ from: "+15551234567", to: "+15557654321" }); // "+15551234567:+15557654321"
+```
+
+Each built-in channel exports a token builder from its `eve/channels/<platform>` entry. Pass the token to that channel's `from(...)` helper. A token is a routing address, not a credential, and doesn't replace authorization.
+
+| Builder                             | Address fields                                                                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `slackContinuationToken`            | `channelId`, `threadTs`                                                                                                 |
+| `slackCodeChannelContinuationToken` | `channelId` (positional argument)                                                                                       |
+| `twilioContinuationToken`           | `from`, optional `to`                                                                                                   |
+| `githubContinuationToken`           | `repositoryId`, `conversationKind`, and the matching `issueNumber`, `pullRequestNumber`, or `reviewThreadRootCommentId` |
+| `discordContinuationToken`          | `channelId`, optional `conversationId`                                                                                  |
+| `teamsContinuationToken`            | `conversationId`, optional `tenantId` and `replyToActivityId`                                                           |
+| `telegramContinuationToken`         | `chatId`, optional `messageThreadId` and `conversationId`                                                               |
+| `linearContinuationToken`           | `agentSessionId`                                                                                                        |
+
+A custom channel owns its token format; write a function that joins the platform's identity fields.
+
+To let another identity address a session, call `channel.continuation?.alias(rawToken)`. The new token belongs to the same channel and becomes `channel.continuation.token` for later handlers. Earlier addresses still reach the same session and accept the same payloads. `end` ends the session and frees all its addresses for later `send()` calls. `cancel` stops only the running turn and keeps the session, history, and addresses.
+
+The `context(state, channel)` config option builds the per-step `ctx.channel` that event handlers read. Its second argument is `ChannelContext` from `eve/channels`: the current `session.id` and `session.auth`, plus `continuation`, without session commands. Keep a reference to `channel.continuation` for callbacks that run later, or call `ctx.channel.continuation?.alias(token)` from an event handler. eve adds `ChannelContinuationOps` to the returned context and saves changes you make to `state`.
+
+```ts
+import { defineChannel } from "eve/channels";
+
+import { mintRef } from "./refs";
+
+defineChannel<{ ref: string | null }>({
+  state: { ref: null },
+  context(state, channel) {
+    return {
+      state,
+      registerAnchor(ref: string) {
+        state.ref = ref;
+        channel.continuation?.alias(ref);
+      },
+    };
+  },
+  events: {
+    "content.completed"(_event, ctx) {
+      if (!ctx.channel.state.ref) ctx.channel.registerAnchor(mintRef());
+    },
+  },
+  routes: [/* ... */],
+});
+```
+
+The new address joins the session at the next workflow boundary. If another active session already uses the token, the session that called `alias()` fails instead of taking it over. Every address stays active until the session ends. Sessions with continuation addresses stay on their current deployment.
+
+Tokens must be nonempty. A session supports up to 256 addresses, including its stable inbox; repeating an existing alias doesn't use another address.
 
 ## Wrap an existing channel's routes
 
-A channel value can be spread into a new object with replaced `routes`. eve keeps the channel's adapter, events, and build metadata (such as the Slack app manifest) on the spread copy, so `{ ...channel, routes }` compiles and runs like the original.
+Spread a channel value into a new object with replaced `routes`. The copy keeps the channel's adapter, events, and build metadata, such as the Slack app manifest, so `{ ...channel, routes }` compiles and runs like the original.
 
-The built-in Slack, Teams, and Telegram channels, and the Chat SDK bridge's `send`, hand every inbound message to `from(address).send(message, options)`. A route wrapper that replaces `send` on the source returned by `from(address)` therefore sees each inbound message, and a rejected delivery reaches the wrapper as an error:
+The built-in Slack, Teams, and Telegram channels, and the Chat SDK bridge's `send`, hand every inbound message to `from(address).send(message, options)`. A wrapper that replaces `send` on the source from `from(address)` sees each inbound message, and a rejected delivery reaches it as an error:
 
 ```ts title="agent/channels/slack.ts"
 import type { RouteHandlerArgs } from "eve/channels";
@@ -317,359 +653,6 @@ export default channel;
 ```
 
 Keep each route's `method` and `path` unless you mean to move the endpoint.
-
-## Operation semantics
-
-- `cancel` cooperatively stops the active turn. Confirm it with `turn.settled` and
-  `outcome: "cancelled"`; the session accepts another message afterward.
-- `compact` summarizes model context without adding a synthetic user message. It
-  is a context change: `context.started`, then `context.settled` with
-  `kind: "compaction"`.
-- `clear` removes model-message history in place. It preserves the system prompt,
-  skills, tools, durable state, limits, address ownership, and session sandbox.
-- `end` terminally retires the current session. A later address `send()` creates
-  a fresh session; a fixed `Session` handle remains pinned to the retired ID.
-
-Control operations never create a session. Unknown or inactive targets throw
-`SessionNotActiveError`; an accepted no-op cancellation settles with `outcome: "ignored"`. Authenticate and deduplicate command webhooks before
-calling `end`, because a delayed duplicate can retire a newer address owner.
-
-## CORS
-
-Custom HTTP channels leave CORS untouched unless you opt in. Pass `cors: true`
-for permissive browser access with preflight handling, or pass a serializable
-CORS options object to narrow origins, methods, and headers:
-
-```ts
-import { defineChannel, POST } from "eve/channels";
-
-export default defineChannel({
-  cors: {
-    origin: ["https://app.example.com"],
-    methods: ["POST"],
-    allowHeaders: ["authorization", "content-type"],
-  },
-  routes: [POST("/message", async () => new Response("ok"))],
-});
-```
-
-## WebSocket routes
-
-Use `WS()` when a custom channel needs a WebSocket endpoint. The route handler runs once per upgrade request and returns lifecycle hooks for that connection:
-
-```ts
-import { defineChannel, WS } from "eve/channels";
-
-export default defineChannel({
-  routes: [
-    WS("/voice/ws", async (_req, { from }) => ({
-      async message(_peer, message) {
-        await from("voice-demo").send(message.text(), { auth: null });
-      },
-    })),
-  ],
-});
-```
-
-`WS()` handlers receive the same `from`, `to`, and `attachSession` operations,
-`params`, `waitUntil`, and `requestIp` arguments as HTTP route handlers. The
-returned hooks are eve-owned structural types compatible with Nitro/H3 websocket
-routing, including `upgrade`, `open`, `message`, `close`, and `error`.
-
-### Node upgrade server escape hatch
-
-Prefer the `WS()` lifecycle hooks above when you own the websocket behavior. eve also exposes `createWebSocketUpgradeServer()` for the narrower case where a third-party SDK or framework expects to bind directly to a Node `http.Server` with `server.on("upgrade", ...)`.
-
-```ts
-import { defineChannel, WS, createWebSocketUpgradeServer } from "eve/channels";
-
-const bridge = createWebSocketUpgradeServer();
-
-thirdPartySdk.attach(bridge.server);
-
-export default defineChannel({
-  routes: [WS("/vendor/ws", bridge.route)],
-});
-```
-
-The bridge server does not listen on its own port. It receives only upgrade events that matched the eve route, and only on hosts where Nitro exposes the raw Node upgrade request, socket, and head. Treat it as a compatibility adapter for libraries with server-binding APIs, not the primary way to build websocket channels in eve.
-
-## Cross-channel hand-off
-
-Use `ctx.to(channel, target).send(message, { auth })` in a route handler to start or resume a conversation on another channel. The agent runs and replies on the destination channel. The hand-off doesn't start a session on the source channel, which returns only its HTTP response.
-
-This webhook filters incoming events and asks the agent to investigate in Slack. Import the destination channel's default export; `verifyAndParseEvent` is a helper you implement in your application.
-
-```ts title="agent/channels/intake.ts"
-import { defineChannel, POST } from "eve/channels";
-
-import { verifyAndParseEvent } from "../lib/inbound-events";
-import slack from "./slack";
-
-export default defineChannel({
-  routes: [
-    POST("/intake/events", async (req, ctx) => {
-      const event = await verifyAndParseEvent(req);
-      if (!event) return new Response("unauthorized", { status: 401 });
-      if (event.kind !== "actionable") return new Response("ok");
-
-      ctx.waitUntil(
-        ctx
-          .to(slack, { channelId: "C0123ABC" })
-          .send(`Investigate ${event.reference}: ${event.summary}`, {
-            auth: {
-              authenticator: "intake",
-              principalType: "service",
-              principalId: event.source,
-              attributes: {},
-            },
-            idempotencyKey: `intake:${event.id}`,
-          }),
-      );
-      return new Response("ok");
-    }),
-  ],
-});
-```
-
-Before sending:
-
-- Verify the provider's signature and validate the payload, including size limits. Derive `event.source` from the verified sender, not an untrusted payload field.
-- Filter out events that should not reach the agent.
-- Pass the provider's stable event ID as `idempotencyKey`, so a redelivered webhook doesn't deliver the message twice. See [Retried deliveries](#retried-deliveries) for the limits.
-
-The supplied `auth` identifies who started the session, available to tools and event handlers as `session.auth.initiator`.
-
-The destination's `receive` hook defines the target fields and how they map to a session. See [Slack proactive sessions](./slack#proactive-sessions) for its target options. To let people continue the conversation, configure the destination's inbound handlers to accept follow-ups.
-
-`send` takes the same options as `from(address).send()` and `Session.send()`: `auth`, `context`, `history`, `idempotencyKey`, `outputSchema`, `title`, and `turnPolicy`. The destination's `receive` hook gets them with the message and target, and every built-in channel passes them to the session. Keys are deduplicated per destination session, which every sender to that destination shares, and a Slack target with only a `channelId` uses the key to choose the session, so a retry reaches the same session. Make the key unique across all senders by prefixing it with the source, for example `pagerduty:${event.id}`. Two senders that pick the same key reach the same session, and the second delivery is `ignored`. The key still only dedupes within that session's retained keys: a retry after the key is evicted runs another turn, and a retry after the session ends starts a new one, which on Slack is a new thread. Anything a `receive` hook does before sending also repeats on retry, such as posting an `initialMessage` (Slack, Teams, Discord, GitHub, and Telegram) or creating a Linear Agent Session for an `issueId` or `commentId` target.
-
-### Write a receive hook
-
-A custom channel's `receive` hook maps the target to an address. Pass the remaining input to `from(address).send()`, so the session gets every option the sender set:
-
-```ts
-async receive({ message, target, ...send }, { from }) {
-  return await from(`inbox:${target.inboxId}`).send(message, { ...send, state: { inboxId: target.inboxId } });
-},
-```
-
-Route handlers, [handler-form schedules](../schedules#handler-form-run), and [tools](../tools#start-channel-sessions-ctxto) provide `to(...)`; other platform callbacks don't.
-
-For notifications that don't need an agent turn, use the platform's API instead. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) when those posts also need retries.
-
-## Channel metadata
-
-A channel can project a subset of its adapter state as metadata, available to instrumentation resolvers and to the `select` of dynamic tools, skills, instructions, and other dynamic capabilities. Define a `metadata(state)` function on the channel config:
-
-```ts
-import { defineChannel, POST } from "eve/channels";
-
-export default defineChannel({
-  state: {
-    topic: null as string | null,
-    contextMessages: [] as string[],
-    internalCounter: 0,
-  },
-
-  metadata(state) {
-    return {
-      topic: state.topic,
-      contextMessages: state.contextMessages,
-    };
-  },
-
-  routes: [
-    POST("/start", async (req, { from }) => {
-      const body = await req.json();
-      await from(body.token).send(body.message, {
-        auth: null,
-        state: { topic: body.topic, contextMessages: body.context, internalCounter: 0 },
-      });
-
-      return new Response("ok");
-    }),
-  ],
-  events: {
-    "turn.started"(_event, ctx) {
-      ctx.channel.state.internalCounter += 1;
-    },
-  },
-});
-```
-
-The projection is re-evaluated whenever adapter state changes after channel event handlers run. A dynamic capability's `select` reads it via `ctx.channel.metadata` and narrows it with `isChannel`. See [Dynamic capabilities](../guides/dynamic-capabilities) for the full consumption pattern.
-
-### Conversation audience
-
-Use `audience(input)` to assign an observability audience. The audience controls
-whether instrumentation may capture conversation content. The hook runs after
-route authentication and before the session is created:
-
-```ts
-import { defineChannel, POST } from "eve/channels";
-
-export default defineChannel({
-  state: { visibility: "workspace" as "workspace" | "private" | "unknown" },
-  audience({ state, caller }) {
-    if (state.visibility === "workspace") return "public";
-    if (caller.type === "principal" && caller.principal.kind === "user") return "private";
-    return "unknown";
-  },
-  routes: [POST("/webhook", async () => new Response("ok"))],
-});
-```
-
-The input contains the channel's `state`, `caller`, `channel`, and `environment`. A principal caller omits `principalId`, `issuer`, and `subject`, but its `attributes` come from route auth and can still contain identifying values. Return `"public"`, `"private"`, or `"unknown"`. Return `"unknown"` when the channel does not have enough evidence to classify confidently; consumers treat it as non-public. A missing, throwing, asynchronous, or malformed classifier also fails closed to `"unknown"`. A `metadata()` projection's `audience` field does not classify visibility; use `audience(input)`.
-
-When you explicitly annotate a callback, use `AudienceContext<TState>`. The retired `AudienceInput`, `AudiencePrincipal`, and `auth` input are not supported; classify the privacy-limited `caller` instead.
-
-Classification is fixed when the session is created. Continuation turns from a different caller do not reclassify an existing session. When a parent dispatches a local subagent, the child inherits the parent's audience while the framework forwards the parent's custom channel metadata separately.
-
-## Continuation tokens
-
-Each channel operation accepts a channel-local token. The framework prepends the channel name, derived from the file stem under `agent/channels/`, before handing the token to the runtime.
-
-```ts
-import { slackContinuationToken } from "eve/channels/slack";
-import { twilioContinuationToken } from "eve/channels/twilio";
-
-slackContinuationToken({ channelId: "C0123ABC", threadTs: "1800000000.001234" }); // "C0123ABC:1800000000.001234"
-twilioContinuationToken({ from: "+15551234567", to: "+15557654321" }); // "+15551234567:+15557654321"
-```
-
-Built-in channels export token builders from their own `eve/channels/<platform>` entry:
-
-| Builder                             | Address fields                                                                                                          |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `slackContinuationToken`            | `channelId`, `threadTs`                                                                                                 |
-| `slackCodeChannelContinuationToken` | `channelId` (positional argument)                                                                                       |
-| `twilioContinuationToken`           | `from`, optional `to`                                                                                                   |
-| `githubContinuationToken`           | `repositoryId`, `conversationKind`, and the matching `issueNumber`, `pullRequestNumber`, or `reviewThreadRootCommentId` |
-| `discordContinuationToken`          | `channelId`, optional `conversationId`                                                                                  |
-| `teamsContinuationToken`            | `conversationId`, optional `tenantId` and `replyToActivityId`                                                           |
-| `telegramContinuationToken`         | `chatId`, optional `messageThreadId` and `conversationId`                                                               |
-| `linearContinuationToken`           | `agentSessionId`                                                                                                        |
-
-Pass the resulting channel-local token to that channel's `from(...)` helper.
-Tokens are routing addresses, not credentials or substitutes for authorization.
-
-Custom channels write their own function that joins the identity fields. The framework derives nothing for you; the channel owns its token format.
-
-When another identity should address a session, add it with `channel.continuation?.alias(rawToken)`. The runtime preserves the current channel namespace and exposes the new token as `channel.continuation.token` for later handlers.
-
-Aliasing adds an address to the current session. Earlier addresses continue to resolve to the same session and accept the same payloads. `end` terminally retires the current session and makes all its addresses available to later `send()` calls. `cancel` stops only the active turn and leaves the session, history, and continuation-token ownership intact.
-
-The `context(state, channel)` config option builds the per-step context read as `ctx.channel`
-in event handlers. Its second argument is `ChannelContext` from `eve/channels`: live
-`session.id` and `session.auth` information, plus channel-owned `continuation` routing. It does
-not expose session commands or put aliasing on session information. Close over
-`channel.continuation` for late-bound callbacks, or call `ctx.channel.continuation?.alias(token)`
-from an event handler. eve adds `ChannelContinuationOps` to the returned context and writes
-state mutations back to adapter state.
-
-```ts
-import { defineChannel } from "eve/channels";
-
-import { mintRef } from "./refs";
-
-defineChannel<{ ref: string | null }>({
-  state: { ref: null },
-  context(state, channel) {
-    return {
-      state,
-      registerAnchor(ref: string) {
-        state.ref = ref;
-        channel.continuation?.alias(ref);
-      },
-    };
-  },
-  events: {
-    "content.completed"(_event, ctx) {
-      if (!ctx.channel.state.ref) ctx.channel.registerAnchor(mintRef());
-    },
-  },
-  routes: [/* ... */],
-});
-```
-
-At the next workflow boundary, the runtime adds the new address to the session's merged inbox. If another active session already owns the new token, the aliasing session fails instead of taking it over. Every address claimed by the session remains active until the session ends. Sessions with continuation addresses remain on their current deployment until Workflow supports atomic ownership transfer.
-
-Tokens must be nonempty. A session supports up to 256 addresses, including its stable inbox; repeating an existing alias does not consume another address.
-
-## File uploads
-
-`from(address).send()` accepts a `message` containing `MessageContent` (a string, or
-text and file parts), while `Session.send()` accepts `MessageContent` directly. To
-include file attachments, pass an array mixing text and file parts:
-
-```ts
-await from(continuationToken).send(
-  [
-    { type: "text", text: body.message },
-    { type: "file", data: imageBytes, mediaType: "image/png" },
-  ],
-  { auth },
-);
-```
-
-For platforms like Slack where files sit behind authenticated URLs, put a `URL` object in the file part's `data` and declare `fetchFile` on the channel config:
-
-```ts
-defineChannel({
-  fetchFile(url) {
-    if (!url.startsWith("https://files.slack.com/")) return null;
-    return fetch(url, { headers: { authorization: `Bearer ${token}` } })
-      .then((r) => r.arrayBuffer())
-      .then((b) => ({ bytes: Buffer.from(b) }));
-  },
-
-  routes: [
-    POST("/webhook", async (req, { from }) => {
-      await from(continuationToken).send(
-        [
-          { type: "text", text: message.text },
-          ...message.attachments.map((a) => ({
-            type: "file" as const,
-            data: new URL(a.url),
-            mediaType: a.mediaType,
-          })),
-        ],
-        {
-          auth,
-          state,
-        },
-      );
-    }),
-  ],
-});
-```
-
-If `fetchFile` throws, eve replaces that attachment with a model-visible note and continues the turn. To tell the model why, throw `attachmentError` from `eve/channels`:
-
-```ts
-import { attachmentError } from "eve/channels";
-
-async function fetchUpload(url: string) {
-  const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
-  if (response.status === 413) {
-    throw attachmentError("The file is over 100 MB. Ask for a smaller file.");
-  }
-  return Buffer.from(await response.arrayBuffer());
-}
-```
-
-The model then reads `Attachment report.pdf could not be retrieved: The file is over 100 MB. Ask for a smaller file.` The message reaches the model as written, so keep it to details the person can act on, such as a size limit or a missing permission, and never include URLs, tokens, or upstream response text. Pass the original error as `attachmentError(message, { cause })` to keep it in operator logs. Any other error that `fetchFile` throws becomes a generic note, and eve keeps the original error in operator logs.
-
-`fetchFile` receives the channel's `state` and the `session` the attachment arrived in as its second argument, so a resolver can check a file against the session's caller in `session.auth`.
-
-The `URL` object survives the queue boundary as a string and is reconstituted inside the workflow step. A string with a URL scheme, such as `https://...` or `myapp-file:abc`, is handled the same way. The staging pipeline calls `fetchFile` with the URL serialized as a string (the URL's `href`), which is why the example matches on `url.startsWith(...)`.
-
-Return bytes to stage the file to the sandbox. Return `null` when the URL is not one your channel resolves: eve then downloads a public `https:` URL itself, with the 25 MB default size cap and a 30-second timeout, and refuses private or reserved addresses. It downloads at most 10 URLs per message, one at a time. Any other URL, or a download that fails, reaches the model as a note. The model provider never fetches an attachment, so a link that expires or needs credentials can't fail later model calls.
-
-Set `uploadPolicy` on `defineChannel` to cap what eve stages for the channel, for example `uploadPolicy: { maxBytes: 10 * 1024 * 1024, allowedMediaTypes: ["image/*", "application/pdf"] }`. eve checks every staged file against it, on the final bytes and the media type they prove, including URLs it downloads itself. A file that breaks the policy reaches the model as a note. Without `uploadPolicy`, eve checks only what your `fetchFile` enforces, and its own downloads stop at 25 MB.
-
-The framework handles staging bytes to the sandbox, hydrating files for the model call, and reconstituting `URL` objects after queue serialization. See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
 
 ## What to read next
 

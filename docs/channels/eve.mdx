@@ -3,11 +3,11 @@ title: "eve"
 description: "The default HTTP API for an agent, covering session routes, auth, and customization."
 ---
 
-The eve channel is the framework's default HTTP API. It's what the terminal UI, [`useEveAgent`](../guides/frontend/overview), `curl`, and any SDK client talk to when they start sessions, send messages, and stream events. The selected `channels/eve.ts` source owns the complete `/eve/v1` surface, including health, inspection, callbacks, task input, and session routes. eve supplies that source when `agent/channels/eve.ts` does not exist.
+The eve channel is the framework's default HTTP API under `/eve/v1`. The terminal UI, [`useEveAgent`](../guides/frontend/overview), `curl`, and SDK clients use it to start sessions, send messages, and stream events. It also serves the health, agent info, callback, and task input routes.
 
-Every running eve app exposes its own API. `eve.dev` publishes framework documentation; it is not a shared API, authorization server, MCP server, or A2A server. Each deployment supplies its own host and authentication policy.
+Each deployment serves its own API with its own host and authentication policy. `eve.dev` hosts framework documentation only; it is not a shared API, authorization server, MCP server, or A2A server.
 
-Reach for it when something needs HTTP access to your agent, including local tooling, a browser frontend, the terminal UI, or another API client. Most apps never write this file. Add `agent/channels/eve.ts` only to override the defaults, usually the route auth policy.
+eve supplies the channel when `agent/channels/eve.ts` doesn't exist. Most apps never write this file. Add it only to change the defaults, usually who may call the routes:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -18,71 +18,9 @@ export default eveChannel({
 });
 ```
 
-## Web Chat with Sign in with Vercel
-
-Run `eve add channel/web`, or select **Web Chat** from the terminal UI's channel
-picker. Choose **Next.js**, a hosting layout, then **Sign in with Vercel**. Sign
-in with Vercel is available only for the Next.js Web Chat app. Setup uses a
-linked Vercel project and creates a Vercel App that only members of that
-project's team can sign in to.
-
-For a new agent, initialize it first, then link a project and add Web Chat:
-
-```bash
-eve init my-agent --non-interactive
-cd my-agent
-eve link
-eve add channel/web
-```
-
-The generated Next.js app uses Better Auth sessions. The selected agent's HTTP
-channel verifies the same session, while retaining Vercel OIDC and local
-development access. In an agent workspace, setup configures only the selected
-agent. Other agents keep their own authentication policies.
-
-Setup registers `/api/auth/callback/vercel` as a project redirect URI, so Vercel
-validates callbacks against the project's deployment domains. The app uses the
-`authorization_code` grant, `client_secret_post` authentication, and the
-`openid`, `email`, and `profile` scopes. Setup writes `VERCEL_APP_CLIENT_ID`,
-`VERCEL_APP_CLIENT_SECRET`, and `BETTER_AUTH_SECRET` to production and preview;
-secret values are marked sensitive and are never printed or written to source.
-Run `eve deploy` after setup to publish the app. Local development continues
-without browser sign-in.
-
-For automation, supply the setup answers explicitly:
-
-```bash
-eve add channel/web --non-interactive \
-  --answer 'web-hosting="vercel"' \
-  --answer 'web-authentication="vercel"'
-```
-
-Use a linked project with permission to manage Vercel Apps and project
-environment variables. A team owner can complete setup if your role cannot
-create apps. The searchable team picker lists eligible teams first. Disabled
-teams show `needs permission` or `couldn't verify`, with shared recovery guidance
-below the list. If permissions cannot be verified, that team stays
-disabled until you sign in or retry. Linked projects are checked before
-interactive auth setup.
-If setup reports a missing prerequisite, complete it and resume with
-`eve add channel/web --skip-install`. Compatible existing apps
-and credentials are reused; conflicting app settings or credentials stop setup
-with an error. Authored channel or UI files are preserved unless you explicitly
-pass `--overwrite`.
-
-If the team has reached its Vercel App limit, remove an unused app in team
-settings and retry. If a generated app name or slug is taken by an incompatible
-app, rename the Vercel project in its settings and retry. Compatible apps from a
-concurrent setup are reused. A client-secret limit requires removing an unused
-secret from the app's settings; setup never removes an existing secret for you.
-
-Choose **Configure authentication myself** (`web-authentication=custom`) to
-keep the current channel policy. The default placeholder rejects production
-browser requests until you configure your own authentication.
-
 ## Routes
 
-The default eve channel inspects the agent, creates sessions, accepts callbacks and task input, controls sessions, and streams events. Its public routes include:
+The default eve channel serves these routes:
 
 - `GET /eve/v1/health` (check whether the application is reachable)
 - `GET /eve/v1/info` (inspect the agent)
@@ -94,48 +32,30 @@ The default eve channel inspects the agent, creates sessions, accepts callbacks 
 - `POST /eve/v1/session/:sessionId/end` (retire the session)
 - `GET /eve/v1/session/:sessionId/stream` (stream events as NDJSON)
 
-The session routes use only durable session IDs. Create a session explicitly, then put its returned ID in every follow-up, control, and stream path.
+Create a session, then put its returned ID in every follow-up, control, and stream path.
 
-`POST /eve/v1/session/:sessionId` with no body or `{}` prepares an existing session using
-the channel's auth policy, without calling `onMessage` or creating a delivery. Non-empty bodies
-keep the message and answer behavior, including unknown-field validation; empty or invalid
-messages, an empty `answers` array, and payloads with neither input are rejected. Preparation
-returns `{ ok: true, status }`: `ready` when the owner already uses the serving
-deployment, `accepted` (HTTP 202) when a background preparation hint has been queued,
-`unsupported` when the World or owner cannot prepare, or `no_active_session` when no live
-owner exists. Other successful statuses use HTTP 200. Acceptance does not mean the handoff
-has completed. Idle preparation preserves the session ID, stream, history, and expiry;
-active work is not interrupted. See the [frontend guide](../guides/frontend/use-eve-agent#prewarming)
-for client usage and deployment routing.
+`POST /eve/v1/session/:sessionId` with no body or `{}` prepares an existing session to answer from the serving deployment. It checks the channel's auth policy, but calls no `onMessage` and sends no message. Preparation keeps the session ID, stream, history, and expiry, and doesn't interrupt running work. It returns `{ ok: true, status }`:
 
-`GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` uses the channel's auth policy, then serves only operator principals: `service` and `runtime` principals and, when the channel's auth includes `localDev()`, any caller it admits on a development server. Other callers the channel admits, such as `user` or `anonymous` principals, get `403` with code `info_forbidden`, because the payload includes authored instructions, skill and schedule markdown, and server paths. The route returns agent-info version 5. The TypeScript client validates both successful payloads: malformed health JSON throws `HealthResponseError`, malformed inspection JSON throws `AgentInfoResponseError`, and a non-success response from either route throws `ClientError`.
+| `status`            | HTTP | Meaning                                                            |
+| ------------------- | ---- | ------------------------------------------------------------------ |
+| `ready`             | 200  | The session already runs on the serving deployment.                |
+| `accepted`          | 202  | A request to move the session is queued; the move may not be done. |
+| `unsupported`       | 200  | The World or the session can't move to the serving deployment.     |
+| `no_active_session` | 200  | No running session has this ID.                                    |
+
+A non-empty body is a message or answer, validated in full. eve rejects empty or invalid messages, an empty `answers` array, and payloads with neither input. See [Prewarming](../guides/frontend/use-eve-agent#prewarming) for client usage and deployment routing.
+
+`GET /eve/v1/health` is public and returns `{ ok: true, status: "ready", workflowId: string }`. `GET /eve/v1/info` returns agent-info version 5. It checks the channel's auth policy, then serves only operator callers: `service` and `runtime` callers, and, when the channel's auth includes `localDev()`, callers it admits on a development server. Other callers, such as `user` or `anonymous` ones, get `403` with code `info_forbidden`, because the payload includes authored instructions, skill and schedule Markdown, and server paths. The TypeScript client throws `HealthResponseError` or `AgentInfoResponseError` on a malformed payload, and `ClientError` on a non-success response from either route.
 
 ### Request validation
 
-Session creation, follow-up message and input-response requests, and session controls reject
-unknown top-level JSON fields with `400 Bad Request`. The error names the unknown fields and
-lists the accepted fields for that route. Field names are case-sensitive: `outputschema` is
-not `outputSchema`. Invalid requests do not create sessions, dispatch messages, or apply controls.
+Session creation, follow-up and input-response requests, and session controls reject unknown top-level JSON fields with `400 Bad Request`. The error names the unknown fields and lists the route's accepted fields. Field names are case-sensitive (`outputschema` is not `outputSchema`), and each route has its own set: `operationId` is accepted on session creation but rejected on follow-ups. A rejected request creates no session, sends no message, and applies no control. Correct the field or upgrade the server; don't strip behavior-changing options and retry.
 
-Fields accepted on one route are not automatically valid on another. For example, `operationId`
-is accepted on session creation but rejected on follow-up messages.
+Request bodies can't contain eve's own attachment markers (`eve-url:`, `eve-sandbox:`, and `chat-sdk-file:`). A request that does returns `400 Bad Request`.
 
-Follow-up message and input-response requests accept an `idempotencyKey` of 1 to 256 characters,
-for a retry that can't tell whether the first request was accepted. The key names the delivery:
-repeating the request with the same key returns the same `deliveryId`, and the input doesn't run
-again. Unlike a channel's [retried deliveries](./custom#retried-deliveries), whose duplicates get a
-new receipt settled `ignored`, the repeat's receipt is the original's. The session remembers its
-last 1,024 keys, so use a new key for new input. The compact and clear routes
-accept no body fields; omit the body or send `{}`. Cancel accepts `turnId`; end accepts `reason`.
+Compact and clear accept no body fields; omit the body or send `{}`. Cancel accepts `turnId`, and end accepts `reason`. The unknown-field check applies to top-level fields, not to open payload objects such as `clientContext`. Delegated requests with a `callback` also accept and ignore an `activityObserver` field. Authentication and value validation still apply, including permission checks for forwarded caller identities and tool stubs.
 
-Open payload objects such as `clientContext` keep their existing contracts. Delegated requests
-with a `callback` accept, and ignore, the retired `activityObserver` field so older senders keep
-working. No other unknown fields are accepted. Authentication and existing value validation still
-apply, including permission checks for forwarded principals and tool stubs.
-
-A newer client sending an unsupported field to an older server with strict validation fails
-rather than silently losing the requested behavior. Correct the field or upgrade the server;
-do not automatically remove behavior-changing options and retry.
+Follow-up and input-response requests accept an `idempotencyKey` of 1 to 256 characters for retries that can't tell whether the first request was accepted. A repeat with the same key returns the original receipt and `deliveryId` without running the input again. A channel's [retried deliveries](./custom#retried-deliveries) differ: they get a new receipt whose result is `ignored`. The session remembers its last 1,024 keys, so use a new key for new input.
 
 ### Start and continue a session
 
@@ -146,12 +66,7 @@ curl -X POST https://<deployment>/eve/v1/session
 # {"ok":true,"sessionId":"wrun_A"}
 ```
 
-See [Start a session](../concepts/sessions-runs-and-streaming#start-a-session) for the
-initialization boundary, first-turn identity, readiness response, and retry behavior.
-
-The create request still requires route auth. Session audience and the timeout are selected
-at creation; they do not change when the first message arrives. Turn-scoped fields such as
-`clientContext` and `outputSchema` require a message on the create request.
+The create request requires route auth and fixes the session's audience and timeout. Fields that apply to one turn, such as `clientContext` and `outputSchema` need a message on the create request. See [Start a session](../concepts/sessions-runs-and-streaming#start-a-session) for the initialization boundary, first-turn identity, readiness response, and retry behavior.
 
 Include an initial message to create the session and start its first turn in one request:
 
@@ -162,14 +77,7 @@ curl -X POST https://<deployment>/eve/v1/session \
 # {"ok":true,"sessionId":"wrun_A","deliveryId":"delivery_A"}
 ```
 
-Authenticated callers that may retry a create request can pass their own `operationId` for
-create-once semantics. Once the operation owner is active, the same operation under the same
-authenticated principal returns that session instead of dispatching the input again. The create
-route does not wait for a concurrently starting request to publish ownership: simultaneous
-requests can receive different accepted candidate IDs, while only the candidate that claims the
-operation runs its first turn. Retry the operation after startup when you need its canonical
-session ID. Anonymous callers cannot use `operationId`, and operation ownership expires when the
-session is no longer resumable.
+An authenticated caller that may retry a create request can pass an `operationId` so the session is created once. Once that session is active, the same `operationId` from the same caller returns it without sending the input again. Simultaneous requests can receive different session IDs, but only one runs the first turn. Retry after startup to get the final session ID. Anonymous callers can't use `operationId`. An `operationId` is free again once its session can no longer resume.
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session \
@@ -179,8 +87,7 @@ curl -X POST https://<deployment>/eve/v1/session \
 # {"ok":true,"sessionId":"wrun_A","deliveryId":"delivery_A"}
 ```
 
-When the create request includes a message, a follow-up request accepts exactly one of
-`message` or `answers`; use the latter to answer a pending HITL request:
+A follow-up request accepts exactly one of `message` or `answers`. Use `answers` to answer a pending approval or question:
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session/wrun_A \
@@ -188,15 +95,13 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -d '{"answers":[{"interactionId":"req_A","optionId":"approve"}]}'
 ```
 
-Follow-up messages use `turnPolicy: "steer"` by default. Before assistant answer output or local tool execution begins, steering interrupts pending model generation and applies the correction in the same turn. Executing tools finish and checkpoint their results first. After answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output; interrupted provider-managed search may run again. The turn ID stays the same.
+A follow-up message joins the running turn by default; see [Overlapping messages](./overview#overlapping-messages). Set `turnPolicy: "queue"` on `eveChannel(...)` to make follow-ups wait for running turns to finish. `answers` only answer the requests they name.
 
-Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `answers` answer their addressed requests.
-
-Sending a message to an unknown or terminal session ID returns `409` with
-`{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.
-An existing workflow whose inbox is not yet available returns `409 session_not_ready` instead.
-A session that another eve version built returns `409 session_stranded` with the `eveVersion`
-that built it.
+| Session state                         | Response                                                                                         |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Unknown or terminal                   | `409` with `{"code":"session_not_active","error":"The session is no longer active.","ok":false}` |
+| Workflow exists but inbox isn't ready | `409 session_not_ready`                                                                          |
+| Built by another eve version          | `409 session_stranded` with the `eveVersion` that built it                                       |
 
 ### Send files
 
@@ -208,11 +113,9 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
   -d '{"message":[{"type":"text","text":"Summarize this report."},{"type":"file","mediaType":"application/pdf","filename":"report.pdf","data":"data:application/pdf;base64,JVBERi0xLjQK..."}]}'
 ```
 
-Framework-generated attachment markers (`eve-url:`, `eve-sandbox:`, and `chat-sdk-file:`) are not accepted in HTTP request bodies; they return `400 Bad Request`.
+`uploadPolicy` sets the size cap and allowed media types; omit it for 25 MB and every type. An inline file that breaks the policy returns `413` for size or `415` for type. Inline bytes also count toward the hosting platform's request body limit: 4.5 MB on Vercel Functions, so about 3.3 MB of file before base64.
 
-`uploadPolicy` sets the size cap and allowed media types, 25 MB and every type by default. A request whose inline file breaks the policy returns `413` for size or `415` for type. Inline bytes also count toward the request body limit of the platform that serves the channel. On Vercel Functions that limit is 4.5 MB, so a base64 file stops at about 3.3 MB.
-
-For larger files, upload them from the browser to your own storage and send the URL in the file part. Add `fetchFile` to load the URLs you own inside the workflow step, so the bytes never pass through the request or the workflow start payload:
+For larger files, upload from the browser to your own storage and send the URL in the file part. Add `fetchFile` to load your URLs after eve accepts the message, so the bytes never pass through the request:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -232,62 +135,105 @@ export default eveChannel({
 });
 ```
 
-`fetchFile` follows the [custom channel contract](./custom#file-uploads): return bytes to stage the file, or `null` for a URL that isn't yours. eve then downloads a public `https:` URL itself, and any other URL reaches the model as a note. `uploadPolicy` covers every file eve stages for the channel, including URLs that `fetchFile` loads and URLs eve downloads itself. eve checks the final bytes and the media type they prove, so a file over the cap, or one whose bytes are a disallowed type, reaches the model as a note instead of failing the request. See [Inbound attachments](../sandbox#inbound-attachments) for how eve stores files and shows them to the model.
+`fetchFile` follows the [custom channel contract](./custom#file-uploads): return bytes to save the file to the sandbox, or `null` for a URL that isn't yours. eve downloads a public `https:` URL itself and passes any other URL to the model as a note. `uploadPolicy` also checks fetched and downloaded files by their actual bytes and detected media type. A violating file reaches the model as a note instead of failing the request. See [Inbound attachments](../sandbox#inbound-attachments) for how eve stores files and shows them to the model.
 
 ### Stream events
 
 Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/stream`. The [session protocol](../concepts/sessions-runs-and-streaming#stream-a-session) defines the event set, envelopes, cursors, and reconnection behavior.
 
-Following a stranded session's stream returns `409 session_stranded`, just like a send. The TypeScript client reports `ClientSessionStrandedError` without retrying. Pass `follow=false` to read the recorded history instead: the response ends at the durable tail, carries the `x-eve-stream-tail-index` header, and never inspects or changes the session, so it works before ending the session. End attempts to append its control delivery's `delivery.admitted` (`source: { control: "reset" }`) and `delivery.settled`, then `session.ended` with `outcome: "failed"`, error code `session_stranded`, and cause `{ deliveryId }` naming that delivery, then close the stream. Existing readers finish when the stream ends.
+Following a stranded session's stream returns `409 session_stranded`, and the TypeScript client reports `ClientSessionStrandedError` without retrying. Pass `follow=false` to read the recorded history instead. The response ends at the last recorded event and carries the `x-eve-stream-tail-index` header. It doesn't change the session, so it works before you end the session.
 
-A session started by an eve version before v27 stores v26 events. Its stream route serves them as the v27 lines they record, so v27 clients render that history: messages, reasoning, tool calls and results, approvals, questions, sign-ins, subagents, clears, and compactions. Streamed text previews aren't translated, so a v26 session that is still running shows each part once it completes.
+Ending a stranded session tries to append these events, then closes the stream so existing readers finish:
 
-Cursors still count stored lines. A stored event with nothing for a v27 reader to fold, such as a streamed delta, is sent as a `position` marker. The route reads these streams from their first line on every request, whatever the cursor. Once no running owner can add to the stream, a follow ends at the tail with `stream.ended`, so clients stop reconnecting.
+1. `delivery.admitted` with `source: { control: "reset" }`, then `delivery.settled`, for the end request.
+2. `session.ended` with `outcome: "failed"`, error code `session_stranded`, and cause `{ deliveryId }`.
 
-After a session ends, the World keeps its stream only for its retention period. Reading a stream past that point returns `410 session_expired`. The history is gone, so the TypeScript client fails on the first response with a `ClientError` whose `code` is `"session_expired"`, without retrying.
+A session started by an eve version before v27 stores v26 events, and the stream route serves them as v27 lines. Translation covers messages, reasoning, tool calls and results, approvals, questions, sign-ins, subagents, clears, and compactions.
+
+- Streamed text previews aren't translated, so a running v26 session shows each part once it completes.
+- Cursors count stored lines. A stored event with nothing to translate, such as a streamed delta, arrives as a `position` marker.
+- When no running deployment can add to the stream, a follow ends at the last event with `stream.ended`, so clients stop reconnecting.
+
+The World keeps an ended session's stream only for its retention period. After that, reading it returns `410 session_expired`, and the TypeScript client fails with a `ClientError` whose `code` is `"session_expired"`, without retrying.
 
 ### Cancel a turn
 
-Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Cancellation is asynchronous; confirm it on the stream as `turn.settled` with `outcome: "cancelled"`.
+Post to `/eve/v1/session/:sessionId/cancel` to cancel the active turn. Include the observed `turnId` so a late request can't cancel a newer turn. Cancellation is asynchronous; confirm it on the stream as `turn.settled` with `outcome: "cancelled"`.
 
-See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for delivery receipts, HTTP status codes, subagent cancellation, and race behavior.
+See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for receipts, HTTP status codes, subagent cancellation, and race behavior.
 
 ### Clear context
 
-Post to `/eve/v1/session/:sessionId/clear` to cancel a running turn and every working task, then remove model-message history while preserving the session ID, system prompt, tools, skills, durable state, limits, and sandbox. A stranded session cannot run the clear, so the route returns `409 session_stranded` and changes nothing; post to the `end` route instead. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
+Post to `/eve/v1/session/:sessionId/clear` to cancel a running turn and every working task, then remove model-message history. The session ID, system prompt, tools, skills, state, limits, and sandbox stay. On a stranded session, clear returns `409 session_stranded` and changes nothing; use `end` instead. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
 
 ### Compact context
 
-Post to `/eve/v1/session/:sessionId/compact` to summarize context without sending a user message. The operation waits for an active turn to settle and reports its result on the stream. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
+Post to `/eve/v1/session/:sessionId/compact` to summarize context without sending a user message. The operation waits for a running turn to finish and reports its result on the stream. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
 
 <a id="reset-a-session" />
 
 ### End a session
 
-Post to `/eve/v1/session/:sessionId/end` to terminally retire that session. End never replaces the ID automatically; create a new session explicitly for a fresh conversation. End also works on a stranded session: eve cancels the stranded workflow run directly instead of delivering the command to it. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
+Post to `/eve/v1/session/:sessionId/end` to end that session for good. Ending doesn't create a replacement; create a new session for a fresh conversation. On a stranded session, eve cancels the workflow run directly. See [Compact, clear, and end](../concepts/sessions-runs-and-streaming#compact-clear-and-end).
 
-## Replace or disable the defaults
+## Authentication
 
-An authored `agent/channels/eve.ts` replaces the complete default eve channel. An `eveChannel(...)` replacement keeps the standard route set with your options; a custom `defineChannel(...)` replacement exposes only the routes you declare. Health, inspection, and callbacks do not reappear through a hidden host fallback.
+The `auth` option decides who can call `/eve/v1/info` and the session routes. The built-in helpers cover development and trusted infrastructure:
 
-Disable the complete surface by exporting `disableRoute()` at that slot:
+- `localDev()` accepts requests during local development.
+- `vercelOidc()` lets the local CLI and your team's other deployments call a deployed agent.
 
-```ts title="agent/channels/eve.ts"
-import { disableRoute } from "eve/channels";
+Neither admits browser users or external clients in production. For a public app, wire the channel to your own auth: Clerk, Auth.js, OIDC/JWT verification, an API-key verifier, or any custom `AuthFn`. Use Vercel OIDC only when Vercel-issued deployment tokens are part of your trust model.
 
-export default disableRoute();
+`eve init` scaffolds `agent/channels/eve.ts` with `vercelOidc()`, `localDev()`, and `placeholderAuth()`, which returns a setup-focused 401 in production until you replace it with real auth. Without the file, eve uses the same `[vercelOidc(), localDev(), placeholderAuth()]` policy, which rejects production requests without a valid Vercel OIDC token.
+
+`/eve/v1/info` also requires an operator caller. To let your own operator credential read it, return `principalType: "service"` from its `AuthFn`, as `jwtHmac()` and `jwtEcdsa()` do, or return `allowAgentInfo: true` from an `EveAuthFn`. See [Agent info access](../guides/auth-and-route-protection#agent-info-access). Keep end-user strategies returning `"user"` without the grant, so end users can't read it.
+
+For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).
+
+## Web Chat with Sign in with Vercel
+
+To let your team sign in to a browser chat, run `eve add channel/web` or select **Web Chat** from the terminal UI's channel picker. Then choose **Next.js**, a hosting layout, and **Sign in with Vercel**. Sign in with Vercel is available only for the Next.js Web Chat app. Setup creates a Vercel App on the linked project that only members of the project's team can sign in to.
+
+For a new agent, initialize it first, then link a project and add Web Chat:
+
+```bash
+eve init my-agent --non-interactive
+cd my-agent
+eve link
+eve add channel/web
 ```
 
-The default home page is a separate `channels/home.ts` source that serves `GET /` and `HEAD /`. Author `agent/channels/home.ts` to replace it or export `disableRoute()` there to remove it without affecting `/eve/v1`.
+`eve init --channel-web-nextjs` scaffolds the app without authentication; sign-in setup runs only through `eve add channel/web` or the channel picker.
+
+The generated Next.js app signs users in with Better Auth. The agent's eve channel accepts the same sign-in, and still accepts Vercel OIDC and local development requests. In an agent workspace, setup configures only the selected agent.
+
+Setup registers `/api/auth/callback/vercel` as a project redirect URI, so Vercel validates callbacks against the project's deployment domains. The app uses the `authorization_code` grant, `client_secret_post` authentication, and the `openid`, `email`, and `profile` scopes. Setup writes `VERCEL_APP_CLIENT_ID`, `VERCEL_APP_CLIENT_SECRET`, and `BETTER_AUTH_SECRET` to production and preview as sensitive values, and never prints them or writes them to source. Run `eve deploy` after setup to publish the app. Local development runs without browser sign-in.
+
+For automation, supply the setup answers explicitly:
+
+```bash
+eve add channel/web --non-interactive \
+  --answer 'web-hosting="vercel"' \
+  --answer 'web-authentication="vercel"'
+```
+
+Setup needs a linked project and permission to manage Vercel Apps and project environment variables. If your role can't create apps, a team owner can complete setup. The team picker lists eligible teams first and disables teams marked `needs permission` or `couldn't verify` until you sign in or retry.
+
+Setup reuses compatible existing apps and credentials, and stops with an error on conflicting app settings or credentials. It preserves authored channel and UI files unless you pass `--overwrite`.
+
+| What you see                                    | What to do                                                                      |
+| ----------------------------------------------- | ------------------------------------------------------------------------------- |
+| Setup reports a missing prerequisite            | Complete it, then resume with `eve add channel/web --skip-install`.             |
+| The team has reached its Vercel App limit       | Remove an unused app in team settings and retry.                                |
+| The generated app name or slug is already taken | Rename the Vercel project in its settings and retry.                            |
+| The app has reached its client-secret limit     | Remove an unused secret in the app's settings; setup never removes one for you. |
+
+Choose **Configure authentication myself** (`web-authentication=custom`) to keep the current channel policy. The default placeholder rejects production browser requests until you configure your own authentication.
 
 ## CORS
 
-The eve channel leaves CORS untouched by default. Pass `cors: true` to enable
-permissive browser CORS with preflight handling, or pass an options object to
-narrow origins, methods, and headers. Route auth still runs on the actual
-session requests.
-
-Enable or narrow CORS only when browser clients call the channel directly:
+The eve channel sends no CORS headers by default. When browser clients call the channel directly, pass `cors: true` for permissive CORS with preflight handling, or an options object to narrow origins, methods, and headers. Route auth still runs on the session requests.
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -303,36 +249,17 @@ export default eveChannel({
 });
 ```
 
-## Authentication
-
-The `auth` option decides who can call `/eve/v1/info` and the session routes. `/eve/v1/info` additionally requires an operator principal (`service`, `runtime`, or `local-dev`). The built-in helpers cover development and trusted infrastructure:
-
-- `localDev()` accepts requests during local development.
-- `vercelOidc()` lets the local CLI reach a deployed agent, and lets other internal deployments from your team call it.
-
-Neither admits browser users or external clients in production. For a public app, wire the channel to your own auth (Clerk, Auth.js, your own OIDC/JWT verification, an API-key verifier, or any custom `AuthFn`). Vercel OIDC is optional; use it only when Vercel-issued deployment tokens are part of your trust model.
-
-`eve init` scaffolds an `agent/channels/eve.ts` with a production placeholder so you replace it before going live. The generated channel checks Vercel OIDC before falling back to localhost access, and includes `placeholderAuth()`, which returns a setup-focused 401 in production until you swap it for real auth. Delete the file and eve selects its default channel source with `[vercelOidc(), localDev(), placeholderAuth()]`, which rejects all production traffic.
-
-To let your own operator credential read `/eve/v1/info`, have its `AuthFn` return `principalType: "service"` (as `jwtHmac()` and `jwtEcdsa()` do), or return `allowAgentInfo: true` from an `EveAuthFn`; see [Agent info access](../guides/auth-and-route-protection#agent-info-access). Keep end-user strategies returning `"user"` without the grant so they cannot read it.
-
-For the full auth model and helper list, see [Auth & route protection](../guides/auth-and-route-protection).
-
 ## Audience
 
-The eve channel assigns an observability audience when it creates a session. The
-audience controls whether instrumentation may capture session content:
+The eve channel sets each new session's audience from its caller. The audience controls whether traces may capture session content, not who may call the endpoint:
 
-| Session creator                           | Default audience |
-| ----------------------------------------- | ---------------- |
-| Anonymous caller                          | `unknown`        |
-| `user`, `service`, or `runtime` principal | `private`        |
-| Any other principal type                  | `unknown`        |
+| Session creator                        | Default audience |
+| -------------------------------------- | ---------------- |
+| Anonymous caller                       | `unknown`        |
+| `user`, `service`, or `runtime` caller | `private`        |
+| Any other caller type                  | `unknown`        |
 
-Anonymous HTTP surfaces are `unknown` by default because reachability does not establish that their content is safe to record. Authenticated `user`, `service`, and `runtime` sessions are private because they belong to one identified party. Other authenticated principal types also remain `unknown`: trace consumers record metadata but omit content by default in preview and production. Set an explicit `audience: "public"` only for intentionally public traffic.
-
-For a production endpoint whose conversations are all intentionally public,
-set a constant audience:
+`user`, `service`, and `runtime` sessions are `private` because they belong to one identified party. For `unknown` sessions, traces record metadata but leave out content by default in preview and production. Set a constant `audience: "public"` only when every conversation on the endpoint is intentionally public:
 
 ```ts title="agent/channels/eve.ts"
 import { vercelOidc } from "eve/channels/auth";
@@ -344,22 +271,11 @@ export default eveChannel({
 });
 ```
 
-Audience also selects the default [run-data retention](../agent-config#run-data-retention).
-Outside development, private and unknown-audience sessions request deletion when
-they end. The Workflow World must support deletion to enforce it.
+`audience` also accepts a function that receives `caller`, channel, and deployment environment. The audience is fixed when the session is created, so a later turn from a different caller doesn't change it. For an audience that depends on channel state or verified application data, use a [custom channel audience](./custom#conversation-audience).
 
-`audience` controls observability content capture; it does not change who may
-call the endpoint. `auth` still controls access. For a classification that
-depends on channel state or application-specific verified data, use a [custom
-channel audience](./custom#conversation-audience).
+Audience also selects the default [run-data retention](../agent-config#run-data-retention). Outside development, private and unknown-audience sessions request deletion when they end, if the Workflow world supports deletion.
 
-You can also pass a function that receives `caller`, channel, and deployment
-environment. Classification is fixed at session creation, so a later
-turn from a different caller does not reclassify the session.
-
-For a remote agent, a trusted dispatch can forward the original audience and
-its trace-content ceiling. See [Preserving trace
-content](../guides/remote-agents#preserving-trace-content).
+For a remote agent, a trusted caller can forward the original audience and its trace-content ceiling. See [Preserving trace content](../guides/remote-agents#preserving-trace-content).
 
 ## Customization
 
@@ -389,13 +305,13 @@ export default eveChannel({
 });
 ```
 
-`onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch creates a session or sends the first message to a prewarmed session. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
+`onMessage` must return an auth result, so every accepted message starts or continues a session. Return `title` alongside `auth` to set the session title. It applies when the message creates the session, or is the first message to one created without a message.
 
 ### Turn context
 
-`context` strings become user messages in durable session history. For context that applies to one turn only, return `clientContext` instead. It replaces the request's [`clientContext`](../guides/client/messages) for that turn: it reaches every model call in the turn and is not kept in session history.
+`context` strings are saved as user messages in session history. For context that applies to one turn only, return `clientContext`. It replaces the request's [`clientContext`](../guides/client/messages) for every model call in the turn and isn't kept in session history.
 
-`ctx.eve.clientContext` holds the request's `clientContext` exactly as the client sent it, or `undefined` when it sent none. Use it to check or correct client-supplied state before the model sees it:
+`ctx.eve.clientContext` holds the request's `clientContext` as sent, or `undefined`. Use it to check or correct client-supplied state before the model sees it:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel, defaultEveAuth } from "eve/channels/eve";
@@ -414,15 +330,15 @@ export default eveChannel({
 ```
 
 - Omit `clientContext` to keep the request's context. Return `[]` to drop it.
-- The returned value takes the same shape as request `clientContext` (`ClientContextValue`, exported from `eve/channels/eve`): a string, an array of strings, or a JSON object. eve turns it into model messages the same way.
+- The returned value has the request's `ClientContextValue` shape, exported from `eve/channels/eve`: a string, an array of strings, or a JSON object.
 - eve labels client-supplied entries `Client context:` for the model. Returned context is sent without the label.
-- `onMessage` runs only for requests with a message. An input response keeps the context its request sent.
+- `onMessage` runs only for requests with a message. An answer keeps the context its request sent.
 
 ### Start from prior history
 
-Pass `history` to bring in conversation eve did not produce, such as a transcript your app stored, a conversation moving from another system, or a branch of an earlier exchange. The model sees each entry as a real user or assistant turn, not as a transcript inside one message.
+Pass `history` to bring in conversation eve didn't produce, such as a stored transcript or a branch of an earlier exchange. The model sees each entry as a real user or assistant turn.
 
-Create a session that starts from stored history and waits for its first message with `create()` on a channel address. No turn runs until a message arrives:
+Call `create()` on a channel address to create a session from stored history. No turn runs until a message arrives:
 
 ```ts title="agent/channels/app.ts"
 import { defineChannel, POST } from "eve/channels";
@@ -450,25 +366,39 @@ export default defineChannel({
 });
 ```
 
-The client then resumes that session by id, for example with `useEveAgent({ initialSession: { sessionId, streamIndex: 0 }, resume: true })`. `created` is `false` when a session already owned the address, or another `create()` or `send()` claimed it first. That session comes back unchanged and your `history` was not added, so check `created` before treating the session as seeded. Use a new address for each new conversation or branch.
+The client then resumes the session by id, for example with `useEveAgent({ initialSession: { sessionId, streamIndex: 0 }, resume: true })`. `created` is `false` when another session already owned the address or another `create()` or `send()` claimed it first. That session comes back unchanged, without your `history`. Use a new address for each new conversation or branch.
 
-When the session at the address is [stranded](../guides/deployment/self-hosted-operations#recover-a-stranded-session), `create()` throws `SessionStrandedError` instead of replacing it, because that session may hold the conversation you meant to import. Call `end()` on the address, then `create()` again.
+`create()` returns once the new session claims its address, so an immediate `send()` reaches it. It throws if no session claims the address within 15 seconds. On a [stranded](../guides/deployment/self-hosted-operations#recover-a-stranded-session) session, `create()` throws `SessionStrandedError` instead of replacing a conversation you may mean to import; call `end()` on the address, then `create()` again.
 
-`create()` returns once the new session claims its address, so a `send()` right after it reaches that session. It throws if no session claims the address within 15 seconds.
+`send()` accepts the same `history` option and adds the entries right before that message and its `context`, whether it creates or continues the session. The eve channel's `onMessage` can return `history` too, which applies to every message it's returned for.
 
-`send()` accepts the same `history` option. The entries are added right before that message and its `context`, whether the send creates the session or continues it. The eve channel's `onMessage` can return `history` the same way. It applies to every message it is returned for, so return it only when the message should carry those turns.
-
-Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` that is unique within the call. An entry with any other field is rejected, not dropped, so map your stored messages to these fields. Invalid history throws an `InvalidSessionHistoryError`, exported from `eve/channels`, that names the entry and the rule it broke. eve doesn't cap how many entries or how much text one call carries. Your route decides how much stored conversation to load, so trim long conversations there, for example to the newest messages. Tool calls, files, and reasoning are not supported.
+Each entry has a `role` of `"user"` or `"assistant"`, non-empty `text`, and an optional `id` unique within the call. eve rejects an entry with any other field, so map your stored messages to these fields. Invalid history throws an `InvalidSessionHistoryError`, exported from `eve/channels`, naming the entry and the broken rule. eve doesn't cap entries or text, so trim long conversations in your route. Tool calls, files, and reasoning are not supported.
 
 eve never accepts `history` from a client request body. Resolve it on the server and authorize the caller against the stored conversation.
 
-The stream records the entries on the `delivery.consumed` of the message that brought them, in `data.history`, with the same `role`, `text`, and `id` you passed. History from `create()` is recorded with the first message the channel accepts. When one turn takes in several messages at once, the model reads all of their history before what they sent. `transcriptOf()` from `eve/client` reads the entries in that order, so its `{ role, text }` messages can be passed straight back as `history` to branch a session. Frontend `messages` show them ahead of their message with `metadata.imported` set and your `id` in `metadata.historyId`, so you can rejoin your own annotations. Imported messages have no `metadata.turnId`, so a turn's reply never streams into one, and their message ids stay unique even when a later call reuses an `id`. After that, the entries are ordinary history: compaction, `clear()`, and handoffs treat them like any other turn.
+The stream records the entries in `data.history` on the `delivery.consumed` of the message that brought them. History from `create()` is recorded with the first accepted message. When one turn takes in several messages, the model reads all their history first. `transcriptOf()` from `eve/client` returns entries in that order as `{ role, text }` messages you can pass back as `history` to branch a session.
+
+Frontend `messages` show imported entries before their message, with `metadata.imported` set and your `id` in `metadata.historyId`. Imported messages have no `metadata.turnId`, so a turn's reply never streams into one. Their message ids stay unique even when a later call reuses an `id`. Compaction, `clear()`, and handoffs treat them like any other history.
+
+## Replace or disable the defaults
+
+An authored `agent/channels/eve.ts` replaces the whole default eve channel. An `eveChannel(...)` replacement keeps the standard routes with your options. A `defineChannel(...)` replacement serves only the routes you declare, without the health, info, or callback routes.
+
+Export `disableRoute()` to remove every `/eve/v1` route:
+
+```ts title="agent/channels/eve.ts"
+import { disableRoute } from "eve/channels";
+
+export default disableRoute();
+```
+
+The default home page at `GET /` and `HEAD /` is a separate `home` channel. Author `agent/channels/home.ts` to replace it, or export `disableRoute()` there to remove it without affecting `/eve/v1`.
 
 ## Clients
 
 The browser side of this API lives in the [Frontend](../guides/frontend/overview) docs, where `useEveAgent` drives the eve channel from React UI.
 
-For scripts, server-to-server calls, evals, tests, and custom clients, use the [Client SDK](../guides/client/overview). It wraps the ID-addressed session routes, stream cursor, and reconnect loop.
+For scripts, server-to-server calls, evals, tests, and custom clients, use the [Client SDK](../guides/client/overview), which wraps the session routes, stream cursor, and reconnect loop.
 
 ## What to read next
 

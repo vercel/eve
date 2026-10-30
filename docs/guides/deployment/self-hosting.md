@@ -10,7 +10,7 @@ Self-host eve by running the Node server that `eve build` produces on your own s
 Every self-hosted deployment needs:
 
 - A model credential and a production route policy; see [Configure model access and route auth](#configure-model-access-and-route-auth)
-- Durable storage for the Workflow world; see [Choose a Workflow world](#choose-a-workflow-world)
+- Persistent storage for the Workflow world; see [Choose a Workflow world](#choose-a-workflow-world)
 - A Node process serving the build; see [Build and start the server](#build-and-start-the-server)
 - A reverse proxy that forwards both runtime route prefixes; see [Configure proxy routes](#configure-proxy-routes)
 
@@ -18,7 +18,7 @@ The sections below follow that order and end by verifying a real turn. Configure
 
 ## Configure model access and route auth
 
-Set `AI_GATEWAY_API_KEY` to use a string model ID through the Vercel AI Gateway from a non-Vercel host. To call a provider directly, install its [AI SDK provider package](https://ai-sdk.dev/docs/foundations/providers-and-models). Then pass its model object in `agent.ts` and set its API key. See [Agent configuration](../../agent-config#set-the-model) for examples.
+Set `AI_GATEWAY_API_KEY` to use a string model ID through the Vercel AI Gateway. To call a provider directly, install its [AI SDK provider package](https://ai-sdk.dev/docs/foundations/providers-and-models), pass its model object in `agent.ts`, and set its API key. See [Agent configuration](../../agent-config#set-the-model) for examples.
 
 Outside Vercel, use an authenticator your host can validate as the production route policy, such as Basic auth, JSON Web Token (JWT) verification, generic OpenID Connect (OIDC), or a custom verifier, rather than `vercelOidc()` alone. See [Authentication](../auth-and-route-protection).
 
@@ -31,8 +31,6 @@ See [Workflow worlds](./workflow-worlds) to compare and configure the available 
 ## Build and start the server
 
 If your agent uses sandbox tools or file attachments, make Docker available during the build and at runtime, or [select a sandbox provider explicitly](#run-the-sandbox). For Dockerfile builds, see [Build inside a container image](#build-inside-a-container-image) below.
-
-Build the agent, then start the generated server:
 
 ```bash
 eve build
@@ -61,16 +59,16 @@ You can instead run `eve build` where Docker is reachable and copy the output in
 
 ## Configure proxy routes
 
-Forward both runtime route prefixes through your reverse proxy or ingress:
+Forward both runtime route prefixes through your reverse proxy or ingress without rewriting their paths:
 
 - `/eve/` serves health, sessions, streams, channels, tools, and subagents
 - `/.well-known/workflow/` receives workflow callbacks
 
-A proxy restricted to `/eve/` lets a session start, but the run stalls when its callback can’t reach eve. Preserve both prefixes without rewriting their paths.
+If the proxy forwards only `/eve/`, a session starts but the run stalls because its workflow callback can’t reach eve.
 
 ## Verify the service
 
-Check the health route after your proxy and authentication configuration are active:
+After your proxy and authentication are active, check the health route:
 
 ```bash
 curl https://your_agent.example.com/eve/v1/health

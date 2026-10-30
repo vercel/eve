@@ -3,101 +3,67 @@ title: "MCP Connections"
 description: "Connect an eve agent to a remote MCP server, authorize it with Vercel Connect or static credentials, and control which tools the model can discover."
 ---
 
-MCP connections point eve at a remote MCP server you do not author. The server publishes its tools and schemas, and the model finds them with `eve__search` and calls them with `eve__tool`.
+An MCP connection gives your agent the tools of a remote MCP server you don't author. It lives in one file under `agent/connections/`. The server publishes its tools, and the model finds them with `eve__search` and calls them with `eve__tool`.
 
-Use MCP when the service already has an MCP server, when the server owns tool schemas dynamically, or when one connection should expose a family of related remote tools. Use an [OpenAPI connection](./openapi) instead when the service publishes an HTTP API contract and you want eve to generate one tool per operation.
+Use MCP when the service has an MCP server that defines its own tools, or when one connection should expose a family of related tools.
 
 ## Define an MCP connection
 
-Create one file under `agent/connections/`. The filename becomes the runtime connection name, so `agent/connections/linear.ts` registers as `linear`, and events report its tools as `linear__<tool>`.
+The filename is the connection name, so `agent/connections/linear.ts` registers as `linear`, and events report its tools as `linear__<tool>`.
 
 ```ts title="agent/connections/linear.ts"
 import { connect } from "@vercel/connect/eve";
 import { defineMcpClientConnection } from "eve/connections";
 
 export default defineMcpClientConnection({
-  url: "https://mcp.linear.app/mcp",
-  description: "Linear workspace: issues, projects, cycles, and comments.",
-  auth: connect("mcp.linear.app/linear"),
+  url: "https://mcp.linear.app/mcp", // required: Streamable HTTP or SSE endpoint
+  description: "Linear workspace: issues, projects, cycles, and comments.", // required
+  auth: connect("mcp.linear.app/linear"), // optional: omit for a public server
 });
 ```
 
-The `url` must speak Streamable HTTP or SSE. Write the `description` for the model, not for yourself: eve lists it next to the connection name, and it is the main signal the model uses to decide which connection to search.
+Write the `description` for the model. eve lists it next to the connection name, and the model uses it to decide which connection to search.
 
-## Configure protocol discovery
+### Options
 
-eve discovers the server's MCP protocol by default. If a server rejects discovery with an unsupported protocol version error (`-32022`) and lists a handshake-based version eve supports, eve falls back to `initialize` with the newest version both sides support. If a server requires the older `initialize` handshake and does not report a supported version, disable discovery for that connection:
+The [shared connection options](../connections#options) apply, with `tools` as the filter. MCP adds these:
 
-```ts
-export default defineMcpClientConnection({
-  url: "https://mcp.example.com/mcp",
-  description: "Search support cases",
-  protocolVersionDiscovery: false,
-});
-```
-
-With `protocolVersionDiscovery: false`, the client skips `server/discover` and starts with `initialize`, proposing `2025-11-25` and negotiating a supported handshake-based version. This is a per-connection setting; omitting it or setting it to `true` keeps discovery enabled. Remove the override when the server supports discovery. The setting also applies to connections returned by dynamic resolvers.
+| Field                      | Default | What it does                                                                                                             |
+| -------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `protocolVersionDiscovery` | `true`  | Set `false` for a server that needs the `initialize` handshake. See [protocol discovery](#configure-protocol-discovery). |
+| `forwardPrincipal`         | `false` | Send the turn's user to another eve agent. See [Forward the caller](#forward-the-caller-to-an-eve-agent).                |
+| `experimental.events`      | None    | Run your code when the server sends an event. See [Events](#events-experimental).                                        |
 
 ## Use Vercel Connect for OAuth
 
-For OAuth-backed MCP servers, use the shared [Vercel Connect flow](../connections#interactive-oauth-via-vercel-connect), then pass the returned connector UID to `connect()`. Keep the MCP runtime URL and Connect service identifier distinct. For example, Linear uses `https://mcp.linear.app/mcp` as the MCP endpoint and `mcp.linear.app` when creating the connector.
+For an MCP server that uses OAuth, follow the shared [Vercel Connect flow](../connections#interactive-oauth-via-vercel-connect) and pass the connector UID to `connect()`. The MCP URL and the Connect service identifier differ. Linear uses `https://mcp.linear.app/mcp` as the endpoint and `mcp.linear.app` when you create the connector.
 
-`connect("...")` is user-scoped by default and requires an authenticated user on the active eve session. Use `connect({ connector, principalType: "app" })` when the server should act as the agent instead. The connections overview covers connector setup, session requirements, app and user scope, callback behavior, and troubleshooting.
+By default, `connect("...")` uses each user's own sign-in, so the session needs a signed-in user. Use `connect({ connector, principalType: "app" })` to have the server act as the agent.
 
 ## When eve asks for sign-in
 
-eve asks the user to sign in only when the MCP server asks for it. When a connection has `auth` but no token yet, because its `getToken` throws `ConnectionAuthorizationRequiredError`, eve connects without an `Authorization` header and lists the server's tools. Any other error from `getToken` still fails the connection.
+eve asks the user to sign in only when the MCP server asks for it. When the user has no token yet, `getToken` throws `ConnectionAuthorizationRequiredError`. eve then connects without an `Authorization` header and lists the server's tools. Any other `getToken` error fails the connection.
 
 - **The server rejects every request without a token.** Most hosted OAuth servers, such as Linear, GitHub, and Notion, answer `initialize` or `tools/list` with HTTP `401`. `eve__search` lists the connection as one result named after it, such as `linear`. Calling that name with `eve__tool({ name: "linear" })`, or any of its tools with `eve__tool`, asks the user to sign in.
 - **The server lists tools without a token.** `eve__search` returns its tools with no prompt, and `eve__tool` runs tools the server answers anonymously. Sign-in starts only when a tool call comes back with HTTP `401`, or with an error result that carries a `WWW-Authenticate` challenge in `_meta["mcp/www_authenticate"]`.
 
-After the user signs in, the turn resumes and the model makes the call again. eve reconnects with the token and reloads the tool list, which may now include tools the server hides from anonymous callers. A connection that already has a token sends it on every request, as before.
+After the user signs in, the turn continues and the model retries the call. eve reconnects with the token and reloads the tool list, which may include tools the server hides from anonymous callers. Once a connection has a token, it sends the token on every request.
 
-eve resolves credentials before each MCP HTTP request, including requests on an existing client. When the cached token's `expiresAt` has passed, eve calls the token provider again. If the server rejects a bearer with HTTP `401`, eve evicts the cached token, asks the provider for another token, and retries the request once before asking for sign-in.
+A server that leaves protected tools out of its anonymous `tools/list` never triggers sign-in, because the model can't find those tools. A server that supports anonymous use should list every tool and refuse the protected calls.
 
-Eviction clears eve's cached access token and calls the provider's optional `evict` hook. The provider controls whether it retains a refresh grant for silent renewal. Missing grants and rejected replacement tokens still use the normal authorization flow; HTTP `403` permission failures do not trigger token refresh or retries.
-
-A server that leaves protected tools out of its anonymous `tools/list` never triggers sign-in, because the model cannot find those tools. Servers that support anonymous use should list every tool and refuse the protected calls.
+eve reuses a token until its `expiresAt` passes, then calls the token provider again. On HTTP `401`, eve calls the provider's optional `evict` hook, gets a new token, and retries once before it asks for sign-in. The provider decides whether to keep a refresh grant to renew tokens without a prompt. HTTP `403` never triggers a refresh or retry.
 
 ## Static tokens and headers
 
-MCP connections accept the shared connection `auth` and `headers` options. Use `auth.getToken` for a bearer token, `headers` for another scheme, and resolver functions when credentials or routing depend on the caller. See [Static-token auth](../connections#static-token-auth), [Headers](../connections#headers), and [Per-caller auth and headers](../connections#per-caller-auth-and-headers) for the canonical examples and token-lifecycle behavior.
-
-## Application-provided tool arguments
-
-Some MCP servers require arguments that belong to the application rather than the model. For example, UCP servers expect the agent profile in `arguments.meta` on every tool call. Configure those values with `toolCall.providedArguments`:
-
-```ts title="agent/connections/storefront.ts"
-import { defineMcpClientConnection } from "eve/connections";
-
-const profileUrl = "https://agent.example.com/.well-known/ucp";
-
-export default defineMcpClientConnection({
-  url: "https://store.example.com/api/ucp/mcp",
-  description: "Storefront catalog, carts, checkouts, and orders.",
-  toolCall: {
-    providedArguments: {
-      meta: ({ session }) => ({
-        "ucp-agent": {
-          profile: `${profileUrl}?session=${encodeURIComponent(session.id)}`,
-        },
-      }),
-    },
-  },
-});
-```
-
-Values may be JSON values, promises, or callbacks. Callbacks receive the active session context, the bare remote `toolName`, and a replay-stable `callId` that is unique to the tool call. Use `callId` when the remote server needs an idempotency key.
-
-eve treats configured keys as application-owned: it removes them from every remote tool's model-facing input schema and adds their resolved values immediately before execution. They apply to every tool call on the connection and replace any conflicting model value. Approval policies continue to receive only the model-authored input.
+MCP connections accept the shared `auth` and `headers` options. Use `auth.getToken` for a bearer token, `headers` for another scheme, and resolver functions when credentials or routing depend on the caller. See [Static-token auth](../connections#static-token-auth), [Headers](../connections#headers), and [Per-caller auth and headers](../connections#per-caller-auth-and-headers).
 
 ## No auth
 
-Omit `auth` and `headers` only for an intentionally public or loopback MCP server. See [No auth](../connections#no-auth) for the shared connection behavior and security boundary.
+Omit `auth` and `headers` only for an intentionally public or loopback MCP server. See [No auth](../connections#no-auth).
 
 ## Tool filters
 
-MCP servers can expose broad read and write surfaces. Narrow what the model can discover with exactly one of `tools.allow` or `tools.block`:
+Narrow which server tools the model can discover with exactly one of `tools.allow` or `tools.block`:
 
 ```ts title="agent/connections/linear.ts"
 import { connect } from "@vercel/connect/eve";
@@ -111,17 +77,17 @@ export default defineMcpClientConnection({
 });
 ```
 
-Prefer `allow` for the smallest safe surface, especially when the server exposes write tools. Use `block` when the server has a broad stable surface and only a few tools should be hidden.
+Prefer `allow` for the smallest safe surface, especially when the server exposes write tools. Use `block` to hide a few tools from a broad, stable surface.
 
 ## Approval gates
 
-Use the shared `approval` option to gate every tool served by an MCP connection. The [connections overview](../connections#per-connection-approval) defines the `never()`, `once()`, `always()`, and `auto()` helpers; [Human-in-the-loop](../human-in-the-loop#approvals) defines the pause-and-resume contract.
+The shared `approval` option applies to every tool on an MCP connection. The [connections overview](../connections#per-connection-approval) defines the `never()`, `once()`, `always()`, and `auto()` helpers. [Human-in-the-loop](../human-in-the-loop#approvals) explains how a call waits for a person.
 
 ### Gate specific tools by name or input
 
-A remote MCP server usually mixes read tools with destructive or publishing ones, so a blanket `always()` would prompt on every harmless call. Pass a custom policy instead — the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use — to gate only the calls that matter. The policy receives `{ session, toolName, toolInput, toolAnnotations, callId, abortSignal }` and returns an approval status, synchronously or as a promise.
+With `always()`, a server that mixes read tools with destructive ones prompts on every harmless call. Pass a custom policy instead, the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use, to ask only for the calls that matter. The policy receives `{ session, toolName, toolInput, toolAnnotations, callId, abortSignal }` and returns an approval status, directly or as a promise.
 
-This connection always gates deletes, gates a publish only when the call actually schedules a post, and lets everything else through:
+This connection always asks before a delete, asks before a publish only when the call schedules a post, and lets everything else run:
 
 ```ts title="agent/connections/social.ts"
 import { defineMcpClientConnection } from "eve/connections";
@@ -154,16 +120,20 @@ export default defineMcpClientConnection({
 });
 ```
 
-Two details are specific to connection tools:
+Two details differ from authored tools:
 
-- **`toolName` arrives qualified**, not as the bare remote name. An MCP tool surfaces to the policy as `<connection>__<tool>` (e.g. `social__delete_draft`), so match the bare tool name with `.includes()` or `.endsWith()` rather than `===`.
-- **`toolInput` is the raw input the model produced**, typed as `Record<string, unknown> | undefined`. With an authored tool you define the `inputSchema`, so its approval policy gets input typed and checked against your schema; a connection tool's schema is published by the remote MCP server, not you, so the shape is one you neither own nor can rely on. It is also `undefined` whenever the model's input isn't an object. Read nested fields defensively — as `publishesNow` does — instead of trusting the shape.
+- **`toolName` is qualified** as `<connection>__<tool>`, such as `social__delete_draft`, so match the bare name with `.includes()` or `.endsWith()` rather than `===`.
+- **`toolInput` is the model's raw input**, typed as `Record<string, unknown> | undefined`. The remote server owns the schema, so you can't rely on its shape, and it is `undefined` when the input isn't an object. Read nested fields defensively, as `publishesNow` does.
 
-Return `"user-approval"` (or `true`) to pause for a person and `"not-applicable"` (or `false`) to run without a prompt; return `"approved"` or `"denied"` to decide automatically without involving anyone.
+| Return                        | Effect                       |
+| ----------------------------- | ---------------------------- |
+| `"user-approval"` or `true`   | Pause for a person           |
+| `"not-applicable"` or `false` | Run without a prompt         |
+| `"approved"` or `"denied"`    | Decide without asking anyone |
 
 ### Gate by the server's tool annotations
 
-Many MCP servers declare [tool annotations](https://modelcontextprotocol.io/specification/2025-06-18/server/tools#tool) such as `readOnlyHint` and `destructiveHint` for each tool. eve passes what the server declared for the called tool as `toolAnnotations`, typed as `ConnectionToolAnnotations` from `eve/tools/approval`. It is `undefined` when the server declares none, so keep a fallback:
+Many MCP servers declare [tool annotations](https://modelcontextprotocol.io/specification/2025-06-18/server/tools#tool) such as `readOnlyHint` and `destructiveHint`. eve passes the called tool's annotations as `toolAnnotations`, typed as `ConnectionToolAnnotations` from `eve/tools/approval`. It is `undefined` when the server declares none, so keep a fallback:
 
 ```ts title="agent/connections/linear.ts"
 import { connect } from "@vercel/connect/eve";
@@ -180,13 +150,63 @@ export default defineMcpClientConnection({
 });
 ```
 
-Annotations are hints from the server, not guarantees. Trust them only as far as you trust the server that sent them.
+Annotations are hints, not guarantees. Trust them only as far as you trust the server.
 
-[Human-in-the-loop](/docs/human-in-the-loop#approvals) covers the full set of statuses, scoped approval state and `session.auth`, and how a gated call pauses and resumes durably.
+[Human-in-the-loop](/docs/human-in-the-loop#approvals) covers every status, how long an approval lasts, and `session.auth`.
+
+## Control result size
+
+An MCP tool call returns the tool's `structuredContent` when the server sends it. Otherwise it returns the result's text, parsed as JSON when the tool declares no output schema. Image, audio, and resource content reaches the model as file parts, and a result with `isError: true` fails the call with its text. MCP connections have no per-result transform like an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).
+
+When a remote tool returns more than the model needs, narrow the result at the server. Add a search or summary tool, or return a handle another call can use to fetch a smaller slice.
+
+If you don't control the server, replace that operation with an authored tool that calls an equivalent upstream API. The authored tool can store the full payload outside model context and return only the needed fields through `toModelOutput`. Hide the original with [`tools.block`](#tool-filters) so the model doesn't see duplicate tools.
+
+## Application-provided tool arguments
+
+Some MCP servers require arguments that come from the application, not the model. For example, UCP servers expect the agent profile in `arguments.meta` on every tool call. Set those values with `toolCall.providedArguments`:
+
+```ts title="agent/connections/storefront.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+const profileUrl = "https://agent.example.com/.well-known/ucp";
+
+export default defineMcpClientConnection({
+  url: "https://store.example.com/api/ucp/mcp",
+  description: "Storefront catalog, carts, checkouts, and orders.",
+  toolCall: {
+    providedArguments: {
+      meta: ({ session }) => ({
+        "ucp-agent": {
+          profile: `${profileUrl}?session=${encodeURIComponent(session.id)}`,
+        },
+      }),
+    },
+  },
+});
+```
+
+Values may be JSON values, promises, or callbacks. Callbacks receive the session context, the bare remote `toolName`, and a `callId`. The `callId` is unique to the tool call and stays the same if eve runs the call again, so it works as an idempotency key.
+
+The model doesn't see these keys in any tool's input schema. eve adds their values just before each call and overwrites any value the model sent. Approval policies see only the model's input.
+
+## Configure protocol discovery
+
+By default, eve first asks the server which MCP protocol version it speaks. A server can answer with an unsupported protocol version error (`-32022`) that lists a handshake version eve supports. eve then uses `initialize` with the newest version both sides support. If the server needs the `initialize` handshake but lists no supported version, turn discovery off:
+
+```ts
+export default defineMcpClientConnection({
+  url: "https://mcp.example.com/mcp",
+  description: "Search support cases",
+  protocolVersionDiscovery: false,
+});
+```
+
+With `protocolVersionDiscovery: false`, eve skips `server/discover` and starts with `initialize`. It proposes `2025-11-25` and agrees on a version the server supports. Dynamic connections can return this option too.
 
 ## Forward the caller to an eve agent
 
-When the server is another eve agent's [`mcpChannel`](../channels/mcp), set `forwardPrincipal: true` so its published tools run as the user of the current turn instead of as this deployment:
+When the server is another eve agent's [`mcpChannel`](../channels/mcp), set `forwardPrincipal: true` so its tools run as the current turn's user instead of as this deployment:
 
 ```ts title="agent/connections/specialist.ts"
 import { defineMcpClientConnection } from "eve/connections";
@@ -199,19 +219,15 @@ export default defineMcpClientConnection({
 });
 ```
 
-eve sends the turn's user, and its initiator when that differs, in the `eve-forwarded-principal` header on every request. A turn with no caller, or an anonymous one, sends no header. The server must trust this deployment's route-authenticated identity in `trustedForwarders`; otherwise it refuses the request with `403`. See [Forwarded principals](../channels/mcp#forwarded-principals). A request carrying the header fails rather than follow a redirect, so the header never reaches another host. A principal over 16 KiB encoded fails the call before it is sent; trim its attributes.
+The `eve-forwarded-principal` header on every request names the turn's user, and the person who started the session when that differs. An anonymous turn, or one with no caller, sends no header. The server must list the identity this deployment authenticates as in `trustedForwarders`, or it refuses the request with `403`. See [Forwarded principals](../channels/mcp#forwarded-principals).
 
-Authenticate the connection as this deployment, with a stable service credential, like the token above, not with user-scoped `connect("...")` or a per-caller resolver. eve resolves `auth` and `headers` once when it opens the client, but one client can serve turns from different users in a shared session, so the header is what names the user on each request. The server trusts the forwarder by that service identity, and grants the user's own access to downstream services itself.
+A request that carries the header fails instead of following a redirect, so the header never reaches another host. If the encoded user is over 16 KiB, the call fails before it is sent; trim the user's attributes.
 
-## Control result size
-
-An MCP tool call returns the tool's `structuredContent` when the server sends it. Otherwise it returns the result's text, parsed as JSON when the tool declares no output schema. Image, audio, and resource content reaches the model as file parts, and a result with `isError: true` fails the call with its text. MCP connections do not expose a per-result transform equivalent to an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).
-
-When a remote tool returns more data than the model needs, narrow the result at the MCP server. Prefer a purpose-built search or summary tool, or return a stable handle that another call can use to fetch a smaller slice. If you do not control the server and an equivalent upstream API is available, replace only that operation with an authored tool that stores the full payload outside model context and projects the needed fields through `toModelOutput`. Block the original MCP operation through [`tools.block`](#tool-filters) so the model does not see duplicate tools.
+Authenticate the connection as this deployment with a fixed service credential, like the token above. Don't use a user's `connect("...")` sign-in or a per-caller resolver. eve can reuse the same `auth` and `headers` for different users in a shared session. The header names the user on each request, and the server decides what that user can reach.
 
 ## Events (experimental)
 
-An MCP connection can watch the server's events and run your code when one arrives. Vercel Connect holds the upstream subscription and forwards each event to your agent; eve runs your callback.
+An MCP connection can watch the server's events and run your code when one arrives. Vercel Connect holds the subscription and forwards each event to your agent.
 
 Requirements:
 
@@ -221,7 +237,7 @@ Requirements:
 
 ### Handle events
 
-Add `experimental: { events: { ... } }` to the connection. In this example, a user asks the agent to "watch the support inbox and draft replies to new bug reports". The model subscribes to Bird's `email_mailbox.message_received` event for that mailbox. Each new email then starts a turn in the same conversation, with instructions to triage it:
+Add `experimental: { events: { ... } }` to the connection. In this example, a user asks the agent to "watch the support inbox and draft replies to new bug reports". The model subscribes to Bird's `email_mailbox.message_received` event for that mailbox. Each new email starts a turn in the same conversation with instructions to triage it:
 
 ```ts title="agent/connections/bird.ts"
 import { connect } from "@vercel/connect/eve";
@@ -251,13 +267,13 @@ export default defineMcpClientConnection({
 });
 ```
 
-The model does the work with the connection's own tools: it reads the thread, drafts the reply, and waits for the user's approval in the conversation. `turnPolicy: "queue"` lets a burst of emails run one turn after another instead of interrupting the user.
+The model does the work with the connection's tools, then waits for the user's approval in the conversation. `turnPolicy: "queue"` runs a burst of emails one turn after another instead of interrupting the user.
 
-`onEvent` is required. Defining it does not subscribe to anything: the model subscribes at runtime.
+`onEvent` is required. Defining it doesn't subscribe to anything; the model subscribes while it works.
 
-Callbacks run outside any conversation, as the user who subscribed (`auth`). Nothing enters a session unless you call `attachSession(sessionId).send(...)`, and `attachSession` never creates a session.
+Callbacks run outside any conversation, as the user who subscribed (`auth`). Nothing reaches a session unless you call `attachSession(sessionId).send(...)`, and `attachSession` never creates a session.
 
-Each delivery runs in its own durable workflow, so callbacks can run concurrently, out of order, and more than once. Use `deliveryId` to deduplicate side effects:
+Callbacks can run concurrently, out of order, and more than once. Use `deliveryId` to deduplicate side effects:
 
 ```ts
 async onEvent({ event, deliveryId }) {
@@ -305,31 +321,31 @@ experimental: {
 | `events_get_subscription` | `{ id }`               | The subscription, or unknown once ended |
 | `events_unsubscribe`      | `{ id }`               | `{ id, status: "stopping" }`            |
 
-There is one subscribe action per event the server offers; its description names the event. `ttlMs` is required: an integer from `120000` (2 minutes) to `31536000000` (365 days), or `null` to watch until stopped. `expiresAt` is the resulting deadline, or `null`.
+Each event the server offers gets one subscribe action, whose description names the event. `ttlMs` is required: an integer from `120000` (2 minutes) to `31536000000` (365 days), or `null` to watch until stopped. `expiresAt` is the resulting deadline, or `null`.
 
 - **Pending.** If Connect has not confirmed in time, subscribe returns the `id` with `status: "pending"`. Call get with that `id` later.
 - **Repeats.** Subscribing again to the same event with the same arguments from the same session returns the existing watch. Another session gets its own watch.
-- **Stopping.** Get and stop accept the `id` from any of the creator's sessions. After stop, eve keeps retrying Connect's unsubscribe until cleanup completes; until then get still reports the watch and stop can be called again.
+- **Stopping.** Get and stop accept the `id` from any of the creator's sessions. Until Connect confirms the unsubscribe, get still reports the watch and stop can be called again.
 - **Lifetime.** A watch outlives the session that created it. It ends on stop, at `expiresAt`, or when the upstream subscription terminates.
 
-`tools.allow` and `tools.block` apply to these actions. An allow list hides any event action it does not name, so copy the exact `events_subscribe_<hash>` names from `eve__search`. `toolCall.providedArguments` does not apply to event actions.
+`tools.allow` and `tools.block` apply to these actions, so an allow list must name the exact `events_subscribe_<hash>` names from `eve__search`. `toolCall.providedArguments` doesn't apply to them.
 
 ### Receiver
 
-eve mounts `POST /eve/v1/hooks/:connectionName`, under any configured agent or public prefix. It accepts only Connect's delivery token and only deliveries for a live watch's subscription; it answers `410` once the watch has ended. The callback's identity always comes from the saved watch, never from the event payload.
+eve serves `POST /eve/v1/hooks/:connectionName`, under any configured agent or public prefix. It accepts only requests that carry Connect's token, and only for a watch that is still active. It answers `410` once the watch has ended. The callback's `auth` always comes from the saved watch, never from the event body.
 
 ## Troubleshooting
 
-| Symptom                                    | Check                                                                                                                                     |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `principal_required`                       | A user-scoped `connect("...")` ran without an authenticated user. Return `principalType: "user"` from route auth, or use app-scoped auth. |
-| The model does not find the remote tool    | Improve the connection `description`, then check `tools.allow` / `tools.block`.                                                           |
-| OAuth works locally but fails after deploy | Attach the Connect connector to the deployed Vercel project and verify the UID in `connect("...")`.                                       |
-| The server rejects requests                | Confirm the MCP URL, transport support, auth scheme, required headers, and application-provided arguments.                                |
+| What you see                               | What to do                                                                                                                                 |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `principal_required`                       | `connect("...")` needs a signed-in user, and the session had none. Return `principalType: "user"` from route auth, or use app-scoped auth. |
+| The model does not find the remote tool    | Improve the connection `description`, then check `tools.allow` / `tools.block`.                                                            |
+| OAuth works locally but fails after deploy | Attach the Connect connector to the deployed Vercel project and verify the UID in `connect("...")`.                                        |
+| The server rejects requests                | Confirm the MCP URL, transport support, auth scheme, required headers, and application-provided arguments.                                 |
 
 ## What to read next
 
 - [Connections](../connections): shared auth, headers, approval, and per-caller patterns.
-- [OpenAPI connections](./openapi): generate tools from OpenAPI operations.
+- [OpenAPI connections](./openapi): use one when the service publishes an HTTP API contract and you want one tool per operation.
 - [Authentication](../guides/auth-and-route-protection): establish the caller identity required by user-scoped auth.
 - [Security model](../concepts/security-model): how connection credentials stay out of the model's reach.

@@ -3,17 +3,17 @@ title: "Multi-Tenant Outbound Auth"
 description: "Select tenant-scoped credentials inside authored tools, OpenAPI connections, and MCP connections from the active turn context."
 ---
 
-eve carries verified inbound identity into every turn. Authored tools and connections can use that context to select outbound credentials for the current tenant:
+Multi-tenant outbound auth picks the current tenant's credentials from the signed-in caller that eve passes into every turn:
 
-- tool executors receive `ctx` directly;
-- OpenAPI and MCP `auth` may be async functions of `ctx`;
-- connection headers may be an async map or async individual values.
+- A tool's `execute` receives `ctx` directly.
+- OpenAPI and MCP `auth` can be an async function of `ctx`.
+- Connection `headers` can be an async function that returns a map, or a map of async values.
 
-That is the entire pattern. Your application still owns tenant membership and credential storage; eve ensures the model never needs to see or choose those credentials.
+Your application stores tenant membership and credentials. The model never sees or chooses those credentials.
 
 ## Establish the tenant scope
 
-Configure route auth so the accepted principal contains a string `tenantId` attribute. Then centralize the runtime check:
+Configure route auth so the accepted caller has a string `tenantId` attribute. Then put the check in one helper:
 
 ```ts title="agent/lib/tenant.ts"
 import type { SessionContext } from "eve/context";
@@ -39,7 +39,7 @@ The tenant comes from verified route auth, never a prompt, tool argument, or rem
 
 For production apps with many customer orgs, the inbound credential is often
 your own API key, session cookie, or JWT. Use that credential to authenticate
-the caller before eve starts a run, then stamp the tenant onto the session:
+the caller before eve starts a run, then add the tenant to the session:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -70,25 +70,28 @@ export default eveChannel({
 });
 ```
 
-`verifyAgentCaller` is application code. It can validate an API key, verify a
-JWT, or read an app session, but it should return only after the user belongs
-to the tenant they are claiming. Keep `principalId` stable for the same user,
-include an `issuer` when ids can come from more than one identity system, and
-put routing facts such as `tenantId` in `attributes`.
+`verifyAgentCaller` is application code that validates an API key, verifies a
+JWT, or reads an app session. It must return only after confirming that the user
+belongs to the tenant they claim.
+
+- Keep `principalId` stable for the same user.
+- Include an `issuer` when ids can come from more than one identity system.
+- Put routing values such as `tenantId` in `attributes`.
 
 If one user can switch between orgs, authenticate the selected org on every
-session create or continue request and stamp that selected `tenantId` onto the
-current turn.
+request that creates or continues a session. Set the selected `tenantId` on
+the current turn.
 
-This is not connection OAuth. The user is already authenticated to your app;
-eve uses that verified principal to pick the correct outbound credential.
+This is not connection OAuth. The user is already signed in to your app, and
+eve uses that user to pick the outbound credential.
 
 ## Build tenant connection auth
 
-For Bearer tokens or tenant-scoped JWTs, write one non-interactive auth helper
-and reuse it across OpenAPI and MCP connections. `principalType: "user"` tells
-eve to require the authenticated user from route auth, key the step-local token
-cache by that user, and pass the projected principal into `getToken`:
+For Bearer tokens or JWTs for one tenant, write one auth helper that never
+prompts the user to sign in. Use it for OpenAPI and MCP connections. With
+`principalType: "user"`, eve requires a signed-in user from route auth and
+passes that user to `getToken` as `principal`. eve never reuses a token
+fetched for one user for another user:
 
 ```ts title="agent/lib/tenant-connection-auth.ts"
 import type { AuthorizationDefinition, ConnectionPrincipal } from "eve/connections";
@@ -124,14 +127,14 @@ export function tenantBearerAuth(service: TenantService): AuthorizationDefinitio
 ```
 
 The model never supplies `tenantId` or sees the returned token. If the remote
-service uses tenant-level credentials shared by multiple users, keep the
-credential lookup keyed by `tenantId` in your provider; user-scoped connection
-auth is still useful because it rejects unauthenticated sessions and keeps
-eve's token cache from crossing caller identities.
+service uses one credential for all users in a tenant, look it up by
+`tenantId` in your provider. Connection auth with `principalType: "user"` still
+rejects sessions without a signed-in user, and it never gives one caller's
+token to another caller.
 
 ## Authenticate an authored tool call
 
-Derive the tenant inside `execute`, fetch its credential from your application provider, and construct the outbound request:
+Read the tenant inside `execute`, get its credential from your provider, and build the outbound request:
 
 ```ts title="agent/tools/list_invoices.ts"
 import { defineTool } from "eve/tools";
@@ -158,12 +161,12 @@ export default defineTool({
 });
 ```
 
-The model controls only `limit`. Even if a prompt asks for another tenant, the executor selects the credential from `ctx.session.auth.current`.
+The model controls only `limit`. Even if a prompt asks for another tenant, `execute` picks the credential from `ctx.session.auth.current`.
 
 ## Authenticate an OpenAPI connection
 
-Attach the reusable auth helper to the connection. Generated operation tools
-receive the token at call time without exposing it to the model:
+Attach the auth helper to the connection. Generated operation tools receive
+the token at call time without exposing it to the model:
 
 ```ts title="agent/connections/billing.ts"
 import { defineOpenAPIConnection } from "eve/connections";
@@ -185,7 +188,7 @@ export default defineOpenAPIConnection({
 });
 ```
 
-Do not return `Authorization` from `headers` when `auth` is present. eve constructs that header from `getToken` and rejects conflicting definitions.
+Do not return `Authorization` from `headers` when `auth` is present. eve builds that header from `getToken` and rejects definitions that set both.
 
 ## Authenticate an MCP connection
 
@@ -240,12 +243,12 @@ export default defineMcpClientConnection({
 });
 ```
 
-Use the same shape for OpenAPI connections. API keys resolved in `headers` are
-sent only on outbound requests; they are not model inputs or tool results.
+Use the same shape for OpenAPI connections. eve sends API keys from `headers`
+only on outbound requests. They are not model inputs or tool results.
 
 ## Supply the credential provider
 
-The eve-facing files need only this application contract:
+The tools and connections need only this interface:
 
 ```ts title="agent/lib/tenant-credentials.ts"
 export type TenantService = "billing" | "support";
@@ -277,20 +280,18 @@ export interface TenantCredentialProvider {
 export { tenantCredentials } from "../../lib/tenant-credentials";
 ```
 
-Implement the provider with the secret system your application already trusts:
-a cloud secret manager, an encrypted database table, a token broker, or an
-out-of-band OAuth flow you own. eve does not prescribe that choice.
+Implement the provider with the secret system your application already trusts.
+Examples are a cloud secret manager, an encrypted database table, a token broker,
+or an out-of-band OAuth flow you own.
 
-The provider must fail closed for unknown tenants, avoid returning secrets in logs or errors, and rotate or refresh credentials before `expiresAt`. Prefer credentials that are themselves restricted to one remote tenant; treat workspace headers as routing, not authorization.
+The provider must fail closed for unknown tenants, keep secrets out of logs and errors, and rotate or refresh credentials before `expiresAt`. Prefer credentials that are themselves restricted to one remote tenant. Treat workspace headers as routing, not authorization.
 
 ## What the model can and cannot see
 
-1. Route auth stamps the verified tenant onto the session.
-2. Tool code reads `ctx.session.auth.current`, and connection auth receives the projected `principal`.
-3. The application provider resolves the corresponding credential.
+1. Route auth adds the verified tenant to the session.
+2. Tool code reads `ctx.session.auth.current`, and connection auth receives the user as `principal`.
+3. Your provider gets the matching credential.
 4. eve sends the resulting token and headers directly to the remote service.
 5. Neither becomes a model message or tool result.
 
-Also enforce tenant ownership for session create, continue, and stream routes. Route authentication identifies the caller, but your application owns the ACL that decides which session ids that caller may access.
-
-No framework-native tenant object is involved. The implementation is the composition of route auth, `ctx.session`, tool execution, and async connection auth/header resolvers.
+Also check which tenant a session belongs to on the session create, continue, and stream routes. Route authentication identifies the caller. Your application's access list decides which session IDs that caller may access.

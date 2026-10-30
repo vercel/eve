@@ -87,6 +87,11 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/getting-started/first-agent", "/tutorial/first-agent"),
   ...createDocsRedirects("/guides/evaluate", "/guides/decide"),
   ...createDocsRedirects("/sandbox/microsandbox", "/sandbox"),
+  ...createDocsRedirects("/tools/tasks-upgrade", "/tools/tasks"),
+  ...createDocsRedirects(
+    "/observability/instrumentation-migration",
+    "/observability/instrumentation",
+  ),
 ];
 
 export const rootMarkdownRedirects: DocsRedirect[] = [

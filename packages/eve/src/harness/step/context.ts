@@ -216,7 +216,6 @@ async function failTurn(step: Step, error: unknown, code: string): Promise<StepR
 /** A lifecycle event failed to publish: a dynamic model selection failure ends the session. */
 export async function failBoundaryEvent(step: Step, error: unknown): Promise<StepResult> {
   throwIfTurnAborted(step.config.abortSignal);
-  if (isTurnCancellation(error)) throw error;
   if (isDynamicModelSelectionError(error)) return failModelSelection(step, error);
   throw error;
 }
@@ -224,6 +223,7 @@ export async function failBoundaryEvent(step: Step, error: unknown): Promise<Ste
 /** No model can serve the turn: the session fails. */
 export async function failModelSelection(step: Step, error: unknown): Promise<StepResult> {
   throwIfTurnAborted(step.config.abortSignal);
+  if (isTurnCancellation(error)) throw error;
   step.instrumentation?.recordError(error);
   if (step.emit === undefined) throw error;
 

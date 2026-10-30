@@ -3,7 +3,7 @@ title: "Query Sample Data"
 description: "Part 3 of the Build an Agent tutorial. Add a run_sql tool over a local sample dataset and watch the tool loop."
 ---
 
-The analytics assistant can hold a conversation, but it can't see a single row of data. Give it a tool. A tool is the action primitive. Typed input goes in, your code runs, structured output comes back. The name the model sees is the filename, so `agent/tools/run_sql.ts` becomes the tool `run_sql`.
+The analytics assistant can hold a conversation, but it can't see a single row of data. Give it a tool: typed input goes in, your code runs, and structured output comes back. The name the model sees is the filename, so `agent/tools/run_sql.ts` becomes the tool `run_sql`.
 
 ## Install the sample database
 
@@ -14,7 +14,7 @@ npm install sql.js
 npm install --save-dev @types/sql.js
 ```
 
-`sql.js` loads its WebAssembly binary from the installed package at runtime. Keep the package external so the binary remains next to its JavaScript. Add this `build` property inside your existing `defineAgent({ ... })` in `agent/agent.ts`, keeping your configured `model` and its imports:
+`sql.js` loads its WebAssembly binary from the installed package at runtime, so keep the package external. Add this `build` property inside your existing `defineAgent({ ... })` in `agent/agent.ts`, keeping your configured `model` and its imports:
 
 ```ts
 build: {
@@ -22,11 +22,11 @@ build: {
 },
 ```
 
-Restart the dev server after changing `externalDependencies`. eve reads this setting when the server starts.
+eve reads `externalDependencies` when the server starts, so restart the dev server after changing it.
 
 ## A tiny sample dataset
 
-Create `agent/lib/sample-db.ts` with the dataset below. These four orders and three customers supply the data for every remaining tutorial step. No database server, account, or connection string is needed. The dataset is recreated when the app restarts.
+Create `agent/lib/sample-db.ts` with the dataset below. These four orders and three customers supply the data for every remaining tutorial step, with no database server or account. The dataset is recreated when the app restarts.
 
 ```ts title="agent/lib/sample-db.ts"
 import initSqlJs from "sql.js";
@@ -71,9 +71,9 @@ export async function runReadOnlySql(sql: string) {
 }
 ```
 
-The outer `SELECT` lets SQLite accept queries, including `WITH` queries, while rejecting writes and configuration statements. The helper prepares one statement, rejects trailing SQL, and reads at most 501 rows. The extra row lets the tool report that its 500-row output was truncated. It frees the statement even when a query fails.
+The outer `SELECT` accepts queries, including `WITH` queries, and rejects writes and configuration statements. The helper reads at most 501 rows; the extra row lets the tool report that its 500-row output was truncated.
 
-This is an in-memory tutorial database. A row limit does not bound the work needed to compute a query; use database-enforced read-only permissions and query timeouts when adapting the tool to a production database.
+A row limit does not bound the work needed to compute a query. When adapting the tool to a production database, use database-enforced read-only permissions and query timeouts.
 
 ## Define the run_sql tool
 
@@ -97,7 +97,7 @@ export default defineTool({
 });
 ```
 
-Tools run in your app runtime with full `process.env`, not in the sandbox. The `inputSchema` both validates the call and types the `input` you get inside `execute`. For output bounding, `toModelOutput`, and authorization, see [Tools](../tools).
+Tools run in your app's server code with full `process.env`, not in the sandbox. The `inputSchema` both validates the call and types the `input` you get inside `execute`. For output bounding, `toModelOutput`, and authorization, see [Tools](../tools).
 
 ## Watch the tool loop
 
@@ -107,7 +107,7 @@ Restart the dev server with `npm run dev` and ask:
 Which customer has spent the most, and how much?
 ```
 
-Watch the loop play out in the TUI. The model emits a `run_sql` call, eve runs your `execute`, and the rows come back as a tool result. The model reads them and answers with a real number. The result is Globex with 9,900 cents ($99.00). The amounts are stored in cents, so divide by 100 when reporting dollars. eve drove the whole loop; you supplied the tool.
+In the TUI, the model emits a `run_sql` call, eve runs your `execute`, and the rows come back as a tool result. The model answers Globex with 9,900 cents ($99.00); amounts are stored in cents. eve ran the whole loop; you wrote the tool.
 
 Keep `run_sql` and the sample database for the rest of the tutorial. When you have your own data service, [Connect a warehouse](./connect-a-warehouse) explains the optional integration.
 

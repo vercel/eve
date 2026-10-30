@@ -3,20 +3,21 @@ title: "Docker Sandbox"
 description: "Create local persistent containers from an image or Dockerfile."
 ---
 
-Docker environments can use eve's default image, an existing OCI image, or `agent/sandbox/Dockerfile`.
+A Docker sandbox runs each session in its own local container, which keeps its files between turns. The container comes from eve's default image, an existing OCI image, or `agent/sandbox/Dockerfile`.
 
-```ts
+```ts title="agent/sandbox.ts"
 import { defineSandbox } from "eve/sandbox";
 import { DockerSandbox } from "eve/sandbox/docker";
 
 export const environment = DockerSandbox.image("ghcr.io/acme/agent@sha256:...");
 
+// networkPolicy is optional: "allow-all" or "deny-all"
 export default defineSandbox(() => environment.open({ networkPolicy: "deny-all" }));
 ```
 
 ## Choose the base image
 
-`DockerSandbox.environment()`, `DockerSandbox.image()`, and `DockerSandbox.dockerfile()` all create the same Docker environment. They differ only in how you pass the base image:
+The three constructors create the same Docker environment. They differ only in how you pass the base image:
 
 | Constructor                                 | Base image without a Dockerfile          |
 | ------------------------------------------- | ---------------------------------------- |
@@ -24,28 +25,33 @@ export default defineSandbox(() => environment.open({ networkPolicy: "deny-all" 
 | `DockerSandbox.image("ghcr.io/acme/agent")` | The image reference you pass             |
 | `DockerSandbox.dockerfile()`                | eve's default image                      |
 
-When `agent/sandbox/Dockerfile` exists, eve builds it during preparation and uses the result as the base image for every constructor. The Dockerfile takes precedence over any `image` you pass, including `DockerSandbox.image(ref)`. eve uses the files under `agent/sandbox/` as the Docker build context. To use an existing image instead, remove the Dockerfile.
+When `agent/sandbox/Dockerfile` exists, eve builds it during preparation with `agent/sandbox/` as the build context. The result is the base image for every constructor, and it overrides any `image` you pass, including `DockerSandbox.image(ref)`. To use an existing image, remove the Dockerfile.
 
-`DockerSandbox.dockerfile()` does not accept an `image` option, which makes the Dockerfile convention explicit in your sandbox file.
+Use `DockerSandbox.dockerfile()`, which takes no `image` option, to make the sandbox file show that it uses the Dockerfile.
 
 ## eve's default image
 
 eve's default image runs Ubuntu with Node.js 24, npm, Python 3, git, ripgrep, jq, and curl. Commands run as the `vercel-sandbox` user in `/workspace`, with passwordless `sudo`. Docker pulls it from `ghcr.io/vercel/eve`, and [Vercel Sandbox](/docs/sandbox/vercel) uses the same image from `vcr.vercel.com/vercel/eve/base`.
 
-The default image does not include pnpm or pip, so install them in `prepare` when your agent needs them. `npm install -g pnpm` installs pnpm for the `vercel-sandbox` user. Ubuntu's system Python refuses `pip install`, so install `python3-venv` with `sudo apt-get install -y python3-venv`, then use the pip inside a virtual environment. The [analysis tutorial](/docs/tutorial/run-analysis#install-the-chart-dependencies) shows the Python setup. Preparation runs when eve builds the template, so it needs network access to the package registries.
+The default image doesn't include pnpm or pip, so install them in `prepare` when your agent needs them:
 
-Each eve release pins one tag of the default image. The tag comes from the image definition, not the eve version. Prepared templates include the image reference, so an eve upgrade that keeps the same image reuses them. A release that changes the image rebuilds them once.
+- `npm install -g pnpm` installs pnpm for the `vercel-sandbox` user.
+- Ubuntu's system Python refuses `pip install`, so run `sudo apt-get install -y python3-venv` and use the pip inside a virtual environment. The [analysis tutorial](/docs/tutorial/run-analysis#install-the-chart-dependencies) shows the Python setup.
+
+Preparation runs when eve builds the template, so it needs network access to the package registries.
+
+Each eve release pins one tag of the default image, and the tag is not the eve version. Prepared templates include the image reference, so a new eve release reuses them unless it pins a different image.
 
 To run a different published tag, set `EVE_SANDBOX_IMAGE_TAG` in both the build and runtime environments. eve applies the tag to both registries.
 
 ## Environment options
 
-Image, pull policy, environment variables, and `prepare` belong to the reusable environment. During preparation, eve starts a temporary container, seeds workspace and skill files, runs your `prepare`, and commits the result as the recorded template image.
+Pass `image`, `pullPolicy`, `env`, and `prepare` to the environment. During preparation, eve copies workspace and skill files into a temporary container and runs your `prepare`. It saves the result as the template image.
 
 ## Live container options
 
-Pass `networkPolicy` to `open()`. Docker supports only `"allow-all"` and `"deny-all"`. The policy applies to the live container, not the prepared image.
+Pass `networkPolicy` to `open()` to set the live container's policy: `"allow-all"` or `"deny-all"`.
 
-A session-owned container keeps writable `/workspace` state in its container filesystem. A stopped container restarts with that state. `sandbox.delete()` removes the session's container by name and succeeds when the container is already gone.
+Each session's container keeps `/workspace` in its filesystem, and a stopped container restarts with those files. `sandbox.delete()` removes the container and succeeds when it's already gone.
 
 See the [sandbox overview](/docs/sandbox) for managed workspace, skills, parent inheritance, and custom providers.

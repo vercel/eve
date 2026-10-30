@@ -3,19 +3,15 @@ title: "Terminal UI"
 description: "Use eve locally or connect to a deployed agent from an interactive terminal UI."
 ---
 
-`eve dev` starts a local development server and opens an interactive terminal UI. Use it to talk to your agent, approve tool calls, answer its questions, and configure local development. When `eve dev` starts a local server, self-modification is available by default; see [Self-Modification](./self-modification).
+`eve dev` starts a local development server and opens an interactive terminal UI. In the UI, you talk to your agent, approve tool calls, answer its questions, and configure local development. Self-modification is on by default in a local server; see [Self-Modification](./self-modification).
 
 ```bash
 eve dev
 ```
 
-The footer shows the active model, reasoning level when set, speed indicator, and connection separated by dots, such as `gpt-6-luna · high · ⚡︎`. The model label omits the provider prefix and removes `-fast` only at the end. A single `⚡︎` marks a model with that suffix or explicit **Fast** mode; terminals without Unicode support use an ASCII marker.
+The footer shows the active model, reasoning level when set, speed indicator, and connection, such as `gpt-6-luna · high · ⚡︎`. The model label drops the provider prefix and a trailing `-fast`; `⚡︎` marks a `-fast` model or **Fast** mode. A Vercel account connection shows the team slug once it resolves.
 
-Vercel account connections show the team slug once it resolves; the local server port is omitted.
-
-The transcript remains in your terminal scrollback after you exit. Run `/help` in the UI to see the commands available in the current session.
-
-Before your first message, the empty composer may suggest asking your local agent to edit its instructions or add a tool or channel. The suggestion depends on the agent's current capabilities; typing replaces it without sending a message or changing files.
+The transcript stays in your terminal scrollback after you exit. Before your first message, the empty composer may suggest a change to ask your agent for; typing replaces the suggestion.
 
 ## Commands
 
@@ -25,7 +21,7 @@ Before your first message, the empty composer may suggest asking your local agen
 | `/new`      | Start a fresh session and clear the screen. `/reset` is an alias.                                                                                            |
 | `/clear`    | Cancel the running turn and every working task, then clear the session's model-message history and keep the session.                                         |
 | `/compact`  | Compact the current session's context.                                                                                                                       |
-| `/cancel`   | Cancel the current turn without discarding settled context.                                                                                                  |
+| `/cancel`   | Cancel the current turn and keep the context from work that already finished.                                                                                |
 | `/login`    | Connect a ChatGPT subscription, Vercel account, or provider API key.                                                                                         |
 | `/add`      | Select and install channels, MCP connections, extensions, and observability integrations. Pass an item address to install it directly: `/add channel/slack`. |
 | `/deploy`   | Deploy the agent to Vercel production. Installs the Vercel CLI, signs in, and links the directory if needed.                                                 |
@@ -35,15 +31,15 @@ Before your first message, the empty composer may suggest asking your local agen
 | `/help`     | List available commands.                                                                                                                                     |
 | `/exit`     | Quit the UI.                                                                                                                                                 |
 
-When a message or stream reconnection reaches a [stranded session](./deployment/self-hosted-operations#recover-a-stranded-session), the TUI says why and which eve version built it, when known. New messages and approvals are not delivered. Run `/new` to end the stranded session; your next message starts a fresh one. `/clear` is refused, because it would keep the stranded session. A session from a previous `eve dev` invocation that the same eve version built is not stranded; see [local workflow recovery](../reference/cli#local-workflow-recovery). A message accepted before the upgrade is not redelivered.
+`/login`, `/model`, `/add`, `/deploy`, `/info`, and `/traces` work only in local `eve dev`, not through `eve remote connect`.
 
-`/login`, `/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects through `eve remote connect`.
+A [stranded session](./deployment/self-hosted-operations#recover-a-stranded-session) accepts no new messages or approvals. When a message or a stream reconnect reaches one, the TUI says why and, when known, which eve version built it. Run `/new` to end it; your next message starts a fresh session. `/clear` is refused because it would keep the stranded session. A message accepted before the upgrade is not redelivered. A session from an earlier `eve dev` process built by the same eve version is not stranded; see [local workflow recovery](../reference/cli#local-workflow-recovery).
 
 ## Set up a new agent
 
-After interactive `eve init`, the TUI opens directly. eve keeps the project's selected connection. For a new connection, it checks explicit environment credentials, the saved machine default, and then the Vercel CLI's current team. Existing project OIDC connections remain supported. Automatic Vercel reuse validates account access without creating or linking a project.
+After interactive `eve init`, the TUI opens directly. eve keeps the connection already selected for the project, including a project OIDC connection. Without one, it checks credentials set in the environment, the saved machine default, and then the Vercel CLI's current team. With the Vercel CLI team, eve checks account access but doesn't create or link a Vercel project.
 
-During startup, the composer stays visible while a progress indicator names the connection being checked and shows when eve is preparing your chat. Type a message and press `Enter` to queue it for when the agent is ready. A picker temporarily takes over input when a choice or API key is needed; your draft returns afterward. If setup is cancelled or fails, queued messages return to the draft.
+During startup, a progress indicator names the connection being checked. Messages you send before the agent is ready are queued. A picker takes over input when a choice or API key is needed, then your draft returns. If setup is cancelled or fails, queued messages return to the draft.
 
 If no connection is ready, `/login` offers:
 
@@ -53,15 +49,15 @@ If no connection is ready, `/login` offers:
 4. OpenAI API Key
 5. Anthropic API Key
 
-Vercel account login opens a browser. When multiple teams are available, `/login` shows a searchable team picker with the current project or CLI team highlighted so you can switch teams. A sole available team is selected automatically. Automatic startup reuses the selected connection without opening this picker. Account-token access to Gateway depends on availability for your account and team; if it is unavailable, choose an API key or another connection.
+Vercel account login opens a browser. With several teams, `/login` shows a searchable team picker with the current project or CLI team highlighted; a sole team is selected automatically. Account-token access to Gateway depends on your account and team; if it is unavailable, choose an API key or another connection.
 
-Type to filter a menu, press `Enter` to select, or `Esc` to return to chat. Dismissing a setup menu adds no cancellation message to the transcript; completed work and failures still appear. Arrow navigation is also available. Cancelling login preserves your draft. If a connection fails, retry `/login`; eve does not silently switch providers.
+In a menu, type to filter, use the arrow keys, press `Enter` to select, or press `Esc` to return to chat. Cancelling login preserves your draft. If a connection fails, retry `/login`; eve does not switch providers on its own.
 
 ### Credentials and deployment
 
-eve saves API keys and eve-owned OAuth refresh credentials in the OS secret store through just-secrets. It saves the last successful login as the machine default and records the project's connection and team separately as nonsecret metadata in `.eve/provider.json`. Newly entered keys are never written into project files. A key explicitly selected through `/login` takes precedence over another key for that provider in your shell; a project connected through environment credentials continues to use its environment. Vercel CLI retains ownership of its credentials and refresh tokens.
+eve saves API keys and its OAuth refresh credentials in the OS secret store, never in project files. The last successful login becomes the machine default. eve records the project's connection and team, which aren't secret, in `.eve/provider.json`. A key selected through `/login` takes precedence over the same provider's key in your shell. A project connected through environment credentials keeps using its environment. The Vercel CLI keeps its own credentials.
 
-Local discovery runs only in development. Deployments need explicitly provisioned `AI_GATEWAY_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or supported project OIDC credentials. ChatGPT subscription models are local-only. `/login` does not link a deployment or authenticate a remote server; `/deploy` handles Vercel CLI installation and account login when needed.
+Credential discovery runs only in local development. Deployments need `AI_GATEWAY_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or project OIDC credentials. ChatGPT subscription models are local-only. `/login` doesn't link a deployment or authenticate a remote server; `/deploy` installs the Vercel CLI and signs you in when needed.
 
 ### Models and settings
 
@@ -71,17 +67,13 @@ Local discovery runs only in development. Deployments need explicitly provisione
 2. Choose **Standard** or **Fast** speed, when supported.
 3. Choose a reasoning level, when the model supports reasoning settings. **Provider default** leaves the reasoning level to the provider.
 
-The picker highlights your current settings when they are compatible with the selected model and skips settings that cannot be changed. Use `↑` and `↓` to move, then `Enter` to advance or apply the final choice. `Esc` or `←` returns to the previous step; at the model list, either key cancels. `Ctrl+C` cancels from any step.
+The picker highlights your compatible current settings and skips settings that can't change. `Enter` advances, `Esc` or `←` goes back a step or cancels at the model list, and `Ctrl+C` cancels from any step. Changes apply together after the final choice; cancelling changes nothing. A login or model change takes effect on the next prompt.
 
-Changes apply together after the final choice, then the picker returns to chat. Cancelling leaves your model and settings unchanged.
-
-A successful login or model change takes effect on the next prompt.
-
-Gateway connections default to `openai/gpt-6-luna-fast`; OpenAI and ChatGPT default to `gpt-6-luna-fast`; Anthropic defaults to `claude-sonnet-5`. An explicitly authored compatible model stays selected. If a new default is unavailable, eve offers the connection's available models. Dynamic or custom model expressions must be edited in `agent.ts`.
+Gateway connections default to `openai/gpt-6-luna-fast`, OpenAI and ChatGPT to `gpt-6-luna-fast`, and Anthropic to `claude-sonnet-5`. An authored compatible model stays selected. If the default is unavailable, eve offers the connection's available models. Edit dynamic or custom model expressions in `agent.ts`.
 
 ## Add an integration
 
-`/add` opens one searchable catalog of channels, connections, extensions, and integrations. Type to filter and press `Enter` to install one item and run its required setup. The flow returns to chat afterward.
+`/add` opens a searchable catalog of channels, connections, extensions, and integrations. Press `Enter` to install an item and run its setup, then return to chat.
 
 Pass an item address to install it directly:
 
@@ -92,21 +84,30 @@ Pass an item address to install it directly:
 /add @acme/analytics
 ```
 
-Required authorization or deployment setup still runs for the selected item. Press `Esc` to cancel setup; files already installed remain in the project. If dependency installation fails, retry the `eve add` command in a terminal for details; raw installer output is not captured in the TUI.
+Press `Esc` to cancel setup; files already installed stay in the project. If dependency installation fails, rerun the `eve add` command in a terminal to see the installer output.
 
 ## Work with the agent
 
-Type a message and press `Enter` to send it. When the agent asks a question or requests tool approval, respond in the prompt shown by the UI. Each answer is sent as soon as you give it. When several requests are open, the prompt shows its place among them, such as `2 of 5`, and names the task that asked as its transcript lines do. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.
+Type a message and press `Enter` to send it. Answer questions and tool approvals in the prompt the UI shows; each answer is sent as soon as you give it. With several open requests, the prompt shows its position, such as `2 of 5`, and names the task that asked. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.
 
-The activity line shows **Thinking** while the model reasons or waits to respond, **Generating** while it writes a response or tool input, and **Running** while tools execute. A blinking dot and elapsed time indicate progress, with token counts shown when available. While [tasks](../tools/tasks) work, the drawer header replaces this line: it shows the parent's current activity, task count, and turn elapsed time without token counts. **Waiting** means the parent is waiting on work; **Working** appears without a turn timer when tasks remain active between turns.
+The activity line shows elapsed time and token counts when available, with one of these states:
 
-A tool call shows the tool's own `label`, or eve's copy for built-in tools such as `Read README.md`. Any other call shows a readable tool name without its extension or connection prefix, such as `List issues` for `linear__list_issues`. Approval prompts name the call the same way, such as `Approve Linear: List issues?`.
+- **Thinking**: the model reasons or waits.
+- **Generating**: the model writes a response or tool input.
+- **Running**: tools execute. While [tasks](../tools/tasks) work, the task drawer header replaces this line with the parent's activity, task count, and turn time. **Waiting** means the parent is waiting on tasks; **Working** means tasks remain active between turns.
 
-A task, such as a call to a subagent, writes one line to the transcript when it starts and one when it finishes, fails, or is stopped. The finished line names how long the task took and, for a subagent, what it did, such as `Read 3 files, Ran 2 commands`. Task starts use the same tool-call styling as synchronous calls. While tasks work, an activity drawer above the prompt shows each task's name, current activity, and elapsed time without repeating its launch prompt. Subagents use readable labels, such as `subagent(stock price)` for a `stock-price` subagent or `subagent(worker)` for the `code__worker` subagent of the code extension, with elapsed time beside the name and the latest observed tool grouped beneath an elbow. The tool remains visible between calls rather than switching to a starting placeholder. During questions and approvals, activity stays visible above the request with a shared divider when screen space permits; the request takes priority on small terminals. Background work started by a followed subagent appears beneath that subagent; deeper work uses an ownership path instead of further indentation. The panel caps its height and prioritizes tasks needing approval when work overflows. The UI does not show the model's own `eve__task_wait` and `eve__task_cancel` calls; their effect appears as the **Waiting** header and a stopped task's line.
+A tool call shows the tool's `label`, or eve's text for a built-in tool, such as `Read README.md`. Other tools show a readable name without the extension or connection prefix, such as `List issues` for `linear__list_issues`. Approval prompts use the same name, such as `Approve Linear: List issues?`.
 
-The prompt stays open while the agent works, including turns started elsewhere, such as a scheduled run. While a turn is running, `Enter` sends your message immediately as steering. Before assistant output begins, the runtime interrupts pending model generation and continues the same turn with your correction. Executing tools finish safely. After output begins, steering applies at the next workflow boundary and preserves streamed text.
+A task, such as a subagent call, writes one transcript line when it starts and one when it finishes, fails, or is stopped. The finished line shows the duration and, for a subagent, what it did, such as `Read 3 files, Ran 2 commands`.
 
-Slash commands run immediately, even during a turn. Press `Esc` or `Ctrl+C`, or run `/cancel`, to cancel a running turn. If you cancel before the turn has started, eve waits for that turn's ID before sending cancellation, so the request cannot cancel a later turn. If a cancellation does not settle, press `Ctrl+C` again to stop waiting: eve starts a new session, and the next `Ctrl+C` exits. At an idle prompt, press `Ctrl+C` twice to exit.
+While tasks work, a drawer above the prompt shows each task's name, latest tool, and elapsed time. Subagents get readable labels, such as `subagent(stock price)` for `stock-price` or `subagent(worker)` for the code extension's `code__worker`. Work started by a subagent appears beneath it. The drawer caps its height, puts tasks awaiting approval first, and yields to questions and approvals on small terminals. The model's `eve__task_wait` and `eve__task_cancel` calls appear only as the **Waiting** header and a stopped task's line.
+
+The prompt stays open while the agent works, including turns started elsewhere, such as a scheduled run. Pressing `Enter` during a turn sends your message as steering, which adds it to the running turn:
+
+- Before the agent starts writing its reply, steering stops the model and continues the turn with your message. Running tools finish first.
+- After the reply starts, the streamed text stays, and your message joins the turn at its next step. See [Message delivery and steering](../concepts/execution-model-and-durability#message-delivery-and-steering).
+
+Slash commands run immediately, even during a turn. Press `Esc` or `Ctrl+C`, or run `/cancel`, to cancel a running turn. A cancel sent before the turn starts applies only to that turn, never to a later one. If the cancel doesn't finish, press `Ctrl+C` again to stop waiting and start a new session; the next `Ctrl+C` exits. At an idle prompt, press `Ctrl+C` twice to exit.
 
 | Key           | Action                                                                                                     |
 | ------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -120,44 +121,50 @@ Slash commands run immediately, even during a turn. Press `Esc` or `Ctrl+C`, or 
 
 ## Logs and traces
 
-By default, the UI shows severity-tagged errors. Use `/loglevel <none|error|warn|debug|all>` to change the display; bare `/loglevel` reports the current setting. `warn` adds warnings, `debug` adds all severity-tagged records, and `all` also shows unclassified stdout, stderr, and sandbox output. `none` hides logs. Errors render red, warnings yellow, and unclassified stderr neutral. `Ctrl+L` cycles the same modes. These modes filter received records; they do not change `EVE_LOG_LEVEL` or enable a dependency's debug logging.
+The UI shows severity-tagged errors by default. Run `/loglevel <mode>` or press `Ctrl+L` to change the display; bare `/loglevel` reports the current mode.
 
-Workflow SDK output, such as lines tagged `[workflow-sdk]` or `[world-local]`, reports internal runtime details, so the transcript shows it only in `all` mode.
+| Mode    | Shows                                                                                                                 |
+| ------- | --------------------------------------------------------------------------------------------------------------------- |
+| `none`  | No logs.                                                                                                              |
+| `error` | Errors (default).                                                                                                     |
+| `warn`  | Errors and warnings.                                                                                                  |
+| `debug` | All severity-tagged records.                                                                                          |
+| `all`   | Also unclassified stdout, stderr, sandbox output, and Workflow SDK lines such as `[workflow-sdk]` or `[world-local]`. |
 
-Every `eve dev` process writes diagnostic logs to `.eve/logs/`, regardless of the display mode. Read them with [`eve logs`](../reference/cli#eve-logs).
+These modes filter the display only; they don't change `EVE_LOG_LEVEL` or a dependency's debug logging. Every `eve dev` process writes diagnostic logs to `.eve/logs/` regardless of mode. Read them with [`eve logs`](../reference/cli#eve-logs).
 
 Use `/traces` to inspect traces recorded during local development. See [Local traces](../observability/otel#local-traces) for trace capture and retention settings.
 
 ## Display options
 
-Use `eve dev` flags to control tool calls, reasoning, subagents, connection authorization, response statistics, context usage, and logs:
+`eve dev` flags control how tool calls, reasoning, subagents, connection authorization, response statistics, context usage, and logs display:
 
 ```bash
 eve dev --show-tools full --show-reasoning collapsed --logs all
 ```
 
-`--show-subagents` accepts `collapsed` (the default), `full`, or `hidden`. `full` also writes each subagent message and tool call to the transcript as it finishes, and `hidden` leaves subagent tasks out of the transcript and the task panel.
+`--show-subagents` accepts `collapsed` (default), `full`, or `hidden`. `full` also writes each subagent message and tool call to the transcript, and `hidden` leaves subagent tasks out of the transcript and the drawer.
 
-Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. Set `EVE_TUI_RENDER_MARKDOWN=0` to show assistant and subagent responses without Markdown parsing or styling; `1` (the default) enables Markdown rendering. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
+Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. Set `EVE_TUI_RENDER_MARKDOWN=0` to show responses as plain text instead of rendered Markdown. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
 
 ## Connect to a deployment
 
-Pass a URL to use the terminal UI with an existing eve server instead of starting one locally:
+`eve remote connect` opens the terminal UI against an existing eve server instead of starting one locally:
 
 ```bash
 eve remote connect --url https://your-app.vercel.app
 ```
 
-Use `eve remote connect` for an existing agent. To send credentials or custom request headers, use a URL with HTTP Basic credentials or repeat `-H, --header`:
+To send credentials or custom request headers, use a URL with HTTP Basic credentials or repeat `-H, --header`:
 
 ```bash
 eve remote connect --url https://user:pass@your-app.example.com
 eve remote connect --url https://your-app.example.com -H 'Authorization: Bearer your_token_here'
 ```
 
-Remote Vercel sessions reuse an existing authorized CLI session. They do not open an account login flow or modify the local project's Vercel link or `.env.local`.
+Remote Vercel sessions reuse an authorized Vercel CLI session. They don't open a login flow or change the local project's Vercel link or `.env.local`.
 
-When Deployment Protection blocks startup, eve verifies the target project and asks before adding a Trusted Sources rule for development access to that deployment's environment. After approval, eve applies the rule and checks access again before returning to chat. Cancelling preserves your draft; restart `eve remote connect --url <url>` to try again. If you cannot change the project's policy, provide `VERCEL_AUTOMATION_BYPASS_SECRET` or ask a project administrator to configure access in Deployment Protection settings.
+When Deployment Protection blocks startup, eve verifies the target project and offers to add a Trusted Sources rule. The rule grants development access to that deployment's environment, and eve then rechecks access. Cancelling preserves your draft; rerun `eve remote connect --url <url>` to try again. If you can't change the project's policy, provide `VERCEL_AUTOMATION_BYPASS_SECRET` or ask a project administrator to configure access in Deployment Protection settings.
 
 ## What to read next
 

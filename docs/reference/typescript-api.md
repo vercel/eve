@@ -3,13 +3,13 @@ title: "TypeScript API Reference"
 description: "The define* helpers, the runtime ctx, and where each one is imported from."
 ---
 
-This is the public surface of the `eve` package: the `define*` helpers you author with, the `ctx` they receive at runtime, and the import path for each. The package's export map defines the full contract; source files that are not reachable through an exported package subpath are framework internals.
+The `eve` package's public surface is the `define*` helpers you author with, the `ctx` they receive at runtime, and the import path for each. The package's export map defines the full contract; anything not reachable through an exported subpath is internal.
 
 For changes to an existing application, follow [Prepare for 1.0](../guides/prepare-for-1-0).
 
 Identity comes from the filesystem, not a field you set. A tool at `agent/tools/get_weather.ts` is `get_weather`, and a connection at `agent/connections/linear.ts` is `linear`, so no definition carries a `name` or `id`.
 
-Most files look the same: import a helper, default-export the result.
+Most files import a helper and default-export the result:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -32,8 +32,7 @@ export default defineTool({
 
 ## Integration dependencies
 
-Install the framework packages for the integration you import. These are optional peers of eve;
-using another entry does not require them.
+Install the packages for each integration entry you import. They are optional peers of eve, so other entries don't need them.
 
 | Entry                                                         | Required integration packages                         |
 | ------------------------------------------------------------- | ----------------------------------------------------- |
@@ -84,29 +83,35 @@ The AI SDK is a required peer and has its own Zod peer requirement. To type the 
 | `mockModel`                                           | `eve/evals`                                                             | Deterministic fixture agent models                                                     | [Evals](../evals/overview)                             |
 | `useEveAgent`                                         | `eve/react`, `eve/vue`, `eve/svelte`                                    | frontend                                                                               | [Frontend](../guides/frontend/overview)                |
 
-Tool-wide authoring helpers and types such as `defineTool`, `defineWorkflowTool`, `defineDynamic`, `disableTool`, and `ToolLabelDefinition` come from `eve/tools`. Capability-specific definitions and helpers use their own subpaths (see [Built-in tools](../concepts/built-in-tools)): reusable definitions such as `bash` and `glob` come from `eve/tools/<name>`, `webSearch` comes from `eve/tools/web_search`, `agentRouter` comes from `eve/tools/agent_router`, `sleep` comes from `eve/tools/sleep`, `noReply` comes from `eve/tools/no_reply`, and approval policies and types come from `eve/tools/approval`. The route verbs `GET`/`HEAD`/`POST`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`/`WS` plus `disableRoute` come from `eve/channels`, and the channel auth helpers `localDev`/`vercelOidc`/`placeholderAuth` come from `eve/channels/auth`.
+Tool-wide helpers and types such as `defineTool`, `defineWorkflowTool`, `defineDynamic`, `disableTool`, and `ToolLabelDefinition` come from `eve/tools`. Built-in tool definitions use their own subpaths; see [Built-in tools](../concepts/built-in-tools):
 
-`AgentReasoningDefinition` is exported from `eve` for the top-level `defineAgent({ reasoning })` setting. `AgentLimitsDefinition` is exported for `defineAgent({ limits })`. `AgentWorkflowDefinition`, `AgentWorkflowRetentionDefinition`, and `AgentWorkflowWorldDefinition` are exported from `eve` for the `defineAgent({ experimental: { workflow } })` config shape. `WebSearchToolInput` and `WebSearchProvider` are exported from `eve/tools/web_search`.
+- Reusable definitions such as `bash` and `glob` from `eve/tools/<name>`.
+- `webSearch` from `eve/tools/web_search`, `agentRouter` from `eve/tools/agent_router`, `sleep` from `eve/tools/sleep`, and `noReply` from `eve/tools/no_reply`.
+- Approval policies and types from `eve/tools/approval`.
 
-`webSearch({ provider })` selects `"exa"`, `"parallel"`, `"browserbase"`, or `"native"` for AI Gateway search using the Gateway model's credentials. `"native"` uses the model vendor's own search for OpenAI, Anthropic, and Gemini 3 and later models; set `fallback` to `"exa"`, `"parallel"`, or `"browserbase"` to give other Gateway models search, which they otherwise don't get. Direct provider models keep their native search implementation when supported. See [Built-in tools](../concepts/built-in-tools#web_search) for setup and provider behavior.
+The route verbs `GET`/`HEAD`/`POST`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`/`WS` and `disableRoute` come from `eve/channels`, and the channel auth helpers `localDev`/`vercelOidc`/`placeholderAuth` from `eve/channels/auth`.
 
-`defineInstructions` accepts `{ content: string, role?: "system" | "user" }`; omitted `role` means `"system"`. Dynamic instructions use `defineDynamic(ctx => defineInstructions(...))` or return `null`. The retired `{ markdown: string }` definition is rejected.
+`eve` exports `AgentReasoningDefinition` for `defineAgent({ reasoning })`, `AgentLimitsDefinition` for `defineAgent({ limits })`, and `AgentWorkflowDefinition`, `AgentWorkflowRetentionDefinition`, and `AgentWorkflowWorldDefinition` for `defineAgent({ experimental: { workflow } })`. `WebSearchToolInput` and `WebSearchProvider` are exported from `eve/tools/web_search`.
 
-Dynamic connections use `defineDynamic(ctx => value)`, returning one MCP or OpenAPI connection definition, a map, or `null`. Functions read committed session context and can load conversation history with `ctx.messages()`. Set `instanceKey` to a stable, non-secret account or tenant identifier so authorization resumes cannot cross resolved instances. See [Dynamic capabilities](../guides/dynamic-capabilities).
+`webSearch({ provider })` selects `"exa"`, `"parallel"`, `"browserbase"`, or `"native"` for AI Gateway search with the Gateway model's credentials. `"native"` uses the model vendor's own search for OpenAI, Anthropic, and Gemini 3 and later models. Other Gateway models get no search unless you set `fallback` to `"exa"`, `"parallel"`, or `"browserbase"`. Direct provider models keep their native search implementation when supported. See [Built-in tools](../concepts/built-in-tools#web_search) for setup and provider behavior.
+
+`defineInstructions` accepts `{ content: string, role?: "system" | "user" }`; omit `role` for `"system"`. Dynamic instructions use `defineDynamic(ctx => defineInstructions(...))` or return `null`.
+
+Dynamic connections use `defineDynamic(ctx => value)`, returning one MCP or OpenAPI connection definition, a map, or `null`. Functions read the saved session context and can load conversation history with `ctx.messages()`. Set `instanceKey` to a stable, non-secret account or tenant identifier. eve rejects a pending sign-in callback when its resolved connection instance changes. See [Dynamic capabilities](../guides/dynamic-capabilities).
 
 ## Authored module lifecycle
 
-eve evaluates TypeScript definition modules during compilation so it can validate and normalize the agent. Within one agent node, each module namespace loads at most once during that compile. The resolved definition then determines whether the module is also an entry in the runtime bundle:
+eve evaluates TypeScript definition modules at build time to validate the agent, at most once per agent. The resolved definition decides whether the module also loads at runtime:
 
-| Lifecycle           | Authored definitions                                                                                                                                                                                                                              |
+| When it loads       | Authored definitions                                                                                                                                                                                                                              |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Compile only        | Static instructions and skills, prompt-form TypeScript schedules, static Gateway or default agent config, provider-managed web search, Workflow SDK configuration, fully shadowed channels, and a child sandbox that selects its parent's sandbox |
 | Compile and runtime | Dynamic instructions, skills, tools, models, and subagents; executable tools; effective channels; connections; hooks; memory; handler schedules; direct-provider models; independent sandboxes; and remote subagents                              |
 | Runtime only        | Instrumentation modules and extension mount initialization                                                                                                                                                                                        |
 
-A compile-only module is not imported when the deployed runtime starts. For example, eve stores the resolved content from a static `instructions.ts` in the compiled manifest. A compile-and-runtime module is evaluated during compilation and imported again when a runtime process loads the module map. Keep module-top-level work deterministic, and put request- or session-specific work in the definition's runtime callbacks.
+The deployed runtime doesn't import a compile-only module; for example, a static `instructions.ts` runs only at build time. A compile-and-runtime module runs at build time and again in each runtime process. Keep module top-level work deterministic, and put request- or session-specific work in runtime callbacks.
 
-The runtime bundler follows the normal ESM graph from every runtime entry. A helper remains runtime code when a tool or other runtime entry imports it, even if static instructions also import that helper. Lifecycle selection applies to definition entries, not as tree-shaking permission for their ordinary dependencies.
+These load rules apply to definition modules, not their ordinary imports. A helper that a tool imports stays runtime code even if static instructions also import it.
 
 ### Asset imports
 
@@ -119,21 +124,30 @@ import template from "../../prompts/template.txt?raw";
 
 `?raw` embeds any file as UTF-8 text, including code files such as `.json` and files without an extension, such as a `Dockerfile`. Other non-code asset imports produce a data URL with an inferred media type. Compilation, local development, and production builds use the same resolution behavior.
 
-A workspace package bundled from TypeScript source can import its own assets the same way. Each import may reach files inside the project package or inside the package that contains the importing module. Imports that escape both are rejected; package those files with the application or the workspace package instead.
+A workspace package bundled from TypeScript source can import its own assets the same way. Each import may reach files inside the project package or the importing module's package. eve rejects imports that escape both, so package those files with the application or the workspace package.
 
 ## Runtime context (`ctx`)
 
-`ctx` is passed to your tool `execute`, hook handlers, channel event handlers, and connection auth/header resolvers. It is live only while authored code is running, so reaching for it at module top level throws. See [Session context](../guides/session-context) for the full model.
+`ctx` is passed to your tool `execute`, hook handlers, channel event handlers, and connection auth/header resolvers. It exists only while authored code runs, so reading it at module top level throws. See [Session context](../guides/session-context) for the full model.
 
 | Member                      | Use                                                                                                                                                                                                                                                    |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ctx.session`               | Current session, turn, auth, and optional parent lineage (read-only)                                                                                                                                                                                   |
-| `ctx.getSandbox()`          | Live sandbox handle; `stop()` releases compute but preserves durable state                                                                                                                                                                             |
+| `ctx.getSandbox()`          | Live sandbox handle; `stop()` releases compute and keeps the sandbox's files                                                                                                                                                                           |
 | `ctx.getToken(provider)`    | Resolve a bearer token for an inline auth provider such as `connect("...")`                                                                                                                                                                            |
 | `ctx.requireAuth(provider)` | Evict and re-authorize an inline provider, commonly after a downstream `401`                                                                                                                                                                           |
 | `ctx.approval`              | Present only while a call runs after a person approved it: `responder` is who approved it and `responder.getToken(provider)` resolves their token. The call still runs as `ctx.session.auth.current`; see [Human-in-the-loop](/docs/human-in-the-loop) |
 
-Tool definitions accept `availableInSubagents: false` to restrict the tool to top-level root sessions, and `deferred: true` to keep the tool out of the model's tool list so the model finds it with `eve__search` and calls it with `eve__tool`; see [Tools](../tools#keep-a-tool-out-of-the-tool-list). `defineTool` definitions accept `endsTurn: true`, or a function that receives the `execute` output, to end the turn without a reply after a successful call; see [Tools](../tools#end-the-turn-after-a-tool-call). Authored workflow bodies also receive `ctx.agents`, a replay-stable map of callable-agent metadata, and `ctx.agent(name)`, which returns an `AgentSession` whose `send(message, options?)` resolves to a response with `result()`. A `"use step"` helper that receives the context directly should type it as `WorkflowStepToolContext`, which excludes `agents`, `agent`, and `ask`; its `getSandbox()` opens the sandbox of the session that called the tool (see [Use the session sandbox in a step](../tools/workflows#use-the-session-sandbox-in-a-step)). The root-copy `agent` entry has an empty description when the root omits `description`. See [Workflows as tools](../tools/workflows#delegate-work-ctxagent) for the workflow-only context.
+Tool definitions accept these options:
+
+- `availableInSubagents: false` restricts the tool to top-level root sessions.
+- `deferred: true` keeps the tool out of the model's tool list. The model finds it with `eve__search` and calls it with `eve__tool`; see [Tools](../tools#keep-a-tool-out-of-the-tool-list).
+
+`defineTool` definitions accept `endsTurn: true`, or a function that receives the `execute` output, to end the turn without a reply after a successful call; see [Tools](../tools#end-the-turn-after-a-tool-call).
+
+Authored workflow bodies also receive `ctx.agents`, a map that describes the agents the workflow can call. It stays the same across workflow replays. `ctx.agent(name)` returns an `AgentSession` whose `send(message, options?)` resolves to a response with `result()`. The `agent` entry is a copy of the root agent, and its description is empty when the root omits `description`. See [Workflows as tools](../tools/workflows#delegate-work-ctxagent) for the workflow-only context.
+
+Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which excludes `agents`, `agent`, and `ask`. Its `getSandbox()` opens the sandbox of the session that called the tool (see [Use the session sandbox in a step](../tools/workflows#use-the-session-sandbox-in-a-step)).
 
 ## Imports at a glance
 
@@ -184,43 +198,30 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | `eve/next`, `eve/nuxt`, `eve/sveltekit`, `eve/tanstack`                           | framework bundler plugins                                                                                         |
 | [`eve/client`](../guides/client/overview)                                         | `Client`, `ClientSession`, health and agent-info schemas, `EveError` and the typed client errors                  |
 | [`eve/sessions`](../guides/client/messages#reusable-delivery-reads)               | `Delivery`, `DeliveryResult`, read options, `SessionReader`, `Session`, `EveError`, and `SessionNotActiveError`   |
-| [`eve/events`](../concepts/sessions-runs-and-streaming#query-session-state)       | Facts, opaque `SessionView`, immutable observations, and query/fold functions                                     |
+| [`eve/events`](../concepts/sessions-runs-and-streaming#query-session-state)       | Event types, opaque `SessionView`, immutable observations, and query/fold functions                               |
 | [`eve/server`](../concepts/sessions-runs-and-streaming#read-a-session-in-process) | `sessions`, for reading session streams in process                                                                |
 
-Exported types ship from the entry point that owns them (for example `ToolDefinition` and `ToolContext` from `eve/tools`). Import fact and view types from `eve/events`, `SessionContext` and `HistoryMessage` from `eve/context`, and assertion types and `ToolStub` from `eve/evals`. Frontend hook entries also export the types their hooks return. Shared delivery/session contracts
-have one home, `eve/sessions`; client factories and transport-specific types stay in `eve/client`.
-`SessionInfo` from `eve/context` is callback metadata, not a reader or an operable session.
-`ChannelContext` from `eve/channels` separates session information from continuation aliasing.
+Exported types ship from the entry point that owns them, such as `ToolDefinition` and `ToolContext` from `eve/tools`. Import event and view types from `eve/events`, `SessionContext` and `HistoryMessage` from `eve/context`, and assertion types and `ToolStub` from `eve/evals`. Frontend hook entries also export the types their hooks return.
 
-`HistoryMessage`, `EveLanguageModel`, `TokenUsage`, the sandbox session, process, result, and method-option types, the `SpanProcessor`, `SpanProcessorOrName`, and `SpanExporter` types from `eve/instrumentation/otel`, and the Linq and Photon credential and webhook-verifier types are eve-owned. Their declarations do not change with your app's AI SDK, OpenTelemetry, or channel-adapter versions. Named judge, mock-model, approval, and disabled-marker types remain public for reusable helpers and declaration emission.
+Types for reading sent messages and sessions live in `eve/sessions`; client factories and transport-specific types stay in `eve/client`. `SessionInfo` from `eve/context` is callback metadata, not a reader or an operable session. `ChannelContext` from `eve/channels` holds the session's `id` and `auth`, plus an optional `continuation` routing token that `alias()` can extend.
+
+`HistoryMessage`, `EveLanguageModel`, `TokenUsage`, and the sandbox session, process, result, and method-option types are eve-owned. So are the `SpanProcessor`, `SpanProcessorOrName`, and `SpanExporter` types from `eve/instrumentation/otel`, and the Linq and Photon credential and webhook-verifier types. Their declarations don't change with your app's AI SDK, OpenTelemetry, or channel-adapter versions. Named judge, mock-model, approval, and disabled-marker types are public for reusable helpers and declaration emission.
 
 ## Stability policy
 
-The `exports` field in `packages/eve/package.json` lists every package entry point.
-`eve/experimental/*` and `eve/internal/*` have no compatibility promise. The same
-applies to `experimental` fields in stable definitions, such as
-`defineAgent({ experimental })`, connection `experimental.events`, and
-`JustBashSandbox.environment({ experimental })`.
+The `exports` field in eve's `package.json` lists every entry point. `eve/experimental/*` and `eve/internal/*` have no compatibility promise. Neither do `experimental` fields in stable definitions, such as `defineAgent({ experimental })`, connection `experimental.events`, and `JustBashSandbox.environment({ experimental })`. The CLI setup wizard is not a public authoring API.
 
-Event union types name today's values. Adding fact types, outcomes, or interaction
-kinds under the [stream evolution rules](../concepts/sessions-runs-and-streaming#what-a-later-release-can-add)
-is not a breaking change. Keep a default branch when switching on those values.
+Event union types name today's values. A release can add event types, outcomes, and request kinds under the [stream evolution rules](../concepts/sessions-runs-and-streaming#what-a-later-release-can-add) without a breaking change, so keep a default branch when you switch on them.
 
-Values eve passes into code you implement can also gain members in a minor
-release, such as a sandbox provider's `onSessionEnd()` `reason`, the provider
-context's `kind`, and `SandboxNetworkRule` variants. Handle unknown values, for
-example with a default branch, instead of switching exhaustively.
+Values eve passes into code you implement can also gain members in a minor release. Examples are a sandbox provider's `onSessionEnd()` `reason`, the provider context's `kind`, and `SandboxNetworkRule` variants. Handle unknown values with a default branch instead of switching exhaustively.
 
-`eve/channels/chat-sdk`, `eve/channels/linq`, and `eve/channels/photon` expose
-types from the `chat` package (Chat SDK v4) as part of their contract. They track
-`chat` v4, so a future breaking `chat` major may require a corresponding eve change.
-
-The CLI setup wizard is not a public authoring API; Agent Builder's scaffold
-integration lives at `eve/internal/scaffold`.
+`eve/channels/chat-sdk`, `eve/channels/linq`, and `eve/channels/photon` expose types from the `chat` package (Chat SDK v4) as part of their contract. A future breaking `chat` major can require a matching eve change.
 
 ## Direct provider models
 
-`openai(model?)` from `eve/models/openai` and `anthropic(model?)` from `eve/models/anthropic` return AI SDK language models that use eve's credentials, so you can also pass them to AI SDK functions such as `generateText`. They accept only an optional model ID. `EveLanguageModel`, exported from `eve` and `eve/models`, is the model instance type `agent.ts` accepts; every AI SDK language model satisfies it. Defaults are `gpt-6-luna-fast` and `claude-sonnet-5`, respectively.
+`openai(model?)` from `eve/models/openai` and `anthropic(model?)` from `eve/models/anthropic` return AI SDK language models that use eve's credentials, so you can also pass them to AI SDK functions such as `generateText`. They accept only an optional model ID; omit it for `gpt-6-luna-fast` and `claude-sonnet-5`, respectively.
+
+`EveLanguageModel`, exported from `eve` and `eve/models`, is the model type `agent.ts` accepts. Every AI SDK language model satisfies it.
 
 Use `/login` for local credentials, or set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. Local secret-store discovery is disabled in deployments; provision server credentials explicitly. See [Set the model](../agent-config#set-the-model) for an example.
 
@@ -237,32 +238,30 @@ export default defineAgent({
 });
 ```
 
-Pass another bare OpenAI model slug to override the default. The retired `experimental_chatgpt` alias is not exported.
+Pass another bare OpenAI model slug to override the default.
 
-`chatgpt()` uses stateless requests (`store: false`). eve retains reasoning summaries and encrypted reasoning in session history and replays them after tool calls and on later turns. You do not need to configure `reasoning.encrypted_content` explicitly.
+`chatgpt()` sends stateless requests (`store: false`). eve preserves reasoning across tool calls and later turns, so you don't configure `reasoning.encrypted_content`.
 
-eve uses one local authentication path with two credential owners:
+To sign in, use one local path. Who stores the credential depends on whether Codex is installed:
 
 1. Run `eve dev`, open `/login`, and select **ChatGPT subscription**.
 2. If `codex` is on `PATH`, eve uses `codex app-server` and launches `codex login` when sign-in is needed. Codex owns credential storage and refresh.
 3. If the Codex binary is not found, eve falls back to direct browser sign-in and owns the saved session and refresh. If the browser does not open, use the URL printed in the terminal.
 
-When Codex is available, eve asks app-server for tokens and does not read or write Codex login files. App-server errors other than a missing binary are reported instead of silently switching credential owners.
+With Codex, eve asks app-server for tokens and doesn't read or write Codex login files. eve reports app-server errors other than a missing binary instead of switching credential owners.
 
-For the eve-owned fallback, eve stores your refresh token and account details in your operating system's credential store through [just-secrets](https://github.com/vercel-labs/just-secrets): the login Keychain on macOS, Credential Manager on Windows, or Secret Service on Linux. Access tokens stay in process memory; a new eve process refreshes the saved session when it first needs a token. The fallback login is separate from Codex and is never written to your project.
+The eve-owned fallback stores your refresh token and account details through [just-secrets](https://github.com/vercel-labs/just-secrets). It uses the login Keychain on macOS, Credential Manager on Windows, or Secret Service on Linux. Access tokens stay in process memory, and a new eve process refreshes the saved session when it first needs a token. The fallback login is separate from Codex and never written to your project. eve doesn't fall back to file storage when the OS credential store is unavailable.
 
-If you previously used eve's `~/.eve/auth/chatgpt.json` file, sign in once through the eve-owned fallback after upgrading. A successful save removes the old plaintext session file. eve does not fall back to file storage if the OS credential store is unavailable.
+Linux, including WSL, requires `/usr/bin/secret-tool` (commonly provided by `libsecret-tools`), a session D-Bus, and an unlocked Secret Service keyring. On macOS, unlock your login keychain and allow credential access if prompted. On Windows, PowerShell and Credential Manager must be available in your user session. OS credential storage protects secrets at rest, not from malicious processes running as your OS user.
 
-Linux, including WSL, requires `/usr/bin/secret-tool` (commonly provided by `libsecret-tools`), a session D-Bus, and an unlocked Secret Service keyring. On macOS, unlock your login keychain and allow credential access if prompted. On Windows, PowerShell and Credential Manager must be available in your user session. OS credential storage protects secrets at rest; it does not guarantee isolation from malicious processes running as your OS user.
+The fallback uses a device code in SSH sessions or when localhost port 1455 is busy: open the displayed link and enter the code. Device sign-in requires device code authorization, enabled in **ChatGPT Settings → Security** or by a workspace admin in workspace permissions. Sign-in times out after five minutes; press **Ctrl+C** to cancel sooner. Device sign-in still needs an OS credential store; use an API-key model in headless environments without one.
 
-For the eve-owned fallback, SSH sessions or a busy localhost port 1455 use a device code. Open the displayed link in a browser and enter the code. Device sign-in requires enabling device code authorization in **ChatGPT Settings → Security**, or having a workspace admin enable it in workspace permissions. Sign-in times out after five minutes; press **Ctrl+C** to cancel sooner. Device sign-in still requires an available OS credential store; use an API-key model in headless environments without one.
-
-ChatGPT subscription credentials are local user credentials. `eve deploy` blocks agents whose active model is `chatgpt()` because those credentials are not uploaded to a deployment. Use an environment branch with a deployable model, or switch to an AI Gateway model before deploying.
+`eve deploy` blocks agents whose active model is `chatgpt()`, because these local user credentials aren't uploaded to a deployment. Use an environment branch with a deployable model, or switch to an AI Gateway model before deploying.
 
 Troubleshooting:
 
 - **`chatgpt-sub login`**: open `/login` and select **ChatGPT subscription** to sign in again. eve launches `codex login` when Codex is available, or its direct sign-in flow when it is not.
-- **`chatgpt-sub unavailable` with Codex installed**: update or restart Codex and retry. eve does not mask app-server failures by switching to a different saved session.
+- **`chatgpt-sub unavailable` with Codex installed**: update or restart Codex and retry.
 - **`chatgpt-sub unavailable` without Codex**: follow the reported OS credential-store recovery steps, or check your network connection if token refresh failed. Retry from `/login`. If eve reports an invalid stored session, sign in again to replace it.
 - **Model rejected by the backend**: model availability depends on the signed-in ChatGPT account. Pick another supported OpenAI model.
 - **Device sign-in unavailable**: enable device code authorization in ChatGPT security settings, or sign in from a local terminal with port 1455 available.

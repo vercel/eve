@@ -3,7 +3,7 @@ title: "SvelteKit"
 description: "Run an eve agent and a SvelteKit app as one project with the eveSvelteKit Vite plugin."
 ---
 
-`eve/sveltekit` runs a SvelteKit frontend and an eve agent as one project instead of two services. The `eveSvelteKit()` Vite plugin puts both on one dev server and one Vercel deploy, and [`useEveAgent`](./use-eve-agent-svelte) finds the mounted routes on its own. There's no CORS to configure and no URL env vars to keep in sync.
+`eve/sveltekit` runs a SvelteKit frontend and an eve agent as one project. The `eveSvelteKit()` Vite plugin puts both on one dev server and one Vercel deploy. [`useEveAgent`](./use-eve-agent-svelte) finds the mounted routes on its own, so you configure no CORS or URL env vars.
 
 ## Prerequisites
 
@@ -38,11 +38,11 @@ export default defineConfig({
 });
 ```
 
-The plugin accepts only two options, `eveRoot` and `eveBuildCommand`.
+The plugin accepts two options, `eveRoot` and `eveBuildCommand`.
 
 ## Call the binding
 
-With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-agent-svelte) from `eve/svelte` and don't pass `baseUrl`:
+With the plugin registered, components call [`useEveAgent`](./use-eve-agent-svelte) from `eve/svelte` and don't pass `baseUrl`:
 
 ```svelte
 <script lang="ts">
@@ -70,12 +70,12 @@ With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-a
 </form>
 ```
 
-The browser still needs a production authentication policy. See [Authenticate browser requests](./overview#authenticate-browser-requests) for the default fail-closed behavior and channel configuration.
+The browser still needs a production authentication policy. See [Authenticate browser requests](./overview#authenticate-browser-requests) for the default policy, which rejects unverified requests, and for channel configuration.
 
 ## Dev vs deploy topology
 
-- **Local dev.** `npm run dev` boots the eve dev server next to SvelteKit and proxies the eve routes to it, so the browser only ever hits the SvelteKit origin. `npm run build && npm run preview` behaves the same way: the preview server gets its own eve route proxy and either reuses the shared eve server or starts one.
-- **Vercel.** The SvelteKit app and the eve runtime deploy as a single project. On Vercel builds the plugin adds Build Output [`services`](https://vercel.com/docs/services) for eve and a `routes` entry that sends `/eve/v1/**` to that service before filesystem routing; the SvelteKit app remains the default app. No `vercel.json` is required. By default the generated service runs the installed eve binary from the SvelteKit app's dependencies, so the agent directory does not need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
+- **Local dev.** `npm run dev` starts the eve dev server next to SvelteKit and proxies the eve routes to it. The browser talks only to the SvelteKit origin. `npm run build && npm run preview` works the same way: the preview server proxies the eve routes and reuses the shared eve server or starts one.
+- **Vercel.** The SvelteKit app and the eve runtime deploy as a single project. On Vercel builds, the plugin adds an eve [service](https://vercel.com/docs/services) and routes `/eve/v1/**` to it before filesystem routing. The SvelteKit app serves everything else, and no `vercel.json` is required. By default, the generated service runs the installed eve binary from the SvelteKit app's dependencies, so the agent directory doesn't need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
 
   ```ts
   export default defineConfig({
@@ -98,7 +98,7 @@ The browser still needs a production authentication policy. See [Authenticate br
 
 ## Managing vercel.json yourself
 
-When `vercel.json` declares [`services`](https://vercel.com/docs/services), the plugin generates nothing and your configuration owns routing. It must include the eve service (`framework: "eve"`) and a rewrite that exposes the eve transport, or the build fails:
+When `vercel.json` declares [`services`](https://vercel.com/docs/services), the plugin generates nothing, and your configuration controls routing. It must include the eve service (`framework: "eve"`) and a rewrite that sends `/eve/v1/*` requests to it, or the build fails:
 
 ```json title="vercel.json"
 {
@@ -110,12 +110,12 @@ When `vercel.json` declares [`services`](https://vercel.com/docs/services), the 
 }
 ```
 
-### Migrating from experimentalServices
+### Remove `experimentalServices`
 
-Earlier versions of the plugin wrote the legacy `experimentalServices` field into `vercel.json`. Vercel no longer routes that model, so the plugin now ignores the field and warns when it sees one. Migrate either way:
+Vercel doesn't route the `experimentalServices` field in `vercel.json`: both services build, but every `/eve/v1/*` request returns `NOT_FOUND`. The plugin ignores the field and warns that `vercel.json defines experimentalServices`. Remove it in one of two ways:
 
-- **Generated (default).** Delete `vercel.json` (or just its `experimentalServices` block) and set the project's Framework Preset back to SvelteKit. The plugin generates the eve service and its routing on every Vercel build.
-- **Hand-maintained.** Replace `experimentalServices` with the stable `services` and `rewrites` shown above, and keep the Services Framework Preset.
+- **Generated (default).** Delete `vercel.json` (or its `experimentalServices` block) and set the project's Framework Preset to SvelteKit. The plugin generates the eve service and its routing on every Vercel build.
+- **Hand-maintained.** Replace `experimentalServices` with the `services` and `rewrites` shown above, and keep the Services Framework Preset.
 
 ## What to read next
 

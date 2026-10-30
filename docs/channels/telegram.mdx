@@ -4,7 +4,7 @@ description: "Reach your agent from Telegram bot webhooks, with inline-keyboard 
 type: integration
 ---
 
-The Telegram channel puts your agent behind a Telegram bot. It takes Bot API webhooks, checks the `X-Telegram-Bot-Api-Secret-Token` header before trusting anything, and routes the messages it cares about (private chats plus group messages that address the bot) to a reply over `sendMessage`. See [Channels](./overview) for the contract this builds on.
+The Telegram channel runs your agent as a Telegram bot. It lives in `agent/channels/telegram.ts`. It checks the `X-Telegram-Bot-Api-Secret-Token` header on each Bot API webhook, and replies with `sendMessage`. See [Channels](./overview) for what every channel shares.
 
 ## Add the channel
 
@@ -21,7 +21,7 @@ TELEGRAM_BOT_TOKEN=123456:...        # replies, typing, callbacks, proactive sen
 TELEGRAM_WEBHOOK_SECRET_TOKEN=...    # must match the secret_token you register
 ```
 
-You can pass the same values via `credentials: { botToken, webhookSecretToken }`. The channel mounts `POST /eve/v1/telegram`. Register the deployed URL yourself; eve does not call `setWebhook`:
+Or pass them as `credentials: { botToken, webhookSecretToken }`. The channel mounts `POST /eve/v1/telegram`. eve doesn't call `setWebhook`, so register the deployed URL yourself:
 
 ```bash
 curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
@@ -35,13 +35,13 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 
 ### Dispatch
 
-In a private chat, text, captions, photos, and documents all go through. Groups are stricter. Only three things wake the bot: a command (`/ask`, `/ask@my_bot`), an `@my_bot` mention (when `botUsername` is set), or a reply to one of the bot's own messages. Everything else is ignored.
+In a private chat, text, captions, photos, and documents all reach the agent. In a group, only a command (`/ask`, `/ask@my_bot`), an `@my_bot` mention (when `botUsername` is set), or a reply to one of the bot's messages does.
 
-The model-visible `<telegram_context>` includes `bot_username` and `is_mentioned`. `is_mentioned` is `true` only for an exact `@bot_username` token or targeted command such as `/ask@my_bot`; other accepted messages set it to `false`.
+The model sees a `<telegram_context>` block with `bot_username` and `is_mentioned`. `is_mentioned` is `true` only for an exact `@bot_username` token or a targeted command such as `/ask@my_bot`.
 
-Forum topics carry `message_thread_id` in the continuation token, so each topic stays on its own thread.
+Each forum topic gets its own session, keyed by `message_thread_id`.
 
-To customize auth or filtering, override `onMessage`. Return `title` alongside `auth` to set the title when the dispatch starts a run. Group privacy mode itself lives in BotFather, not here.
+Override `onMessage` to choose which messages run the agent, and as whom. Return `{ auth }` to run it, optionally with `title` to set the run title. Set group privacy mode in BotFather.
 
 Custom `onMessage` hooks can import `defaultTelegramAuth` from
 `eve/channels/telegram` and return `{ auth: defaultTelegramAuth(message) }` to
@@ -51,23 +51,23 @@ For a button press, pass the button presser as `from`, not the message's author.
 
 ### Delivery
 
-The default `content.completed` handler sends each reply part as plain text via `sendMessage`. It passes no `parse_mode`, so any Markdown shows up literally. Replies longer than Telegram's 4096-char limit are split across messages. Custom handlers use `ctx.channel.telegram`.
+By default, the bot sends each reply as plain text with `sendMessage` and no `parse_mode`, so Markdown shows as typed. Replies over Telegram's 4096-character limit are split across messages. Custom handlers use `ctx.channel.telegram`.
 
 ### Human-in-the-loop (HITL)
 
-Human-in-the-loop (HITL) turns option requests into inline-keyboard buttons and freeform requests into `ForceReply`. Telegram caps `callback_data` at 64 bytes, so eve keeps compact callback ids in channel state instead. It acknowledges its own callbacks with `answerCallbackQuery`; anything it doesn't recognize goes to `onCallbackQuery`. A press on a prompt whose session is no longer active replaces the keyboard with `No longer active`, and the acknowledgement tells the person to send a new message.
+Approvals and questions with options render as inline-keyboard buttons, and free-text questions as `ForceReply`. eve acknowledges its own callbacks with `answerCallbackQuery` and passes others to `onCallbackQuery`. A press on a prompt whose session has ended replaces the keyboard with `No longer active` and tells the person to send a new message.
 
-A text reply to a bot message is sent as a normal message, with the replied-to message id in `state.replyToBotMessageId`. When that id matches a pending `ForceReply` prompt, the channel's `deliver` hook turns the reply into the answer. Otherwise the reply reaches the agent as a message, and starts a new session when none owns the thread.
+A text reply to a pending `ForceReply` prompt answers it. A reply to any other bot message reaches the agent as a new message. It starts a new session when no session answers in that thread.
 
 ### Proactive sessions
 
-Start a session without an inbound message through `to(telegram, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(telegram, target).send(message, { auth })` from another channel. `target.chatId` is required. Add `messageThreadId` to land in a specific forum topic.
+To start a session without an incoming message, call `to(telegram, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(telegram, target).send(message, { auth })` from another channel. `target.chatId` is required; add `messageThreadId` to post in a forum topic.
 
-Private proactive chats stay keyed to the chat, or to the chat plus `messageThreadId` when you target a topic. Group and supergroup proactive sends anchor to the bot message id returned by Telegram, so replies to different bot messages can resume different sessions in the same chat. If Telegram does not return a recognized chat type for an outbound send, eve keeps the session unanchored instead of guessing.
+A private-chat session is keyed to the chat, or the chat and topic. A group or supergroup session is keyed to the bot message Telegram returns. Replies to different bot messages can resume different sessions in one chat. If Telegram returns no recognized chat type, the session stays unanchored.
 
 ### Attachments
 
-Inbound photos and documents are supported. eve fetches them on demand via `getFile`, only when an upload policy allows the type:
+Inbound photos and documents reach the agent when `uploadPolicy` allows their type. eve downloads them with `getFile`. Omit `uploadPolicy` to accept any type up to 25 MB:
 
 ```ts
 export default telegramChannel({
@@ -78,5 +78,5 @@ export default telegramChannel({
 
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
+- [Channels overview](./overview): what every channel shares, and every built-in channel
 - [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic

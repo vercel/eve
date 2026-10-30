@@ -3,55 +3,13 @@ title: "Subagents"
 description: "Delegate work to root-agent copies or declared specialists with their own tools and sandbox."
 ---
 
-Use a subagent to run independent work in parallel, narrow the available tools, or give a task to a specialist.
+A subagent is a specialist agent your agent can delegate work to. Each one lives under `agent/subagents/<name>/` with its own `agent.ts`. The parent model reads the subagent's `description` to decide when to delegate, sends it a message, and gets its reply back.
 
-- Use the root-only [built-in `agent` tool](#the-built-in-agent-tool) to start or continue a copy of the root agent that shares its sandbox.
-- Use a [declared local subagent](#declared-subagents) for a specialist with its own directory and authored capabilities, rather than inheriting the root's.
-- Use a [remote agent](./guides/remote-agents) to delegate to a separately deployed eve agent, with its own configuration and authentication.
-
-Every subagent call runs as a [task](./tools/tasks). The call returns a
-receipt naming the task's `taskId` right away, the child works while the parent continues, and the
-child's final reply for that turn arrives as the task's result. The parent's turn does not end while
-the task is working. If the child's turn fails, the call fails and the task ends. This applies to
-root-agent copies, declared local subagents, and remote subagents. The subagent session remains
-available for later calls with the same `taskId`. When an action must wait for a subagent's result,
-such as publishing only after a review, [run both from one workflow tool](./tools/tasks#order-work-that-depends-on-a-result).
-
-## The built-in `agent` tool
-
-The root session receives `agent` by default. The model calls it to delegate a task to a new copy of the root agent or continue an existing copy:
-
-```ts
-{
-  message: string; // everything the child needs; it does not see the parent's history
-  taskId?: string; // continue an existing child
-}
+```text
+agent/subagents/researcher/
+├── agent.ts          # required: description and model
+└── instructions.md   # optional system prompt
 ```
-
-The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` needs no configuration. Each call starts or continues a task whose result is the child's reply, so several children can work at once, whether the model starts them in one response or across several. Give parallel children non-overlapping write scopes.
-
-`agent` is intentionally root-only. Copies created by it cannot call `agent`, and declared subagents never receive the built-in tool. If a stale or forced recursive call reaches execution, eve rejects it instead of starting another child session.
-
-The parent transfers data to the child through the `message` input it gives the subagent. Do not include sensitive data in a subagent request unless that child and its inherited tools, connections, sandbox, and telemetry path are appropriate for that data.
-
-An authored workflow can open the same root-copy target through `ctx.agent("agent")`. To keep the copied configuration but use another model for that child session, pass a [model override to `ctx.agent`](./tools/workflows#delegate-work-ctxagent). The default model-facing tool does not accept a model choice; an authored [`agentWithModel` tool](./concepts/built-in-tools#agent) can expose that choice in its input.
-
-To prevent the root session from delegating to a fresh copy of itself, set `tool: false` on the root agent:
-
-```ts title="agent/agent.ts"
-import { defineAgent } from "eve";
-
-export default defineAgent({
-  model: "anthropic/claude-opus-5.5",
-  tool: false,
-});
-```
-
-You can also export `disableTool()` from `agent/tools/agent.ts`. Any authored tool at that path replaces the model-facing framework tool and takes priority over `tool: false`; re-export `eve/tools/agent` to keep direct root-copy delegation. Tool composition does not change the callable-agent registry: a workflow in a top-level root session can still invoke the root copy with `ctx.agent("agent", ...)` and read its description from `ctx.agents.agent`.
-
-## Declared subagents
-
-A declared subagent lives under `agent/subagents/<id>/` and uses the same `defineAgent` helper as the root. Its location under `subagents/` is the only thing that marks it as a subagent. Declare one when the child needs a clearly different prompt, role, or tool surface.
 
 ```ts title="agent/subagents/researcher/agent.ts"
 import { defineAgent } from "eve";
@@ -62,41 +20,63 @@ export default defineAgent({
 });
 ```
 
-`description` is required. The parent reads it to decide whether to delegate, so the compiler rejects any subagent whose `agent.ts` leaves it out. The path-derived invocation name `agent` is reserved for the built-in root-copy target; rename a declared subagent at `agent/subagents/agent/`. Namespaced names such as `crm__agent` do not collide and remain valid. Set `tool: false` to keep the subagent out of the parent model's tools while allowing an authored [workflow tool](/docs/tools/workflows) to call it by name through `ctx.agent()`:
+Use a subagent to give a task to a specialist with a different prompt or tools, or to run independent work in parallel. eve also has two other kinds:
 
-```ts title="agent/subagents/researcher/agent.ts"
-import { defineAgent } from "eve";
+- The [built-in `agent` tool](#the-built-in-agent-tool) starts a copy of the root agent that shares its sandbox and tools.
+- A [remote agent](./guides/remote-agents) is a separately deployed eve agent, with its own configuration and authentication.
 
-export default defineAgent({
-  description: "Investigate ambiguous questions for the routing workflow.",
-  model: "anthropic/claude-opus-5.5",
-  tool: false,
-});
+## Declared subagents
+
+A declared subagent uses the same `defineAgent` helper as the root agent. Its name comes from its directory: `agent/subagents/researcher/` is the `researcher` tool. The parent model calls that tool with a message:
+
+```ts
+{
+  message: string; // everything the child needs; it never sees the parent's conversation
+  taskId?: string; // continue an earlier child instead of starting a new one
+}
 ```
 
-The parent can alternatively export `disableTool()` from a same-named tool path, such as `agent/tools/researcher.ts`. This suppresses the derived model tool without removing `researcher` from the workflow invocation registry. A same-named authored tool replaces the model-facing surface while the workflow can still call the underlying subagent with `ctx.agent("researcher", ...)`.
+Each call runs as a [task](./tools/tasks). The parent keeps working, and the child's final reply arrives as the task's result. If the child fails, the call fails. When one action must wait for a subagent's result, such as publishing only after a review, [run both from one workflow tool](./tools/tasks#order-work-that-depends-on-a-result).
 
-Set `tool: "deferred"` to keep the subagent out of the parent model's tool list while the model can still call it. eve doesn't name the subagent in the parent's context; the model finds it with [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) and calls it with `eve__tool`. The call then runs exactly like a direct subagent call. Use this when a parent has many specialists and you want to keep its tool list short.
+Rules:
 
-A declared local or remote subagent call returns a receipt, and the child's reply arrives as the task's result. Human input requests from the child surface on the parent session while the task works. `eve__task_cancel` with the task's `taskId` cancels the child's current turn, and so does cancelling the calling turn.
+- `description` is required; the build fails without it.
+- `agent` is reserved for the built-in root copy, so rename a subagent at `agent/subagents/agent/`. Namespaced names such as `crm__agent` are valid.
+- A subagent's directory can hold its own `instructions.md` (or `instructions.ts`), `tools/`, `connections/`, `skills/`, `extensions/`, `sandbox/`, `hooks/`, and nested `subagents/`. It can't have `channels/` or `schedules/`, which are root-only.
+- A subagent can call its own nested subagents, to any depth.
 
-A mounted extension can also contribute declared subagents from `extension/subagents/`. The mount namespace prefixes the subagent visible to the consuming agent node: mounting an extension as `crm` exposes its `reviewer` subagent as `crm__reviewer`. The contributed subagent keeps its own isolated tools, connections, skills, hooks, instructions, sandbox, and nested subagents, and its modules can read configuration from the extension handle. See [Extensions](./extensions#add-a-subagent) for the authoring and override behavior.
+To choose how the parent model sees the subagent, set `tool` in its `agent.ts`:
 
-Local `eve dev` makes the bundled `self-modification__agent` subagent available by default. Bundled development extensions are not included in production builds. See [Self-Modification](/docs/guides/self-modification) for the local workflow.
+| `tool`       | The parent model                                                                                                                                                                                                     |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| omitted      | Sees it as a tool.                                                                                                                                                                                                   |
+| `"deferred"` | Doesn't see it in its tool list, but can find it with [`eve__search`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) and call it with `eve__tool`. Use this when a parent has many specialists. |
+| `false`      | Can't call it. An authored [workflow tool](/docs/tools/workflows) can still call it with `ctx.agent("researcher", ...)`.                                                                                             |
+
+A tool file with the same name, such as `agent/tools/researcher.ts`, collides with the subagent and fails the build. To wrap the subagent in your own tool, set the subagent's `tool: false` and author the tool; `ctx.agent("researcher", ...)` still reaches the subagent. To hide it completely, export `disableTool()` from that path instead. When a dynamic subagent and a dynamic tool collide, eve logs the collision and skips that result.
+
+A mounted extension can add subagents from its `extension/subagents/` directory, named with the mount's namespace: mounting an extension as `crm` adds its `reviewer` as `crm__reviewer`. See [Extensions](./extensions#add-a-subagent). An extension mounted under `subagents/<name>/extensions/` adds its tools, skills, and instructions only to that subagent:
+
+```ts title="agent/subagents/researcher/extensions/search.ts"
+export { default } from "@acme/research-search";
+```
+
+Local `eve dev` also adds the bundled `self-modification__agent` subagent. Production builds don't include it. See [Self-Modification](/docs/guides/self-modification).
 
 ### Vercel workspace peers
 
-In a Vercel agent workspace, expose one other workspace member as a remote subagent with `defineWorkspaceAgent` from `eve/experimental/workspace`. The helper and its `WorkspaceAgentDefinition` and `WorkspaceAgentTransport` types are experimental and have no compatibility promise. The `agents/<name>/` workspace layout and `eve/vercel` integration remain stable. Create an ordinary file under the caller's `agent/subagents/` directory. Its filename gives the model-visible tool name; `name` identifies the peer under `agents/`.
+In a Vercel agent workspace, `defineWorkspaceAgent` from `eve/experimental/workspace` lets one member call another as a subagent. Add a file under the caller's `agent/subagents/`. The filename is the tool name, and `name` is the peer's directory under `agents/`:
 
 ```ts title="agents/foreman/agent/subagents/research.ts"
 import { defineWorkspaceAgent } from "eve/experimental/workspace";
 
 export default defineWorkspaceAgent({
-  name: "research",
+  name: "research", // must match a workspace member exactly
+  // description: omit to use the peer's own defineAgent description
 });
 ```
 
-The helper uses the peer's root `defineAgent({ description })` value as the model-visible tool description. Pass `description` to override it for this caller. When `transport` is omitted, eve selects the built-in transport for the Vercel runtime environment. Local `vercel dev` routes workspace calls without deployment credentials; Vercel deployments route calls through the current deployment and authenticate with the caller's Vercel OIDC token. Named peers use their `/eve/<name>` mount. Outside those environments, provide an explicit transport with `url` and optional `auth` or `headers`:
+Omit `transport` to use the built-in one. Local `vercel dev` routes calls without credentials, and on Vercel, calls reach the peer's `/eve/<name>` mount authenticated with the caller's Vercel OIDC token. Elsewhere, set a transport:
 
 ```ts title="agents/foreman/agent/subagents/research.ts"
 import { defineWorkspaceAgent } from "eve/experimental/workspace";
@@ -111,15 +91,15 @@ export default defineWorkspaceAgent({
 });
 ```
 
-An explicit transport replaces the environment default completely. The receiving peer must still accept the transport's credentials through its channel authentication policy. Set `forwardPrincipal: true` only when the peer trusts the caller to forward user identity, as described in [Remote agents](./guides/remote-agents#forward-the-callers-identity).
+An explicit transport replaces the default completely, and the peer's channel authentication must accept its credentials. Set `forwardPrincipal: true` only when the peer trusts the caller to pass along the user's identity; see [Remote agents](./guides/remote-agents#forward-the-callers-identity).
 
-Use the peer's directory name under `agents/`. eve requires an exact workspace-member match, so add another declared subagent file for each additional peer. Run `vercel dev --local` with a root `vercel.ts` composed by `withEve` to start every member and enable the default local workspace transport. `eve dev` starts only the selected agent; use an explicit transport if it must call a separately running peer.
+`defineWorkspaceAgent` and its `WorkspaceAgentDefinition` and `WorkspaceAgentTransport` types are experimental and have no compatibility promise. The `agents/<name>/` workspace layout and the `eve/vercel` integration are stable.
+
+To start every member locally, run `vercel dev --local` with a root `vercel.ts` composed by `withEve`. `eve dev` starts only the selected agent, so use an explicit transport to reach a peer you run separately.
 
 ### Conditional availability
 
-To expose a declared subagent only for certain sessions or turns, export
-`defineDynamic` from that subagent's `agent.ts`. Return a `defineAgent`
-configuration to expose the subagent, or `null` to omit it from the parent's tools.
+To offer a subagent only to some sessions or turns, export `defineDynamic` from its `agent.ts`. Return a `defineAgent` configuration to offer it, or `null` to hide it from the parent model:
 
 ```ts title="agent/subagents/researcher/agent.ts"
 import { defineAgent, defineDynamic } from "eve";
@@ -134,13 +114,7 @@ export default defineDynamic((ctx) =>
 );
 ```
 
-eve evaluates the subagent before each parent model call. A nullish result (`null` or `undefined`)
-removes the subagent's description and tool definition from the model-visible
-surface. The subagent's filesystem manifest is always compiled; a non-nullish
-result injects the returned agent configuration when the child runs.
-
-Packaging controls must be available at compile time. `defineDynamic` takes only a function;
-put packaging configuration on the root agent instead:
+eve runs the function before each parent model call. The subagent's files are always built. Build settings such as `build.externalDependencies` can't be dynamic, so set them on the root agent, where they also apply to subagents:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -151,100 +125,87 @@ export default defineAgent({
 });
 ```
 
-The root's external dependencies apply when bundling subagent modules too.
-See [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-subagents) for
-when eve evaluates a subagent, failure behavior, and the dispatch-time guard.
-
-Minimum files:
-
-```text
-agent/subagents/researcher/
-├── agent.ts            # required
-├── instructions.md     # or instructions.ts, optional
-├── tools/              # optional, its own tools
-├── extensions/         # optional, mounted only into this subagent
-├── skills/             # optional, its own skills
-├── sandbox/            # optional, its own sandbox + workspace seed
-└── subagents/          # optional, nested subagents
-```
-
-Extensions mounted under `subagents/<id>/extensions/` contribute only to that subagent. They use the same file and directory mount forms, namespacing, configuration, and overrides as root-agent extensions:
-
-```ts title="agent/subagents/researcher/extensions/search.ts"
-export { default } from "@acme/research-search";
-```
-
-The root agent does not receive the extension's tools, skills, instructions, connections, or hooks.
-
-`schedules/` is not supported inside a declared subagent. Schedules are root-only.
+See [Dynamic capabilities](./guides/dynamic-capabilities#dynamic-subagents) for when eve runs the function and what happens when it fails.
 
 ## The isolation boundary
 
-A declared subagent inherits nothing from the root's authored slots. Discovery treats its directory as its own agent root, so it has only the instructions, tools, connections, skills, sandbox, hooks, and nested subagents authored under `agent/subagents/<id>/`. For a slot with a framework default, eve selects that source when the subagent does not author a replacement; it never inherits the root's authored version.
+A declared subagent inherits nothing from the root agent. It has only what you put under `agent/subagents/<name>/`, and anything it doesn't define falls back to eve's default, never to the root's version.
 
-| Slot         | Root built-in `agent` tool    | Declared subagent                      |
-| ------------ | ----------------------------- | -------------------------------------- |
-| Instructions | Inherited (copy of the agent) | Own `instructions.{md,ts}`, optional   |
-| Tools        | Inherited except root-only    | Own `tools/`                           |
-| Connections  | Inherited                     | Own `connections/`                     |
-| Skills       | Inherited                     | Own `skills/`                          |
-| Sandbox      | Reuses the parent sandbox     | Own `sandbox/`, else framework default |
-| Hooks        | Inherited                     | Own `hooks/`                           |
-| Extensions   | Inherited contributions       | Own `extensions/`                      |
-| State        | Fresh                         | Fresh                                  |
-| Channels     | Root-only                     | Root-only                              |
-| Schedules    | Root-only                     | Root-only                              |
+| What         | Copy from the built-in `agent` tool | Declared subagent                      |
+| ------------ | ----------------------------------- | -------------------------------------- |
+| Instructions | The root's                          | Its own `instructions.{md,ts}`         |
+| Tools        | The root's, except `agent`          | Its own `tools/`                       |
+| Connections  | The root's                          | Its own `connections/`                 |
+| Skills       | The root's                          | Its own `skills/`                      |
+| Sandbox      | The root's sandbox, shared          | Its own `sandbox/`, else eve's default |
+| Hooks        | The root's                          | Its own `hooks/`                       |
+| Extensions   | The root's                          | Its own `extensions/`                  |
+| State        | Starts empty                        | Starts empty                           |
+| Channels     | Root only                           | Root only                              |
+| Schedules    | Root only                           | Root only                              |
 
-For a declared subagent this means authoring or mounting anything the child needs. When two subagents need the same procedure, package the skill in a [workspace extension](./extensions#use-an-extension-in-a-workspace) and mount that extension in each subagent. Share typed helpers through `lib/`. The sandbox does not inherit from the parent; eve selects the default sandbox source unless the subagent authors `subagents/<id>/sandbox.ts` or seeds files via `subagents/<id>/sandbox/workspace/`.
+To share a procedure between subagents, package the skill in a [workspace extension](./extensions#use-an-extension-in-a-workspace) and mount it in each. Share typed helpers through `lib/`.
 
-The root built-in `agent` tool is the exception. Its children reuse the root's sandbox and tools because they are copies of the same agent working on the same files.
-
-`defineState` is never shared, for either kind. Each child starts with fresh durable state.
-
-## What the parent sees
-
-By default, eve lowers every tool-enabled subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, taskId? }` shape. The opt-in [`agentWithModel` root-copy tool](./concepts/built-in-tools#agent) instead uses `{ message, model, taskId? }`. The parent packs `message` with everything the child needs, since the child never sees the parent's history. To require structured output from a child, open a session with it from an authored workflow tool with [`ctx.agent(name)`](./tools/workflows#delegate-work-ctxagent) and pass `outputSchema` to `send()`; the schema applies to that turn, and the session accepts follow-up messages until the workflow run finishes.
-
-Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. The built-in `agent` follows the stricter root-only rule above, so `limits.maxSubagentDepth` no longer exists.
-
-Child sessions can still call their own declared or remote subagents, but they do not receive the built-in `agent`. Authored workflow tools use the same subagent availability and authorization checks as direct delegation. In a delegated root copy, `ctx.agents` also omits `agent`, so a router cannot select another root copy recursively.
-
-A directly declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. A subagent supplied by a mounted extension includes the mount namespace, such as `crm__reviewer`. The model, approvals, logs, and evals reference the resulting name. Its input schema is:
-
-```ts
-{
-  message: string; // all context the child needs; it never sees the parent's history
-  taskId?: string; // continue an existing child
-}
-```
-
-The tool's description is the subagent's `description` followed by a sentence telling the model that the agent does not see the conversation and that `taskId` continues an agent task.
-
-By default, a subagent named `researcher` collides with an authored tool named `researcher`. Set the subagent's `tool` to `false` when the authored tool intentionally wraps that subagent; the authored tool becomes the model-facing capability while `ctx.agent("researcher", ...)` continues to address the child. A same-named `disableTool()` removes the model-facing capability entirely. The same holds for dynamic subagents and dynamic tools: a dynamic subagent whose resolved config sets `tool: false` can be wrapped by an authored tool, and a dynamic tool can wrap a static subagent hidden either way. Any other collision is an error: eve rejects a static one when the deployment builds, and logs a dynamic one and skips that resolver's result.
-
-Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
-
-Each delegated subagent spins up its own child session and stream. The parent stream carries the task's `task.started`, the call's `call.started` and `call.settled`, and `child.opened` when the child session opens, plus the approvals, questions, and sign-ins descendants open, relayed as the parent's own `interaction.opened` so the root channel can prompt the user. A relayed interaction's `origin` names the descendant session and request, and `origin.call` the descendant's call. The parent settles a relayed question when it routes an answer back down to the descendant that asked. A tool approval is the exception: the descendant decides it, since its response policy can refuse the person who answered, so the approval stays open on the parent until the descendant settles it. The parent relays that `interaction.settled`. On text-only channels, a typed reply that matches an option of the first open prompt, such as `approve` or `deny` for a tool approval or the budget prompt, answers it as the person who typed it, so a person answers several proxied prompts one message at a time. `call.settled` carries the child's reply as `output` when the call completes, or `error.message` when it fails. To follow the child's other progress, pass the `child.opened` event to [`session.agent()`](./guides/client/streaming#follow-a-subagent) on a client session attached to the parent and follow the child with `stream()`. It reads the event's `stream`: the child's own session stream for a local child, or a parent-origin proxy for a remote child, which the parent authenticates to the remote deployment.
-
-`child.opened` carries its `owner` (the call that opened the session, or the task whose run did), the agent `name`, the child's `sessionId`, and the `stream` path to follow it. Later calls with the same `taskId` reach the same session and do not announce it again, so match a child to its calls by `taskId`: each later call's `call.started` carries it. A session an authored workflow tool opens with `ctx.agent` is announced the same way.
-
-Channels with activity reporting show a subagent's tool activity beneath that subagent's progress item. Activity reporting is best-effort and does not change execution or result delivery.
-
-Subagent model calls automatically retry classified transient provider failures, including overload errors delivered after a stream starts. eve makes at most three fresh model-call attempts, repeating only the current uncommitted call by default so completed earlier Workflow steps, tool results, and sandbox work remain available to the child. A declared subagent that opts into [Workflow checkpoint batching](./agent-config#workflow-checkpoint-batching) can instead repeat the uncommitted calls and inline tool executions in its current batch. Other recoverable errors fall back to Workflow's durable step retry from the last committed session snapshot. Exhausting the transient model-call attempts or the dedicated empty-response reissue returns one failed result instead of stacking both retry budgets; terminal errors fail immediately.
+The parent passes only the `message` to a child. Don't include sensitive data unless the child's tools, connections, sandbox, and telemetry are fit for it. Delegation isn't an approval boundary: protect sensitive tools with `approval`, connection approval, or route and session authorization wherever they can be called.
 
 ## Agent messaging
 
-A child parks after answering instead of terminating, keeping its session and conversation history alive. Pass the task's `taskId` to the same subagent tool with a new `message` to continue that session. Omitting `taskId` always starts a new child. When a child's turn fails, the call fails and the task ends. A `taskId` that names no task of that subagent tool, including one that ended, fails with `UNKNOWN_TASK`. Any later turn can continue the child, and each continuation runs with the auth of the caller that sends it.
+After it answers, a child waits with its conversation intact. To continue it in any later turn, call the same subagent tool with the child's `taskId` and a new `message`. Omit `taskId` to start a new child. A `taskId` for a task that ended, or that belongs to another tool, fails with `UNKNOWN_TASK`.
 
-A call with the `taskId` of a child that is still working joins the child's current turn, and that turn's final reply settles both calls. If the turn ends before the child reads the message, the message starts the child's next turn, and that turn's reply settles both calls. Use it to correct or add to work in progress. `eve__task_cancel` with the task's `taskId` ends the task and stops the child's current work. Start a new task to delegate again after a cancel.
+- **Correct work in progress:** call with the `taskId` of a working child. The message joins the child's current turn, or starts its next turn if the current one ends first, and one reply answers both calls.
+- **Cancel:** call `eve__task_cancel` with the `taskId`, or cancel the turn that called the child. Start a new task to delegate again.
+- **Find a child:** a `[Tasks]` note in the conversation lists working and idle tasks by `taskId` and tool.
 
-eve adds a framework-injected `[Tasks]` note to the conversation that lists the working and idle tasks by `taskId` and tool, so the model can find a child to continue. See [Tasks](./tools/tasks) for how the model waits for, corrects, and cancels agent tasks.
+Each message runs with the sender's auth. eve shuts down each child when the parent session ends or the task is cancelled. Shutdown is best effort: an unreachable child can keep running. For [remote agents](./guides/remote-agents), continuing and shutting down a child need both deployments to run an eve version that supports them.
 
-The parent holds each child for the life of the task's run, which lasts until the parent session ends or its task is cancelled. Then eve requests child shutdown, using authenticated end-session requests for remote children. Cleanup is best effort: a child whose inbox or deployment is unavailable may remain running or parked. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or end-session behavior introduced by a newer eve version.
+See [Tasks](./tools/tasks) for how the model waits for, corrects, and cancels tasks.
+
+## What the parent sees
+
+The subagent tool's description is the subagent's `description`, plus a note that the child doesn't see the conversation and that `taskId` continues a task. The model, approvals, logs, and evals all use the tool's name, such as `researcher` or `crm__reviewer`.
+
+To require structured output, call the child from an authored workflow tool with [`ctx.agent(name)`](./tools/workflows#delegate-work-ctxagent) and pass `outputSchema` to `send()`.
+
+Approvals, questions, and sign-ins from a child appear on the parent session, so the parent's channel can prompt for them. On text-only channels, typing an option of the first open prompt, such as `approve` or `deny`, answers that prompt; each message answers one prompt. A tool approval stays open until the child accepts the answer, because the child's approval policy decides who may answer.
+
+Each child has its own session and stream. The parent stream records:
+
+| Event                                        | Meaning                                                                                  |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `task.started`                               | The task started.                                                                        |
+| `call.started`                               | A call started. Later calls to the same child carry its `taskId`.                        |
+| `child.opened`                               | The child session opened, with `owner`, agent `name`, `sessionId`, and `stream`.         |
+| `interaction.opened` / `interaction.settled` | A child's approval, question, or sign-in opened or finished. `origin` names the child.   |
+| `call.settled`                               | The call finished, with the child's reply as `output` or the failure as `error.message`. |
+
+Later calls with the same `taskId` reach the same child without another `child.opened`, so match calls to a child by `taskId`. To follow a child's progress from a client, pass its `child.opened` event to [`session.agent()`](./guides/client/streaming#follow-a-subagent) and call `stream()`. For a remote child, the stream is proxied and authenticated by the parent. Channels that show activity list a child's tool calls under its progress item, on a best-effort basis.
+
+A child's model calls retry temporary provider failures up to three times. A retry repeats only the failed model call; earlier tool results and sandbox work stay. With [Workflow checkpoint batching](./agent-config#workflow-checkpoint-batching), a retry can also repeat the tool calls in the current batch. When retries run out, the call fails once.
+
+## The built-in `agent` tool
+
+The root session gets an `agent` tool by default. It starts a copy of the root agent, or continues one with `taskId`, using the same `{ message, taskId? }` input as a declared subagent.
+
+A copy uses the root's instructions, connections, auth, tools (except `agent`), and sandbox, so the root sees its file writes immediately. It starts with an empty conversation and state. Several copies can run at once, so give parallel copies separate files to write.
+
+Only the root session has `agent`: copies and declared subagents can't call it. To run a copy on another model, call it from a workflow with [`ctx.agent("agent", { model })`](./tools/workflows#delegate-work-ctxagent), or offer the [`agentWithModel` tool](./concepts/built-in-tools#agent), which adds a `model` input.
+
+To turn the tool off, set `tool: false` on the root agent:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-5.5",
+  tool: false,
+});
+```
+
+You can also export `disableTool()` from `agent/tools/agent.ts`, or author your own tool there, which takes priority over `tool: false`. Re-export `eve/tools/agent` from that path to keep the built-in tool. A workflow in a root session can still call the copy with `ctx.agent("agent", ...)`.
 
 ## When to split
 
-Split out a subagent when the task needs a different prompt or specialist role, a narrower tool surface, or its own runtime context. Don't reach for one when a [skill](./skills) would do. If the agent can keep its identity and needs only an optional procedure, a skill is the lighter choice.
+Create a subagent when a task needs a different prompt or role, fewer tools, or its own sandbox. When the agent keeps its role and needs only an optional procedure, use a [skill](./skills) instead.
 
 ## What to read next
 

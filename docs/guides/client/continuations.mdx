@@ -3,14 +3,13 @@ title: "Session State"
 description: "Persist and resume eve client sessions with durable session IDs and stream cursors."
 ---
 
-The TypeScript client uses one durable session ID for messages, controls, and
-streams. A `ClientSession` adds a local `streamIndex` cursor so reconnects do not
-replay events already consumed by that handle.
+A `ClientSession` is a handle on one session ID, used for messages, controls,
+and streams. It also keeps a local `streamIndex` cursor, so reconnects skip
+events the handle already read.
 
 ## Read and persist state
 
-Create the session with its first turn, then persist `session.state` after
-consuming the delivery:
+Save `session.state` after you read a response:
 
 ```ts
 const { session, delivery } = await client.sessions.create({
@@ -21,10 +20,11 @@ await delivery.result();
 await saveSessionState(session.state);
 ```
 
-The state is deliberately small:
+The state holds the ID, the cursor, and an optional routing handle:
 
 ```ts
 interface ClientSessionState {
+  inbox?: string; // opaque; save and restore it unchanged
   sessionId: string;
   streamIndex: number;
   /** Opaque; persist it and pass it back unchanged. eve may extend it. */
@@ -32,8 +32,8 @@ interface ClientSessionState {
 }
 ```
 
-It is a remote stream cursor, not a transcript. Persist events separately when
-your application renders chat history.
+It is a stream cursor, not a transcript. Save events separately when your
+application renders chat history.
 
 ## Resume a saved session
 
@@ -46,31 +46,29 @@ const saved = (await loadSessionState()) as ClientSessionState;
 const session = client.sessions.attach(saved.sessionId, saved);
 
 const response = await session.send("Now shorten it.");
-console.log((await response.result()).message);
+console.log((await response.result()).reply);
 ```
 
 Pass the whole saved state so its optional [`inbox`](./overview#faster-sends-with-inbox) value
 reaches later sends. `attach()` performs no request. Every later operation targets exactly
-`saved.sessionId`; it never follows or creates a replacement.
+`saved.sessionId` and never creates a replacement.
 
-`send()` correlates its response with the message accepted by the server. If the
-saved cursor is behind, it skips earlier turns and advances past them before
-collecting the new result, including when another turn is active or queued. You
-do not need to drain the stream before sending. Upgrade the server alongside the
-client: a server that omits the accepted delivery identity causes `send()` to
-throw instead of returning an ambiguous result.
+`send()` returns the response to the message the server accepted. If the saved
+cursor is behind, the response skips earlier turns, even while another turn is
+active or queued. You don't need to read the rest of the stream first. `send()`
+throws when the server's reply has no delivery ID, so upgrade the server with
+the client.
 
-If a configured reconnect limit ends the stream before the accepted turn reaches
-a boundary, collecting its response throws. A partial stream is not a completed
-result.
+If a reconnect limit you set ends the stream before the turn finishes or pauses,
+`result()` throws instead of returning a partial result.
 
 <a id="waiting-completed-and-reset-sessions" />
 
 ## Waiting, completed, and ended sessions
 
-A session that hasn't ended (`session.ended`) accepts another message through the
+A session that hasn't ended (`session.ended`) accepts more messages through the
 same handle. An ended session does not. Start a fresh conversation
-explicitly with another `client.sessions.create(firstTurn)` call.
+with another `client.sessions.create(firstTurn)` call.
 
 ```ts
 const ended = await session.end({ reason: "Start over" });
@@ -78,7 +76,7 @@ await ended.result();
 const { session: fresh, delivery } = await client.sessions.create({ message: "Begin again." });
 ```
 
-The old `session` remains pinned to its retired ID; `fresh` owns a different ID.
+The old `session` keeps pointing at its retired ID; `fresh` has a different ID.
 
 ## Multiple sessions
 
@@ -97,13 +95,12 @@ await save("research", research.state);
 await save("support", support.state);
 ```
 
-The shared `Client` owns the base URL, auth, headers, and redirect policy. Each
-`ClientSession` owns its fixed ID and stream cursor.
+The shared `Client` holds the base URL, auth, headers, and redirect policy. Each
+`ClientSession` holds its fixed ID and stream cursor.
 
 ## Reconnect an existing stream
 
-`stream()` starts from the handle's saved cursor and advances it as events are
-read:
+`stream()` starts from the handle's cursor and advances it as you read:
 
 ```ts
 const session = client.sessions.attach(saved.sessionId, saved);

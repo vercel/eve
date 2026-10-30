@@ -3,7 +3,7 @@ title: "Security Model"
 description: "eve's trust boundaries, where secrets live, how credentials reach hosts, and what fails closed by default."
 ---
 
-Your eve agent runs across two contexts, with a trust boundary between them and every secret kept on the trusted side. Use this mental model when deciding what an agent (and the model driving it) is allowed to reach.
+An eve agent runs in two contexts: the trusted app runtime and the isolated sandbox. Every secret stays in the app runtime. Use this model to decide what an agent, and the model driving it, can reach.
 
 ## Trust boundaries
 
@@ -14,13 +14,15 @@ Your eve agent runs across two contexts, with a trust boundary between them and 
 | Network                 | Unrestricted | Controlled by policy  |
 | Filesystem              | App's own    | Isolated `/workspace` |
 
-The app runtime is the trusted side. Your tool implementations, model calls, connections, state, and durable execution all run here, with `process.env` and full Node.js available. (On Vercel, this is a Vercel Function.)
+The app runtime is the trusted side. Your tool implementations, model calls, connections, and session state run here, with `process.env` and full Node.js available. On Vercel, this is a Vercel Function.
 
-The sandbox is the isolated side. The model runs shell commands and accesses files there through the default `bash`, `read_file`, and `write_file` tools and any opt-in sandbox tools such as `glob` and `grep`. It gets its own `/workspace` filesystem, but no `process.env`, no secrets, and no path back into the app runtime. (On Vercel, each sandbox is a [Vercel Sandbox](https://vercel.com/docs/sandbox) microVM with hardware-level isolation.) Only shell commands execute in the sandbox. Even the built-in `bash`/`read_file`/`write_file` tools live in the app runtime and _proxy_ into the sandbox. The model sees tool definitions and results, never your secrets.
+The sandbox is the isolated side. It has its own `/workspace` filesystem but no `process.env`, no secrets, and no path back into the app runtime. On Vercel, each sandbox is a [Vercel Sandbox](https://vercel.com/docs/sandbox) microVM with hardware-level isolation.
 
-The [just-bash provider](../sandbox/just-bash) has a weaker boundary. Its shell is a JavaScript interpreter with a virtual filesystem that runs inside the app runtime process, not a separate container or VM. It provides no network isolation, and any `experimental.customCommands` you register run as host application code outside the virtual filesystem. Use a Vercel or Docker sandbox when the model runs commands you would not run in the app runtime.
+Only shell commands execute in the sandbox. The built-in `bash`, `read_file`, and `write_file` tools, and opt-in tools such as `glob` and `grep`, run in the app runtime and _proxy_ into the sandbox.
 
-A concrete trace makes the boundary clear. When the model calls a custom `charge_card` tool, its `execute` runs in the app runtime, reads `process.env.STRIPE_KEY`, calls Stripe, and returns `{ ok: true }`. The model sees only `{ ok: true }`: the key never leaves the app runtime, and nothing about the call touches the sandbox. The built-in `write_file` is the mirror image, running in the app runtime and proxying the write into the sandbox `/workspace`. Either way the model drives the work through tool calls and their results, never by holding a credential or reaching the runtime directly.
+The model sees only tool definitions and results. When the model calls a custom `charge_card` tool, its `execute` runs in the app runtime, reads `process.env.STRIPE_KEY`, calls Stripe, and returns `{ ok: true }`. The model sees only `{ ok: true }`, and the call never touches the sandbox.
+
+The [just-bash provider](../sandbox/just-bash) has a weaker boundary. Its shell is a JavaScript interpreter with a virtual filesystem inside the app runtime process, with no network isolation. Any `experimental.customCommands` you register run as host application code outside the virtual filesystem. Use a Vercel or Docker sandbox when the model runs commands you would not run in the app runtime.
 
 See [Agent loop and sandbox](./execution-model-and-durability#agent-loop-and-sandbox) for how eve connects these contexts while keeping their state and lifetimes separate.
 
@@ -38,42 +40,40 @@ flowchart LR
   Runtime --> Telemetry["Configured telemetry or eval provider"]
 ```
 
-eve sends data where your agent configuration and runtime choices send it:
+eve sends data only where your agent configuration sends it:
 
 - Inbound channel data flows through the channel provider you configure, then into the eve app runtime.
-- Model inputs and outputs flow to the model or routing path selected in `agent.ts`, such as a Vercel AI Gateway model id or a provider model instance (`EveLanguageModel`).
+- Model inputs and outputs flow to the model selected in `agent.ts`, such as a Vercel AI Gateway model id or a provider model instance (`EveLanguageModel`).
 - Tool and connection calls flow to the external services, MCP servers, OpenAPI endpoints, and channels you configure.
 - Sandbox commands can reach network destinations allowed by the sandbox network policy.
 - Telemetry flows to destinations configured under `agent/instrumentation/`.
-  eve also records local traces during `eve dev` and exports to Vercel Agent
-  Runs in preview and production by default. Eval data flows to the reporters
-  configured in eval settings.
+  By default, eve also records local traces during `eve dev` and exports to
+  Vercel Agent Runs in preview and production.
+- Eval data flows to the reporters configured in eval settings.
 
-eve stores durable session and workflow state needed to resume conversations, stream events, replay completed steps, and show run observability. You are responsible for deciding whether the selected channels, model providers, connected services, sandbox egress destinations, telemetry exporters, retention settings, and deletion controls are appropriate for your data and use case.
+eve stores the session and workflow state it needs to resume conversations, stream events, replay completed steps, and show run observability.
+
+You decide whether your channels, model providers, connected services, and sandbox egress destinations suit your data and use case. The same applies to telemetry exporters, retention settings, and deletion controls.
 
 ## Credential brokering
 
-Credential brokering gives the model _authenticated_ network access from inside the sandbox, like a `git clone` of a private repo or an authenticated `curl`, when there's no [tool](../tools) or [connection](../connections) to route it through. On the Vercel Sandbox backend, auth headers get injected at the sandbox's network firewall for matching domains. The secret stays in the app runtime; the sandbox process only ever sees the response. See [Vercel Sandbox Credential Brokering](https://vercel.com/docs/sandbox/concepts/firewall#credentials-brokering) for the platform mechanism, and [Sandbox](../sandbox) for the eve policy API.
+Credential brokering gives the model _authenticated_ network access from inside the sandbox, such as a `git clone` of a private repo. Use it when no [tool](../tools) or [connection](../connections) can route the call. On the Vercel Sandbox backend, the sandbox's network firewall injects auth headers for matching domains. The secret stays in the app runtime, and the sandbox process sees only the response. See [Vercel Sandbox Credential Brokering](https://vercel.com/docs/sandbox/concepts/firewall#credentials-brokering) for the platform mechanism, and [Sandbox](../sandbox) for the eve policy API.
 
 ## Connection credentials
 
-[Connection](../connections) tokens (MCP and OpenAPI) come from either `getToken()` or an interactive OAuth flow, and eve injects the resolved token into every outbound request. The token is cached per step and never serialized to durable state.
+[Connection](../connections) tokens (MCP and OpenAPI) come from either `getToken()` or an interactive OAuth flow. eve injects the resolved token into every outbound request and never saves it in session state.
 
 ## Channel verification
 
-A [channel](../channels/overview) is your agent's front door, so authenticating inbound traffic is its job. The built-in platform channels follow two rules, and so must any channel you write yourself:
+A [channel](../channels/overview) authenticates its own inbound traffic. The built-in platform channels follow two rules, and so must any channel you write:
 
 - **Verify signatures in constant time.** Platform channels (Slack, GitHub,
-  Telegram, Twilio) verify the platform's HMAC signature over the raw request body
-  with a constant-time comparison, so timing the response can't reveal a forged
-  signature. Use a constant-time compare for any secret you check, never `===` on
-  a signature.
+  Telegram, Twilio) verify the platform's HMAC signature over the raw request
+  body. They compare in constant time, so response timing can't reveal a forged
+  signature. Never use `===` on a signature or secret.
 - **Don't trust body-supplied identity.** Derive the caller from a _verified_
-  signature or token, never from a `principalId` (or similar) the request body
-  claims. A body field is attacker-controlled; treating it as identity is
-  cross-user impersonation.
-
-A custom channel that accepts dashboard-style webhooks should follow the same shape: authenticate the raw body with an HMAC, compare signatures in constant time, and trust any body-supplied principal only after the signature verifies.
+  signature or token. Never use a `principalId` (or similar) from the request
+  body, because a body field is attacker-controlled.
 
 ## A turn runs as one principal
 
@@ -81,11 +81,11 @@ A turn's principal (its authenticator, issuer, principal type and id) never chan
 
 ## Authored markdown is data
 
-[Skill](../skills) and [schedule](../schedules) files are markdown with YAML frontmatter, and eve treats that frontmatter strictly as data. The code-capable engines (`---js` / `---javascript`, which would `eval()` the frontmatter body the moment the file is parsed) are disabled, so such a fence throws rather than running. Frontmatter has to parse to a plain YAML object.
+[Skill](../skills) and [schedule](../schedules) frontmatter is data: it must parse to a plain YAML object. A fence that names any language other than YAML, such as `---js`, throws instead of evaluating code.
 
 ## Auth fails closed
 
-Routes reject unauthenticated traffic by default. If no `AuthFn` in the walk accepts the request, it gets a `401`, and admitting anonymous callers takes an explicit `none()`. The scaffold's `placeholderAuth()` keeps a half-configured app closed in production until you replace it. See [Auth & route protection](../guides/auth-and-route-protection) for the full walk and verifiers.
+Routes reject unauthenticated traffic by default. If no `AuthFn` in the walk accepts the request, it gets a `401`; admitting anonymous callers takes an explicit `none()`. The scaffold's `placeholderAuth()` keeps a half-configured app closed in production until you replace it. See [Auth & route protection](../guides/auth-and-route-protection) for the full walk and verifiers.
 
 ## Pre-production checklist
 
@@ -99,7 +99,7 @@ Before exposing an agent to real traffic:
       trust body-supplied identity.
 - [ ] Keep secrets in `process.env`, never in compiled artifacts, never
       passed into the sandbox. Route privileged calls through tools or connections.
-- [ ] Scope connection tokens to the least privilege the agent needs; they
+- [ ] Limit connection tokens to the least privilege the agent needs; they
       reach hosts but never the model.
 - [ ] Set a sandbox network policy tighter than `allow-all` if the model
       shouldn't have open egress; use credential brokering for authenticated egress.
@@ -110,6 +110,6 @@ Before exposing an agent to real traffic:
 
 - [Auth & route protection](../guides/auth-and-route-protection): the full auth walk and verifier helpers
 - [Sandbox](../sandbox): backends, network policy, and brokering config
-- [Execution model and durability](./execution-model-and-durability): how durable sessions run
+- [Execution model and durability](./execution-model-and-durability): how sessions run and resume
 - [Connections](../connections): static-token and OAuth connections
 - [Responsible use](../responsible-use): deployer responsibilities and safeguards to review before production

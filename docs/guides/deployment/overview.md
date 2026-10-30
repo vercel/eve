@@ -3,7 +3,7 @@ title: "Overview"
 description: "How an eve agent runs in production, and the backends you choose on Vercel or your own infrastructure."
 ---
 
-Deploy eve on Vercel or run it as a Node service on your own infrastructure. Both use eve's durable session runtime, built on the open-source [Workflow SDK](https://workflow-sdk.dev/), so conversations, human approvals, and subagent work survive restarts and long waits. Your agent directory stays the same on every target.
+Deploy eve to Vercel or run it as a Node service on your own infrastructure. Both targets run on the open-source [Workflow SDK](https://workflow-sdk.dev/), so conversations, approvals, and subagent work survive restarts and long waits. The agent directory stays the same on every target.
 
 ## Choose a deployment target
 
@@ -12,11 +12,11 @@ Deploy eve on Vercel or run it as a Node service on your own infrastructure. Bot
 | [Vercel](./vercel)             | `.vercel/output`       | You want Vercel to operate the runtime services                 |
 | [Self-hosting](./self-hosting) | `.output/` Node server | You run Node services on your own servers or container platform |
 
-eve is frontend agnostic and can be deployed alongside Next.js, Nuxt, SvelteKit, or TanStack Start applications, which route browser requests to the agent. See [Frontend integrations](../frontend/overview) for more details.
+You can also deploy eve beside a Next.js, Nuxt, SvelteKit, or TanStack Start application that routes browser requests to the agent. See [Frontend integrations](../frontend/overview).
 
 ## Backends
 
-The eve server delegates storage, isolation, model access, scheduling, and tracing to backends. Choosing a deployment target chooses the default for each one, so a new agent deploys without backend configuration on either target.
+The eve server hands storage, isolation, model access, scheduling, and tracing to backends. Each deployment target picks a default for every backend, so a new agent deploys without backend configuration.
 
 | Backend          | What it does                                                        | On Vercel                                    | Self-hosted                                                    |
 | ---------------- | ------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------- |
@@ -26,11 +26,11 @@ The eve server delegates storage, isolation, model access, scheduling, and traci
 | Schedules        | Runs authored [schedules](../../schedules)                          | Vercel Cron                                  | The schedule runner in `eve start`                             |
 | Observability    | Records traces of sessions, turns, and tool calls                   | [Agent Runs](../../observability/agent-runs) | [OpenTelemetry](../../observability/otel)                      |
 
-Self-hosted defaults store workflow state on disk and run sandboxes in Docker when Docker is available during the build. See [Self-host eve](./self-hosting) for the persistent storage and sandbox setup your host provides.
+Self-hosted defaults store workflow state on disk, and run sandboxes in Docker when Docker is available during the build. See [Self-host eve](./self-hosting) for the persistent storage and sandbox setup your host must provide.
 
 ## Prepare for production
 
-Every production deployment needs the same preparation:
+Every production deployment needs these steps:
 
 1. Run `eve build` to compile the agent and create host output.
 2. Provide a model credential and any secrets required by tools, connections, and route authentication.
@@ -41,11 +41,11 @@ Every production deployment needs the same preparation:
 
 ## Configure credentials
 
-Keep credentials in your deployment environment or secret manager. Don’t include them in source or compiled artifacts.
+Keep credentials in your deployment environment or secret manager, not in source or compiled artifacts.
 
 Your model configuration determines the required credential. A string model ID uses the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) and requires Vercel project OpenID Connect (OIDC) or `AI_GATEWAY_API_KEY`. A provider-authored model uses that provider’s package and API key. See [Agent configuration](../../agent-config#set-the-model) for both forms.
 
-Configure production route authentication separately from model access. The default policy rejects browser traffic in production. See [Authentication](../auth-and-route-protection) for the available policies and secret requirements.
+Route authentication is separate from model access. The default policy rejects browser traffic in production. See [Authentication](../auth-and-route-protection) for the available policies and secret requirements.
 
 ## Verify the deployment
 
@@ -64,8 +64,6 @@ eve remote connect --url https://your_agent.example.com
 Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally first if a Vercel deployment uses Deployment Protection.
 
 ## Continue with a platform guide
-
-Follow the guide for your deployment platform or application topology:
 
 - [Deploy to Vercel](./vercel): use Vercel Build Output, Workflow, Sandbox, Cron, and observability
 - [Self-host eve](./self-hosting): run the eve server on Node with backends you choose

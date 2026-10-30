@@ -3,7 +3,7 @@ title: "Workflow Worlds"
 description: "Choose and configure the Workflow world that stores and resumes eve sessions on a self-hosted deployment."
 ---
 
-A Workflow world is the backend that makes eve sessions durable. eve runs every session as a [Workflow SDK](https://workflow-sdk.dev/) workflow, and the world stores each run's event log, step results, pending input, and streams, and queues the work that resumes it. eve uses Vercel Workflow on Vercel and the local world for `eve start`. A self-hosted deployment can select another world package without changing the agent.
+A Workflow world is the backend that stores eve sessions so they survive restarts and redeploys. eve runs every session as a [Workflow SDK](https://workflow-sdk.dev/) workflow. The world stores each run's event log, step results, pending input, and streams, and queues the work that resumes it. eve uses Vercel Workflow on Vercel and the local world for `eve start`. A self-hosted deployment can select another world package without changing the agent.
 
 ## Compare worlds
 
@@ -21,9 +21,9 @@ All three support compaction handoff, which moves a session to a fresh run while
 
 The local world is the default for `eve start` and needs no configuration. It stores run state under `.eve/.workflow-data` in the app directory. Mount that directory on persistent storage so runs survive process and container replacement.
 
-Each `eve start` process accepts workflow queue deliveries only from its own queue. Keep deliveries on the process that enqueued them: don't point `WORKFLOW_LOCAL_BASE_URL` at a load balancer that can forward deliveries to another replica, because that replica rejects them with HTTP 401. To serve an agent from several replicas, use the [Postgres world](#use-the-postgres-world).
+Each `eve start` process accepts queue messages only from its own queue. Don't point `WORKFLOW_LOCAL_BASE_URL` at a load balancer, because another replica rejects forwarded messages with HTTP 401. To serve an agent from several replicas, use the [Postgres world](#use-the-postgres-world).
 
-On startup, eve re-enqueues pending and running local workflow runs with a new per-process delivery proof. Runs that were active when the previous process stopped continue when the eve version is unchanged. Local recovery always runs; `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` or `false` does not disable it in `eve start`.
+On startup, `eve start` queues pending and running local workflow runs again. Runs that were active when the previous process stopped continue when the eve version is unchanged. `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` or `false` doesn't disable this recovery.
 
 ## Use the Postgres world
 
@@ -93,8 +93,8 @@ export default defineAgent({
 });
 ```
 
-The package must export a default factory or `createWorld()` function. Read credentials and host options from runtime environment variables, not `agent.ts`. If the package must stay external in hosted output, list it in `build.externalDependencies`.
+The package must export a default factory or `createWorld()` function. It reads credentials and host options from runtime environment variables, not `agent.ts`. If the package must stay external in hosted output, list it in `build.externalDependencies`.
 
-Install a world built against the same `@workflow/*` major version as your eve release, currently `5.x`. At startup, eve checks the world's declared `@workflow/core` or `@workflow/world` dependency and fails with the version to install when the major versions differ.
+Install a world built against the same `@workflow/*` major version as your eve release, currently `5.x`. eve checks the world's `@workflow/core` or `@workflow/world` dependency at startup, and fails with the version to install when the major versions differ.
 
-See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the underlying Workflow SDK abstraction, and [agent.ts](../../agent-config#workflow-world) for the configuration field.
+See [Workflow Worlds](https://workflow-sdk.dev/worlds) for the Workflow SDK abstraction, and [agent.ts](../../agent-config#workflow-world) for the configuration field.

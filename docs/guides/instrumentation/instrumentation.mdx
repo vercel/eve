@@ -4,27 +4,18 @@ description: "Configure lifecycle instrumentation, handle runtime events, and co
 url: "/observability/instrumentation"
 ---
 
-Add lifecycle instrumentation as files under `agent/instrumentation/`. Each
-file handles eve runtime events independently. Configure trace exporters and
-shared span settings with the [built-in OpenTelemetry APIs](./otel).
-
-The instrumentation directory replaces `agent/instrumentation.ts`. See
-[Migrate instrumentation](/docs/observability/instrumentation-migration) when
-upgrading from `eve < 0.62.0`.
+An instrumentation file is a file under `agent/instrumentation/` that receives eve runtime events, such as a tool call starting or a turn ending. To export traces instead, use the [built-in OpenTelemetry APIs](./otel).
 
 ## Add instrumentation
 
-The filename identifies the instrumentation slot. A lifecycle-event file must
-default-export `defineInstrumentation(...)` or `disableInstrumentation()`.
-See [OpenTelemetry](./otel) for the supported OTel declarations.
+eve names each file by its filename. A lifecycle-event file must default-export `defineInstrumentation(...)` or `disableInstrumentation()`. See [OpenTelemetry](./otel) for the OTel files.
 
 ```text
 agent/instrumentation/
   audit.ts  lifecycle instrumentation
 ```
 
-This instrumentation measures the time from a call being requested until it
-settles, including any approval wait, without receiving arguments or results:
+This file measures how long each call takes from request to finish, including any approval wait. It doesn't receive arguments or results:
 
 ```ts title="agent/instrumentation/audit.ts"
 import { defineInstrumentation } from "eve/instrumentation";
@@ -48,20 +39,50 @@ export default defineInstrumentation({
 });
 ```
 
-`ctx.state` is JSON storage scoped to this file and operation. It survives
-durable suspension and is released after the terminal event.
+`ctx.state` stores JSON for one operation in this file, such as one tool call. It is kept while the session pauses, such as during an approval wait. eve releases it after the operation's last event.
 
-Use `setup` for asynchronous initialization. In `eve dev` and built servers,
-eve awaits every provider's setup before loading the server entry. A setup
-failure stops startup. Modules imported by an instrumentation file load before
-setup, so keep dependencies that need initialization out of those imports.
+Handlers from different files run at the same time, in no fixed order. A failure in one file doesn't affect the others.
+
+| Field         | Purpose                                                                                                                    |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `events`      | Handlers keyed by event name. See [Lifecycle events](#lifecycle-events).                                                   |
+| `tracePolicy` | Whether this file receives a trace, and with which content. See [Control inputs and outputs](#control-inputs-and-outputs). |
+| `setup`       | Asynchronous initialization. Runs once at startup, before any event arrives.                                               |
+| `flush`       | Sends buffered records. eve calls it before a session goes idle.                                                           |
+| `shutdown`    | Releases resources when the process stops.                                                                                 |
+
+A `setup` failure stops startup. Modules that an instrumentation file imports load before `setup`, so keep dependencies that need initialization out of those imports.
+
+## Lifecycle events
+
+Events that also appear in the session stream use the same names and outcomes there. Each operation emits one final event; read its `outcome` to tell completion from failure. A start event and its final event share an `idempotencyKey`, so match on it when you upsert records across replays.
+
+| Kind             | Events                                                 | Meaning                                                                                                                                                                                                       |
+| ---------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session          | `session.started`, `session.ended`                     | Session start and end. `session.ended.outcome` is `completed` or `failed`.                                                                                                                                    |
+| Turn             | `turn.started`, `turn.settled`                         | Turn work. `outcome` is `completed`, `cancelled`, or `failed`. A cancelled turn is not a failure.                                                                                                             |
+| Message          | `delivery.consumed`, `delivery.settled`                | An inbound message eve recorded. The final `outcome` is `handled`, `awaiting-input`, `applied`, `ignored`, `refused`, or `failed`. `delivery.consumed` carries channel metadata when available.               |
+| Model run        | `model.started`, `model.retried`, `model.settled`      | Each attempt of a model run. `model.retried` ends a failed attempt before another try. `model.settled.outcome` is `completed`, `failed`, `interrupted`, `abandoned`, or `cancelled` (the turn was cancelled). |
+| Provider call    | `model.call.started`, `model.call.settled`             | One provider call; a model attempt can make several. The final `outcome` is `"completed"` or `"failed"`. Completion carries usage, finish reason, and optional `providerMetadata`.                            |
+| Call             | `call.requested`, `call.settled`                       | A tool, skill, or agent call, including direct `invokeTool` calls. `capability` names its kind and name. The final `outcome` is `completed`, `failed`, `rejected`, `interrupted`, or `abandoned`.             |
+| User input       | `interaction.opened`, `interaction.settled`            | A question, approval, or budget prompt, keyed by `interactionId`. The final event carries `outcome`, `responder` (who answered), and, when recorded, `answer`.                                                |
+| Memory operation | `memory.operation.started`, `memory.operation.settled` | A memory search or write, with operation name, phase, and slot. The final `outcome` is `"completed"` or `"failed"`.                                                                                           |
+
+A message that pauses for a person ends with `awaiting-input`, and the work after the answer belongs to the answer's message. OTel links a turn to a message only when the turn handled exactly one message.
+
+Each call emits one `call.*` pair, and SDK callbacks don't add a second one. A subagent's `call.settled` includes its reported usage.
+
+The event's `scope` field holds the session and run IDs the event belongs to. `turnId` can be absent for compaction or direct calls. Treat `idempotencyKey` as opaque. `runId` and `attempt` identify a run; runtime-context resolvers receive them as `run: { id, attempt }`.
+
+eve rebuilds a thrown tool error from its saved record, so check `error.name`, not `instanceof`.
+
+Use `InstrumentationEvent<"model.call.settled">` from `eve/instrumentation` to type a standalone handler. Model input content is `unknown`, because it holds the provider's request messages, not eve conversation messages. Narrow it before you read it.
+
+The OpenTelemetry trace schema is version 4.
 
 ## Control inputs and outputs
 
-Each lifecycle file created with `defineInstrumentation(...)` has an
-independent `tracePolicy`. It decides whether that file receives a trace and
-whether its events include input or output content. OpenTelemetry destinations
-share the process-wide policy declared by `otel(...)`.
+Each file created with `defineInstrumentation(...)` has its own `tracePolicy`. It decides whether that file receives a trace and whether its events include input or output content. OpenTelemetry destinations share the process-wide policy declared by `otel(...)`.
 
 ```ts title="agent/instrumentation/audit.ts"
 import { defineInstrumentation } from "eve/instrumentation";
@@ -83,13 +104,9 @@ export default defineInstrumentation({
 });
 ```
 
-The function receives `agentName`, `channel`, `audience`, `environment`, and
-`principalType`. `audience` is `"public"`, `"private"`, or
-`"unknown"`; `environment` is `"development"`, `"preview"`, or
-`"production"`.
+The function receives `agentName`, `channel`, `audience`, `environment`, and `principalType`, the kind of caller. `audience` is `"public"`, `"private"`, or `"unknown"`; `environment` is `"development"`, `"preview"`, or `"production"`.
 
-Without a policy, or when it returns `true`, eve sends metadata for every
-trace. It includes input and output content in these cases:
+Return `{ emit: false }` to skip the trace for this file, or `{ emit: true, recordInputs, recordOutputs }` to choose each content direction. Without a policy, or when it returns `true`, eve sends metadata for every trace and includes content in these cases:
 
 | Environment           | Audience               | Content            |
 | --------------------- | ---------------------- | ------------------ |
@@ -97,22 +114,13 @@ trace. It includes input and output content in these cases:
 | Preview or production | `public`               | Inputs and outputs |
 | Preview or production | `private` or `unknown` | Metadata only      |
 
-Return `{ emit: false }` to not sample the trace for this file. Return
-`{ emit: true, recordInputs, recordOutputs }` to choose the two content
-directions explicitly. Inputs include model prompts, tool arguments, call labels,
-channel input, and user responses. Labels follow the input policy because they can contain
-input-derived text. Outputs include model responses, tool results,
-requests for user input, model provider metadata, and error details. Omitted
-content fields are unavailable to the handler.
+Inputs include model prompts, tool arguments, call labels (which can contain input-derived text), channel input, and user responses. Outputs include model responses, tool results, requests for user input, model provider metadata, and error details. Content that isn't recorded is absent from the event.
 
-The channel assigns the audience once when it creates the session. It controls
-content capture, not access. See [Audience](../channels/overview#audience) for
-how the channel derives `public`, `private`, and `unknown`.
+The channel sets the audience once, when it creates the session. The audience controls content capture, not access. See [Audience](../channels/overview#audience) for how the channel picks `public`, `private`, or `unknown`.
 
 ## Redact fields
 
-Lifecycle events are immutable snapshots. Copy the fields you need into a
-destination-specific payload and redact that copy before sending it:
+Events are read-only, so copy the fields you need into a payload and redact the copy before sending it:
 
 ```ts title="agent/instrumentation/audit.ts"
 import { defineInstrumentation } from "eve/instrumentation";
@@ -148,45 +156,10 @@ async function sendAuditRecord(record: unknown): Promise<void> {
 }
 ```
 
-Prefer `recordInputs: false` or `recordOutputs: false` when the destination does not need an entire content direction. Use field-level redaction only when the destination needs part of that content.
-
-## Lifecycle events
-
-Lifecycle events derived from session facts use the same names and outcomes as
-the stream. For example, `turn.settled` carries the turn's `outcome`. Match an
-operation's start and terminal events by their shared `idempotencyKey` when
-upserting records across replays.
-
-| Lifecycle        | Events                                                 | Meaning                                                                                                                                                                                                          |
-| ---------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session          | `session.started`, `session.ended`                     | Session creation and end. `session.ended.outcome` is `completed` or `failed`.                                                                                                                                    |
-| Turn             | `turn.started`, `turn.settled`                         | Turn work. `outcome` is `completed`, `cancelled`, or `failed`; a cancelled turn is not a failure.                                                                                                                |
-| Delivery         | `delivery.consumed`, `delivery.settled`                | The committed delivery facts. Settlement includes `outcome`: `handled`, `awaiting-input`, `applied`, `ignored`, `refused`, or `failed`. Channel metadata is on consumption when available.                       |
-| Model run        | `model.started`, `model.retried`, `model.settled`      | Each attempt of a model run. `model.retried` ends a failed attempt before another try; `model.settled.outcome` is `completed`, `failed`, `interrupted`, `abandoned`, or `cancelled` when the turn was cancelled. |
-| Provider call    | `model.call.started`, `model.call.settled`             | An individual provider call; one model attempt can make several. Settlement has `outcome: "completed"` or `"failed"`; completion carries usage, finish reason, and optional `providerMetadata`.                  |
-| Call             | `call.requested`, `call.settled`                       | A tool, skill, or agent call, including direct `invokeTool` calls. `capability` identifies its kind and name. Settlement carries `completed`, `failed`, `rejected`, `interrupted`, or `abandoned`.               |
-| User input       | `interaction.opened`, `interaction.settled`            | A question, approval, or budget prompt, keyed by `interactionId`. Settlement includes the interaction's `outcome`, `responder` (who decided it), and, when recorded, its `answer`.                               |
-| Memory operation | `memory.operation.started`, `memory.operation.settled` | A memory search or write, with operation name, phase, and slot. Settlement has `outcome: "completed"` or `"failed"`.                                                                                             |
-
-A delivery that pauses for a person settles `awaiting-input`; resumed work belongs to the answer's delivery. OTel attributes a turn to a delivery only when exactly one delivery was consumed. Event `scope` includes session and run coordinates; `turnId` can be absent for compaction or direct calls. Treat `idempotencyKey` as opaque.
-
-Use `InstrumentationEvent<"model.call.settled">` from `eve/instrumentation` when typing a
-standalone handler. Model input content is `unknown`: the messages are the provider's request
-messages, not an eve conversation-message schema. Narrow that content before reading it.
-
-Each call emits one `call.*` lifecycle; SDK callbacks do not duplicate it. A subagent's `call.settled` includes its reported usage. A thrown tool error is reconstructed from the durable record, so don't use `instanceof` to classify it; inspect `error.name` instead.
-
-When upgrading, use each operation's terminal event and inspect its `outcome` instead of subscribing to separate completion and failure events. See the [v27 event mapping](/docs/concepts/upgrade-to-v27-events#event-mapping). Provider metadata moved to `model.call.settled`. Replace step indices and encoded attempt IDs with `runId` and `attempt`; use `capability` for call kind and name. Channel types and `isChannel` now come from `eve/channels`. Runtime-context resolvers receive `run: { id, attempt }` instead of `step.index`.
-
-The OpenTelemetry trace schema remains version 4: span names, attributes, and span events are unchanged.
-
-Handlers from different files run concurrently and are failure-isolated. Do
-not depend on execution order. Use `flush` to drain buffered records and
-`shutdown` to release resources.
+When the destination needs no content in one direction, set `recordInputs: false` or `recordOutputs: false` instead.
 
 ## What to read next
 
-- [Migrate instrumentation](/docs/observability/instrumentation-migration): replace `agent/instrumentation.ts`.
 - [OpenTelemetry](/docs/observability/otel): configure process-wide settings and third-party destinations.
 - [Agent Runs](/docs/observability/agent-runs): configure Vercel's built-in trace destination.
 - [Local development](../guides/dev-tui): inspect local traces in the TUI

@@ -3,7 +3,7 @@ title: "Messages"
 description: "Send text, full turn payloads, client context, attachments, and HITL responses with eve/client."
 ---
 
-Create a session with its first turn, then use the returned `ClientSession` for follow-ups. Each handle targets one durable session ID.
+A message is one turn of input to a session. Create a session with its first turn, then send follow-ups through the returned `ClientSession`, which targets that one session ID.
 
 ## Send text
 
@@ -24,42 +24,41 @@ const result = await delivery.result();
 console.log(result.status, result.reply);
 ```
 
-`delivery.result()` reads through this delivery's settlement and returns a `DeliveryResult`.
+`delivery.result()` reads until the request finishes or pauses for input, then returns a `DeliveryResult`.
 Import `Delivery`, `DeliveryReadOptions`, and `DeliveryResult` from `eve/sessions`:
 
-| Field          | Meaning                                                                                            |
-| -------------- | -------------------------------------------------------------------------------------------------- |
-| `reply`        | The request's reply text, from the parts `turn.settled.reply` lists.                               |
-| `status`       | `awaiting-input`, `completed`, `failed`, or `cancelled` for this settled request.                  |
-| `sessionEnded` | Whether the session ended in the delivery's final commit.                                          |
-| `deliveryId`   | The accepted command's ID.                                                                         |
-| `outcome`      | The delivery's outcome: `handled`, `awaiting-input`, `applied`, `ignored`, `refused`, or `failed`. |
-| `error`        | Required `ErrorInfo` when `status` is `failed`.                                                    |
-| `interactions` | Display-safe interactions left open for a person.                                                  |
-| `sessionId`    | Session ID for streaming and inspection.                                                           |
-| `data`         | Structured output when the turn requested an [output schema](./output-schema).                     |
+| Field          | Meaning                                                                                                  |
+| -------------- | -------------------------------------------------------------------------------------------------------- |
+| `reply`        | The request's reply text, from the parts `turn.settled.reply` lists.                                     |
+| `status`       | `awaiting-input`, `completed`, `failed`, or `cancelled` for this request.                                |
+| `sessionEnded` | Whether the session ended when this request finished.                                                    |
+| `deliveryId`   | The ID of the accepted message or control.                                                               |
+| `outcome`      | What happened to the request: `handled`, `awaiting-input`, `applied`, `ignored`, `refused`, or `failed`. |
+| `error`        | Required `ErrorInfo` when `status` is `failed`.                                                          |
+| `interactions` | Approvals, questions, and sign-ins still waiting for a person, safe to display.                          |
+| `sessionId`    | Session ID for streaming and inspection.                                                                 |
+| `data`         | Structured output when the turn requested an [output schema](./output-schema).                           |
 
-A settled request's failure returns `status: "failed"` and `error`; inspect `error.code` and
-`error.message` to recover. HTTP failures and reads interrupted before settlement throw rather
-than fabricating a result. An `awaiting-input` result is complete: answering the prompt creates
-another delivery. Ordinary results do not retain an event log; capture `delivery.stream()`
-explicitly when you need one.
+A failed request returns `status: "failed"` with `error`; inspect `error.code` and
+`error.message` to recover. HTTP failures and reads interrupted before the request finishes throw instead.
+An `awaiting-input` result is complete. Answering the prompt sends a new request with its own result.
+Results don't include an event log; capture `delivery.stream()` when you need one.
 
-`session.send()` retries `409 session_not_ready` with bounded exponential backoff for up to 20
-seconds when a durable run has been accepted but its command inbox is still starting. The caller's
-abort signal cancels the wait. Other errors, `session.respond()`, control methods, and raw HTTP
-requests do not use this retry. An unknown
-or terminal session throws `SessionNotActiveError` immediately with `retryable: false`. A
-`session_not_ready` rejection has `retryable: true` if the bounded send retry expires. A
-[stranded](../../concepts/execution-model-and-durability#stranded-sessions) session throws
-`ClientSessionStrandedError`, a `ClientError` with `code: "session_stranded"` and the
-`eveVersion` that built the session when it recorded one. It is never retried automatically. Call
-`session.end()` and create a new session.
-The client never creates a replacement session. Following or reconnecting to a stranded session's
-stream reports the same typed error without retrying, including when you were waiting for a
-response to a message accepted before the upgrade. That accepted message is not redelivered.
-`session.clear()` throws the same error, because clearing would keep a session that cannot run.
-`session.stream({ follow: false })` and `session.snapshot()` still read the recorded history.
+`session.send()` retries `409 session_not_ready` with backoff for up to 20 seconds while the
+session starts. The caller's abort signal cancels the wait. Other errors, `session.respond()`,
+control methods, and raw HTTP requests are not retried.
+
+| Error                        | When                                                                                                                                |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `SessionNotActiveError`      | Unknown or terminal session, thrown immediately (`retryable: false`), or the `session_not_ready` retry expired (`retryable: true`). |
+| `ClientSessionStrandedError` | [Stranded](../../concepts/execution-model-and-durability#stranded-sessions) session.                                                |
+
+`ClientSessionStrandedError` is a `ClientError` with `code: "session_stranded"` and, when recorded,
+the `eveVersion` that built the session. It is never retried, and the client never creates a
+replacement: call `session.end()` and create a new session. Following the stranded session's
+stream, `send()`, and `session.clear()` throw the same error, and a message accepted before the
+session stranded is not redelivered. `session.stream({ follow: false })` and `session.snapshot()`
+still read the recorded history.
 
 The typed errors `eve/client` throws (`ClientError` and its subclasses, `SessionNotActiveError`,
 `HealthResponseError`, and `AgentInfoResponseError`) extend `EveError` and have a stable snake_case
@@ -101,27 +100,11 @@ const { session, delivery } = await client.sessions.create({
 await delivery.result();
 ```
 
-`clientContext` is ephemeral context for the current turn. Strings become user-role context messages, arrays of strings become multiple context messages, and objects are JSON-serialized into one context message. The context remains available to every model call in the turn, then disappears before the next turn. It isn't persisted to durable session history and doesn't dispatch a turn by itself.
+`clientContext` is ephemeral context for the current turn. A string becomes a user-role context message, an array of strings becomes several, and an object is JSON-serialized into one. Every model call in the turn sees it. It isn't saved to session history and doesn't start a turn by itself.
 
 ## Send attachments
 
-`send()` accepts `MessageContent`, so a message can mix text and file parts. A file part's `data` is the file inline (bytes, base64, or a `data:` URL) or a URL:
-
-```ts
-const response = await session.send([
-  { type: "text", text: "Summarize this report." },
-  {
-    type: "file",
-    data: reportDataUrl,
-    mediaType: "application/pdf",
-    filename: "report.pdf",
-  },
-]);
-
-await response.result();
-```
-
-For local files, read the file and send a base64 `data:` URL:
+`send()` accepts `MessageContent`, so a message can mix text and file parts. A file part's `data` is the file inline (bytes, base64, or a `data:` URL) or a URL. For a local file, send a base64 `data:` URL:
 
 ```ts
 import { readFile } from "node:fs/promises";
@@ -142,10 +125,9 @@ const response = await session.send([
 await response.result();
 ```
 
-The stream confirms the turn with `delivery.consumed`. Its `data.parts` contains structured text and
-file metadata for clients that render attachments. File parts never include raw bytes or internal sandbox paths. See [Inbound
-attachments](../../sandbox#inbound-attachments) for how eve stages byte-backed files in the session
-sandbox and prepares them for each model call.
+The stream confirms the turn with `delivery.consumed`, whose `data.parts` holds text and file
+metadata for rendering attachments, never raw bytes or sandbox paths. See [Inbound
+attachments](../../sandbox#inbound-attachments) for how eve stages files in the session sandbox.
 
 ## Answer human input requests
 
@@ -165,9 +147,9 @@ const resumed = await session.respond(
 await resumed.result();
 ```
 
-The reply's delivery records a `response.submitted` for each answer, and each request ends with `interaction.settled`: its `interactionId`, terminal `outcome`, and the `response` that decided it. Persist this authoritative event instead of relying on the submitting client's optimistic state when rebuilding message history.
+The stream records a `response.submitted` event for each answer. Each request then ends with an `interaction.settled` event that carries its `interactionId`, final `outcome`, and the `response` that decided it. Save `interaction.settled`, not the client's optimistic state, when you rebuild message history.
 
-`send(message, options)` and `respond(answers, options)` are separate operations. Put `clientContext`, `outputSchema`, headers, or stream options in the second argument to either method.
+Pass `clientContext`, `outputSchema`, headers, or stream options in the second argument to `send(message, options)` or `respond(answers, options)`.
 
 ## Reusable delivery reads
 
@@ -180,14 +162,13 @@ for await (const event of response.stream()) {
 const result = await response.result();
 ```
 
-Each read follows the same interval, from the admitting commit through the complete settlement
-commit, independently of other readers. Repeated or concurrent reads are supported; reading the
-interval again can open another HTTP stream. A completed summary may be cached.
+Each read covers the request from when the server accepts it until it finishes, independently of other readers.
+Repeated and concurrent reads are supported, and each may open another HTTP stream.
 
-Pass `{ signal }` to `stream()` or `result()` to abort that read. An aborted or failed read does
-not consume the handle or cancel the accepted work; retry the same delivery without submitting
-another message. Use `session.cancel()` to cancel work. A signal passed to `send()` controls
-submission, so pass it to the read too when a timeout must cover both.
+Pass `{ signal }` to `stream()` or `result()` to abort that read. An aborted or failed read doesn't
+consume the handle or cancel the work, so retry the same delivery instead of sending again. Use
+`session.cancel()` to cancel work. A signal passed to `send()` covers only submission, so pass it
+to the read too when a timeout must cover both.
 
 ## What to read next
 

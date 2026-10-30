@@ -3,9 +3,9 @@ title: "Targets"
 description: "Point evals at a local dev server or a deployment with the same eval files."
 ---
 
-An eval target is always an HTTP URL. `eve eval` starts a local dev server, while `eve eval --url <url>` runs against an existing server or deployment. The same eval files work for both, which is what makes evals usable as end-to-end tests in CI.
+An eval target is the URL of the agent server an eval runs against. `eve eval` starts a local dev server, and `eve eval --url <url>` targets a running server or deployment. The same eval files work for both, so evals also serve as end-to-end tests in CI.
 
-The runner polls `/eve/v1/health`, verifies `/eve/v1/info`, and exposes the live target as `t.target` inside the `test` function.
+Before running evals, `eve eval` waits for `/eve/v1/health` and checks `/eve/v1/info`. Inside `test`, `t.target` is the target.
 
 ## Target helpers
 
@@ -23,40 +23,37 @@ export default defineEval({
 });
 ```
 
-- `t.target.fetch(path, init)` performs an authenticated fetch against the target, useful for channel and webhook ingress. See [Authentication](#authentication) for how the runner authenticates.
-- `t.target.dispatchSchedule(id)` triggers a [schedule](../schedules) through the dev-only schedule route and returns the session ids it created. It works only against a target with dev routes enabled (the local `eve eval` dev server, or a deployment running in development mode), and throws otherwise.
-- `t.target.attach(sessionId, { startIndex? })` returns a handle without I/O. Its `id` is the exact session ID, and `startIndex` sets the initial stream cursor. An unknown or inaccessible session fails when you read it, not when you attach it.
-- `session.nextTurn()` reads and records the next turn boundary. Its events feed both the session's assertions and the run-level assertions. Each read advances the same session cursor.
-- `session.watch()` starts consuming immediately and returns a live-turn handle. Use `waitForEvent(...)` to coordinate with mid-turn work, `cancel()` to request cancellation, and `result()` to read through the boundary. Pass `{ until }` to stop at the commit containing a matching event, such as `context.settled` for a context change between turns.
+- `t.target.fetch(path, init)` sends an [authenticated](#authentication) request to the target, to test channel and webhook routes.
+- `t.target.dispatchSchedule(id)` triggers a [schedule](../schedules) through the dev-only schedule route and returns the session ids it created. It throws unless the target has dev routes enabled. The local `eve eval` dev server and a deployment in development mode enable them.
+- `t.target.attach(sessionId, { startIndex? })` returns a handle for an existing session without making a request. `startIndex` sets where reading starts. An unknown or inaccessible session fails when you read it, not when you attach it.
+- `session.nextTurn()` reads and records the session's next turn. Its events feed both the session's assertions and the run-level assertions. Each read continues where the last one stopped.
+- `session.watch()` starts reading right away and returns a [live turn](./cases#in-flight-turns) with `waitForEvent(...)`, `cancel()`, and `result()`. Pass `{ until }` to stop at a matching event instead of the end of a turn, such as `context.settled` for a context change between turns.
 
-Sessions attached this way are full `EveEvalSession`s: you can keep driving them and assert directly on that session (`session.succeeded()`, `session.calledTool(...)`). Aggregate assertions on `t` continue to read the whole run, including every attached session.
+Attached sessions are full `EveEvalSession`s. Send them messages and assert on them directly, as in `session.succeeded()` or `session.calledTool(...)`. Assertions on `t` cover the whole run, including every attached session.
 
-For session creation and message delivery, use the [drive API](./cases#the-drive-api).
-`t.session()` creates a session without a first message; call `session.send()` or `session.start()`
-on the returned handle to use it. `t.send()` creates a new session with its first message.
-These helpers handle the session protocol, retries, and event collection for the eval.
+To create sessions and send messages, use the [drive API](./cases#the-drive-api).
 
 ## Authentication
 
-Local targets send no auth: `eve eval` owns the dev server it boots.
+Requests to a local target carry no credentials, because `eve eval` started that server.
 
-For a remote `--url`, eve gets the expected Vercel owner and project from `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` when both values are nonblank. Otherwise it reads the local Vercel project link: `.vercel/project.json`, or the matching project in `.vercel/repo.json` for a linked monorepo.
+For a remote `--url`, eve finds the expected Vercel team and project from `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` when both are nonblank. Otherwise it reads the local Vercel project link: `.vercel/project.json`, or the matching project in `.vercel/repo.json` for a linked monorepo.
 
-With a project reference, eve looks up the exact HTTPS origin under that owner, regardless of the Vercel CLI's current team. The deployment's project ID must match before eve sends ambient credentials. Without a project reference, eve verifies the URL under the CLI's current scope. URLs that Vercel cannot verify remain anonymous.
+With a project, eve looks up the exact HTTPS origin under that team, regardless of the Vercel CLI's current team. It sends your Vercel credentials only when the deployment's project ID matches. Without a project, eve checks the URL under the Vercel CLI's current team. A URL that Vercel can't verify gets no credentials.
 
 After verification, eve sends the available Vercel credentials:
 
 - The resolved OIDC token as both the bearer and Vercel trusted-IDP header.
 - `VERCEL_AUTOMATION_BYPASS_SECRET`, when set, as the Protection Bypass for Automation header.
 
-`EVE_EVAL_AUTH_TOKEN` is an explicit bearer override for targets whose auth is not Vercel OIDC. Credential-bearing clients do not follow redirects, so those headers cannot be forwarded to another origin.
+Set `EVE_EVAL_AUTH_TOKEN` to send that bearer token instead, for targets that don't use Vercel OIDC. Requests that carry credentials don't follow redirects, so the credentials never reach another origin.
 
-`/eve/v1/info` serves only operator principals, so the credential must authenticate as a service principal, for example through Vercel OIDC, `jwtHmac()`, `jwtEcdsa()`, or a custom `AuthFn` that returns `principalType: "service"`. When the target answers `403`, the run fails before any eval starts and names the credential it needs.
+`/eve/v1/info` serves only operator callers, so the credential must authenticate with `principalType: "service"`. Vercel OIDC, `jwtHmac()`, `jwtEcdsa()`, or a custom `AuthFn` can provide it. When the target answers `403`, the run fails before any eval starts and names the credential it needs.
 
-`t.target.fetch(path, init)` carries these same credentials, so channel and webhook ingress you exercise through it authenticates the same way the session protocol does.
+`t.target.fetch(path, init)` sends these same credentials.
 
 ## What to read next
 
 - [Running evals](./running): `--url` and the rest of the CLI in practice
 - [Schedules](../schedules): the surface `dispatchSchedule` drives
-- [Channels](../channels/overview): ingress you can exercise with `target.fetch`
+- [Channels](../channels/overview): routes you can test with `target.fetch`

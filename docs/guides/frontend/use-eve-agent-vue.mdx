@@ -3,9 +3,9 @@ title: "useEveAgent (Vue)"
 description: "Use the eve Vue composable and its Vue-specific reactive interface."
 ---
 
-`useEveAgent()` from `eve/vue` exposes the shared eve frontend client as Vue computed refs and methods. Read the [frontend overview](./overview) for session behavior, messages, human input, authorization, callbacks, and persistence. This page covers the Vue-specific interface.
+`useEveAgent()` from `eve/vue` exposes the shared eve frontend client as Vue computed refs and methods. See the [frontend overview](./overview) for session behavior, messages, human input, authorization, callbacks, and persistence.
 
-Nuxt users normally receive the composable as an auto-import after registering the [`eve/nuxt` module](./nuxt).
+In Nuxt, the [`eve/nuxt` module](./nuxt) auto-imports the composable.
 
 ## Basic usage
 
@@ -44,26 +44,25 @@ async function handleSubmit() {
 
 The state fields are computed refs; the commands are ordinary methods:
 
-| Property                                                                                  | Vue shape                                       |
-| ----------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `messages`, `agents`                                                                      | Computed refs for each projected snapshot field |
-| `view`                                                                                    | `ComputedRef<SessionView>`                      |
-| `status`                                                                                  | `ComputedRef<UseEveAgentStatus>`                |
-| `error`                                                                                   | `ComputedRef<Error \| undefined>`               |
-| `events`                                                                                  | `ComputedRef<readonly SessionStreamEvent[]>`    |
-| `session`                                                                                 | `ComputedRef<ClientSessionState \| undefined>`  |
-| `send`, `respond`, `prewarm`, `resume`, `cancel`, `clear`, `compact`, `end`, `newSession` | Methods                                         |
+| Property                                                                                            | Vue shape                                      |
+| --------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `messages`, `agents`                                                                                | Computed refs for the snapshot fields          |
+| `view`                                                                                              | `ComputedRef<SessionView>`                     |
+| `status`                                                                                            | `ComputedRef<UseEveAgentStatus>`               |
+| `error`                                                                                             | `ComputedRef<Error \| undefined>`              |
+| `events`                                                                                            | `ComputedRef<readonly SessionStreamEvent[]>`   |
+| `session`                                                                                           | `ComputedRef<ClientSessionState \| undefined>` |
+| `send`, `respond`, `prewarm`, `resume`, `follow`, `cancel`, `clear`, `compact`, `end`, `newSession` | Methods                                        |
 
 Destructuring preserves reactivity because each state value remains a ref. Read refs with `.value` in `<script>` and without `.value` in a template. The [`useEveAgent` reference](./use-eve-agent#returned-state) describes what each value and command does.
 
 ## Send a message
 
-Call `send(text)` for text or pass content parts for attachments. The API and transport behavior match the [sending reference](./use-eve-agent#sending); only reactive access differs in Vue. `send()` and `respond()` resolve with a `Delivery` receipt when accepted, without waiting for execution to finish. Read its `sessionId` and `deliveryId`, or use the receipt's [delivery reads](../client/messages#reusable-delivery-reads).
+Call `send(text)` for text or pass content parts for attachments. The API and streaming behavior match the [sending reference](./use-eve-agent#sending). `send()` and `respond()` resolve with a `Delivery` receipt when the server accepts the request, before the agent finishes. Read the receipt's `sessionId` and `deliveryId`, or use its [`stream()` and `result()` reads](../client/messages#reusable-delivery-reads).
 
 ## Human-in-the-loop prompts
 
-Read requests from the shared `view` and answer them with `respond()`. Submission does not settle
-an interaction; its response rows and eventual settlement are authoritative.
+Read requests from the shared `view` and answer them with `respond()`. A request stays open until `interaction.settled`, even after you submit an answer.
 
 ```vue
 <script setup lang="ts">
@@ -104,16 +103,17 @@ See [Human-in-the-loop prompts](./overview#human-in-the-loop-prompts) for reques
 
 ## Cancel, end, and resume
 
-Pass `prewarm: true` to prepare an owned workflow on mount and after `newSession()`. It defaults
-to `false`, so the first send creates the session. The binding waits for create acceptance,
-retries while the inbox starts, and keeps the session stream open across turns. See [Prewarming](./use-eve-agent#prewarming) for creation, failure, and
-connection behavior.
+Pass `prewarm: true` to create the session on mount and after `newSession()`. Omit it to create the session on the first send. The composable keeps the session stream open across turns. See [Prewarming](./use-eve-agent#prewarming) for creation and failure behavior, and [Stream lifetime](./use-eve-agent#stream-lifetime) for connection behavior.
 
-Call `cancel()` to stop the durable server-side turn while the composable remains attached through settlement. Offer it while `activeTurn(view.value)` from `eve/events` returns a turn: `status` reports outstanding work, so it is `"idle"` while a turn waits only on a person. Disposing the component only disconnects its local stream; it does not cancel server execution. Call `newSession()` to clear local state and start a new session. `end()` instead retires the server-side session. Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow an in-flight turn. During bounded catch-up, `status.value` is `"resuming"`; keep the hydrated conversation visible, disable submission, and wait for `"idle"` or `"busy"`, and inspect the separate `error` field. Use `resume()` directly when restoration is controlled imperatively. See [Resumable sessions](./use-eve-agent#resume-a-saved-session) for the persistence contract and [Cancelling](./use-eve-agent#cancelling) for cancellation behavior.
+Call `cancel()` to stop the turn on the server; the composable stays attached until the turn ends. Offer it while `activeTurn(view.value)` from `eve/events` returns a turn, because `status` reports outstanding work and is `"idle"` while a turn waits only on a person. Disposing the component only disconnects its local stream, and the turn keeps running on the server.
+
+Call `newSession()` to clear local state and start a new session; `end()` instead ends the session on the server.
+
+Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow a turn that is still running. During catch-up, `status.value` is `"resuming"`. Keep the restored conversation visible, and disable submission until it changes to `"idle"` or `"busy"`. Failures appear in the separate `error` field. Call `resume()` directly to control restoration imperatively. See [Resume a saved session](./use-eve-agent#resume-a-saved-session) for the persistence contract and [Cancelling](./use-eve-agent#cancelling) for cancellation behavior.
 
 ## Custom host and credentials
 
-Pass `baseUrl`, `auth`, or `headers` to the composable using the same options as the other frontend bindings. See [Custom hosts and headers](./overview#custom-hosts-and-headers).
+Pass `baseUrl`, `auth`, or `headers` to the composable, as with the other frontend bindings. See [Custom hosts and headers](./overview#custom-hosts-and-headers).
 
 ## Attach page context per turn
 
@@ -121,11 +121,11 @@ Pass `clientContext` to `send()` or `respond()`, or use `prepareSend` to add con
 
 ## Lifecycle callbacks
 
-Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` when the application needs lifecycle notifications. See [Lifecycle callbacks](./use-eve-agent#lifecycle-callbacks) for callback timing and optimistic projection behavior.
+Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` to react to events, errors, finished turns, and session changes. See [Lifecycle callbacks](./use-eve-agent#lifecycle-callbacks) for when each one fires and how optimistic messages behave.
 
 ## Derive your own state
 
-Use `view` and selectors from `eve/events` for lifecycle state, and `messages` for rendering. See [Derive your own state](./overview#derive-your-own-state).
+Use `view` and selectors from `eve/events` for session state, and `messages` for rendering. See [Derive your own state](./overview#derive-your-own-state).
 
 ## What to read next
 

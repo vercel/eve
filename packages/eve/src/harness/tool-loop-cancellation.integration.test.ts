@@ -130,6 +130,48 @@ describe("tool loop cancellation (real AI SDK)", () => {
     ).toEqual([]);
   });
 
+  // #4273: a resolver can raise the cancellation before the turn's signal fires.
+  it("propagates a model resolver cancellation raised before the signal aborts", async () => {
+    const logs = captureLogRecords();
+    const cancellation = new TurnCancelledError();
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createConfig(new MockLanguageModelV3(), emit, {
+        abortSignal: new AbortController().signal,
+        resolveModel: vi.fn().mockRejectedValue(cancellation),
+      }),
+    );
+
+    await expect(runStep(createSession(), { message: "Hi" })).rejects.toBe(cancellation);
+
+    expect(events.map((event) => event.type)).not.toContain("session.ended");
+    expect(logs.records).not.toContainEqual(
+      expect.objectContaining({ message: "model selection failed terminally" }),
+    );
+  });
+
+  it("fails the session when the model resolver throws an ordinary error", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createConfig(new MockLanguageModelV3(), emit, {
+        abortSignal: new AbortController().signal,
+        resolveModel: vi.fn().mockRejectedValue(new Error("No provider for integration-model.")),
+      }),
+    );
+
+    await runStep(createSession(), { message: "Hi" });
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          error: expect.objectContaining({ code: "MODEL_SELECTION_FAILED" }),
+          outcome: "failed",
+        }),
+        type: "session.ended",
+      }),
+    );
+  });
+
   it("forwards a live signal to executing tools and discards the straggler result", async () => {
     const logs = captureLogRecords();
     const abortController = new AbortController();
