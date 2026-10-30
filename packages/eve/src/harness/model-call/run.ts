@@ -2,6 +2,7 @@ import type { LanguageModel } from "ai";
 import { handleStepResult } from "#harness/step/after-model.js";
 
 import { HistoryStateKey } from "#context/keys.js";
+import { EndingStubCallsKey } from "#context/providers/tool-stubs-key.js";
 import {
   buildStepCatalog,
   recordOfferedCatalogTools,
@@ -44,6 +45,8 @@ export interface ModelResponse {
   readonly durableModelPromptMessageCount?: number;
   /** Tools that can end the turn in this step, with their `endsTurn` option. */
   readonly endsTurnTools: EndsTurnTools;
+  /** Calls this step's stubs answered with an `endsTurn` response, when `endsTurn` applies. */
+  readonly endingStubCalls: ReadonlySet<string>;
   readonly promptMessages: readonly HarnessModelMessage[];
   readonly requestEnvelopeTokens?: number;
   readonly result: HarnessStepResult;
@@ -127,6 +130,7 @@ export async function runModelStep(
           ? caller.modelMessages.length
           : undefined,
       endsTurnTools: endsTurnTools(catalog, endsTurn),
+      endingStubCalls: (endsTurn && step.ctx?.get(EndingStubCallsKey)) || NO_CALLS,
       promptMessages: caller.request.history,
       requestEnvelopeTokens: caller.requestEnvelopeTokens,
       result,
@@ -140,6 +144,8 @@ export async function runModelStep(
   step.ctx?.set(HistoryStateKey, caller.request.historyState);
   return stepResult;
 }
+
+const NO_CALLS: ReadonlySet<string> = new Set();
 
 /**
  * The turn requests a model run, which the dynamic model evaluated for it serves, or the agent's

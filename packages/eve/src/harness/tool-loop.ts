@@ -31,6 +31,8 @@ import {
 import { turnPosition } from "#harness/session-machine/view.js";
 import { createStep, failTurnForReaction, openTurn, type Step } from "#harness/step/context.js";
 import { prepareTurnInput, settleRuntimeWork } from "#harness/step/intake.js";
+import { recordStepEndingStubCalls } from "#harness/step/stub-ending-calls.js";
+import { endTurnAfterStubs } from "#harness/step/stub-ends-turn.js";
 import type {
   HarnessSession,
   StepFn,
@@ -138,6 +140,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const hookFailure = await failTurnForReaction(step);
     if (hookFailure !== undefined) return hookFailure;
     const stopped = await applyHumanDecisions(step, answered.decided);
+    // Approved calls ran here, so whether a stub ended them is saved before the step can park.
+    recordStepEndingStubCalls(step);
     if (stopped !== undefined) return stopped;
     if (blocked(step.view(), step.session.state)) return park(step);
     // Read input held behind approved calls before the model can ask for more work. The step's
@@ -147,6 +151,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       await step.apply(queueInput(step.view(), turnInputOnly(prepared)));
       return { next: step.runStep, session: step.session };
     }
+    const stubbed = await endTurnAfterStubs(step, turn);
+    if (stubbed !== undefined) return stubbed;
     return runModelStep(step, {
       generation,
       turn,

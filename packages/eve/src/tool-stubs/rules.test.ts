@@ -22,6 +22,36 @@ describe("tool stubs", () => {
     }
   });
 
+  it("accepts endsTurn on a root rule's response", () => {
+    expect(
+      parseToolStubs([
+        { id: "a", tool: "list", outcome: { response: [], endsTurn: true } },
+        {
+          id: "b",
+          tool: "researcher",
+          outcomes: [{ throw: { message: "Busy" } }, { response: "done", endsTurn: true }],
+        },
+      ]),
+    ).toHaveLength(2);
+  });
+
+  it("rejects endsTurn on a subagent's tool and names the root path to stub instead", () => {
+    expect(() =>
+      parseToolStubs([
+        { id: "a", tool: "researcher/list", outcome: { response: [], endsTurn: true } },
+      ]),
+    ).toThrow(
+      'Tool stub "a" sets endsTurn on the subagent tool "researcher/list". A delegated session must reply to its caller; set endsTurn on a root tool or agent, such as "researcher".',
+    );
+  });
+
+  it.each([
+    { name: "beside a throw", outcome: { throw: { message: "Busy" }, endsTurn: true } },
+    { name: "set to false", outcome: { response: [], endsTurn: false } },
+  ])("rejects endsTurn $name", ({ outcome }) => {
+    expect(() => parseToolStubs([{ id: "a", tool: "list", outcome }])).toThrow();
+  });
+
   it("selects a response by partial input without changing the arguments", () => {
     const playback = new StubPlayback(
       parseToolStubs([

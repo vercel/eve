@@ -11,6 +11,24 @@ export function findStubTarget(scope: StubScope | undefined, tool: string) {
   return scope.rules.some((rule) => rule.tool === tool) ? { scope, tool } : undefined;
 }
 
+/** Whether any of the session's stubs has an outcome that ends the turn. */
+export function stubsMayEndTurn(scope: StubScope | undefined): boolean {
+  return (
+    scope?.rules.some((rule) =>
+      (rule.outcomes ?? [rule.outcome!]).some((outcome) => outcome.endsTurn === true),
+    ) === true
+  );
+}
+
+/** Whether a rule for the qualified `tool` has an outcome that ends the turn. */
+export function stubMayEndTurn(scope: StubScope, tool: string): boolean {
+  return scope.rules.some(
+    (rule) =>
+      rule.tool === tool &&
+      (rule.outcomes ?? [rule.outcome!]).some((outcome) => outcome.endsTurn === true),
+  );
+}
+
 export function stubCallId(sessionId: string, turnId: string, callId: string): string {
   return `${sessionId}:${turnId}:${callId}`;
 }

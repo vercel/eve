@@ -77,7 +77,7 @@ These responses describe a sequence, not a simulated task database. The second `
 | `outcome`  | One outcome repeated on every matching call, such as `{ response: { tasks: [] } }`.                                                    |
 | `outcomes` | A nonempty array of outcomes returned in sequence. Use exactly one of `outcome` or `outcomes`.                                         |
 
-Each outcome contains exactly one of `response` or `throw`. `response` holds the JSON returned by the tool; `throw` describes an error raised immediately instead. The enclosing outcome is not part of the tool's response. Top-level `response` and `responses` are not accepted.
+Each outcome contains exactly one of `response` or `throw`. `response` holds the JSON returned by the tool; `throw` describes an error raised immediately instead. A `response` outcome can add `endsTurn: true` to [end the turn](#end-the-turn-after-a-stub) once it is the call's result. The enclosing outcome is not part of the tool's response. Top-level `response` and `responses` are not accepted.
 
 Exposing rule IDs and response positions in traces is a follow-up: [AX-5157](https://linear.app/vercel/issue/AX-5157).
 
@@ -153,6 +153,35 @@ Choose the rules at session creation; they stay fixed for that session. Local su
 eve's transparent internal workflow replay reuses the recorded outcome without consuming another entry.
 
 Parallel calls consume responses in arrival order, which can vary. Use separate argument matchers when particular arguments must receive particular responses.
+
+## End the turn after a stub
+
+Add `endsTurn: true` to a `response` outcome when the eval grades what the agent did up to that call, such as which specialist it chose or the arguments it sent, and nothing after it:
+
+```ts
+const session = await t.session({
+  stubs: [
+    {
+      id: "researcher",
+      tool: "researcher",
+      outcome: { response: "Three sources agree.", endsTurn: true },
+    },
+  ],
+});
+
+const turn = await session.send("Ask the researcher what the sources say.");
+turn.expectOk();
+turn.calledAgent("researcher", { status: "completed" });
+```
+
+The turn completes, without a final reply, once that call has its result. The model is not called again, so nothing it would do next appears in the turn's events. The model is not told the call ends its turn; what it sees is unchanged.
+
+- **Every call in the step.** The turn ends only when every call the model made in that step got an `endsTurn` response or is a tool with its own [`endsTurn`](../tools#end-the-turn-after-a-tool-call), and all of them succeeded. Otherwise the model receives the results as usual.
+- **Agents and tools that run as tasks.** When those calls started tasks, the session waits for the tasks to finish instead of having the model read that they started, then ends the turn. While other work is running or has a result the model hasn't read, the model runs as usual.
+- **Sequences.** Only the call that receives an `endsTurn` outcome ends the turn. `outcomes: [{ throw: { message: "Busy" } }, { response: "done", endsTurn: true }]` lets the agent recover from the first failure, then ends the turn on its retry.
+- **Approvals.** A call that waits on approval ends the turn once it is approved and gets its `endsTurn` response. A tool's own `endsTurn` never applies to a call that waited on approval, so an approved call to that tool, unstubbed, keeps the turn going.
+
+`endsTurn` does not apply in a delegated session, which must reply to its caller, on a turn that requests structured output, or when a person's message arrives before the model would run. A rule for a subagent's tool, such as `researcher/list_tasks`, cannot set it; stub the subagent itself, as `researcher`, instead. `endsTurn` is only allowed beside `response`, never beside `throw`.
 
 ## Permit tool replacement
 

@@ -34,6 +34,10 @@ import {
   isInvalidToolCall,
 } from "#harness/tool-call-input-errors.js";
 import { isWorkflowTool, workingTaskIds } from "#execution/tasks/model-step.js";
+import { ToolStubsKey } from "#context/keys.js";
+import { activeTurnId } from "#harness/session-machine/view.js";
+import { recordEndingStubCalls } from "#tool-stubs/ending-calls.js";
+import { stubsMayEndTurn } from "#tool-stubs/target.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
@@ -97,6 +101,13 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     providerExecutedOutcomeIds,
   });
   const responseMessages = await stageToolResultMedia(normalizedProviderHistory.messages);
+  // A step that parks on other calls decides once they settle, from what this one recorded.
+  const ending = stubsMayEndTurn(step.ctx?.get(ToolStubsKey))
+    ? await endingCalls(result, responseMessages, input.endsTurnTools, input.endingStubCalls)
+    : undefined;
+  if (ending !== undefined) {
+    step.session = recordEndingStubCalls(step.session, activeTurnId(step.position()), ending);
+  }
 
   step.session = {
     ...step.session,
@@ -180,7 +191,11 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     };
   }
 
-  const endsTurn = await stepEndsTurn(result, responseMessages, input.endsTurnTools);
+  const toolCalls = result.toolCalls ?? [];
+  const endsTurn =
+    ending === undefined
+      ? await stepEndsTurn(result, responseMessages, input.endsTurnTools)
+      : toolCalls.length > 0 && toolCalls.every((toolCall) => ending.has(toolCall.toolCallId));
   const continueLoop =
     (!calledFinalOutput || finalOutputRejected) &&
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
@@ -263,6 +278,49 @@ async function stepEndsTurn(
   return true;
 }
 
+/**
+ * The step's calls that end the turn: each succeeded, and got a tool stub's `endsTurn` response or
+ * targets a tool that can end the turn, whose `endsTurn` function, if any, accepts its `execute`
+ * output. The step ends the turn when all of its calls do; a failed or invalid call lets the model
+ * recover instead.
+ */
+async function endingCalls(
+  result: HarnessStepResult,
+  responseMessages: readonly ModelMessage[],
+  endsTurnTools: EndsTurnTools,
+  endingStubCalls: ReadonlySet<string>,
+): Promise<Set<string>> {
+  const toolCalls = result.toolCalls ?? [];
+  const outputs = new Map<string, ToolResultPart["output"]>();
+  for (const message of responseMessages) {
+    if (message.role !== "tool") continue;
+    for (const part of message.content) {
+      if (part.type === "tool-result") outputs.set(part.toolCallId, part.output);
+    }
+  }
+  const executeOutputs = new Map(
+    (result.toolResults ?? []).map((toolResult) => [toolResult.toolCallId, toolResult.output]),
+  );
+  const ending = new Set<string>();
+  for (const toolCall of toolCalls) {
+    const output = outputs.get(toolCall.toolCallId);
+    if (output === undefined || isToolResultError(output)) continue;
+    if (endingStubCalls.has(toolCall.toolCallId)) {
+      ending.add(toolCall.toolCallId);
+      continue;
+    }
+    const endsTurn = endsTurnTools.get(toolCall.toolName);
+    if (endsTurn === undefined) continue;
+    if (
+      typeof endsTurn !== "function" ||
+      (await callEndsTurn(endsTurn, executeOutputs.get(toolCall.toolCallId), toolCall))
+    ) {
+      ending.add(toolCall.toolCallId);
+    }
+  }
+  return ending;
+}
+
 /** A throwing `endsTurn` function keeps the turn going rather than failing it. */
 async function callEndsTurn(
   endsTurn: (output: unknown) => boolean | Promise<boolean>,
@@ -324,7 +382,8 @@ async function settleTurn(
   step: Step,
   input: {
     readonly history: readonly HarnessModelMessage[];
-    readonly result: HarnessStepResult;
+    /** Absent when the turn ends without a model call, so no structured output is fulfilled. */
+    readonly result?: HarnessStepResult;
     readonly stepOutput: string | null;
   },
 ): Promise<StepResult> {
@@ -343,7 +402,7 @@ async function settleTurn(
     return { next: null, session: step.session, settledTurn: { output: stepOutput ?? "" } };
   }
 
-  const structured = extractFinalOutput(result);
+  const structured = result === undefined ? undefined : extractFinalOutput(result);
   // The schema belongs to the settled turn. A later conversation turn that
   // omits outputSchema must not inherit its contract.
   if (structured === undefined) {
@@ -366,4 +425,16 @@ async function settleTurn(
     step.session.history,
   );
   return { next: null, session: step.session, settledTurn: { output: structured } };
+}
+
+/**
+ * Completes the turn without a model call or a reply, with `history` as the session's: the results
+ * of calls a tool stub answered with `endsTurn` are the turn's last word.
+ */
+export async function settleTurnWithoutReply(
+  step: Step,
+  history: readonly HarnessModelMessage[],
+): Promise<StepResult> {
+  step.session = { ...step.session, history: validateHarnessModelMessages([...history]) };
+  return await settleTurn(step, { history, stepOutput: null });
 }

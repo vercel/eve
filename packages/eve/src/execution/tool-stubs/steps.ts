@@ -51,6 +51,11 @@ export async function publishStubFailureStep(error: string): Promise<void> {
  */
 export async function callToolStubStep(scope: StubScope, call: StubCall): Promise<StubResult> {
   "use step";
+  return await callToolStub(scope, call);
+}
+
+/** The outcome playback selects for `call`, or the one it already recorded for its call ID. */
+export async function callToolStub(scope: StubScope, call: StubCall): Promise<StubResult> {
   return await requestStub(scope, { kind: "call", call });
 }
 
