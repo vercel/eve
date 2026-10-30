@@ -1,11 +1,12 @@
 import { randomBytes } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { select, text } from "#setup/ask.js";
+import { confirm, select, text } from "#setup/ask.js";
 import { appendEnv } from "#setup/append-env.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { deriveSlackConnectorSlug } from "#setup/scaffold/index.js";
-import { writeTextFile } from "#setup/scaffold/files.js";
+import { pathExists, WriteFileExistsError, writeTextFile } from "#setup/scaffold/files.js";
 
 import { provisionTelegramConnector } from "./connect.js";
 import { fetchTelegramBotUsername } from "./management.js";
@@ -17,16 +18,52 @@ import {
 
 export interface TelegramSetupDeps {
   fetchBotUsername: typeof fetchTelegramBotUsername;
+  pathExists: typeof pathExists;
+  readEnvFile: (path: string) => Promise<string | undefined>;
 }
 
-const defaultDeps: TelegramSetupDeps = { fetchBotUsername: fetchTelegramBotUsername };
+async function readEnvFile(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
 
-interface TelegramSetupPlan {
-  credentials: "connect" | "portable";
-  botToken: string;
-  botUsername: string;
-  connectorSlug?: string;
-  project?: VercelProjectReference;
+const defaultDeps: TelegramSetupDeps = {
+  fetchBotUsername: fetchTelegramBotUsername,
+  pathExists,
+  readEnvFile,
+};
+
+const CHANNEL_FILE = "agent/channels/telegram.ts";
+
+type TelegramSetupPlan =
+  | {
+      credentials: "connect";
+      botToken: string;
+      botUsername: string;
+      connectorSlug: string;
+      project: VercelProjectReference;
+    }
+  | {
+      credentials: "portable";
+      botToken: string;
+      botUsername: string;
+      /** Overwrite a different `TELEGRAM_BOT_TOKEN` already in `.env.local`. */
+      replaceBotToken: boolean;
+    };
+
+/** Reads one unquoted or double-quoted value from dotenv text. */
+function envValue(contents: string | undefined, key: string): string | undefined {
+  for (const line of contents?.split("\n") ?? []) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith(`${key}=`)) continue;
+    const raw = trimmed.slice(key.length + 1);
+    return raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1) : raw;
+  }
+  return undefined;
 }
 
 function portableTemplate(botUsername: string): string {
@@ -57,6 +94,11 @@ export async function prepareTelegramSetup(
   context: SetupPrepareContext,
   deps: TelegramSetupDeps = defaultDeps,
 ): Promise<TelegramSetupPlan> {
+  // Refuse an overwrite before setup creates a connector or edits `.env.local`.
+  const channelPath = join(context.appRoot, CHANNEL_FILE);
+  if (!context.force && (await deps.pathExists(channelPath))) {
+    throw new WriteFileExistsError(channelPath);
+  }
   const credentials = await context.asker.ask(
     select({
       key: "telegram-credentials",
@@ -82,24 +124,53 @@ export async function prepareTelegramSetup(
       required: true,
     }),
   );
-  if (credentials === "connect" && context.environment.vercel.kind === "unavailable") {
-    throw new Error(
-      "Vercel Connect requires an authenticated Vercel CLI. Run `vercel login`, then retry Telegram setup.",
+  if (credentials === "connect") {
+    if (context.environment.vercel.kind === "unavailable") {
+      throw new Error(
+        "Vercel Connect requires an authenticated Vercel CLI. Run `vercel login`, then retry Telegram setup.",
+      );
+    }
+    const project = await context.resolveVercelProject("Telegram");
+    const connectorSlug = await context.asker.ask(
+      text({
+        key: "telegram-connector-name",
+        message: "Name your Telegram connector",
+        recommended: await deriveSlackConnectorSlug(context.appRoot),
+        required: true,
+      }),
     );
+    const bot = await askBotToken(context, deps);
+    return { credentials, ...bot, connectorSlug: connectorSlug.trim(), project };
   }
-  const project =
-    credentials === "connect" ? await context.resolveVercelProject("Telegram") : undefined;
-  const connectorSlug =
-    credentials === "connect"
-      ? await context.asker.ask(
-          text({
-            key: "telegram-connector-name",
-            message: "Name your Telegram connector",
-            recommended: await deriveSlackConnectorSlug(context.appRoot),
-            required: true,
-          }),
-        )
-      : undefined;
+
+  const bot = await askBotToken(context, deps);
+  const existingToken = envValue(
+    await deps.readEnvFile(join(context.projectRoot, ".env.local")),
+    "TELEGRAM_BOT_TOKEN",
+  );
+  const replaceBotToken = existingToken !== undefined && existingToken !== bot.botToken;
+  if (replaceBotToken && !context.force) {
+    const replace = await context.asker.ask(
+      confirm({
+        key: "telegram-replace-bot-token",
+        message: `.env.local already has a different TELEGRAM_BOT_TOKEN. Replace it with @${bot.botUsername}'s token?`,
+        recommended: false,
+        required: true,
+      }),
+    );
+    if (!replace) {
+      throw new Error(
+        "Telegram setup stopped: .env.local keeps its existing TELEGRAM_BOT_TOKEN, which belongs to a different bot. Remove it or rerun setup with that bot's token.",
+      );
+    }
+  }
+  return { credentials, ...bot, replaceBotToken };
+}
+
+async function askBotToken(
+  context: SetupPrepareContext,
+  deps: TelegramSetupDeps,
+): Promise<{ botToken: string; botUsername: string }> {
   const botToken = (
     await context.asker.ask(
       text({
@@ -111,32 +182,33 @@ export async function prepareTelegramSetup(
       }),
     )
   ).trim();
-  const botUsername = await deps.fetchBotUsername(botToken, context.signal);
-  const plan: TelegramSetupPlan = { credentials, botToken, botUsername };
-  if (project !== undefined) plan.project = project;
-  if (connectorSlug !== undefined) plan.connectorSlug = connectorSlug.trim();
-  return plan;
+  return { botToken, botUsername: await deps.fetchBotUsername(botToken, context.signal) };
 }
 
 async function applyTelegramSetup(plan: TelegramSetupPlan, context: SetupApplyContext) {
-  const path = join(context.appRoot, "agent/channels/telegram.ts");
+  const path = join(context.appRoot, CHANNEL_FILE);
   if (plan.credentials === "connect") {
     const connector = await provisionTelegramConnector({
       botToken: plan.botToken,
       log: context.presenter.log,
-      project: plan.project!,
+      project: plan.project,
       projectRoot: context.projectRoot,
-      slug: plan.connectorSlug!,
+      slug: plan.connectorSlug,
       signal: context.signal,
     });
     await writeTextFile(path, connectTemplate(connector.uid, plan.botUsername), {
       force: context.force,
     });
   } else {
-    const webhookSecretToken = randomBytes(32).toString("hex");
-    await appendEnv(join(context.projectRoot, ".env.local"), {
-      TELEGRAM_BOT_TOKEN: plan.botToken,
-      TELEGRAM_WEBHOOK_SECRET_TOKEN: webhookSecretToken,
+    const envPath = join(context.projectRoot, ".env.local");
+    await appendEnv(
+      envPath,
+      { TELEGRAM_BOT_TOKEN: plan.botToken },
+      { force: plan.replaceBotToken },
+    );
+    // An existing secret still matches whatever webhook was registered with it.
+    await appendEnv(envPath, {
+      TELEGRAM_WEBHOOK_SECRET_TOKEN: randomBytes(32).toString("hex"),
     });
     await writeTextFile(path, portableTemplate(plan.botUsername), { force: context.force });
     context.presenter.nextSteps([

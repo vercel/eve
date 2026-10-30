@@ -81,4 +81,26 @@ describe("Telegram Connect provisioning", () => {
       }),
     ).rejects.toThrow("vercel connect attach telegram/agent");
   });
+
+  it("explains how to detach and reattach when the default destination stays", async () => {
+    const runVercelCaptureStdout = vi.fn(async () => ({
+      ok: true as const,
+      stdout: JSON.stringify(createdConnector),
+      stderr: "",
+    }));
+    const runVercel = vi.fn(async () => false);
+
+    const error = await provisionTelegramConnector({
+      botToken: "123456:secret-token",
+      log: log(),
+      project: { orgId: "team_123", projectId: "prj_123" },
+      projectRoot: "/project",
+      slug: "agent",
+      deps: { runVercel, runVercelCaptureStdout },
+    }).catch((caught: unknown) => caught);
+
+    expect(runVercel).toHaveBeenCalledTimes(1);
+    expect(String(error)).toContain("vercel connect detach telegram/agent");
+    expect(String(error)).toContain("vercel connect attach telegram/agent");
+  });
 });

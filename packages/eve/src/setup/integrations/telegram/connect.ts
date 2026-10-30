@@ -107,9 +107,13 @@ export async function provisionTelegramConnector(input: {
       deps,
     }),
   );
+  input.signal?.throwIfAborted();
   if (attachment.state !== "attached") {
+    const attach = `vercel connect attach ${connector.uid} --project ${input.project.projectId} --environment production --triggers --trigger-path ${TELEGRAM_TRIGGER_PATH} --yes --scope ${input.project.orgId}`;
     throw new Error(
-      `Telegram connector was created, but its trigger could not be attached. Run \`vercel connect attach ${connector.uid} --project ${input.project.projectId} --environment production --triggers --trigger-path ${TELEGRAM_TRIGGER_PATH} --yes --scope ${input.project.orgId}\`.`,
+      attachment.state === "detach-failed"
+        ? `Telegram connector was created, but its default trigger destination could not be removed. Run \`vercel connect detach ${connector.uid} --project ${input.project.projectId} --yes --scope ${input.project.orgId}\`, then \`${attach}\`.`
+        : `Telegram connector was created, but its trigger could not be attached. Run \`${attach}\`.`,
     );
   }
   return connector;
