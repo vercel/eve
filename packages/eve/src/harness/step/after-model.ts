@@ -15,25 +15,21 @@ import type { ModelResponse } from "#harness/model-call/run.js";
 import type { EndsTurnTools } from "#harness/model-call/tools.js";
 import type { JsonValue } from "#shared/json.js";
 import type { Step } from "#harness/step/context.js";
-import { suspendStep } from "#harness/session-machine/transitions.js";
 import { type ToolResultPart, withResult } from "#harness/session-machine/suspended-steps.js";
-import { collectWorkflowCalls } from "#harness/coordination.js";
 import {
   createToolResultMessagePartFromToolError,
   isToolResultError,
 } from "#harness/action-result-helpers.js";
-import { askStepApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
-import { hasQueuedTurnInput, park } from "#harness/step/park.js";
+import { hasQueuedTurnInput, parkCalls } from "#harness/step/park.js";
 import { decideAfterModel } from "#harness/policy/apply.js";
 import type { ModelStep } from "#harness/policy/policy.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
 } from "#harness/tool-call-input-errors.js";
-import { isWorkflowTool, workingTaskIds } from "#execution/tasks/model-step.js";
+import { workingTaskIds } from "#execution/tasks/model-step.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
-import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { withPromptMeasurement } from "#harness/compaction/engine.js";
 import { createLogger } from "#internal/logging.js";
 
@@ -104,51 +100,19 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     }),
   };
 
-  const approvalRequests = result.approvalRequests ?? [];
-  // Only unanswered calls can dispatch: automatic denials already have results.
-  const blockedCallIds = new Set([
-    ...approvalRequests.map((ask) => ask.call.callId),
-    ...extractToolResultCallIds(responseMessages),
-  ]);
-  const workflowToolCalls = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
-    .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
-    .filter((toolCall) => !blockedCallIds.has(toolCall.toolCallId))
-    .filter((toolCall) => isWorkflowTool(input.catalog.get(toolCall.toolName)));
-
-  const authorizationInterrupt = resolveInlineAuthorizationInterrupt({
+  const parked = await parkCalls(step, {
+    approvals: result.approvalRequests ?? [],
+    catalog: input.catalog,
+    invalidCallIds: invalidInputToolCallIds,
+    // A suspended response commits once every call it made has a result, so a call that will
+    // never get one is answered now.
+    messages: answerCallsThatWontRun(responseMessages, result),
+    policyApprovals: result.policyApprovals,
+    promptMessages,
     signIns: result.signIns ?? [],
+    toolCalls: (result.toolCalls ?? []) as TypedToolCall<ToolSet>[],
   });
-
-  // --- Park on approvals or runtime calls ----------------------------------
-
-  if (workflowToolCalls.length > 0 || approvalRequests.length > 0 || authorizationInterrupt) {
-    const { sequence, stepIndex, turnId } = step.position();
-    const dispatched = collectWorkflowCalls({
-      session: step.session,
-      toolCalls: workflowToolCalls,
-      tools: input.catalog,
-      turnId,
-    });
-    step.session = changeHistory(dispatched.session, { extend: promptMessages });
-    const parked = {
-      event: { sequence, stepIndex, turnId },
-      // A suspended response commits once every call it made has a result, so a call that will
-      // never get one is answered now.
-      messages: answerCallsThatWontRun(responseMessages, result),
-      tasks: dispatched.workflowRequests.map((task) => ({
-        ...task,
-        clearedBy: result.policyApprovals?.[task.callId],
-      })),
-    };
-    if (approvalRequests.length > 0) {
-      await askStepApprovals(step, { ...parked, requests: approvalRequests, tools: input.catalog });
-    } else {
-      await step.apply(suspendStep(step.view(), parked));
-    }
-    // Approval only precedes sign-in for the same call, not an executing sibling.
-    if (authorizationInterrupt) return stopForToolSignIn(step, authorizationInterrupt);
-    return park(step);
-  }
+  if (parked !== undefined) return parked;
 
   // --- Continue or terminate ------------------------------------------------
 
