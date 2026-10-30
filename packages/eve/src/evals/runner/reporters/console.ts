@@ -11,6 +11,11 @@ import {
   formatAssertionFailureDetailLines,
   formatAssertionFailureHeadline,
 } from "#evals/runner/reporters/assertion-diagnostics.js";
+import {
+  exportedAssertionName,
+  groupAssertionScores,
+} from "#evals/runner/reporters/assertion-scores.js";
+import { formatAttemptLabel } from "#evals/runner/attempt-label.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
 /**
@@ -26,7 +31,7 @@ export interface ConsoleReporterConfig {
 /**
  * Creates a {@link ConsoleReporter}.
  */
-export function Console(config: ConsoleReporterConfig = {}): EvalReporter {
+export function consoleReporter(config: ConsoleReporterConfig = {}): EvalReporter {
   return new ConsoleReporter(config);
 }
 
@@ -64,20 +69,34 @@ class ConsoleReporter implements EvalReporter {
         ? this.#formatGateCount(gates.filter((gate) => gate.passed).length, gates.length)
         : "";
     const scoreText = softs
-      .map((assertion) => this.#formatScore(assertion.name, assertion.score))
+      .flatMap((assertion) =>
+        assertion.score === undefined ? [] : [this.#formatScore(assertion.name, assertion.score)],
+      )
       .join("  ");
 
-    const line = [icon, this.#colors.dim(result.id), gateText, scoreText]
-      .filter(Boolean)
-      .join("  ");
+    const label = formatAttemptLabel(result.id, result.attempt);
+    const line = [icon, this.#colors.dim(label), gateText, scoreText].filter(Boolean).join("  ");
     this.#log(line);
 
     for (const assertion of assertions) {
-      if (assertion.passed) continue;
+      if (assertion.passed !== false) continue;
       this.#log(`  ${this.#colors.red(`✗ ${formatAssertionFailureHeadline(assertion)}`)}`);
       for (const detailLine of formatAssertionFailureDetailLines(assertion)) {
         this.#log(`    ${this.#colors.red(detailLine)}`);
       }
+    }
+
+    // Braintrust and Datadog keep one score per exported name, the lowest. For
+    // gates that aggregate is exact and the failure line above already names
+    // the failing member, so warn only for soft groups whose scores differ.
+    for (const group of groupAssertionScores(softs, exportedAssertionName).values()) {
+      if (group.assertions.every((assertion) => assertion.score === group.score)) continue;
+      const name = group.assertions[0]!.name;
+      this.#log(
+        `  ${this.#colors.yellow(
+          `⚠ ${name} recorded ${group.assertions.length} times with different scores; Braintrust and Datadog keep only the lowest. Add .label() to tell them apart.`,
+        )}`,
+      );
     }
 
     if (error) {
@@ -121,6 +140,22 @@ class ConsoleReporter implements EvalReporter {
       const failedText =
         gateTotals.failed > 0 ? `, ${this.#colors.red(`${gateTotals.failed} failed`)}` : "";
       this.#log(`${this.#colors.bold("Gates:")} ${passedText}${failedText}`);
+    }
+
+    const repeatability = aggregateAttempts(results);
+    if (repeatability.length > 0) {
+      this.#log("");
+      this.#log(this.#colors.bold("Repeatability:"));
+      for (const { id, passed, total } of repeatability) {
+        const text = `${passed}/${total} passed`;
+        const colored =
+          passed === total
+            ? this.#colors.green(text)
+            : passed === 0
+              ? this.#colors.red(text)
+              : this.#colors.yellow(text);
+        this.#log(`  ${colored}  ${this.#colors.dim(id)}`);
+      }
     }
 
     const scoreAggregates = this.#aggregateScores(results);
@@ -186,15 +221,18 @@ class ConsoleReporter implements EvalReporter {
   ): { name: string; avg: number; count: number }[] {
     const totals = new Map<string, { sum: number; count: number }>();
 
+    // One value per name per eval, the group minimum, matching what the
+    // export reporters record; `count` is the number of evals.
     for (const result of results) {
-      for (const assertion of result.assertions) {
-        if (assertion.severity !== "soft") continue;
-        const entry = totals.get(assertion.name);
+      const softs = result.assertions.filter((assertion) => assertion.severity === "soft");
+      for (const [name, group] of groupAssertionScores(softs, (assertion) => assertion.name)) {
+        if (group.score === undefined) continue;
+        const entry = totals.get(name);
         if (entry) {
-          entry.sum += assertion.score;
+          entry.sum += group.score;
           entry.count += 1;
         } else {
-          totals.set(assertion.name, { sum: assertion.score, count: 1 });
+          totals.set(name, { sum: group.score, count: 1 });
         }
       }
     }
@@ -205,6 +243,25 @@ class ConsoleReporter implements EvalReporter {
       count,
     }));
   }
+}
+
+/**
+ * Per-eval gate pass counts across attempts, for repeated runs only. Scored
+ * and skipped attempts have no pass/fail verdict, so they are left out.
+ */
+function aggregateAttempts(
+  results: readonly EveEvalResult[],
+): { id: string; passed: number; total: number }[] {
+  const totals = new Map<string, { passed: number; total: number }>();
+  for (const result of results) {
+    if (result.attempt === undefined) continue;
+    if (result.verdict !== "passed" && result.verdict !== "failed") continue;
+    const entry = totals.get(result.id) ?? { passed: 0, total: 0 };
+    entry.total += 1;
+    if (result.verdict === "passed") entry.passed += 1;
+    totals.set(result.id, entry);
+  }
+  return [...totals.entries()].map(([id, counts]) => ({ id, ...counts }));
 }
 
 function gatesOf(result: EveEvalResult): readonly AssertionResult[] {

@@ -29,4 +29,16 @@ describe("assertion failure diagnostics", () => {
       "…",
     ]);
   });
+
+  it("omits the score comparison when the scorer threw", () => {
+    const assertion: AssertionResult = {
+      message: "model unavailable",
+      name: "judge.boolean",
+      passed: false,
+      errored: true,
+      severity: "gate",
+    };
+
+    expect(formatAssertionFailureHeadline(assertion)).toBe("judge.boolean: model unavailable");
+  });
 });

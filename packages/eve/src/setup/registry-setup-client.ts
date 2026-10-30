@@ -1,5 +1,5 @@
 import { InteractionRequired, InvalidAnswerError } from "./ask.js";
-import { SetupPrerequisiteRequired } from "./integrations/shared/prerequisite.js";
+import { setupPrerequisiteOf } from "./integrations/shared/prerequisite.js";
 import type {
   EditableSelectOptions,
   MultiSelectOptions,
@@ -47,10 +47,8 @@ function registrySetupBlocker(
       issue: { code: "invalid_answer", message: error.message },
     };
   }
-  if (error instanceof SetupPrerequisiteRequired) {
-    return { status: "prerequisite_required", prerequisite: error.prerequisite };
-  }
-  return undefined;
+  const prerequisite = setupPrerequisiteOf(error);
+  return prerequisite === undefined ? undefined : { status: "prerequisite_required", prerequisite };
 }
 
 function registrySetupError(error: unknown): { message: string; details?: readonly string[] } {
@@ -211,14 +209,9 @@ export function createRegistrySetupClient(
       warning: (text) => send(childProcess, { type: "log", level: "warning", text }),
       error: (text) => send(childProcess, { type: "log", level: "error", text }),
       commandOutput: (text) => send(childProcess, { type: "log", level: "commandOutput", text }),
-      spinner(status, intent) {
+      spinner(status) {
         const id = nextId++;
-        send(childProcess, {
-          type: "status",
-          id,
-          status,
-          intent: intent?.kind === "external-action" ? intent : undefined,
-        });
+        send(childProcess, { type: "status", id, status });
         return { stop: () => send(childProcess, { type: "status", id }) };
       },
     },

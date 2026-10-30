@@ -10,9 +10,9 @@ import {
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
 import { resolveWorkflowTestOutputDirectory } from "#internal/testing/workflow-vitest-plugin.js";
+import { bundleWorkflowStepRegistrations } from "#internal/testing/workflow-step-registrations.js";
 import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
 import {
-  bundleWorkflowStepRegistrations,
   collectWorkflowInputFiles,
   type WorkflowBundleDiscoveredEntries,
 } from "#internal/workflow-bundle/builder-support.js";
@@ -55,11 +55,15 @@ export default async function setupWorkflowTests(): Promise<void> {
 async function discoverWorkflowEntries(): Promise<WorkflowBundleDiscoveredEntries> {
   const inputFiles = [
     ...(await collectWorkflowInputFiles(resolvePackageSourceDirectoryPath("src/execution"))),
+    ...(await collectWorkflowInputFiles(
+      resolvePackageSourceDirectoryPath("src/runtime/connections/events"),
+    )),
     ...(await collectWorkflowInputFiles(resolvePackageSourceDirectoryPath("src/internal/testing"))),
     ...(await collectWorkflowInputFiles(
       resolvePackageSourceDirectoryPath("src/runtime/subagents"),
     )),
     ...(await collectWorkflowInputFiles(resolvePackageSourceDirectoryPath("src/subagents"))),
+    ...(await collectWorkflowInputFiles(resolvePackageSourceDirectoryPath("src/tools/provided"))),
     resolvePackageSourceFilePath("test/setup/compiled-artifacts-bootstrap.mjs"),
   ];
   const discovered: WorkflowBundleDiscoveredEntries = {

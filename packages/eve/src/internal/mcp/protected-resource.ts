@@ -1,6 +1,6 @@
-import { escapeAuthChallengeParameter } from "#public/channels/auth.js";
+import { escapeAuthChallengeParameter } from "#channel/auth/definitions.js";
 
-export interface McpProtectedResourceMetadataOptions {
+interface McpProtectedResourceMetadataOptions {
   readonly authorizationServers: readonly string[];
   readonly resource: string;
   readonly scopesSupported?: readonly string[];

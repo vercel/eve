@@ -16,10 +16,6 @@
  *   rule 13 — No spread-ternary object composition
  *             (`...(c ? {} : { k: v })`). (Rationale: hard to read, easy
  *             to mistype; declare the object then assign optional keys.)
- *   rule 15 — No `@workflow/*` imports inside `src/channel/**`,
- *             `src/harness/**`, or `src/tracing/**`. Channels, harnesses,
- *             and tracing must stay workflow-agnostic — only
- *             runtime/execution code touches workflow primitives.
  *   rule 19 — No `new AsyncLocalStorage()` outside the two allowlisted
  *             files. All ambient runtime state flows through a single
  *             `EveContext`.
@@ -54,7 +50,8 @@
  *             vendored integration catalog. The scaffold stays free of
  *             framework runtime, compiler, terminal UI, and provider SDK
  *             dependencies.
- *   rule 29 — Changeset package keys must match workspace package names.
+ *   rule 29 — Changeset package keys must match workspace package names and
+ *             summaries must start with one complete sentence.
  *             Release metadata is consumed before `pnpm release`, so bad
  *             changeset package names must fail in PR CI rather than in the
  *             post-merge release workflow.
@@ -82,16 +79,6 @@
  *             `queue-namespace.ts`. The generated agent bootstrap installs the
  *             agent-scoped namespace before queue-producing APIs can run.
  *   rule 34 — `phase` stays a runtime-only dependency. No file under the Eve\n *             logo renderer's GPU/runtime boundary (render/, shaders/, or the\n *             offline render harness) may import the `phase` package. This keeps\n *             the mechanical separation between the lifecycle layer and the GPU\n *             renderer enforceable.
- *   rule 35 — No direct `#compiled/gray-matter` imports outside the
- *             `internal/helpers/gray-matter.ts` wrapper. gray-matter's default
- *             engines `eval()` a `---js` frontmatter fence, so every call must
- *             route through `parseFrontmatter`, which is safe by default. A
- *             direct import lets untrusted input reach an evaluating engine.
- *   rule 36 — Extension capability epochs have immutable hashed API metadata
- *             and explicit support history. The current hash must match the
- *             authoring roots, every historical epoch must be supported or
- *             dropped, every retained epoch needs a compiling fixture, and
- *             every public authoring value must belong to a capability.
  *   rule 37 — Instrumentation ownership stays provider-neutral and outside the
  *             harness. The lifecycle contract must not import from `ai`, harness
  *             code may import only runtime facade types, and execution may use
@@ -100,19 +87,83 @@
  *             `pnpm --filter eve build`. Turbo owns workspace dependency
  *             ordering; nested builds race on eve's clean-and-publish dist
  *             directory and let consumers observe a partial package.
- *   rule 42 — The shared subagent workflow body is framework-authored
- *             userspace. It must not import task, harness, or context
- *             internals or recover private state through `Symbol.for`.
- *             Privileged dispatch belongs in ordinary step-backed APIs that
- *             the workflow body consumes through a public contract.
  *   rule 43 — Reusable session plumbing stays independent of the subagent
  *             executor. The generic inbox and state cursor must not
  *             import subagent modules; session/turn composition roots may
  *             compose built-in executors directly.
- *   rule 44 — Every concrete built-in sandbox provider is defined through
- *             `defineSandboxProvider()` and does not import sandbox runtime
- *             orchestration, registries, key derivation, or session state.
- *             Built-ins and authored providers must share one contract.
+ *   rule 44 — Sandbox providers are built on the public provider contract.
+ *             Files under `src/execution/sandbox/bindings/` and
+ *             `src/sandbox/providers/` reach the contract only through
+ *             `#public/sandbox/*` and never import core sandbox modules
+ *             (session construction, ensure, prewarm, sandbox state, the
+ *             shutdown registry, tool sessions, the runtime sandbox
+ *             registry, or the shared provider and session internals).
+ *             `sandbox/providers/default.ts` may import `#sandbox/state.js`
+ *             for `DefaultSandbox`'s two internal state hooks. Engine
+ *             helpers such as other binding modules,
+ *             stream utilities, and the optional-package loader stay
+ *             allowed. Every concrete built-in under `src/sandbox/providers/`
+ *             is defined through `defineSandboxProvider()`.
+ *   rule 45 — Provided tools under `packages/eve/src/tools/provided/**` and
+ *             the body of every agent tool import only public eve entry
+ *             points (the `#` specifiers of the package's `exports`), the
+ *             vendored Workflow SDK that authored bodies import as
+ *             `workflow`, and each other. eve is built on eve: a provided
+ *             tool that needs a private hook means authors cannot build the
+ *             same tool. Files that predate the rule are baselined and may
+ *             only leave the baseline.
+ *   rule 46 — Running work owns its record, and tasks their words. Only
+ *             `harness/running-work.ts` names the session's one record of
+ *             running work, and only its two owners read or write it:
+ *             `execution/tasks/table*.ts` for tasks and
+ *             `harness/workflow-tool-runs.ts` for the runs a turn waits on.
+ *             `execution/session/checkpoint-migrations.ts` may also name it:
+ *             its upgrades pin the shapes released builds wrote.
+ *             The model-facing task markers appear only in
+ *             `execution/tasks/render.ts`, which holds all of the tasks'
+ *             model text.
+ *   rule 47 — A caller hears from its session only at a turn's real end.
+ *             Only `execution/session/program.ts` sends the caller's reply,
+ *             after the turn loop returns, and `execution/session/finalization.ts`
+ *             when the session ends. A held turn is still open, so nothing
+ *             inside the turn loop or the harness may reply.
+ *   rule 48 — Retired: remote agent protocol 1 and its directory were removed.
+ *   rule 49 — Provided tool definitions carry a framework tool flag,
+ *             so telemetry ownership survives renamed and namespaced tools.
+ *   rule 50 — The human-in-the-loop lifecycle in `harness/hitl/` is
+ *             reached only through its `index.ts`, its request vocabulary
+ *             (`approval-prompt`, `budget-request`, `relays`, `sign-ins`) and
+ *             read surface via index.ts or the Workflow-safe view.ts.
+ *             Only commit.ts and checkpoint-migrations.ts import requests.ts
+ *             for saving and legacy upgrades.
+ *   rule 51 — Only the session machine (`harness/session-machine/`) and the
+ *             human-in-the-loop lifecycle it delegates to
+ *             (`harness/hitl/`) build lifecycle events and read the
+ *             machine's private state. The guard checks only those imports;
+ *             it does not prove every state change emits events (approval
+ *             candidates are still written directly, and `matchSignIns`
+ *             emits none). The model step's streamed content (its calls) is
+ *             built where it streams, and their results where eve runs them
+ *             (`call-executor.ts`).
+ *   rule 52 — The tracing library in `packages/tracing/src/` imports only
+ *             itself and external packages. eve reaches it only through the
+ *             vendored root, delegation, otel, and ai-sdk entrypoints under
+ *             `#compiled/@vercel/agent-runs/`, never the workspace package itself.
+ *   rule 53 — The session event contract (`protocol/session-events/`) and
+ *             the shared fold (`protocol/session-projection/`) stand alone:
+ *             they import only each other, plus the vendored Zod in the
+ *             schema files, so a runtime refactor can't change the wire.
+ *             Legacy snapshots stay at ingress so current execution consumes
+ *             only normalized session state.
+ *   rule 54 — Zod stays out of readers. The modules readers load (the
+ *             contract's catalog, envelope, guards, and index; the fold;
+ *             `eve/events`; the client) never import a schema module by
+ *             value: schemas serve tests and development only.
+ *
+ *   rule 55 — Public named exports match checker-generated per-entry lists,
+ *             and no entry exports a name `stripInternal` drops (`@internal`).
+ *   rule 56 — Retired: dangling references to stripped declarations are caught
+ *             by `packages/eve/test/scenarios/packed-public-types.scenario.test.ts`.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -122,14 +173,35 @@ import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import matter from "gray-matter";
-import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
+import { load as loadYaml } from "js-yaml";
+import { parseSummary } from "./changeset-format.mjs";
+import { checkPublicExports } from "./public-exports.mjs";
 
 const require = createRequire(import.meta.url);
 const extractorRequire = createRequire(require.resolve("@microsoft/api-extractor/package.json"));
 const ts = extractorRequire("typescript");
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "../..");
 const BASELINE_PATH = join(REPO_ROOT, "scripts/guard-invariants-baseline.json");
+
+const FRONTMATTER_RE = /^\uFEFF?---\r?\n([\s\S]*?)^---[ \t]*(?:\r?\n|$)/m;
+
+/**
+ * Parses a Markdown document's YAML frontmatter. Returns `undefined` when the
+ * document has no complete leading `---` block.
+ *
+ * @param {string} content
+ * @returns {unknown}
+ */
+function readFrontmatter(content) {
+  const match = FRONTMATTER_RE.exec(content);
+  if (match === null || match.index !== 0) return undefined;
+  return loadYaml(match[1] ?? "") ?? {};
+}
+
+/** @param {string} content */
+function startsWithFrontmatter(content) {
+  return /^\uFEFF?---/.test(content);
+}
 
 const SKIP_DIRS = new Set([
   "node_modules",
@@ -197,7 +269,6 @@ function isTsLike(relPath) {
  *
  * @param {{
  *   rule13: { baseline: Record<string, number>; current: Map<string, number> };
- *   rule15: Violation[];
  *   rule19: { allowlist: Set<string>; current: Set<string>; lines: Map<string, number> };
  *   rule21: { allowlist: Set<string>; violations: Violation[] };
  *   rule23: { baseline: Record<string, number>; current: Map<string, number> };
@@ -206,11 +277,16 @@ function isTsLike(relPath) {
  *   rule27: Violation[];
  *   rule28: Violation[];
  *   rule33: Violation[];
- *   rule35: Violation[];
  *   rule37: Violation[];
- *   rule42: Violation[];
  *   rule43: Violation[];
  *   rule44: Violation[];
+ *   rule45: { allowlist: Set<string>; violations: Violation[] };
+ *   rule46: Violation[];
+ *   rule47: Violation[];
+ *   rule50: Violation[];
+ *   rule51: Violation[];
+ *   rule52: Violation[];
+ *   rule53: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -229,7 +305,6 @@ async function scanRepo(state) {
     const lines = content.split(/\r?\n/);
 
     checkRule13(posix, lines, state.rule13);
-    checkRule15(posix, lines, state.rule15);
     checkRule19(posix, lines, state.rule19);
     checkRule21(posix, lines, state.rule21.allowlist, state.rule21.violations);
     checkRule23(posix, lines, state.rule23);
@@ -238,49 +313,69 @@ async function scanRepo(state) {
     checkRule27(posix, lines, state.rule27);
     checkRule28(posix, lines, state.rule28);
     checkRule33(posix, lines, state.rule33);
-    checkRule35(posix, lines, state.rule35);
     checkRule37(posix, content, state.rule37);
-    checkRule42(posix, lines, state.rule42);
     checkRule43(posix, lines, state.rule43);
     checkRule44(posix, lines, state.rule44);
+    checkLegacySessionImports(posix, lines, state.rule53);
+    checkRule45(posix, lines, state.rule45);
+    checkRule46(posix, lines, state.rule46);
+    checkRule47(posix, lines, state.rule47);
+    checkRule50(posix, lines, state.rule50);
+    checkRule51(posix, lines, state.rule51);
+    if (posix.startsWith("packages/tracing/src/")) {
+      for (const [index, line] of lines.entries()) {
+        const imports = [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)];
+        for (const match of imports) {
+          const specifier = match[2];
+          const escapes =
+            specifier.startsWith("#") ||
+            (specifier.startsWith(".") &&
+              !toPosix(relative(REPO_ROOT, resolve(dirname(absPath), specifier))).startsWith(
+                "packages/tracing/src/",
+              ));
+          if (escapes)
+            state.rule52.push({
+              rule: 52,
+              file: posix,
+              line: index + 1,
+              message:
+                "Tracing library imports must stay inside the library or use an external package. Host integration belongs in the host.",
+            });
+        }
+      }
+    }
+    if (posix.startsWith("packages/eve/")) {
+      lines.forEach((line, index) => {
+        const privateImport =
+          /['"]#compiled\/@vercel\/agent-runs\/(?!(?:index|delegation|otel|ai-sdk)\.js['"])/.test(
+            line,
+          ) ||
+          /(?:from\s+|import\s*\()['"]@vercel\/agent-runs(?:\/[^'"]*)?['"]/.test(line) ||
+          [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)].some(
+            (match) =>
+              match[2].startsWith(".") &&
+              toPosix(relative(REPO_ROOT, resolve(dirname(absPath), match[2]))).startsWith(
+                "packages/tracing/",
+              ),
+          );
+        if (privateImport)
+          state.rule52.push({
+            rule: 52,
+            file: posix,
+            line: index + 1,
+            message:
+              "Import the tracing library from #compiled/@vercel/agent-runs/{index,delegation,otel,ai-sdk}.js, not the workspace package or its private modules.",
+          });
+      });
+    }
+    checkRule53(posix, lines, state.rule53);
   }
-}
-
-// ---------- Rule 42: userspace subagent workflow ----------
-
-const SUBAGENT_WORKFLOW_PATH = "packages/eve/src/runtime/subagents/workflow.ts";
-const SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE =
-  /["']#(?:tasks|execution|harness|context|shared)(?:\/|\.js)/;
-// The shared body owns its invocation id, so it consumes the framework-internal
-// entry rather than the public `agent()`; that import is the one exception.
-const SUBAGENT_WORKFLOW_ALLOWED_IMPORT = '"#execution/tools/subagent/invoke-agent.js"';
-
-/**
- * @param {string} posix
- * @param {string[]} lines
- * @param {Violation[]} violations
- */
-function checkRule42(posix, lines, violations) {
-  if (posix !== SUBAGENT_WORKFLOW_PATH) return;
-
-  lines.forEach((line, idx) => {
-    if (line.includes(SUBAGENT_WORKFLOW_ALLOWED_IMPORT)) return;
-    if (!SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE.test(line) && !line.includes("Symbol.for(")) return;
-    violations.push({
-      rule: 42,
-      file: posix,
-      line: idx + 1,
-      message:
-        "the shared subagent workflow reaches into task, harness, or context internals. Keep the body userspace-shaped and call a public workflow-safe agent API instead.",
-    });
-  });
 }
 
 // ---------- Rule 43: executor-neutral session plumbing ----------
 
 // Matches both `#` alias specifiers and relative paths into the executor trees.
-const SUBAGENT_IMPORT_RE =
-  /from ["'](?:#|(?:\.\.?\/)+(?:[\w-]+\/)*)(?:subagents|execution\/tools\/subagent|tools\/subagent)(?:\/|\.js|["'])/;
+const SUBAGENT_IMPORT_RE = /from ["'](?:#|(?:\.\.?\/)+(?:[\w-]+\/)*)subagents(?:\/|\.js|["'])/;
 
 const RULE43_GENERIC_SESSION_FILES = new Set([
   "packages/eve/src/execution/session-hook-claims.ts",
@@ -316,7 +411,7 @@ const LEGACY_INGRESS_FILES = new Set([
   "packages/eve/src/eve-channel/index.ts",
 ]);
 /** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
-function checkRule44(posix, lines, violations) {
+function checkLegacySessionImports(posix, lines, violations) {
   if (
     posix.includes("/execution/legacy-session/") ||
     posix.includes("/internal/testing/") ||
@@ -330,12 +425,364 @@ function checkRule44(posix, lines, violations) {
       /import\(["'][^"']*legacy-session\//.test(line)
     )
       violations.push({
-        rule: 44,
+        rule: 53,
         file: posix,
         line: index + 1,
         message:
           "Legacy session import belongs at ingress; current execution must consume only normalized session state.",
       });
+  });
+}
+
+// ---------- Rule 44: sandbox providers use the public provider contract ----------
+
+const SANDBOX_PROVIDER_DIRS = [
+  "packages/eve/src/execution/sandbox/bindings/",
+  "packages/eve/src/sandbox/providers/",
+];
+
+const SANDBOX_CORE_IMPORT_RE =
+  /(?:from\s+|import\s*\()["']#(?:sandbox\/(?:provider|state)|execution\/sandbox\/(?:active-connections|ensure|prewarm|session|logging-session)|execution\/tool-session\/[^"']*|runtime\/sandbox\/[^"']*|shared\/sandbox-(?:provider|session|write-files))\.js["']/;
+
+const SANDBOX_CORE_IMPORT_EXEMPTIONS = new Map([
+  ["packages/eve/src/sandbox/providers/default.ts", /["']#sandbox\/state\.js["']/],
+]);
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule44(posix, lines, violations) {
+  if (!SANDBOX_PROVIDER_DIRS.some((dir) => posix.startsWith(dir))) return;
+  if (posix.endsWith(".test.ts")) return;
+  const exemption = SANDBOX_CORE_IMPORT_EXEMPTIONS.get(posix);
+  lines.forEach((line, index) => {
+    if (!SANDBOX_CORE_IMPORT_RE.test(line) || exemption?.test(line)) return;
+    violations.push({
+      rule: 44,
+      file: posix,
+      line: index + 1,
+      message:
+        "Sandbox providers reach the provider contract only through #public/sandbox/* and may not import core sandbox modules. Use the public contract, or an engine helper such as another binding module.",
+    });
+  });
+  if (!posix.startsWith("packages/eve/src/sandbox/providers/")) return;
+  const source = lines.join("\n");
+  if (!/\bdefineSandboxProvider\(/.test(source)) {
+    violations.push({
+      rule: 44,
+      file: posix,
+      message: "Built-in sandbox providers must use defineSandboxProvider().",
+    });
+  }
+  if (source.includes("createSandboxEnvironment")) {
+    violations.push({
+      rule: 44,
+      file: posix,
+      message:
+        "Built-in sandbox providers must not bypass defineSandboxProvider() through createSandboxEnvironment().",
+    });
+  }
+}
+
+// ---------- Rule 45: provided tools use only public entry points ----------
+
+const PROVIDED_TOOLS_DIR = "packages/eve/src/tools/provided/";
+// Every agent tool is a `serve` workflow tool eve generates around this body.
+const AGENT_TOOL_BODY_PATH = "packages/eve/src/runtime/subagents/workflow.ts";
+
+const EVE_PACKAGE_EXPORTS = require(join(REPO_ROOT, "packages/eve/package.json")).exports;
+const EXPORTED_TYPES_PATH_RE = /^\.\/dist\/src\/(.+)\.d\.ts$/;
+
+/**
+ * The `#` specifier eve's own source uses for one exported module, such as
+ * `#public/tools/index.js` for `eve/tools`.
+ *
+ * @param {unknown} target
+ */
+function toSourceSpecifier(target) {
+  if (typeof target !== "object" || target === null) return undefined;
+  const types = Reflect.get(target, "types");
+  if (typeof types !== "string") return undefined;
+  const match = EXPORTED_TYPES_PATH_RE.exec(types);
+  return match === null ? undefined : `#${match[1]}.js`;
+}
+
+const EVE_PUBLIC_ENTRY_SPECIFIERS = new Set(
+  Object.values(EVE_PACKAGE_EXPORTS)
+    .map(toSourceSpecifier)
+    .filter((specifier) => specifier !== undefined),
+);
+
+const PROVIDED_TOOL_EXTRA_IMPORTS = new Set([
+  // What an authored body imports as `workflow`: eve vendors the Workflow SDK.
+  "#compiled/@workflow/core/index.js",
+  // `defineJsonSchema` is not public yet, and provided tools declare schemas without zod.
+  "#tools/schema.js",
+]);
+
+// `eve__task_wait` and `eve__task_cancel` belong to the session, not to authors: they
+// take their model text from execution/tasks/render.ts directly.
+const PROVIDED_TASK_TOOL_FILES = new Set([
+  "packages/eve/src/tools/provided/task-cancel.ts",
+  "packages/eve/src/tools/provided/task-wait.ts",
+]);
+
+const IMPORT_SPECIFIER_RE = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)["']([^"']+)["']/;
+
+/** @param {string} specifier */
+function isProvidedToolImportAllowed(specifier) {
+  if (EVE_PUBLIC_ENTRY_SPECIFIERS.has(specifier)) return true;
+  if (PROVIDED_TOOL_EXTRA_IMPORTS.has(specifier)) return true;
+  return specifier.startsWith("#tools/provided/") || specifier.startsWith("./");
+}
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {{ allowlist: Set<string>; violations: Violation[] }} state
+ */
+function checkRule45(posix, lines, state) {
+  const provided = posix.startsWith(PROVIDED_TOOLS_DIR) && !posix.endsWith(".test.ts");
+  if (!provided && posix !== AGENT_TOOL_BODY_PATH) return;
+  if (state.allowlist.has(posix) || PROVIDED_TASK_TOOL_FILES.has(posix)) return;
+  lines.forEach((line, idx) => {
+    // Doc comments show authors how to import the tool from its public entry.
+    if (/^\s*(?:\*|\/\/)/.test(line)) return;
+    const specifier = IMPORT_SPECIFIER_RE.exec(line)?.[1];
+    if (specifier === undefined || isProvidedToolImportAllowed(specifier)) return;
+    state.violations.push({
+      rule: 45,
+      file: posix,
+      line: idx + 1,
+      message: `imports "${specifier}", which is not a public eve entry point. Provided tools use only the API authors have: import from the matching entry in packages/eve/package.json "exports" (for example "#public/tools/index.js" for eve/tools), or make the capability public first.`,
+    });
+  });
+}
+
+// ---------- Rule 46: tasks own their records and model text ----------
+
+const TASKS_DIR = "packages/eve/src/execution/tasks/";
+const TASK_TABLE_FILE_RE = /^packages\/eve\/src\/execution\/tasks\/table[\w-]*\.ts$/;
+const TASK_RENDER_FILE = `${TASKS_DIR}render.ts`;
+const RUNNING_WORK_FILE = "packages/eve/src/harness/running-work.ts";
+const CHECKPOINT_MIGRATIONS_FILE = "packages/eve/src/execution/session/checkpoint-migrations.ts";
+const RUNNING_WORK_KEY = '"eve.work"';
+const RUNNING_WORK_ACCESS_RE = /\b(?:readRunningWork|writeRunningWork)\(/;
+const RUNNING_WORK_OWNER_FILES = new Set([
+  RUNNING_WORK_FILE,
+  "packages/eve/src/harness/workflow-tool-runs.ts",
+]);
+const TASK_MODEL_MARKERS = ["<task_result", "[Tasks]", "Started task ", "Sent to task "];
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule46(posix, lines, violations) {
+  if (!posix.startsWith("packages/eve/src/") || posix.endsWith(".test.ts")) return;
+  lines.forEach((line, idx) => {
+    if (
+      line.includes(RUNNING_WORK_KEY) &&
+      posix !== RUNNING_WORK_FILE &&
+      posix !== CHECKPOINT_MIGRATIONS_FILE
+    ) {
+      violations.push({
+        rule: 46,
+        file: posix,
+        line: idx + 1,
+        message:
+          "names the session's record of running work outside harness/running-work.ts. Read and write it through its owners' helpers.",
+      });
+    }
+    if (
+      RUNNING_WORK_ACCESS_RE.test(line) &&
+      !RUNNING_WORK_OWNER_FILES.has(posix) &&
+      !TASK_TABLE_FILE_RE.test(posix)
+    ) {
+      violations.push({
+        rule: 46,
+        file: posix,
+        line: idx + 1,
+        message:
+          "reads or writes the record of running work outside its owners. Use execution/tasks/table.ts for tasks and harness/workflow-tool-runs.ts for the runs a turn waits on.",
+      });
+    }
+    if (posix === TASK_RENDER_FILE || /^\s*(?:\/?\*|\/\/)/.test(line)) return;
+    const marker = TASK_MODEL_MARKERS.find((candidate) => line.includes(candidate));
+    if (marker === undefined) return;
+    violations.push({
+      rule: 46,
+      file: posix,
+      line: idx + 1,
+      message: `writes the model-facing task text "${marker}" outside execution/tasks/render.ts. Keep every string the model reads about tasks in the renderer and import it from there.`,
+    });
+  });
+}
+
+// ---------- Rule 47: one caller-reply site ----------
+
+const CALLER_REPLY_DEFINITION_FILE = "packages/eve/src/subagents/parent-notification.ts";
+const CALLER_REPLY_FILES = new Set([
+  "packages/eve/src/execution/session/program.ts",
+  "packages/eve/src/execution/session/finalization.ts",
+]);
+const CALLER_REPLY_CALL_RE = /\b(?:notifyTurnCallerStep|notifyCancelledTaskCallerStep)\(/;
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule47(posix, lines, violations) {
+  if (!posix.startsWith("packages/eve/src/") || posix.endsWith(".test.ts")) return;
+  if (posix === CALLER_REPLY_DEFINITION_FILE || CALLER_REPLY_FILES.has(posix)) return;
+  lines.forEach((line, idx) => {
+    if (!CALLER_REPLY_CALL_RE.test(line)) return;
+    violations.push({
+      rule: 47,
+      file: posix,
+      line: idx + 1,
+      message:
+        "sends a caller's reply outside execution/session/program.ts and execution/session/finalization.ts. A turn replies to its caller only at its real end, which the session program owns; finalization replies when the session ends.",
+    });
+  });
+}
+
+// ---------- Rule 50: the human-in-the-loop lifecycle has one seam ----------
+
+const HUMAN_INPUT_DIR = "packages/eve/src/harness/hitl/";
+const HUMAN_INPUT_PRIVATE_IMPORT_RE =
+  /["'](?:#harness\/|(?:\.\.?\/)+)hitl\/(?!(?:index|view|approval-prompt|budget-request|relays|sign-ins)\.js["'])/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule50(posix, lines, violations) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    posix.startsWith(HUMAN_INPUT_DIR) ||
+    posix.startsWith("packages/eve/src/internal/testing/") ||
+    /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix)
+  )
+    return;
+  lines.forEach((line, idx) => {
+    if (!HUMAN_INPUT_PRIVATE_IMPORT_RE.test(line)) return;
+    if (
+      /["']#harness\/hitl\/requests\.js["']/.test(line) &&
+      (posix === "packages/eve/src/harness/session-machine/commit.ts" ||
+        posix === "packages/eve/src/execution/session/checkpoint-migrations.ts")
+    )
+      return;
+    violations.push({
+      rule: 50,
+      file: posix,
+      line: idx + 1,
+      message:
+        "imports the human-in-the-loop lifecycle's internals. Reach it through `#harness/hitl/index.js`, or use the read-only `#harness/hitl/view.js` from workflow bodies.",
+    });
+  });
+}
+
+// ---------- Rules 53 and 54: the session event contract stands alone ----------
+
+const CONTRACT_DIR = "packages/eve/src/protocol/session-events/";
+const FOLD_DIR = "packages/eve/src/protocol/session-projection/";
+const CONTRACT_IMPORT_RE = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)["']([^"']+)["']/;
+const CONTRACT_SPECIFIER_RE = /^(?:#protocol\/session-(?:events|projection)\/|\.\.?\/)/;
+const SCHEMA_FILE_RE =
+  /^packages\/eve\/src\/protocol\/session-events\/(?:common|schemas|families\/[^/]+)\.ts$/;
+const SCHEMA_SPECIFIER_RE =
+  /session-events\/(?:common|schemas|families\/[^"'/]+)\.js$|^\.\.?\/(?:common|schemas)\.js$|^\.\/families\//;
+const READER_FILE_RE =
+  /^packages\/eve\/src\/(?:protocol\/session-events\/(?:catalog|envelope|facts|guards|index)\.ts$|protocol\/session-projection\/|public\/events\/|client\/)/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule53(posix, lines, violations) {
+  if (/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix)) return;
+  const inContract = posix.startsWith(CONTRACT_DIR) || posix.startsWith(FOLD_DIR);
+  const isReader = READER_FILE_RE.test(posix);
+  if (!inContract && !isReader) return;
+  // A multi-line `import type { … } from` names its specifier lines after the `type`.
+  let statementTypeOnly = false;
+  lines.forEach((line, idx) => {
+    if (/^\s*(?:import|export)\b/.test(line)) {
+      statementTypeOnly = /^\s*(?:import|export)\s+type\b/.test(line);
+    }
+    const specifier = CONTRACT_IMPORT_RE.exec(line)?.[1];
+    if (specifier === undefined) return;
+    const typeOnly = statementTypeOnly;
+    if (inContract) {
+      const allowed =
+        CONTRACT_SPECIFIER_RE.test(specifier) ||
+        (specifier === "#compiled/zod/index.js" && SCHEMA_FILE_RE.test(posix));
+      if (!allowed) {
+        violations.push({
+          rule: 53,
+          file: posix,
+          line: idx + 1,
+          message: `imports "${specifier}". The session event contract and its fold stand alone, so runtime refactors can't change the wire.`,
+        });
+        return;
+      }
+    }
+    if (isReader && !typeOnly && SCHEMA_SPECIFIER_RE.test(specifier)) {
+      violations.push({
+        rule: 54,
+        file: posix,
+        line: idx + 1,
+        message: `imports the schema module "${specifier}" by value, which loads Zod. Readers import its types with \`import type\`, and validate nothing.`,
+      });
+    }
+  });
+}
+
+// ---------- Rule 51: the session machine owns lifecycle ----------
+
+const SESSION_MACHINE_DIR = "packages/eve/src/harness/session-machine/";
+const LIFECYCLE_EVENT_BUILDER_RE =
+  /\bcreate(?:Session(?:Started|Waiting|Failed|Completed)|Turn(?:Started|Completed|Failed|Cancelled|Waiting)|MessageReceived|Step(?:Started|Failed)|Input(?:Requested|Resolved)|Authorization(?:Required|Completed)|Approval(?:Candidate|Settled)|Task(?:Started|Settled)|ContextCleared|ResultCompleted)Event\b/;
+const CALL_EVENT_BUILDER_RE = /\bcreateAction(?:Result|sRequested)Event\b/;
+/** Where the model step streams its calls, runs them, and reports the calls they made. */
+const STREAM_CONTENT_FILES = new Set([
+  "packages/eve/src/harness/call-executor.ts",
+  "packages/eve/src/harness/emission.ts",
+  "packages/eve/src/harness/nested-actions.ts",
+  "packages/eve/src/harness/step-hooks.ts",
+  "packages/eve/src/harness/stream-actions.ts",
+]);
+const MACHINE_PRIVATE_IMPORT_RE = /["']#harness\/session-machine\/(?:state|events)\.js["']/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule51(posix, lines, violations) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    posix.startsWith(SESSION_MACHINE_DIR) ||
+    posix.startsWith(HUMAN_INPUT_DIR) ||
+    posix.startsWith("packages/eve/src/protocol/") ||
+    posix.startsWith("packages/eve/src/internal/testing/") ||
+    posix.endsWith(".test.ts") ||
+    posix.includes("/test/")
+  )
+    return;
+  lines.forEach((line, idx) => {
+    const builder = LIFECYCLE_EVENT_BUILDER_RE.exec(line)?.[0];
+    const callBuilder = STREAM_CONTENT_FILES.has(posix)
+      ? undefined
+      : CALL_EVENT_BUILDER_RE.exec(line)?.[0];
+    if (builder !== undefined || callBuilder !== undefined) {
+      violations.push({
+        rule: 51,
+        file: posix,
+        line: idx + 1,
+        message: `uses ${builder ?? callBuilder} outside harness/session-machine/. Only the session machine builds lifecycle events: return them from a transition and publish what it returns with \`applyTransition\`.`,
+      });
+    }
+    if (MACHINE_PRIVATE_IMPORT_RE.test(line)) {
+      violations.push({
+        rule: 51,
+        file: posix,
+        line: idx + 1,
+        message:
+          "imports the session machine's private state or event builders. Read execution state through `#harness/session-machine/view.js`; change it with a transition.",
+      });
+    }
   });
 }
 
@@ -355,40 +802,6 @@ function checkRule13(posix, lines, state) {
     if (SPREAD_TERNARY_RE.test(line)) count++;
   }
   if (count > 0) state.current.set(posix, count);
-}
-
-// ---------- Rule 15: workflow primitives outside runtime/execution ----------
-
-const WORKFLOW_IMPORT_RE = /from ["']@workflow\b/;
-
-/**
- * @param {string} posix
- */
-function isChannelOrHarness(posix) {
-  return (
-    posix.startsWith("packages/eve/src/channel/") ||
-    posix.startsWith("packages/eve/src/harness/") ||
-    posix.startsWith("packages/eve/src/tracing/")
-  );
-}
-
-/**
- * @param {string} posix
- * @param {string[]} lines
- * @param {Violation[]} violations
- */
-function checkRule15(posix, lines, violations) {
-  if (!isChannelOrHarness(posix)) return;
-  lines.forEach((line, idx) => {
-    if (WORKFLOW_IMPORT_RE.test(line)) {
-      violations.push({
-        rule: 15,
-        file: posix,
-        line: idx + 1,
-        message: `imports from "@workflow/*". Channel, harness, and tracing code must stay workflow-agnostic. Move the workflow primitive call into src/runtime/ or src/execution/ and have the caller use a thin runtime helper instead.`,
-      });
-    }
-  });
 }
 
 // ---------- Rule 33: namespaced Workflow runtime boundary ----------
@@ -430,33 +843,6 @@ function checkRule33(posix, lines, violations) {
         file: posix,
         line: idx + 1,
         message: `writes WORKFLOW_QUEUE_NAMESPACE outside the canonical namespace module. Use installEveWorkflowQueueNamespace() so every queue surface derives the same agent-scoped value.`,
-      });
-    }
-  });
-}
-
-// ---------- Rule 35: direct gray-matter imports ----------
-
-const GRAY_MATTER_SPECIFIER_RE = /["']#compiled\/gray-matter(?:\/[^"']+)?["']/;
-const GRAY_MATTER_FACADE = "packages/eve/src/internal/helpers/gray-matter.ts";
-
-/**
- * @param {string} posix
- * @param {string[]} lines
- * @param {Violation[]} violations
- */
-function checkRule35(posix, lines, violations) {
-  if (posix === GRAY_MATTER_FACADE) return;
-  lines.forEach((line, idx) => {
-    const isImport =
-      /^(?:import|export)\b|^}\s*from\b|\b(?:import|require)\s*\(/.test(line.trimStart()) &&
-      GRAY_MATTER_SPECIFIER_RE.test(line);
-    if (isImport) {
-      violations.push({
-        rule: 35,
-        file: posix,
-        line: idx + 1,
-        message: `imports "#compiled/gray-matter" directly. gray-matter's default engines eval() a \`---js\` frontmatter fence, so parse through parseFrontmatter() from "#internal/helpers/gray-matter.js" instead — it is safe by default and takes an explicit { allowCodeEngines: true } opt-in for trusted input.`,
       });
     }
   });
@@ -872,7 +1258,7 @@ function checkRule28(posix, lines, violations) {
   }
 }
 
-// ---------- Rule 29: changeset package names exist in the workspace ----------
+// ---------- Rule 29: changeset package names and summaries ----------
 
 const CHANGESET_DIR = ".changeset";
 
@@ -901,7 +1287,7 @@ async function checkRule29ChangesetPackageNames() {
     const relPath = `${CHANGESET_DIR}/${entry.name}`;
     const content = await readFile(join(REPO_ROOT, relPath), "utf8");
 
-    if (!matter.test(content)) {
+    if (!startsWithFrontmatter(content)) {
       violations.push({
         rule: 29,
         file: relPath,
@@ -913,7 +1299,7 @@ async function checkRule29ChangesetPackageNames() {
 
     let data;
     try {
-      data = matter(content).data;
+      data = readFrontmatter(content);
     } catch (error) {
       violations.push({
         rule: 29,
@@ -950,6 +1336,16 @@ async function checkRule29ChangesetPackageNames() {
         rule: 29,
         file: relPath,
         message: `changeset references package "${packageName}", but no workspace package has that name. Use the exact package.json "name" from the target workspace package; for packages/eve that is "eve".`,
+      });
+    }
+    try {
+      const frontmatter = FRONTMATTER_RE.exec(content);
+      parseSummary(content.slice(frontmatter[0].length), entry.name);
+    } catch (error) {
+      violations.push({
+        rule: 29,
+        file: relPath,
+        message: error instanceof Error ? error.message : String(error),
       });
     }
   }
@@ -999,6 +1395,60 @@ async function checkRule30VendoredCompiledPackageJson() {
     }
   }
 
+  return violations;
+}
+
+// Provided definitions must carry identity, not rely on their filesystem or runtime name.
+async function checkFrameworkActionIdentity() {
+  const violations = [];
+  const roots = ["packages/eve/src/tools/provided", "packages/eve/src/tools/framework"];
+  const files = [];
+  for (const root of roots) {
+    for await (const file of walkFiles(join(REPO_ROOT, root))) files.push(file);
+  }
+  for (const { absPath, relPath } of files) {
+    if (!absPath.endsWith(".ts") || absPath.endsWith(".test.ts")) continue;
+    const source = await readFile(absPath, "utf8");
+    const ast = ts.createSourceFile(relPath, source, ts.ScriptTarget.Latest, true);
+    const report = (node, message) =>
+      violations.push({
+        rule: 49,
+        file: toPosix(relPath),
+        line: ast.getLineAndCharacterOfPosition(node.getStart(ast)).line + 1,
+        message,
+      });
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+        const name = node.expression.text;
+        if (["defineTool", "defineWorkflowTool", "stampToolDefinition"].includes(name)) {
+          const parent = node.parent;
+          if (
+            !ts.isCallExpression(parent) ||
+            !ts.isIdentifier(parent.expression) ||
+            parent.expression.text !== "frameworkTool"
+          )
+            report(
+              node,
+              "Wrap provided tool definitions in frameworkTool(definition), so renamed tools remain marked in traces.",
+            );
+        }
+      }
+      if (ts.isObjectLiteralExpression(node)) {
+        const properties = new Map(
+          node.properties
+            .filter(ts.isPropertyAssignment)
+            .map((property) => [property.name.getText(ast), property.initializer]),
+        );
+        if (properties.has("frameworkAction")) {
+          const flag = properties.get("frameworkTool");
+          if (flag === undefined || flag.kind !== ts.SyntaxKind.TrueKeyword)
+            report(node, "Framework harness tools must declare frameworkTool: true.");
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(ast);
+  }
   return violations;
 }
 
@@ -1087,7 +1537,7 @@ async function checkRule32ResearchFrontmatter() {
     if (!posix.endsWith(".md")) continue;
 
     const content = await readFile(absPath, "utf8");
-    if (!matter.test(content)) {
+    if (!startsWithFrontmatter(content)) {
       violations.push({
         rule: 32,
         file: posix,
@@ -1099,7 +1549,7 @@ async function checkRule32ResearchFrontmatter() {
 
     let data;
     try {
-      data = matter(content).data;
+      data = readFrontmatter(content);
     } catch (error) {
       violations.push({
         rule: 32,
@@ -1358,50 +1808,12 @@ function diffCounts(current, baseline) {
 
 // ---------- Entry point ----------
 
-async function checkRule44SandboxProviders() {
-  const providerNames = ["docker", "just-bash", "microsandbox", "vercel"];
-  const forbidden = [
-    "#execution/sandbox/ensure.js",
-    "#execution/sandbox/prewarm.js",
-    "#runtime/sandbox/registry.js",
-    "#sandbox/state.js",
-  ];
-  const issues = [];
-  for (const name of providerNames) {
-    const file = `packages/eve/src/sandbox/providers/${name}.ts`;
-    const source = await readFile(join(REPO_ROOT, file), "utf8");
-    if (!source.includes("defineSandboxProvider")) {
-      issues.push({
-        file,
-        message: "Built-in sandbox providers must use defineSandboxProvider().",
-      });
-    }
-    if (source.includes("createSandboxEnvironment")) {
-      issues.push({
-        file,
-        message:
-          "Built-in sandbox providers must not bypass defineSandboxProvider() through createSandboxEnvironment().",
-      });
-    }
-    for (const specifier of forbidden) {
-      if (source.includes(specifier)) {
-        issues.push({
-          file,
-          message: `Built-in sandbox providers may not bypass the provider contract through ${specifier}.`,
-        });
-      }
-    }
-  }
-  return issues;
-}
-
 async function main() {
   const baselineRaw = await readFile(BASELINE_PATH, "utf8");
   const baseline = JSON.parse(baselineRaw);
 
   const state = {
     rule13: { baseline: baseline.rule13_spreadTernaryByFile, current: new Map() },
-    rule15: /** @type {Violation[]} */ ([]),
     rule19: {
       allowlist: new Set(baseline.rule19_asyncLocalStorageAllowlist),
       current: new Set(),
@@ -1420,11 +1832,19 @@ async function main() {
     rule27: /** @type {Violation[]} */ ([]),
     rule28: /** @type {Violation[]} */ ([]),
     rule33: /** @type {Violation[]} */ ([]),
-    rule35: /** @type {Violation[]} */ ([]),
     rule37: /** @type {Violation[]} */ ([]),
-    rule42: /** @type {Violation[]} */ ([]),
     rule43: /** @type {Violation[]} */ ([]),
     rule44: /** @type {Violation[]} */ ([]),
+    rule45: {
+      allowlist: new Set(baseline.rule45_providedToolPrivateImportAllowlist),
+      violations: /** @type {Violation[]} */ ([]),
+    },
+    rule46: /** @type {Violation[]} */ ([]),
+    rule47: /** @type {Violation[]} */ ([]),
+    rule50: /** @type {Violation[]} */ ([]),
+    rule51: /** @type {Violation[]} */ ([]),
+    rule52: /** @type {Violation[]} */ ([]),
+    rule53: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1449,9 +1869,6 @@ async function main() {
       message: `${now} spread-ternary object composition${now === 1 ? "" : "s"} detected (baseline: ${was}). Replace \`...(cond ? {} : { key: value })\` with explicit assignment: declare the object, then \`if (cond) obj.key = value;\` (or use the conditional form for the *value* not the spread).`,
     });
   }
-
-  // Rule 15
-  violations.push(...state.rule15);
 
   // Rule 19
   for (const file of state.rule19.current) {
@@ -1513,30 +1930,34 @@ async function main() {
   // Rule 34
   violations.push(...(await checkRule34PhaseBoundary()));
 
-  // Rule 35
-  violations.push(...state.rule35);
-
-  // Rule 36
-  for (const issue of await checkExtensionCapabilityContracts()) {
-    violations.push({ rule: 36, ...issue });
-  }
-
   // Rule 37
   violations.push(...state.rule37);
 
   // Rule 38
   violations.push(...(await checkRule38NoNestedEveBuild()));
 
-  // Rule 42
-  violations.push(...state.rule42);
-
   // Rule 43
   violations.push(...state.rule43);
-  violations.push(...state.rule44);
 
   // Rule 44
-  for (const issue of await checkRule44SandboxProviders()) {
-    violations.push({ rule: 44, ...issue });
+  violations.push(...state.rule44);
+
+  // Rule 45
+  violations.push(...state.rule45.violations);
+
+  // Rule 46
+  violations.push(...state.rule46);
+
+  // Rule 47
+  violations.push(...state.rule47);
+  violations.push(...(await checkFrameworkActionIdentity()));
+  violations.push(...state.rule50);
+  violations.push(...state.rule51);
+  violations.push(...state.rule52);
+  violations.push(...state.rule53);
+
+  for (const issue of await checkPublicExports()) {
+    violations.push({ rule: 55, ...issue });
   }
 
   if (violations.length === 0) {

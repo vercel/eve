@@ -1,7 +1,10 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { runUntilAborted } from "#evals/abort.js";
 import type { Client } from "#client/client.js";
-import type { MessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
+import type { RuntimeIdentity } from "#protocol/session-events/families/session.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { addTokenUsage } from "#shared/token-usage-math.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import type {
   AssertionResult,
   EveEval,
@@ -12,11 +15,11 @@ import type {
   EveEvalTraceContext,
   EveEvalTurn,
 } from "#evals/types.js";
-import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
+import { createEmptyDerivedFacts, deriveRunFacts } from "#evals/runner/derive-run-facts.js";
 import { EvalSessionManager } from "#evals/session-manager.js";
 import type { EvalSessionStartedEvent } from "#evals/session.js";
 import { createEvalContext } from "#evals/context.js";
-import { scopeEvalTargetHandle } from "#evals/target.js";
+import { scopeEvalTargetHandle, targetTools } from "#evals/target.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
 
@@ -43,7 +46,7 @@ interface ExecuteTaskOptions {
  * set when the `test` body threw (e.g. a failed `expectOk()` or a bespoke
  * `throw`); the partial run is still captured so recorded assertions report.
  */
-export interface ExecuteTaskResult {
+interface ExecuteTaskResult {
   readonly result: EveEvalTaskResult;
   readonly assertions: readonly AssertionResult[];
   readonly error?: string;
@@ -58,7 +61,7 @@ export interface ExecuteTaskResult {
 export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteTaskResult> {
   const { client, evaluation, target, timeoutMs } = options;
   const signal = timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : neverAbortSignal();
-  const collector = new AssertionCollector();
+  const collector = new AssertionCollector(targetTools(target));
   const manager = new EvalSessionManager({
     client,
     collector,
@@ -87,6 +90,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
   let skipReason: string | undefined;
   try {
     await runUntilAborted(evaluation.test(context), signal);
+    await runUntilAborted(manager.verifyStubs(), signal);
   } catch (err) {
     if (err instanceof EvalSkipped) {
       skipReason = err.reason;
@@ -124,10 +128,13 @@ function buildTaskResult(input: {
   readonly turn: EveEvalTurn | undefined;
 }): EveEvalTaskResult {
   const events = input.sessions.flatMap((session) => session.events);
-  const finalMessage = input.turn?.message ?? null;
   return {
-    output: input.turn?.data === undefined ? finalMessage : input.turn.data,
-    finalMessage,
+    data: input.turn?.data,
+    outcome: input.turn?.outcome,
+    error: input.turn?.error,
+    reply: input.turn?.reply,
+    view: input.turn?.view,
+    sessionEnded: input.turn?.sessionEnded ?? false,
     sessionId: selectPrimarySessionId(input.sessions),
     status: input.turn?.status ?? "completed",
     events,
@@ -153,26 +160,118 @@ function collectTraceContexts(
   });
 }
 
-function combineDerivedFacts(sessions: readonly EveEvalSessionResult[]): EveEvalDerivedFacts {
+/**
+ * Each session's facts once. Handles that read the same session, such as a turn watched after
+ * the handle that sent it, saw parts of one stream: a call one requested, another settled. Their
+ * events merge by position before facts are derived.
+ */
+function derivedBySession(
+  sessions: readonly EveEvalSessionResult[],
+): readonly EveEvalSessionResult["derived"][] {
+  const groups: EveEvalSessionResult[][] = [];
+  const byId = new Map<string, EveEvalSessionResult[]>();
+  for (const session of sessions) {
+    const group = session.sessionId === undefined ? undefined : byId.get(session.sessionId);
+    if (group !== undefined) {
+      group.push(session);
+      continue;
+    }
+    const created = [session];
+    groups.push(created);
+    if (session.sessionId !== undefined) byId.set(session.sessionId, created);
+  }
+  return groups.map((group) => {
+    if (group.length === 1) return group[0]!.derived;
+    const byPosition = new Map<string, SessionStreamEvent>();
+    for (const session of group) {
+      for (const event of session.events) {
+        const { index, line } = event.meta.position;
+        byPosition.set(`${line}:${index}`, event);
+      }
+    }
+    const events = [...byPosition.values()].sort(
+      (a, b) =>
+        a.meta.position.line - b.meta.position.line ||
+        a.meta.position.index - b.meta.position.index,
+    );
+    return deriveRunFacts(events, { sessionId: group[0]!.sessionId });
+  });
+}
+
+/** The facts of every session an eval read, each session's handles read as one stream. */
+export function combineDerivedFacts(
+  sessions: readonly EveEvalSessionResult[],
+): EveEvalDerivedFacts {
   if (sessions.length === 0) return createEmptyDerivedFacts();
 
-  const toolCalls = sessions.flatMap((session) => session.derived.toolCalls);
-  const subagentCalls = sessions.flatMap((session) => session.derived.subagentCalls);
-  const inputRequests = sessions.flatMap((session) => session.derived.inputRequests);
+  const derived = derivedBySession(sessions);
+  const toolCalls = derived.flatMap((facts) => facts.toolCalls);
+  const skillLoads = derived.flatMap((facts) => facts.skillLoads);
+  const subagentCalls = derived.flatMap((facts) => facts.subagentCalls);
+  const interactions = derived.flatMap((facts) => facts.interactions);
   const failureCode = sessions.find((session) => session.derived.failureCode !== undefined)?.derived
     .failureCode;
 
   return {
     toolCalls,
     toolCallCount: toolCalls.length,
+    skillLoads,
     subagentCalls,
     subagentCallCount: subagentCalls.length,
-    inputRequests,
-    parked: sessions.some((session) => session.derived.parked),
+    interactions,
+    // A session read in several handles is parked only if its merged stream still is.
+    parked: derived.some((facts) => facts.parked),
     messageCount: sum(sessions, (session) => session.derived.messageCount),
     reasoningBlockCount: sum(sessions, (session) => session.derived.reasoningBlockCount),
+    models: [...new Set(sessions.flatMap((session) => session.derived.models))],
+    usage: evalUsage(sessions),
     failureCode,
   };
+}
+
+/**
+ * The eval's usage: each captured session's latest usage, counted once however often the eval
+ * captured it, less the sessions another captured session opened, whose spend that session already
+ * counts. No usage when a counted session reported none, and no cost when a counted session reported
+ * none, so a partial sum never reads as the eval's cost.
+ *
+ * "Latest" is by time across captures, not capture order: an eval can capture a session again with
+ * an earlier snapshot (fewer events) after a fuller capture.
+ */
+function evalUsage(sessions: readonly EveEvalSessionResult[]): TokenUsage | undefined {
+  const opened = new Set(
+    sessions.flatMap((session) =>
+      session.events.flatMap((event) =>
+        event.type === "child.opened" ? [event.data.sessionId] : [],
+      ),
+    ),
+  );
+  const latestById = new Map<string | undefined, { at: number; usage: TokenUsage | undefined }>();
+  for (const session of sessions) {
+    // A capture that recorded no usage never replaces one that did; on equal times the later
+    // capture wins.
+    const at = lastUsageRecordedAt(session.events) ?? -Infinity;
+    const prior = latestById.get(session.sessionId);
+    if (prior === undefined || at >= prior.at)
+      latestById.set(session.sessionId, { at, usage: session.derived.usage });
+  }
+  const counted = [...latestById].flatMap(([id, latest]) =>
+    id !== undefined && opened.has(id) ? [] : [latest.usage],
+  );
+  if (counted.length === 0) return undefined;
+  if (!counted.every((usage): usage is TokenUsage => usage !== undefined)) return undefined;
+  const total = counted.reduce(addTokenUsage);
+  if (counted.every((usage) => usage.costUsd !== undefined)) return total;
+  const { costUsd: _partial, ...withoutCost } = total;
+  return withoutCost;
+}
+
+function lastUsageRecordedAt(events: readonly SessionStreamEvent[]): number | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event?.type === "usage.recorded") return Date.parse(event.meta.at);
+  }
+  return undefined;
 }
 
 function selectPrimarySessionId(sessions: readonly EveEvalSessionResult[]): string | undefined {
@@ -184,7 +283,7 @@ function selectPrimarySessionId(sessions: readonly EveEvalSessionResult[]): stri
  * in the stream, if present.
  */
 function extractRuntimeIdentity(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
 ): RuntimeIdentity | undefined {
   for (const event of events) {
     if (event.type === "session.started" && event.data.runtime !== undefined) {

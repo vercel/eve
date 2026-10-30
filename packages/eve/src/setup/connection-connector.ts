@@ -1,5 +1,5 @@
 import { createPromptCommandOutput, type ChannelSetupLog, withPhase } from "#setup/cli/index.js";
-import type { ProcessOutputHandler } from "#setup/primitives/process-output.js";
+import { vercelErrorDetail, type ProcessOutputHandler } from "#setup/primitives/process-output.js";
 import type { Prompter } from "#setup/prompter.js";
 import { readProjectLink, type VercelProjectReference } from "#setup/project-resolution.js";
 import { captureVercel, runVercel, runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
@@ -22,7 +22,7 @@ export interface SetupConnectionConnectorOptions {
 }
 
 /** Connector identity returned by the Vercel CLI. */
-export interface ConnectConnectorRef {
+interface ConnectConnectorRef {
   uid: string;
   id: string;
   name?: string;
@@ -51,11 +51,7 @@ function parseJson(source: string): unknown {
 }
 
 function connectorCreationFailure(service: string, stderr: string | undefined): string {
-  const detail = stderr
-    ?.split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !line.startsWith("Vercel CLI "))
-    .at(-1);
+  const detail = vercelErrorDetail(stderr);
   return detail === undefined
     ? `Could not create the ${service} connector.`
     : `Could not create the ${service} connector. Vercel returned: ${detail}`;
@@ -320,7 +316,6 @@ async function resolveFallbackConnector(
           ],
           { cwd: options.projectRoot, onOutput: createOutput, signal: options.signal },
         ),
-      { kind: "external-action", emphasis: "browser" },
     );
     const raw = parseConnectorRef(parseJson(created.stdout));
     const ownedId = raw?.id ?? CREATED_CONNECTOR.exec(transcript.join("\n"))?.[1];

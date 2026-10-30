@@ -30,7 +30,6 @@ describe("runInteractiveDevelopmentUi", () => {
 
     await runInteractiveDevelopmentUi({
       applicationRoot: memberRoot,
-      existingLocalServer: false,
       options: {},
       runDevelopmentTui,
       server: { appRoot: "/workspace", serverUrl: "http://localhost:2000" },

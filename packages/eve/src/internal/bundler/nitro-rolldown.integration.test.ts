@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildSingleRolldownChunk,
@@ -34,6 +34,32 @@ describe("buildSingleRolldownChunk", () => {
         resolve: { conditionNames: ["eve-source", "import"] },
       }),
     ).rejects.toThrow('standard condition "import"');
+  });
+
+  it("keeps bundle bytes stable across compiler workspace paths", async () => {
+    const bundle = async (workspace: string) => {
+      const entry = `virtual:${workspace}/module-map.mjs`;
+      return await buildSingleRolldownChunk("compiler workspace fixture", {
+        input: entry,
+        plugins: [
+          {
+            name: "compiler-workspace-fixture",
+            resolveId(id: string) {
+              return id === entry ? id : undefined;
+            },
+            load(id: string) {
+              return id === entry ? "export const answer = 42;" : undefined;
+            },
+          },
+        ],
+        output: { comments: false, format: "esm" },
+      });
+    };
+
+    const first = await bundle("first");
+    const second = await bundle("second");
+
+    expect(second.code).toBe(first.code);
   });
 
   it("preserves require conditions inside bundled CommonJS dependencies", async () => {
@@ -89,6 +115,49 @@ describe("buildSingleRolldownChunk", () => {
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
+  });
+
+  it("keeps authored and unresolved-import warnings while silencing other dependency warnings", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "eve-rolldown-dependency-warning-"));
+    const dependencyRoot = join(dir, "node_modules", "evaluator");
+    const entryPath = join(dir, "entry.mjs");
+    const warnings: string[] = [];
+    // Rolldown's default log handler prints warnings with console.warn.
+    const warn = vi.spyOn(console, "warn").mockImplementation((message: unknown) => {
+      warnings.push(String(message));
+    });
+
+    try {
+      mkdirSync(dependencyRoot, { recursive: true });
+      writeFileSync(
+        join(dependencyRoot, "package.json"),
+        `${JSON.stringify({ main: "./index.js", name: "evaluator", version: "1.0.0" })}\n`,
+      );
+      writeFileSync(
+        join(dependencyRoot, "index.js"),
+        'import "eve-missing-package";\nexport const fromDependency = eval("1");\n',
+      );
+      writeFileSync(
+        entryPath,
+        'import { fromDependency } from "evaluator";\nexport const values = [fromDependency, eval("2")];\n',
+      );
+
+      await buildSingleRolldownChunk("dependency warning fixture", {
+        cwd: dir,
+        input: entryPath,
+        platform: "node",
+        output: { format: "esm" },
+      });
+    } finally {
+      warn.mockRestore();
+      rmSync(dir, { force: true, recursive: true });
+    }
+
+    expect(warnings).toHaveLength(2);
+    expect(warnings.find((message) => message.includes("[EVAL]"))).toContain("entry.mjs");
+    expect(warnings.find((message) => message.includes("[UNRESOLVED_IMPORT]"))).toContain(
+      "eve-missing-package",
+    );
   });
 
   it("inlines dynamic imports into one chunk instead of splitting", async () => {

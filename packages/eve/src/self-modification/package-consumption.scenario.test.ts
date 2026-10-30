@@ -5,9 +5,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { afterEach, describe, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { renderSelfModificationConfig } from "./setup.js";
+import { DEPLOYED_SELF_MODIFICATION_CONFIG_PATH, renderSelfModificationConfig } from "./setup.js";
 
 const runFile = promisify(execFile);
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -77,13 +77,50 @@ describe("packed package consumption", () => {
 
   it("builds a fresh app using only installed tarball contents", async () => {
     await access(join(packageRoot, "dist/src/index.js"));
-    await access(join(packageRoot, "dist/src/self-modification/agent.js"));
     await access(join(packageRoot, "dist/src/self-modification/config.js"));
     await access(join(packageRoot, "dist/src/self-modification/sandbox.js"));
     await access(join(packageRoot, "dist/src/self-modification/setup.js"));
-    await access(
-      join(packageRoot, "dist/src/self-modification/extension/subagents/agent/tools/edit_file.js"),
-    );
+    await access(join(packageRoot, "dist/src/self-modification/remote/extension.js"));
+    await Promise.all([
+      access(
+        join(
+          packageRoot,
+          "dist/src/self-modification/extension/subagents/agent/skills/trace_analysis.js",
+        ),
+      ),
+      access(
+        join(
+          packageRoot,
+          "dist/src/self-modification/extension/subagents/agent/tools/edit_file.js",
+        ),
+      ),
+      access(
+        join(
+          packageRoot,
+          "dist/src/self-modification/extension/subagents/agent/tools/inspect_trace.js",
+        ),
+      ),
+      access(
+        join(
+          packageRoot,
+          "dist/src/self-modification/extension/subagents/agent/tools/inspect_trace_spans.js",
+        ),
+      ),
+      access(
+        join(
+          packageRoot,
+          "dist/src/self-modification/extension/subagents/agent/tools/search_traces.js",
+        ),
+      ),
+    ]);
+    await Promise.all([
+      expect(
+        access(join(packageRoot, "dist/src/self-modification/extension/skills/trace_analysis.js")),
+      ).rejects.toMatchObject({ code: "ENOENT" }),
+      expect(
+        access(join(packageRoot, "dist/src/self-modification/extension/tools/inspect_trace.js")),
+      ).rejects.toMatchObject({ code: "ENOENT" }),
+    ]);
 
     const root = await mkdtemp(join(tmpdir(), "eve-self-modification-package-"));
     temporaryRoots.push(root);
@@ -106,7 +143,6 @@ describe("packed package consumption", () => {
             "@vercel/connect": "2.2.0",
             eve: `file:${eveTarball}`,
             "just-bash": "3.1.0",
-            microsandbox: "0.5.5",
           },
         },
         null,
@@ -126,14 +162,13 @@ describe("packed package consumption", () => {
     await writeAppFile(appRoot, "agent/instructions.md", "You are a test agent.\n");
     await writeAppFile(
       appRoot,
-      "agent/extensions/self-modification/extension.ts",
+      DEPLOYED_SELF_MODIFICATION_CONFIG_PATH,
       renderSelfModificationConfig({
         branch: "main",
         channelNames: [],
         connector: "github/selfmod-acme-agent",
         directory: ".",
         repository: "github.com/acme/agent",
-        vercelBackend: true,
       }),
     );
 
@@ -142,7 +177,11 @@ describe("packed package consumption", () => {
       ["install", "--ignore-scripts", "--no-frozen-lockfile", "--prefer-offline"],
       appRoot,
     );
-    await access(join(appRoot, "node_modules/eve/dist/src/self-modification/agent.js"));
+    await run(
+      "node",
+      ["--input-type=module", "-e", 'await import("eve/extensions/code/sandbox")'],
+      appRoot,
+    );
     await writeAppFile(
       appRoot,
       "verify-development-extension.mjs",
@@ -159,7 +198,23 @@ if (compiled.subagents.length !== 1 || subagent === undefined || !subagent.agent
 `,
     );
     await run("node", ["verify-development-extension.mjs"], appRoot);
-    const build = await run("pnpm", ["build"], appRoot);
+    await writeAppFile(
+      appRoot,
+      "verify-remote-extension.mjs",
+      `import assert from "node:assert/strict";
+import { discoverAgent } from "./node_modules/eve/dist/src/discover/discover-agent.js";
+import { compileAgentManifest } from "./node_modules/eve/dist/src/compiler/normalize-manifest.js";
+
+const discovered = await discoverAgent({ appRoot: process.cwd(), agentRoot: process.cwd() + "/agent" });
+assert.deepEqual(discovered.diagnostics.filter((entry) => entry.severity === "error"), []);
+const compiled = await compileAgentManifest(discovered.manifest);
+assert.deepEqual(compiled.subagents.map((entry) => entry.name), ["self-modification-remote__agent"]);
+const slugs = compiled.subagents[0].agent.dynamicTools.map((tool) => tool.slug);
+assert.ok(slugs.includes("publish") && slugs.includes("registry_add"));
+`,
+    );
+    await run("node", ["verify-remote-extension.mjs"], appRoot);
+    const build = await run("pnpm", ["exec", "eve", "build", "--skip-sandbox-prewarm"], appRoot);
     const output = `${build.stdout}\n${build.stderr}`;
     if (output.includes("Could not resolve '#shared/")) {
       throw new Error(

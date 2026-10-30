@@ -10,7 +10,7 @@ export type ReasoningLevel = Exclude<AgentReasoningDefinition, "provider-default
  * `/model` menu paints so unsupported controls never present as available.
  */
 export interface GatewayModelCapabilities {
-  /** Whether the model advertises adjustable reasoning (the `reasoning` catalog tag). */
+  /** Whether the model advertises adjustable reasoning. */
   readonly reasoning: boolean;
   /** Effort levels worth offering for the model; empty when reasoning is unsupported. */
   readonly reasoningLevels: readonly ReasoningLevel[];
@@ -18,7 +18,7 @@ export interface GatewayModelCapabilities {
   readonly fastMode: boolean;
 }
 
-/** Every effort level eve can author, offered when capabilities are unknown. */
+/** Every effort level eve can author. */
 export const ALL_REASONING_LEVELS: readonly ReasoningLevel[] = [
   "none",
   "minimal",
@@ -28,17 +28,11 @@ export const ALL_REASONING_LEVELS: readonly ReasoningLevel[] = [
   "xhigh",
 ];
 
-// The catalog carries no per-model level list, so levels are a best-effort
-// read of what each provider's API accepts today; unknown reasoning-capable
-// providers get the common core every provider maps.
-const REASONING_LEVELS_BY_PROVIDER: Record<string, readonly ReasoningLevel[]> = {
-  anthropic: ALL_REASONING_LEVELS,
-  openai: ALL_REASONING_LEVELS,
-  google: ["none", "low", "medium", "high"],
-  xai: ["low", "high"],
-};
-
-const DEFAULT_REASONING_LEVELS: readonly ReasoningLevel[] = ["none", "low", "medium", "high"];
+function reasoningLevels(model: GatewayCatalogModel): readonly ReasoningLevel[] {
+  return model.reasoningEfforts.filter((value): value is ReasoningLevel =>
+    ALL_REASONING_LEVELS.includes(value as ReasoningLevel),
+  );
+}
 
 /**
  * Capabilities for `modelId` from a fetched catalog, or undefined when the
@@ -53,14 +47,12 @@ export function gatewayModelCapabilities(
   const model = catalog.find((entry) => entry.id === modelId);
   if (model === undefined) return undefined;
 
-  const reasoning = (model.tags ?? []).includes("reasoning");
-  const provider = modelId.split("/")[0] ?? "";
+  const levels = reasoningLevels(model);
+  const reasoning = (model.tags ?? []).includes("reasoning") || levels.length > 0;
   const tiers = model.pricing?.service_tiers;
   return {
     reasoning,
-    reasoningLevels: reasoning
-      ? (REASONING_LEVELS_BY_PROVIDER[provider] ?? DEFAULT_REASONING_LEVELS)
-      : [],
+    reasoningLevels: levels,
     fastMode: tiers !== undefined && Object.hasOwn(tiers, "priority"),
   };
 }

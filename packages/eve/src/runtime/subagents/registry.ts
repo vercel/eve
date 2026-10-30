@@ -1,14 +1,14 @@
 import { RuntimeRegistry, RuntimeRegistryError } from "#internal/runtime-registry.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type {
   ResolvedDynamicSubagentDefinition,
   ResolvedRuntimeDelegationNode,
 } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
-import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
+import { serializeInputSchema } from "#tools/schema.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
-import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#tools/framework/task-contract.js";
-import { subagentToolExecuteWorkflowReference } from "#runtime/subagents/workflow-reference.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 
 /**
  * One runtime-owned subagent tracked by the prepared registry.
@@ -22,7 +22,7 @@ export interface ResolvedDynamicSubagentResolver extends ResolvedDynamicSubagent
   readonly kind: "subagent";
   readonly name: string;
   readonly nodeId: string;
-  readonly tool?: boolean;
+  readonly tool?: AgentToolExposure;
 }
 
 /**
@@ -42,7 +42,6 @@ export interface RuntimeSubagentRegistry {
  * accept one free-form `message` string from the parent agent.
  */
 const SUBAGENT_TOOL_INPUT_JSON_SCHEMA = serializeInputSchema(SUBAGENT_TOOL_INPUT_SCHEMA);
-const SUBAGENT_TOOL_OUTPUT_JSON_SCHEMA = serializeOutputSchema(SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA);
 
 /**
  * Builds the runtime-owned registry for the resolved subagents owned by one
@@ -88,10 +87,18 @@ export function createRuntimeSubagentRegistry(input: {
       };
       registry.register(subagentDefinition.name, registeredSubagent, {
         location,
-        duplicateMessage: `Found multiple subagents named "${subagentDefinition.name}". Subagent names must be unique at runtime.`,
+        duplicateMessage: duplicateSubagentMessage(subagentDefinition.name),
       });
       const modelVisible =
         subagentDefinition.tool !== false && !disabledToolNames.has(subagentDefinition.name);
+      const reservation = eveNamespaceReservation(subagentDefinition.name);
+      if (reservation !== undefined) {
+        throw new RuntimeRegistryError(
+          "subagent",
+          `Subagent "${subagentDefinition.logicalPath}" uses the reserved name "${subagentDefinition.name}". Rename its path; ${reservation}.`,
+          { ...location, entryName: subagentDefinition.name },
+        );
+      }
       if (modelVisible && reservedToolNames.has(subagentDefinition.name)) {
         throw new RuntimeRegistryError(
           "subagent",
@@ -118,6 +125,7 @@ export function createRuntimeSubagentRegistry(input: {
     }
     subagentsByNodeId.set(subagentDefinition.nodeId, registeredSubagent);
   }
+  assertUniqueDynamicSubagentNames(dynamicResolvers, registry.asMap());
 
   return {
     dynamicNodeIds,
@@ -154,18 +162,35 @@ export function createPreparedRuntimeSubagentTool(
               },
       },
     },
-    description: `${definition.description}\n\nThis call starts a background task and returns a task receipt immediately.`,
-    execution: "background",
+    deferred: definition.tool === "deferred" || undefined,
+    description: definition.description,
     inputSchema,
     kind: definition.kind,
     logicalPath: definition.logicalPath,
     name: definition.name,
     nodeId: definition.nodeId,
-    outputSchema: SUBAGENT_TOOL_OUTPUT_JSON_SCHEMA,
     sourceId: definition.sourceId,
-    task: {
-      nodeId: definition.nodeId,
-      workflowId: subagentToolExecuteWorkflowReference.workflowId,
-    },
   };
+}
+
+function duplicateSubagentMessage(name: string): string {
+  return `Found multiple subagents named "${name}". Subagent names must be unique at runtime.`;
+}
+
+/** Dynamic subagents resolve later, so their names are checked here, against every subagent. */
+function assertUniqueDynamicSubagentNames(
+  dynamicResolvers: readonly ResolvedDynamicSubagentResolver[],
+  subagentsByName: ReadonlyMap<string, unknown>,
+): void {
+  const names = new Set(subagentsByName.keys());
+  for (const { logicalPath, name, sourceId } of dynamicResolvers) {
+    if (names.has(name)) {
+      throw new RuntimeRegistryError("subagent", duplicateSubagentMessage(name), {
+        entryName: name,
+        logicalPath,
+        sourceId,
+      });
+    }
+    names.add(name);
+  }
 }

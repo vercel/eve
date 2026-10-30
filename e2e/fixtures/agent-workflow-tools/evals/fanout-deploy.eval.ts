@@ -12,6 +12,6 @@ export default defineEval({
     turn.calledTool("fanout_deploy", { output: /"replica":0/u });
     turn.calledTool("fanout_deploy", { output: /"replica":1/u });
     turn.messageIncludes("WORKFLOW-FANOUT-RESULT");
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

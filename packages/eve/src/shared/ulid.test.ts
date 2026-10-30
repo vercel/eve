@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createUlid, createUlidFactory, isUlid, ULID_LENGTH } from "#shared/ulid.js";
+import { createUlid, createUlidFactory, ULID_LENGTH } from "#shared/ulid.js";
 
 const CROCKFORD = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 const TIME_MAX = 2 ** 48 - 1;
@@ -139,21 +139,5 @@ describe("createUlidFactory", () => {
     const fresh = createUlidFactory();
 
     expect(fresh() < settled()).toBe(true);
-  });
-});
-
-describe("isUlid", () => {
-  it("accepts values this module mints", () => {
-    expect(isUlid(createUlid())).toBe(true);
-  });
-
-  it("rejects a wrong length or a non-Crockford character", () => {
-    const ulid = createUlid();
-
-    expect(isUlid(ulid.slice(1))).toBe(false);
-    expect(isUlid(`${ulid}0`)).toBe(false);
-    expect(isUlid(`8${"0".repeat(25)}`)).toBe(false);
-    // U is excluded from the Crockford alphabet.
-    expect(isUlid(`U${ulid.slice(1)}`)).toBe(false);
   });
 });

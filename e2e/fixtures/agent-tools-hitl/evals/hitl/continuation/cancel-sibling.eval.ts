@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import {
+  expectApprovalCancelled,
   scriptedSession,
-  approveSavedChange,
   expectChangeStillUnexecuted,
   expectResponseReply,
   expectToolResult,
@@ -22,15 +22,15 @@ export default defineEval({
     const current = requestFrom(second, "change-b");
 
     // When the user cancels B only.
-    const live = await session.startRespond([{ requestId: current.requestId, optionId: "cancel" }]);
+    const live = await session.startRespond([
+      { interactionId: current.interactionId, optionId: "deny" },
+    ]);
 
-    // Then B does not execute and the read gets a completed reply; A stays unexecuted and answerable.
+    // Then B does not execute and the read gets a completed reply; the message cancelled A, which never runs.
     await expectToolResult(t, live, "read-draft");
-    const reply = await expectResponseReply(t, live, "Draft status: ready.", current.requestId);
-    reply.notEvent("action.result", {
-      data: { status: "completed", result: { toolName: "change-b" } },
-    });
+    const reply = await expectResponseReply(t, live, "Draft status: ready.", current.interactionId);
+    reply.calledTool("change-b", { status: "completed", count: 0 });
     expectChangeStillUnexecuted(session);
-    await approveSavedChange(t, session, approvalA);
+    expectApprovalCancelled(session, approvalA);
   },
 });

@@ -1,8 +1,8 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineAgent, type DefinedAgent } from "eve";
 import { mockModel } from "eve/evals";
 
-export default defineAgent({
+const agent: DefinedAgent = defineAgent({
   ...e2eAgentConfig(),
   description: "Handle general tasks that do not belong to a specialist.",
   model: mockModel({
@@ -21,19 +21,22 @@ export default defineAgent({
         }
         return "AGENT-ROUTER-ROOT-COPY-OK";
       }
-      const result = request.toolResults.find((entry) => entry.name === "agent");
-      return result === undefined
-        ? {
-            toolCalls: [
-              {
-                name: "agent",
-                input: { message: "Return the root-copy marker." },
-              },
-            ],
-          }
-        : JSON.stringify(result.output);
+      // agentRouter() runs each call as a task: a receipt now, the result in a
+      // later <task_result> message once eve__task_wait returns.
+      const taskResult = request.messages.find(
+        (message) => message.role === "user" && message.text.startsWith("<task_result"),
+      );
+      if (taskResult !== undefined) return taskResult.text;
+      if (request.toolResults.some((entry) => entry.name === "agent")) {
+        return { toolCalls: [{ name: "eve__task_wait", input: {} }] };
+      }
+      return {
+        toolCalls: [{ name: "agent", input: { message: "Return the root-copy marker." } }],
+      };
     },
   }),
   modelContextWindowTokens: 1_000_000,
   tool: false,
 });
+
+export default agent;

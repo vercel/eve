@@ -35,17 +35,25 @@ describe("applyModelSelectionToSource", () => {
     expect(result.nextSource).toContain('model: "anthropic/claude-sonnet-5"');
   });
 
-  it("switches the documented no-argument chatgpt() call back to Gateway", async () => {
-    const source = `import { defineAgent } from "eve";\nimport { chatgpt } from "eve/models/openai";\n\nexport default defineAgent({ model: chatgpt() });\n`;
+  it.each([
+    ["chatgpt", "chatgpt/gpt-6-luna-fast"],
+    ["openai", "openai-api/gpt-6-luna-fast"],
+  ])(
+    "resolves the no-argument %s() default when switching back to Gateway",
+    async (helper, selection) => {
+      const source = `import { defineAgent } from "eve";\nimport { ${helper} } from "eve/models/openai";\n\nexport default defineAgent({ model: ${helper}(), reasoning: "low" });\n`;
 
-    const result = await applyModelSelectionToSource(source, "openai/gpt-5.5");
+      expect(await readModelSelectionFromSource(source)).toBe(selection);
+      const result = await applyModelSelectionToSource(source, "openai/gpt-5.5");
 
-    expect(result.kind).toBe("applied");
-    if (result.kind !== "applied") return;
-    expect(result.from).toBe("chatgpt/gpt-5.6-luna-fast");
-    expect(result.nextSource).not.toContain("eve/models/openai");
-    expect(result.nextSource).toContain('model: "openai/gpt-5.5"');
-  });
+      expect(result.kind).toBe("applied");
+      if (result.kind !== "applied") return;
+      expect(result.from).toBe(selection);
+      expect(result.nextSource).not.toContain("eve/models/openai");
+      expect(result.nextSource).toContain('model: "openai/gpt-5.5"');
+      expect(result.nextSource).toContain('reasoning: "low"');
+    },
+  );
 
   it("normalizes an openai-prefixed chatgpt() argument when changing models", async () => {
     const source = `import { chatgpt } from "eve/models/openai";\nexport default defineAgent({ model: chatgpt("openai/gpt-5.5") });\n`;
@@ -121,7 +129,7 @@ describe("applyModelSelectionToSource", () => {
   it.each([
     `export default defineAgent({ model: process.env.MODEL ?? "a/b" });\n`,
     "export default defineAgent({ model: `a/${x}` });\n",
-    `export default defineAgent({ model: defineDynamic({ events: {} }) });\n`,
+    `export default defineAgent({ model: defineDynamic(() => "a/b") });\n`,
     `export default defineAgent({ instructions: "hello" });\n`,
     `export const x = 1;\n`,
   ])("bails rather than rewriting a non-static model", async (source) => {
@@ -135,8 +143,8 @@ it.each([
   ["openai-api/gpt-5.6-luna-fast", "openai", "eve/models/openai"],
   ["anthropic-api/claude-sonnet-5", "anthropic", "eve/models/anthropic"],
 ])("switches a Gateway string to %s and back safely", async (selection, helper, module) => {
-  const source =
-    'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.6-luna-fast" });';
+  const source = `import { defineAgent } from "eve";
+export default defineAgent({ model: "openai/gpt-5.6-luna-fast" });`;
   const result = await applyModelSelectionToSource(source, selection);
   expect(result.kind).toBe("applied");
   if (result.kind !== "applied") return;
@@ -148,15 +156,17 @@ it.each([
 
 it("refuses to shadow a custom provider import", async () => {
   const result = await applyModelSelectionToSource(
-    'import { openai } from "@ai-sdk/openai";\nexport default defineAgent({ model: "anthropic/claude-sonnet-5" });',
+    `import { openai } from "@ai-sdk/openai";
+export default defineAgent({ model: "anthropic/claude-sonnet-5" });`,
     "openai-api/gpt-5.6-luna-fast",
   );
   expect(result.kind).toBe("bail");
 });
 
 it("does not recognize a commented import as an eve helper", async () => {
-  const source =
-    '// import { openai } from "eve/models/openai";\nconst openai = customProvider;\nexport default defineAgent({ model: openai("example") });';
+  const source = `// import { openai } from "eve/models/openai";
+const openai = customProvider;
+export default defineAgent({ model: openai("example") });`;
   expect((await applyModelSelectionToSource(source, "anthropic/claude-sonnet-5")).kind).toBe(
     "bail",
   );

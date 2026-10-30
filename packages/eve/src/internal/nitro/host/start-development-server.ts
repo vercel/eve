@@ -2,13 +2,12 @@ import { handleDevelopmentModelCredentialRequest } from "#internal/model-auth/de
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
 import { defaultDevelopmentExtensions } from "#compiler/development-extensions.js";
 
-import type { Nitro } from "nitro/types";
-
-import { createDevelopmentApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
+import {
+  createDevelopmentBuilds,
+  type DevelopmentBuilds,
+} from "#internal/nitro/host/dev-build-host.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
 import type { AuthoredSourceWatcherHandle } from "#internal/nitro/host/dev-authored-source-watcher.js";
-import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
-import { buildDevelopmentHostCandidate } from "#internal/nitro/host/dev-host-candidate.js";
 import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
 import { createDevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import {
@@ -68,34 +67,6 @@ const DEVELOPMENT_SERVER_READINESS_TIMEOUT_MS = 1_000;
 const PORT_ENV = "PORT";
 
 export { normalizeDevelopmentServerClientUrl };
-
-/**
- * Returns whether a supplied URL identifies this app's healthy local development
- * server. Only that server receives the local TUI credential path.
- */
-export async function isActiveDevelopmentServerForApp(input: {
-  readonly appRoot: string;
-  readonly serverUrl: string;
-}): Promise<boolean> {
-  try {
-    const project = await resolveDiscoveryProject(input.appRoot);
-    const recordedServerUrl = await new DevelopmentServerState(project).read();
-    if (
-      recordedServerUrl === undefined ||
-      !isLoopbackServerUrl(recordedServerUrl) ||
-      !(await isDevelopmentServerReady(recordedServerUrl))
-    ) {
-      return false;
-    }
-
-    return (
-      new URL(recordedServerUrl).origin ===
-      new URL(normalizeDevelopmentServerClientUrl(input.serverUrl)).origin
-    );
-  } catch {
-    return false;
-  }
-}
 
 async function isDevelopmentServerReady(serverUrl: string): Promise<boolean> {
   return (
@@ -162,7 +133,14 @@ async function formatDevelopmentServerConnectCommand(
   serverUrl: string,
 ): Promise<string> {
   const packageManager = await detectDevelopmentCommandPackageManager(appRoot);
-  return [packageManager, ...eveDevArguments(packageManager), serverUrl].join(" ");
+  return [
+    packageManager,
+    ...eveDevArguments(packageManager).slice(0, -1),
+    "remote",
+    "connect",
+    "--url",
+    serverUrl,
+  ].join(" ");
 }
 
 async function createDevelopmentServerAlreadyRunningError(
@@ -262,9 +240,9 @@ function addDevelopmentControlHandler(input: {
 async function closeDevelopmentServerResources(input: {
   readonly appRoot: string;
   readonly authoredSourceWatcher: AuthoredSourceWatcherHandle | undefined;
+  readonly builds: DevelopmentBuilds;
   readonly devServer: NitroDevelopmentServer | undefined;
   readonly developmentSandboxRunId: string;
-  readonly nitro: Nitro | undefined;
   readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
 }): Promise<{ readonly errors: readonly unknown[]; readonly listenerClosed: boolean }> {
   const errors: unknown[] = [];
@@ -278,6 +256,9 @@ async function closeDevelopmentServerResources(input: {
     }
   };
 
+  // Before the watcher, which waits for an in-flight rebuild: that rebuild's
+  // build process exits, so the rebuild fails instead of finishing first.
+  input.builds.close();
   const authoredSourceWatcher = input.authoredSourceWatcher;
   if (authoredSourceWatcher !== undefined) {
     await attempt(() => authoredSourceWatcher.close());
@@ -288,13 +269,8 @@ async function closeDevelopmentServerResources(input: {
   }
   const devServer = input.devServer;
   const listenerClosed = devServer === undefined ? true : await attempt(() => devServer.close());
-  const nitro = input.nitro;
-  if (nitro !== undefined) {
-    await attempt(() => nitro.close());
-  }
   await attempt(() =>
     stopDevelopmentSandboxResources({
-      appRoot: input.appRoot,
       devRunId: input.developmentSandboxRunId,
       log: (message) => console.warn(`[eve:dev] ${message}`),
     }),
@@ -396,6 +372,7 @@ async function startNitroDevelopmentServer(
   const environmentPort = readEnvironmentPort();
   const requestedPort = options.port ?? environmentPort;
   const hasExplicitServerConfiguration =
+    options.resume === true ||
     options.developmentExtensions !== undefined ||
     options.host !== undefined ||
     options.port !== undefined ||
@@ -420,7 +397,8 @@ async function startNitroDevelopmentServer(
   const previousDevelopmentSandboxRunId = process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV];
   const developmentSandboxRunId = createDevelopmentSandboxRunId();
   process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV] = developmentSandboxRunId;
-  let nitro: Nitro | undefined;
+  const builds = createDevelopmentBuilds();
+  const build = builds.begin();
   let devServer: NitroDevelopmentServer | undefined;
   let restoreLocalDevCapabilityEnvironment: (() => void) | undefined;
   let restoreWorkflowLocalQueueEnvironment: (() => void) | undefined;
@@ -434,18 +412,12 @@ async function startNitroDevelopmentServer(
   try {
     const preparedHost = await devBootPhase(
       "compiling agent",
-      () => prepareDevelopmentApplicationHost(project.appRoot, { developmentExtensions }),
+      () => build.prepare({ appRoot: project.appRoot, developmentExtensions }),
       options.onBootProgress,
     );
     preparedDevelopmentHost = preparedHost;
     pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
-    const activeNitro = await devBootPhase(
-      "creating dev server",
-      () => createDevelopmentApplicationNitro(preparedHost),
-      options.onBootProgress,
-    );
-    nitro = activeNitro;
-    devServer = new DrainedNitroDevServer(activeNitro.logger);
+    devServer = new DrainedNitroDevServer();
     const activeDevServer = devServer;
     const workflowTransportSecret = randomBytes(32).toString("base64url");
     activeDevServer.setClientAddressSecret(workflowTransportSecret);
@@ -456,8 +428,14 @@ async function startNitroDevelopmentServer(
     workflowWorld = createDevelopmentWorkflowWorld({
       appRoot: project.appRoot,
       preparedHost,
+      resume: options.resume,
       transportSecret: workflowTransportSecret,
     });
+    const localWorkflowWorld = workflowWorld;
+    const onRuntimePruned =
+      localWorkflowWorld === undefined
+        ? undefined
+        : () => localWorkflowWorld.reconcileExpiredRuns();
     // Parent-owned control routes must answer before the World starts: queue
     // redelivery begins at start(), and a delivery's World calls would
     // otherwise fall through to the worker and 404.
@@ -468,8 +446,7 @@ async function startNitroDevelopmentServer(
       workflowWorld,
       transportSecret: workflowTransportSecret,
     });
-    const hostname =
-      options.host ?? activeNitro.options.devServer.hostname ?? DEFAULT_DEVELOPMENT_SERVER_HOST;
+    const hostname = options.host ?? DEFAULT_DEVELOPMENT_SERVER_HOST;
     const retryOnAddressInUse = requestedPort === undefined;
     const server = await devBootPhase(
       "binding port",
@@ -498,11 +475,8 @@ async function startNitroDevelopmentServer(
     await devBootPhase(
       "building dev bundle",
       async () => {
-        const payload = await buildDevelopmentHostCandidate({
-          host: preparedHost,
-          nitro: activeNitro,
-        });
-        nitro = undefined;
+        const payload = await build.buildHost(preparedHost);
+        build.close();
         const workspace = preparedHost.workspace;
         initialWorkspaceTransferred = true;
         await activeDevServer.replaceWorker({
@@ -513,17 +487,21 @@ async function startNitroDevelopmentServer(
         await activateDevelopmentGeneration({
           appRoot: preparedHost.appRoot,
           generation: preparedHost.generation,
+          onRuntimePruned,
         });
         initialGenerationPublished = true;
       },
       options.onBootProgress,
     );
+    activeDevServer.prepareSpareWorker();
     await workflowWorld?.start();
 
     const rebuildCoordinator = await createDevelopmentAuthoredRebuildCoordinator({
+      builds,
       developmentExtensions,
       devServer: activeDevServer,
       initialHost: preparedHost,
+      onRuntimePruned,
     });
 
     authoredSourceWatcher = await devBootPhase(
@@ -555,9 +533,9 @@ async function startNitroDevelopmentServer(
         const cleanup = await closeDevelopmentServerResources({
           appRoot: project.appRoot,
           authoredSourceWatcher: authoredSourceWatcherOnClose,
+          builds,
           devServer: devServerOnClose,
           developmentSandboxRunId,
-          nitro: undefined,
           workflowWorld: workflowWorldOnClose,
         });
         if (cleanup.listenerClosed) {
@@ -586,11 +564,12 @@ async function startNitroDevelopmentServer(
     const cleanup = await closeDevelopmentServerResources({
       appRoot: project.appRoot,
       authoredSourceWatcher,
+      builds,
       devServer,
       developmentSandboxRunId,
-      nitro,
       workflowWorld,
     });
+    build.close();
     const cleanupErrors = [...cleanup.errors];
     if (preparedDevelopmentHost !== undefined && !initialGenerationPublished) {
       await discardDevelopmentGeneration(preparedDevelopmentHost.generation).catch(

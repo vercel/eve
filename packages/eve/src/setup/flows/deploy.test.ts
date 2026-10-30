@@ -135,7 +135,7 @@ describe("runDeployFlow", () => {
     expect(login).toHaveBeenCalledOnce();
     expect(fake.selectMessages).toEqual([]);
     expect(deployDeps.runVercel).toHaveBeenCalledWith(
-      ["deploy", "--prod", "--yes"],
+      expect.arrayContaining(["deploy", "--prod", "--yes"]),
       expect.objectContaining({ cwd: APP_ROOT }),
     );
   });
@@ -176,6 +176,7 @@ describe("runDeployFlow", () => {
     const result = await runDeployFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
+      traceSampling: false,
       interactive: true,
       deps: {
         detectDeployment: vi.fn(async () => UNLINKED),
@@ -197,8 +198,15 @@ describe("runDeployFlow", () => {
       provisioningDeps.pickTeam.mock.invocationCallOrder[0]!,
     );
     expect(linkDeps.linkProject).toHaveBeenCalled();
+    expect(linkDeps.linkProject).toHaveBeenCalledWith(
+      fake.prompter,
+      APP_ROOT,
+      { kind: "new", project: "my-agent", team: "acme" },
+      expect.anything(),
+      { signal: undefined, traceSampling: false },
+    );
     expect(deployDeps.runVercel).toHaveBeenCalledWith(
-      ["deploy", "--prod", "--yes"],
+      expect.arrayContaining(["deploy", "--prod", "--yes"]),
       expect.objectContaining({ cwd: APP_ROOT }),
     );
   });
@@ -247,7 +255,7 @@ describe("runDeployFlow", () => {
     expect(result).toEqual({ kind: "deployed", productionUrl: "https://my-agent.vercel.app" });
     expect(login).not.toHaveBeenCalled();
     expect(deployDeps.runVercel).toHaveBeenCalledWith(
-      ["deploy", "--prod", "--yes", "--non-interactive"],
+      expect.arrayContaining(["deploy", "--prod", "--yes", "--non-interactive"]),
       expect.objectContaining({ cwd: APP_ROOT, nonInteractive: true }),
     );
   });

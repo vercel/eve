@@ -6,8 +6,8 @@ import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
-  bindTurnCallerContextStep,
-  notifyDelegatedParentStep,
+  bindTurnCallerContext,
+  NOT_PENDING_RETRY_DELAYS_MS,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
@@ -15,7 +15,6 @@ import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 
 vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
@@ -30,21 +29,6 @@ const fetchMock = vi.fn();
 
 const USAGE = { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outputTokens: 50 };
 const ZERO_USAGE = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 };
-
-function createSuccessResult(): RuntimeSubagentChildResult {
-  return {
-    callId: "call-1",
-    kind: "subagent-result",
-    origin: "child",
-    outcome: {
-      kind: "terminal",
-      result: { kind: "succeeded", output: "done" },
-      usageDelta: ZERO_USAGE,
-    },
-    output: "done",
-    subagentName: "research",
-  };
-}
 
 function createSerializedContext(
   adapterState: Record<string, unknown> = {},
@@ -73,88 +57,6 @@ function createSerializedContext(
   });
   return serializeContext(ctx);
 }
-
-describe("notifyDelegatedParentStep", () => {
-  beforeEach(() => {
-    resumeHookMock.mockReset();
-    resumeHookMock.mockResolvedValue(undefined as never);
-  });
-
-  it("attaches usage to a success result and folds it into the outcome delta", async () => {
-    await notifyDelegatedParentStep({
-      result: createSuccessResult(),
-      serializedContext: createSerializedContext(),
-      usage: USAGE,
-    });
-
-    expect(resumeHookMock).toHaveBeenCalledWith("parent-tok", {
-      kind: "runtime-action-result",
-      results: [
-        {
-          callId: "call-1",
-          kind: "subagent-result",
-          origin: "child",
-          outcome: {
-            kind: "terminal",
-            result: { kind: "succeeded", output: "done" },
-            usageDelta: USAGE,
-          },
-          output: "done",
-          subagentName: "research",
-          usage: USAGE,
-        },
-      ],
-    });
-  });
-
-  it("omits usage when none is provided", async () => {
-    await notifyDelegatedParentStep({
-      result: createSuccessResult(),
-      serializedContext: createSerializedContext(),
-    });
-
-    expect(resumeHookMock).toHaveBeenCalledWith("parent-tok", {
-      kind: "runtime-action-result",
-      results: [createSuccessResult()],
-    });
-  });
-
-  it("attaches usage to error results", async () => {
-    const errorResult: RuntimeSubagentChildResult = {
-      callId: "call-1",
-      isError: true,
-      kind: "subagent-result",
-      origin: "child",
-      outcome: {
-        kind: "terminal",
-        result: {
-          error: { code: "SUBAGENT_EXECUTION_FAILED", message: "boom" },
-          kind: "failed",
-        },
-        usageDelta: ZERO_USAGE,
-      },
-      output: { code: "SUBAGENT_EXECUTION_FAILED", message: "boom" },
-      subagentName: "research",
-    };
-
-    await notifyDelegatedParentStep({
-      result: errorResult,
-      serializedContext: createSerializedContext(),
-      usage: USAGE,
-    });
-
-    expect(resumeHookMock).toHaveBeenCalledWith("parent-tok", {
-      kind: "runtime-action-result",
-      results: [
-        {
-          ...errorResult,
-          outcome: { ...errorResult.outcome, usageDelta: USAGE },
-          usage: USAGE,
-        },
-      ],
-    });
-  });
-});
 
 describe("turn caller notification", () => {
   beforeEach(() => {
@@ -187,11 +89,10 @@ describe("turn caller notification", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
-  it("restores task ownership from a local adapter with an opaque reply hook", async () => {
+  it("restores the caller from a local adapter with an opaque reply hook", async () => {
     const caller = await resolveInitialTurnCallerStep({
       serializedContext: createSerializedContext({
         parentContinuationToken: "invocation-reply-hook",
-        taskId: "task-1",
       }),
     });
 
@@ -199,7 +100,6 @@ describe("turn caller notification", () => {
       callId: "call-1",
       replyTo: { kind: "hook", token: "invocation-reply-hook" },
       subagentName: "research",
-      taskId: "task-1",
     });
   });
 
@@ -412,6 +312,77 @@ describe("turn caller notification", () => {
     });
   });
 
+  describe("a remote caller that reports nothing pending", () => {
+    const remoteCaller = () =>
+      resolveInitialTurnCallerStep({
+        serializedContext: {
+          "eve.sessionCallback": {
+            callId: "call-remote",
+            subagentName: "remote",
+            token: "parent-turn",
+            url: "https://caller.example/eve/v1/callback/parent-turn",
+          },
+          "eve.sessionId": "remote-session",
+        },
+      });
+    const notPending = () =>
+      Response.json(
+        { code: "CALLBACK_NOT_PENDING", error: "Session callback not pending.", ok: false },
+        { status: 404 },
+      );
+    const notify = async () =>
+      notifyTurnCallerStep({
+        caller: await remoteCaller(),
+        lifecycle: "parked",
+        sessionId: "remote-session",
+        settled: { output: "remote answer" },
+      });
+
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("delivers the result once the caller registers the reply it sent", async () => {
+      fetchMock
+        .mockResolvedValueOnce(notPending())
+        .mockResolvedValueOnce(notPending())
+        .mockResolvedValueOnce(new Response(null, { status: 202 }));
+      const notified = notify();
+      await vi.runAllTimersAsync();
+      await expect(notified).resolves.toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it("leaves the session alive when the caller already took the result or stopped waiting", async () => {
+      // A delivery whose 202 was lost: the caller applied it, so its repeat finds nothing pending.
+      fetchMock.mockImplementation(async () => notPending());
+      const notified = notify();
+      await vi.runAllTimersAsync();
+      await expect(notified).resolves.toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(NOT_PENDING_RETRY_DELAYS_MS.length + 1);
+    });
+
+    it("also reads an earlier protocol's not-pending answer, which names no code", async () => {
+      fetchMock.mockImplementation(async () =>
+        Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 }),
+      );
+      const notified = notify();
+      await vi.runAllTimersAsync();
+      await expect(notified).resolves.toBeUndefined();
+    });
+
+    it("still fails a callback that can't be delivered, so its step retries", async () => {
+      for (const response of [
+        new Response("Not Found", { status: 404 }),
+        new Response(null, { status: 503 }),
+      ]) {
+        fetchMock.mockReset();
+        fetchMock.mockResolvedValue(response);
+        await expect(notify()).rejects.toThrow(/Turn callback failed with HTTP (404|503)/);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      }
+    });
+  });
+
   it("warns and returns when the caller hook no longer exists", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     resumeHookMock.mockRejectedValue(new HookNotFoundError("parent-tok"));
@@ -434,9 +405,9 @@ describe("turn caller notification", () => {
         "[eve:execution.delegated-parent-notification] turn caller hook no longer exists",
         expect.objectContaining({
           callId: "call-1",
-          callerToken: "parent-tok",
         }),
       );
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("parent-tok");
     } finally {
       warnSpy.mockRestore();
     }
@@ -444,15 +415,15 @@ describe("turn caller notification", () => {
 });
 
 describe("turn caller binding", () => {
-  it("rebinds local adapter forwarding to a non-task continuation caller", async () => {
-    await expect(
-      bindTurnCallerContextStep({
-        caller: {
+  it("rebinds local adapter forwarding to a continuation caller", () => {
+    expect(
+      bindTurnCallerContext(
+        {
           callId: "call-new",
           replyTo: { kind: "hook", token: "turn-new" },
           subagentName: "research",
         },
-        serializedContext: {
+        {
           [ChannelKey.name]: {
             kind: SUBAGENT_ADAPTER_KIND,
             state: {
@@ -460,12 +431,11 @@ describe("turn caller binding", () => {
               parentContinuationToken: "turn-old",
               parentSessionId: "parent",
               subagentName: "research",
-              taskId: "task-old",
             },
           },
         },
-      }),
-    ).resolves.toEqual({
+      ),
+    ).toEqual({
       [ChannelKey.name]: {
         kind: SUBAGENT_ADAPTER_KIND,
         state: {
@@ -478,10 +448,10 @@ describe("turn caller binding", () => {
     });
   });
 
-  it("rebinds remote callback forwarding to a non-task continuation caller", async () => {
-    await expect(
-      bindTurnCallerContextStep({
-        caller: {
+  it("rebinds remote callback forwarding to a continuation caller", () => {
+    expect(
+      bindTurnCallerContext(
+        {
           callId: "call-new",
           replyTo: {
             kind: "callback",
@@ -490,70 +460,14 @@ describe("turn caller binding", () => {
           },
           subagentName: "research",
         },
-        serializedContext: {},
-      }),
-    ).resolves.toEqual({
+        {},
+      ),
+    ).toEqual({
       [SessionCallbackKey.name]: {
         callId: "call-new",
         subagentName: "research",
         token: "turn-new",
         url: "https://parent.example/eve/v1/callback/turn-new",
-      },
-    });
-  });
-
-  it("rebinds local adapter forwarding to the current task", async () => {
-    const serializedContext = {
-      [ChannelKey.name]: {
-        kind: SUBAGENT_ADAPTER_KIND,
-        state: {
-          callId: "call-old",
-          parentContinuationToken: "task-old",
-          parentSessionId: "parent",
-          subagentName: "research",
-        },
-      },
-    };
-
-    await expect(
-      bindTurnCallerContextStep({
-        caller: {
-          callId: "call-new",
-          replyTo: { kind: "hook", token: "task-new" },
-          subagentName: "research",
-          taskId: "task-new",
-        },
-        serializedContext,
-      }),
-    ).resolves.toMatchObject({
-      [ChannelKey.name]: {
-        state: { callId: "call-new", parentContinuationToken: "task-new", taskId: "task-new" },
-      },
-    });
-  });
-
-  it("rebinds remote callback forwarding to the current task", async () => {
-    await expect(
-      bindTurnCallerContextStep({
-        caller: {
-          callId: "call-new",
-          replyTo: {
-            kind: "callback",
-            token: "task-new",
-            url: "https://parent.example/eve/v1/callback/task-new",
-          },
-          subagentName: "research",
-          taskId: "task-new",
-        },
-        serializedContext: {},
-      }),
-    ).resolves.toEqual({
-      [SessionCallbackKey.name]: {
-        callId: "call-new",
-        subagentName: "research",
-        taskId: "task-new",
-        token: "task-new",
-        url: "https://parent.example/eve/v1/callback/task-new",
       },
     });
   });

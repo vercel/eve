@@ -1,13 +1,12 @@
 # eve/extensions/code
 
-`eve/extensions/code` is an eve extension for coding work. It contributes `apply_patch`, computer use, `gh`, `grep`, investigation and PR skills, a read-only worker subagent, sandbox tooling, and shared PR-watch primitives. Vercel credentials are brokered before each turn; GitHub credentials are scoped to one repository and leased for each `gh` tool invocation. Because eve workflow directives are application-only, consumers own their `prwatch` / `prwatch_delete` workflow tools.
+`eve/extensions/code` is an eve extension for coding work. It contributes `apply_patch`, `grep`, investigation and review skills, a read-only worker subagent, sandbox tooling, and shared PR-watch primitives. Vercel credentials are brokered before each turn. GitHub instructions, the `pr` skill, and the authenticated `gh` tool live in [`eve/extensions/git`](../eve-git/README.md). Because eve workflow directives are application-only, consumers own their `prwatch` / `prwatch_delete` workflow tools.
 
 It ships inside the `eve` package. This private `@eve/code` workspace package is its source of truth: eve's build copies `extension/` into `packages/eve/src/extensions/code/extension` and publishes it with these entry points:
 
 - `eve/extensions/code`: the extension
 - `eve/extensions/code/sandbox`: sandbox bootstrap and credential helpers
-- `eve/extensions/code/tools`: `apply_patch`, `computer_use`, `gh`, and `grep`
-- `eve/extensions/code/prwatch`: PR-watch primitives for consumer-owned workflow tools
+- `eve/extensions/code/tools`: `apply_patch` and `grep`
 
 ## Mount
 
@@ -21,45 +20,36 @@ export default code({
 });
 ```
 
-Both connectors are optional; `code({})` mounts without either. The Vercel connector requests an app-subject token. Firewall delivery is the default and keeps tokens outside sandbox processes; without a consumer `broker`, it requires a sandbox provider that exposes `setNetworkPolicy()` and fails otherwise. Use `delivery: "command"` on the Vercel connector for providers without mutable network policy. A top-level `broker(sandbox, rules)` callback lets the consumer merge Vercel credential rules into its own network policy.
+The Vercel connector is optional; `code({})` mounts without it. The Vercel connector requests an app-subject token. Firewall delivery is the default and keeps tokens outside sandbox processes; without a consumer `broker`, it requires a sandbox provider that exposes `setNetworkPolicy()` and fails otherwise. Use `delivery: "command"` on the Vercel connector for providers without mutable network policy. A top-level `broker(sandbox, rules)` callback lets the consumer merge Vercel credential rules into its own network policy.
 
-To enable the authenticated `gh` tool, configure `github` with `connector`, `org`, and a required `broker(sandbox, rules)` callback. The tool requests a token for exactly one repository in that organization. The callback installs the supplied GitHub header-transform rules for the command, then receives `null` to remove the lease. It must preserve the consumer's other network rules. GitHub authentication has no command-delivery option on this tool; sandbox processes receive a placeholder token, not the real credential.
+The retired `github` option is rejected. Configure `eve/extensions/git` for GitHub tools, instructions, and the pull request skill.
 
 The read-only worker subagent defaults to `openai/gpt-5.6-terra-fast` with `xhigh` reasoning. Set `worker: { model, reasoning, openaiReasoningEffort? }` to choose another model; `openaiReasoningEffort` is passed to OpenAI models as `reasoningEffort`.
 
 ## Sandbox bootstrap
 
-Install CLI tooling and computer-use assets in the environment's `prepare` callback, then start the desktop and driver after `open()` in `defineSandbox()`. Computer use requires an apt-based Linux image with root or passwordless sudo; it cannot run on the `just-bash` provider.
+Install CLI tooling in the environment's `prepare` callback:
 
 ```ts
 // agent/sandbox.ts
 import { defineSandbox } from "eve/sandbox";
 import { VercelSandbox } from "eve/sandbox/vercel";
-import {
-  installCodeTooling,
-  installComputerUse,
-  startComputerUse,
-} from "eve/extensions/code/sandbox";
+import { installCodeTooling } from "eve/extensions/code/sandbox";
 
 export const environment = VercelSandbox.environment({
   prepare: async (sandbox) => {
     await installCodeTooling(sandbox, { vercel: true });
-    await installComputerUse(sandbox);
   },
 });
 
-export default defineSandbox(async () => {
-  const sandbox = await environment.open();
-  await startComputerUse(sandbox);
-  return sandbox;
-});
+export default defineSandbox(() => environment.open());
 ```
 
 eve derives the prepared environment generation from the sandbox file and environment options, not from imported helpers, so upgrading eve alone does not rebuild an existing prepared artifact.
 
-Mounting the extension exposes `computer_use` but does not install or start its driver. The prepared artifact captures files, not running processes; the `defineSandbox()` selector starts the driver once for each new durable sandbox. If the driver exits or the provider resumes only filesystem state, call `startComputerUse` again before using the tool; resuming a sandbox does not rerun the selector. Stop recordings with `record_stop` to finalize the MP4 at the returned sandbox path. A five-minute watchdog also finalizes forgotten recordings, and the driver attempts finalization on `SIGINT` or `SIGTERM`; abrupt VM termination cannot guarantee a finalized MP4.
+Computer use lives in its own extension. Import its tools and sandbox helpers directly; the deprecated code re-exports are removed.
 
-Preparation ensures `gh`, installs wrappers for `gh`, `vc`, and `gh-signed-commit`, and installs TypeScript diagnostics. For repositories requiring verified signatures, stage the intended changes and use `gh-signed-commit`.
+Preparation ensures `gh`, installs wrappers for `gh`, `vc`, and `gh-signed-commit`, and installs TypeScript diagnostics. With `eve/extensions/git` configured for `github`, repositories requiring verified signatures use `gh-signed-commit` through its `gh` tool.
 
 ## Non-Connect escape hatch
 
@@ -70,15 +60,16 @@ Consumers with a PAT, benchmark token, or another credential provider can omit t
 Rebuild eve after editing `extension/`; the local agent under `agent/` mounts the built `eve/extensions/code`:
 
 ```sh
-pnpm --filter eve build
-pnpm --filter @eve/code typecheck
-pnpm --filter @eve/code test
-pnpm --filter @eve/code test:scenario
+pnpm build:eve
+pnpm typecheck --filter=@eve/code
+pnpm test:unit --filter=@eve/code
+pnpm test:integration --filter=@eve/code
+pnpm test:scenario --filter=@eve/code
 pnpm exec oxlint packages/eve-code
 pnpm exec oxfmt --check packages/eve-code
 ```
 
-Tests live under `test/`, outside the extension distribution. Unit and integration tests run through the workspace's matching test tasks. The package integration task depends only on eve's build. The root integration command runs the framework suite before the other packages because that suite rebuilds the runtime files they import. Scenario tests exercise temporary files, local Git repositories, and subprocesses; they need Node.js 24 or newer, Git, and Bash, but no model or service credentials.
+Tests live under `test/`, outside the extension distribution. Unit and integration tests run through the workspace's matching test tasks. Turbo builds eve once before the integration tasks that import its runtime files. Scenario tests exercise temporary files, local Git repositories, and subprocesses; they need Node.js 24 or newer, Git, and Bash, but no model or service credentials.
 
 The `typescript-compiler` development alias supplies the JavaScript compiler API used by the diagnostics worker test. The workspace's TypeScript 7 CLI remains the package typechecker. `prepack` builds the extension; installation does not run the extension CLI before the local framework has been built.
 

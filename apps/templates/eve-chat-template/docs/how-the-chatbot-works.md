@@ -15,45 +15,45 @@ navigation.
 The template has four major layers:
 
 1. The eve agent layer in `agent/`
-2. The Next.js shell and page layer in `app/`
-3. The chat UI components in `components/chat/`
-4. The persistence, auth, setup, and rate-limit layer in `lib/`
+2. The Next.js shell and page layer in `apps/web/app/`
+3. The chat UI components in `apps/web/components/chat/`
+4. The persistence, auth, setup, and rate-limit layer in `apps/web/lib/`
 
 Important files:
 
-| File                                    | Purpose                                                                                             |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `agent/agent.ts`                        | Defines the eve agent and model.                                                                    |
-| `agent/channels/eve.ts`                 | Configures the eve web channel and auth adapters.                                                   |
-| `agent/channels/slack.ts`               | Configures the Slack channel route and Vercel Connect credentials.                                  |
-| `agent/connections/notion.ts`           | Defines the Notion MCP connection through Vercel Connect.                                           |
-| `agent/connections/linear.ts`           | Defines the Linear MCP connection through Vercel Connect.                                           |
-| `agent/connections/sentry.ts`           | Defines the Sentry MCP connection through Vercel Connect.                                           |
-| `agent/instructions.md`                 | Defines the agent's behavior and long-term-memory rules.                                            |
-| `agent/memory/profile.ts`               | Defines the per-principal long-term-memory slot.                                                    |
-| `next.config.ts`                        | Wraps the app with `withEve(nextConfig)`, which mounts the `/eve/v1/*` routes.                      |
-| `app/(chat)/layout.tsx`                 | Renders the static chat shell immediately, then streams viewer/setup/sidebar data through Suspense. |
-| `app/(chat)/page.tsx`                   | Root chat screen. Creates a new chat row and navigates into `/chat/[id]`.                           |
-| `app/(chat)/chat/[id]/page.tsx`         | Session route. Streams the active chat data into the client shell.                                  |
-| `app/_components/agent-chat-shell.tsx`  | Client shell for sidebar state, history pagination, auth modal, and shared chat context.            |
-| `app/_components/home-chat-page.tsx`    | Root-page composer and logo experience.                                                             |
-| `app/_components/session-chat-page.tsx` | Session-page composer, active chat sync, and controller wiring.                                     |
-| `app/_components/agent-chat.tsx`        | The eve client bridge: sending, streaming, persistence, resume, pending auth, and display state.    |
-| `components/chat/composer.tsx`          | The controlled chat input.                                                                          |
-| `components/chat/message.tsx`           | Renders eve messages, markdown, reasoning, tools, and input requests.                               |
-| `components/chat/sidebar.tsx`           | Paginated chat history sidebar.                                                                     |
-| `components/chat/integrations-menu.tsx` | Per-turn connection toggle UI.                                                                      |
-| `app/actions/chat.ts`                   | Server actions for chat creation, persistence, pending state, skip auth, and rate checks.           |
-| `app/api/chats/route.ts`                | Paginated chat history endpoint.                                                                    |
-| `lib/chat/local-store.ts`               | Versioned browser storage for starter-mode chats and eve session cursors.                           |
-| `lib/chat/persistence-client.ts`        | Routes client persistence calls to browser or database storage.                                     |
-| `lib/db/schema.ts`                      | Drizzle tables for Better Auth, chats, and chat events.                                             |
-| `lib/db/queries.ts`                     | Chat list, chat load, event save, snapshot save, and delete queries.                                |
-| `lib/setup.ts`                          | Selects starter, local development, or production mode and validates readiness.                     |
-| `lib/auth.ts`                           | Better Auth configuration with Sign in with Vercel.                                                 |
-| `lib/password-auth.ts`                  | Shared-password verification and stateless signed session cookies.                                  |
-| `lib/eve-auth.ts`                       | Converts password or Better Auth sessions into eve channel principals.                              |
-| `lib/rate-limit.ts`                     | Upstash Redis based fixed-window rate limiting.                                                     |
+| File                                             | Purpose                                                                                             |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `agent/agent.ts`                                 | Defines the eve agent and model.                                                                    |
+| `agent/channels/eve.ts`                          | Configures the eve web channel and auth adapters.                                                   |
+| `agent/channels/slack.ts`                        | Configures the Slack channel route and Vercel Connect credentials.                                  |
+| `agent/connections/notion.ts`                    | Defines the Notion MCP connection through Vercel Connect.                                           |
+| `agent/connections/linear.ts`                    | Defines the Linear MCP connection through Vercel Connect.                                           |
+| `agent/connections/sentry.ts`                    | Defines the Sentry MCP connection through Vercel Connect.                                           |
+| `agent/instructions.md`                          | Defines the agent's behavior and long-term-memory rules.                                            |
+| `agent/memory/profile.ts`                        | Defines the per-principal long-term-memory slot.                                                    |
+| `vercel.ts`                                      | Composes the peer Next.js and eve services for Vercel.                                              |
+| `apps/web/app/(chat)/layout.tsx`                 | Renders the static chat shell immediately, then streams viewer/setup/sidebar data through Suspense. |
+| `apps/web/app/(chat)/page.tsx`                   | Root chat screen. Creates a new chat row and navigates into `/chat/[id]`.                           |
+| `apps/web/app/(chat)/chat/[id]/page.tsx`         | Session route. Streams the active chat data into the client shell.                                  |
+| `apps/web/app/_components/agent-chat-shell.tsx`  | Client shell for sidebar state, history pagination, auth modal, and shared chat context.            |
+| `apps/web/app/_components/home-chat-page.tsx`    | Root-page composer and logo experience.                                                             |
+| `apps/web/app/_components/session-chat-page.tsx` | Session-page composer, active chat sync, and controller wiring.                                     |
+| `apps/web/app/_components/agent-chat.tsx`        | The eve client bridge: sending, streaming, persistence, resume, pending auth, and display state.    |
+| `apps/web/components/chat/composer.tsx`          | The controlled chat input.                                                                          |
+| `apps/web/components/chat/message.tsx`           | Renders eve messages, markdown, reasoning, tools, and input requests.                               |
+| `apps/web/components/chat/sidebar.tsx`           | Paginated chat history sidebar.                                                                     |
+| `apps/web/components/chat/integrations-menu.tsx` | Per-turn connection toggle UI.                                                                      |
+| `apps/web/app/actions/chat.ts`                   | Server actions for chat creation, persistence, pending state, and rate checks.                      |
+| `apps/web/app/api/chats/route.ts`                | Paginated chat history endpoint.                                                                    |
+| `apps/web/lib/chat/local-store.ts`               | Versioned browser storage for starter-mode chats and eve session cursors.                           |
+| `apps/web/lib/chat/persistence-client.ts`        | Routes client persistence calls to browser or database storage.                                     |
+| `apps/web/lib/db/schema.ts`                      | Drizzle tables for Better Auth, chats, and chat events.                                             |
+| `apps/web/lib/db/queries.ts`                     | Chat list, chat load, event save, snapshot save, and delete queries.                                |
+| `apps/web/lib/setup.ts`                          | Selects starter, local development, or production mode and validates readiness.                     |
+| `apps/web/lib/auth.ts`                           | Better Auth configuration with Sign in with Vercel.                                                 |
+| `apps/web/lib/password-auth.ts`                  | Shared-password verification and stateless signed session cookies.                                  |
+| `apps/web/lib/eve-auth.ts`                       | Converts password or Better Auth sessions into eve channel principals.                              |
+| `apps/web/lib/rate-limit.ts`                     | Upstash Redis based fixed-window rate limiting.                                                     |
 
 ## Runtime Model
 
@@ -78,7 +78,7 @@ Production mode stores eve stream events in ordered rows:
 
 ```ts
 chat_event.eventIndex: number
-chat_event.event: MessageStreamEvent
+chat_event.event: SessionStreamEvent
 ```
 
 Starter mode keeps the same two values in a versioned localStorage record.
@@ -102,7 +102,7 @@ Suspense boundaries.
 
 ### Shell First
 
-`app/(chat)/layout.tsx` renders this immediately:
+`apps/web/app/(chat)/layout.tsx` renders this immediately:
 
 ```tsx
 <AgentChatShell
@@ -137,7 +137,7 @@ This pattern avoids a blocking route, which would delay the entire page.
 
 ### Session Route Data
 
-`app/(chat)/chat/[id]/page.tsx` uses the same idea. It renders the session page
+`apps/web/app/(chat)/chat/[id]/page.tsx` uses the same idea. It renders the session page
 shell first:
 
 ```tsx
@@ -210,7 +210,7 @@ through:
 
 ## Root Page Flow
 
-The root route is `app/(chat)/page.tsx`, rendered by `HomeChatPage`.
+The root route is `apps/web/app/(chat)/page.tsx`, rendered by `HomeChatPage`.
 
 The root page is the "start a new chat" experience. It has:
 
@@ -275,92 +275,41 @@ navigation.
 
 ## eve Client Bridge
 
-Most of the chat logic lives in `app/_components/agent-chat.tsx`.
+Most of the chat logic lives in `apps/web/app/_components/agent-chat.tsx`.
 
 The core hook is:
 
 ```tsx
 const agent = useEveAgent({
   initialEvents: activeChat?.events ?? [],
-  session: persistedSessionRef.current,
-  onEvent: persistStreamEvent,
-  onFinish: (snapshot) => {
-    void persistSnapshot(snapshot);
+  initialSession: activeChat?.session,
+  onSessionChange: (session) => {
+    if (session) void persistSessionState(session);
   },
+  onEvent: persistStreamEvent,
 });
 ```
 
 `useEveAgent` handles reducing eve stream events into renderable chat messages.
 The template wraps it with persistence and resume logic.
 
-### Persisted Client Session
+### Persisted session and streaming
 
-The browser session object is created by `createPersistedClientSession`.
+`useEveAgent` owns the eve session and stream. The template passes the saved
+`initialSession` cursor and `initialEvents` when the chat mounts, then renders
+`agent.messages` directly. It does not maintain a second projection or
+merge local events into the server log.
 
-It exposes:
+`onSessionChange` saves the session ID and cursor. `onEvent` persists each newly
+accepted event; overlapping replay events are deduplicated by eve using their
+stream positions before that callback runs. A React effect saves the hook's full
+snapshot when committed state is idle, failed, or waiting for a person. It also
+saves a settled or paused tail after `resume()` catches up.
 
-- `send(message, options)`
-- `respond(inputResponses, options)`
-- `stream(options)`
-- `setState(nextSession)`
-- `state`
-
-When `send(message, options)` or `respond(inputResponses, options)` is called:
-
-1. It builds the matching message or input-response payload.
-2. It posts to `/eve/v1/session` for a new eve session, or
-   `/eve/v1/session/:sessionId` for a continuation.
-3. It reads the `x-eve-session-id` response header.
-4. It updates the local `ClientSessionState`.
-5. It saves that session state to the chat row.
-6. It returns a browser-compatible message response whose async iterator reads
-   `/eve/v1/session/:sessionId/stream`.
-
-The app never talks directly to a third-party model endpoint. It talks to eve's
-same-origin session API, which is mounted by `withEve(nextConfig)`.
-
-### Streaming
-
-The stream reader is `streamSessionEvents`.
-
-It opens:
-
-```txt
-GET /eve/v1/session/:sessionId/stream?startIndex=<n>
-```
-
-Then it reads newline-delimited JSON events.
-
-For every event:
-
-1. Push it into the current stream buffer.
-2. Increment the next remote stream index.
-3. Yield it to `useEveAgent`.
-4. Stop if the event settles the turn.
-
-A turn is considered settled when `lib/chat/events.ts` sees one of:
-
-```ts
-session.completed;
-session.failed;
-session.waiting;
-```
-
-The stream reader retries a few times for transient stream-open failures:
-
-- 404
-- 409
-- 425
-- 500
-- 502
-- 503
-- 504
-
-It also tolerates stream disconnects by reconnecting from the next unread stream
-index.
-
-When the async iterator exits, it calls `onFinalize(events)`, which advances the
-browser session state using the events that were actually observed.
+The hook keeps following the stream across turn boundaries, sign-in callbacks,
+and transport reconnects. The template does not implement a separate stream
+reader. The app talks to eve's same-origin session API, routed to the eve service
+by `vercel.ts`, rather than to a model endpoint.
 
 ## Sending A Message
 
@@ -375,9 +324,10 @@ The intended order is:
 4. Render an optimistic user bubble immediately when possible.
 5. Run `prepareSend(message)`.
 6. Mark the chat row with `pendingUserMessage`.
-7. Call `agent.send(message, { clientContext })`.
-8. Let `useEveAgent`, `onEvent`, and `onFinish` handle streaming and
-   persistence.
+7. Call `agent.send(message, { clientContext })`, using `turnPolicy: "steer"`
+   if a turn is still streaming while waiting for a response.
+8. Observe execution through the hook's shared state. `send()` resolves with a
+   delivery receipt at acceptance; it does not wait for execution or persistence.
 
 `prepareSend` does the things that must happen before talking to eve:
 
@@ -388,8 +338,9 @@ The intended order is:
 - navigate to the new chat URL when necessary
 
 The optimistic user bubble is separate from persisted eve events. It is created
-with `createPendingUserMessage`. Once the real eve message appears in the
-reduced message list, `hasLatestUserMessage` clears the local pending bubble.
+with `createPendingUserMessage` while the app prepares the send. Once the
+hook projects that message, `hasLatestUserMessage` clears the local pending
+bubble; the hook reconciles its own optimistic message with the server.
 
 This keeps the UI feeling immediate while still letting eve produce the
 canonical event log.
@@ -422,38 +373,28 @@ the browser closes mid-turn.
 
 ### Snapshot Persistence
 
-When `useEveAgent` finishes a turn, it calls `onFinish(snapshot)`.
+The template saves a snapshot when the hook's committed state is idle, failed, or
+waiting for a person. It reads `activity(agent.view)` and the hook's status in an
+effect, rather than treating command acceptance as a response boundary.
+`onFinish` now means a live turn settled; it does not fire for a pause or replayed
+history, so this template does not use it as its persistence trigger.
 
 The snapshot includes:
 
-- the full reduced event list known by eve React
+- the authoritative, deduplicated event list known by eve React
 - the current eve `ClientSessionState`
 
 The template calls `saveChatSnapshotAction({ chatId, events, session })`.
 
-`saveChatSnapshot` upserts each event by index, deletes any events past the new
-snapshot length, saves the eve session state, clears `pendingUserMessage`, and
-updates the chat timestamp.
+`saveChatSnapshot` upserts each event by index, saves the eve session state,
+clears `pendingUserMessage`, and updates the chat timestamp. It does not delete
+events beyond the snapshot's length, because a newer stream append may already
+have reached storage.
 
-### Why Snapshot Merging Exists
-
-There are local events that may not come from the remote stream, especially
-locally synthesized authorization skip events. There are also cases where the
-snapshot returned by the hook starts after some initial events that the app
-already loaded from Postgres.
-
-To avoid losing or duplicating history, `persistSnapshot` applies:
-
-- `preserveKnownInitialEvents(snapshot.events, knownInitialEvents)`
-- `mergeLocalEvents(snapshotEvents, localEvents)`
-- `advanceSessionWithLocalEvents(snapshot.session, localEvents)`
-
-`preserveKnownInitialEvents` is prefix-aware. If the snapshot and known event log
-share a prefix, it preserves the right continuation instead of blindly
-concatenating arrays.
-
-Event comparison uses `areEqualJsonValues`, not `JSON.stringify`, so JSON object
-key order does not cause false mismatches.
+Within a mounted chat, persistence writes run in order: events, session cursors,
+snapshots, and pending-message updates share one queue. Snapshot writes retain
+event rows appended after the captured snapshot. The composer does not use a
+separate "Finishing response" lock.
 
 ## Pending Message Recovery
 
@@ -471,62 +412,40 @@ The flow:
 4. `SessionChatPage` consumes it once the controller is ready.
 5. After a settled event is persisted, `getChatForUser` hides stale pending
    messages.
-6. `saveChatSnapshot` and `skipChatAuthorization` clear pending state.
+6. `saveChatSnapshot` clears pending state, including after a cancellation.
 
 This gives the app a way to recover from "message was accepted by the UI but the
 browser left before eve completed."
 
 ## Refresh And Resume
 
-If a user refreshes during an in-progress eve turn, the app can resume from the
-saved eve session.
+When a saved chat has an eve session, `AgentChatSession` calls `agent.resume()`
+once the viewer is available and the hook is ready. Waiting for the viewer
+avoids opening an unauthenticated stream during shell bootstrap.
 
-`AgentChatSession` checks:
+The hook catches up from the saved session, deduplicates overlapping events,
+and follows any in-flight work. A settled chat returns to `ready` after catch-up;
+a running or paused turn continues streaming. `resume()` resolves at catch-up,
+not at the running turn's end. The same event and cursor callbacks, plus the
+shared-state snapshot effect, persist both resumed and newly sent work.
 
-- there is a viewer
-- there is a `pendingUserMessage`
-- the loaded chat has an `activeChat.session.sessionId`
-- resume has not already started
-- `useEveAgent` is ready
-
-Then it creates a temporary persisted client session from `activeChat.session`
-and streams:
-
-```ts
-session.stream({
-  startIndex: activeChat.events.length,
-  ignoreLeadingWaiting,
-});
-```
-
-Each resumed event is:
-
-- appended to local resume overlay state
-- written to `chat_event`
-- later included in the final snapshot
-
-When a settled event arrives, the app saves the full snapshot and clears pending
-state.
-
-The resume overlay exists because the main `useEveAgent` instance was initialized
-from the loaded events. New resumed events are layered on top until the final
-snapshot catches up.
+Do not pass `events.length` as a stream cursor: a single stream line can contain
+several facts. The hook owns that mapping. While its status is `resuming`, the
+composer and interaction responses are disabled.
 
 ## Authorization Flow For Connections
 
-Connections are not string-parsed from assistant text. eve emits structured
-authorization events.
+Connections are not string-parsed from assistant text. eve opens a structured
+sign-in interaction.
 
 When a connection requires auth, eve emits:
 
 ```txt
-authorization.required
+interaction.opened   (request.kind: "sign-in")
 ```
 
-`getPendingAuthorizations(displayEvents)` scans the current event log:
-
-- add a pending authorization for each `authorization.required`
-- remove it when a matching `authorization.completed` appears
+The UI reads `agent.view.interactions` through the `interaction` selector from
+`eve/events` and selects open interactions whose request has `kind: "sign-in"`. It does not scan or interpret the event log.
 
 For each pending authorization, the UI renders `ConnectionAuthorizationPrompt`.
 
@@ -550,19 +469,16 @@ session.
 
 ### Skip
 
-Skip is a local way to end the authorization wait without connecting the service.
+Skip cancels the current turn without connecting the service.
 
-`handleSkipAuthorization`:
+`handleSkipAuthorization` calls `agent.cancel()` to request cancellation of the
+server-side turn. The stream stays attached and receives the authoritative
+interaction and turn settlements. Normal persistence callbacks save those facts
+and clear pending state.
 
-1. Stops the current agent stream.
-2. Creates an `authorization.completed` event with outcome `declined`.
-3. Creates a local `session.waiting` event.
-4. Applies those events to the persisted browser session.
-5. Saves them through `skipChatAuthorizationAction`.
-6. Clears pending user message state.
-
-That means "skip" ends the current turn. The next normal user message should
-start a fresh turn with the updated context.
+Skip ends the current turn, not the session. The next normal message continues
+the same eve session with its existing context. The template never invents
+settlement events or abandons the session locally.
 
 ## Connections Menu
 
@@ -612,19 +528,19 @@ development, connectors created with `--name notion`, `--name linear`, and
 
 Starter mode uses a shared deployment password. The login route verifies
 `EVE_CHAT_PASSWORD` and issues a signed, HTTP-only, same-site cookie without a
-database. `lib/session.ts` and `lib/eve-auth.ts` verify the same cookie for the
+database. `apps/web/lib/session.ts` and `apps/web/lib/eve-auth.ts` verify the same cookie for the
 Next.js UI and eve route boundary.
 
 Production mode uses Better Auth with Sign in with Vercel.
 
-`lib/auth-url.ts` resolves the base app URL in this order:
+`apps/web/lib/auth-url.ts` resolves the base app URL in this order:
 
 1. `BETTER_AUTH_URL`
 2. `VERCEL_PROJECT_PRODUCTION_URL`
 3. `VERCEL_URL`
 4. `http://localhost:3000`
 
-`lib/auth.ts` configures Better Auth with:
+`apps/web/lib/auth.ts` configures Better Auth with:
 
 - Drizzle adapter
 - encrypted OAuth tokens
@@ -632,11 +548,11 @@ Production mode uses Better Auth with Sign in with Vercel.
 - required scopes: `openid`, `email`, `profile`
 - `/auth/error` as the error page
 
-`lib/session.ts` returns a safe `Viewer` object for server components. It returns
+`apps/web/lib/session.ts` returns a safe `Viewer` object for server components. It returns
 the shared starter viewer, local development viewer, or Vercel user depending
 on the selected mode.
 
-`lib/eve-auth.ts` adapts the selected app session into an eve channel principal.
+`apps/web/lib/eve-auth.ts` adapts the selected app session into an eve channel principal.
 Production mode uses:
 
 ```ts
@@ -663,7 +579,7 @@ with Vercel OIDC contexts.
 
 ## Setup Readiness
 
-`lib/setup.ts` produces a `SetupStatus` object:
+`apps/web/lib/setup.ts` produces a `SetupStatus` object:
 
 ```ts
 type SetupStatus = {
@@ -708,7 +624,7 @@ Disabled composers should always provide a reason through tooltip text.
 
 ## Rate Limiting
 
-Production-mode rate limiting uses Upstash Redis in `lib/rate-limit.ts`.
+Production-mode rate limiting uses Upstash Redis in `apps/web/lib/rate-limit.ts`.
 
 The app supports either current Upstash env names:
 
@@ -740,14 +656,14 @@ messages.
 ## Message Rendering
 
 `useEveAgent` reduces stream events into message data. The template renders that
-data through `components/chat/message.tsx`.
+data through `apps/web/components/chat/message.tsx`.
 
 Message rendering supports:
 
 - user bubbles
 - assistant markdown through Streamdown
 - reasoning parts
-- dynamic tool parts
+- tool parts
 - tool input/response UI
 - optimistic pending user messages
 - a separate "Thinking..." presence row
@@ -755,12 +671,15 @@ Message rendering supports:
 User messages are rendered as rounded, compact bubbles aligned to the right.
 Assistant messages are full-width text on the left.
 
-Tool calls are grouped so a sequence of dynamic tool parts appears as one
+Tool calls are grouped so a sequence of tool parts appears as one
 compact row. Tool rows can be expanded only when they have useful details or
-input controls.
+input controls. A row's status comes from the tool part, not from whether later
+assistant text exists or the turn is still streaming. Labels come from eve's
+`part.label` rather than guesses based on tool inputs.
 
 Reasoning parts render as a collapsible block. While streaming, the label says
-"Thinking..." and uses shimmer text.
+"Thinking..." and uses shimmer text. Reply carets follow the text part's own
+streaming state, so completed text does not keep a caret while other work runs.
 
 The standalone `ThinkingMessage` appears when the session is busy but there is
 not yet enough assistant text to make progress feel visible, or while a response
@@ -768,7 +687,7 @@ is still active. It fades out instead of disappearing abruptly.
 
 ## Composer Behavior
 
-`components/chat/composer.tsx` is controlled by the page:
+`apps/web/components/chat/composer.tsx` is controlled by the page:
 
 - `value`
 - `onChange`
@@ -828,9 +747,9 @@ These invariants are important:
 
 1. `chat_event.eventIndex` must be unique per chat.
 2. A completed snapshot should overwrite stale event rows by index.
-3. Rows beyond the final snapshot length should be deleted.
-4. `pendingUserMessage` should be cleared after a settled turn.
-5. Local authorization skip events must be merged into final snapshots.
+3. A snapshot must not truncate newer event rows.
+4. `pendingUserMessage` should be cleared after a response boundary.
+5. Persist only authoritative events from the hook; do not synthesize settlements.
 6. A pending authorization should disable normal text input for that session.
 7. A route change should reset per-chat refs such as event index and local
    pending messages.
@@ -841,9 +760,9 @@ When debugging "messages replaced old messages" or "a response updated after it
 looked complete", inspect these pieces first:
 
 - whether two events were written to the same local `eventIndex`
-- whether `preserveKnownInitialEvents` duplicated or dropped a prefix
+- whether writes reached storage in event order, with cursors following their events
 - whether `pendingUserMessage` was left on the chat row after a settled event
-- whether the eve stream ended with `session.waiting` before the UI expected it
+- whether the eve stream ended its turn (`turn.settled`) before the UI expected it
 - whether a local optimistic message was cleared before the real user event
   appeared
 
@@ -856,7 +775,7 @@ To add a local eve tool:
 3. Import/register it according to eve's agent conventions.
 4. Update `agent/instructions.md` so the agent knows when to use it.
 5. If the UI should render a special tool state, update
-   `components/chat/message.tsx`.
+   `apps/web/components/chat/message.tsx`.
 
 Keep tool output structured. The message renderer can make much better UI
 decisions when tool parts contain predictable JSON instead of prose-only output.
@@ -875,18 +794,17 @@ To add another Vercel Connect-backed MCP connection:
 8. Verify auth-required events render correctly.
 
 Do not parse assistant text to detect auth requirements. Rely on
-`authorization.required` and `authorization.completed` events.
+sign-in `interaction.opened` and `interaction.settled` events.
 
 ## Adding A New Channel
 
 This template exposes a web chat channel through `agent/channels/eve.ts`, a
-Slack channel through `agent/channels/slack.ts`, and the `withEve` Next.js
-integration.
+Slack channel through `agent/channels/slack.ts`, and the peer Next.js service composed with eve in `vercel.ts`.
 
 If you add another channel, keep this separation:
 
 - channel-specific webhook or transport code belongs in `agent/channels/`
-- web chat UI state belongs in `app/_components/` and `components/chat/`
+- web chat UI state belongs in `apps/web/app/_components/` and `apps/web/components/chat/`
 - cross-channel agent behavior belongs in `agent/instructions.md`, tools, and
   connections
 
@@ -925,7 +843,7 @@ flowchart TD
   EvePost --> Stream["GET /eve/v1/session/:id/stream"]
   Stream --> EventRows["append chat_event rows"]
   Stream --> UI["useEveAgent renders messages"]
-  UI --> Snapshot["onFinish saves full snapshot"]
+  UI --> Snapshot["Shared-state boundary saves full snapshot"]
   Snapshot --> ChatRow["chat.eveSession and pending cleared"]
   ChatRow --> Sidebar["touchChat updates sidebar"]
 ```

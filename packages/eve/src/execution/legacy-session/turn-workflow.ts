@@ -3,7 +3,8 @@ import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { createSessionInbox } from "#execution/session-inbox/inbox.js";
 import { failSession, runPreparedSession } from "#execution/session/program.js";
-import { sessionTimeoutDeadline } from "#execution/session/timeout.js";
+import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
+import { recordSessionOwnerStep } from "#execution/session/handoff-steps.js";
 import { completeLegacyDriverStep } from "./completion-step.js";
 import { interruptLegacySessionStep } from "./interrupt-step.js";
 import { prepareLegacySessionStep } from "./prepare-step.js";
@@ -19,6 +20,7 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
   "use workflow";
   const prepared = await prepareLegacySessionStep(rawInput);
   const { sessionId } = prepared.sessionState;
+  await recordSessionOwnerStep({ sessionId });
   const inbox = createSessionInbox(sessionId);
   try {
     await inbox.claimSessionHook(sessionCommandHookToken(sessionId));
@@ -27,7 +29,7 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
     if (isHookConflictError(error)) return;
     throw error;
   }
-  const { mode, sessionWritable } = prepared.input;
+  const { sessionWritable } = prepared.input;
   let interrupted;
   try {
     await inbox.claimSessionHooks(sessionHookTokens(prepared));
@@ -36,20 +38,22 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
     await inbox.dispose();
     return await failSession({
       error,
-      mode,
       serializedContext: prepared.serializedContext,
       sessionId,
       sessionState: prepared.sessionState,
       sessionWritable,
     });
   }
+  const initialDeliveryKey = prepared.input.delivery?.idempotencyKey;
   await runPreparedSession(
     {
+      admittedDeliveryKeys: initialDeliveryKey === undefined ? [] : [initialDeliveryKey],
       anchor: {
         kind: "self",
         notify: (result) =>
           completeLegacyDriverStep({
             completionToken: prepared.input.completionToken,
+            history: prepared.history,
             result,
             serializedContext: prepared.serializedContext,
             sessionState: prepared.sessionState,
@@ -59,18 +63,23 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
       caller: undefined,
       capabilities: prepared.input.capabilities,
       deploymentId: prepared.deploymentId,
-      initialInput:
-        prepared.input.delivery === undefined
-          ? undefined
-          : { ...prepared.input.delivery, caller: undefined },
-      awaitFirstMessage: false,
-      mode,
+      history: interrupted.history,
+      start: {
+        input:
+          prepared.input.delivery === undefined
+            ? undefined
+            : { ...prepared.input.delivery, caller: undefined },
+        kind: "turn",
+      },
       retention: prepared.input.retention,
       serializedContext: interrupted.serializedContext,
       sessionId,
       sessionState: interrupted.sessionState,
+      sessionTimeoutControl: createSessionTimeoutControl({
+        sessionId,
+        timeoutMs: prepared.sessionTimeoutMs,
+      }),
       sessionTimeoutMs: prepared.sessionTimeoutMs,
-      sessionTimeoutDeadline: sessionTimeoutDeadline(prepared.sessionTimeoutMs, Date.now()),
       sessionWritable,
     },
     inbox,

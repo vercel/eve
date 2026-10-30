@@ -169,7 +169,7 @@ export async function prepareLinqSetup(
   return { credentials, apiKey: apiKey.trim(), signingSecret: signingSecret.trim() };
 }
 
-export async function applyLinqSetup(plan: LinqSetupPlan, context: SetupApplyContext) {
+async function applyLinqSetup(plan: LinqSetupPlan, context: SetupApplyContext) {
   const path = join(context.appRoot, "agent/channels/linq.ts");
   let phoneNumber: string | undefined;
   if (plan.credentials === "connect") {

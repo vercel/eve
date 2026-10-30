@@ -1,22 +1,20 @@
-/**
- * AI SDK conversation-message shape that the harness uses as the unit of
- * session history and turn input. Re-exported from the `ai` package so
- * authors wiring up the Slack channel can type their own message arrays
- * without taking a direct `ai` dependency.
- */
-export type { ModelMessage } from "ai";
+export {
+  openCodeChannel,
+  type SlackCodeChannelOpenResult,
+} from "#public/channels/slack/open-code-channel.js";
 
 export {
   slackChannel,
   type SlackApiResponse,
+  type SlackApprovalChannel,
   type SlackAuthorizationEventContext,
-  type SlackAuthorizationRequiredHandler,
   type SlackBotToken,
   type SlackChannel,
   type SlackChannelConfig,
+  type SlackChannelContext,
   type SlackChannelCredentials,
-  type SlackChannelEvents,
   type SlackChannelState,
+  type SlackCodeChannelTarget,
   type SlackContext,
   type SlackEventContext,
   type SlackEventRespondFn,
@@ -26,15 +24,13 @@ export {
   type SlackHandle,
   type SlackInboundEventContext,
   type SlackInboundMessageContext,
+  type SlackOpenCodeChannelOptions,
+  type SlackOpenedCodeChannel,
   type SlackInboundResult,
-  type SlackInboundResultOrPromise,
   type SlackInitialMessage,
-  type SlackInputRequestedDefaultDeliver,
-  type SlackInputRequestedEvent,
-  type SlackInputRequestedHandler,
-  type SlackInputResponseContext,
-  type SlackInputResponseResult,
-  type SlackInputResponseSubmission,
+  type SlackAnswerContext,
+  type SlackAnswerResult,
+  type SlackAnswerSubmission,
   type SlackInstrumentationMetadata,
   type SlackInteractionAction,
   type SlackInteractionContext,
@@ -44,7 +40,6 @@ export {
   type SlackShortcutContext,
   type SlackShortcutMessage,
   type SlackMentionResult,
-  type SlackMentionResultOrPromise,
   type SlackReceiveTarget,
   type SlackSessionTarget,
   type SlackRespondOptions,
@@ -67,6 +62,7 @@ export type {
 export {
   callSlackApi,
   resolveSlackBotToken,
+  slackCodeChannelContinuationToken,
   slackContinuationToken,
   type SlackPostInput,
   type SlackPostedMessage,
@@ -76,23 +72,29 @@ export {
   type SlackUploadFilesResult,
 } from "#public/channels/slack/api.js";
 
+export { type SlackFetch, type SlackTransportOptions } from "#public/channels/slack/transport.js";
+
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 
-export {
-  experimental_slackActivityPlan,
-  experimental_slackActivityRenderer,
-  experimental_slackActivityTree,
-  experimental_slackActivityStatus,
-  type ExperimentalSlackActivityDestination,
-  type ExperimentalSlackActivityRenderer,
-  type ExperimentalSlackActivitySnapshot,
-  type SlackActivityRenderer,
-} from "#public/channels/slack/activity.js";
+export { type SlackUserInfo } from "#public/channels/slack/user-info.js";
 
 export {
-  describeActionRequest,
-  describeActionRequests,
-} from "#public/channels/slack/action-status.js";
+  postCompletedSlackReply,
+  type SlackCompletedReply,
+} from "#public/channels/slack/reply-delivery.js";
+
+export {
+  defineSlackRenderer,
+  type SlackCardMessage,
+  type SlackInteractionCard,
+  type SlackInteractionCardParts,
+  type SlackRenderer,
+  type SlackRendererEvents,
+  type SlackRenderHandler,
+  type SlackRenderNext,
+} from "#public/channels/slack/renderers.js";
+
+export type { TaskCard } from "#channel/task-card.js";
 
 export {
   loadThreadContextMessages,
@@ -106,9 +108,18 @@ export {
   type BlockKitBlock,
 } from "#public/channels/slack/blocks.js";
 
+export {
+  answerFromSlackAction,
+  ANSWER_ACTION_PREFIX,
+  renderInteractionBlocks,
+  type DerivedHitlResponse,
+  type SlackHitlAction,
+  type SlackHitlRoute,
+} from "#public/channels/slack/hitl.js";
+
 /**
- * Card builders and element types re-exported from the vendored chat
- * SDK module. These are pure data factories. They return plain typed
+ * Card builders and eve-owned element types. The vendored factories remain an
+ * implementation detail. These are pure data factories. They return plain typed
  * objects that the channel passes to {@link cardToBlocks} at post time.
  * The chat SDK runtime (`Chat`, `Thread`, `Adapter`, etc.) is not
  * imported and not reachable through this entry point.
@@ -120,74 +131,43 @@ export {
   CardLink,
   CardText,
   Divider,
-  ExternalSelect,
   Field,
   Fields,
   Image,
   LinkButton,
-  Modal,
   RadioSelect,
   Section,
   Select,
   SelectOption,
   Table,
-  TextInput,
-  cardChildToFallbackText,
-  isCardElement,
-} from "#compiled/chat/index.js";
+} from "#public/channels/slack/cards.js";
 
 export type {
   ActionsElement,
-  AdapterPostableMessage,
-  Attachment,
   ButtonElement,
   ButtonOptions,
-  ButtonProps,
   ButtonStyle,
   CardChild,
   CardElement,
-  CardJSXElement,
-  CardJSXProps,
-  CardLinkProps,
   CardOptions,
-  CardProps,
-  ChatElement,
-  ContainerProps,
   DividerElement,
-  DividerProps,
-  ExternalSelectElement,
-  ExternalSelectOptions,
-  ExternalSelectProps,
   FieldElement,
-  FieldProps,
   FieldsElement,
   FileUpload,
   ImageElement,
-  ImageProps,
   LinkButtonElement,
   LinkButtonOptions,
-  LinkButtonProps,
   LinkElement,
-  ModalChild,
-  ModalElement,
-  ModalOptions,
-  ModalProps,
   PostableCard,
   RadioSelectElement,
   RadioSelectOptions,
   SectionElement,
   SelectElement,
   SelectOptionElement,
-  SelectOptionProps,
   SelectOptions,
-  SelectProps,
   TableAlignment,
   TableElement,
   TableOptions,
   TextElement,
-  TextInputElement,
-  TextInputOptions,
-  TextInputProps,
-  TextProps,
   TextStyle,
-} from "#compiled/chat/index.js";
+} from "#public/channels/slack/cards.js";

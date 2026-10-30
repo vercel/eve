@@ -96,14 +96,16 @@ async function writeRuntimeLoaderFixture(agentRoot: string): Promise<void> {
   );
   await writeFile(
     join(agentRoot, "agent.mjs"),
-    ['export default { model: "openai/gpt-5.4" };\n'].join("\n"),
+    [
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    ].join("\n"),
   );
   await writeFile(
     join(agentRoot, "instructions.mjs"),
     [
       'import { instructionsMarkdown } from "./lib/instructions-copy.mjs";',
       "",
-      "export default { markdown: instructionsMarkdown };\n",
+      "export default { content: instructionsMarkdown };\n",
     ].join("\n"),
   );
   await writeFile(
@@ -112,11 +114,11 @@ async function writeRuntimeLoaderFixture(agentRoot: string): Promise<void> {
   );
   await writeFile(
     join(agentRoot, "schedules", "daily-digest.mjs"),
-    'export default { cron: "0 8 * * *", markdown: "Send a weather digest." };\n',
+    'export default { cron: "0 8 * * *", content: "Send a weather digest." };\n',
   );
   await writeFile(
     join(agentRoot, "skills", "route-weather.mjs"),
-    'export default { description: "Route weather questions.", markdown: "Route weather questions to the weather tool." };\n',
+    'export default { description: "Route weather questions.", content: "Route weather questions to the weather tool." };\n',
   );
   await writeFile(
     join(agentRoot, "tools", "get_weather.mjs"),
@@ -151,7 +153,10 @@ async function writeRuntimeLoaderSubagentFixture(agentRoot: string): Promise<voi
   await mkdir(join(researcherRoot, "tools"), {
     recursive: true,
   });
-  await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+  await writeFile(
+    join(agentRoot, "agent.mjs"),
+    'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+  );
   await writeFile(
     join(agentRoot, "instructions.md"),
     "You are a precise runtime loader test agent.",
@@ -159,10 +164,11 @@ async function writeRuntimeLoaderSubagentFixture(agentRoot: string): Promise<voi
   await writeFile(
     join(researcherRoot, "agent.mjs"),
     [
-      "export default {",
+      'import { defineAgent } from "eve";',
+      "export default defineAgent({",
       '  model: "openai/gpt-5.4",',
       '  description: "Research one topic in depth.",',
-      "};\n",
+      "});\n",
     ].join("\n"),
   );
   await writeFile(
@@ -181,7 +187,7 @@ async function writeRuntimeLoaderSubagentFixture(agentRoot: string): Promise<voi
     ].join("\n"),
   );
   await writeFile(
-    join(researcherRoot, "tools", "search.mjs"),
+    join(researcherRoot, "tools", "lookup.mjs"),
     [
       'import { createSearchResponse } from "../lib/search-response.mjs";',
       "",
@@ -237,9 +243,10 @@ async function writeRuntimeLoaderTsconfigAliasFixture(input: {
   await writeFile(
     join(input.agentRoot, "agent.ts"),
     [
+      'import { defineAgent } from "eve";',
       'import { runtimeModelId } from "@/lib/model.ts";',
       "",
-      "export default { model: runtimeModelId };\n",
+      "export default defineAgent({ model: runtimeModelId });\n",
     ].join("\n"),
   );
   await writeFile(
@@ -292,13 +299,14 @@ describe("runtime compiled artifact loaders", () => {
     await writeFile(
       join(agentRoot, "agent.mjs"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  model: "openai/gpt-5.4",',
         "  compaction: {",
         '    model: "openai/gpt-5.4-mini",',
-        "    thresholdPercent: 0.75,",
+        "    threshold: 0.75,",
         "  },",
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -360,7 +368,6 @@ describe("runtime compiled artifact loaders", () => {
       model: {
         contextWindowTokens: expect.any(Number),
         id: "openai/gpt-5.4",
-        maxOutputTokens: 128_000,
         routing: { kind: "gateway", target: "openai" },
       },
       name: "runtime-loader-test-agent",
@@ -406,7 +413,7 @@ describe("runtime compiled artifact loaders", () => {
       {
         description: "Route weather questions.",
         logicalPath: "skills/route-weather.mjs",
-        markdown: "Route weather questions to the weather tool.",
+        content: "Route weather questions to the weather tool.",
         name: "route-weather",
         sourceId: "skills/route-weather.mjs",
         sourceKind: "module",
@@ -420,11 +427,12 @@ describe("runtime compiled artifact loaders", () => {
     expect(resolvedChannel.urlPath).toBe("/slack");
     expect(typeof resolvedChannel.fetch).toBe("function");
     expect(resolvedAgent.channels.filter((channel) => channel.name === "slack")).toHaveLength(1);
-    // The runtime module map excludes compile-only config, instructions,
-    // skills, and prompt schedules while retaining executable entries.
+    // The schedule wrapper loads its authored source to distinguish static
+    // schedules from collections; static schedules still execute via Cron.
     const rootModuleIds = Object.keys(moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules ?? {});
     expect(rootModuleIds.filter((moduleId) => !moduleId.startsWith("eve:"))).toEqual([
       "channels/slack.mjs",
+      "schedules/daily-digest.mjs",
       "tools/get_weather.mjs",
     ]);
     expect(rootModuleIds.some((moduleId) => moduleId.startsWith("eve:"))).toBe(true);
@@ -550,7 +558,7 @@ describe("runtime compiled artifact loaders", () => {
     ]);
     const researcherModuleIds = Object.keys(moduleMap.nodes["subagents/researcher"]?.modules ?? {});
     expect(researcherModuleIds.filter((moduleId) => !moduleId.startsWith("eve:defaults:"))).toEqual(
-      ["sandbox/sandbox.mjs", "tools/search.mjs"],
+      ["sandbox/sandbox.mjs", "tools/lookup.mjs"],
     );
     expect(researcherModuleIds.some((moduleId) => moduleId.startsWith("eve:defaults:"))).toBe(true);
     expect(researcherNode?.agent.instructions).toEqual([
@@ -579,7 +587,7 @@ describe("runtime compiled artifact loaders", () => {
     ).toBe(false);
     await expect(
       researcherNode?.agent.tools
-        .find((tool) => tool.name === "search")
+        .find((tool) => tool.name === "lookup")
         ?.execute?.({ query: "climate" }, { messages: [], toolCallId: "call_1" }),
     ).resolves.toEqual({
       query: "climate",
@@ -704,7 +712,10 @@ describe("runtime compiled artifact loaders", () => {
       APP_ROOT_OPTIONS,
     );
 
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
 
     await compileAgent({

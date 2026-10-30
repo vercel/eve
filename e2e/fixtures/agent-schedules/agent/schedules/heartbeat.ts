@@ -1,7 +1,7 @@
 import { defineSchedule } from "eve/schedules";
 
 /**
- * Markdown (task-mode) schedule used by `evals/schedule-dispatch.eval.ts`.
+ * Markdown schedule used by `evals/schedule-dispatch.eval.ts`.
  *
  * The eval fires it out of band through the dev-only dispatch route
  * (`t.target.dispatchSchedule("heartbeat")`), which runs the exact path the
@@ -11,7 +11,7 @@ import { defineSchedule } from "eve/schedules";
  */
 export default defineSchedule({
   cron: "0 0 * * *",
-  markdown: [
+  content: [
     "Call the `record-heartbeat` tool exactly once with note 'cron-tick'.",
     "Do not call any other tool. You have no other task.",
   ].join("\n"),

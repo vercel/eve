@@ -12,7 +12,6 @@ import type { HarnessSession } from "#harness/types.js";
 const RECORD = {
   callId: "call_1",
   toolName: "deploy",
-  lifetime: "turn" as const,
   origin: { turnId: "turn-1", stepIndex: 0 },
   address: { runId: "wrun_1", hookToken: "eve:workflow-tool-run:abc" },
 };
@@ -22,14 +21,6 @@ function session(state?: HarnessSession["state"]): HarnessSession {
 }
 
 describe("workflow tool run records", () => {
-  it("rejects the previous registry format before using its run records", () => {
-    expect(() =>
-      getBlockingWorkflowToolRuns({
-        "eve.workflowTool": { version: 1, runs: [RECORD] },
-      }),
-    ).toThrow("Corrupt workflow tool run registry");
-  });
-
   it("records, finds, and removes runs by call id", () => {
     const recorded = registerWorkflowToolRun(session({ other: true }), RECORD);
     expect(getBlockingWorkflowToolRuns(recorded.state)).toEqual([RECORD]);
@@ -98,8 +89,8 @@ describe("workflow tool run records", () => {
   it("rejects malformed state", () => {
     expect(() =>
       getBlockingWorkflowToolRuns({
-        "eve.workflowTool": { version: 3, runs: { not: "an array" } },
+        "eve.work": { version: 1, calls: { not: "an array" } },
       }),
-    ).toThrow("Corrupt workflow tool run registry");
+    ).toThrow("Corrupt running-work record");
   });
 });

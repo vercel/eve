@@ -28,7 +28,7 @@ describe("composeRuntimeBasePrompt", () => {
     ).toEqual([
       [
         "Tool execution",
-        "A single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.",
+        "Tool calls in one response run in parallel, so batch only calls that don't depend on each other.",
       ].join("\n"),
     ]);
   });
@@ -125,10 +125,9 @@ describe("composeRuntimeBasePrompt", () => {
       [
         "Workspace",
         "- You have access to authored files mounted at the workspace root for this run.",
-        "- The live workspace root visible to `bash` in this run is `/workspace`.",
-        "- Root entries under /workspace/:",
+        "- The workspace root is the directory where `bash` commands start; `pwd` prints its absolute path.",
+        "- Root entries under the workspace root:",
         "  - skills/",
-        "- Treat `/workspace` as the workspace root for this run unless a `bash` call shows otherwise.",
         "- For questions about workspace paths or file availability, verify with `bash` first using commands like `pwd`, `ls`, and `find`.",
         "- If the required `bash` verification fails, report that failure directly instead of answering from this overview.",
         "- Use the `bash` tool with `ls`, `find`, and `rg` to inspect deeper contents when needed.",
@@ -151,10 +150,9 @@ describe("composeRuntimeBasePrompt", () => {
       [
         "Workspace",
         "- You have access to authored files mounted at the workspace root for this run.",
-        "- The live workspace root visible to `bash` in this run is `/workspace`.",
-        "- Root entries under /workspace/:",
+        "- The workspace root is the directory where `bash` commands start; `pwd` prints its absolute path.",
+        "- Root entries under the workspace root:",
         "  - skills/",
-        "- Treat `/workspace` as the workspace root for this run unless a `bash` call shows otherwise.",
         "- For questions about workspace paths or file availability, verify with `bash` first using commands like `pwd`, `ls`, and `find`.",
         "- If the required `bash` verification fails, report that failure directly instead of answering from this overview.",
         "- Use the `bash` tool with `ls`, `find`, and `rg` to inspect deeper contents when needed.",
@@ -162,7 +160,7 @@ describe("composeRuntimeBasePrompt", () => {
       ].join("\n"),
       [
         "Tool execution",
-        "A single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.",
+        "Tool calls in one response run in parallel, so batch only calls that don't depend on each other.",
       ].join("\n"),
     ]);
   });

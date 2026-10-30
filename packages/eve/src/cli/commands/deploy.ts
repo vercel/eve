@@ -6,6 +6,7 @@ import { hasInteractiveTerminal, validateWorkspaceProjectCommand } from "./preco
 import {
   isNonInteractiveProjectCommand,
   runNonInteractiveLink,
+  type NonInteractiveLinkDependencies,
   type VercelProjectCliOptions,
 } from "./vercel-non-interactive.js";
 
@@ -20,6 +21,7 @@ export interface DeployCommandDependencies {
   isEveProject?: typeof isEveProject;
   /** Test seam into the flow's detection and box effects. */
   flowDeps?: Partial<DeployFlowDeps>;
+  nonInteractiveLinkDeps?: NonInteractiveLinkDependencies;
 }
 
 const defaultDependencies: DeployCommandDependencies = {
@@ -38,7 +40,7 @@ export async function runDeployCommand(
   logger: DeployCliLogger,
   appRoot: string,
   dependencies: DeployCommandDependencies = defaultDependencies,
-  options: VercelProjectCliOptions & { yes?: boolean } = {},
+  options: VercelProjectCliOptions & { yes?: boolean; traceSampling?: boolean } = {},
 ): Promise<void> {
   if (
     !(await validateWorkspaceProjectCommand({
@@ -51,27 +53,34 @@ export async function runDeployCommand(
   ) {
     return;
   }
-  if (isNonInteractiveProjectCommand(options)) {
-    if (options.yes !== true) {
-      logger.error(
-        "`eve deploy --non-interactive` requires `--yes` to confirm production deployment.",
-      );
-      process.exitCode = 1;
-      return;
-    }
-    if (options.project !== undefined) {
-      if (!(await runNonInteractiveLink({ logger, appRoot, options }))) return;
-    }
+  const nonInteractive = isNonInteractiveProjectCommand(options);
+  if (nonInteractive && options.yes !== true) {
+    logger.error(
+      "`eve deploy --non-interactive` requires `--yes` to confirm production deployment.",
+    );
+    process.exitCode = 1;
+    return;
   }
   const prompter = dependencies.createPrompter?.() ?? createPrompter();
-  prompter.intro("Deploy your eve agent to Vercel");
   try {
+    if (nonInteractive && options.project !== undefined) {
+      if (
+        !(await runNonInteractiveLink({
+          logger,
+          appRoot,
+          options,
+          prompter,
+          dependencies: dependencies.nonInteractiveLinkDeps,
+        }))
+      )
+        return;
+    }
+    prompter.intro("Deploy your eve agent to Vercel");
     const result = await runDeployFlow({
       appRoot,
       prompter,
-      interactive: isNonInteractiveProjectCommand(options)
-        ? false
-        : dependencies.hasInteractiveTerminal(),
+      traceSampling: options.traceSampling !== false,
+      interactive: nonInteractive ? false : dependencies.hasInteractiveTerminal(),
       deps: dependencies.flowDeps,
     });
     if (result.kind === "needs-link") {

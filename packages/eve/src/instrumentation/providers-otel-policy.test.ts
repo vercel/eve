@@ -1,3 +1,4 @@
+import { instrumentationScope } from "#instrumentation/scope.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -8,20 +9,16 @@ import {
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { otel, type TracePolicyDecision } from "#public/instrumentation/otel.js";
 
-vi.mock("#tracing/otel-registration.js", () => ({
-  registerOtelPipeline: () => ({
-    forceFlush: async () => undefined,
-    idGenerator: {
-      deriveSpanId: () => "2".repeat(16),
-      generateTraceId: () => "1".repeat(32),
-      withSpanId: (_spanId: string, run: () => unknown) => run(),
-      withTraceId: (_traceId: string, run: () => unknown) => run(),
-    },
-    shutdown: async () => undefined,
+const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
+vi.mock("#tracing/eve/otel-registration.js", () => ({
+  registerOtel: () => ({
+    provider: { getTracer: () => ({}) },
+    idGenerator: { deriveSpanId: () => "2".repeat(16), generateTraceId: () => "1".repeat(32) },
+    samplesTrace: () => true,
+    forceFlush: async () => {},
+    shutdown: async () => {},
   }),
 }));
-
-const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
 const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
 
 const traceContext = (audience: "public" | "private" | "unknown") => ({
@@ -29,7 +26,6 @@ const traceContext = (audience: "public" | "private" | "unknown") => ({
   audience,
   channel: { kind: "http" as const },
   environment: "production" as const,
-  mode: "conversation" as const,
   principalType: "anonymous",
 });
 
@@ -70,14 +66,16 @@ describe("otel and authored provider composition", () => {
             messages: [{ content: "private user message", role: "user" }],
           },
           model: { modelId: "test-model", provider: "test-provider" },
-          scope: {
-            attemptId: "session-1:turn-1:0:0",
-            attemptIndex: 0,
-            channelAudience: "private",
-            sessionId: "session-1",
-            stepIndex: 0,
-            turnId: "turn-1",
-          },
+          scope: instrumentationScope(
+            {
+              runId: "session-1:turn-1:0:0",
+              attempt: 0,
+              channelAudience: "private",
+              sessionId: "session-1",
+              turnId: "turn-1",
+            },
+            0,
+          ),
           type: "model.call.started",
         }),
       );

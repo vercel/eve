@@ -2,7 +2,7 @@ import { readProjectLink, type VercelProjectReference } from "#setup/project-res
 
 import { SetupPrerequisiteRequired } from "./prerequisite.js";
 
-export interface IntegrationVercelProjectDeps {
+interface IntegrationVercelProjectDeps {
   readProjectLink: typeof readProjectLink;
 }
 

@@ -1,13 +1,45 @@
 import { createHeadlessPrompter } from "#setup/headless.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
+import { WizardCancelledError } from "#setup/step.js";
 import { mergeRegistrySetupCompletions } from "#setup/registry-setup-completion.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
+import {
+  SetupPrerequisiteRequired,
+  setupPrerequisiteOf,
+  type SetupPrerequisite,
+} from "#setup/integrations/shared/prerequisite.js";
 
 import type { RegistryCommandLogger, RegistrySetupDependencies } from "./registry.js";
 import type { RegistrySetupCommand } from "./registry-setup-command.js";
 import { headlessSetupContinuation, serializeHeadlessSetupEvent } from "./setup-headless.js";
 
-export interface DeclaredSetupOptions {
+/**
+ * A declared setup that failed after the item's source was installed. Keeps
+ * the original error as `cause` so interactive callers can report the item as
+ * installed-but-not-set-up and recover from a structured prerequisite (for
+ * example `vercel login`) instead of parsing the message.
+ */
+export class RegistrySetupFailedError extends Error {
+  readonly item: string;
+  readonly resumeCommand: string;
+  /** The failure without the resume hint, for callers that render it separately. */
+  readonly reason: string;
+
+  constructor(input: { item: string; resumeCommand: string; cause: unknown }) {
+    const reason = input.cause instanceof Error ? input.cause.message : String(input.cause);
+    super(`${reason} Try again with \`${input.resumeCommand}\`.`, { cause: input.cause });
+    this.name = "RegistrySetupFailedError";
+    this.item = input.item;
+    this.resumeCommand = input.resumeCommand;
+    this.reason = reason;
+  }
+
+  get prerequisite(): SetupPrerequisite | undefined {
+    return setupPrerequisiteOf(this.cause);
+  }
+}
+
+interface DeclaredSetupOptions {
   yes?: boolean;
   force?: boolean;
   nonInteractive?: boolean;
@@ -25,7 +57,6 @@ export async function runDeclaredSetups(input: {
   setups: readonly RegistrySetupCommand[] | undefined;
   options: DeclaredSetupOptions;
   dependencies: RegistrySetupDependencies;
-  cancelledReminder: string;
   resumeCommand: string;
 }): Promise<RegistrySetupCompletion | false> {
   let completion: RegistrySetupCompletion = { facts: [] };
@@ -60,12 +91,14 @@ export async function runDeclaredSetups(input: {
         input.item,
         { prompter, signal: input.options.signal },
       );
-      if (result.kind === "cancelled") {
-        input.logger.log(input.cancelledReminder);
-        return false;
-      }
+      if (result.kind === "cancelled") return false;
       if (result.kind === "blocked") {
-        if (!input.options.nonInteractive) throw new Error("Setup requires more input.");
+        if (!input.options.nonInteractive) {
+          if (result.blocker.status === "prerequisite_required") {
+            throw new SetupPrerequisiteRequired(result.blocker.prerequisite);
+          }
+          throw new Error("Setup requires more input.");
+        }
         input.logger.error(
           serializeHeadlessSetupEvent({
             version: 1,
@@ -92,6 +125,7 @@ export async function runDeclaredSetups(input: {
     }
     return completion;
   } catch (error) {
+    if (error instanceof WizardCancelledError) return false;
     const message = error instanceof Error ? error.message : String(error);
     if (input.options.nonInteractive) {
       input.logger.error(
@@ -111,6 +145,10 @@ export async function runDeclaredSetups(input: {
       process.exitCode = 1;
       return false;
     }
-    throw new Error(`${message} Try again with \`${input.resumeCommand}\`.`);
+    throw new RegistrySetupFailedError({
+      item: input.item,
+      resumeCommand: input.resumeCommand,
+      cause: error,
+    });
   }
 }

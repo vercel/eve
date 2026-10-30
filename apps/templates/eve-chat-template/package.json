@@ -7,18 +7,20 @@
     "#evals/*": "./evals/*"
   },
   "scripts": {
-    "build": "next build",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:migrate:production": "vercel env run -e production -- pnpm db:migrate",
-    "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio",
-    "dev": "next dev",
-    "start": "next start",
-    "typecheck": "next typegen && tsgo --noEmit -p tsconfig.json",
+    "build": "pnpm build:eve && pnpm build:web",
     "build:eve": "eve build",
+    "build:web": "next build --turbopack apps/web",
+    "db:generate": "drizzle-kit generate --config apps/web/drizzle.config.ts",
+    "db:migrate": "drizzle-kit migrate --config apps/web/drizzle.config.ts",
+    "db:migrate:production": "vercel env run -e production -- pnpm db:migrate",
+    "db:push": "drizzle-kit push --config apps/web/drizzle.config.ts",
+    "db:studio": "drizzle-kit studio --config apps/web/drizzle.config.ts",
+    "dev": "next dev apps/web",
     "dev:eve": "eve dev",
-    "start:eve": "eve start"
+    "dev:all": "vercel dev --local",
+    "dev:web": "next dev apps/web",
+    "start:eve": "eve start",
+    "typecheck": "next typegen apps/web && tsgo --noEmit -p apps/web/tsconfig.json"
   },
   "dependencies": {
     "@neondatabase/serverless": "1.1.0",
@@ -32,17 +34,17 @@
     "@tailwindcss/postcss": "4.3.3",
     "@upstash/redis": "1.38.2",
     "@vercel/analytics": "2.0.1",
-    "@vercel/connect": "0.8.0",
+    "@vercel/connect": "^2.5.2",
     "@vercel/speed-insights": "2.0.0",
-    "ai": "7.0.105",
-    "better-auth": "1.7.1",
+    "ai": "7.0.137",
+    "better-auth": "1.7.10",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
     "drizzle-orm": "0.45.2",
-    "eve": "^0.54.2",
+    "eve": "^0.84.0",
     "lucide-react": "1.33.0",
-    "next": "16.3.4",
+    "next": "16.3.8",
     "radix-ui": "1.6.7",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -59,8 +61,7 @@
     "@types/react-dom": "19.2.4",
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "drizzle-kit": "0.31.10",
-    "microsandbox": "^0.5.10",
     "typescript": "7.0.2"
   },
-  "packageManager": "pnpm@12.4.2"
+  "packageManager": "pnpm@11.25.0"
 }

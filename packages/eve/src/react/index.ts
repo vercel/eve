@@ -1,29 +1,30 @@
 export {
   useEveAgent,
   type PrepareSend,
-  type UseEveAgentHelpers,
+  type UseEveAgentReturn,
   type UseEveAgentOptions,
   type UseEveAgentSnapshot,
   type UseEveAgentStatus,
 } from "#react/use-eve-agent.js";
 
 export {
-  type EveAgentReducer,
-  type EveAgentReducerEvent,
-  type ClientInputRespondedEvent,
-  type ClientMessageFailedEvent,
-  type ClientMessageSubmittedEvent,
-} from "#client/reducer.js";
-export {
-  defaultMessageReducer,
-  type EveAuthorizationChallenge,
-  type EveAuthorizationOutcome,
-  type EveAuthorizationPart,
-  type EveMessageData,
-  type EveDynamicToolPart,
-  type EveMessageInputRequest,
-  type EveMessage,
-  type EveMessageMetadata,
-  type EveMessagePart,
-  type EveMessageToolMetadata,
-} from "#client/message-reducer.js";
+  signInEnding,
+  type AskedCall,
+  type Interaction,
+} from "#protocol/session-projection/reader.js";
+
+export type {
+  AgentObservation,
+  AgentObservationReason,
+  FollowAgents,
+  FollowedChild,
+  ConversationAgentSession,
+  ConversationState,
+} from "#client/conversation-state.js";
+export type {
+  EveInteractionPart,
+  EveMessage,
+  EveMessageMetadata,
+  EveMessagePart,
+  EveToolPart,
+} from "#client/message-types.js";

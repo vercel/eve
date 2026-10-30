@@ -1,0 +1,1908 @@
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+import { describe, expect, it } from "vitest";
+
+import { compileAgent } from "#compiler/compile-agent.js";
+import type { CompiledModuleMap } from "#compiler/module-map.js";
+import { compileAgentManifest } from "#compiler/normalize-manifest.js";
+import { discoverAgent } from "#discover/discover-agent.js";
+import { resolveDiscoveryProject } from "#discover/project.js";
+import {
+  bundleAuthoredModuleCode,
+  bundleAuthoredModuleForGeneration,
+  bundleAuthoredModuleMapForGeneration,
+  loadAuthoredModuleNamespace,
+} from "#internal/authored-module-loader.js";
+import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
+import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
+import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
+
+describe("loadAuthoredModuleNamespace", () => {
+  const createAppRoot = useTemporaryAppRoots();
+
+  function createApp(input: {
+    readonly files: Readonly<Record<string, string>>;
+    readonly name: string;
+  }) {
+    return createAppRoot(`eve-${input.name}-`, { files: input.files });
+  }
+
+  it.each(["defineTool", "bare object"])(
+    "rejects %s workflow executors during compilation",
+    async (kind) => {
+      const definition = `{ description: "Legacy workflow", inputSchema: {}, async execute() {
+  "use workflow";
+  return 1;
+} }`;
+      const app = await createApp({
+        files: {
+          "agent/agent.ts":
+            'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+          "agent/tools/probe.ts": `import { defineTool } from "eve/tools";\nexport default ${kind === "defineTool" ? `defineTool(${definition})` : definition};`,
+        },
+        name: "legacy-workflow-tool",
+      });
+      const discovered = await discoverAgent({
+        agentRoot: join(app.appRoot, "agent"),
+        appRoot: app.appRoot,
+      });
+      await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(
+        "Workflow executors require defineWorkflowTool()",
+      );
+    },
+  );
+
+  it("rejects a named workflow channel handler during compilation", async () => {
+    const app = await createApp({
+      files: {
+        "agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
+        "agent/channels/probe.ts": `import { defineChannel, POST } from "eve/channels";
+export default defineChannel({ routes: [POST("/probe", handler)] });
+async function handler() {
+  "use workflow";
+  return new Response("Done");
+}`,
+      },
+      name: "invalid-workflow-channel",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(
+      '"use workflow" is not supported on channel callbacks',
+    );
+  });
+
+  it.each([
+    ["missing", "async execute() { return 1; }", ""],
+    ["generator", "async *execute() { yield 1; }", ""],
+    ["expression body", "execute: async () => 1", ""],
+    ["synchronous", "execute() { return 1; }", ""],
+    ["local reference", "execute: run", "async function run() { return 1; }"],
+    [
+      "unrelated workflow",
+      "async execute() { return 1; }",
+      'async function other() { "use workflow"; return 1; }',
+    ],
+  ])(
+    "rejects a workflow tool with a %s executor directive during compilation",
+    async (_kind, execute, helper) => {
+      const app = await createApp({
+        files: {
+          "agent/agent.ts":
+            'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+          "agent/tools/probe.ts": `import { defineWorkflowTool } from "eve/tools";
+export default defineWorkflowTool({ description: "Probe", inputSchema: {}, ${execute} });
+${helper}`,
+        },
+        name: "missing-workflow-directive",
+      });
+      const discovered = await discoverAgent({
+        agentRoot: join(app.appRoot, "agent"),
+        appRoot: app.appRoot,
+      });
+      await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(
+        "requires a compiled workflow executor",
+      );
+    },
+  );
+
+  it.each([
+    ['import { defineWorkflowTool as durable } from "eve/tools";', "durable"],
+    ['import * as tools from "eve/tools";', "tools.defineWorkflowTool"],
+  ])("validates a workflow tool through its compiled definition: %s", async (binding, definer) => {
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/tools/probe.ts": `${binding}
+import { run } from "../lib/run";
+export default ${definer}({ description: "Probe", inputSchema: {}, execute: run });`,
+        "agent/lib/run.ts": 'export async function run() { "use workflow"; return 1; }',
+      },
+      name: "compiled-workflow-reference",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    const compiled = await compileAgentManifest(discovered.manifest);
+    expect(compiled.tools.find((tool) => tool.name === "probe")?.behavior?.handling).toEqual({
+      entryPoint: "execute",
+      kind: "workflow-tool",
+      workflowId: "workflow//./agent/lib/run//run",
+    });
+  });
+
+  it("compiles a workflow tool that calls agent through an imported helper", async () => {
+    const app = await createApp({
+      files: {
+        "agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
+        "agent/tools/probe.ts": `import { defineWorkflowTool } from "eve/tools";
+import { delegate } from "../lib/delegate";
+export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "object" }, async execute(input, ctx) {
+  "use workflow";
+  return delegate(ctx, input);
+} });`,
+        "agent/lib/delegate.ts": `export async function delegate(ctx, input) {\n  const response = await ctx.agent("researcher").send(input.message);\n  return (await response.result()).message;\n}`,
+      },
+      name: "valid-workflow-helper",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    await expect(compileAgentManifest(discovered.manifest)).resolves.toBeDefined();
+  });
+
+  it.each([
+    [
+      "channels/probe.ts",
+      "channel",
+      'import { defineChannel, POST } from "eve/channels";',
+      'defineChannel({ routes: [POST("/probe", handler)] })',
+    ],
+    [
+      "schedules/probe.ts",
+      "schedule",
+      'import { defineSchedule } from "eve/schedules";',
+      'defineSchedule({ cron: "* * * * *", run: handler })',
+    ],
+  ])(
+    "rejects an imported workflow handler while compiling %s",
+    async (path, kind, binding, definition) => {
+      const app = await createApp({
+        files: {
+          "agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
+          [`agent/${path}`]: `${binding}\nimport { handler } from "../lib/handler";\nexport default ${definition};\n`,
+          "agent/lib/handler.ts": `export async function handler() {
+  "use workflow";
+  return undefined;
+}`,
+        },
+        name: "imported-workflow-handler",
+      });
+      const discovered = await discoverAgent({
+        agentRoot: join(app.appRoot, "agent"),
+        appRoot: app.appRoot,
+      });
+      await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(
+        `"use workflow" is not supported on ${kind} callbacks`,
+      );
+    },
+  );
+
+  it("explains when an installed package contains Node-incompatible extensionless ESM", async () => {
+    const app = await createApp({
+      files: {
+        "agent/channels/eve.ts": [
+          'import { matchRoute } from "compiler-oriented-sdk/server";',
+          "",
+          'export const result = matchRoute("/");',
+          "",
+        ].join("\n"),
+        "node_modules/compiler-oriented-sdk/dist/server/index.js": `export { matchRoute } from "./routeMatcher";
+`,
+        "node_modules/compiler-oriented-sdk/dist/server/routeMatcher.js": `export const matchRoute = () => true;
+`,
+        "node_modules/compiler-oriented-sdk/package.json": JSON.stringify({
+          exports: { "./server": "./dist/server/index.js" },
+          name: "compiler-oriented-sdk",
+          type: "module",
+        }),
+      },
+      name: "compiler-oriented-external-package",
+    });
+    const modulePath = join(app.appRoot, "agent", "channels", "eve.ts");
+
+    let thrown: unknown;
+    try {
+      await loadAuthoredModuleNamespace(modulePath);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const error = thrown as Error;
+    expect(error.message).toContain(`Failed to evaluate authored module:\n  ${modulePath}`);
+    expect(error.message).toContain("Failed to load an installed package:");
+    expect(error.message).toContain(
+      "  Package: compiler-oriented-sdk (loaded outside the authored bundle)",
+    );
+    expect(error.message).toContain("  Import: dist/server/routeMatcher");
+    expect(error.message).not.toContain("routeMatcher.js");
+    expect(error.message).toContain(
+      "  Reason: Node's ESM loader does not infer file extensions for relative imports.",
+    );
+    expect(error.message).toContain("  Hint: Use a Node-compatible package or entrypoint");
+    expect(error.cause).toBeInstanceOf(Error);
+    expect((error.cause as NodeJS.ErrnoException).code).toBe("ERR_MODULE_NOT_FOUND");
+  });
+
+  it("does not infer a compiler requirement when package output is simply missing", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_sdk.ts": `import "incomplete-sdk";
+export const result = true;
+`,
+        "node_modules/incomplete-sdk/index.js": `import "./generated";
+`,
+        "node_modules/incomplete-sdk/package.json": JSON.stringify({
+          exports: "./index.js",
+          name: "incomplete-sdk",
+          type: "module",
+        }),
+      },
+      name: "incomplete-external-package",
+    });
+    const modulePath = join(app.appRoot, "agent", "tools", "use_sdk.ts");
+
+    let thrown: unknown;
+    try {
+      await loadAuthoredModuleNamespace(modulePath);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const error = thrown as Error;
+    expect(error.message).toContain("Failed to load an installed package:");
+    expect(error.message).toContain(
+      "  Package: incomplete-sdk (loaded outside the authored bundle)",
+    );
+    expect(error.message).toContain("  Missing: generated");
+    expect(error.message).toContain(
+      "  Reason: Package output may be incomplete, incorrectly installed",
+    );
+    expect(error.message).not.toContain("ESM loader does not infer");
+    expect(error.cause).toMatchObject({ code: "ERR_MODULE_NOT_FOUND" });
+  });
+
+  it("preserves an authored module initialization failure as the evaluation cause", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/throws.ts": 'throw new Error("authored initialization failed");\n',
+      },
+      name: "authored-initialization-failure",
+    });
+    const modulePath = join(app.appRoot, "agent", "tools", "throws.ts");
+
+    let thrown: unknown;
+    try {
+      await loadAuthoredModuleNamespace(modulePath);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const error = thrown as Error;
+    expect(error.message).toContain(`Failed to evaluate authored module:\n  ${modulePath}`);
+    expect(error.message).not.toContain("Failed to load an installed package:");
+    expect(error.message).not.toContain("Package:");
+    expect(error.cause).toMatchObject({ message: "authored initialization failed" });
+  });
+
+  it("resolves extensionless relative imports with dotted TypeScript basenames", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_schema.ts": [
+          'import { schemaValue } from "./mock-registry.schemas";',
+          "",
+          "export const result = schemaValue;",
+          "",
+        ].join("\n"),
+        "agent/tools/mock-registry.schemas.ts": [
+          'export const schemaValue = "local-dotted-basename";',
+          "",
+        ].join("\n"),
+      },
+      name: "local-dotted-basename-import",
+    });
+
+    const moduleNamespace = await loadAuthoredModuleNamespace(
+      join(app.appRoot, "agent", "tools", "use_schema.ts"),
+    );
+
+    expect(moduleNamespace.result).toBe("local-dotted-basename");
+  });
+
+  it("resolves extensionless relative directory imports to index modules", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_helpers.ts": [
+          'import { helperValue } from "./helpers";',
+          "",
+          "export const result = helperValue;",
+          "",
+        ].join("\n"),
+        "agent/tools/helpers/index.ts": ['export const helperValue = "directory-index";', ""].join(
+          "\n",
+        ),
+      },
+      name: "directory-index-import",
+    });
+
+    const moduleNamespace = await loadAuthoredModuleNamespace(
+      join(app.appRoot, "agent", "tools", "use_helpers.ts"),
+    );
+
+    expect(moduleNamespace.result).toBe("directory-index");
+  });
+
+  it("resolves extensionless CommonJS requires with dotted JavaScript basenames", async () => {
+    const app = await createApp({
+      files: {
+        "agent/channels/api/contact-sales/webhook.ts": [
+          'import { readDottedValue } from "@repo/enrichment/dotted";',
+          "",
+          "export const result = readDottedValue();",
+          "",
+        ].join("\n"),
+      },
+      name: "dependency-dotted-basename-require",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-dependency-dotted-basename-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "enrichment");
+      const packageNodeModules = join(packageRoot, "node_modules", "fixture-dotted-cjs-dep");
+      await mkdir(join(packageRoot, "src"), { recursive: true });
+      await mkdir(packageNodeModules, { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify(
+          {
+            exports: {
+              "./dotted": "./src/dotted.ts",
+            },
+            name: "@repo/enrichment",
+            type: "module",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(packageRoot, "src", "dotted.ts"),
+        [
+          'import dottedDependency from "fixture-dotted-cjs-dep";',
+          "",
+          "export function readDottedValue() {",
+          "  return dottedDependency.value;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(
+        join(packageNodeModules, "package.json"),
+        JSON.stringify(
+          {
+            main: "index.cjs",
+            name: "fixture-dotted-cjs-dep",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(packageNodeModules, "index.cjs"),
+        'module.exports = require("./Reflect.getPrototypeOf");\n',
+      );
+      await writeFile(
+        join(packageNodeModules, "Reflect.getPrototypeOf.js"),
+        'module.exports = { value: "cjs-dotted-basename" };\n',
+      );
+
+      await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
+      await symlink(
+        packageRoot,
+        join(app.appRoot, "node_modules", "@repo", "enrichment"),
+        "junction",
+      );
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
+      );
+
+      expect(moduleNamespace.result).toBe("cjs-dotted-basename");
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("bundles symlinked workspace packages that export TypeScript source", async () => {
+    const app = await createApp({
+      files: {
+        "agent/channels/api/contact-sales/webhook.ts": [
+          'import { searchLinkedInProfile } from "@repo/enrichment/exa-linkedin";',
+          "",
+          "export const result = searchLinkedInProfile();",
+          "",
+        ].join("\n"),
+      },
+      name: "workspace-source-package",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-workspace-source-package-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "enrichment");
+      const packageNodeModules = join(packageRoot, "node_modules", "cjs-dep");
+      await mkdir(join(packageRoot, "src"), { recursive: true });
+      await mkdir(packageNodeModules, { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify(
+          {
+            exports: {
+              "./exa-linkedin": {
+                "eve-source": "./src/exa-linkedin.ts",
+                default: "./dist/exa-linkedin.js",
+              },
+            },
+            name: "@repo/enrichment",
+            type: "module",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(packageRoot, "src", "exa-linkedin.ts"),
+        [
+          'import * as cjs from "cjs-dep";',
+          'import { getExaClient } from "./exa-client";',
+          "",
+          "cjs.configure();",
+          "export function searchLinkedInProfile() {",
+          "  return getExaClient();",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(
+        join(packageRoot, "src", "exa-client.ts"),
+        `export function getExaClient() { return "linked"; }
+`,
+      );
+      await writeFile(
+        join(packageNodeModules, "package.json"),
+        JSON.stringify({ main: "index.cjs", name: "cjs-dep" }, null, 2),
+      );
+      await writeFile(
+        join(packageNodeModules, "index.cjs"),
+        [
+          "module.exports = { configure() {",
+          '  require("stream");',
+          '  if (typeof __dirname !== "string") throw new Error("__dirname missing");',
+          "} };",
+          "",
+        ].join("\n"),
+      );
+
+      await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
+      await symlink(
+        packageRoot,
+        join(app.appRoot, "node_modules", "@repo", "enrichment"),
+        "junction",
+      );
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
+      );
+
+      expect(moduleNamespace.result).toBe("linked");
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("applies a workspace package's sideEffects to modules it imports by relative path", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/probe.ts": [
+          'import { report } from "@repo/shared/report";',
+          "",
+          "export const result = report;",
+          "",
+        ].join("\n"),
+      },
+      name: "side-effect-free-relative-import",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-side-effect-free-package-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "shared");
+      await mkdir(join(packageRoot, "src"), { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify({
+          exports: { "./*": "./src/*.ts" },
+          name: "@repo/shared",
+          sideEffects: false,
+          type: "module",
+        }),
+      );
+      await writeFile(
+        join(packageRoot, "src", "registry.ts"),
+        "globalThis.sharedRegistryLoaded = true;\nexport const registry = {};\n",
+      );
+      await writeFile(
+        join(packageRoot, "src", "report.ts"),
+        'import "./registry";\nexport const report = "weekly report";\n',
+      );
+      await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
+      await symlink(packageRoot, join(app.appRoot, "node_modules", "@repo", "shared"), "junction");
+
+      const code = await bundleAuthoredModuleForGeneration(
+        join(app.appRoot, "agent", "tools", "probe.ts"),
+      );
+
+      expect(code).toContain("weekly report");
+      expect(code).not.toContain("sharedRegistryLoaded");
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("does not collide with authored modules that already declare __dirname", async () => {
+    // Regression: the Node ESM compatibility banner used to unconditionally
+    // prepend `const __dirname = ...` / `const __filename = ...` /
+    // `const require = ...` to every bundled chunk. When the authored
+    // source already declared one of those identifiers at the top level
+    // the bundled `.mjs` failed to load with
+    // `SyntaxError: Identifier '__dirname' has already been declared`.
+    const app = await createApp({
+      files: {
+        "agent/channels/api/already-declared/webhook.ts": [
+          'import { createRequire } from "node:module";',
+          'import { dirname } from "node:path";',
+          'import { fileURLToPath } from "node:url";',
+          "",
+          "const __filename = fileURLToPath(import.meta.url);",
+          "const __dirname = dirname(__filename);",
+          "const require = createRequire(import.meta.url);",
+          "",
+          "export const result = {",
+          "  dirname: typeof __dirname,",
+          "  filename: typeof __filename,",
+          "  require: typeof require,",
+          "};",
+          "",
+        ].join("\n"),
+      },
+      name: "authored-module-redeclares-path-globals",
+    });
+
+    const moduleNamespace = await loadAuthoredModuleNamespace(
+      join(app.appRoot, "agent", "channels", "api", "already-declared", "webhook.ts"),
+    );
+
+    expect(moduleNamespace.result).toEqual({
+      dirname: "string",
+      filename: "string",
+      require: "function",
+    });
+  });
+
+  it("uses a symlinked workspace package's tsconfig paths when bundling its source", async () => {
+    const app = await createApp({
+      files: {
+        "agent/channels/api/contact-sales/webhook.ts": [
+          'import { searchLinkedInProfile } from "@repo/enrichment/exa-linkedin";',
+          "",
+          "export const result = searchLinkedInProfile();",
+          "",
+        ].join("\n"),
+        "tsconfig.json": JSON.stringify(
+          {
+            compilerOptions: {
+              baseUrl: ".",
+              paths: {
+                "@app/*": ["agent/*"],
+              },
+            },
+          },
+          null,
+          2,
+        ),
+      },
+      name: "workspace-package-local-tsconfig-paths",
+    });
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "eve-workspace-package-local-tsconfig-paths-"),
+    );
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "enrichment");
+      await mkdir(join(packageRoot, "src", "internal"), { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify(
+          {
+            exports: {
+              "./exa-linkedin": "./src/exa-linkedin.ts",
+            },
+            name: "@repo/enrichment",
+            type: "module",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(packageRoot, "tsconfig.json"),
+        [
+          "{",
+          "  // Package-local aliases should be resolved from this config.",
+          '  "compilerOptions": {',
+          '    "baseUrl": ".",',
+          '    "paths": {',
+          '      "@enrichment/*": ["src/internal/*"],',
+          "    },",
+          "  },",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(
+        join(packageRoot, "src", "exa-linkedin.ts"),
+        [
+          'import { getExaClient } from "@enrichment/exa-client";',
+          "",
+          "export function searchLinkedInProfile() {",
+          "  return getExaClient();",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(
+        join(packageRoot, "src", "internal", "exa-client.ts"),
+        `export function getExaClient() { return "package-local-paths"; }
+`,
+      );
+
+      await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
+      await symlink(
+        packageRoot,
+        join(app.appRoot, "node_modules", "@repo", "enrichment"),
+        "junction",
+      );
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
+      );
+
+      expect(moduleNamespace.result).toBe("package-local-paths");
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("loads a linked package tsconfig from its real workspace location", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-linked-package-tsconfig-"));
+
+    try {
+      const workspaceRoot = join(root, "workspace");
+      const packageRoot = join(workspaceRoot, "packages", "extension");
+      const linkedPackageRoot = join(root, "app", "node_modules", "@repo", "extension");
+      await mkdir(join(packageRoot, "dist"), { recursive: true });
+      await mkdir(join(linkedPackageRoot, ".."), { recursive: true });
+      await writeFile(
+        join(workspaceRoot, "tsconfig.json"),
+        JSON.stringify({ compilerOptions: { target: "ES2024" } }),
+      );
+      await writeFile(
+        join(packageRoot, "tsconfig.json"),
+        JSON.stringify({ extends: "../../tsconfig.json" }),
+      );
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify({ name: "@repo/extension", type: "module" }),
+      );
+      await writeFile(
+        join(packageRoot, "dist", "entry.mjs"),
+        `export const result = "linked";
+`,
+      );
+      await symlink(packageRoot, linkedPackageRoot, "junction");
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(linkedPackageRoot, "dist", "entry.mjs"),
+      );
+
+      expect(moduleNamespace.result).toBe("linked");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps configured dependencies external when they are imported from workspace packages", async () => {
+    const app = await createApp({
+      files: {
+        "agent/channels/api/contact-sales/webhook.ts": [
+          'import { readExternalValue } from "@repo/enrichment/external-value";',
+          "",
+          "export const result = readExternalValue();",
+          "",
+        ].join("\n"),
+      },
+      name: "workspace-package-configured-external",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-workspace-configured-external-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "enrichment");
+      await mkdir(join(packageRoot, "src"), { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify(
+          {
+            exports: {
+              "./external-value": "./src/external-value.ts",
+            },
+            name: "@repo/enrichment",
+            type: "module",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(packageRoot, "src", "external-value.ts"),
+        [
+          'import externalOnly from "external-only";',
+          "",
+          "export function readExternalValue() {",
+          "  return externalOnly.value;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+
+      const externalPackageRoot = join(app.appRoot, "node_modules", "external-only");
+      await mkdir(externalPackageRoot, { recursive: true });
+      await writeFile(
+        join(externalPackageRoot, "package.json"),
+        JSON.stringify({ main: "index.cjs", name: "external-only" }, null, 2),
+      );
+      await writeFile(
+        join(externalPackageRoot, "index.cjs"),
+        [
+          'const fs = require("node:fs");',
+          'const path = require("node:path");',
+          "module.exports = {",
+          '  value: fs.readFileSync(path.join(__dirname, "payload.txt"), "utf8").trim(),',
+          "};",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(join(externalPackageRoot, "payload.txt"), "externalized\n");
+
+      await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
+      await symlink(
+        packageRoot,
+        join(app.appRoot, "node_modules", "@repo", "enrichment"),
+        "junction",
+      );
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
+        { externalDependencies: ["external-only"] },
+      );
+
+      expect(moduleNamespace.result).toBe("externalized");
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("bundles unconfigured dependencies imported from workspace packages", async () => {
+    const app = await createApp({
+      files: {
+        "agent/channels/api/contact-sales/webhook.ts": [
+          'import { readExternalValue } from "@repo/enrichment/external-value";',
+          "",
+          "export const result = readExternalValue();",
+          "",
+        ].join("\n"),
+      },
+      name: "workspace-package-bundled-dependency",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-workspace-bundled-dependency-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "enrichment");
+      await mkdir(join(packageRoot, "src"), { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify(
+          {
+            exports: {
+              "./external-value": "./src/external-value.ts",
+            },
+            name: "@repo/enrichment",
+            type: "module",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(packageRoot, "src", "external-value.ts"),
+        [
+          'import kmsClient from "@aws-sdk/client-kms";',
+          "",
+          "export function readExternalValue() {",
+          "  return kmsClient.value;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+
+      // Installed beside the workspace package, as pnpm lays it out.
+      const dependencyRoot = join(packageRoot, "node_modules", "@aws-sdk", "client-kms");
+      await mkdir(dependencyRoot, { recursive: true });
+      await writeFile(
+        join(dependencyRoot, "package.json"),
+        JSON.stringify({ main: "index.cjs", name: "@aws-sdk/client-kms" }, null, 2),
+      );
+      await writeFile(
+        join(dependencyRoot, "index.cjs"),
+        'module.exports = require("./runtimeConfig.shared");\n',
+      );
+      await writeFile(
+        join(dependencyRoot, "runtimeConfig.shared.js"),
+        "module.exports = { value: 'kms-client-inlined' };\n",
+      );
+
+      await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
+      await symlink(
+        packageRoot,
+        join(app.appRoot, "node_modules", "@repo", "enrichment"),
+        "junction",
+      );
+
+      const modulePath = join(
+        app.appRoot,
+        "agent",
+        "channels",
+        "api",
+        "contact-sales",
+        "webhook.ts",
+      );
+      const moduleNamespace = await loadAuthoredModuleNamespace(modulePath);
+
+      expect(moduleNamespace.result).toBe("kms-client-inlined");
+      // The dependency's source is inlined, not left as an external import.
+      expect(await bundleAuthoredModuleCode(modulePath)).toContain("kms-client-inlined");
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  // pnpm's store layout: an installed package's dependencies are store
+  // siblings, only resolvable from the package's real location. The compiled
+  // module map imports extension modules by literal path through the app's
+  // node_modules symlink (a dev-generation snapshot preserves that symlink
+  // while relocating every importer path), so bare imports must resolve from
+  // the module's realpath.
+  async function createStoreSiblingInstall(input: {
+    readonly appRoot: string;
+    readonly storeRoot: string;
+    readonly consumerDecoy?: boolean;
+  }): Promise<void> {
+    const storeNodeModules = join(input.storeRoot, "node_modules");
+    const packageRoot = join(storeNodeModules, "gadget-extension");
+    await mkdir(join(packageRoot, "extension", "tools"), { recursive: true });
+    await mkdir(join(storeNodeModules, "store-sibling"), { recursive: true });
+    await writeFile(
+      join(packageRoot, "package.json"),
+      JSON.stringify({ name: "gadget-extension", type: "module" }, null, 2),
+    );
+    await writeFile(
+      join(packageRoot, "extension", "tools", "echo.ts"),
+      ['import sibling from "store-sibling";', "", "export const result = sibling.value;", ""].join(
+        "\n",
+      ),
+    );
+    await writeFile(
+      join(storeNodeModules, "store-sibling", "package.json"),
+      JSON.stringify({ main: "index.cjs", name: "store-sibling" }, null, 2),
+    );
+    await writeFile(
+      join(storeNodeModules, "store-sibling", "index.cjs"),
+      "module.exports = { value: 'store-sibling-value' };\n",
+    );
+
+    await mkdir(join(input.appRoot, "node_modules"), { recursive: true });
+    await symlink(packageRoot, join(input.appRoot, "node_modules", "gadget-extension"), "junction");
+
+    if (input.consumerDecoy === true) {
+      const decoyRoot = join(input.appRoot, "node_modules", "store-sibling");
+      await mkdir(decoyRoot, { recursive: true });
+      await writeFile(
+        join(decoyRoot, "package.json"),
+        JSON.stringify({ main: "index.cjs", name: "store-sibling" }, null, 2),
+      );
+      await writeFile(join(decoyRoot, "index.cjs"), "module.exports = { value: 'decoy-value' };\n");
+    }
+  }
+
+  it("inlines store-sibling dependencies of modules reached through literal symlink paths", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_echo.ts": [
+          'import { result } from "../../node_modules/gadget-extension/extension/tools/echo.ts";',
+          "",
+          "export const toolResult = result;",
+          "",
+        ].join("\n"),
+      },
+      name: "store-sibling-generation",
+    });
+    const storeRoot = await mkdtemp(join(tmpdir(), "eve-store-sibling-generation-"));
+
+    try {
+      await createStoreSiblingInstall({ appRoot: app.appRoot, storeRoot });
+
+      const code = await bundleAuthoredModuleForGeneration(
+        join(app.appRoot, "agent", "tools", "use_echo.ts"),
+      );
+
+      expect(code).toContain("store-sibling-value");
+      expect(code).not.toMatch(/from\s*["']store-sibling["']/);
+    } finally {
+      await rm(storeRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("prefers a package's store sibling over a consumer copy of the same dependency", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_echo.ts": [
+          'import { result } from "../../node_modules/gadget-extension/extension/tools/echo.ts";',
+          "",
+          "export const toolResult = result;",
+          "",
+        ].join("\n"),
+      },
+      name: "store-sibling-precedence",
+    });
+    const storeRoot = await mkdtemp(join(tmpdir(), "eve-store-sibling-precedence-"));
+
+    try {
+      await createStoreSiblingInstall({ appRoot: app.appRoot, consumerDecoy: true, storeRoot });
+
+      const code = await bundleAuthoredModuleForGeneration(
+        join(app.appRoot, "agent", "tools", "use_echo.ts"),
+      );
+
+      expect(code).toContain("store-sibling-value");
+      expect(code).not.toContain("decoy-value");
+    } finally {
+      await rm(storeRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("resolves store siblings for generation bundles entered at node_modules paths", async () => {
+    const app = await createApp({
+      files: {
+        "agent/instructions.md": "Store-sibling entry scenario.\n",
+      },
+      name: "store-sibling-entry",
+    });
+    const storeRoot = await mkdtemp(join(tmpdir(), "eve-store-sibling-entry-"));
+
+    try {
+      await createStoreSiblingInstall({ appRoot: app.appRoot, consumerDecoy: true, storeRoot });
+
+      const code = await bundleAuthoredModuleForGeneration(
+        join(app.appRoot, "node_modules", "gadget-extension", "extension", "tools", "echo.ts"),
+      );
+
+      expect(code).toContain("store-sibling-value");
+      expect(code).not.toContain("decoy-value");
+    } finally {
+      await rm(storeRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps configured dependency subpaths importable after externalizing them", async () => {
+    const app = await createApp({
+      files: {
+        "agent/channels/api/contact-sales/webhook.ts": [
+          'import { readExternalValue } from "@repo/enrichment/external-value";',
+          "",
+          "export const result = readExternalValue();",
+          "",
+        ].join("\n"),
+      },
+      name: "workspace-package-configured-external-subpath",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-workspace-external-subpath-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "enrichment");
+      await mkdir(join(packageRoot, "src"), { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify(
+          {
+            exports: {
+              "./external-value": "./src/external-value.ts",
+            },
+            name: "@repo/enrichment",
+            type: "module",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(packageRoot, "src", "external-value.ts"),
+        [
+          'import externalTags from "external-only/ext/tags";',
+          "",
+          "export function readExternalValue() {",
+          "  return externalTags.value;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+
+      const externalPackageRoot = join(app.appRoot, "node_modules", "external-only");
+      await mkdir(join(externalPackageRoot, "ext"), { recursive: true });
+      await writeFile(
+        join(externalPackageRoot, "package.json"),
+        JSON.stringify({ main: "index.js", name: "external-only", type: "commonjs" }, null, 2),
+      );
+      await writeFile(
+        join(externalPackageRoot, "ext", "tags.js"),
+        "module.exports = { value: 'external-subpath' };\n",
+      );
+
+      await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
+      await symlink(
+        packageRoot,
+        join(app.appRoot, "node_modules", "@repo", "enrichment"),
+        "junction",
+      );
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
+        { externalDependencies: ["external-only"] },
+      );
+
+      expect(moduleNamespace.result).toBe("external-subpath");
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("resolves configured dependency subpaths from the importing package", async () => {
+    const app = await createApp({
+      files: {
+        "agent/channels/api/contact-sales/webhook.ts": [
+          'import { readExternalValue } from "@repo/enrichment/external-value";',
+          "",
+          "export const result = readExternalValue();",
+          "",
+        ].join("\n"),
+      },
+      name: "workspace-package-nested-external-subpath",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-workspace-nested-external-subpath-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "enrichment");
+      const externalPackageRoot = join(packageRoot, "node_modules", "external-only");
+      await mkdir(join(packageRoot, "src"), { recursive: true });
+      await mkdir(join(externalPackageRoot, "ext"), { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify(
+          {
+            exports: {
+              "./external-value": "./src/external-value.ts",
+            },
+            name: "@repo/enrichment",
+            type: "module",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(packageRoot, "src", "external-value.ts"),
+        [
+          'import externalTags from "external-only/ext/tags";',
+          "",
+          "export function readExternalValue() {",
+          "  return externalTags.value;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(
+        join(externalPackageRoot, "package.json"),
+        JSON.stringify({ main: "index.js", name: "external-only", type: "commonjs" }, null, 2),
+      );
+      await writeFile(
+        join(externalPackageRoot, "ext", "tags.js"),
+        "module.exports = { value: 'nested-external-subpath' };\n",
+      );
+
+      await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
+      await symlink(
+        packageRoot,
+        join(app.appRoot, "node_modules", "@repo", "enrichment"),
+        "junction",
+      );
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
+        { externalDependencies: ["external-only"] },
+      );
+
+      expect(moduleNamespace.result).toBe("nested-external-subpath");
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("applies agent build externals while compiling authored modules", async () => {
+    const app = await createApp({
+      files: {
+        "agent/agent.ts": [
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
+          '  model: "anthropic/claude-sonnet-5",',
+          '  build: { externalDependencies: ["external-only"] },',
+          "});",
+          "",
+        ].join("\n"),
+        "agent/tools/read_external.ts": [
+          'import { readExternalValue } from "@repo/enrichment/external-value";',
+          "",
+          "export default {",
+          '  description: "Read the external package value.",',
+          "  execute() {",
+          "    return readExternalValue();",
+          "  },",
+          "};",
+          "",
+        ].join("\n"),
+      },
+      name: "compile-agent-configured-external",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-compile-configured-external-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "enrichment");
+      await mkdir(join(packageRoot, "src"), { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify(
+          {
+            exports: {
+              "./external-value": "./src/external-value.ts",
+            },
+            name: "@repo/enrichment",
+            type: "module",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(packageRoot, "src", "external-value.ts"),
+        [
+          'import externalOnly from "external-only";',
+          "",
+          "export function readExternalValue() {",
+          "  return externalOnly.value;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+
+      const externalPackageRoot = join(app.appRoot, "node_modules", "external-only");
+      await mkdir(externalPackageRoot, { recursive: true });
+      await writeFile(
+        join(externalPackageRoot, "package.json"),
+        JSON.stringify({ main: "index.cjs", name: "external-only" }, null, 2),
+      );
+      await writeFile(
+        join(externalPackageRoot, "index.cjs"),
+        [
+          'const fs = require("node:fs");',
+          'const path = require("node:path");',
+          "module.exports = {",
+          '  value: fs.readFileSync(path.join(__dirname, "payload.txt"), "utf8").trim(),',
+          "};",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(join(externalPackageRoot, "payload.txt"), "compiled-external\n");
+
+      await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
+      await symlink(
+        packageRoot,
+        join(app.appRoot, "node_modules", "@repo", "enrichment"),
+        "junction",
+      );
+
+      const discovered = await discoverAgent({
+        agentRoot: join(app.appRoot, "agent"),
+        appRoot: app.appRoot,
+      });
+      const manifest = await compileAgentManifest(discovered.manifest);
+
+      expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
+      expect(
+        manifest.tools.filter(
+          (tool) => manifest.bindings[tool.sourceId]?.owner.kind === "application",
+        ),
+      ).toHaveLength(1);
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("inherits root build externals while compiling subagent authored modules", async () => {
+    const app = await createApp({
+      files: {
+        "agent/agent.ts": [
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
+          '  model: "anthropic/claude-sonnet-5",',
+          '  build: { externalDependencies: ["external-only"] },',
+          "});",
+          "",
+        ].join("\n"),
+        "agent/subagents/signal-gatherer/agent.ts": [
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
+          '  description: "Gather abuse signals.",',
+          '  model: "anthropic/claude-sonnet-5",',
+          "});",
+          "",
+        ].join("\n"),
+        "agent/subagents/signal-gatherer/tools/read_external.ts": [
+          'import { readExternalValue } from "@repo/enrichment/external-value";',
+          "",
+          "export default {",
+          '  description: "Read the external package value.",',
+          "  execute() {",
+          "    return readExternalValue();",
+          "  },",
+          "};",
+          "",
+        ].join("\n"),
+      },
+      name: "compile-subagent-inherited-external",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-subagent-inherited-external-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "enrichment");
+      await mkdir(join(packageRoot, "src"), { recursive: true });
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify(
+          {
+            exports: {
+              "./external-value": "./src/external-value.ts",
+            },
+            name: "@repo/enrichment",
+            type: "module",
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        join(packageRoot, "src", "external-value.ts"),
+        [
+          'import externalOnly from "external-only";',
+          "",
+          "export function readExternalValue() {",
+          "  return externalOnly.value;",
+          "}",
+          "",
+        ].join("\n"),
+      );
+
+      const externalPackageRoot = join(app.appRoot, "node_modules", "external-only");
+      await mkdir(externalPackageRoot, { recursive: true });
+      await writeFile(
+        join(externalPackageRoot, "package.json"),
+        JSON.stringify({ main: "index.cjs", name: "external-only" }, null, 2),
+      );
+      await writeFile(
+        join(externalPackageRoot, "index.cjs"),
+        [
+          'const fs = require("node:fs");',
+          'const path = require("node:path");',
+          "module.exports = {",
+          '  value: fs.readFileSync(path.join(__dirname, "payload.txt"), "utf8").trim(),',
+          "};",
+          "",
+        ].join("\n"),
+      );
+      await writeFile(join(externalPackageRoot, "payload.txt"), "subagent-external\n");
+
+      await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
+      await symlink(
+        packageRoot,
+        join(app.appRoot, "node_modules", "@repo", "enrichment"),
+        "junction",
+      );
+
+      const discovered = await discoverAgent({
+        agentRoot: join(app.appRoot, "agent"),
+        appRoot: app.appRoot,
+      });
+      const manifest = await compileAgentManifest(discovered.manifest);
+      const subagent = manifest.subagents[0];
+      if (subagent?.configResolver !== undefined) {
+        throw new Error("expected a static subagent");
+      }
+
+      expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
+      expect(subagent?.agent.config.build?.externalDependencies).toEqual(["external-only"]);
+      expect(
+        subagent?.agent.tools.filter(
+          (tool) => subagent.agent.bindings[tool.sourceId]?.owner.kind === "application",
+        ),
+      ).toHaveLength(1);
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it.each([
+    [
+      "transpiled CommonJS",
+      'Object.defineProperty(exports, "__esModule", { value: true }); exports.default = tool;',
+    ],
+    ["CommonJS", "module.exports = tool;"],
+  ])("compiles %s authored tool exports", async (_kind, exportStatement) => {
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/tools/legacy.cjs": [
+          'const tool = { description: "Legacy tool.", execute() { return "ok"; } };',
+          exportStatement,
+          "",
+        ].join("\n"),
+      },
+      name: "commonjs-authored-tool",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+
+    const compiled = await compileAgentManifest(discovered.manifest);
+
+    expect(compiled.tools.find((tool) => tool.logicalPath === "tools/legacy.cjs")).toMatchObject({
+      description: "Legacy tool.",
+      hasExecute: true,
+    });
+  });
+
+  it("resolves transpiled CommonJS authored modules from the runtime module map", async () => {
+    const esModuleFlag = 'Object.defineProperty(exports, "__esModule", { value: true });';
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/instructions.md": "Use the legacy tool.",
+        "agent/sandbox/sandbox.cjs": [
+          'const { DefaultSandbox, defineSandbox } = require("eve/sandbox");',
+          esModuleFlag,
+          "const environment = DefaultSandbox.environment();",
+          "exports.environment = environment;",
+          "exports.default = defineSandbox(async () => await environment.open());",
+          "",
+        ].join("\n"),
+        "agent/tools/legacy.cjs": [
+          esModuleFlag,
+          'exports.default = { description: "Legacy tool.", execute() { return "ok"; } };',
+          "",
+        ].join("\n"),
+      },
+      name: "commonjs-runtime-module-map",
+    });
+    const { manifest } = await compileAgent({ startPath: app.appRoot });
+    const moduleMapPath = join(app.appRoot, ".eve", "compile", "generation-module-map.mjs");
+    const { code } = await bundleAuthoredModuleMapForGeneration({
+      appRoot: app.appRoot,
+      manifest,
+      moduleMapPath,
+    });
+    await writeFile(moduleMapPath, code);
+    const moduleMaps = {
+      // What `eve build` output and the `eve dev` host import.
+      generation: (
+        (await import(pathToFileURL(moduleMapPath).href)) as { default: CompiledModuleMap }
+      ).default,
+      // What `eve eval`, sandbox prewarm, and the compiled-agent cache hydrate from source.
+      authoredSource: await loadCompiledModuleMapFromAuthoredSource({
+        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
+      }),
+    };
+
+    for (const [path, moduleMap] of Object.entries(moduleMaps)) {
+      const { root } = await resolveRuntimeAgentGraph({ manifest, moduleMap });
+      const tool = root.agent.tools.find((entry) => entry.logicalPath === "tools/legacy.cjs");
+      expect(await tool?.execute?.({}, {} as never), path).toBe("ok");
+      expect(root.agent.sandbox, path).toMatchObject({ logicalPath: "sandbox/sandbox.cjs" });
+    }
+  });
+
+  it("evaluates a module shared by authored tools once per compilation", async () => {
+    const evaluationsKey = "__eveSharedAuthoredModuleEvaluations";
+    const tool = (sharedImport: string) =>
+      [
+        `import { shared } from ${JSON.stringify(sharedImport)};`,
+        "",
+        "export default {",
+        '  description: "Read the shared value.",',
+        "  execute() {",
+        "    return shared;",
+        "  },",
+        "};",
+        "",
+      ].join("\n");
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/lib/shared.ts": [
+          `globalThis.${evaluationsKey} = (globalThis.${evaluationsKey} ?? 0) + 1;`,
+          'export const shared = "shared";',
+          "",
+        ].join("\n"),
+        "agent/tools/first.ts": tool("../lib/shared"),
+        "agent/tools/second.ts": tool("../lib/shared"),
+        "agent/subagents/helper/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ description: "Help.", model: "openai/gpt-5.4" });',
+        "agent/subagents/helper/tools/third.ts": tool("../../../lib/shared"),
+      },
+      name: "shared-authored-module",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    const scope = globalThis as Record<string, unknown>;
+
+    try {
+      await compileAgentManifest(discovered.manifest);
+
+      expect(scope[evaluationsKey]).toBe(1);
+    } finally {
+      delete scope[evaluationsKey];
+    }
+  });
+
+  // Rolldown can host its runtime helpers in a shared chunk that imports back
+  // from a chunk needing them, so the source graph is acyclic but the chunks
+  // are not: rolldown/rolldown#11341.
+  it("evaluates authored modules whose shared chunks import each other", async () => {
+    const tool = (body: readonly string[]) =>
+      [...body, 'export default { description: "Read the schema.", execute() { return value; } };']
+        .join("\n")
+        .concat("\n");
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/lib/look.ts": 'export const lookSchema = { type: "object" };\n',
+        "agent/lib/index.ts": 'export * from "./look";\n',
+        "agent/lib/loader.ts": [
+          'import { lookSchema } from "./index";',
+          'export const loaders = [lookSchema, () => import("./look")];',
+          "",
+        ].join("\n"),
+        "agent/tools/email.ts": tool([
+          'import { lookSchema } from "../lib/index";',
+          "const value = lookSchema.type;",
+        ]),
+        "agent/tools/load.ts": tool([
+          'import * as loader from "../lib/loader";',
+          'import { lookSchema } from "../lib/index";',
+          "const value = [loader, lookSchema];",
+        ]),
+        "agent/tools/list.ts": tool([
+          'import { loaders } from "../lib/loader";',
+          "const value = loaders;",
+        ]),
+      },
+      name: "authored-chunk-cycle",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+
+    await expect(compileAgentManifest(discovered.manifest)).resolves.toBeDefined();
+  });
+
+  it("loads authored modules that use asset imports", async () => {
+    const app = await createApp({
+      files: {
+        "agent/assets/logo.bin": "logo-bytes",
+        "agent/assets/logo.png": "png-bytes",
+        "agent/assets/message.txt": "asset text",
+        "agent/tools/use_assets.ts": [
+          'import logoUrl from "../assets/logo.bin";',
+          'import imageUrl from "../assets/logo.png";',
+          'import rawText from "../assets/message.txt?raw";',
+          "",
+          "export default {",
+          '  description: "Use asset imports.",',
+          "  async execute() {",
+          "    return {",
+          "      imageUrl,",
+          "      logoUrl,",
+          "      rawText,",
+          "    };",
+          "  },",
+          "};",
+          "",
+        ].join("\n"),
+      },
+      name: "dynamic-and-asset-imports",
+    });
+
+    const moduleNamespace = await loadAuthoredModuleNamespace(
+      join(app.appRoot, "agent", "tools", "use_assets.ts"),
+    );
+    const tool = moduleNamespace.default as {
+      execute(): Promise<{
+        imageUrl: string;
+        logoUrl: string;
+        rawText: string;
+      }>;
+    };
+
+    await expect(tool.execute()).resolves.toEqual({
+      imageUrl: "data:image/png;base64,cG5nLWJ5dGVz",
+      logoUrl: "data:application/octet-stream;base64,bG9nby1ieXRlcw==",
+      rawText: "asset text",
+    });
+  });
+
+  it("rejects asset imports outside the authored package", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/outside_asset.ts": `export default {};
+`,
+      },
+      name: "outside-asset-import",
+    });
+    const outsideFileName = `${basename(app.appRoot)}.txt`;
+    const outsidePath = join(app.appRoot, "..", outsideFileName);
+    const modulePath = join(app.appRoot, "agent", "tools", "outside_asset.ts");
+
+    try {
+      await Promise.all([
+        writeFile(outsidePath, "outside\n"),
+        writeFile(
+          modulePath,
+          `import value from "../../../${outsideFileName}?raw";\nexport default value;\n`,
+        ),
+      ]);
+
+      await expect(loadAuthoredModuleNamespace(modulePath)).rejects.toThrow(
+        /resolves outside package root/,
+      );
+    } finally {
+      await rm(outsidePath, { force: true });
+    }
+  });
+
+  it("loads ?raw imports inside a symlinked workspace package", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_image.ts": [
+          'import { image } from "@repo/sandbox-image";',
+          "",
+          "export default image;",
+          "",
+        ].join("\n"),
+      },
+      name: "workspace-package-asset-import",
+    });
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-workspace-package-asset-import-"));
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "sandbox-image");
+      await writeWorkspaceSourcePackage(packageRoot, {
+        "image.ts": [
+          'import config from "./config.json?raw";',
+          'import dockerfile from "./Dockerfile?raw";',
+          'import tools from "./mise.toml?raw";',
+          "",
+          "export const image = { config, dockerfile, tools };",
+          "",
+        ].join("\n"),
+        "config.json": '{ "telemetry": false }\n',
+        Dockerfile: "FROM ubuntu:26.04\n",
+        "mise.toml": '[tools]\nnode = "24"\n',
+      });
+      await linkWorkspacePackage(app.appRoot, packageRoot);
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "tools", "use_image.ts"),
+      );
+
+      expect(moduleNamespace.default).toEqual({
+        config: '{ "telemetry": false }\n',
+        dockerfile: "FROM ubuntu:26.04\n",
+        tools: '[tools]\nnode = "24"\n',
+      });
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects asset imports that leave a symlinked workspace package", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_image.ts": [
+          'import { image } from "@repo/sandbox-image";',
+          "",
+          "export default image;",
+          "",
+        ].join("\n"),
+      },
+      name: "workspace-package-outside-asset-import",
+    });
+    const workspaceRoot = await mkdtemp(
+      join(tmpdir(), "eve-workspace-package-outside-asset-import-"),
+    );
+
+    try {
+      const packageRoot = join(workspaceRoot, "packages", "sandbox-image");
+      await writeWorkspaceSourcePackage(packageRoot, {
+        "image.ts": [
+          'import secret from "../../secret.txt?raw";',
+          "",
+          "export const image = secret;",
+          "",
+        ].join("\n"),
+      });
+      await writeFile(join(workspaceRoot, "secret.txt"), "outside\n");
+      await linkWorkspacePackage(app.appRoot, packageRoot);
+
+      await expect(
+        loadAuthoredModuleNamespace(join(app.appRoot, "agent", "tools", "use_image.ts")),
+      ).rejects.toThrow(/resolves outside package root/);
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("recovers in the same process once a missing package is installed", async () => {
+    // Regression: bundling used to emit unresolvable package imports as
+    // bare externals, so the loader handed Node an import that could not
+    // resolve. That first failed import poisons Node's process-wide
+    // package-config cache with a negative entry for the package path;
+    // after installing the package (pnpm-style symlink, subpath export),
+    // the same process kept failing with the no-exports fallback error
+    // ("Cannot find module .../node_modules/@scope/pkg/sub") until restart.
+    // Failing at bundle time instead keeps the process recoverable.
+    const app = await createApp({
+      files: {
+        "agent/channels/api/late-install/webhook.ts": [
+          'import { value } from "@scope/late-dep/sub";',
+          "",
+          "export const result = value;",
+          "",
+        ].join("\n"),
+      },
+      name: "late-installed-package",
+    });
+    const modulePath = join(app.appRoot, "agent", "channels", "api", "late-install", "webhook.ts");
+
+    await expect(loadAuthoredModuleNamespace(modulePath)).rejects.toThrow(
+      /Cannot resolve package "@scope\/late-dep\/sub"/,
+    );
+
+    const storeRoot = join(
+      app.appRoot,
+      "node_modules",
+      ".pnpm",
+      "@scope+late-dep@1.0.0",
+      "node_modules",
+      "@scope",
+      "late-dep",
+    );
+    await mkdir(storeRoot, { recursive: true });
+    await writeFile(
+      join(storeRoot, "package.json"),
+      JSON.stringify(
+        { exports: { "./sub": "./sub.js" }, name: "@scope/late-dep", type: "module" },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      join(storeRoot, "sub.js"),
+      `export const value = "installed";
+`,
+    );
+    await mkdir(join(app.appRoot, "node_modules", "@scope"), { recursive: true });
+    await symlink(storeRoot, join(app.appRoot, "node_modules", "@scope", "late-dep"), "junction");
+
+    const moduleNamespace = await loadAuthoredModuleNamespace(modulePath);
+
+    expect(moduleNamespace.result).toBe("installed");
+  });
+
+  it("adds actionable hints when authored bundling hits native module imports", async () => {
+    const app = await createApp({
+      files: {
+        "agent/native.node": "not really native",
+        "agent/tools/use_native.ts": [
+          'import nativeModule from "../native.node";',
+          "",
+          "export const result = nativeModule;",
+          "",
+        ].join("\n"),
+      },
+      name: "native-module-hint",
+    });
+
+    await expect(
+      loadAuthoredModuleNamespace(join(app.appRoot, "agent", "tools", "use_native.ts")),
+    ).rejects.toThrow(/build\.externalDependencies|asset import/);
+  });
+});
+
+describe("workspace member workflow ids", () => {
+  const createAppRoot = useTemporaryAppRoots();
+
+  const workflowTool = `import { defineWorkflowTool } from "eve/tools";
+export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "object" }, async execute() { "use workflow"; return 1; } });
+`;
+
+  // Members have no package.json, so the package root is the workspace root
+  // while the app root, which owns workflow ids, is the member directory.
+  async function compileMember(files: Record<string, string>) {
+    const workspace = await createAppRoot("eve-workspace-member-workflow-ids-", {
+      files: {
+        "package.json": JSON.stringify({ dependencies: { eve: "*" }, type: "module" }),
+        ...files,
+      },
+    });
+    await rm(workspace.agentRoot, { recursive: true });
+    const project = await resolveDiscoveryProject(join(workspace.appRoot, "agents", "assistant"));
+    const manifest = await compileAgentManifest((await discoverAgent(project)).manifest);
+    const generation = await bundleAuthoredModuleMapForGeneration({
+      appRoot: project.appRoot,
+      manifest,
+      moduleMapPath: join(project.appRoot, ".eve", "compile", "module-map.mjs"),
+    });
+    return { generation, manifest, project };
+  }
+
+  it("compiles root and subagent tool ids that match the generation bundle", async () => {
+    const { generation, manifest } = await compileMember({
+      "agents/assistant/agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
+      "agents/assistant/agent/tools/plan.ts": workflowTool,
+      "agents/assistant/agent/subagents/reviewer/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ description: "Review plans.", model: "openai/gpt-5.4" });
+`,
+      "agents/assistant/agent/subagents/reviewer/tools/approve.ts": workflowTool,
+    });
+    const reviewer = manifest.subagents.find((subagent) => subagent.name === "reviewer");
+    const toolId = "workflow//./agent/tools/plan//execute";
+    const subagentToolId = "workflow//./agent/subagents/reviewer/tools/approve//execute";
+
+    expect(manifest.tools.find((tool) => tool.name === "plan")?.behavior?.handling).toEqual({
+      entryPoint: "execute",
+      kind: "workflow-tool",
+      workflowId: toolId,
+    });
+    expect(
+      reviewer?.agent.tools.find((tool) => tool.name === "approve")?.behavior?.handling,
+    ).toEqual({ entryPoint: "execute", kind: "workflow-tool", workflowId: subagentToolId });
+    expect(generation.code).toContain(JSON.stringify(toolId));
+    expect(generation.code).toContain(JSON.stringify(subagentToolId));
+  });
+
+  it("compiles workflow modules from the shared package but not from sibling packages", async () => {
+    const { generation, manifest, project } = await compileMember({
+      "agents/assistant/agent/agent.ts": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
+      "agents/assistant/agent/tools/plan.ts": `import { defineWorkflowTool } from "eve/tools";
+import "../../../../packages/shared/index";
+import { run } from "../../../../lib/run";
+export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "object" }, execute: run });
+`,
+      "lib/run.ts": `import { add } from "./steps";
+export async function run() { "use workflow"; return add(1); }
+`,
+      "lib/steps.ts": `export async function add(n) { "use step"; return n + 1; }
+`,
+      "packages/shared/package.json": JSON.stringify({ name: "shared", version: "1.0.0" }),
+      "packages/shared/index.ts": `export async function other() { "use step"; return 1; }
+`,
+    });
+    const workflowId = "workflow//../../lib/run//run";
+    const sharedModule = (name: string) => join(project.appRoot, "..", "..", "lib", name);
+
+    expect(manifest.tools.find((tool) => tool.name === "plan")?.behavior?.handling).toEqual({
+      entryPoint: "execute",
+      kind: "workflow-tool",
+      workflowId,
+    });
+    expect(generation.code).toContain(JSON.stringify(workflowId));
+    expect(generation.authoredWorkflowModules).toEqual({
+      directiveModules: [sharedModule("run.ts"), sharedModule("steps.ts")],
+      workflowModules: [sharedModule("run.ts")],
+    });
+    expect(generation.sourceModules).toEqual(
+      expect.arrayContaining([sharedModule("run.ts"), sharedModule("steps.ts")]),
+    );
+    expect(generation.sourceModules.some((id) => id.includes("/packages/shared/"))).toBe(false);
+  });
+});
+
+async function writeWorkspaceSourcePackage(
+  packageRoot: string,
+  files: Readonly<Record<string, string>>,
+): Promise<void> {
+  await mkdir(packageRoot, { recursive: true });
+  await writeFile(
+    join(packageRoot, "package.json"),
+    JSON.stringify(
+      { exports: { ".": "./image.ts" }, name: "@repo/sandbox-image", type: "module" },
+      null,
+      2,
+    ),
+  );
+  await Promise.all(
+    Object.entries(files).map(([path, content]) => writeFile(join(packageRoot, path), content)),
+  );
+}
+
+/** Links the package into the app's `node_modules`, as a pnpm workspace does. */
+async function linkWorkspacePackage(appRoot: string, packageRoot: string): Promise<void> {
+  await mkdir(join(appRoot, "node_modules", "@repo"), { recursive: true });
+  await symlink(packageRoot, join(appRoot, "node_modules", "@repo", "sandbox-image"), "junction");
+}

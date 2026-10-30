@@ -30,6 +30,7 @@ const {
   resolveInstalledPackageInfo,
   unlink,
   searchRegistries,
+  stat,
   writeFile,
 } = vi.hoisted(() => ({
   addRegistryItems: vi.fn(),
@@ -46,6 +47,7 @@ const {
   resolveInstalledPackageInfo: vi.fn(() => ({ name: "eve", version: "0.27.8" })),
   unlink: vi.fn(),
   searchRegistries: vi.fn(),
+  stat: vi.fn(),
   writeFile: vi.fn(),
 }));
 
@@ -60,7 +62,7 @@ vi.mock("#internal/project-context.js", () => ({ resolveEveProjectContext }));
 vi.mock("./registry-pnpm-build-policy-flow.js", () => ({ prepareDeclaredPnpmBuildPolicy }));
 vi.mock("#setup/scaffold/workspace-root.js", () => ({ applyPackageManagerWorkspaceConfiguration }));
 vi.mock("#internal/application/package.js", () => ({ resolveInstalledPackageInfo }));
-vi.mock("node:fs/promises", () => ({ readFile, unlink, writeFile }));
+vi.mock("node:fs/promises", () => ({ readFile, stat, unlink, writeFile }));
 
 function createLogger(): RegistryCommandLogger & { errors: string[]; logs: string[] } {
   const errors: string[] = [];
@@ -88,6 +90,7 @@ describe("registry commands", () => {
       kind: "standalone",
     }));
     getRegistryItems.mockResolvedValue([]);
+    stat.mockRejectedValue(Object.assign(new Error("missing"), { code: "ENOENT" }));
     readFile.mockResolvedValue(
       JSON.stringify({
         name: "project",
@@ -304,6 +307,50 @@ describe("registry commands", () => {
     ]);
   });
 
+  it("does not expose installer credentials in dependency failures", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([
+      { name: "channel/photon-imessage", type: "registry:item" },
+    ]);
+    addRegistryItems.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          "Command failed: pnpm add https://token@example.com\nERR_PNPM_FETCH_404 token=secret",
+        ),
+        {
+          exitCode: 1,
+          stderr: "ERR_PNPM_FETCH_404 token=secret",
+        },
+      ),
+    );
+
+    await runAddCommand(logger, "/project", "channel/photon-imessage", {
+      silent: true,
+    });
+
+    expect(logger.errors).toEqual([
+      "Dependency installation failed. Retry the eve add command in a terminal for details.",
+    ]);
+    expect(logger.errors.join("\n")).not.toContain("secret");
+    expect(logger.errors.join("\n")).not.toContain("example.com");
+  });
+
+  it("does not echo arbitrary installer output", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([
+      { name: "channel/photon-imessage", type: "registry:item" },
+    ]);
+    addRegistryItems.mockRejectedValueOnce(new Error("arbitrary secret stderr"));
+
+    await runAddCommand(logger, "/project", "channel/photon-imessage", {
+      silent: true,
+    });
+
+    expect(logger.errors).toEqual([
+      "Dependency installation failed. Retry the eve add command in a terminal for details.",
+    ]);
+  });
+
   it("reports only paths that rollback could not restore", async () => {
     const logger = createLogger();
     getRegistryItems.mockResolvedValue([{ name: "extension/browser", type: "registry:item" }]);
@@ -417,6 +464,7 @@ describe("registry commands", () => {
 
       expect(prepareWebRegistryProject).toHaveBeenCalledTimes(kind === "web" ? 1 : 0);
       if (kind === "web") {
+        expect(prepareWebRegistryProject).toHaveBeenCalledWith("/project", "next");
         expect(prepareWebRegistryProject.mock.invocationCallOrder[0]).toBeLessThan(
           addRegistryItems.mock.invocationCallOrder[0]!,
         );
@@ -504,6 +552,120 @@ describe("registry commands", () => {
       expect.objectContaining({ prompter: expect.any(Object) }),
     );
     expect(logger.errors).toEqual([]);
+  });
+
+  it("installs the TanStack Start files when Web Chat is answered with TanStack Start", async () => {
+    const logger = createLogger();
+    const prepareWebRegistryProject = vi.fn(async () => {});
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "channel/web-tanstack",
+        type: "registry:item",
+        meta: {
+          eve: {
+            setup: [{ package: "eve", bin: "eve", args: ["integration", "setup", "web"] }],
+          },
+        },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/web",
+      { nonInteractive: true, answers: { "web-framework": "tanstack" } },
+      { loadSetupCommandRunner: async () => runSetupCommand, prepareWebRegistryProject },
+    );
+
+    expect(writeFile).toHaveBeenCalledWith(
+      "/project/package.json",
+      expect.stringContaining('"dev:web": "vite dev apps/web"'),
+      "utf8",
+    );
+    expect(prepareWebRegistryProject).toHaveBeenCalledWith("/project", "tanstack");
+    expect(getRegistryItems).toHaveBeenCalledWith(
+      ["https://eve.dev/r/channel/web-tanstack.json"],
+      expect.any(Object),
+    );
+    expect(addRegistryItems).toHaveBeenCalledWith(
+      ["https://eve.dev/r/channel/web-tanstack.json"],
+      expect.objectContaining({ cwd: "/project" }),
+    );
+    expect(runSetupCommand).toHaveBeenCalledWith(
+      "/project",
+      expect.objectContaining({ args: expect.arrayContaining(["integration", "setup", "web"]) }),
+      "channel/web",
+      expect.any(Object),
+    );
+    expect(logger.errors).toEqual([]);
+  });
+
+  it("installs the Next.js files when a headless install leaves the framework unanswered", async () => {
+    const logger = createLogger();
+    const prepareWebRegistryProject = vi.fn(async () => {});
+    getRegistryItems.mockResolvedValue([{ name: "channel/web", type: "registry:item" }]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/web",
+      { nonInteractive: true, skipSetup: true },
+      {
+        loadSetupCommandRunner: async () =>
+          vi.fn(async () => ({ kind: "completed" as const, facts: [] })),
+        prepareWebRegistryProject,
+      },
+    );
+
+    expect(prepareWebRegistryProject).toHaveBeenCalledWith("/project", "next");
+    expect(addRegistryItems).toHaveBeenCalledWith(
+      ["https://eve.dev/r/channel/web.json"],
+      expect.objectContaining({ cwd: "/project" }),
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("reports an invalid headless framework answer before writing anything", async () => {
+    const logger = createLogger();
+
+    await runAddCommand(logger, "/project", "channel/web", {
+      nonInteractive: true,
+      answers: { "web-framework": "nuxt" },
+    });
+
+    expect(logger.errors.map((line) => JSON.parse(line))).toEqual([
+      expect.objectContaining({
+        type: "blocked",
+        item: "channel/web",
+        installed: false,
+        status: "input_required",
+        question: expect.objectContaining({ key: "web-framework" }),
+        issue: expect.objectContaining({ code: "invalid_answer" }),
+      }),
+    ]);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(addRegistryItems).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(2);
+  });
+
+  it("refuses to install a second Web Chat framework over an existing app", async () => {
+    const logger = createLogger();
+    stat.mockImplementation(async (path: string) => {
+      if (path === "/project/apps/web/next.config.ts") return {};
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    });
+
+    await runAddCommand(logger, "/project", "channel/web", {
+      nonInteractive: true,
+      answers: { "web-framework": "tanstack" },
+    });
+
+    expect(logger.errors).toEqual([
+      'apps/web already contains a Next.js app. Remove apps/web to switch Web Chat to TanStack Start, or answer web-framework="next".',
+    ]);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(addRegistryItems).not.toHaveBeenCalled();
   });
 
   it("surfaces required deployment in non-interactive completion", async () => {
@@ -811,6 +973,115 @@ describe("registry commands", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("treats a cancellation thrown by the setup CLI like a returned one", async () => {
+    const logger = createLogger();
+    const runSetup = vi.fn(async () => {
+      throw new WizardCancelledError();
+    });
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/slack",
+      { yes: true },
+      { loadSetupCommandRunner: async () => runSetup },
+    );
+
+    expect(logger.logs).toEqual([
+      "Setup cancelled. Run `eve add channel/slack --skip-install` when you're ready.",
+    ]);
+    expect(logger.errors).toEqual([]);
+  });
+
+  it("returns unfinished setup to the TUI as a structured resume command", async () => {
+    const fake = createFakePrompter();
+    const runSetup = vi.fn(async () => ({ kind: "cancelled" as const }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
+      },
+    ]);
+
+    await expect(
+      installRegistryItem(
+        "/project",
+        "channel/slack",
+        { prompter: fake.prompter, silent: true },
+        { loadSetupCommandRunner: async () => runSetup },
+      ),
+    ).resolves.toEqual({
+      output: [],
+      setupIncomplete: { resumeCommand: "eve add channel/slack --skip-install" },
+    });
+  });
+
+  it("returns setup blocked on a prerequisite after install as unfinished, not failed", async () => {
+    const fake = createFakePrompter();
+    const prerequisite = {
+      kind: "command" as const,
+      code: "vercel-login",
+      message: "The Vercel CLI is not logged in.",
+      command: "vercel login",
+    };
+    const runSetup = vi.fn(async () => ({
+      kind: "blocked" as const,
+      blocker: { status: "prerequisite_required" as const, prerequisite },
+    }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "eve", bin: "eve", args: ["integration", "setup"] }] } },
+      },
+    ]);
+
+    await expect(
+      installRegistryItem(
+        "/project",
+        "connection/notion",
+        { prompter: fake.prompter, silent: true },
+        { loadSetupCommandRunner: async () => runSetup },
+      ),
+    ).resolves.toEqual({
+      output: [],
+      setupIncomplete: {
+        resumeCommand: "eve add connection/notion --skip-install",
+        reason: "The Vercel CLI is not logged in.",
+        prerequisite,
+      },
+    });
+    expect(addRegistryItems).toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("keeps the CLI's setup failure message and resume hint", async () => {
+    const logger = createLogger();
+    const runSetup = vi.fn(async () => {
+      throw new Error("vercel connect list exited with code 1.");
+    });
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/slack",
+      { yes: true },
+      { loadSetupCommandRunner: async () => runSetup },
+    );
+
+    expect(logger.errors).toEqual([
+      "vercel connect list exited with code 1. Try again with `eve add channel/slack --skip-install`.",
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
   it("runs setup directly without installing the item", async () => {
     const logger = createLogger();
     const runSetup = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
@@ -1034,11 +1305,11 @@ describe("registry commands", () => {
     expect(getRegistryItems).not.toHaveBeenCalled();
     expect(searchRegistries).toHaveBeenCalledWith(
       ["https://eve.dev/r/registry.json"],
-      expect.objectContaining({ limit: 100, query: "sdk" }),
+      expect.objectContaining({ limit: 500, query: "sdk" }),
     );
     expect(searchRegistries).toHaveBeenCalledWith(
       ["@acme"],
-      expect.objectContaining({ limit: 100, query: "sdk" }),
+      expect.objectContaining({ limit: 500, query: "sdk" }),
     );
   });
 
@@ -1092,7 +1363,7 @@ describe("registry commands", () => {
 
     expect(searchRegistries).toHaveBeenCalledWith(["https://eve.dev/r/registry.json"], {
       config: { registries: { "@skills": "https://www.skills.sh/r/{name}?agent=eve" } },
-      limit: 100,
+      limit: 500,
       query: undefined,
     });
     expect(logger.logs).toEqual(["No registry items found."]);
@@ -1112,7 +1383,7 @@ describe("registry commands", () => {
       JSON.stringify(
         {
           ...result,
-          pagination: { hasMore: false, limit: 100, offset: 0, total: 1 },
+          pagination: { hasMore: false, limit: 500, offset: 0, total: 1 },
         },
         null,
         2,
@@ -1443,7 +1714,7 @@ describe("registry commands", () => {
       JSON.stringify(
         {
           items: [],
-          pagination: { hasMore: false, limit: 100, offset: 0, total: 0 },
+          pagination: { hasMore: false, limit: 500, offset: 0, total: 0 },
           errors: result.errors,
         },
         null,

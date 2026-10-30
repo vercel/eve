@@ -38,13 +38,13 @@ describe("coalesceDeliverPayloads", () => {
     const result = coalesceDeliverPayloads([
       {
         adapterMetadata: { callbackKind: "button", deliverySequence: 1 },
-        inputResponses: [{ optionId: "approve", requestId: "approval_synthetic_release" }],
+        answers: [{ optionId: "approve", interactionId: "approval_synthetic_release" }],
         preservedAdapterMetadata: { source: "synthetic-callback" },
       },
       {
         adapterMetadata: { callbackKind: "message", deliverySequence: 2 },
-        inputResponses: [
-          { requestId: "question_synthetic_rollout", text: "Begin with the synthetic canary." },
+        answers: [
+          { interactionId: "question_synthetic_rollout", text: "Begin with the synthetic canary." },
         ],
         nextAdapterMetadata: { callbackVersion: 2 },
         preservedAdapterMetadata: undefined,
@@ -53,62 +53,12 @@ describe("coalesceDeliverPayloads", () => {
 
     expect(result).toEqual({
       adapterMetadata: { callbackKind: "message", deliverySequence: 2 },
-      inputResponses: [
-        { optionId: "approve", requestId: "approval_synthetic_release" },
-        { requestId: "question_synthetic_rollout", text: "Begin with the synthetic canary." },
+      answers: [
+        { optionId: "approve", interactionId: "approval_synthetic_release" },
+        { interactionId: "question_synthetic_rollout", text: "Begin with the synthetic canary." },
       ],
       nextAdapterMetadata: { callbackVersion: 2 },
       preservedAdapterMetadata: { source: "synthetic-callback" },
     });
-  });
-
-  it("preserves task agent requests and authorization events across queued payloads", () => {
-    const agentRequests = [
-      {
-        replyTo: "agent-reply-1",
-        request: {
-          input: { message: "Find it", target: "first" },
-          invocationId: "call-1:first",
-          kind: "agent-invoke" as const,
-        },
-        taskId: "task-1",
-      },
-      {
-        replyTo: "agent-reply-2",
-        request: {
-          input: { message: "Find it", target: "second" },
-          invocationId: "call-2:second",
-          kind: "agent-invoke" as const,
-        },
-        taskId: "task-2",
-      },
-    ];
-    const authorizationEvents = [1, 2].map((index) => ({
-      hookPayload: {
-        callId: `call-${index}`,
-        childSessionId: `child-${index}`,
-        event: { data: { index }, type: "authorization.required" } as never,
-        kind: "subagent-authorization-event" as const,
-        subagentName: `agent-${index}`,
-      },
-      taskId: `task-${index}`,
-    }));
-
-    expect(
-      coalesceDeliverPayloads([
-        {
-          task: {
-            agentRequests: [agentRequests[0]!],
-            authorizationEvents: [authorizationEvents[0]!],
-          },
-        },
-        {
-          task: {
-            agentRequests: [agentRequests[1]!],
-            authorizationEvents: [authorizationEvents[1]!],
-          },
-        },
-      ]),
-    ).toEqual({ task: { agentRequests, authorizationEvents } });
   });
 });

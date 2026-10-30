@@ -91,15 +91,6 @@ export function createDiskRuntimeCompiledArtifactsSource(
 }
 
 /**
- * Returns the disk-backed app root when one exists for the artifact source.
- */
-export function getRuntimeCompiledArtifactsAppRoot(
-  source: RuntimeCompiledArtifactsSource,
-): string | undefined {
-  return source.kind === "disk" ? source.appRoot : undefined;
-}
-
-/**
  * Returns the stable application root to use for local sandbox cache scope.
  */
 export function getRuntimeCompiledArtifactsSandboxAppRoot(

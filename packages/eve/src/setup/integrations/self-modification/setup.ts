@@ -1,29 +1,23 @@
-import { relative } from "node:path";
+import { access } from "node:fs/promises";
+import { join } from "node:path";
 
 import { confirm, select, text } from "#setup/ask.js";
 import {
   classifySelfModificationConfig,
   connectorName,
+  DEPLOYED_SELF_MODIFICATION_CONFIG_PATH,
   defaultSelfModificationSetupOperations,
   directoryError,
   gitRefError,
   renderSelfModificationConfig,
   repositoryPartError,
+  SELF_MODIFICATION_CONFIG_PATH,
   type SelfModificationSetupOperations,
   type SelfModificationSetupValues,
 } from "#self-modification/setup.js";
-import { SELF_MODIFICATION_CONFIG_PATH } from "#self-modification/git-workspace.js";
-import {
-  detectLegacySelfModificationScaffold,
-  removeLegacySelfModificationScaffold,
-  type LegacySelfModificationScaffold,
-} from "#self-modification/migration.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { ensurePackageDependencies } from "#setup/scaffold/index.js";
-import {
-  DEFAULT_CONNECT_PACKAGE_VERSION,
-  DEFAULT_MICROSANDBOX_PACKAGE_VERSION,
-} from "#setup/scaffold/version-tokens.js";
+import { DEFAULT_CONNECT_PACKAGE_VERSION } from "#setup/scaffold/version-tokens.js";
 
 import { describeIntegrationSetupEnvironment } from "../shared/environment.js";
 import { installScaffoldDependencies } from "../shared/scaffold.js";
@@ -45,10 +39,9 @@ const defaultApplyDependencies: SelfModificationApplyDependencies = {
 
 const SELF_MODIFICATION_PRODUCTION_DEPENDENCIES = {
   "@vercel/connect": DEFAULT_CONNECT_PACKAGE_VERSION,
-  microsandbox: DEFAULT_MICROSANDBOX_PACKAGE_VERSION,
 };
 
-type SelfModificationSetupPlan = (
+type SelfModificationSetupPlan =
   | { readonly kind: "authored" }
   | { readonly kind: "local" }
   | {
@@ -56,35 +49,22 @@ type SelfModificationSetupPlan = (
       readonly connectorName: string;
       readonly project: VercelProjectReference;
       readonly values: SelfModificationSetupValues;
-    }
-) & { readonly legacyScaffold?: LegacySelfModificationScaffold };
+    };
+
+async function assertCurrentLayout(appRoot: string): Promise<void> {
+  try {
+    await access(join(appRoot, "agent/subagents/self-modification"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  throw new Error(
+    "The legacy agent/subagents/self-modification layout is no longer supported. Preserve any authored changes, remove that directory, and mount eve/extensions/self-modification/local at agent/extensions/self-modification/extension.ts instead.",
+  );
+}
 
 function validationResult(error: string | undefined): string | null {
   return error ?? null;
-}
-
-async function prepareLegacyScaffoldCleanup(
-  context: SetupPrepareContext,
-): Promise<LegacySelfModificationScaffold | undefined> {
-  const scaffold = await detectLegacySelfModificationScaffold(context.appRoot);
-  if (scaffold === undefined) return undefined;
-
-  const approved = await context.asker.ask(
-    confirm({
-      key: "self-modification-cleanup",
-      message: `A legacy self-modification scaffold was found at ${relative(context.appRoot, scaffold.root)}. This scaffold format is no longer supported. Do you want to remove it?`,
-      recommended: true,
-      required: true,
-    }),
-  );
-  return approved ? scaffold : undefined;
-}
-
-function withLegacyScaffold(
-  plan: SelfModificationSetupPlan,
-  legacyScaffold: LegacySelfModificationScaffold | undefined,
-): SelfModificationSetupPlan {
-  return legacyScaffold === undefined ? plan : { ...plan, legacyScaffold };
 }
 
 export async function prepareSelfModificationSetup(
@@ -95,15 +75,15 @@ export async function prepareSelfModificationSetup(
     context.projectRoot,
   ),
 ): Promise<SelfModificationSetupPlan> {
-  const legacyScaffold = await prepareLegacyScaffoldCleanup(context);
+  await assertCurrentLayout(context.appRoot);
   const existing = await operations.readConfig();
   if (classifySelfModificationConfig(existing) === "authored") {
     context.presenter.note(
-      `The existing ${SELF_MODIFICATION_CONFIG_PATH} contains authored configuration and was not overwritten.`,
+      `The existing ${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH} contains authored configuration and was not overwritten.`,
       "Manual update required",
       { tone: "warning" },
     );
-    return withLegacyScaffold({ kind: "authored" }, legacyScaffold);
+    return { kind: "authored" };
   }
 
   const mode = await context.asker.ask(
@@ -128,7 +108,7 @@ export async function prepareSelfModificationSetup(
       required: true,
     }),
   );
-  if (mode === "local") return withLegacyScaffold({ kind: "local" }, legacyScaffold);
+  if (mode === "local") return { kind: "local" };
 
   const [project, detected, channelNames] = await Promise.all([
     context.resolveVercelProject("self-modification"),
@@ -178,11 +158,10 @@ export async function prepareSelfModificationSetup(
     connector: `github/${name}`,
     directory,
     repository: `github.com/${owner}/${repo}`,
-    vercelBackend: true,
   };
   context.presenter.note(
     renderSelfModificationConfig(values),
-    `Generated ${SELF_MODIFICATION_CONFIG_PATH}`,
+    `Generated ${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}`,
   );
   context.presenter.note(
     "Vercel Connect will issue short-lived GitHub App credentials restricted to this repository. Install the managed GitHub App and select only this repository. Review, merge, and deployment remain separate operator boundaries.",
@@ -196,10 +175,7 @@ export async function prepareSelfModificationSetup(
       required: true,
     }),
   );
-  return withLegacyScaffold(
-    confirmed ? { kind: "deployed", connectorName: name, project, values } : { kind: "local" },
-    legacyScaffold,
-  );
+  return confirmed ? { kind: "deployed", connectorName: name, project, values } : { kind: "local" };
 }
 
 export async function applySelfModificationSetup(
@@ -212,10 +188,6 @@ export async function applySelfModificationSetup(
   ),
   deps: SelfModificationApplyDependencies = defaultApplyDependencies,
 ) {
-  if (plan.legacyScaffold !== undefined) {
-    await removeLegacySelfModificationScaffold(context.appRoot, plan.legacyScaffold);
-    context.presenter.log.success("Removed the retired self-modification scaffold.");
-  }
   if (plan.kind === "authored") {
     return {
       facts: [{ label: "Self-modification", value: "manual configuration update required" }],
@@ -238,12 +210,10 @@ export async function applySelfModificationSetup(
     signal: context.signal,
   });
   await operations.writeConfig(renderSelfModificationConfig({ ...plan.values, connector }));
-  context.presenter.log.success(`Updated ${SELF_MODIFICATION_CONFIG_PATH}.`);
+  context.presenter.log.success(`Updated ${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}.`);
   context.presenter.nextSteps([
     "Install the managed GitHub App for the configured repository, then deploy or redeploy.",
-    plan.values.vercelBackend
-      ? "After deployment, try self-modification by running `eve dev <deployment-url>` from this linked project. The generated policy admits its Vercel OIDC identity over HTTP; configured channels remain denied until you update `agent/extensions/self-modification/extension.ts`."
-      : "Before deployment, configure `deployed.authorize` in `agent/extensions/self-modification/extension.ts` to admit a trusted principal for your deployment's channel. After deployment, use that channel to try self-modification.",
+    `After deployment, try self-modification by running \`eve dev <deployment-url>\` from this linked project. The generated policy admits its Vercel OIDC identity over HTTP; configured channels remain denied until you update \`${DEPLOYED_SELF_MODIFICATION_CONFIG_PATH}\`.`,
   ]);
   return {
     deploymentRequired: true as const,
@@ -264,17 +234,17 @@ export async function prepareLocalSelfModificationSetup(
     context.projectRoot,
   ),
 ): Promise<SelfModificationSetupPlan> {
-  const legacyScaffold = await prepareLegacyScaffoldCleanup(context);
-  const existing = await operations.readConfig();
+  await assertCurrentLayout(context.appRoot);
+  const existing = await operations.readLocalConfig();
   if (classifySelfModificationConfig(existing) === "authored") {
     context.presenter.note(
       `The existing ${SELF_MODIFICATION_CONFIG_PATH} contains authored configuration and was not overwritten.`,
       "Manual update required",
       { tone: "warning" },
     );
-    return withLegacyScaffold({ kind: "authored" }, legacyScaffold);
+    return { kind: "authored" };
   }
-  return withLegacyScaffold({ kind: "local" }, legacyScaffold);
+  return { kind: "local" };
 }
 
 function describeEnvironment(environment: SetupPrepareContext["environment"]): string {

@@ -14,7 +14,7 @@ import type {
  * answers a single-select (`select`) and `multiple` answers a checklist
  * (`select({ multiple: true })`).
  */
-export interface FakePrompterConfig {
+interface FakePrompterConfig {
   text?: (opts: Parameters<Prompter["text"]>[0]) => string;
   password?: (opts: { message: string }) => string;
   single?: (opts: SingleSelectOptions<PrompterValue>) => PrompterValue | Promise<PrompterValue>;
@@ -23,7 +23,7 @@ export interface FakePrompterConfig {
   ) => PrompterValue[] | Promise<PrompterValue[]>;
 }
 
-export interface FakePrompter {
+interface FakePrompter {
   prompter: Prompter;
   /** Every `select` message in call order, for asserting which prompts ran. */
   selectMessages: string[];

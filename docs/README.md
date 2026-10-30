@@ -25,9 +25,11 @@ Important naming note:
 | Package a procedure the agent loads only when it applies | [Skills](./skills.mdx)                                                                 |
 | Carry state across turns, or shape what the model sees   | [State](./concepts/state.md), [Context Control](./concepts/context-control.md)         |
 | Run commands or untrusted code in isolation              | [Sandboxes](./sandbox/index.mdx)                                                       |
+| Answer voice notes and other audio attachments           | [Voice Notes](./patterns/voice-notes.md)                                               |
 | Delegate work to a specialist child agent                | [Subagents](./subagents/index.mdx)                                                     |
 | Run work on a recurring schedule                         | [Schedules](./schedules.mdx)                                                           |
 | Install an existing integration instead of writing one   | [Add Integrations](./install-integrations.mdx)                                         |
+| Build a coding agent, or compare eve-code benchmarks     | [Code Extension](./code-extension.mdx)                                                 |
 | Link a Vercel project and deploy to production           | [Deploy to Vercel](./guides/deployment/vercel.mdx)                                     |
 | Self-host, or compare hosting strategies                 | [Deployment](./guides/deployment/overview.md)                                          |
 | Authorize routes, sessions, and per-user access          | [Authentication](./guides/auth-and-route-protection.md)                                |

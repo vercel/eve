@@ -1,38 +1,55 @@
-import type { UserContent } from "ai";
+import { sessionTables } from "#protocol/session-projection/session-view.js";
+import { failureNotice } from "#public/channels/reply.js";
+import { callLabel } from "#protocol/session-projection/selectors.js";
+import { contentPhase } from "#protocol/session-events/catalog.js";
+import { type PromptQueueState, promptQueue } from "#channel/prompt-queue.js";
+import type { MessageContent } from "#shared/message-content.js";
 
-import type { ChannelAddressDeliveryOptions } from "#channel/channel-address.js";
-import {
-  INTERNAL_CHANNEL_DELIVER,
-  type ChannelFrom,
-  type InternalChannelSource,
+import type {
+  ChannelFrom,
+  ChannelRespondOptions,
+  ChannelSendOptions,
 } from "#channel/channel-operations.js";
-import { normalizeSendInput } from "#channel/send-input.js";
-import type { SendPayload } from "#channel/routes.js";
-import type { SessionAuthContext, TurnPolicy, TaskDeliveryPolicy } from "#channel/types.js";
+import type { ChannelDelivery } from "#shared/channel-delivery.js";
+import type { ChannelContext } from "#shared/channel-context.js";
+import {
+  INACTIVE_REQUEST_NOTICE,
+  respondOrRetireInactivePrompt,
+} from "#channel/inactive-prompt.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { InputRequest } from "#shared/input.js";
+import { EveAttachmentError } from "#internal/attachments/errors.js";
+import { assertWithinLimit } from "#internal/attachments/limited-read.js";
+import { createLogger } from "#internal/logging.js";
+import type { RequestSettlement } from "#channel/interaction-prompts.js";
+import type { FetchFileResult } from "#shared/channel-definition.js";
+import type { Interaction } from "#channel/interaction-prompts.js";
+import { type Answer, parseAnswers, type StrictAnswers } from "#shared/input.js";
 import type {
   ActionEvent,
   Adapter,
-  CardChild,
   ChatConfig,
   SerializedThread,
   Thread,
   WebhookOptions,
 } from "#compiled/chat/index.js";
+import { Chat, Message, ThreadImpl } from "#compiled/chat/index.js";
+import { chatSdkSignIns } from "#public/channels/chat-sdk/authorization.js";
+import { requestSettlementOf } from "#channel/interaction-prompts.js";
+import { settleSignIn, showSignIn } from "#channel/sign-in.js";
+import { parseChatSdkFileRef } from "#public/channels/chat-sdk/attachment-refs.js";
 import {
-  Actions,
-  Button,
-  Card,
-  CardText,
-  Chat,
-  Message,
-  ThreadImpl,
-} from "#compiled/chat/index.js";
-import { defaultAuthorizationEvents } from "#public/channels/chat-sdk/authorization.js";
+  decodeInputAction,
+  renderInteractions,
+  renderRetiredInputRequest,
+} from "#public/channels/chat-sdk/input-actions.js";
+import {
+  reportUndeliveredReply,
+  type UndeliveredReplyState,
+  withUndeliveredReplyNote,
+} from "#public/channels/undelivered-reply.js";
+import { DEFAULT_UPLOAD_POLICY } from "#public/channels/upload-policy.js";
 import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
 import {
   defineChannel,
@@ -42,7 +59,7 @@ import {
   type ChannelEvents,
   type ChannelContinuationOps,
   type RouteHandlerArgs,
-  type Session,
+  type Delivery,
 } from "#public/definitions/channel.js";
 import { chatSdkInstrumentation } from "#public/channels/chat-sdk/audience.js";
 
@@ -51,42 +68,56 @@ const DEFAULT_ROUTE = "/eve/v1";
 const DEFAULT_INPUT_ACTION_PREFIX = "eve_input:";
 const DEFAULT_STREAMING_EDIT_INTERVAL_MS = 1_000;
 const MAX_TYPING_STATUS = 80;
-const streamTextByState = new WeakMap<ChatSdkChannelState, string>();
+/** How the undelivered-reply notice and model note name a Chat SDK surface. */
+const SURFACE_NAME = "this chat";
 
 type ChatSdkAdapters = Record<string, Adapter>;
-type ChatSdkSendInput = string | UserContent | SendPayload;
-type MutableDeliveryOptions<TState> = {
-  -readonly [
-    Key in keyof ChannelAddressDeliveryOptions<TState>
-  ]: ChannelAddressDeliveryOptions<TState>[Key];
-};
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
-
 interface ActiveWebhookContext {
   readonly from: ChannelFrom<ChatSdkChannelState>;
 }
 
 const ActiveWebhookKey = new ContextKey<ActiveWebhookContext>("chat-sdk.active-webhook");
 
-/** Durable Chat SDK thread state plus default-handler streaming bookkeeping. */
-export interface ChatSdkChannelState extends Record<string, unknown> {
+/** Durable Chat SDK thread state. */
+export interface ChatSdkChannelState
+  extends Record<string, unknown>, PromptQueueState, UndeliveredReplyState {
   thread: SerializedThread | null;
-  /** Message id of the in-flight streamed assistant post (edit fallback). */
+  /** @internal Message id of the in-flight streamed assistant post (edit fallback). */
   anchorMessageId?: string | null;
+  /** @internal Text streamed for the anchor so far, including deltas no throttled edit has shown yet. */
+  streamText?: string | null;
+  /** @internal Text the anchor showed after its last successful post or edit. */
+  shownText?: string | null;
   /**
    * Whether `adapter.editMessage` works for this session. Set to `false` once
    * an edit throws {@link isNotImplemented}, which disables streaming edits for
    * the rest of the session.
+   * @internal
    */
   editSupported?: boolean;
-  /** Epoch ms of the last streaming edit, used to throttle edits. */
+  /** @internal Epoch ms of the last streaming edit, used to throttle edits. */
   lastEditAtMs?: number | null;
-  /** Buffered first line of a tool-call message, surfaced as typing status. */
+  /** @internal Buffered first line of a tool-call message, surfaced as typing status. */
   pendingToolCallMessage?: string | null;
-  /** Authorization status messages, keyed by connection name. */
+  /** @internal Authorization status messages, keyed by connection name. */
   pendingAuthMessageIds?: Record<string, string>;
-  streamStepIndex?: number | null;
+  /**
+   * The Chat SDK user behind each principal that sent a message, so a sign-in
+   * reaches them privately. `null` once more than one person sent as it.
+   */
+  usersByPrincipal?: Record<string, string | null>;
+  /** @internal Posted input request cards, keyed by message id, until eve resolves every request on them. */
+  pendingInputCards?: Record<string, ChatSdkPendingInputCard>;
+  /** @internal Id of the content part streaming into the anchor. */
+  streamPartId?: string | null;
+  /** Id of the latest message someone other than the bot sent in the thread. */
+  latestMessageId?: string;
+}
+
+/** One posted card's requests and the resolutions eve has reported for them so far. */
+export interface ChatSdkPendingInputCard {
+  readonly requests: readonly Interaction[];
+  readonly resolved: Readonly<Record<string, RequestSettlement>>;
 }
 
 /**
@@ -136,20 +167,10 @@ export interface ChatSdkEventContext<TAdapters extends ChatSdkAdapters = ChatSdk
 export type ChatSdkChannelEvents<TAdapters extends ChatSdkAdapters = ChatSdkAdapters> =
   ChannelEvents<ChatSdkChannelContext<TAdapters>>;
 
-/** The thread determines the eve continuation token and persisted channel state. */
-export interface ChatSdkSendOptions {
+/** Selects the Chat SDK thread that owns the eve continuation token. */
+interface ChatSdkThreadOptions {
   readonly auth?: SessionAuthContext | null;
-  readonly callback?: ChannelAddressDeliveryOptions<ChatSdkChannelState>["callback"];
-  readonly mode?: ChannelAddressDeliveryOptions<ChatSdkChannelState>["mode"];
-  /** Updates the session policy; omission preserves it. */
-  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   readonly thread: SerializedThread | Thread | string;
-  readonly title?: string;
-  /**
-   * Controls how this input interacts with an active eve turn on the same
-   * thread. Defaults to `"steer"`.
-   */
-  readonly turnPolicy?: TurnPolicy;
   /**
    * Required when `thread` is a string that does not include the Chat SDK
    * adapter prefix. Prefer passing the `Thread` object from the Chat SDK handler
@@ -157,6 +178,34 @@ export interface ChatSdkSendOptions {
    */
   readonly adapterName?: string;
 }
+
+/**
+ * Options for `bridge.send`: channel send options plus the thread. The thread
+ * determines the eve continuation token and persisted channel state.
+ */
+export interface ChatSdkSendOptions extends ChatSdkThreadOptions, Omit<ChannelSendOptions, "auth"> {
+  /**
+   * Answers the input request on the card eve posted as `messageId` with
+   * `optionId`, when that card is still waiting on it. Otherwise eve delivers
+   * the message as usual.
+   */
+  readonly inputAnswer?: ChatSdkInputAnswer;
+  /**
+   * Controls how this input interacts with an active eve turn on the same
+   * thread. Defaults to the channel's `turnPolicy`, then `"steer"`.
+   */
+  readonly turnPolicy?: TurnPolicy;
+}
+
+/** An option chosen for the input request card posted as `messageId`. */
+export interface ChatSdkInputAnswer {
+  readonly messageId: string;
+  readonly optionId: string;
+}
+
+/** Options for `bridge.respond`: channel respond options plus the thread. */
+export interface ChatSdkRespondOptions
+  extends ChatSdkThreadOptions, Omit<ChannelRespondOptions, "auth" | "state"> {}
 
 /**
  * Configuration for {@link chatSdkChannel}. It accepts normal Chat SDK
@@ -230,7 +279,15 @@ export interface ChatSdkChannelBridge<TAdapters extends ChatSdkAdapters = ChatSd
    * Use `channel.receive(...)` for proactive sends that are not handling an
    * inbound Chat SDK webhook.
    */
-  send(input: ChatSdkSendInput, options: ChatSdkSendOptions): Promise<Session>;
+  send(message: MessageContent, options: ChatSdkSendOptions): Promise<Delivery>;
+  /**
+   * Answers pending input requests on the thread's session from inside a Chat
+   * SDK webhook handler. Never creates a session.
+   */
+  respond<const TResponses extends readonly Answer[]>(
+    answers: StrictAnswers<TResponses>,
+    options: ChatSdkRespondOptions,
+  ): Promise<Delivery>;
 }
 
 /**
@@ -269,19 +326,30 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
   bot.onAction(async (event: ActionEvent) => {
     const response = decodeInputAction(event.actionId, inputActionPrefix, event.value);
     if (!response) return;
-    if (!event.thread) {
+    const { thread } = event;
+    if (!thread) {
       throw new Error(
         "chatSdkChannel input actions require a thread on the Chat SDK action event.",
       );
     }
-    await bridgeSend(
-      bot,
-      { inputResponses: [response] },
+    const auth = config.resolveInputAuth ? await config.resolveInputAuth(event) : null;
+    const answer = await respondOrRetireInactivePrompt(
+      () => bridgeRespond(bot, [response], { auth, thread: thread.toJSON() }),
       {
-        auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
-        thread: event.thread.toJSON(),
+        retirePrompt: (label) => retireInputCard(thread, event.messageId, label),
       },
+      log,
     );
+    // Chat SDK stops its action handlers at a throw, as it did before inactive
+    // presses were told apart from other failures.
+    if (answer.outcome === "failed") throw answer.error;
+    if (answer.outcome === "delivered") return;
+    await Promise.all([
+      answer.retirement,
+      thread
+        .postEphemeral(event.user, { markdown: INACTIVE_REQUEST_NOTICE }, { fallbackToDM: true })
+        .catch((error: unknown) => log.error("inactive prompt notice failed", { error })),
+    ]);
   });
 
   const channel = defineChannel<
@@ -290,8 +358,8 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     ChatSdkReceiveTarget,
     ChatSdkInstrumentationMetadata
   >({
-    kindHint: "chat-sdk",
     turnPolicy: config.turnPolicy,
+    fetchFile: (url) => fetchAttachment(bot, url),
     state: initialState(),
     ...chatSdkInstrumentation,
     context(state) {
@@ -326,12 +394,24 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       };
       return [GET<ChatSdkChannelState>(path, handler), POST<ChatSdkChannelState>(path, handler)];
     }),
-    async receive(input, { from }) {
-      const thread = serializeReceiveTarget(bot, input.target);
-      return from(thread.id).send(input.message, {
-        auth: input.auth,
+    async receive({ message, target, ...send }, { from }) {
+      const thread = serializeReceiveTarget(bot, target);
+      return from(thread.id).send(message, {
+        ...send,
         state: { thread },
       });
+    },
+    // `session.auth.current` is the caller of this delivery.
+    deliver(
+      payload,
+      channel: ChatSdkChannelContext<TAdapters> & { readonly session: ChannelContext["session"] },
+    ) {
+      recordPrincipalUser(channel.state, channel.session.auth.current, payload);
+      recordLatestMessage(channel.state, payload);
+      const answer = resolveInputAnswer(channel.state, payload);
+      if (answer !== undefined)
+        return { answers: parseAnswers([answer]), context: payload.context };
+      return withUndeliveredReplyNote(channel.state, payload, SURFACE_NAME);
     },
     events: mergedEvents,
   });
@@ -339,8 +419,11 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
   return {
     bot,
     channel,
-    send(input, options) {
-      return bridgeSend(bot, input, options);
+    send(message, options) {
+      return bridgeSend(bot, message, options);
+    },
+    respond(answers, options) {
+      return bridgeRespond(bot, answers, options);
     },
   };
 }
@@ -348,39 +431,95 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
 function defaultEvents<TAdapters extends ChatSdkAdapters>(
   inputActionPrefix: string,
 ): ChatSdkChannelEvents<TAdapters> {
+  type EventChannel = Parameters<
+    NonNullable<ChatSdkChannelEvents<TAdapters>["interaction.opened"]>
+  >[1]["channel"];
+
+  async function showPrompt(channel: EventChannel, request: Interaction) {
+    if (!channel.thread) return false;
+    const posted = await channel.thread.post(renderInteractions([request], inputActionPrefix));
+    if (!posted.id) return;
+    // Tracked even without edit support, so an answer can name the card it is on.
+    channel.state.pendingInputCards = {
+      ...channel.state.pendingInputCards,
+      [posted.id]: { requests: [request], resolved: {} },
+    };
+  }
+
+  async function clearAnsweredCards(
+    event: { readonly resolutions: readonly RequestSettlement[] },
+    channel: EventChannel,
+  ) {
+    const thread = channel.thread;
+    if (!thread) return;
+    for (const [messageId, card] of Object.entries(channel.state.pendingInputCards ?? {})) {
+      const resolutions = event.resolutions.filter((resolution) =>
+        card.requests.some((request) => request.interactionId === resolution.interactionId),
+      );
+      if (resolutions.length === 0) continue;
+      const resolved = {
+        ...card.resolved,
+        ...Object.fromEntries(
+          resolutions.map((resolution) => [resolution.interactionId, resolution]),
+        ),
+      };
+      const { [messageId]: _, ...rest } = channel.state.pendingInputCards ?? {};
+      channel.state.pendingInputCards = card.requests.every(
+        (request) => resolved[request.interactionId] !== undefined,
+      )
+        ? rest
+        : { ...rest, [messageId]: { requests: card.requests, resolved } };
+      if (channel.state.editSupported === false) continue;
+      try {
+        await thread.adapter.editMessage(
+          thread.id,
+          messageId,
+          renderInteractions(card.requests, inputActionPrefix, resolved),
+        );
+      } catch (error) {
+        if (!isNotImplemented(error)) {
+          log.warn("answered input card edit failed", { error, messageId });
+          continue;
+        }
+        channel.state.editSupported = false;
+      }
+    }
+  }
+
+  const prompts = promptQueue(showPrompt);
   return {
-    ...defaultAuthorizationEvents(),
-    async "turn.started"(_event, channel, _ctx) {
+    async "turn.started"(_event, { channel }) {
       channel.state.pendingToolCallMessage = null;
       clearStream(channel.state);
       await safeStartTyping(channel.thread, "Working...");
     },
-    async "actions.requested"(event, channel, _ctx) {
+    async "call.requested"({ data }, { channel }) {
       const buffered = channel.state.pendingToolCallMessage;
       channel.state.pendingToolCallMessage = null;
       if (buffered) {
         await safeStartTyping(channel.thread, truncate(buffered));
         return;
       }
-      const labels = event.actions.map((action) =>
-        action.kind === "tool-call" ? action.toolName : action.kind,
-      );
-      await safeStartTyping(channel.thread, truncate(`Running ${labels.join(", ")}...`));
+      // eve's own task controls stay out of view.
+      if (data.capability.kind === "control") return;
+      const label = callLabel(data);
+      await safeStartTyping(channel.thread, truncate(`${label}...`));
     },
-    async "message.appended"(event, channel, _ctx) {
+    async "content.delta"({ data }, { channel }) {
       if (!channel.thread || !canStream(channel)) return;
-      const currentText =
-        channel.state.streamStepIndex === event.stepIndex
-          ? streamTextByState.get(channel.state)
-          : undefined;
-      const message = (currentText ?? "") + event.messageDelta;
+      // Only text streams: a part announces its kind with its first delta.
+      const streaming = channel.state.streamPartId === data.partId;
+      if (data.kind === undefined ? !streaming : data.kind !== "text") return;
+      const currentText = streaming ? channel.state.streamText : null;
+      const message = (currentText ?? "") + data.delta;
       if (!message) return;
-      streamTextByState.set(channel.state, message);
+      channel.state.streamText = message;
       const anchor = channel.state.anchorMessageId;
-      if (!anchor || channel.state.streamStepIndex !== event.stepIndex) {
+      if (!anchor || !streaming) {
         const sent = await channel.thread.post({ markdown: message });
+        channel.state.shownText = message;
         channel.state.anchorMessageId = sent.id;
-        channel.state.streamStepIndex = event.stepIndex;
+        channel.state.streamPartId = data.partId;
         channel.state.lastEditAtMs = Date.now();
         return;
       }
@@ -388,45 +527,81 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       if (Date.now() - lastEdit < channel.streamingEditIntervalMs) return;
       try {
         await editMessage(channel.thread, anchor, message);
+        channel.state.shownText = message;
         channel.state.lastEditAtMs = Date.now();
       } catch (error) {
         if (!isNotImplemented(error)) throw error;
+        // Keep the anchor: completion must not post the reply beside it.
         channel.state.editSupported = false;
-        clearStream(channel.state);
       }
     },
-    async "input.requested"(event, channel, _ctx) {
-      if (!channel.thread || event.requests.length === 0) return;
-      await channel.thread.post(renderInputRequests(event.requests, inputActionPrefix));
+    // Some adapters show only text, where a reply can answer only the request
+    // it sees, so cards post one at a time.
+    async "interaction.opened"(event, ctx) {
+      const { data } = event;
+      const { channel } = ctx;
+      const signIns = chatSdkSignIns(channel);
+      if (signIns !== undefined)
+        await showSignIn(sessionTables(ctx.view), data.interactionId, signIns);
     },
-    async "message.completed"(event, channel, _ctx) {
-      if (event.finishReason === "tool-calls") {
-        channel.state.pendingToolCallMessage = event.message
-          ? (firstNonEmptyLine(event.message) ?? null)
-          : null;
+    // Covers every way a request ends: a press, a typed answer, or a withdrawal.
+    async "interaction.settled"(event, ctx) {
+      const { data } = event;
+      const { channel } = ctx;
+      const signIns = chatSdkSignIns(channel);
+      if (signIns !== undefined) await settleSignIn(sessionTables(ctx.view), data, signIns);
+      const resolution = requestSettlementOf(sessionTables(ctx.view), data);
+      if (resolution !== undefined)
+        await clearAnsweredCards({ resolutions: [resolution] }, channel);
+    },
+    committed: prompts,
+    async "content.completed"({ data }, { channel, session }) {
+      if (data.kind !== "text") return;
+      const text = typeof data.value === "string" ? data.value : "";
+      if (contentPhase(data.phase) === "narration") {
+        channel.state.pendingToolCallMessage = text ? (firstNonEmptyLine(text) ?? null) : null;
         // Finalize the streamed anchor so it shows the complete pre-tool-call
         // text rather than the last throttled edit. Pass `false` so nothing new
         // is posted when nothing was streamed — intermediate tool-call narration
         // must not become a standalone message on non-streaming surfaces.
-        if (event.message) {
-          await finalizeStreamedMessage(channel, event.message, false);
+        if (text) {
+          try {
+            await finalizeStreamedMessage(channel, text, false);
+          } catch (error) {
+            if (!isNotImplemented(error)) throw error;
+          }
         } else {
           clearStream(channel.state);
         }
         return;
       }
       channel.state.pendingToolCallMessage = null;
-      if (!event.message) {
+      if (!text) {
         clearStream(channel.state);
         return;
       }
-      await finalizeStreamedMessage(channel, event.message, true);
+      try {
+        await finalizeStreamedMessage(channel, text, true);
+      } catch (error) {
+        await reportUndeliveredReply(
+          {
+            log,
+            name: SURFACE_NAME,
+            post: async (notice) => channel.thread?.post(notice),
+            state: channel.state,
+          },
+          session.turn.id,
+          error,
+        );
+      }
     },
-    async "turn.failed"(event, channel, _ctx) {
-      await postFailure(channel.thread, "I hit an error while handling your request", event);
+    async "turn.settled"({ data }, { channel }) {
+      const notice = failureNotice(data, "turn");
+      if (notice !== undefined) await channel.thread?.post(notice);
     },
-    async "session.failed"(event, channel) {
-      await postFailure(channel.thread, "This session could not recover from an error", event);
+    async "session.ended"({ data }, { channel }) {
+      const notice = failureNotice(data, { restart: "message" });
+      if (notice !== undefined) await channel.thread?.post(notice);
     },
   };
 }
@@ -447,44 +622,59 @@ async function safeStartTyping(thread: Thread | null, status?: string): Promise<
 
 /**
  * Edits a previously posted message in place via the adapter. Rendered as
- * markdown so streamed edits match the completed-message formatting. Callers
- * handle {@link isNotImplemented} to fall back to a fresh post.
+ * markdown so streamed edits match the completed-message formatting.
  */
 async function editMessage(thread: Thread, messageId: string, markdown: string): Promise<void> {
   await thread.adapter.editMessage(thread.id, messageId, { markdown });
 }
 
 /**
- * Finalizes a completed assistant message. When a streamed anchor exists, edits
- * it in place so it shows the complete text instead of the last throttled
- * delta. When no anchor was streamed and `postWhenNoAnchor` is `true`, posts the
- * message fresh (the normal path for a final reply on a non-streaming surface);
- * when `false`, leaves the surface untouched so intermediate tool-call narration
- * does not become a standalone message. Clears the stream anchor either way.
+ * Replaces a pressed request card with only `label`. The session that held the
+ * request is gone and a press carries no prompt text, so the prompt can't be
+ * kept; what matters is that the buttons stop being offered.
+ */
+async function retireInputCard(
+  thread: Pick<Thread, "adapter" | "id">,
+  messageId: string,
+  label: string,
+): Promise<void> {
+  try {
+    await thread.adapter.editMessage(thread.id, messageId, renderRetiredInputRequest(label));
+  } catch (error) {
+    if (!isNotImplemented(error)) throw error;
+  }
+}
+
+/**
+ * Shows a completed assistant message and clears the stream. With a streamed
+ * anchor, edits it to the complete text unless it already shows it; the
+ * anchor is the reply, so a failed edit throws rather than posting the reply
+ * beside it, and an edit {@link isNotImplemented} also disables edits for the
+ * session. Without an anchor, posts the message when `postWhenNoAnchor` is
+ * `true` (a final reply on a non-streaming surface); when `false`, leaves the
+ * surface untouched so intermediate tool-call narration does not become a
+ * standalone message.
  */
 async function finalizeStreamedMessage(
   channel: ChatSdkChannelContext,
   message: string,
   postWhenNoAnchor: boolean,
 ): Promise<void> {
+  const { anchorMessageId: anchor, shownText } = channel.state;
+  clearStream(channel.state);
   const thread = channel.thread;
-  if (!thread) {
-    clearStream(channel.state);
+  if (!thread) return;
+  if (!anchor) {
+    if (postWhenNoAnchor) await thread.post({ markdown: message });
     return;
   }
-  const anchor = channel.state.anchorMessageId;
-  if (canStream(channel) && anchor) {
-    try {
-      await editMessage(thread, anchor, message);
-    } catch (error) {
-      if (!isNotImplemented(error)) throw error;
-      channel.state.editSupported = false;
-      if (postWhenNoAnchor) await thread.post({ markdown: message });
-    }
-  } else if (postWhenNoAnchor) {
-    await thread.post({ markdown: message });
+  if (shownText === message) return;
+  try {
+    await editMessage(thread, anchor, message);
+  } catch (error) {
+    if (isNotImplemented(error)) channel.state.editSupported = false;
+    throw error;
   }
-  clearStream(channel.state);
 }
 
 /** Whether streamed edits are enabled and still supported by the adapter. */
@@ -496,8 +686,9 @@ function canStream(channel: ChatSdkChannelContext): boolean {
 function clearStream(state: ChatSdkChannelState): void {
   state.anchorMessageId = null;
   state.lastEditAtMs = null;
-  state.streamStepIndex = null;
-  streamTextByState.delete(state);
+  state.streamPartId = null;
+  state.streamText = null;
+  state.shownText = null;
 }
 
 /** First non-blank line of `text`, used as a compact typing status. */
@@ -514,81 +705,150 @@ function truncate(text: string, max = MAX_TYPING_STATUS): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`;
 }
 
-function renderInputRequests(requests: readonly InputRequest[], inputActionPrefix: string) {
-  return Card({
-    children: requests.flatMap((request) => renderInputRequest(request, inputActionPrefix)),
+async function bridgeSend<TAdapters extends ChatSdkAdapters>(
+  bot: Chat<TAdapters>,
+  message: MessageContent,
+  options: ChatSdkSendOptions,
+): Promise<Delivery> {
+  const from = activeFrom("send");
+  const { adapterName, auth, inputAnswer, thread: threadInput, ...sendOptions } = options;
+  const thread = serializeThread(bot, threadInput, adapterName);
+  const state: ChatSdkDeliveryState = { thread };
+  if (inputAnswer !== undefined) state.inputAnswer = inputAnswer;
+  return from(thread.id).send(message, {
+    ...sendOptions,
+    auth: auth ?? null,
+    state,
   });
 }
 
-function renderInputRequest(request: InputRequest, inputActionPrefix: string) {
-  const children: CardChild[] = [CardText(request.prompt)];
-  if (request.options && request.options.length > 0) {
-    children.push(
-      Actions(
-        request.options.map((option) =>
-          Button({
-            id: encodeInputAction(inputActionPrefix, request.requestId, option.id),
-            label: option.label,
-            style: option.style,
-            value: option.id,
-          }),
-        ),
-      ),
-    );
-    return children;
-  }
-  children.push(
-    CardText("This request needs a freeform answer. Continue from the eve session UI."),
-  );
-  return children;
-}
-
-async function postFailure(
-  thread: Thread | null,
-  prefix: string,
-  event: EventData<"turn.failed"> | EventData<"session.failed">,
-): Promise<void> {
-  if (!thread) return;
-  const hint = formatErrorHint(event);
-  const errorId = extractErrorId(event.details);
-  await thread.post(
-    [
-      `${prefix}${hint}.`,
-      "Please try again, rephrase, or reach out if it keeps failing.",
-      ...(errorId ? [`Error id: ${errorId}`] : []),
-    ].join("\n\n"),
-  );
-}
-
-async function bridgeSend<TAdapters extends ChatSdkAdapters>(
+async function bridgeRespond<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
-  input: ChatSdkSendInput,
-  options: ChatSdkSendOptions,
-): Promise<Session> {
+  answers: readonly Answer[],
+  options: ChatSdkRespondOptions,
+): Promise<Delivery> {
+  const from = activeFrom("respond");
+  const { adapterName, auth, thread: threadInput, ...respondOptions } = options;
+  const thread = serializeThread(bot, threadInput, adapterName);
+  return from(thread.id).respond(parseAnswers(answers), {
+    ...respondOptions,
+    auth: auth ?? null,
+  });
+}
+
+/**
+ * Records the author of the delivery's message as the Chat SDK user behind its
+ * caller. A principal several people send as, such as tenant auth, names no one
+ * person, so it records `null` rather than whoever spoke last.
+ */
+function recordPrincipalUser(
+  state: ChatSdkChannelState,
+  caller: SessionAuthContext | null,
+  payload: ChannelDelivery<ChatSdkChannelState>,
+): void {
+  if (caller === null) return;
+  const thread = payload.state?.thread;
+  const author = thread?.currentMessage?.author;
+  if (author === undefined || author.isBot === true || author.isMe) return;
+  const recorded = state.usersByPrincipal?.[caller.principalId];
+  if (recorded === author.userId || recorded === null) return;
+  state.usersByPrincipal = {
+    ...state.usersByPrincipal,
+    [caller.principalId]: recorded === undefined ? author.userId : null,
+  };
+}
+
+/**
+ * Records the delivery's message as the thread's latest. Session state keeps
+ * the thread from the first delivery, so its `currentMessage` goes stale.
+ */
+function recordLatestMessage(
+  state: ChatSdkChannelState,
+  payload: ChannelDelivery<ChatSdkChannelState>,
+): void {
+  const message = payload.state?.thread?.currentMessage;
+  if (message === undefined || message.author.isMe) return;
+  state.latestMessageId = message.id;
+}
+
+/** Channel state a delivery carries. `inputAnswer` lives only on the delivery. */
+interface ChatSdkDeliveryState extends ChatSdkChannelState {
+  inputAnswer?: ChatSdkInputAnswer;
+}
+
+/**
+ * The response for a delivery's `inputAnswer`, when its card still waits on a
+ * request that offers the option. Matching the card keeps an answer meant for
+ * one prompt from settling a different request.
+ */
+function resolveInputAnswer(
+  state: ChatSdkChannelState,
+  payload: ChannelDelivery<ChatSdkChannelState>,
+): Answer | undefined {
+  const answer = (payload.state as Partial<ChatSdkDeliveryState> | undefined)?.inputAnswer;
+  if (answer === undefined) return undefined;
+  const card = state.pendingInputCards?.[answer.messageId];
+  const request = card?.requests.find(
+    (candidate) =>
+      card.resolved[candidate.interactionId] === undefined &&
+      candidate.request.kind !== "sign-in" &&
+      candidate.request.options?.some((option) => option.id === answer.optionId) === true,
+  );
+  return request === undefined
+    ? undefined
+    : { optionId: answer.optionId, interactionId: request.interactionId };
+}
+
+function activeFrom(operation: "respond" | "send"): ChannelFrom<ChatSdkChannelState> {
   const active = contextStorage.getStore()?.get(ActiveWebhookKey);
   if (!active) {
     throw new Error(
-      "chatSdkChannel().send can only run during a Chat SDK webhook handler for this bridge.",
+      `chatSdkChannel().${operation} can only run during a Chat SDK webhook handler for this bridge.`,
     );
   }
-  const thread = serializeThread(bot, options.thread, options.adapterName);
-  const payload = normalizeSendInput(input);
-  const deliveryOptions: MutableDeliveryOptions<ChatSdkChannelState> = {
-    auth: options.auth ?? null,
-    state: { thread },
-  };
-  if (options.callback !== undefined) deliveryOptions.callback = options.callback;
-  if (options.mode !== undefined) deliveryOptions.mode = options.mode;
-  if (options.title !== undefined) deliveryOptions.title = options.title;
-  if (options.turnPolicy !== undefined) deliveryOptions.turnPolicy = options.turnPolicy;
-  if (options.taskDeliveryPolicy !== undefined)
-    deliveryOptions.taskDeliveryPolicy = options.taskDeliveryPolicy;
-  const source = active.from(thread.id) as InternalChannelSource<ChatSdkChannelState>;
-  return source[INTERNAL_CHANNEL_DELIVER](payload, deliveryOptions);
+  return active.from;
 }
 
 function initialState(): ChatSdkChannelState {
   return { pendingAuthMessageIds: {}, thread: null };
+}
+
+/**
+ * Downloads an attachment `messageContentOf` deferred to the step: rebuilds
+ * the download with the adapter's `rehydrateAttachment`, since the message's
+ * own `fetchData` didn't survive the queue.
+ */
+async function fetchAttachment<TAdapters extends ChatSdkAdapters>(
+  bot: Chat<TAdapters>,
+  url: string,
+): Promise<FetchFileResult | null> {
+  const ref = parseChatSdkFileRef(new URL(url));
+  if (ref === null) return null;
+  // The step may run where the webhook didn't, so the adapters may not be initialized yet.
+  await bot.initialize();
+  const rehydrated = bot.getAdapter(ref.adapter).rehydrateAttachment?.(ref.attachment);
+  if (rehydrated?.fetchData === undefined) {
+    throw new EveAttachmentError({
+      adapterKind: "chat-sdk",
+      kind: "resolver-threw",
+      message: `the ${ref.adapter} adapter can't download it after the webhook returns.`,
+    });
+  }
+  let data: Buffer | ArrayBuffer;
+  try {
+    data = await rehydrated.fetchData();
+  } catch (cause) {
+    if (cause instanceof EveAttachmentError) throw cause;
+    throw new EveAttachmentError({
+      adapterKind: "chat-sdk",
+      cause,
+      kind: "resolver-threw",
+      message: `the ${ref.adapter} download failed.`,
+    });
+  }
+  const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  assertWithinLimit(bytes, DEFAULT_UPLOAD_POLICY.maxBytes, "chat-sdk");
+  return { bytes, mediaType: ref.attachment.mimeType };
 }
 
 function threadFromState<TAdapters extends ChatSdkAdapters>(
@@ -673,26 +933,4 @@ function routeForAdapter<TAdapters extends ChatSdkAdapters>(
   if (override) return override;
   const route = config.route ?? DEFAULT_ROUTE;
   return `${route.replace(/\/$/u, "")}/${adapterName}`;
-}
-
-function encodeInputAction(prefix: string, requestId: string, optionId: string): string {
-  return `${prefix}${encodeURIComponent(requestId)}:${encodeURIComponent(optionId)}`;
-}
-
-function decodeInputAction(
-  actionId: string,
-  prefix: string,
-  value: string | undefined,
-): { optionId: string; requestId: string } | null {
-  if (!actionId.startsWith(prefix)) return null;
-  const encoded = actionId.slice(prefix.length);
-  const separator = encoded.indexOf(":");
-  if (separator <= 0) return null;
-  try {
-    const requestId = decodeURIComponent(encoded.slice(0, separator));
-    const optionId = value ?? decodeURIComponent(encoded.slice(separator + 1));
-    return { optionId, requestId };
-  } catch {
-    return null;
-  }
 }

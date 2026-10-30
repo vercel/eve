@@ -1,12 +1,7 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { z } from "#compiled/zod/index.js";
 
-import {
-  readVercelProjectLink,
-  type VercelProjectLink,
-  VercelProjectLinkSchema,
-} from "#internal/vercel/project-link.js";
+import { readVercelProjectLink, type VercelProjectLink } from "#internal/vercel/project-link.js";
 import { readVercelResourceName } from "#internal/vercel/api-resource.js";
 import { captureVercel } from "./primitives/run-vercel.js";
 
@@ -21,25 +16,8 @@ export interface DeploymentInfo {
   productionUrl?: string;
 }
 
-const VercelProjectEnvironmentSchema = z.object({
-  VERCEL_ORG_ID: VercelProjectLinkSchema.shape.orgId,
-  VERCEL_PROJECT_ID: VercelProjectLinkSchema.shape.projectId,
-});
-
 /** Validated Vercel owner and project identifiers. */
 export type VercelProjectReference = VercelProjectLink;
-
-/** Parses the complete Vercel owner and project environment pair. */
-export function projectReferenceFromEnvironment(
-  environment: Readonly<Record<string, string | undefined>>,
-): VercelProjectReference | undefined {
-  const parsed = VercelProjectEnvironmentSchema.safeParse(environment);
-  if (!parsed.success) return undefined;
-  return {
-    orgId: parsed.data.VERCEL_ORG_ID,
-    projectId: parsed.data.VERCEL_PROJECT_ID,
-  };
-}
 
 /** Rejects Vercel's unsupported legacy link directory before link mutation. */
 export async function assertNoLegacyProjectLinkDirectory(projectRoot: string): Promise<void> {

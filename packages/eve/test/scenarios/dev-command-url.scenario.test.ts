@@ -46,22 +46,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("runCli dev URL support", () => {
-  it.each([
-    ["--url", ["dev", "--url", "https://example.com"]],
-    ["-u", ["dev", "-u", "https://example.com"]],
-    ["bare URL", ["dev", "https://example.com"]],
-  ])("connects the default terminal UI with %s", async (_label, argv) => {
+describe("eve remote connect", () => {
+  it("connects the terminal UI without starting a local server", async () => {
     setInteractiveTerminal();
 
-    const logger = {
-      error: vi.fn(),
-      log: vi.fn(),
-    };
+    const logger = { error: vi.fn(), log: vi.fn() };
     const startHost = vi.fn();
     const runDevelopmentTui = vi.fn(async () => {});
 
-    await runCli(argv, logger, {
+    await runCli(["remote", "connect", "--url", "https://example.com"], logger, {
       runDevelopmentTui,
       startHost,
     });
@@ -75,38 +68,16 @@ describe("runCli dev URL support", () => {
         }),
       }),
     );
-    const devOutput = logger.log.mock.calls.map(([message]) => String(message)).join("\n");
-    expect(devOutput).toContain("↗ remote mode targeting");
-    expect(devOutput).toContain("example.com");
-  });
-
-  it("rejects local server flags when using --url", async () => {
-    const logger = {
-      error: vi.fn(),
-      log: vi.fn(),
-    };
-    const startHost = vi.fn();
-    const runDevelopmentTui = vi.fn(async () => {});
-
-    await expect(
-      runCli(["dev", "--url", "https://example.com", "--port", "3000"], logger, {
-        runDevelopmentTui,
-        startHost,
-      }),
-    ).rejects.toThrow("The --port option cannot be used with --url.");
-
-    expect(startHost).not.toHaveBeenCalled();
-    expect(runDevelopmentTui).not.toHaveBeenCalled();
+    const output = logger.log.mock.calls.map(([message]) => String(message)).join("\n");
+    expect(output).toContain("↗ remote agent");
+    expect(output).toContain("example.com");
   });
 
   it("loads local development env files before connecting", async () => {
     const appRoot = await createTemporaryRoot();
     const canonicalAppRoot = await realpath(appRoot);
     const previousCwd = process.cwd();
-    const logger = {
-      error: vi.fn(),
-      log: vi.fn(),
-    };
+    const logger = { error: vi.fn(), log: vi.fn() };
     const startHost = vi.fn();
     const runDevelopmentTui = vi.fn(async () => {});
 
@@ -116,7 +87,7 @@ describe("runCli dev URL support", () => {
     process.chdir(appRoot);
 
     try {
-      await runCli(["dev", "--url", "https://example.com"], logger, {
+      await runCli(["remote", "connect", "--url", "https://example.com"], logger, {
         runDevelopmentTui,
         startHost,
       });

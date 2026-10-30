@@ -2,7 +2,9 @@ import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import {
+  AgentSessionRuntimeOverridesKey,
   AuthKey,
+  ToolStubsKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
   ChannelDeliveryKey,
@@ -12,19 +14,21 @@ import {
   ConversationIdKey,
   DynamicSubagentAgentConfigKey,
   InitiatorAuthKey,
-  ModeKey,
+  OccurrenceIdKey,
   ParentSessionKey,
   ParentTraceContextKey,
-  ActivityObserverKey,
   ScheduleIdKey,
-  TaskDeliveryPolicyKey,
+  ScheduleInstanceKey,
+  EarlierRemoteCallerKey,
   SessionCallbackKey,
   SessionTitleKey,
+  TraceRootKey,
 } from "#context/keys.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import { readConversationId } from "#tracing/conversation-context.js";
+import { readConversationId } from "#shared/conversation-identity.js";
 import { buildConversationContext } from "#channel/conversation-context.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
@@ -33,6 +37,7 @@ import { resolveInstrumentationEnvironment } from "#internal/application/dev-env
  * Builds the bootstrap {@link ContextContainer} for one run.
  */
 export function buildRunContext(input: {
+  readonly agentSessionRuntimeOverrides?: AgentSessionRuntimeOverrides;
   readonly bundle: CompiledBundle;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly run: RunInput;
@@ -49,7 +54,7 @@ export function buildRunContext(input: {
     ConversationContextKey,
     buildConversationContext(run, resolveInstrumentationEnvironment()),
   );
-  if (run.parent === undefined) {
+  if (run.parent === undefined || run.traceRoot?.kind === "own") {
     const title = deriveSessionTitle(run.title ?? run.input.message);
     if (title !== undefined) ctx.set(SessionTitleKey, title);
   }
@@ -67,14 +72,20 @@ export function buildRunContext(input: {
     ctx.set(ContinuationTokenKey, run.continuationToken);
     ctx.set(ContinuationHookTokensKey, [run.continuationToken]);
   }
-  ctx.set(ModeKey, run.mode);
+  const occurrenceId =
+    run.schedule?.occurrenceId ?? contextStorage.getStore()?.get(OccurrenceIdKey);
+  if (occurrenceId !== undefined) ctx.set(OccurrenceIdKey, occurrenceId);
   ctx.set(AuthKey, auth);
+  if (run.toolStubs !== undefined) ctx.set(ToolStubsKey, run.toolStubs);
   if (run.initiatorAuth !== undefined || run.input.message !== undefined) {
     ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);
   }
 
   if (input.dynamicSubagentAgentConfig !== undefined) {
     ctx.set(DynamicSubagentAgentConfigKey, input.dynamicSubagentAgentConfig);
+  }
+  if (input.agentSessionRuntimeOverrides !== undefined) {
+    ctx.set(AgentSessionRuntimeOverridesKey, input.agentSessionRuntimeOverrides);
   }
 
   if (run.capabilities !== undefined) {
@@ -85,16 +96,12 @@ export function buildRunContext(input: {
     ctx.set(ChannelRequestIdKey, run.requestId);
   }
 
-  const scheduleId = contextStorage.getStore()?.get(ScheduleIdKey);
+  const instance = run.schedule?.instance ?? contextStorage.getStore()?.get(ScheduleInstanceKey);
+  if (instance !== undefined) ctx.set(ScheduleInstanceKey, instance);
+  const scheduleId = run.schedule?.definition ?? contextStorage.getStore()?.get(ScheduleIdKey);
   if (scheduleId !== undefined) {
     ctx.set(ScheduleIdKey, scheduleId);
   }
-
-  ctx.set(
-    TaskDeliveryPolicyKey,
-    run.taskDeliveryPolicy ??
-      (run.parent !== undefined || scheduleId !== undefined ? "cohort" : "auto"),
-  );
 
   if (run.delivery !== undefined) {
     ctx.set(ChannelDeliveryKey, run.delivery);
@@ -103,21 +110,20 @@ export function buildRunContext(input: {
   if (run.callback !== undefined) {
     ctx.set(SessionCallbackKey, run.callback);
   }
-  if (run.activityObserver !== undefined) {
-    ctx.set(ActivityObserverKey, run.activityObserver);
+  if (run.callback !== undefined && run.earlierCallerProtocol !== undefined) {
+    ctx.set(EarlierRemoteCallerKey, run.earlierCallerProtocol);
   }
 
   if (run.parent !== undefined) {
     ctx.set(ParentSessionKey, run.parent);
   }
+  if (run.traceRoot !== undefined) {
+    ctx.set(TraceRootKey, run.traceRoot);
+  }
 
   if (run.parentTraceContext !== undefined) {
     ctx.set(ParentTraceContextKey, run.parentTraceContext);
   }
-
-  // `run.limits` deliberately never enters the context: inherited limits ride
-  // the typed workflow-entry payload into `createSessionStep` and live on the
-  // session from then on.
 
   return ctx;
 }

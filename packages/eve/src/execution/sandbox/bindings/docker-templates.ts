@@ -37,7 +37,9 @@ export async function pruneDockerSandboxTemplates(input: {
   readonly retainCount?: number;
 }): Promise<void> {
   const cli = input.dockerCli ?? createDockerCli();
-  const markersDirectory = resolveDockerTemplateMarkersDirectory(input.appRoot);
+  const markersDirectory = resolveDockerTemplateMarkersDirectory(
+    resolveSandboxCacheDirectory(input.appRoot),
+  );
 
   let entries: Dirent<string>[];
   try {
@@ -99,13 +101,13 @@ function dockerTemplateImageTag(input: {
 }
 
 export function resolveDockerTemplateMarkerPath(
-  appRoot: string,
+  storagePath: string,
   input: {
     readonly optionsHash: string;
     readonly templateKey: string;
   },
 ): string {
-  return join(resolveDockerTemplateMarkersDirectory(appRoot), dockerTemplateImageTag(input));
+  return join(resolveDockerTemplateMarkersDirectory(storagePath), dockerTemplateImageTag(input));
 }
 
 export async function touchDockerTemplateMarker(
@@ -184,6 +186,6 @@ export async function ensureDockerBaseImage(
   expectDockerSuccess(await cli.run(["pull", options.image]), `pull base image "${options.image}"`);
 }
 
-function resolveDockerTemplateMarkersDirectory(appRoot: string): string {
-  return join(resolveSandboxCacheDirectory(appRoot), "docker", "templates");
+function resolveDockerTemplateMarkersDirectory(storagePath: string): string {
+  return join(storagePath, "docker", "templates");
 }

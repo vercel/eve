@@ -34,7 +34,7 @@ When the user asks about weather, call the weather tool before answering.`;
         metadata: {
           audience: "forecast",
         },
-        markdown: "When the user asks about weather, call the weather tool before answering.",
+        content: "When the user asks about weather, call the weather tool before answering.",
       }),
     );
   });
@@ -52,7 +52,7 @@ Research complex weather questions before replying.`;
     ).toEqual(
       defineSkill({
         description: "Research complex weather questions before replying.",
-        markdown: "Research complex weather questions before replying.",
+        content: "Research complex weather questions before replying.",
       }),
     );
   });
@@ -72,7 +72,7 @@ When the user asks about weather, call the weather tool before answering.`;
     expect(lowerSkillMarkdown(markdown)).toEqual(
       defineSkill({
         description: "Use the weather tool before answering forecast questions.",
-        markdown: "When the user asks about weather, call the weather tool before answering.",
+        content: "When the user asks about weather, call the weather tool before answering.",
       }),
     );
   });
@@ -91,7 +91,7 @@ Research complex weather questions before replying.`;
     ).toEqual(
       defineSkill({
         description: "Research complex weather questions before replying.",
-        markdown: "Research complex weather questions before replying.",
+        content: "Research complex weather questions before replying.",
       }),
     );
   });
@@ -106,7 +106,25 @@ When the user asks about weather, call the weather tool before answering.`),
     ).toEqual(
       defineSkill({
         description: "Use the weather tool before answering forecast questions.",
-        markdown: "When the user asks about weather, call the weather tool before answering.",
+        content: "When the user asks about weather, call the weather tool before answering.",
+      }),
+    );
+  });
+
+  it("treats metadata outside eve's flat string map as a no-op", () => {
+    expect(
+      lowerSkillMarkdown(`---
+description: Use the Lark CLI before answering document questions.
+metadata:
+  requires:
+    bins: [lark-cli]
+  enabled: true
+---
+Use lark-cli to answer the question.`),
+    ).toEqual(
+      defineSkill({
+        description: "Use the Lark CLI before answering document questions.",
+        content: "Use lark-cli to answer the question.",
       }),
     );
   });
@@ -119,7 +137,7 @@ When the user asks about weather, call the weather tool before answering.`),
     ).toEqual(
       defineSkill({
         description: "Use the weather tool before answering forecast questions.",
-        markdown: "Use the weather tool before answering forecast questions.",
+        content: "Use the weather tool before answering forecast questions.",
       }),
     );
   });
@@ -131,7 +149,7 @@ description: Use the weather tool before answering forecast questions.
 When the user asks about weather, call the weather tool before answering.`);
 
     expect(result.description).toBe("Use the weather tool before answering forecast questions.");
-    expect(result.markdown).toBe(
+    expect(result.content).toBe(
       "When the user asks about weather, call the weather tool before answering.",
     );
   });
@@ -154,7 +172,7 @@ What's the temp in NYC?`;
     expect(lowerScheduleMarkdown(markdown)).toEqual(
       defineSchedule({
         cron: "*/5 * * * *",
-        markdown: "What's the temp in NYC?",
+        content: "What's the temp in NYC?",
       }),
     );
   });
@@ -214,14 +232,14 @@ plain markdown`),
   });
 
   it("rejects JavaScript frontmatter in skill markdown instead of evaluating it", () => {
-    // gray-matter's built-in `javascript` engine would `eval()` the frontmatter
-    // body, so a `---javascript` fence must throw rather than execute code.
     const malicious = `---javascript
 globalThis.__eveMarkdownRce = true
 ---
 When the user asks about weather, call the weather tool before answering.`;
 
-    expect(() => lowerSkillMarkdown(malicious)).toThrow("JavaScript frontmatter is not supported.");
+    expect(() => lowerSkillMarkdown(malicious)).toThrow(
+      'Frontmatter language "javascript" is not supported.',
+    );
     expect(Reflect.get(globalThis, "__eveMarkdownRce")).toBeUndefined();
   });
 
@@ -232,7 +250,7 @@ globalThis.__eveScheduleRce = true
 body`;
 
     expect(() => lowerScheduleMarkdown(malicious)).toThrow(
-      "JavaScript frontmatter is not supported.",
+      'Frontmatter language "js" is not supported.',
     );
     expect(Reflect.get(globalThis, "__eveScheduleRce")).toBeUndefined();
   });

@@ -19,7 +19,7 @@ export function resultSucceeded(result: PackageManagerProcessResult): boolean {
   return result.termination.kind === "exit" && result.termination.code === 0;
 }
 
-export interface PackageProcessStdoutCollector {
+interface PackageProcessStdoutCollector {
   end(): void;
   result(termination: PackageManagerProcessTermination): PackageManagerProcessResult;
   write(chunk: Buffer): void;

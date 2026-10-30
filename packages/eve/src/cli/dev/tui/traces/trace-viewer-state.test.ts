@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local/trace-reader.js";
 
 import type { TraceStoreEntry } from "./trace-store.js";
 import type { TerminalKey } from "../stream-format.js";
@@ -548,7 +548,7 @@ describe("applyLoadedTrace", () => {
             "gen_ai.input.messages": JSON.stringify([
               { parts: [{ content: "hi", type: "text" }], role: "user" },
             ]),
-            "ai.prompt.system": "system prompt",
+            "gen_ai.system_instructions": '[{"content":"system prompt","type":"text"}]',
             "ai.response.text": "reply",
           },
         }),

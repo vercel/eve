@@ -2,6 +2,7 @@ import { resolveModelEndpointStatus } from "#internal/resolve-model-endpoint-sta
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import type { ConnectedModel } from "#shared/model-connection.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
+import { parseChatGptFastModelId } from "#shared/chatgpt-model.js";
 import { measureLoginStage, withLoginProgress } from "./model-login-progress.js";
 import { availableHelperModels } from "#internal/model-auth/available-models.js";
 import { fetchGatewayCatalog } from "../boxes/select-model.js";
@@ -26,9 +27,9 @@ import {
 import type { Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { changeValidatedAgentModel, readAuthoredModelSelection } from "./model-source-change.js";
+import { CONNECTION_OPTIONS } from "./model-login-options.js";
 import {
   authenticateModelConnection,
-  CONNECTION_OPTIONS,
   reuseModelConnection,
   type ValidatedModelConnection,
 } from "./model-login-connection.js";
@@ -91,7 +92,7 @@ type LoginInput = {
   withConnectionUpdate?(task: () => Promise<void>): Promise<void>;
 };
 
-export type ModelLoginResult =
+type ModelLoginResult =
   | { kind: "ready"; reload: boolean; model?: ConnectedModel }
   | { kind: "cancelled" };
 
@@ -115,7 +116,8 @@ async function applyConnection(
           )
         : []);
     let id = defaultId;
-    if (!available.includes(id)) {
+    const catalogId = helper === "chatgpt" ? parseChatGptFastModelId(id).slug : id;
+    if (!available.includes(catalogId)) {
       if (available.length === 0)
         throw new Error(
           "No models are available for this connection. Choose another connection with /login.",

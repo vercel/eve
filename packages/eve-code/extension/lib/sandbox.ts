@@ -86,17 +86,3 @@ export {
   authenticateVercel,
   type BrokeredCredentialOptions,
 } from "./credentials.ts";
-
-export {
-  COMPUTER_USE_REVALIDATION_KEY,
-  installComputerUse,
-  startComputerUse,
-} from "./computer-use-sandbox.ts";
-
-export {
-  executeGitHubShell,
-  githubShellApproval,
-  type GitHubLeaseRule,
-  type GitHubShellInput,
-  type GitHubShellOutput,
-} from "./github-shell.ts";

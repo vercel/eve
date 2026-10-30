@@ -84,14 +84,6 @@ export function initAgentDevHandoff(options: { projectPath: string; devCommand: 
   });
 }
 
-/** The initial prompt for a coding-agent REPL opened inside the scaffolded project. */
-export function initAgentReplPrompt(options: { devCommand: string }): string {
-  return compose(HANDOFF_SECTIONS, {
-    devCommand: options.devCommand,
-    workingDirectory: ".",
-  });
-}
-
 /**
  * Pre-scaffold guide for a coding agent that ran `eve extension init` with no
  * target. Mirrors agent bare-init: collect a package name, then re-run with it.

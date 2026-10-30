@@ -9,18 +9,18 @@ import {
 } from "#setup/primitives/run-vercel.js";
 import { z } from "#compiled/zod/index.js";
 
-export const PHOTON_CONNECT_SERVICE = "photon";
-export const PHOTON_CONNECTOR_TYPE = "photon";
-export const PHOTON_TRIGGER_PATH = "/eve/v1/photon";
+const PHOTON_CONNECT_SERVICE = "photon";
+const PHOTON_CONNECTOR_TYPE = "photon";
+const PHOTON_TRIGGER_PATH = "/eve/v1/photon";
 
 /** Photon project credentials collected separately from their Connect storage encoding. */
-export interface PhotonProjectCredentials {
+interface PhotonProjectCredentials {
   projectId: string;
   projectSecret: string;
 }
 
 /** Identity of a native Photon connector created through Vercel Connect. */
-export interface PhotonConnectorRef {
+interface PhotonConnectorRef {
   id: string;
   uid: string;
   /** Direct project URL used until Photon is available as a managed trigger connector. */
@@ -28,13 +28,13 @@ export interface PhotonConnectorRef {
 }
 
 /** Effects used to provision a Photon connector. */
-export interface ProvisionPhotonConnectorDeps {
+interface ProvisionPhotonConnectorDeps {
   runVercel: typeof runVercel;
   runVercelCaptureStdout: typeof runVercelCaptureStdout;
 }
 
 /** Input for provisioning one Photon connector and its eve webhook destination. */
-export interface ProvisionPhotonConnectorOptions {
+interface ProvisionPhotonConnectorOptions {
   credentials: PhotonProjectCredentials;
   log: ChannelSetupLog;
   project: VercelProjectReference;

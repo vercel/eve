@@ -62,12 +62,12 @@ export interface PhotonManagedProject {
   cleanup(): Promise<void>;
 }
 
-export interface PhotonDeviceAuthorization {
+interface PhotonDeviceAuthorization {
   userCode: string;
   verificationUrl: string;
 }
 
-export interface ProvisionPhotonProjectOptions {
+interface ProvisionPhotonProjectOptions {
   projectName: string;
   phoneNumber: string;
   onAuthorization(authorization: PhotonDeviceAuthorization): void;
@@ -75,7 +75,7 @@ export interface ProvisionPhotonProjectOptions {
   deps?: PhotonManagementDeps;
 }
 
-export interface UsePhotonProjectOptions {
+interface UsePhotonProjectOptions {
   projectId: string;
   projectSecret: string;
   dedicatedLine?: string;
@@ -83,7 +83,7 @@ export interface UsePhotonProjectOptions {
   deps?: PhotonManagementDeps;
 }
 
-export interface PhotonManagementDeps {
+interface PhotonManagementDeps {
   fetch: typeof fetch;
   delay(ms: number, signal?: AbortSignal): Promise<void>;
 }

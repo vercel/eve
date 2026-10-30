@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
-import { readConnectionProtocol } from "#public/definitions/connections/protocol.js";
+import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
 
 describe("defineOpenAPIConnection", () => {
   it('stamps the "openapi" protocol marker', () => {
@@ -11,7 +11,7 @@ describe("defineOpenAPIConnection", () => {
       spec: "https://api.example.com/openapi.json",
     });
 
-    expect(readConnectionProtocol(definition)).toBe("openapi");
+    expect(readStampedConnectionProtocol(definition)).toBe("openapi");
   });
 
   it('normalizes getToken-only auth to principalType "app"', () => {
@@ -26,10 +26,10 @@ describe("defineOpenAPIConnection", () => {
     expect(definition.auth).toMatchObject({ getToken, principalType: "app" });
   });
 
-  it("normalizes credentialOwner into the runtime principalType", () => {
+  it("normalizes principalType into the runtime principalType", () => {
     const getToken = async () => ({ token: "test-token" });
     const definition = defineOpenAPIConnection({
-      auth: { credentialOwner: "user", getToken },
+      auth: { principalType: "user", getToken },
       baseUrl: "https://api.example.com",
       description: "test connection",
       spec: "https://api.example.com/openapi.json",

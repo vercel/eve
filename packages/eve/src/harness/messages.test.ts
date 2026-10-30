@@ -1,4 +1,8 @@
-import type { FilePart, ModelMessage, UserContent } from "ai";
+import type { ModelMessage, UserContent } from "ai";
+import type { DeliverHookPayload } from "#channel/types.js";
+
+import type { MessageFilePart } from "#shared/message-content.js";
+import type { HarnessStepInput } from "#harness/types.js";
 import { describe, expect, it } from "vitest";
 import {
   coalesceDeliveries,
@@ -11,8 +15,9 @@ import {
   isUserModelMessage,
   markFrameworkStepInput,
   normalizeModelMessages,
-  normalizeUserContent,
+  normalizeMessage,
   resolveAssistantStepText,
+  selectDeliveryPayloads,
   validateHarnessModelMessages,
 } from "#harness/messages.js";
 import type { StepInput } from "#harness/types.js";
@@ -21,7 +26,7 @@ import { attachClientContext, readClientContext } from "#internal/client-context
 function textFilePart(overrides: {
   readonly filename: string;
   readonly payload: string;
-}): FilePart {
+}): MessageFilePart {
   return {
     data: Buffer.from(overrides.payload, "utf8"),
     filename: overrides.filename,
@@ -31,23 +36,6 @@ function textFilePart(overrides: {
 }
 
 describe("coalesceDeliveries", () => {
-  it("keeps the last explicit task policy when batching authored sends", () => {
-    const result = coalesceDeliveries([
-      {
-        kind: "deliver" as const,
-        payloads: [{ message: "First" }],
-        taskDeliveryPolicy: "cohort" as const,
-      },
-      {
-        kind: "deliver" as const,
-        payloads: [{ message: "Second" }],
-        taskDeliveryPolicy: "auto" as const,
-      },
-      { kind: "deliver" as const, payloads: [{ message: "Third" }] },
-    ]);
-    expect(result.taskDeliveryPolicy).toBe("auto");
-  });
-
   const caller = {
     callId: "call-1",
     replyTo: { kind: "hook" as const, token: "turn-caller" },
@@ -57,14 +45,71 @@ describe("coalesceDeliveries", () => {
   it("preserves the only caller in a delivery batch", () => {
     expect(
       coalesceDeliveries([
-        { kind: "deliver", payloads: [{ context: ["background"] }] },
+        { kind: "deliver", payloads: [{ context: ["earlier context"] }] },
         { caller, kind: "deliver", payloads: [{ message: "question" }] },
       ]),
     ).toEqual({
       caller,
       kind: "deliver",
-      payloads: [{ context: ["background"] }, { message: "question" }],
+      payloads: [{ context: ["earlier context"] }, { message: "question" }],
     });
+  });
+
+  it("preserves receipt identities through filtering and rebatching", () => {
+    const metadata = (deliveryId: string) => ({
+      channelKind: "subagent",
+      channelName: "research",
+      deliveryId,
+      payloadIndex: 0,
+    });
+    const batch = coalesceDeliveries<DeliverHookPayload>([
+      {
+        kind: "deliver" as const,
+        caller,
+        payloads: [{ message: "First." }],
+        deliveryMetadata: [metadata("d1")],
+      },
+      {
+        kind: "deliver" as const,
+        payloads: [{ message: "A person's correction." }],
+        deliveryMetadata: [metadata("d2")],
+      },
+      {
+        kind: "deliver" as const,
+        caller,
+        payloads: [{ message: "Second." }],
+        deliveryMetadata: [metadata("d3")],
+      },
+    ]);
+    const selected = selectDeliveryPayloads(batch, [
+      { index: 2, payload: batch.payloads[2]! },
+      { index: 1, payload: batch.payloads[1]! },
+    ]);
+    const replayed: typeof selected = JSON.parse(JSON.stringify(selected));
+    const latest = {
+      ...caller,
+      replyTo: { kind: "hook" as const, token: "third-reply" },
+    };
+    const result = coalesceDeliveries<DeliverHookPayload>([
+      replayed,
+      {
+        kind: "deliver" as const,
+        caller: latest,
+        payloads: [{ message: "Third." }],
+        deliveryMetadata: [metadata("d4")],
+      },
+    ]);
+    expect(result.caller).toEqual(latest);
+    expect(
+      result.deliveryMetadata?.map(({ deliveryId, payloadIndex }) => ({
+        deliveryId,
+        payloadIndex,
+      })),
+    ).toEqual([
+      { deliveryId: "d3", payloadIndex: 0 },
+      { deliveryId: "d2", payloadIndex: 1 },
+      { deliveryId: "d4", payloadIndex: 2 },
+    ]);
   });
 
   it("rejects a batch with more than one turn caller", () => {
@@ -109,6 +154,32 @@ describe("coalesceDeliveries", () => {
 });
 
 describe("coalesceTurnInputs", () => {
+  it("keeps answers that carry their responder", () => {
+    const bob = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "bob",
+      principalType: "user",
+    };
+    const first = {
+      deliveryId: "d1",
+      interactionId: "approval-1",
+      optionId: "approve",
+      responseId: "r1",
+    };
+    const second = {
+      deliveryId: "d2",
+      interactionId: "approval-2",
+      optionId: "cancel",
+      responder: bob,
+      responseId: "r2",
+    };
+
+    expect(coalesceTurnInputs({ answers: [first] }, { answers: [second] })).toEqual({
+      answers: [first, second],
+    });
+  });
+
   it("joins two messages with a double newline", () => {
     const result = coalesceTurnInputs({ message: "hello" }, { message: "world" });
 
@@ -125,42 +196,39 @@ describe("coalesceTurnInputs", () => {
   it("preserves a framework kind only when all merged message content shares it", () => {
     expect(
       coalesceTurnInputs(
-        markFrameworkStepInput({ message: "first" }, "execution.background_task"),
-        markFrameworkStepInput({ message: "second" }, "execution.background_task"),
+        markFrameworkStepInput({ message: "first" }, "execution.continuation"),
+        markFrameworkStepInput({ message: "second" }, "execution.continuation"),
       ),
-    ).toEqual(markFrameworkStepInput({ message: "first\n\nsecond" }, "execution.background_task"));
+    ).toEqual(markFrameworkStepInput({ message: "first\n\nsecond" }, "execution.continuation"));
     expect(
-      coalesceTurnInputs(
-        markFrameworkStepInput({ message: "first" }, "execution.background_task"),
-        {
-          message: "second",
-        },
-      ),
+      coalesceTurnInputs(markFrameworkStepInput({ message: "first" }, "execution.continuation"), {
+        message: "second",
+      }),
     ).toEqual({ message: "first\n\nsecond" });
     expect(
       coalesceTurnInputs(
         markFrameworkStepInput({ message: "first" }, "context.instruction"),
-        markFrameworkStepInput({ message: "second" }, "execution.background_task"),
+        markFrameworkStepInput({ message: "second" }, "execution.continuation"),
       ),
     ).toEqual({ message: "first\n\nsecond" });
   });
 
-  it("merges inputResponses from both payloads", () => {
+  it("merges answers from both payloads", () => {
     const result = coalesceTurnInputs(
-      { inputResponses: [{ requestId: "r1", optionId: "approve" }] },
-      { inputResponses: [{ requestId: "r2", text: "yes" }] },
+      { answers: [{ interactionId: "r1", optionId: "approve" }] },
+      { answers: [{ interactionId: "r2", text: "yes" }] },
     );
 
     expect(result).toEqual({
-      inputResponses: [
-        { requestId: "r1", optionId: "approve" },
-        { requestId: "r2", text: "yes" },
+      answers: [
+        { interactionId: "r1", optionId: "approve" },
+        { interactionId: "r2", text: "yes" },
       ],
     });
   });
 
   it("coalesces ephemeral context without making it durable context", () => {
-    const result = coalesceTurnInputs(
+    const result = coalesceTurnInputs<HarnessStepInput>(
       attachClientContext({}, ["first"]),
       attachClientContext({}, ["second"]),
     );
@@ -169,14 +237,14 @@ describe("coalesceTurnInputs", () => {
     expect(result.context).toBeUndefined();
   });
 
-  it("combines messages and inputResponses", () => {
+  it("combines messages and answers", () => {
     const result = coalesceTurnInputs(
-      { message: "hello", inputResponses: [{ requestId: "r1", optionId: "approve" }] },
+      { message: "hello", answers: [{ interactionId: "r1", optionId: "approve" }] },
       { message: "world" },
     );
 
     expect(result).toEqual({
-      inputResponses: [{ requestId: "r1", optionId: "approve" }],
+      answers: [{ interactionId: "r1", optionId: "approve" }],
       message: "hello\n\nworld",
     });
   });
@@ -188,13 +256,13 @@ describe("coalesceTurnInputs", () => {
         context: ["from-channel"],
       },
       {
-        inputResponses: [{ requestId: "r1", text: "yes" }],
+        answers: [{ interactionId: "r1", text: "yes" }],
         context: ["from-hook"],
       },
     );
 
     expect(result).toEqual({
-      inputResponses: [{ requestId: "r1", text: "yes" }],
+      answers: [{ interactionId: "r1", text: "yes" }],
       message: "hello",
       context: ["from-channel", "from-hook"],
     });
@@ -250,7 +318,7 @@ describe("coalesceTurnInputs", () => {
   });
 });
 
-describe("normalizeUserContent", () => {
+describe("normalizeMessage", () => {
   it.each([
     ["empty string", ""],
     ["whitespace-only string", "   \n\t "],
@@ -260,19 +328,19 @@ describe("normalizeUserContent", () => {
   ] satisfies ReadonlyArray<readonly [string, string | UserContent]>)(
     "returns undefined for %s",
     (_name, content) => {
-      expect(normalizeUserContent(content)).toBeUndefined();
+      expect(normalizeMessage(content)).toBeUndefined();
     },
   );
 
   it("preserves visible text", () => {
-    expect(normalizeUserContent("hello")).toBe("hello");
+    expect(normalizeMessage("hello")).toBe("hello");
   });
 
   it("keeps file parts while removing blank text parts", () => {
     const attachment = textFilePart({ filename: "notes.txt", payload: "contents" });
 
     expect(
-      normalizeUserContent([{ text: "", type: "text" }, attachment, { text: "  ", type: "text" }]),
+      normalizeMessage([{ text: "", type: "text" }, attachment, { text: "  ", type: "text" }]),
     ).toEqual([attachment]);
   });
 
@@ -311,7 +379,7 @@ describe("createFrameworkUserMessage", () => {
     "context.state",
     "context.compaction",
     "memory.load",
-    "execution.background_task",
+    "execution.continuation",
     "execution.continuation",
     "execution.retry",
   ] as const)("recognizes %s as a framework message kind", (kind) => {
@@ -320,13 +388,13 @@ describe("createFrameworkUserMessage", () => {
 
   it("brands framework-authored user-role messages", () => {
     const message = createFrameworkUserMessage(
-      "execution.background_task",
-      "Background task task_1 completed.",
+      "execution.continuation",
+      "Continue the interrupted turn.",
     );
 
     expect(message).toEqual({
-      content: "Background task task_1 completed.",
-      kind: "execution.background_task",
+      content: "Continue the interrupted turn.",
+      kind: "execution.continuation",
       role: "user",
     });
     expect(isFrameworkUserMessage(message)).toBe(true);

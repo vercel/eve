@@ -1,5 +1,5 @@
 # Node and JS/TS builds
-node_modules/
+node_modules
 dist/
 /build/
 coverage/
@@ -23,10 +23,11 @@ apps/benchmarks/results/
 apps/benchmarks/evals/*/PROMPT.md
 apps/benchmarks/evals/*/package.json
 apps/benchmarks/evals/*/.eve-authoring-bootstrap.json
-.extension-contracts-cache/
 packages/eve/.workflow-vitest/
 packages/eve/.generated/
 packages/eve/src/extensions/code/extension/
+packages/eve/src/extensions/git/extension/
+packages/eve/src/computer-use/extension/
 playwright-report/
 test-results/
 
@@ -34,8 +35,8 @@ test-results/
 packages/eve/docs/
 packages/eve/LICENSE
 packages/eve/NOTICE
-packages/eve-buzz-acp-adapter/LICENSE
-packages/eve-buzz-acp-adapter/NOTICE
+packages/tracing/LICENSE
+packages/tracing/NOTICE
 
 # Logs
 *.log
@@ -56,6 +57,10 @@ Thumbs.db
 # IDE/editor
 .codex/
 .githooks/
+/packages/eve/.package/
+/packages/eve/.package-staging-*/
+/packages/tracing/.package/
+/packages/tracing/.package-staging-*/
 .vscode/
 .idea/
 

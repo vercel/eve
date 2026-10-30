@@ -4,7 +4,7 @@ import { satisfies } from "eve/evals/expect";
 
 const TOOL_NAME = "complete-work";
 
-interface MessageResponse {
+interface Delivery {
   readonly ok: boolean;
   readonly sessionId?: string;
 }
@@ -14,7 +14,7 @@ async function postMessage(
   threadId: string,
   message: string,
   turnPolicy?: TurnPolicy,
-): Promise<MessageResponse> {
+): Promise<Delivery> {
   const path = `/threads/${threadId}/messages`;
   const response = await target.fetch(path, {
     body: JSON.stringify({ message, turnPolicy }),
@@ -25,7 +25,7 @@ async function postMessage(
   if (!response.ok) {
     throw new Error(`POST ${path} failed (${response.status}): ${text}`);
   }
-  return JSON.parse(text) as MessageResponse;
+  return JSON.parse(text) as Delivery;
 }
 
 /** Applies an accepted message at a safe boundary within the active turn. */
@@ -39,19 +39,14 @@ export default defineEval({
     await t.require(
       started,
       satisfies(
-        (value: MessageResponse) => value.ok === true && typeof value.sessionId === "string",
+        (value: Delivery) => value.ok === true && typeof value.sessionId === "string",
         "the initial channel message starts a session",
       ),
     );
     const sessionId = started.sessionId!;
-    const activeTurn = t.target.watchTurn(sessionId);
+    const activeTurn = t.target.attach(sessionId).watch();
 
-    await activeTurn.waitForEvent("actions.requested", {
-      data: {
-        actions: (actions) =>
-          actions.some((action) => action.kind === "tool-call" && action.toolName === TOOL_NAME),
-      },
-    });
+    await activeTurn.waitForEvent("call.requested", { data: { capability: { name: TOOL_NAME } } });
 
     const replacement = await postMessage(
       t.target,
@@ -62,17 +57,17 @@ export default defineEval({
     await t.require(
       replacement,
       satisfies(
-        (value: MessageResponse) => value.sessionId === sessionId,
+        (value: Delivery) => value.sessionId === sessionId,
         "the replacement remains in the same durable session",
       ),
     );
 
     const replacementTurn = await activeTurn.result();
     replacementTurn.event("turn.started", { count: 1 });
-    replacementTurn.event("message.received", { count: 2 });
-    replacementTurn.notEvent("turn.cancelled");
-    replacementTurn.notEvent("turn.failed");
-    replacementTurn.notEvent("session.failed");
+    replacementTurn.event("delivery.consumed", { count: 2 });
+    replacementTurn.notEvent("turn.settled", { data: { outcome: "cancelled" } });
+    replacementTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    replacementTurn.notEvent("session.ended", { data: { outcome: "failed" } });
     replacementTurn.messageIncludes(/CHANNEL-STEERING-REPLACEMENT-OK/i);
 
     t.succeeded();

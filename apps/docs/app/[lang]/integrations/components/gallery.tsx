@@ -2,7 +2,6 @@
 
 import { track } from "@vercel/analytics";
 import { Input } from "@vercel/geistdocs/components/input";
-import { InputGroup, InputGroupAddon } from "@vercel/geistdocs/components/input-group";
 import { SearchIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -12,11 +11,12 @@ import {
   getQueryLengthBucket,
   normalizeSearchQuery,
 } from "@/lib/analytics/events";
-import type { Integration, IntegrationType } from "@/lib/integrations/data";
+import type { Integration } from "@/lib/integrations/data";
+import { filterIntegrations, type GalleryFilter } from "@/lib/integrations/gallery";
 import { cn } from "@/lib/utils";
 import { IntegrationCard } from "./integration-card";
 
-export type GalleryFilter = "all" | IntegrationType | "memory";
+export type { GalleryFilter };
 
 const FILTERS: { value: GalleryFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -47,24 +47,10 @@ export const Gallery = ({ filter, integrations }: GalleryProps) => {
   const [query, setQuery] = useState("");
   const lastTrackedSearch = useRef("");
 
-  const results = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    return integrations.filter((integration) => {
-      if (filter === "memory" && !integration.keywords?.includes("memory")) {
-        return false;
-      }
-      if (filter !== "all" && filter !== "memory" && integration.type !== filter) {
-        return false;
-      }
-      if (!normalized) {
-        return true;
-      }
-      const haystack = [integration.name, integration.tagline, ...(integration.keywords ?? [])]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(normalized);
-    });
-  }, [integrations, filter, query]);
+  const results = useMemo(
+    () => filterIntegrations(integrations, filter, query),
+    [integrations, filter, query],
+  );
 
   useEffect(() => {
     const normalizedQuery = normalizeSearchQuery(query);
@@ -116,18 +102,16 @@ export const Gallery = ({ filter, integrations }: GalleryProps) => {
             </Link>
           ))}
         </div>
-        <InputGroup className="h-9 w-full bg-background min-[1024px]:w-64">
-          <InputGroupAddon>
-            <SearchIcon className="size-4 text-gray-700" />
-          </InputGroupAddon>
-          <Input
-            aria-label="Search integrations"
-            className="h-full border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent"
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search integrations"
-            value={query}
-          />
-        </InputGroup>
+        <Input
+          aria-label="Search integrations"
+          className="[&_input]:pl-2"
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search integrations"
+          prefix={<SearchIcon aria-hidden="true" className="ml-3 size-4 text-gray-700" />}
+          prefixStyling={false}
+          value={query}
+          wrapperClassName="w-full min-[1024px]:w-64"
+        />
       </div>
 
       {filter !== "all" && <p className="text-gray-800 text-sm">{FILTER_DESCRIPTIONS[filter]}</p>}

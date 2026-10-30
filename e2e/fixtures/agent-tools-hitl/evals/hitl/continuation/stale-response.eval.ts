@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import {
   scriptedSession,
-  approveSavedChange,
+  expectApprovalCancelled,
   expectChangeStillUnexecuted,
   expectReply,
   expectResponseReply,
@@ -15,18 +15,18 @@ export default defineEval({
   tags: ["hitl", "continuation", "regression", "input-response", "stale-response"],
   timeoutMs: 60_000,
   async test(t) {
-    // Given A awaits approval and B has already been cancelled and acknowledged.
+    // Given asking for B cancelled A's held approval, and B has been cancelled and acknowledged.
     const first = await t.send("Prepare change A.", scriptedSession);
     const approvalA = requestFrom(first, "change-a");
     const session = first.session;
     const second = await session.send("Prepare change B, then acknowledge my decision.");
     const approvalB = requestFrom(second, "change-b");
-    const cancelB = [{ requestId: approvalB.requestId, optionId: "cancel" }];
+    const cancelB = [{ interactionId: approvalB.interactionId, optionId: "deny" }];
     await expectResponseReply(
       t,
       await session.startRespond(cancelB),
       "Change B resolved.",
-      approvalB.requestId,
+      approvalB.interactionId,
     );
 
     // When the user repeats the saved cancellation response for B.
@@ -36,9 +36,7 @@ export default defineEval({
     await expectToolResult(t, repeated, "read-draft");
     await expectReply(t, repeated, "Draft status: ready.");
     expectChangeStillUnexecuted(session, "change-a");
-    session.notEvent("action.result", {
-      data: { status: "completed", result: { toolName: "change-b" } },
-    });
-    await approveSavedChange(t, session, approvalA);
+    session.calledTool("change-b", { status: "completed", count: 0 });
+    expectApprovalCancelled(session, approvalA);
   },
 });

@@ -3,7 +3,7 @@
  * "Authentication Required" challenge that fronts protected previews and
  * production deployments.
  *
- * When the eve development client (`eve dev --url …`) targets a deployment
+ * When the eve development client (`eve remote connect …`) targets a deployment
  * that has Deployment Protection enabled and no valid bypass header is
  * attached, Vercel returns an HTML SSO challenge instead of routing the
  * request to the function. The raw HTML body is unhelpful in a CLI
@@ -131,32 +131,6 @@ export function isVercelAuthChallenge(error: unknown): boolean {
       (bodyLooksLikeVercelAuthChallenge(candidate.body) ||
         bodyLooksLikeStructuredVercelAuthChallenge(candidate.body)))
   );
-}
-
-/**
- * Builds the human-readable repair message for the existing dev-client
- * challenge surface, including a structured local OIDC failure when known.
- */
-export function formatVercelAuthChallengeMessage(input: {
-  readonly serverUrl: string;
-  readonly oidcTokenFailure?: DevelopmentOidcTokenFailure;
-}): string {
-  const lines = [`Vercel Deployment Protection blocked the request to ${input.serverUrl}.`];
-  if (input.oidcTokenFailure !== undefined) {
-    lines.push("", formatDevelopmentOidcTokenFailure(input.oidcTokenFailure));
-  }
-  lines.push(
-    "",
-    "To access the deployment from `eve dev`, do one of:",
-    "  • Run `vercel link` in this project so the CLI can mint an OIDC",
-    "    token for the deployment automatically.",
-    "  • Set VERCEL_AUTOMATION_BYPASS_SECRET to a Protection Bypass for",
-    "    Automation token (Project Settings → Deployment Protection).",
-    "  • Disable Deployment Protection on the target deployment.",
-    "",
-    "Docs: https://vercel.com/docs/deployment-protection",
-  );
-  return lines.join("\n");
 }
 
 export function formatDevelopmentOidcTokenFailure(failure: DevelopmentOidcTokenFailure): string {

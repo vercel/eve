@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,9 +7,8 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
-  EXTENSION_CAPABILITY_SUPPORT,
-  EXTENSION_CAPABILITY_VERSIONS,
-  findUnsupportedExtensionCapabilities,
+  EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+  EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
   parseExtensionCompatibilityManifest,
 } from "#compiler/extension-compatibility.js";
 import {
@@ -39,12 +38,15 @@ async function createExtensionPackage(pkg?: Record<string, unknown>): Promise<st
   await mkdir(join(root, "extension", "tools"), { recursive: true });
   await writeFile(
     join(root, "extension", "extension.ts"),
-    'import { defineExtension } from "eve/extension";\nexport default defineExtension();\n',
+    `import { defineExtension } from "eve/extension";
+export default defineExtension();
+`,
     "utf8",
   );
   await writeFile(
     join(root, "extension", "tools", "crm_search.ts"),
-    'export default { description: "Search the CRM.", async execute() { return {}; } };\n',
+    `export default { description: "Search the CRM.", async execute() { return {}; } };
+`,
     "utf8",
   );
   await writeFile(
@@ -64,6 +66,49 @@ async function createExtensionPackage(pkg?: Record<string, unknown>): Promise<st
 }
 
 describe("extension build output", () => {
+  it.each([true, false])(
+    "omits test runtime entries with authored tsconfig=%s",
+    async (hasTsConfig) => {
+      const root = await createExtensionPackage();
+      if (!hasTsConfig) await rm(join(root, "tsconfig.json"));
+      const files = {
+        "tools/crm_search.test.ts": hasTsConfig
+          ? 'throw new Error("test executed"); export {};'
+          : 'describe("crm", () => { it("works", () => { expect(1).toBe(1); }); });',
+        "lib/client.spec.ts": 'throw new Error("spec executed"); export {};',
+        "lib/state.test.ts":
+          'import { defineState } from "eve/context"; export const state = defineState("test", () => 0);',
+        "tools/__tests__/setup.ts": 'throw new Error("test setup executed"); export {};',
+        "tools/__tests__/_manifest.json": "{}",
+        "skills/checks/SKILL.md":
+          "---\nname: checks\ndescription: Run checks.\n---\nRun the checks.",
+        "skills/checks/scripts/check.test.ts":
+          'import { defineState } from "eve/context"; defineState("resource-test", () => 0);',
+      };
+      for (const [path, content] of Object.entries(files)) {
+        await mkdir(dirname(join(root, "extension", path)), { recursive: true });
+        await writeFile(join(root, "extension", path), content);
+      }
+      const config = await tryReadExtensionBuildConfig(root);
+      const outDir = await buildExtensionPackage(root, config!);
+      const emitted = await readdir(join(outDir, "extension"), { recursive: true });
+      expect(emitted.filter((path) => path.endsWith(".mjs")).sort()).toEqual([
+        "extension.mjs",
+        join("tools", "crm_search.mjs"),
+      ]);
+      expect(emitted).toContain(join("skills", "checks", "scripts", "check.test.ts"));
+      expect(emitted.includes(join("tools", "crm_search.test.d.ts"))).toBe(hasTsConfig);
+      expect(emitted.includes(join("tools", "__tests__", "setup.d.ts"))).toBe(hasTsConfig);
+      const manifestPath = join(outDir, "extension", "_manifest.json");
+      expect(
+        parseExtensionCompatibilityManifest(await readFile(manifestPath, "utf8"), manifestPath),
+      ).toMatchObject({
+        formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+        contractMajor: EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
+      });
+    },
+  );
+
   it("emits an agent-shaped runnable distribution and thin package entrypoints", async () => {
     const root = await createExtensionPackage();
     const config = await tryReadExtensionBuildConfig(root);
@@ -83,100 +128,41 @@ describe("extension build output", () => {
     );
   });
 
-  it.each([
-    ["static re-export", 'export { evaluate as assess } from "eve/ai";'],
-    [
-      "namespace import",
-      'import * as evaluation from "eve/ai"; export const assess = evaluation.evaluate;',
-    ],
-    [
-      "dynamic import",
-      'export async function assess(options: Parameters<typeof import("eve/ai").evaluate>[0]): Promise<void> { await (await import("eve/ai")).evaluate(options); }',
-    ],
-  ])("stamps the tool capability for a hook-only extension using a %s", async (_name, helper) => {
+  it("retains explicitly imported test modules without a tsconfig", async () => {
     const root = await createExtensionPackage();
-    await rm(join(root, "extension", "tools"), { recursive: true });
-    await mkdir(join(root, "extension", "hooks"));
-    await mkdir(join(root, "extension", "lib"));
-    await writeFile(join(root, "extension", "lib", "evaluation.ts"), helper);
+    await rm(join(root, "tsconfig.json"));
+    await mkdir(join(root, "extension", "lib", "__tests__"), { recursive: true });
     await writeFile(
-      join(root, "extension", "hooks", "evaluate.ts"),
-      `import { defineHook } from "eve/hooks";
-import { assess } from "../lib/evaluation";
-export default defineHook({ events: { "turn.started": async () => {
-  await assess({ state: { request: "Alice needs a summary." }, questions: {
-    routine: { type: "boolean", instructions: "Is this routine work?" }
-  } });
-} } });`,
+      join(root, "extension", "lib", "__tests__", "value.ts"),
+      'import { defineState } from "eve/context"; export const state = defineState("value", () => 0); export const value = "imported value";',
+    );
+    await writeFile(
+      join(root, "extension", "tools", "crm_search.ts"),
+      [
+        'import { state, value } from "../lib/__tests__/value";',
+        'export default { description: "Search the CRM.", async execute() { return { value, hasState: state !== undefined }; } };',
+      ].join("\n"),
     );
     const config = await tryReadExtensionBuildConfig(root);
     const outDir = await buildExtensionPackage(root, config!);
-    const manifestPath = join(outDir, "extension", "_manifest.json");
-    const manifest = parseExtensionCompatibilityManifest(
-      await readFile(manifestPath, "utf8"),
-      manifestPath,
+    const tool = await import(
+      pathToFileURL(join(outDir, "extension", "tools", "crm_search.mjs")).href
     );
-
-    expect(manifest.requires).toEqual({
-      extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-      hook: EXTENSION_CAPABILITY_VERSIONS.hook,
-      tool: EXTENSION_CAPABILITY_VERSIONS.tool,
+    await expect(tool.default.execute()).resolves.toEqual({
+      value: "imported value",
+      hasState: true,
     });
-    expect(findUnsupportedExtensionCapabilities(manifest)).toEqual([]);
     expect(
-      findUnsupportedExtensionCapabilities(manifest, {
-        ...EXTENSION_CAPABILITY_SUPPORT,
-        tool: EXTENSION_CAPABILITY_SUPPORT.tool.filter(
-          (version) => version !== EXTENSION_CAPABILITY_VERSIONS.tool,
-        ),
-      }),
-    ).toEqual([
-      expect.objectContaining({
-        capability: "tool",
-        requiredVersion: EXTENSION_CAPABILITY_VERSIONS.tool,
-      }),
-    ]);
+      await readFile(join(outDir, "extension", "lib", "__tests__", "value.d.ts"), "utf8"),
+    ).toContain("imported value");
+    const manifestPath = join(outDir, "extension", "_manifest.json");
+    expect(
+      parseExtensionCompatibilityManifest(await readFile(manifestPath, "utf8"), manifestPath),
+    ).toMatchObject({
+      formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+      contractMajor: EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
+    });
   });
-
-  it.each([
-    [
-      "automatic model selection",
-      'import { auto } from "eve/models"; export const route: ReturnType<typeof auto> = auto({ options: { "openai/small": "Routine work" } });',
-      "dynamicTool",
-    ],
-    [
-      "type-only AI import",
-      'import type { evaluate } from "eve/ai"; export type Evaluate = typeof evaluate;',
-      undefined,
-    ],
-    [
-      "type-only model import",
-      'import type { auto } from "eve/models"; export type Auto = typeof auto;',
-      undefined,
-    ],
-  ] as const)(
-    "tracks runtime AI and model imports in a tool-free helper: %s",
-    async (_name, helper, capability) => {
-      const root = await createExtensionPackage();
-      await rm(join(root, "extension", "tools"), { recursive: true });
-      await mkdir(join(root, "extension", "lib"));
-      await writeFile(join(root, "extension", "lib", "evaluation.ts"), helper);
-      const config = await tryReadExtensionBuildConfig(root);
-      const outDir = await buildExtensionPackage(root, config!);
-      const manifestPath = join(outDir, "extension", "_manifest.json");
-      const manifest = parseExtensionCompatibilityManifest(
-        await readFile(manifestPath, "utf8"),
-        manifestPath,
-      );
-
-      expect(manifest.requires).toEqual({
-        extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-        ...(capability === undefined
-          ? {}
-          : { [capability]: EXTENSION_CAPABILITY_VERSIONS[capability] }),
-      });
-    },
-  );
 
   it("stamps extension-owned external dependencies into compatibility metadata", async () => {
     const root = await createExtensionPackage({
@@ -196,7 +182,7 @@ export default defineHook({ events: { "turn.started": async () => {
     expect(
       parseExtensionCompatibilityManifest(await readFile(manifestPath, "utf8"), manifestPath),
     ).toMatchObject({
-      formatVersion: 2,
+      formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
       build: { externalDependencies: ["layout-sensitive-runtime"] },
     });
   });
@@ -222,7 +208,9 @@ export default defineHook({ events: { "turn.started": async () => {
     await mkdir(join(root, "extension", "lib"), { recursive: true });
     await writeFile(
       join(root, "extension", "lib", "counter.ts"),
-      "let count = 0;\nexport const next = () => ++count;\n",
+      `let count = 0;
+export const next = () => ++count;
+`,
       "utf8",
     );
     for (const name of ["first", "second"]) {
@@ -281,8 +269,8 @@ export default defineHook({ events: { "turn.started": async () => {
         "",
         "export default defineHook({",
         "  events: {",
-        '    "action.result"(event) {',
-        "      console.info(event.data.result);",
+        '    "call.settled"(event) {',
+        "      console.info(event.data.output);",
         "    },",
         "  },",
         "});",
@@ -295,7 +283,7 @@ export default defineHook({ events: { "turn.started": async () => {
 
     const declaration = await readFile(join(outDir, "extension", "hooks", "audit.d.ts"), "utf8");
     expect(declaration).toMatch(
-      /import\(["']eve\/hooks["']\)\.HookDefinition<["']action\.result["']>/,
+      /import\(["']eve\/hooks["']\)\.HookDefinition<["']call\.settled["']>/,
     );
     expect(declaration).not.toContain("protocol/message");
   });
@@ -326,15 +314,12 @@ export default defineHook({ events: { "turn.started": async () => {
       join(root, "extension", "tools", "crm_search.ts"),
       [
         'import { defineDynamic, defineTool } from "eve/tools";',
-        "export default defineDynamic({",
-        "  events: {",
-        '    "session.started": async () => defineTool({',
-        '      description: "Search the CRM.",',
-        '      inputSchema: { type: "object", properties: {}, additionalProperties: false },',
-        "      async execute() { return {}; },",
-        "    }),",
-        "  },",
-        "});",
+        "export default defineDynamic(() => defineTool({",
+        '    description: "Search the CRM.",',
+        '    inputSchema: { type: "object", properties: {}, additionalProperties: false },',
+        "    async execute() { return {}; },",
+        "  }),",
+        ");",
         "",
       ].join("\n"),
       "utf8",
@@ -362,15 +347,9 @@ export default defineHook({ events: { "turn.started": async () => {
     );
     expect(manifest.kind).toBe("eve-extension");
     expect(manifest.builtWithEve).toMatch(/^\d+\.\d+\.\d+/);
-    // The set of stamped capabilities is the assertion; the versions track
-    // the current contract table so epoch bumps do not break this test.
-    expect(manifest.requires).toEqual({
-      extension: EXTENSION_CAPABILITY_VERSIONS.extension,
-      tool: EXTENSION_CAPABILITY_VERSIONS.tool,
-      dynamicTool: EXTENSION_CAPABILITY_VERSIONS.dynamicTool,
-      skill: EXTENSION_CAPABILITY_VERSIONS.skill,
-      config: EXTENSION_CAPABILITY_VERSIONS.config,
-      state: EXTENSION_CAPABILITY_VERSIONS.state,
+    expect(manifest).toMatchObject({
+      formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+      contractMajor: EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
     });
     const dynamicToolDeclaration = await readFile(
       join(outDir, "extension", "tools", "crm_search.d.ts"),
@@ -396,7 +375,8 @@ export default defineHook({ events: { "turn.started": async () => {
       "---\ndescription: Triage a request.\n---\n\nRun scripts/check.js.\n",
       "utf8",
     );
-    const script = 'export const token = "skill-script-resource";\n';
+    const script = `export const token = "skill-script-resource";
+`;
     await writeFile(
       join(root, "extension", "skills", "triage", "scripts", "check.js"),
       script,
@@ -413,11 +393,36 @@ export default defineHook({ events: { "turn.started": async () => {
     ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("preserves test files inside subagent sandbox workspaces", async () => {
+    const root = await createExtensionPackage();
+    const subagentRoot = join(root, "extension", "subagents", "researcher");
+    const workspaceFiles = {
+      "check.test.js": 'describe("workspace", () => {});',
+      "__tests__/fixture.json": '{"value":"workspace fixture"}',
+    };
+    for (const [path, content] of Object.entries(workspaceFiles)) {
+      const filePath = join(subagentRoot, "sandbox", "workspace", path);
+      await mkdir(dirname(filePath), { recursive: true });
+      await writeFile(filePath, content);
+    }
+    await writeFile(
+      join(subagentRoot, "agent.ts"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ description: "Research.", model: "openai/gpt-5.4" });',
+    );
+    const config = await tryReadExtensionBuildConfig(root);
+    const outDir = await buildExtensionPackage(root, config!);
+    const workspace = join(outDir, "extension", "subagents", "researcher", "sandbox", "workspace");
+    for (const [path, content] of Object.entries(workspaceFiles)) {
+      await expect(readFile(join(workspace, path), "utf8")).resolves.toBe(content);
+    }
+  });
+
   it("sanitizes kebab-case tool names into valid export bindings", async () => {
     const root = await createExtensionPackage();
     await writeFile(
       join(root, "extension", "tools", "get-weather.ts"),
-      'export default { description: "Get the weather.", async execute() { return {}; } };\n',
+      `export default { description: "Get the weather.", async execute() { return {}; } };
+`,
       "utf8",
     );
     const config = await tryReadExtensionBuildConfig(root);
@@ -449,7 +454,9 @@ export default defineHook({ events: { "turn.started": async () => {
     await writeFile(join(outDir, "last-success.txt"), "keep\n", "utf8");
     await writeFile(
       join(root, "extension", "tools", "crm_search.ts"),
-      'const invalid: "expected" = "actual";\nexport default { description: invalid, async execute() { return {}; } };\n',
+      `const invalid: "expected" = "actual";
+export default { description: invalid, async execute() { return {}; } };
+`,
       "utf8",
     );
 
@@ -460,7 +467,12 @@ export default defineHook({ events: { "turn.started": async () => {
   it("explains a tsconfig whose include misses the extension source", async () => {
     const root = await createExtensionPackage();
     await mkdir(join(root, "scripts"), { recursive: true });
-    await writeFile(join(root, "scripts", "release.ts"), "export const release = true;\n", "utf8");
+    await writeFile(
+      join(root, "scripts", "release.ts"),
+      `export const release = true;
+`,
+      "utf8",
+    );
     await writeFile(
       join(root, "tsconfig.json"),
       JSON.stringify({
@@ -485,7 +497,8 @@ export default defineHook({ events: { "turn.started": async () => {
     const root = await createExtensionPackage();
     await writeFile(
       join(root, "extension", "tools", "excluded.mts"),
-      'export default { description: "Excluded declaration.", async execute() { return {}; } };\n',
+      `export default { description: "Excluded declaration.", async execute() { return {}; } };
+`,
       "utf8",
     );
     const config = await tryReadExtensionBuildConfig(root);

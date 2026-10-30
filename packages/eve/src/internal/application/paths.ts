@@ -43,17 +43,6 @@ export function isVercelBuildEnvironment(): boolean {
 }
 
 /**
- * Resolves the programmatic Nitro build directory for an app.
- */
-export function resolveNitroBuildDirectory(appRoot: string): string {
-  return join(appRoot, ".eve", "nitro");
-}
-
-export function resolveApplicationHostArtifactsDirectory(appRoot: string): string {
-  return join(appRoot, ".eve", "host");
-}
-
-/**
  * Resolves the package-owned Workflow DevKit bundle directory for a target app.
  *
  * This directory is intentionally placed under the package root rather than the

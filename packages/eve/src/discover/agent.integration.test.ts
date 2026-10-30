@@ -3,15 +3,11 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { buildMemoryAgentProject } from "#internal/testing/memory-agent-source.js";
-import {
-  EXTENSION_CAPABILITY_SUPPORT,
-  EXTENSION_CAPABILITY_VERSIONS,
-} from "#compiler/extension-compatibility.js";
 import { projectAgentSources } from "#compiler/project-sources.js";
 import { composeAgentModuleCandidates } from "#compiler/source-graph.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
-  DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
+  DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
   DISCOVER_EXTENSION_COMPATIBILITY_INVALID,
   DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
   DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
@@ -30,7 +26,7 @@ import {
   DISCOVER_TOOL_NAME_INVALID,
   DISCOVER_UNSUPPORTED_DIRECTORY,
 } from "#discover/grammar.js";
-import { DISCOVER_LIB_DIRECTORY_INVALID, DISCOVER_LIB_ENTRY_UNSUPPORTED } from "#discover/lib.js";
+import { DISCOVER_LIB_DIRECTORY_INVALID } from "#discover/lib.js";
 import { DISCOVER_MEMORY_NAME_INVALID, DISCOVER_MEMORY_SLOT_AMBIGUOUS } from "#discover/memory.js";
 import {
   DISCOVER_SCHEDULE_FILE_UNSUPPORTED,
@@ -39,9 +35,9 @@ import {
 
 const EXTENSION_COMPATIBILITY_MANIFEST = JSON.stringify({
   kind: "eve-extension",
-  formatVersion: 1,
-  builtWithEve: "0.0.0-test",
-  requires: { extension: 1, tool: 1 },
+  formatVersion: 3,
+  builtWithEve: "0.0.0",
+  contractMajor: 0,
 });
 
 /**
@@ -55,6 +51,47 @@ const EXTENSION_COMPATIBILITY_MANIFEST = JSON.stringify({
  * here against an in-memory {@link buildMemoryAgentProject} tree.
  */
 describe("discoverAgent (memory)", () => {
+  it.each(["agent", "extension"] as const)(
+    "excludes colocated tests from %s definitions and local subagents",
+    async (role) => {
+      const agentFiles: Record<string, string> = {
+        "instructions.md": "Help Alice check the weather.",
+        "tools/weather.ts": "export default {};",
+        "tools/nested/weather.mjs": "export default {};",
+        "subagents/researcher/agent.ts": "export default {};",
+        "subagents/researcher/tools/weather.ts": "export default {};",
+      };
+      const baseline = await discoverAgent({ ...buildMemoryAgentProject({ agentFiles }), role });
+      expect(baseline.diagnostics).toEqual([]);
+
+      for (const directory of [
+        "tools",
+        "hooks",
+        "channels",
+        "connections",
+        "skills",
+        "schedules",
+        "instructions",
+        "memory",
+        "lib",
+        "extensions",
+        "subagents",
+        "tools/nested",
+        "subagents/researcher/tools",
+      ]) {
+        for (const extension of ["ts", "mts", "cts", "js", "mjs", "cjs"]) {
+          agentFiles[`${directory}/weather.test.${extension}`] = "throw new Error('test module');";
+          agentFiles[`${directory}/weather.spec.${extension}`] = "throw new Error('spec module');";
+        }
+        agentFiles[`${directory}/__tests__/fixture.json`] = "{}";
+        agentFiles[`${directory}/__tests__/weather.ts`] = "throw new Error('test directory');";
+      }
+
+      const result = await discoverAgent({ ...buildMemoryAgentProject({ agentFiles }), role });
+      expect(result).toEqual(baseline);
+    },
+  );
+
   it("discovers flat and named memory slots with path-derived identities", async () => {
     const flat = buildMemoryAgentProject({
       agentFiles: { "instructions.md": "Remember.", "memory.ts": "export default {};" },
@@ -181,7 +218,7 @@ describe("discoverAgent (memory)", () => {
       {
         definition: {
           cron: "*/15 * * * *",
-          markdown: "Retry dunning.",
+          content: "Retry dunning.",
         },
         sourceKind: "markdown",
         logicalPath: "schedules/billing/dunning/retry.md",
@@ -200,7 +237,7 @@ describe("discoverAgent (memory)", () => {
       {
         definition: {
           cron: "0 9 * * *",
-          markdown: "Send a morning weather digest.",
+          content: "Send a morning weather digest.",
         },
         sourceKind: "markdown",
         logicalPath: "schedules/daily-digest.md",
@@ -503,11 +540,12 @@ describe("discoverAgent (memory)", () => {
     expect(result.manifest.lib).toEqual([]);
   });
 
-  it("discovers module-only lib sources and reports unsupported lib entries", async () => {
+  it("discovers module-only lib sources and ignores non-module lib files", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
+        "lib/data/contract.json": '{"openapi":"3.1.0"}\n',
         "lib/generated.d.ts": "export declare const generated: true;\n",
-        "lib/notes.md": "unsupported",
+        "lib/notes.md": "incidental notes",
         "lib/weather/client.ts": "export const client = {};\n",
         "instructions.md": "You are a precise assistant.",
       },
@@ -519,9 +557,7 @@ describe("discoverAgent (memory)", () => {
       source: project.source,
     });
 
-    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
-      DISCOVER_LIB_ENTRY_UNSUPPORTED,
-    ]);
+    expect(result.diagnostics).toEqual([]);
     expect(result.manifest.lib).toEqual([
       {
         sourceKind: "module",
@@ -808,6 +844,7 @@ describe("discoverAgent (memory)", () => {
       externalDependencies: [],
       manifest: result.manifest,
       nodeId: "root",
+      nodePath: "",
     });
     const composed = composeAgentModuleCandidates(projected.candidates);
 
@@ -817,12 +854,22 @@ describe("discoverAgent (memory)", () => {
     expect(composed.selected.get("instructions/crm")).toMatchObject({
       layer: "extension-package",
       logicalPath: "instructions/crm.md",
-      owner: { kind: "extension", namespace: "crm", packageName: "@acme/crm" },
+      owner: {
+        kind: "extension",
+        mountId: "extensions/crm",
+        namespace: "crm",
+        packageName: "@acme/crm",
+      },
     });
     expect(composed.selected.get("instructions/gizmo")).toMatchObject({
       layer: "extension-package",
       logicalPath: "instructions/gizmo.md",
-      owner: { kind: "extension", namespace: "gizmo", packageName: "@acme/gizmo" },
+      owner: {
+        kind: "extension",
+        mountId: "extensions/gizmo",
+        namespace: "gizmo",
+        packageName: "@acme/gizmo",
+      },
     });
   });
 
@@ -1199,6 +1246,7 @@ describe("discoverAgent (memory)", () => {
       externalDependencies: [],
       manifest: result.manifest,
       nodeId: "root",
+      nodePath: "",
     });
     const composed = composeAgentModuleCandidates(projected.candidates);
     expect(composed.selected.get("tools/crm__search")).toMatchObject({
@@ -1233,24 +1281,19 @@ describe("discoverAgent (memory)", () => {
     );
   });
 
-  it("rejects a mounted extension that requires an unsupported capability version", async () => {
-    // One past the current epoch is unsupported by construction, so the
-    // fixture keeps rejecting after future capability bumps.
-    const unsupportedToolVersion = EXTENSION_CAPABILITY_VERSIONS.tool + 1;
+  it("rejects an epoch-format extension before loading its contributions", async () => {
     const project = buildMemoryAgentProject({
       appFiles: {
         "node_modules/@acme/crm/package.json": JSON.stringify({
           name: "@acme/crm",
           eve: { extension: { source: "source", dist: "extension" } },
-          peerDependencies: { eve: "*" },
         }),
         "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
           kind: "eve-extension",
-          formatVersion: 1,
-          builtWithEve: "9.0.0",
-          requires: { extension: 1, tool: unsupportedToolVersion },
+          formatVersion: 2,
+          builtWithEve: "0.82.0",
+          requires: { extension: 2 },
         }),
-        "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
         "node_modules/@acme/crm/extension/tools/search.ts": "export default {};\n",
       },
       agentFiles: {
@@ -1258,23 +1301,62 @@ describe("discoverAgent (memory)", () => {
         "instructions.md": "You are a precise assistant.",
       },
     });
-
     const result = await discoverAgent({
       agentRoot: project.agentRoot,
       appRoot: project.appRoot,
       source: project.source,
     });
-
-    const incompatible = result.diagnostics.find(
-      (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
-    );
-    expect(incompatible).toBeDefined();
-    expect(incompatible?.message).toContain(`tool contract v${unsupportedToolVersion}`);
-    expect(incompatible?.message).toContain(
-      `versions: ${EXTENSION_CAPABILITY_SUPPORT.tool.map((version) => `v${version}`).join(", ")}`,
-    );
     expect(result.manifest.resolvedExtensions).toEqual([]);
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
+          message: expect.stringMatching(
+            /old epoch-based distribution manifest.*Rebuild the extension/,
+          ),
+        }),
+      ]),
+    );
   });
+
+  it.each([
+    { builtWithEve: "0.82.0", rejected: false },
+    { builtWithEve: "999.0.0", rejected: true },
+  ])(
+    "checks a version-based extension build from eve $builtWithEve before mounting",
+    async ({ builtWithEve, rejected }) => {
+      const project = buildMemoryAgentProject({
+        appFiles: {
+          "node_modules/@acme/crm/package.json": JSON.stringify({
+            name: "@acme/crm",
+            eve: { extension: { source: "source", dist: "extension" } },
+          }),
+          "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
+            kind: "eve-extension",
+            formatVersion: 3,
+            builtWithEve,
+            contractMajor: 0,
+          }),
+          "node_modules/@acme/crm/extension/extension.ts": "export default {};\n",
+        },
+        agentFiles: {
+          "extensions/crm.ts": 'export { default } from "@acme/crm";\n',
+          "instructions.md": "You are a precise assistant.",
+        },
+      });
+      const result = await discoverAgent({
+        agentRoot: project.agentRoot,
+        appRoot: project.appRoot,
+        source: project.source,
+      });
+      expect(result.manifest.resolvedExtensions).toHaveLength(rejected ? 0 : 1);
+      expect(
+        result.diagnostics.some(
+          (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
+        ),
+      ).toBe(rejected);
+    },
+  );
 
   it("does not use the npm peer range as the runtime compatibility authority", async () => {
     const project = buildMemoryAgentProject({
@@ -1302,7 +1384,7 @@ describe("discoverAgent (memory)", () => {
 
     expect(
       result.diagnostics.some(
-        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
+        (diagnostic) => diagnostic.code === DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
       ),
     ).toBe(false);
     expect(result.manifest.resolvedExtensions).toHaveLength(1);
@@ -1380,6 +1462,7 @@ describe("discoverAgent (memory)", () => {
         externalDependencies: [],
         manifest: result.manifest,
         nodeId: "root",
+        nodePath: "",
       }),
     ).not.toThrow();
   });

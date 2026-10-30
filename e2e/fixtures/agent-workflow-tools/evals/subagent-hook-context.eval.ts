@@ -1,94 +1,122 @@
 import { defineEval } from "eve/evals";
-import type { SubagentHookObservation } from "../subagent-hook-audit";
 
-export default (["direct", "waiting", "background"] as const).map((mode) =>
+import { RESEARCH_INTERIM_MESSAGE } from "../task-scenario-text";
+import { positionOf, readHookAudit, recordsEveryAgentStart } from "./subagent-hook-audit.shared";
+
+const SCENARIOS = {
+  // An agent call is a task: task.started names its call, the call settles with the child's
+  // result, and child.opened announces the session the task opened. The agent stays reachable
+  // by its taskId, so its task doesn't end with the call.
+  direct: {
+    ends: false,
+    description:
+      "Delegation and later wildcard hooks continue after a typed hook writes parent state and catches its own failure.",
+    task: "workflow-marker",
+    request: "Alice asks Bob to review a short report and return his result. SUBAGENT-HOOKS:direct",
+    audit:
+      "Alice reviews the recorded hook observations for Bob's completed report. SUBAGENT-HOOKS:AUDIT",
+  },
+  // A task whose run opens a helper agent while the parent keeps answering.
+  // The parent's slow model step makes a mid-step open likely, not certain;
+  // either way the helper's hooks' state and sandbox writes must reach
+  // Alice's next turn.
+  background: {
+    // A `task()` run ends once it replies.
+    ends: true,
+    description:
+      "child.opened hooks keep the parent state and sandbox writes they make for a helper a background task opens.",
+    task: "research_brief",
+    request:
+      "Alice starts background research on a short report while she keeps planning with the assistant. SUBAGENT-HOOKS:background",
+    audit:
+      "Alice reviews the recorded hook observations for the finished research. SUBAGENT-HOOKS:AUDIT",
+  },
+} as const;
+
+export default (["direct", "background"] as const).map((mode) =>
   defineEval({
-    description: `${mode} subagent hooks preserve parent context, skills, and sandbox writes.`,
+    description: SCENARIOS[mode].description,
     async test(t) {
-      const initial = await t.send(
-        `Alice asks Bob to review a short report and return his result. SUBAGENT-HOOKS:${mode}`,
-      );
+      const scenario = SCENARIOS[mode];
+      const initial = await t.send(scenario.request);
       initial.expectOk();
-      initial.calledTool("load_skill", { count: 1, status: "completed" });
-      const marker =
-        mode === "direct"
-          ? "Alice's hook audit"
-          : `hook-audit:${mode === "waiting" ? "blocking" : "background"}`;
-      const completed =
-        mode === "waiting"
-          ? initial
-          : await t.target
-              .watchTurn(initial.sessionId, { startIndex: initial.session.state.streamIndex })
-              .result();
-      completed.expectOk();
-      completed.messageIncludes(marker);
+      initial.messageIncludes("Alice's hook audit");
+      if (mode === "background") {
+        initial.event("content.completed", {
+          count: 1,
+          data: { phase: "reply", value: RESEARCH_INTERIM_MESSAGE },
+        });
+        initial.notCalledTool("eve__task_wait");
+      }
 
-      const audit = await completed.session.send(
-        "Alice reviews the recorded hook observations for Bob's completed report. SUBAGENT-HOOKS:AUDIT",
-      );
+      const audit = await initial.session.send(scenario.audit);
       audit.expectOk();
-      audit.calledTool("load_skill", { count: 1, status: "completed" });
-      t.eventsSatisfy("the parent's dynamic skill remains loadable after delegation", () =>
-        [initial, audit].every((turn) =>
-          String(turn.toolCalls.find((call) => call.name === "load_skill")?.output).includes(
-            "DELEGATION-POLICY:",
-          ),
-        ),
-      );
+      // The parent's dynamic skill stays loadable after delegation.
+      for (const turn of [initial, audit]) {
+        turn.calledSkill("delegation-policy", { count: 1, output: /DELEGATION-POLICY:/u });
+      }
       audit.calledTool("read_subagent_hooks", { count: 1, status: "completed" });
-      const observations = audit.toolCalls.find(
-        (call) => call.name === "read_subagent_hooks",
-      )?.output;
+      const records = readHookAudit(audit);
       t.eventsSatisfy(
         "both hook subscriptions receive the parent's exact child result once",
         (events) => {
-          if (!Array.isArray(observations) || observations.length !== 4) return false;
-          const completion = events.find((event) => event.type === "subagent.completed");
-          if (completion?.type !== "subagent.completed") return false;
-          if (!completion.data.output.startsWith("WORKFLOW-CHILD:")) return false;
-          if (!completed.message?.includes(completion.data.output)) return false;
-          const records = observations as SubagentHookObservation[];
+          const ended = scenario.ends ? 1 : 0;
+          if (records.length !== 6 + 2 * ended) return false;
+          const started = events.find((event) => event.type === "task.started");
+          if (started?.type !== "task.started") return false;
+          const callId = started.data.startedBy.callId;
+          const completion = events.find(
+            (event) => event.type === "call.settled" && event.data.callId === callId,
+          );
+          if (completion?.type !== "call.settled") return false;
+          const output = completion.data.output;
+          if (typeof output !== "string" || !output.startsWith("WORKFLOW-CHILD:")) return false;
+          if (!initial.reply?.includes(output)) return false;
+          const countOf = (
+            subscriber: string,
+            type: string,
+            extra: (record: unknown) => boolean = () => true,
+          ) =>
+            records.filter(
+              (record) => record.subscriber === subscriber && record.type === type && extra(record),
+            ).length;
           return (
             records.every(
-              (record) =>
-                record.sessionId === initial.sessionId && record.callId === completion.data.callId,
+              (record) => record.sessionId === initial.sessionId && record.callId === callId,
             ) &&
             (["typed", "wildcard"] as const).every(
               (subscriber) =>
-                records.filter(
-                  (record) => record.subscriber === subscriber && record.type === "subagent.called",
-                ).length === 1 &&
-                records.filter(
-                  (record) =>
-                    record.subscriber === subscriber &&
-                    record.type === "subagent.completed" &&
-                    record.output === completion.data.output,
-                ).length === 1,
+                countOf(subscriber, "task.started") === 1 &&
+                countOf(subscriber, "task.ended") === ended &&
+                countOf(
+                  subscriber,
+                  "call.settled",
+                  (record) => (record as { output?: string }).output === output,
+                ) === 1,
             )
           );
         },
       );
       t.eventsSatisfy(
-        "hooks receive the exact published event IDs",
-        (events) =>
-          Array.isArray(observations) &&
-          observations.every((record: SubagentHookObservation) =>
-            events.some((event) => event.meta.id === record.eventId && event.type === record.type),
-          ),
+        "both hook subscriptions record the opened session in parent state and sandbox",
+        (events) => recordsEveryAgentStart(records, events, initial.sessionId),
       );
-      t.eventsSatisfy(
-        "hooks persist parent sandbox files for the next turn",
-        () =>
-          Array.isArray(observations) &&
-          observations.every(
-            (record: SubagentHookObservation & { sandboxCallId: string | null }) =>
-              record.sandboxCallId === record.callId,
+      t.eventsSatisfy("hooks receive the exact published event positions", (events) =>
+        records.every((record) =>
+          events.some(
+            (event) => positionOf(event) === record.position && event.type === record.type,
           ),
+        ),
       );
-      t.event("subagent.called", { data: { name: "workflow-marker" }, count: 1 });
-      t.event("subagent.completed", { data: { subagentName: "workflow-marker" }, count: 1 });
-      t.notEvent("session.failed");
-      t.noFailedActions();
+      t.eventsSatisfy("hooks persist parent sandbox files for the next turn", () =>
+        records.every((record) => record.sandboxCallId === record.callId),
+      );
+      t.event("task.started", { data: { name: scenario.task }, count: 1 });
+      t.event("child.opened", { data: { name: "workflow-marker" }, count: 1 });
+      t.event("task.ended", { data: { outcome: "completed" }, count: scenario.ends ? 1 : 0 });
+      t.notEvent("session.ended", { data: { outcome: "failed" } });
+      t.notEvent("turn.settled", { data: { outcome: "failed" } });
+      t.noFailedCalls();
       t.succeeded();
     },
   }),

@@ -118,7 +118,7 @@ On Vercel, Eve handles provider configuration through the platform. For local de
 Integrations use [Vercel Connect](https://vercel.com/docs/connect) — no extra env vars in this repo for Linear or GitHub OAuth, but you must:
 
 1. Create Connect resources (GitHub, Linear MCP, Slack) in your Vercel team
-2. Update connector UIDs in [`shared/connect.ts`](../shared/connect.ts) (GitHub) or [`agent/channels/slack.ts`](../agent/channels/slack.ts) (Slack, default: `slack/v`)
+2. Update connector UIDs in [`lib/connect.ts`](../lib/connect.ts) (GitHub) or [`agent/channels/slack.ts`](../agent/channels/slack.ts) (Slack, default: `slack/v`)
 3. Connect clients in **Settings → Integrations** in the app
 
 See [Customization](./CUSTOMIZATION.md#integrations) for setup steps.

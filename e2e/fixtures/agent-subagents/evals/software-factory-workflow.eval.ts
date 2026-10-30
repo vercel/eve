@@ -29,17 +29,19 @@ export default defineEval({
 
     turn.expectOk();
     t.succeeded();
-    t.calledTool("workflow", {
+    t.calledTool("workflow", { count: 1 });
+    // The workflow tool runs as a task: its result settles the task, not the call.
+    t.event("call.settled", {
       count: 1,
-      output: (observed) => isDeepStrictEqual(observed, expected),
+      data: { output: (observed) => isDeepStrictEqual(observed, expected), outcome: "completed" },
     });
-    t.calledSubagent(TRIAGE, { count: 1, status: "completed" });
-    t.calledSubagent(REVIEW, { count: 1, status: "completed" });
-    t.calledSubagent(REPRODUCE, { count: 1, status: "completed" });
+    t.event("child.opened", { count: 1, data: { name: TRIAGE } });
+    t.event("child.opened", { count: 1, data: { name: REVIEW } });
+    t.event("child.opened", { count: 1, data: { name: REPRODUCE } });
     turn.eventsSatisfy("analysis fans out before reproduction consumes both results", (events) => {
       const called = new Map<string, number>();
       for (const [index, event] of events.entries()) {
-        if (event.type === "subagent.called" && !called.has(event.data.name)) {
+        if (event.type === "child.opened" && !called.has(event.data.name)) {
           called.set(event.data.name, index);
         }
       }
@@ -54,8 +56,8 @@ export default defineEval({
         Math.max(triageCalled, reviewCalled) < reproduceCalled
       );
     });
-    await t.require(parseJsonMessage(turn.message), equals(expected));
-    t.noFailedActions();
+    await t.require(parseJsonMessage(turn.reply), equals(expected));
+    t.noFailedCalls();
   },
 });
 

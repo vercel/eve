@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   createDiscoverErrorDiagnostic,
   createDiscoverWarningDiagnostic,
-  hasDiscoverErrors,
   summarizeDiscoverDiagnostics,
 } from "../src/discover/diagnostics.js";
 
@@ -47,6 +46,5 @@ describe("discovery diagnostics", () => {
       errors: 1,
       warnings: 2,
     });
-    expect(hasDiscoverErrors(diagnostics)).toBe(true);
   });
 });

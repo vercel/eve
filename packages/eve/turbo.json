@@ -2,14 +2,115 @@
   "extends": ["//"],
   "tasks": {
     "build": {
-      "dependsOn": ["$TURBO_EXTENDS$"],
-      "inputs": ["$TURBO_EXTENDS$", "$TURBO_ROOT$/packages/eve-code/extension/**"]
+      "dependsOn": ["$TURBO_EXTENDS$", "build:compiled"],
+      "env": ["EVE_PACKAGE_DEPENDENCY_URL", "VERCEL"],
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/packages/eve-code/extension/**",
+        "$TURBO_ROOT$/packages/eve-git/extension/**",
+        "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
+        "$TURBO_ROOT$/docs/**",
+        "$TURBO_ROOT$/scripts/stage-package.mjs",
+        "$TURBO_ROOT$/scripts/package-catalog.mjs",
+        "$TURBO_ROOT$/scripts/write-package-changelog.mjs",
+        "$TURBO_ROOT$/scripts/copy-package-license.mjs",
+        "$TURBO_ROOT$/LICENSE",
+        "$TURBO_ROOT$/NOTICE",
+        "$TURBO_ROOT$/apps/docs/lib/evals/eve-code-format.ts",
+        "$TURBO_ROOT$/apps/docs/lib/evals/eve-code-benchmark.json",
+        "!.generated/**",
+        "!src/extensions/code/extension/**",
+        "!src/extensions/git/extension/**",
+        "!src/computer-use/extension/**"
+      ],
+      "outputs": ["$TURBO_EXTENDS$", "docs/**"]
+    },
+    "build:compiled": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/eve-code/extension/**",
+        "$TURBO_ROOT$/packages/eve-git/extension/**",
+        "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
+        "!.generated/**",
+        "!src/extensions/code/extension/**",
+        "!src/extensions/git/extension/**",
+        "!src/computer-use/extension/**"
+      ],
+      "outputs": [
+        ".generated/compiled/**",
+        "src/extensions/code/extension/**",
+        "src/extensions/git/extension/**",
+        "src/computer-use/extension/**"
+      ]
+    },
+    "build:js": {
+      "dependsOn": ["build:compiled"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/eve-code/extension/**",
+        "$TURBO_ROOT$/packages/eve-git/extension/**",
+        "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
+        "!.generated/**",
+        "!src/extensions/code/extension/**",
+        "!src/extensions/git/extension/**",
+        "!src/computer-use/extension/**"
+      ],
+      "outputs": ["dist/**"]
     },
     "build:types": {
-      "inputs": ["$TURBO_EXTENDS$", "$TURBO_ROOT$/packages/eve-code/extension/**"]
+      "dependsOn": ["$TURBO_EXTENDS$", "build:compiled"],
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/packages/eve-code/extension/**",
+        "$TURBO_ROOT$/packages/eve-git/extension/**",
+        "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
+        "!.generated/**",
+        "!src/extensions/code/extension/**",
+        "!src/extensions/git/extension/**",
+        "!src/computer-use/extension/**"
+      ]
+    },
+    "test:unit": {
+      "dependsOn": ["build"]
     },
     "typecheck": {
-      "inputs": ["$TURBO_EXTENDS$", "$TURBO_ROOT$/packages/eve-code/extension/**"]
+      "dependsOn": ["$TURBO_EXTENDS$", "build:compiled"],
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/packages/eve-code/extension/**",
+        "$TURBO_ROOT$/packages/eve-git/extension/**",
+        "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
+        "!.generated/**",
+        "!src/extensions/code/extension/**",
+        "!src/extensions/git/extension/**",
+        "!src/computer-use/extension/**"
+      ]
+    },
+    "test:integration": {
+      "dependsOn": ["build"]
+    },
+    "test:scenario": {
+      "dependsOn": ["$TURBO_EXTENDS$", "build"]
+    },
+    "test:webchat": {
+      "cache": false,
+      "dependsOn": ["build:js"],
+      "env": ["PLAYWRIGHT_BROWSERS_PATH"]
+    },
+    "test:framework-fixtures": {
+      "cache": false,
+      "dependsOn": ["build"]
+    },
+    "test:tui": {
+      "cache": false,
+      "dependsOn": ["build"],
+      "env": ["AI_GATEWAY_API_KEY", "EVE_SANDBOX_IMAGE_TAG"]
+    },
+    "test:watch": {
+      "cache": false,
+      "dependsOn": ["build:compiled"],
+      "persistent": true
     }
   }
 }

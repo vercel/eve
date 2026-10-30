@@ -10,10 +10,22 @@ export const SCHEDULE_APP_AUTH: SessionAuthContext = {
   principalType: "runtime",
 };
 
-/** Returns whether the current request is authenticated as eve's schedule principal. */
-export function isScheduleAppAuth(
-  auth: SessionAuthContext | null | undefined,
-): auth is SessionAuthContext {
+/**
+ * Returns true when `auth` is the default app principal that schedules pass
+ * as `appAuth`. It identifies that principal, not how a turn started: a
+ * schedule handler may send with a user's auth instead, and any code can
+ * reuse `appAuth`.
+ *
+ * @example
+ * ```ts
+ * import { isScheduleAuth } from "eve/schedules";
+ *
+ * if (isScheduleAuth(ctx.session.auth.current)) {
+ *   // Work the agent does on its own behalf.
+ * }
+ * ```
+ */
+export function isScheduleAuth(auth: SessionAuthContext | null | undefined): boolean {
   return (
     auth?.authenticator === SCHEDULE_APP_AUTH.authenticator &&
     auth.principalId === SCHEDULE_APP_AUTH.principalId &&

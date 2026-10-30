@@ -63,8 +63,6 @@ export interface PackageJsonMutation {
   scripts: string[];
 }
 
-export type ChannelMutationAction = "created" | "overwritten" | "skipped";
-
 export type ChannelMutationResult = SlackChannelMutationResult | WebChannelMutationResult;
 
 interface SlackChannelWrittenResult {
@@ -170,6 +168,8 @@ async function hasPackageDependency(
  */
 const VERCEL_HOST_FRAMEWORK_PRESETS: Readonly<Record<string, string>> = {
   "@sveltejs/kit": "sveltekit",
+  "@tanstack/react-start": "tanstack-start",
+  "@tanstack/solid-start": "tanstack-start",
   [NEXT_PACKAGE_NAME]: "nextjs",
   nuxt: "nuxtjs",
   nuxt3: "nuxtjs",

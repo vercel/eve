@@ -101,12 +101,9 @@ export function typeaheadCompletion(spec: PromptCommandSpec): string {
 }
 
 /**
- * When the draft is a complete command name or alias with exactly one match,
- * the dropdown collapses into an inline hint trailing the prompt row. Returns
- * the command's argument shape to paint dim after the input — an empty string
- * for argument-less commands, which still collapse the list — or `undefined`
- * when the list should render normally (partial draft, multiple matches, or a
- * dismissed list).
+ * When the draft is a complete command name or alias with exactly one match and
+ * the list is not dismissed, return its argument shape to paint dim after the
+ * input (an empty string when there is none). Returns `undefined` otherwise.
  */
 export function inlineCommandHint(state: CommandTypeaheadState): string | undefined {
   if (state.dismissed || state.matches.length !== 1) return undefined;

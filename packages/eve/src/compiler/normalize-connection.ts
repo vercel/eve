@@ -1,4 +1,5 @@
 import type { ConnectionSourceRef } from "#discover/manifest.js";
+import { eveNamespaceReservation } from "#protocol/runtime-tools.js";
 import {
   normalizeMcpClientConnectionDefinition,
   normalizeOpenApiConnectionDefinition,
@@ -11,15 +12,11 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
-import { readConnectionProtocol } from "#public/definitions/connections/protocol.js";
-import {
-  ALLOWED_DYNAMIC_CONNECTION_EVENTS,
-  assertResolverOnlyDynamicSentinel,
-  isDynamicSentinel,
-  type DynamicToolEventName,
-} from "#dynamic/definition.js";
+import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
+import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
+import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
-export type CompiledConnectionEntry =
+type CompiledConnectionEntry =
   | { readonly kind: "connection"; readonly definition: CompiledConnectionDefinition }
   | {
       readonly kind: "dynamic-connection";
@@ -38,7 +35,7 @@ export type CompiledConnectionEntry =
  * during `eve build`.
  *
  * The wire protocol is read from the marker stamped by the `define*`
- * factory, defaulting to MCP, and selects which normalizer validates
+ * factory and selects which normalizer validates
  * the authored shape. `url` carries the MCP server endpoint for MCP
  * connections and the API base URL for OpenAPI connections, so the rest
  * of the connection pipeline (auth context, tool-result narrowing,
@@ -58,20 +55,10 @@ export async function compileConnectionDefinition(
   const message = `Expected the connection export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
 
   if (isDynamicSentinel(loaded)) {
-    assertResolverOnlyDynamicSentinel(loaded, message);
-    const eventNames = Object.keys(loaded.events);
-    const unsupportedEvent = eventNames.find(
-      (eventName) => !ALLOWED_DYNAMIC_CONNECTION_EVENTS.has(eventName),
-    );
-    if (unsupportedEvent !== undefined) {
-      throw new Error(
-        `${message} Dynamic connections support only "session.started" and "turn.started" handlers. Unsupported event: "${unsupportedEvent}".`,
-      );
-    }
+    assertDynamicSentinelKeys(loaded, message);
     return {
       kind: "dynamic-connection",
       definition: {
-        eventNames: eventNames as DynamicToolEventName[],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
         slug: source.connectionName,
@@ -81,7 +68,20 @@ export async function compileConnectionDefinition(
     };
   }
 
-  const protocol = readConnectionProtocol(loaded);
+  // A connection's own name is the entry that signs the user in to it.
+  const reservation = eveNamespaceReservation(source.connectionName);
+  if (reservation !== undefined) {
+    throw new Error(
+      `Connection "${source.logicalPath}" uses the reserved name "${source.connectionName}". Rename its path; ${reservation}.`,
+    );
+  }
+
+  const protocol = readStampedConnectionProtocol(loaded);
+  if (protocol === undefined) {
+    throw new Error(
+      `Connection "${source.logicalPath}" exports a plain object. Wrap it in defineMcpClientConnection({...}) or defineOpenAPIConnection({...}) from "eve/connections"; plain objects no longer default to MCP.`,
+    );
+  }
 
   const shared = {
     connectionName: source.connectionName,
@@ -109,41 +109,22 @@ export async function compileConnectionDefinition(
       ...shared,
       description: normalized.description,
       protocol: "mcp",
+      ...(normalized.experimental?.events === undefined
+        ? {}
+        : { experimental_events: true as const }),
       url: normalized.url,
     };
     auth = normalized.auth;
   }
 
-  const vercelConnect = extractVercelConnectMarker(auth);
+  const vercelConnect = extractVercelConnectMetadata(
+    auth === null || typeof auth !== "object"
+      ? undefined
+      : (auth as { readonly vercelConnect?: unknown }).vercelConnect,
+  );
   if (vercelConnect !== undefined) {
     compiled.vercelConnect = vercelConnect;
   }
 
   return { definition: compiled, kind: "connection" };
-}
-
-/**
- * Reads the optional `vercelConnect: { connector: string }` marker that
- * `@vercel/connect/eve`'s `connect()` helper attaches to its returned
- * authorization definition. Returns the parsed marker when present and
- * shaped correctly, otherwise `undefined`.
- *
- * The compiler does not import `@vercel/connect/eve` (it should not
- * depend on a specific auth provider). Detection is duck-typed against
- * the structural marker contract — any object with a non-empty
- * `vercelConnect.connector` string is recognized.
- */
-function extractVercelConnectMarker(auth: unknown): { readonly connector: string } | undefined {
-  if (auth === null || typeof auth !== "object") {
-    return undefined;
-  }
-  const marker = (auth as { vercelConnect?: unknown }).vercelConnect;
-  if (marker === null || typeof marker !== "object") {
-    return undefined;
-  }
-  const connector = (marker as { connector?: unknown }).connector;
-  if (typeof connector !== "string" || connector.length === 0) {
-    return undefined;
-  }
-  return { connector };
 }

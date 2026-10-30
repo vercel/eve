@@ -1,47 +1,62 @@
 import { createHook } from "#compiled/@workflow/core/index.js";
+import { isHookConflictError } from "#execution/hook-ownership.js";
 import {
   createChannelReader,
   type ChannelReader,
 } from "#execution/tools/workflow/owner-channels.js";
-import {
-  isWorkflowToolRunControlMessage,
-  type WorkflowToolRunMessage,
-  type WorkflowToolRunControlMessage,
+import type {
+  WorkflowToolRunMessage,
+  WorkflowToolRunMessageBatch,
+  WorkflowToolRunControlMessage,
 } from "#execution/tools/workflow/messages.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 
 export interface BlockingWorkflowOwner {
-  readonly kind: "turn";
+  /** The session's commands, from the run's control hook. */
   readonly commands: ChannelReader<"control", WorkflowToolRunControlMessage>;
-  readonly signal: AbortSignal;
-  handleCommand(message: WorkflowToolRunControlMessage): void;
+  /**
+   * Waits until the control hook is registered, so the session's commands
+   * reach the run, and resolves `false` when another run already holds its
+   * token. A pending wait keeps the suspension that registers the hook from
+   * running its steps inline, so call it only once the run needs the answer.
+   */
+  register(): Promise<boolean>;
   handleMessage(message: WorkflowToolRunMessage): Promise<void>;
+  /**
+   * Relays the body's messages to the session in one delivery, which is one
+   * durable write: the session gets all of them or none, never a prefix.
+   */
+  relay(messages: readonly WorkflowToolRunMessage[]): Promise<void>;
 }
 
-/** Routes invocation messages to the waiting turn and accepts cancellation. */
+/** The run's link to its session: commands arrive on its control hook, and its messages go to the session's inbox. */
 export function createBlockingWorkflow(input: WorkflowToolRunInput): BlockingWorkflowOwner {
-  const controller = new AbortController();
   const hook = createHook<WorkflowToolRunControlMessage>({ token: input.hookToken });
+  let registered: Promise<boolean> | undefined;
+  const handleMessage = (message: WorkflowToolRunMessage): Promise<void> =>
+    resumeHookStep(input.owner.inbox, message, {
+      ifPresent: message.kind === "outcome" && message.result.status === "cancelled",
+    });
   return {
-    kind: "turn",
     commands: createChannelReader("control", hook),
-    signal: controller.signal,
-    handleCommand(message: WorkflowToolRunControlMessage) {
-      if (isWorkflowToolRunControlMessage(message))
-        controller.abort(new WorkflowToolRunCancelledError(message.reason));
+    register() {
+      registered ??= hook.getConflict().then(
+        (conflict) => conflict === null,
+        // A World that can't name the holder rejects instead.
+        (error: unknown) => {
+          if (isHookConflictError(error)) return false;
+          throw error;
+        },
+      );
+      return registered;
     },
-    handleMessage(message: WorkflowToolRunMessage) {
-      return resumeHookStep(input.owner.inbox, message, {
-        ifPresent: message.kind === "outcome" && message.result.status === "cancelled",
-      });
+    handleMessage,
+    relay(messages) {
+      // A lone message keeps the shape every session reads.
+      if (messages.length === 1) return handleMessage(messages[0]!);
+      const batch: WorkflowToolRunMessageBatch = { kind: "workflow-batch", messages };
+      return resumeHookStep(input.owner.inbox, batch);
     },
   };
-}
-
-class WorkflowToolRunCancelledError extends Error {
-  constructor(reason: string) {
-    super(reason);
-    this.name = "WorkflowToolRunCancelledError";
-  }
 }

@@ -1,22 +1,28 @@
 /**
- * Pure rendering for the HITL question panel — the overlay a pending question
- * request (such as one from `ask_question` or `ctx.ask()`) opens above the
- * input area. A full-width rule separates
- * it from the transcript, options render as numbered rows with their
+ * Pure rendering for the HITL question drawer — a pending question request
+ * (such as one from `ask_question` or `ctx.ask()`) opens above the input area.
+ * Options render as numbered rows with their
  * descriptions always visible, and the trailing "Type your own answer" row
  * carries an inline elbow editor that receives focus the moment the cursor
  * rests on it (the provider-key grammar from the setup panel). The renderer
  * hosts lifecycle and keys; this module only paints rows.
  */
 
-import type { AgentTUIInputOption } from "./runner.js";
+import type { AgentTUIInputContext, AgentTUIInputOption } from "./runner.js";
 import { visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
-import { clipVisible, renderInputWithBlockCursor, wrapVisibleLine } from "#cli/ui/terminal-text.js";
+import {
+  clipVisible,
+  renderInputText,
+  renderInputWithBlockCursor,
+  stripTerminalControls,
+  wrapVisibleLine,
+} from "#cli/ui/terminal-text.js";
+import { renderOptionRow } from "#setup/cli/option-row.js";
 
-const FREEFORM_ROW_LABEL = "Type your own answer";
+const FREEFORM_ROW_LABEL = "Type your own answer…";
 
-export interface QuestionPanelState {
+interface QuestionPanelState {
   readonly prompt: string;
   readonly options: readonly AgentTUIInputOption[];
   /** Row index under the cursor; `options.length` is the freeform row. */
@@ -26,12 +32,7 @@ export interface QuestionPanelState {
   /** The freeform row's inline editor; focused while the cursor rests on it. */
   readonly editor: LineState;
   readonly caretVisible: boolean;
-}
-
-/** Rows under the cursor paint like the setup panel's selected option. */
-function selectedRow(text: string, theme: Theme): string {
-  const c = theme.colors;
-  return `${c.bold(` ${theme.glyph.selectedPointer} ${text}`)} ${c.dim("↵")}`;
+  readonly maxRows?: number;
 }
 
 export function renderQuestionPanel(
@@ -39,79 +40,114 @@ export function renderQuestionPanel(
   theme: Theme,
   width: number,
 ): string[] {
-  const c = theme.colors;
-  const g = theme.glyph;
-  // The rule hugs the question — no blank row between them.
-  const rows: string[] = [];
-
-  // The prompt is model-authored and can span paragraphs. Embedded newlines
-  // MUST split before width-wrapping: a row that secretly holds newlines
-  // occupies more terminal rows than the live region accounts for, leaking a
-  // duplicate frame into scrollback on every repaint.
-  for (const logical of state.prompt.split(/\r?\n/u)) {
-    for (const line of wrapVisibleLine(logical, Math.max(8, width - 2))) {
-      rows.push(`  ${c.bold(line)}`);
-    }
-  }
+  const rows = renderQuestionPrompt(state.prompt, theme, width);
   rows.push("");
-
+  let focusedRow = rows.length;
+  let focusedEndRow = focusedRow;
   for (const [index, option] of state.options.entries()) {
-    rows.push(...optionRows(option.label, option.description, index, state, theme));
+    if (index === state.cursor) focusedRow = rows.length;
+    rows.push(
+      ...renderQuestionChoice(option, index === state.cursor, theme).flatMap((row) =>
+        row.split(/\r?\n/u),
+      ),
+    );
+    if (index === state.cursor) focusedEndRow = rows.length - 1;
   }
   if (state.allowFreeform) {
-    const index = state.options.length;
-    const focused = state.cursor === index;
-    rows.push(...optionRows(FREEFORM_ROW_LABEL, undefined, index, state, theme));
-    if (focused || state.editor.text.length > 0) {
-      rows.push(`        ${c.dim(g.elbow)} ${freeformEditorBody(state, focused, theme, width)}`);
-    }
+    if (state.cursor === state.options.length) focusedRow = focusedEndRow = rows.length;
+    rows.push(renderFreeformRow(state, theme, width));
   }
 
-  // One quiet hint; arrow/enter affordances are carried by the cursor row
-  // itself. The overlay suppresses the footer's status hint row entirely.
-  rows.push("", `  ${c.dim("Esc to dismiss")}`);
-  return rows.map((row) => clipVisible(row, width));
+  return fitQuestionPanel(
+    rows.map((row) => clipVisible(row, width)),
+    state.maxRows ?? rows.length,
+    focusedRow,
+    focusedEndRow,
+  );
 }
 
-function optionRows(
-  label: string,
-  description: string | undefined,
-  index: number,
-  state: QuestionPanelState,
+export function renderQuestionPrompt(prompt: string, theme: Theme, width: number): string[] {
+  return stripTerminalControls(prompt)
+    .split(/\r?\n/u)
+    .flatMap((line) => wrapVisibleLine(line, Math.max(1, width - 2)))
+    .map((line) => `  ${theme.colors.bold(line)}`);
+}
+
+/** Window the body, keeping the focused choice or editor reachable on short terminals. */
+export function fitQuestionPanel(
+  rows: readonly string[],
+  maxRows: number,
+  focusedRow = rows.length - 1,
+  focusedEndRow = focusedRow,
+): string[] {
+  // Keep the label when one choice's description is taller than the viewport.
+  const end = Math.min(focusedEndRow, focusedRow + maxRows - 1);
+  const start = Math.max(0, Math.min(end - maxRows + 1, rows.length - maxRows));
+  return rows.slice(start, start + maxRows);
+}
+
+/** Who asked for a prompt and where it sits among the open requests, for the drawer's corner. */
+export function inputContextLabel(
+  context: AgentTUIInputContext | undefined,
+  theme: Theme,
+): string | undefined {
+  const parts: string[] = [];
+  if (context?.requester !== undefined) parts.push(stripTerminalControls(context.requester));
+  if (context?.position !== undefined) {
+    parts.push(`${context.position.index} of ${context.position.total}`);
+  }
+  return parts.length === 0 ? undefined : parts.join(` ${theme.glyph.dot} `);
+}
+
+function renderQuestionChoice(
+  option: AgentTUIInputOption,
+  isCursor: boolean,
   theme: Theme,
 ): string[] {
-  const c = theme.colors;
-  const numbered = `${index + 1}. ${label}`;
-  // Both variants put the number at column 5 and the label at column 8 —
-  // the selected row's extra cells are its pointer and padding, so moving
-  // the cursor never shifts the text horizontally.
-  const rows = [
-    state.cursor === index
-      ? `  ${selectedRow(numbered, theme)}`
-      : `     ${c.dim(`${index + 1}.`)} ${label}`,
-  ];
-  if (description !== undefined && description.length > 0) {
-    rows.push(`        ${c.dim(description)}`);
+  const row = renderOptionRow({
+    colors: theme.colors,
+    glyphs: {
+      pointer: theme.glyph.pointer,
+      selectedPointer: theme.glyph.selectedPointer,
+      success: theme.glyph.success,
+      placeholder: theme.glyph.option,
+      dot: theme.glyph.dot,
+      warning: theme.glyph.warning,
+    },
+    label: option.label,
+    isCursor,
+    state: { kind: "available", checked: false },
+    placeholder: false,
+    presentation: "minimal",
+  });
+  const rows = [`  ${row}`];
+  if (option.description !== undefined && option.description.length > 0) {
+    rows.push(`     ${theme.colors.dim(option.description)}`);
   }
   return rows;
 }
 
-function freeformEditorBody(
-  state: QuestionPanelState,
-  focused: boolean,
-  theme: Theme,
-  width: number,
-): string {
+function renderFreeformRow(state: QuestionPanelState, theme: Theme, width: number): string {
   const c = theme.colors;
-  // Reserve the elbow gutter plus the block cursor's trailing cell.
-  const budget = Math.max(4, width - 12);
+  const focused = state.cursor === state.options.length;
+  // Reserve the block cursor's trailing cell so an input at the width limit
+  // never clips its caret.
+  const budget = Math.max(4, width - 6);
   if (!focused) {
-    const preserved = visibleLine(state.editor, budget, theme.glyph.ellipsis);
-    return c.dim(`${preserved.before}${preserved.under}${preserved.after}`);
+    const visible = visibleLine(state.editor, budget, theme.glyph.ellipsis);
+    const value =
+      state.editor.text.length === 0
+        ? FREEFORM_ROW_LABEL
+        : `${visible.before}${visible.under}${visible.after}`;
+    return `     ${c.dim(value)}`;
   }
-  return renderInputWithBlockCursor({
-    ...visibleLine(state.editor, budget, theme.glyph.ellipsis),
+
+  const placeholder = state.editor.text.length === 0;
+  const line = placeholder ? { text: FREEFORM_ROW_LABEL, cursor: 0 } : state.editor;
+  return `     ${renderInputWithBlockCursor({
+    ...visibleLine(line, budget, theme.glyph.ellipsis),
     visible: state.caretVisible,
     inverse: c.inverse,
-  });
+    render: placeholder ? (text) => c.dim(renderInputText(text)) : undefined,
+  })}`;
 }

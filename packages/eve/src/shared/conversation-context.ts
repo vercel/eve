@@ -1,9 +1,8 @@
-import type { InstrumentationChannelKind } from "#public/channels/index.js";
+import type { InstrumentationChannelKind } from "#shared/instrumentation-channel.js";
 import { ContextKey } from "#context/key.js";
 import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
 import { isNonEmptyString } from "#shared/guards.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
-import type { RunMode } from "#shared/run-mode.js";
 import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 
 export type ConversationEnvironment = "development" | "preview" | "production";
@@ -14,15 +13,8 @@ export interface ConversationContext {
     readonly name?: string;
   };
   readonly audience: ChannelAudience;
-  readonly mode: RunMode;
   readonly environment: ConversationEnvironment;
   readonly principalType: string;
-}
-
-export interface AudiencePrincipal {
-  readonly principalType: string;
-  readonly authenticator: string;
-  readonly attributes: Readonly<Record<string, string | readonly string[]>>;
 }
 
 export type AudienceCaller =
@@ -36,18 +28,12 @@ export type AudienceCaller =
       };
     };
 
-export interface AudienceInput<TState> {
+/** Privacy-limited input for conversation audience classification. */
+export interface AudienceContext<TState> {
   readonly state: TState;
-  /** @deprecated Use `caller`; it excludes `principalId`, `issuer`, and `subject`. */
-  readonly auth: AudiencePrincipal | null;
-  readonly channel: ConversationContext["channel"];
-  readonly mode: RunMode;
-  readonly environment: ConversationEnvironment;
-}
-
-/** Preferred input type for new audience callback annotations. */
-export interface AudienceContext<TState> extends AudienceInput<TState> {
   readonly caller: AudienceCaller;
+  readonly channel: ConversationContext["channel"];
+  readonly environment: ConversationEnvironment;
 }
 
 /** Safe projection for durable sessions created before `eve.conversation` existed. */
@@ -55,15 +41,13 @@ export const UNKNOWN_CONVERSATION_CONTEXT: ConversationContext = {
   audience: "unknown",
   channel: { kind: "unknown" },
   environment: "production",
-  mode: "conversation",
   principalType: "anonymous",
 };
 
-export interface ConversationContextFallback {
+interface ConversationContextFallback {
   readonly channelKind?: string;
   readonly environment: ConversationEnvironment;
   readonly forwardedTracePolicy?: ForwardedTraceAssertion;
-  readonly mode?: RunMode;
   readonly principalType?: string;
 }
 
@@ -89,7 +73,6 @@ export function resolveConversationContext(
       kind: normalizeInstrumentationChannelKind(fallback.channelKind),
     },
     environment: fallback.environment,
-    mode: fallback.mode ?? "conversation",
     principalType: fallback.principalType ?? "anonymous",
   };
 }
@@ -98,7 +81,6 @@ interface SerializedConversationContext {
   readonly audience?: unknown;
   readonly channel?: unknown;
   readonly environment?: unknown;
-  readonly mode?: unknown;
   readonly principalType?: unknown;
 }
 
@@ -122,12 +104,10 @@ export function normalizeConversationContext(value: unknown): ConversationContex
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const candidate = value as SerializedConversationContext;
   const channel = normalizeConversationChannel(candidate.channel);
-  const mode = candidate.mode;
   const environment = candidate.environment;
   const principalType = candidate.principalType;
   if (
     channel === undefined ||
-    (mode !== "conversation" && mode !== "task") ||
     (environment !== "development" && environment !== "preview" && environment !== "production") ||
     !isNonEmptyString(principalType)
   ) {
@@ -137,7 +117,6 @@ export function normalizeConversationContext(value: unknown): ConversationContex
     audience: normalizeChannelAudience(candidate.audience),
     channel,
     environment,
-    mode,
     principalType,
   };
 }

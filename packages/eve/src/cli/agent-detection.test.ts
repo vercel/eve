@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CODING_AGENT_ENV_MARKERS, isCodingAgentLaunch } from "./agent-detection.js";
+import { CODING_AGENT_ENV_MARKERS } from "#setup/primitives/coding-agent-env.js";
+
+import { isCodingAgentLaunch } from "./agent-detection.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();

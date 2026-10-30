@@ -89,7 +89,7 @@ async function createTemporaryAppRoot(input: {
   );
   await writeFile(
     join(appRoot, "agent", "agent.mjs"),
-    'export default { model: "openai/gpt-5.4" };\n',
+    'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
   );
 
   if (!input.omitInstructionsSource) {
@@ -249,7 +249,8 @@ describe("eve build process output", () => {
   it("bundles authored workflow tools into the server and driver output", async () => {
     const { appRoot } = await scenarioApp({
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "You are a precise assistant.",
       },
       installDependencies: true,
@@ -273,7 +274,7 @@ describe("eve build process output", () => {
       join(appRoot, "agent", "tools", "deploy_service.mjs"),
       [
         'import { defineWorkflowTool } from "eve/tools";',
-        'import { sleep } from "workflow";',
+        'import { sleep } from "eve/workflow";',
         'import { hashPlan } from "../lib/plan.mjs";',
         "",
         "export default defineWorkflowTool({",
@@ -326,38 +327,6 @@ describe("eve build process output", () => {
       'Expected authored instructions at "instructions.md", "instructions.ts", "instructions.cts", "instructions.mts", "instructions.js", "instructions.cjs", "instructions.mjs", or "instructions/" directory.',
     );
     expect(result.stderr).toContain(`source: ${join(resolvedAppRoot, "agent")}`);
-  }, 120_000);
-
-  it("prints bundled missing-import errors to stderr when build fails", async () => {
-    const appRoot = await createTemporaryAppRoot({
-      prefix: "eve-bin-build-output-missing-import-",
-    });
-
-    await mkdir(join(appRoot, "agent", "tools"), {
-      recursive: true,
-    });
-    await writeFile(
-      join(appRoot, "agent", "tools", "bad.ts"),
-      [
-        'import { missing } from "./does-not-exist";',
-        "export default {",
-        '  description: "Missing import test.",',
-        '  inputSchema: { type: "object", properties: {}, required: [] },',
-        "  execute: async () => String(missing),",
-        "};",
-        "",
-      ].join("\n"),
-    );
-
-    const result = await runEveBuild(appRoot);
-
-    expect(result.code).toBe(1);
-    expect(result.signal).toBeNull();
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("Could not resolve './does-not-exist'");
-    expect(result.stderr).toContain("Build failed with 1 error:");
-    expect(result.stderr).toContain("agent/tools/bad.ts");
-    expect(result.stderr).not.toContain("Diagnostics artifact:");
   }, 120_000);
 
   it("prints bundled syntax errors to stderr when build fails", async () => {

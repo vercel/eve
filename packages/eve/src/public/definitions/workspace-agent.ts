@@ -1,5 +1,3 @@
-import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-
 import type { HeadersValue } from "#client/types.js";
 import { type OutboundAuthFn, vercelOidc } from "#public/agents/auth.js";
 import {
@@ -7,8 +5,8 @@ import {
   type RemoteAgentDefinition,
   type RemoteAgentUrl,
 } from "#public/definitions/remote-agent.js";
-import type { JsonObject } from "#shared/json.js";
 import { normalizePublicRoutePrefix } from "#shared/public-route-prefix.js";
+import type { AgentToolExposure } from "#shared/agent-definition.js";
 
 const WORKSPACE_AGENT_NAME = Symbol.for("eve.workspace-agent.name");
 
@@ -28,14 +26,15 @@ export interface WorkspaceAgentDefinition {
   /** Overrides the peer agent's description in the parent's tool definition. */
   readonly description?: string;
   readonly forwardPrincipal?: boolean;
-  readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
   /** Name of the peer workspace member, such as `research`. */
   readonly name: string;
   /**
-   * Whether eve exposes this workspace peer to the parent model as a tool.
-   * Defaults to `true`; `false` keeps it callable from workflow tools.
+   * How eve exposes this workspace peer to the parent model: `true` lists it
+   * as a tool, `"deferred"` makes it a catalog entry the model finds with
+   * `eve__search` and calls with `eve__tool`, and `false` keeps it callable only from
+   * workflow tools. Defaults to `true`.
    */
-  readonly tool?: boolean;
+  readonly tool?: AgentToolExposure;
   /** Overrides environment-aware workspace routing and service authentication. */
   readonly transport?: WorkspaceAgentTransport;
 }
@@ -48,7 +47,6 @@ export function defineWorkspaceAgent(definition: WorkspaceAgentDefinition): Remo
     description: definition.description ?? "",
     forwardPrincipal: definition.forwardPrincipal,
     headers: transport.headers,
-    outputSchema: definition.outputSchema,
     tool: definition.tool,
     url: transport.url,
   }) as BrandedWorkspaceSubagent;

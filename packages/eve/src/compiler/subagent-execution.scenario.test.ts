@@ -13,9 +13,9 @@ describe("subagent compilation", () => {
     const app = await scenarioApp({
       files: {
         "agent/agent.ts":
-          "export default { model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 };\n",
+          "import { defineAgent } from 'eve';\nexport default defineAgent({ model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 });\n",
         "agent/subagents/researcher/agent.ts":
-          "export default { description: 'Research.', model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 };\n",
+          "import { defineAgent } from 'eve';\nexport default defineAgent({ description: 'Research.', model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 });\n",
       },
       name: "subagent-execution-edge",
     });
@@ -27,19 +27,15 @@ describe("subagent compilation", () => {
     const child = manifest.subagents[0];
 
     expect(child).not.toHaveProperty("execution");
-    if (child?.configResolver !== undefined) throw new Error("Expected a static child.");
-    const toolNames = child?.agent.tools.map((tool) => tool.name);
-    expect(toolNames).toContain("task_cancel");
-    expect(toolNames).not.toContain("task_update");
   });
 
   it("compiles a subagent without root configuration", async () => {
     const app = await scenarioApp({
       files: {
         "agent/agent.ts":
-          "export default { model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 };\n",
+          "import { defineAgent } from 'eve';\nexport default defineAgent({ model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 });\n",
         "agent/subagents/researcher/agent.ts":
-          "export default { description: 'Research.', model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 };\n",
+          "import { defineAgent } from 'eve';\nexport default defineAgent({ description: 'Research.', model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 });\n",
       },
       name: "subagent-execution-gate",
     });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { defineChannel, POST } from "#public/definitions/channel.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
@@ -34,7 +34,7 @@ describe("buildVercelAgentSummary", () => {
         },
         {
           loadNamespace: async () => ({
-            default: defineSchedule({ cron: "0 9 * * *", markdown: "Run the digest." }),
+            default: defineSchedule({ cron: "0 9 * * *", content: "Run the digest." }),
           }),
           logicalPath: "schedules/digest.ts",
         },

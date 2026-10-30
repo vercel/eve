@@ -9,7 +9,7 @@ import { CONTENT_OUTPUT_COMPACTION_MARKER } from "../constants";
 // capped result honors the full contract:
 // - the raw payload is gone (a canary buried in the base64 detects the cap
 //   and any leak);
-// - the file rendered as its `Attached file <name> (<mediaType>)` stub;
+// - the file rendered as its `Attached file <path> (<mediaType>)` stub;
 // - the text parts around the file survived in place (lead + tail markers);
 // - the surrounding conversation was untouched (the case's own user text).
 // On violation the model emits granular *_LOST diagnostics instead, so a
@@ -43,7 +43,7 @@ export default defineEval({
       input: {},
       output: { completed: true },
     });
-    t.event("compaction.completed", { count: 1 });
+    t.event("context.settled", { count: 1, data: { kind: "compaction", outcome: "completed" } });
     t.messageIncludes(CONTENT_OUTPUT_COMPACTION_MARKER);
     t.messageIncludes(EXPECTED_HISTORY);
   },

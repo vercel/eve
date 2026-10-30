@@ -1,3 +1,4 @@
+import type { PromptQueueState } from "#channel/prompt-queue.js";
 import {
   githubContinuationToken,
   type GitHubCiEvent,
@@ -23,7 +24,7 @@ import {
  * null. The default `turn.started` handler fills them in once it checks out
  * the repository, which is why the fields are mutable.
  */
-export interface GitHubChannelState {
+export interface GitHubChannelState extends PromptQueueState {
   baseRef: string | null;
   baseSha: string | null;
   checkoutPath: string | null;
@@ -41,10 +42,12 @@ export interface GitHubChannelState {
   reviewThreadRootCommentId: number | null;
   triggeringCommentId: number | null;
   triggeringUserLogin: string | null;
+  /** @internal The sign-ins the default flow posted a status for, by connection name. */
+  pendingSignIns?: Record<string, string>;
 }
 
 /** Minimal receive target needed to seed GitHub channel state. */
-export interface GitHubReceiveStateTarget {
+interface GitHubReceiveStateTarget {
   readonly installationId?: number;
   readonly issueNumber?: number;
   readonly pullRequestNumber?: number;
@@ -195,6 +198,34 @@ export function stateFromReceiveTarget(input: {
     repo: input.repo,
     repositoryId: input.repositoryId,
   };
+}
+
+/** Fields a later delivery's event sets, as opposed to the checkout's own. */
+const DELIVERED_EVENT_FIELDS = [
+  "baseRef",
+  "baseSha",
+  "defaultBranch",
+  "headRef",
+  "headSha",
+  "reviewCommentId",
+  "triggeringCommentId",
+  "triggeringUserLogin",
+] as const satisfies readonly (keyof GitHubChannelState)[];
+
+/**
+ * Applies what a later delivery's event says to the session's state: the head
+ * it was pushed to and the comment that triggered it. A field the event does
+ * not carry (null) is applied as null, so the next checkout resolves the
+ * current head from the API instead of reusing the last checkout's sha.
+ */
+export function applyDeliveredGitHubState(
+  state: GitHubChannelState,
+  delivered: Partial<GitHubChannelState> | undefined,
+): void {
+  if (delivered === undefined) return;
+  for (const field of DELIVERED_EVENT_FIELDS) {
+    if (field in delivered) Object.assign(state, { [field]: delivered[field] ?? null });
+  }
 }
 
 /** Reconstructs the channel-local GitHub conversation reference from state. */

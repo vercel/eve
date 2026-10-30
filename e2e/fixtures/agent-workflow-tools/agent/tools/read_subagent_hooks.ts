@@ -11,7 +11,7 @@ export default defineTool({
       subagentHookAudit.get().map(async (record) => ({
         ...record,
         sandboxCallId: await sandbox.readTextFile({
-          path: `subagent-hook-${record.eventId}-${record.subscriber}.txt`,
+          path: `subagent-hook-${record.position.replace(":", "-")}-${record.subscriber}.txt`,
         }),
       })),
     );

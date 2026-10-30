@@ -15,7 +15,7 @@ import {
 
 export { isAuthoredSourcePath } from "#internal/nitro/dev-runtime-source-snapshot-local-roots.js";
 
-export const DEV_RUNTIME_SOURCE_DIRECTORY = "source";
+const DEV_RUNTIME_SOURCE_DIRECTORY = "source";
 
 const SOURCE_ROOT_MARKER_NAMES = [".git", "pnpm-workspace.yaml"] as const;
 const WORKSPACE_METADATA_FILE_NAMES = [

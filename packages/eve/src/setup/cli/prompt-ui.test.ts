@@ -345,6 +345,28 @@ describe("renderSearchableSelect", () => {
     expect(rendered).not.toContain("Submit");
   });
 
+  test("shows shared guidance below search results and removes it after submission", () => {
+    const input = {
+      colors,
+      state: "active" as const,
+      message: "Select your team",
+      multiple: false,
+      filter: "",
+      options: projectOptions,
+      cursor: 0,
+      selectedValues: [],
+      submitDisplay: "alpha",
+      helpText: "Ask a team owner to run setup.\nOr choose another team.",
+    };
+    const rendered = renderSearchableSelect(input);
+    expect(rendered).toContain("Ask a team owner to run setup.");
+    expect(rendered.indexOf("Ask a team owner")).toBeGreaterThan(rendered.indexOf("beta"));
+    expect(rendered.indexOf("Or choose another team.")).toBeLessThan(
+      rendered.indexOf("type to filter"),
+    );
+    expect(renderSearchableSelect({ ...input, state: "submit" })).not.toContain("team owner");
+  });
+
   test("multi-select: checkboxes, a pinned Submit row, and only a filter hint", () => {
     const rendered = renderSearchableSelect({
       colors: styledColors,

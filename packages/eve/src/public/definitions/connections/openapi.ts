@@ -6,7 +6,10 @@ import type {
 import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { stampConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { Approval } from "#public/definitions/approval.js";
-import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
+import {
+  connectionDefinitionKey,
+  stampDefinitionKey,
+} from "#internal/authored-definition/source-identity.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 
 /**
@@ -26,8 +29,8 @@ export type OpenAPISpecSource = string | Record<string, unknown>;
  * `"vercel"`.
  *
  * Each operation in the document becomes a connection tool the model can
- * discover via `connection_search` and call by its qualified name (e.g.
- * `vercel__getProjects`). The tool name is the operation's
+ * find with `eve__search` and call with `eve__tool` as `vercel__getProjects`, the
+ * name events report the call under. The tool name is the operation's
  * `operationId`; operations without one get a deterministic synthesized
  * name (`<method>_<sanitized-path>`).
  *
@@ -55,9 +58,8 @@ export interface OpenAPIConnectionDefinition {
   /**
    * Human-readable summary of the connection and its operations.
    *
-   * The system prompt layer uses it to describe the connection to the
-   * model, and `connection_search` results use it so the model can
-   * choose which connection to query.
+   * The model sees it in the catalog listing eve announces, so it can
+   * choose which connection to search.
    */
   readonly description: string;
   /**
@@ -65,7 +67,7 @@ export interface OpenAPIConnectionDefinition {
    * `Authorization: Bearer <token>`.
    *
    * - `getToken`-only: covers static API keys, pre-provisioned tokens,
-   *   and out-of-band OAuth. Defaults to `credentialOwner: "app"` when
+   *   and out-of-band OAuth. Defaults to `principalType: "app"` when
    *   omitted.
    * - Three-method form: provide `startAuthorization` and
    *   `completeAuthorization` together to opt into interactive OAuth.
@@ -90,7 +92,7 @@ export interface OpenAPIConnectionDefinition {
    * - `never()`: allow all tool calls without approval
    * - `once()`: require approval only the first time per session
    * - `always()`: require approval for every tool call
-   * - `auto()`: use an evaluation model to ask about dangerous or unclear effects
+   * - `auto()`: use a decision model to ask about dangerous or unclear effects
    */
   approval?: Approval;
   /**
@@ -110,9 +112,8 @@ export interface OpenAPIConnectionDefinition {
    */
   toolCall?: ConnectionToolCallDefinition;
   /**
-   * Operation filter keyed on `operationId`. When set, the model sees
-   * only operations whose id passes the filter; `connection_search`
-   * drops all others.
+   * Operation filter keyed on `operationId`. When set, the model can find
+   * and call only operations whose id passes the filter.
    *
    * Specify exactly one of `allow` or `block`. Mirrors `tools` on MCP
    * connections, but names operations rather than tools.
@@ -134,10 +135,10 @@ export function defineOpenAPIConnection(
   if (definition.auth !== undefined && typeof definition.auth !== "function") {
     definition.auth = normalizeAuthorizationSpec(definition.auth, "defineOpenAPIConnection:");
   }
-  const definitionKey =
-    definition.baseUrl ??
-    (typeof definition.spec === "string" ? definition.spec : definition.description);
-  stampDefinitionKey(definition, `connection:${definitionKey}`);
+  stampDefinitionKey(
+    definition,
+    connectionDefinitionKey(definition.baseUrl ?? "", definition.description),
+  );
   stampConnectionProtocol(definition, "openapi");
   return definition;
 }

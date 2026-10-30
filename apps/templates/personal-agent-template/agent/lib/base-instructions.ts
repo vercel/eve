@@ -1,4 +1,4 @@
-import { agent } from "../../shared/agent.js";
+import { agent } from "../../lib/agent.js";
 
 // Customize agent persona, tone, and behavior rules.
 export const BASE_INSTRUCTIONS = `# Identity

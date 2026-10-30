@@ -9,9 +9,8 @@ export default defineEval({
     turn.expectOk();
     turn.messageIncludes("DISABLED-SUBAGENT-OK");
     turn.calledTool("invoke-hidden", { count: 1 });
-    turn.calledSubagent("disabled-hidden", { count: 1, status: "completed" });
-    turn.calledSubagent("tool-hidden", { count: 0 });
+    turn.event("child.opened", { count: 1, data: { name: "disabled-hidden" } });
     t.succeeded();
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

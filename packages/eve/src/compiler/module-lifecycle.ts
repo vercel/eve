@@ -15,8 +15,20 @@ export class NodeModuleEvaluationContext {
   readonly #lifecycle = new NodeModuleLifecycle();
   readonly loadNamespace: CompiledBindingNamespaceLoader;
 
-  constructor(registries: readonly AgentSourceRegistry[]) {
+  constructor(
+    registries: readonly AgentSourceRegistry[],
+    mountSourceId?: (binding: AgentModuleBinding) => string | undefined,
+    mounts?: Parameters<typeof createCompiledBindingNamespaceLoader>[0]["mounts"],
+    evaluationId?: string,
+    appRoot?: string,
+    graph?: Parameters<typeof createCompiledBindingNamespaceLoader>[0]["graph"],
+  ) {
     this.loadNamespace = createCompiledBindingNamespaceLoader({
+      appRoot,
+      graph,
+      mountSourceId,
+      mounts,
+      evaluationId,
       onLoad: (sourceId) => this.#lifecycle.recordCompileLoad(sourceId),
       registries,
       resolveBinding: (sourceId) => this.#bindings[sourceId],
@@ -41,7 +53,13 @@ export function markConfigRuntimeEntries(
   config: CompiledAgentDefinition,
   evaluation: NodeModuleEvaluationContext,
 ): void {
-  const sources = [config.dynamicModel, config.model?.source, config.compaction?.model?.source];
+  const sources = [
+    config.dynamicModel,
+    config.model?.source,
+    config.compaction?.model?.source,
+    // The runtime loads `limits.sessionUsage` from the agent config module.
+    config.limits?.sessionUsage === true ? config.source : undefined,
+  ];
   for (const source of sources) {
     if (source !== undefined) evaluation.requireRuntimeEntry(source.sourceId);
   }

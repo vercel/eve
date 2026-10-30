@@ -9,7 +9,7 @@ import { resolvePackageRoot } from "#internal/application/package.js";
  * Options accepted by the factory returned from
  * {@link useTemporaryAppRoots}.
  */
-export interface CreateTemporaryAppRootOptions {
+interface CreateTemporaryAppRootOptions {
   /** Value written into the synthetic `package.json#name`. */
   readonly packageName?: string;
   /** Value written into the synthetic `package.json#type`. */
@@ -24,7 +24,7 @@ export interface CreateTemporaryAppRootOptions {
 /**
  * Handle returned by the {@link useTemporaryAppRoots} factory.
  */
-export interface TemporaryAppRoot {
+interface TemporaryAppRoot {
   /** Absolute path to the temporary app root. */
   readonly appRoot: string;
   /**

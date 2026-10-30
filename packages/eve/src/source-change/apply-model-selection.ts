@@ -11,7 +11,7 @@ import {
 } from "./agent-config-ast.js";
 import { MODEL_HELPERS, parseModelHelper, type ModelHelper } from "#shared/model-helper.js";
 
-export type SourceEdit =
+type SourceEdit =
   | {
       readonly kind: "applied";
       readonly from: string;

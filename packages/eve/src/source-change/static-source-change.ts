@@ -14,7 +14,7 @@ import { applyModelSelectionToSource } from "#source-change/apply-model-selectio
  * Outcome of a static source change, returned to upstream callers (CLI, web
  * setup UI) so they can render success or route the bail to a guided fix.
  */
-export type ApplyResult =
+type ApplyResult =
   | { readonly kind: "applied"; readonly from: string; readonly to: string }
   | {
       readonly kind: "bail";
@@ -22,7 +22,7 @@ export type ApplyResult =
       readonly at: { readonly logicalPath: string; readonly line: number };
     };
 
-export type ApplyModelSettingsResult =
+type ApplyModelSettingsResult =
   | { readonly kind: "applied"; readonly changed: readonly AgentModelSetting[] }
   | {
       readonly kind: "bail";
@@ -37,7 +37,7 @@ export type ApplyModelSettingsResult =
  * `ModuleSourceRef`, so each operation can locate the file it edits without
  * recompiling. Consumers depend only on this interface.
  */
-export interface StaticSourceChange {
+interface StaticSourceChange {
   /**
    * Rewrites the agent's `model` in `agent.ts` in place. Bails (no write) when
    * the value isn't a string literal; the bail carries the source location so

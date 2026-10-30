@@ -1,13 +1,9 @@
+import type { MessageContent } from "#shared/message-content.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
-import {
-  formatSubagentInput,
-  normalizeRequestedOutputSchema,
-  type SubagentParentContext,
-} from "#subagents/invocation.js";
+import { formatSubagentInput, type SubagentParentContext } from "#subagents/invocation.js";
+import type { JsonObject } from "#shared/json.js";
 import type {
-  ActivityObserverConfig,
   ChannelInstrumentationProjection,
-  RunSessionLimits,
   SessionAuthContext,
   SessionCapabilities,
   RunInput,
@@ -15,18 +11,14 @@ import type {
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
-import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
-import type { JsonObject } from "#shared/json.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 
 export type SubagentInputSource =
   | {
       readonly description: string;
-      readonly outputSchema?: JsonObject;
       readonly type: "local";
     }
   | {
-      readonly outputSchema?: JsonObject;
       readonly type: "runtime";
     };
 
@@ -37,7 +29,7 @@ export type SubagentInputSource =
  * {@link RunInput} so dispatch sites never re-derive the token from
  * `(callId, parentSessionId)` on their own.
  */
-export interface SubagentRunInputBuild {
+interface SubagentRunInputBuild {
   readonly childContinuationToken: string;
   readonly runInput: RunInput;
 }
@@ -71,16 +63,12 @@ export function buildSubagentRunInput(input: {
    * parent capabilities produce an undefined child capability set.
    */
   readonly capabilities?: SessionCapabilities;
+  readonly schedule?: import("#context/session-schedule.js").SessionSchedule;
   readonly channelMetadata?: ChannelInstrumentationProjection;
+  /** Replay-stable key the child's continuation token derives from. */
+  readonly continuationKey: string;
   /** Parent's immutable conversation classification. */
   readonly inheritedConversation?: ConversationContext;
-  /**
-   * Number of local subagent calls dispatched in this batch. The parent's
-   * remaining token quota is split evenly across them so parallel children
-   * are collectively, not individually, bounded by it. Remote agents run
-   * under their own deployment's limits and are not counted.
-   */
-  readonly fanoutSize?: number;
   readonly initiatorAuth: SessionAuthContext | null;
   /**
    * Runtime graph used to detect whether this declared child selected the
@@ -91,11 +79,8 @@ export function buildSubagentRunInput(input: {
   readonly sandboxSessionId?: string;
   readonly selfAgent: boolean;
   readonly parent: SubagentParentContext;
-  readonly activityObserver?: ActivityObserverConfig;
-  readonly session: HarnessSession;
+  readonly session: Pick<HarnessSession, "continuationToken" | "sandboxState" | "sessionId">;
   readonly source: SubagentInputSource;
-  /** Owning task when this child starts from a background workflow tool. */
-  readonly taskId?: string;
 }): SubagentRunInputBuild {
   const {
     action,
@@ -108,21 +93,13 @@ export function buildSubagentRunInput(input: {
     source,
   } = input;
 
-  const childContinuationToken = mintSubagentContinuationToken(
-    `${session.sessionId}:${action.callId}`,
-  );
-
-  const inheritedLimits: {
-    -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
-  } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
-  const requestedOutputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
+  const childContinuationToken = mintSubagentContinuationToken(input.continuationKey);
   const adapterState: Record<string, unknown> = {
     callId: action.callId,
     parentContinuationToken: input.parent.continuationToken ?? session.continuationToken,
     parentSessionId: session.sessionId,
     subagentName: action.subagentName,
   };
-  if (input.taskId !== undefined) adapterState.taskId = input.taskId;
   const reusesOwnerSandbox =
     input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition.kind ===
       "parent" || input.selfAgent;
@@ -142,6 +119,7 @@ export function buildSubagentRunInput(input: {
     },
     auth,
     capabilities,
+    schedule: input.schedule,
     channelMetadata,
     inheritedConversation,
     continuationToken: childContinuationToken,
@@ -151,17 +129,14 @@ export function buildSubagentRunInput(input: {
         action,
         source,
       }),
-      outputSchema: requestedOutputSchema ?? source.outputSchema,
+      // `ctx.agent` already dropped an empty schema, so what arrives is one to honor.
+      outputSchema: action.input.outputSchema as JsonObject | undefined,
     },
-    limits: inheritedLimits,
-    mode: "conversation",
     conversationId: input.parent.conversationId,
     parent: input.parent.lineage,
     parentTraceContext: input.parent.traceContext,
-    activityObserver: input.activityObserver,
+    traceRoot: input.parent.traceRoot,
   };
-  if (input.taskId !== undefined) runInput.taskId = input.taskId;
-
   return { childContinuationToken, runInput };
 }
 
@@ -171,8 +146,8 @@ export function buildSubagentRunInput(input: {
 function formatSubagentCallInputMessage(input: {
   readonly action: Pick<RuntimeSubagentDispatchRequest, "input" | "subagentName">;
   readonly source: SubagentInputSource;
-}): string {
-  const { message } = input.action.input as { message: string };
+}): MessageContent<string | URL> {
+  const { message } = input.action.input as { message: MessageContent<string | URL> };
 
   switch (input.source.type) {
     case "local":

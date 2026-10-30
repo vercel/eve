@@ -1,0 +1,385 @@
+---
+title: "useEveAgent Reference"
+description: "Every value, option, and behavior of useEveAgent, shared by the React, Vue, and Svelte bindings."
+---
+
+This page lists every value, option, and behavior of `useEveAgent`. Use it when you need exact behavior. For a guided introduction, start with the [frontend overview](./overview).
+
+React, [Vue](./use-eve-agent-vue), and [Svelte](./use-eve-agent-svelte) share the behavior described here. Their pages cover only how each binding exposes it.
+
+## Returned state
+
+| Field              | What it is                                                                     |
+| ------------------ | ------------------------------------------------------------------------------ |
+| `messages`         | The current conversation, and your submitted messages before eve confirms them |
+| `status`           | Outstanding work: `"idle"`, `"busy"`, or `"resuming"`. See [Status](#status)   |
+| `error`            | The latest session creation, stream, resume, or turn failure                   |
+| `view`             | Immutable session snapshot. Query it with functions from `eve/events`          |
+| `agents`           | Child sessions this store follows. See [Child agents](#child-agents)           |
+| `events`           | The session's raw stream events, deduplicated and in order                     |
+| `session`          | Serializable session cursor: `sessionId` and `streamIndex`                     |
+| `send`, `respond`  | Send a message or answers. Resolve with a `Delivery` receipt when accepted     |
+| `cancel`           | Ask the server to cancel the active turn                                       |
+| `prewarm`          | Create a session, or prepare an idle one, without starting a turn              |
+| `resume`           | Catch up to the end of the stream. Later following obeys `followWhile`         |
+| `follow`           | Follow a delivery receipt from this or another store on the same session       |
+| `clear`, `compact` | Queue a context change and return its delivery                                 |
+| `end`              | Retire the server-side session and return its delivery                         |
+| `newSession`       | Clear local state and the local session cursor                                 |
+
+About snapshots:
+
+- A snapshot publishes after every event in a recorded stream line has been applied.
+- A view you keep, and its observations, never change after later updates.
+- Internal tables and preview dictionaries are not public fields.
+
+## Options
+
+| Option                                              | Default      | Purpose                                                                                          |
+| --------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------ |
+| `agent`                                             | none         | Named agent mounted at `/eve/<name>/v1/*`. Don't combine with `baseUrl`                          |
+| `baseUrl`                                           | `""`         | Where the eve routes are mounted: a same-origin prefix or another origin                         |
+| `auth`, `headers`                                   | none         | Credentials and headers. Function values are resolved before every request, including reconnects |
+| `session`                                           | none         | An existing `ClientSession` to bind. It stays owned by your code                                 |
+| `initialSession`                                    | none         | A saved session cursor to restore                                                                |
+| `initialEvents`                                     | `[]`         | Saved events to render before catch-up. See [Resume a saved session](#resume-a-saved-session)    |
+| `resume`                                            | `false`      | Replay the session after mount and follow a running turn. Needs `initialSession` or `session`    |
+| `prewarm`                                           | `false`      | Create or prepare the session before the first send. See [Prewarming](#prewarming)               |
+| `optimistic`                                        | `true`       | Show submitted messages before eve confirms them                                                 |
+| `followAgents`                                      | `false`      | Follow child sessions. See [Child agents](#child-agents)                                         |
+| `followWhile`                                       | `() => true` | Keep the stream open only while this returns true. See [Stream lifetime](#stream-lifetime)       |
+| `prepareSend`                                       | none         | Adjust each turn just before it is sent, for example to add `clientContext`                      |
+| `onEvent`, `onError`, `onFinish`, `onSessionChange` | none         | See [Lifecycle callbacks](#lifecycle-callbacks)                                                  |
+
+`agent`, `baseUrl`, `session`, `initialEvents`, `initialSession`, `auth`, `headers`, `optimistic`, `followAgents`, and `resume` are read once, when the hook creates its store. Remount the component, for example with `key={chat.id}`, to change them. React reads `prewarm`, `followWhile`, and the callbacks on every render. Vue and Svelte read `prewarm` when the binding is created and `followWhile` from their options object.
+
+## Status
+
+| Status       | Meaning                                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------------------------ |
+| `"idle"`     | Nothing is pending. A turn waiting only on a person can still be open                                        |
+| `"busy"`     | A command or answer is pending, a followed receipt hasn't settled, or the session has running or queued work |
+| `"resuming"` | Catching up on an attached session. Disable sending and answering                                            |
+
+- `status` describes outstanding work, not whether a turn is open. Use `activeTurn(view)` from `eve/events` to decide whether a turn can be steered or cancelled.
+- A failure sets `error` without changing `status`.
+- After `followWhile` closes the stream, `status` reflects the last observed view, not the current server state.
+
+## Messages
+
+`messages` are eve's own `EveMessage[]`. To pass them to an API typed as AI SDK `UIMessage[]`, adapt them first.
+
+| Part type     | What it is                                                                                               |
+| ------------- | -------------------------------------------------------------------------------------------------------- |
+| `text`        | Message text                                                                                             |
+| `reasoning`   | Model reasoning                                                                                          |
+| `file`        | An attachment a person sent. `url` can be absent                                                         |
+| `tool`        | A call the turn made                                                                                     |
+| `interaction` | Something the turn asked a person that no call carries: a sign-in, the budget prompt, or a free question |
+
+- **Keys:** assistant text and reasoning parts carry a stable `id` that survives appends and completion. Use `part.id` as the React key. Older events without an ID get a best-effort fallback. User text parts may not have an ID.
+- **Steps:** each assistant part carries its turn's `stepIndex`.
+- **Follow-ups split replies:** each message a person sends is its own bubble, placed where its turn took it in. A message that arrives while the agent works splits the response around it, and both pieces share `metadata.turnId`. A single event that combines several deliveries stays one bubble.
+- **Attachments:** after `delivery.consumed` confirms an attachment turn, each attachment shows as a `file` part with `mediaType`, optional `filename` and `size`, and a `url` only when the original was browser-resolvable.
+
+### Tool parts
+
+A `tool` part shows a call's shared state, with partial input while it streams.
+
+| Field                      | What it is                                                                                                                             |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `callId`, `name`           | The call, and the tool, agent, or skill it invokes                                                                                     |
+| `kind`                     | `tool`, `agent`, `skill`, or `control`. Task controls are usually hidden in activity displays                                          |
+| `label`                    | The tool's authored label, its latest output label, or a readable name                                                                 |
+| `state`                    | `streaming` while input arrives, then `requested`, `approval`, `running`, `blocked`, `completed`, `failed`, `rejected`, or `cancelled` |
+| `inputText`                | Partial input, only while `state` is `streaming`                                                                                       |
+| `input`, `output`, `error` | Validated input, current or final output, and error details                                                                            |
+| `interaction`              | The latest approval or question about the call. It stays `open` after an answer is submitted, until eve decides it                     |
+
+- Read outcomes, reasons, and task identities from `call(view, part.callId)`, not from the part.
+- A call stays open if your stream stopped following before it finished. Decide what an open call shows after the stream ends.
+- A call that a model retry replaced isn't shown; the replacement asks again.
+- A delegated call stays `running` until `call.settled`. Its child's detail is on a separate stream; see [Child agents](#child-agents).
+
+## Sending
+
+- `send(message, options)` and `respond(answers, options)` resolve when the server accepts the request, before the agent replies. They reject if preparation or submission fails. Later execution failures arrive through `view`, `error`, and `onError`.
+- The returned `Delivery` has its own `stream({ signal })` and `result({ signal })` reads. These can open another HTTP stream and keep working after `newSession()` or unmount, so pass a signal that ends with your component.
+- Headers passed to `send()` apply to that request and become the stream's credentials on its next reconnect, until a later send replaces them.
+- Answers are accepted while other work runs.
+
+### Messages during a running turn
+
+| `turnPolicy`        | Behavior                                   |
+| ------------------- | ------------------------------------------ |
+| `"steer"` (default) | Corrects the current turn with the message |
+| `"queue"`           | Waits for the current turn to finish       |
+
+You don't need to pass `"steer"`; omit `turnPolicy` unless you want to queue.
+
+Steering timing depends on what the turn is doing:
+
+- Before answer output or local tool execution starts, eve interrupts model generation and continues the same turn with the correction.
+- Running tools finish and save their results first.
+- After the reply starts streaming, a steering message waits until the current step is saved.
+- Reasoning and search progress don't count as answer output.
+
+### Optimistic messages
+
+With `optimistic: true`, the default, a submitted message shows in `messages` before eve confirms it with `delivery.consumed`.
+
+- The placeholder keeps its message ID when confirmed, so an unrelated or identical message can't replace it.
+- A follow-up sent while a turn works appears at the end and stays there once the turn takes it in.
+- If the send fails, the placeholder stays in place with `metadata.status: "failed"`.
+- Placeholders appear only in `messages`; `events` stays the authoritative stream.
+- While a POST acknowledgement is pending, stream-driven snapshots wait for its identity. `onEvent` still receives events.
+
+### Prepare each send
+
+`prepareSend` runs right before each send and returns the turn to send, for example with added `clientContext`. The optimistic message is already visible while it runs.
+
+## Cancelling
+
+- `cancel()` targets the turn this store is observing and keeps the stream attached until the turn ends.
+- If no turn is active, it waits for a submission that was pending when you called it, including preparation, session creation, and POST acceptance, then cancels that turn. It never stops an unrelated later turn.
+- It doesn't withdraw a queued message. If the message never reaches a running turn, `cancel()` does nothing. An idle `cancel()` doesn't arm a future request.
+- Cancellation is cooperative: a turn can finish before it takes effect.
+- Unmounting or closing the page disconnects the local stream but doesn't cancel the turn. Call `cancel()` first when the user wants to stop it.
+
+## Stream lifetime
+
+By default, the hook keeps one stream open across turns and idle periods, so replies, authorization updates, and turns started elsewhere all arrive as they happen.
+
+- A turn settling doesn't close the connection.
+- The stream reconnects from its cursor after a disconnect and when the server's renewable 60-second lease ends. Renewal doesn't start a turn or clear UI state.
+- Unmounting or `newSession()` closes the local stream without cancelling the session on the server.
+
+### Close the stream when idle
+
+`followWhile(view)` closes the stream when it returns false at a complete line boundary, after catch-up and any followed receipt. Pair it with `follow()` to stream only while the agent works. This sidebar shares a stable `ClientSession` with the main chat:
+
+```tsx
+import type { ClientSession } from "eve/client";
+import { idle } from "eve/events";
+import { useEveAgent } from "eve/react";
+
+function useSessionPanels(session: ClientSession) {
+  const chat = useEveAgent({ session });
+  const sidebar = useEveAgent({ session, followWhile: (view) => !idle(view) });
+
+  async function send(message: string) {
+    const receipt = await chat.send(message);
+    sidebar.follow(receipt);
+    return receipt;
+  }
+
+  return { chat, sidebar, send };
+}
+```
+
+- `followWhile` can close the stream while a turn is active or waiting on a person. The UI then stays at its last observed state until a command or `follow()` reopens it.
+- To close only between turns, pass `(view) => !idle(view) || activeTurn(view) !== undefined`.
+- A closed stream can't see new activity. Send a command, call `resume()` or `follow()`, or keep the default when other sources can start work.
+
+### Follow a receipt
+
+- `follow(receipt)` tracks an accepted receipt until it finishes, even if the stream caught up before the server admitted it.
+- Pass only receipts from `send`, `respond`, `clear`, `compact`, or `end` on the same session. A receipt the stream never admits keeps the store `"busy"` until the session ends or you call `newSession()`.
+- `follow()` doesn't create a session or grant access.
+- Limit retries after stream errors, and resolve authorization failures before retrying.
+
+## Prewarming
+
+Prewarming creates the session before the first message so the first reply starts sooner.
+
+- **Default off.** The first send creates the session. Turn it on only after your auth, headers, and any chat-record binding are ready.
+- **React:** `prewarm: true` prepares on mount, after each `newSession()`, and when the option changes from `false` to `true`, including for a restored session.
+- **Vue and Svelte:** the option is read when the binding is created. Call `prewarm()` when typing starts.
+- **Typing bursts:** call `prewarm()` once when a burst begins, with your own cooldown if you retry during long drafts. eve shares concurrent calls; it doesn't watch inputs or poll deployments.
+
+### What prewarming does
+
+- It starts the workflow and its inbox, then waits before session hooks or dynamic definitions run.
+- It starts the agent's [sandbox](/docs/sandbox) in the background. The first turn doesn't wait for it; only a tool or hook that uses the sandbox does. If startup fails, the first turn that needs the sandbox starts it.
+- The first message passes through the channel's `onMessage` hook and supplies identity and context for initialization and the first turn.
+- The session timeout starts at creation, so an unused prewarmed session can expire. eve deletes its sandbox when it ends.
+- `prewarm()` resolves when the server accepts creation, without waiting for initialization. The composer stays `"idle"`, and `prepareSend` doesn't run.
+- A concurrent `send()` waits for creation to be accepted. While the inbox starts, the client retries `409 session_not_ready` with backoff for up to 20 seconds, and your abort signal cancels the wait.
+
+### Existing sessions on Vercel
+
+For an existing idle session, `prewarm()` can move it to the deployment that accepted the request, ahead of the next `send()`. The ID, history, stream, and expiry stay the same, and no model call runs.
+
+- A session already running on that deployment isn't woken.
+- Active turns are never interrupted. A turn can finish before the move, and a queued message takes priority.
+- A session with pending tasks or input requests can skip the move.
+- Sessions from eve versions without this support, or on workflow backends without deployment routing, aren't moved.
+- A production alias targets its current deployment and a preview alias its preview. Requests pinned to an immutable deployment can't discover a newer one.
+- In local development, `prewarm()` can create a session but doesn't move one.
+- `client.sessions.attach(sessionId).prewarm({ signal })` returns `ready`, `accepted`, `unsupported`, or `no_active_session`. `accepted` means the request was saved, not that the move finished. It never replaces an expired session. `send()` keeps its own retries if the move is unavailable or unfinished.
+
+### Prewarm failures
+
+- A failed move of an existing session rejects the explicit call without setting `error` or blocking `send()`.
+- A failed create sets `error` and calls `onError` when no send is waiting. A waiting send can fall back to creating the session with its message.
+- After creation, initialization failures arrive on the stream during the first turn.
+- React doesn't retry a failed prewarm on unrelated renders. Recover by calling `prewarm()`, toggling the option from `false` to `true`, calling `newSession()`, or sending a message.
+
+## Start over
+
+| Command        | Effect                                                                                         |
+| -------------- | ---------------------------------------------------------------------------------------------- |
+| `newSession()` | Clears the local conversation and reuses the hook. The old session keeps running on the server |
+| `end()`        | Retires the server-side session and returns its delivery                                       |
+
+After `end()`, call `newSession()` to clear the retired conversation. With `prewarm` on, that prepares the next session; otherwise the next send creates it. A `session` you passed in stays yours: prewarming and `newSession()` never replace it.
+
+## Resume a saved session
+
+Pass a saved cursor and events with `resume: true`:
+
+```tsx
+const agent = useEveAgent({
+  initialEvents: saved.events,
+  initialSession: saved.session,
+  resume: true,
+});
+```
+
+### Saved events
+
+- `initialEvents` must be an ordered prefix of the same session's stream. Its end doesn't have to match where the stream resumes.
+- Catch-up starts after the source lines your events cover. Coverage uses line positions, not event counts.
+- Keep reader metadata unchanged. `meta.next` can record source lines that produced no events.
+- The `initialSession` cursor alone never extends coverage. A partial line is replayed from its start.
+- Each event's [`meta.position`](/docs/concepts/sessions-runs-and-streaming#positions) is stable, and the store drops positions it already applied. An overlapping replay renders once, and `onEvent` fires only for new events.
+- `session.streamIndex` and `position(view)` both track the covered prefix.
+
+### Catch-up
+
+- While catching up, `status` is `"resuming"`. Render saved messages, but disable sending and answering, and don't show cancel or progress controls.
+- `resume()` resolves when catch-up reaches the end of the stream, even while a turn runs.
+- Afterward, `status` is `"busy"` for running or queued work, or `"idle"` for a session with nothing running or a turn waiting only on a person.
+- The connection then stays open to follow the session, unless `followWhile` closes it.
+- A terminal session failure sets `error`.
+
+## Lifecycle callbacks
+
+| Callback                   | When it fires                                                                                                                                       |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onEvent(event)`           | For each stream event as it arrives                                                                                                                 |
+| `onError(error)`           | When session creation, streaming, resume, or a live turn fails, or a prewarm fails with no send waiting. Restored historical failures don't fire it |
+| `onFinish(snapshot)`       | When a live turn ends, after its last events are visible. Catch-up never fires it                                                                   |
+| `onSessionChange(session)` | When a session is created, its cursor advances, or `newSession()` clears it                                                                         |
+
+To read the result of one delivery, use `receipt.result()` instead of `onFinish`. A delivery can finish while its turn still waits for input.
+
+## Interactions
+
+Approvals, questions, sign-ins, and budget prompts are requests for input, which the API calls interactions. Read them with `interaction(view, id)`, `interactions(view)`, or `openInteractions(view)` from `eve/events`.
+
+- A request stays `open` until eve decides it. Submitting an answer doesn't end it; the stream's `interaction.settled` event does.
+- A tool part's `state` is the call's state, not the decision. A call can be `cancelled` while its approval was never answered.
+
+| `outcome`                                                               | Meaning                                                                                                            |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `accepted`                                                              | A person approved or answered it                                                                                   |
+| `declined`                                                              | A person declined                                                                                                  |
+| `withdrawn`, `interrupted`, `abandoned`, `expired`, `invalid`, `failed` | No decision. The request ended another way, such as a cancelled turn or a message sent while a sign-in was pending |
+
+Show "Approved" or "Denied" only for `accepted` and `declined`. For any other outcome, show the outcome itself. Keep a default branch: later releases can add outcomes.
+
+## Use eve's answers
+
+Read session state from `view` with functions from `eve/events`, instead of scanning `events` or keeping your own copy:
+
+| Question                                        | Ask eve                                                                                                   |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| How did my request end, and what did it reply?  | `delivery.result()`: `status`, `outcome`, `reply`, `interactions`, and `error` for that delivery          |
+| Is a turn open?                                 | `activeTurn(view)`                                                                                        |
+| What is the turn waiting on?                    | `waiting(view, turnId)` or `activity(view)`                                                               |
+| How did a turn end, and why did it fail?        | `turn(view, turnId)` and `failure(view, turnId)`, which also covers a session failure that ended the turn |
+| What is a call doing, and how long did it take? | `call(view, callId)`: `state`, `outcome`, `startedAt`, and `endedAt`                                      |
+| What did a turn's model runs cost?              | `runs(view, { turnId })` and `usage(view)`                                                                |
+| What did a turn reply?                          | `reply(view, turnId)`                                                                                     |
+| Where should a saved chat resume?               | The hook's `session`, `position(view)`, or `session.snapshot()`. Never an event count                     |
+| Did a person approve?                           | `interaction(view, id).outcome`. See [Interactions](#interactions)                                        |
+
+`delivery.result()` is scoped to one delivery. Scanning the events in a delivery's interval isn't: a queued message's interval starts while the earlier turn still runs, so it includes that turn's `turn.settled`.
+
+Outside the store:
+
+- `foldEvents(view, events)`, starting from `emptySessionView`, folds received events by whole line. It returns a new view and holds unfinished lines until they complete.
+- `callPreview(view, callId)` and `contentPreviews(view)` show transient progress.
+- `conversationOf(events)` from `eve/client` renders a saved log.
+
+## Child agents
+
+A delegated call's detailed progress lives on the child session's stream, not in the root `messages`. Pass `followAgents` to observe recorded children, including children opened inside workflow tools:
+
+```tsx
+const all = useEveAgent({ followAgents: true });
+const shallow = useEveAgent({ followAgents: ({ depth }) => depth <= 3 });
+```
+
+- The predicate is synchronous. An excluded child's descendants aren't discovered. Root depth is zero.
+- Each `agents[sessionId]` describes one opening, with an `owner` naming its call or task. Its `observation.conversation` has its own `agents`, `messages`, and `view`.
+- Calls that continue a task reuse its child conversation.
+- Read a call's or delivery's final result for its outcome, not the child's latest message.
+- Requests the parent relays are the ones people answer. Don't render a second set of controls from child observations.
+
+### Limits
+
+| Limit                           | Value                                  |
+| ------------------------------- | -------------------------------------- |
+| Child observations per root     | 128, reset by `newSession()`           |
+| Depth                           | 8                                      |
+| Simultaneous descendant reads   | 8, independent of the root stream      |
+| Read length                     | Until the captured tail, or 10 seconds |
+| Refresh delay after catching up | 1 to 10 seconds                        |
+
+These limits don't affect execution or the root transcript. The policy is read at store creation and evaluated once per relationship at each reachable depth. When two paths reach the same session, the store shares one observation.
+
+### Observation status
+
+| Status           | Meaning                                                                                                     |
+| ---------------- | ----------------------------------------------------------------------------------------------------------- |
+| `"not-followed"` | Following is off, or `reason` names a predicate, limit, or cycle                                            |
+| `"queued"`       | Waiting for a read slot                                                                                     |
+| `"following"`    | Reading. Silence doesn't mean the child is done                                                             |
+| `"caught-up"`    | Reached the tail captured for this read. The child may still be working                                     |
+| `"interrupted"`  | A retryable read failure, or the observation was detached                                                   |
+| `"unavailable"`  | History can't be read now. `reason` distinguishes authorization, expiry, unsupported readers, and transport |
+
+- Every status except `"not-followed"` exposes `position`, `caughtUp`, and `conversation`, which can be empty before the first read.
+- `caughtUp` describes the tail when that read opened, not that execution finished.
+- Each observation's `key` identifies the session within this store's authorized reader scope. Equal IDs from different remote namespaces aren't merged.
+- Cursors are per session.
+- Root call results, `status`, `resume()`, `events`, and callbacks describe the root session only; child failures stay on their observations.
+
+### Activity from one call
+
+When several calls share a child, `agentCallActivity(state, callId)` from `eve/client` shows what one call caused:
+
+```ts
+import { agentCallActivity } from "eve/client";
+
+const activity = agentCallActivity(agent, callId);
+if (activity.status === "linked") {
+  for (const { sessionId, deliveries, turns } of activity.sessions) {
+    const pending = deliveries.some(({ status }) => status !== "settled");
+    const turnIds = new Set(turns.map(({ turnId }) => turnId));
+    // Render agent.agents[sessionId]'s messages whose metadata.turnId is in turnIds.
+  }
+}
+```
+
+- A delivery is `"unseen"` until this reader reads the child's admission, then `"admitted"`, `"consumed"`, or `"settled"`.
+- Several calls can reach one turn. Each turn lists the other calls it answered in `sharedWith`, so render it once.
+- `"unlinked"` means the parent recorded no delivery, as for a call that sent nothing or reached a remote agent on an earlier protocol.
+
+### Without the hook
+
+- For headless capture, use [`SessionStore.observe()`](../client/streaming#observe-nested-traces-without-a-framework). Archive observed prefixes with their per-session cursors in your own versioned schema, and keep earlier archives when history expires.
+- If you read child streams yourself, attribute work with the parent's `child.sent` events. Each one names the `callId` and the `childDeliveryId` on the child's stream. Don't count `delivery.consumed` on the child: answers to the child's questions are deliveries too.
+- With your own session, pass a `child.opened` event to [`session.agent()`](../client/streaming#follow-a-subagent) and follow the child with `stream()`. It reads local and remote children through the parent. See [What the parent sees](../../subagents#what-the-parent-sees).

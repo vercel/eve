@@ -11,6 +11,8 @@ import {
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
 import { runQueuedWorkflowBuild } from "#internal/workflow-bundle/build-queue.js";
+import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
+import { findAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
 import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
 import {
@@ -26,7 +28,6 @@ import {
   createWorkflowImport,
   createWorkflowNodeBuiltinGuardPlugin,
   createWorkflowDriverAliasPlugin,
-  createWorkflowPseudoPackagePlugin,
   createWorkflowTransformPlugin,
   createWorkflowVirtualEntryPlugin,
   WORKFLOW_SOURCE_EXTENSIONS,
@@ -38,6 +39,10 @@ import {
   type WorkflowBundleDiscoveredEntries,
 } from "#internal/workflow-bundle/builder-support.js";
 import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
+import {
+  type BundlerDefaultLogHandler,
+  onVendoredDependencyLog,
+} from "#internal/bundler/vendored-dependency-log.js";
 import {
   type NitroStepEntrypointDiscoveredEntries,
   writeNitroStepEntrypoint,
@@ -63,7 +68,9 @@ export class WorkflowBundleBuilder {
     const dirs = [
       resolvePackageSourceDirectoryPath("src/execution"),
       resolvePackageSourceDirectoryPath("src/runtime/subagents"),
+      resolvePackageSourceDirectoryPath("src/runtime/connections/events"),
       resolvePackageSourceDirectoryPath("src/subagents"),
+      resolvePackageSourceDirectoryPath("src/tools/provided"),
     ];
     if (options.includeTestFixtures === true) {
       dirs.push(resolvePackageSourceDirectoryPath("src/internal/testing"));
@@ -103,7 +110,7 @@ export class WorkflowBundleBuilder {
 
     if (frameworkInputFiles.length === 0) {
       throw new Error(
-        `Expected framework workflow source files under eve's execution, runtime/subagents, or subagents source directories.`,
+        `Expected framework workflow source files under eve's execution, runtime/subagents, subagents, or tools/provided source directories.`,
       );
     }
 
@@ -304,20 +311,31 @@ export class WorkflowBundleBuilder {
     ].join("\n");
     const interimBundle = await buildSingleRolldownChunk(`${options.label} workflow driver chunk`, {
       cwd: this.config.workingDir,
-      onwarn(warning: { code: string; message: string }, warn: (warning: unknown) => void) {
-        if (warning.code === "UNRESOLVED_IMPORT") {
-          throw new Error(`Cannot build workflow bundle: ${warning.message}`);
+      // Checked before the dependency-warning filter, which would otherwise
+      // drop an unresolved import raised inside node_modules.
+      onLog(
+        level: string,
+        log: { code?: string; message: string },
+        defaultHandler: BundlerDefaultLogHandler,
+      ) {
+        if (level === "warn" && log.code === "UNRESOLVED_IMPORT") {
+          throw new Error(`Cannot build workflow bundle: ${log.message}`);
         }
-        warn(warning);
+        onVendoredDependencyLog(level, log, defaultHandler);
       },
       input: WORKFLOW_VIRTUAL_ENTRY_ID,
       platform: "neutral",
       plugins: [
         createWorkflowVirtualEntryPlugin(virtualEntrySource),
-        createWorkflowPseudoPackagePlugin(),
         createWorkflowDriverAliasPlugin(this.config.workingDir),
         createAuthoredRelativeExtensionResolverPlugin({
           extensions: WORKFLOW_SOURCE_EXTENSIONS,
+        }),
+        createAuthoredAssetImportPlugin({
+          authoredSourceOnly: true,
+          // A workspace member without its own package.json shares the enclosing package.
+          packageRoot:
+            findAuthoredPackageRoot(this.transformProjectRoot) ?? this.transformProjectRoot,
         }),
         createAuthoredPackageTsConfigPathsPlugin({
           appPackageRoot: this.transformProjectRoot,

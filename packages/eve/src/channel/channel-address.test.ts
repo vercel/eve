@@ -1,51 +1,39 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
-import {
-  attachChannelActivityPresentation,
-  getChannelActivityPresentation,
-} from "#channel/activity-renderer.js";
+import { createSession } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 
 function createRuntime(): Runtime {
   return {
     createSession: vi.fn(),
     dispatchContinuation: vi.fn().mockResolvedValue({ sessionId: "sess_1", status: "accepted" }),
-    dispatchSession: vi.fn(),
+    dispatchSession: vi.fn().mockResolvedValue({ sessionId: "sess_1", status: "accepted" }),
     getEventStream: vi.fn(),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn(),
     resolveContinuation: vi.fn(),
   };
 }
 
 describe("createChannelAddress", () => {
-  it("carries each send's task policy through creation and continuation", async () => {
-    const runtime = createRuntime();
-    vi.mocked(runtime.dispatchContinuation).mockResolvedValueOnce({ status: "session_not_active" });
-    vi.mocked(runtime.createSession).mockResolvedValue({ sessionId: "sess_1" } as never);
-    const address = createChannelAddress({
-      adapter: { kind: "http" },
-      channelName: "reports",
-      continuationToken: "alice",
-      runtime,
-    });
-    await address.send("Prepare reports", { auth: null, taskDeliveryPolicy: "cohort" });
-    expect(runtime.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskDeliveryPolicy: "cohort",
-        continuationConflictCommand: expect.objectContaining({ taskDeliveryPolicy: "cohort" }),
-      }),
-    );
-    await address.send("Share useful results as they arrive", {
-      auth: null,
-      taskDeliveryPolicy: "auto",
-    });
-    expect(runtime.dispatchContinuation).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        command: expect.objectContaining({ taskDeliveryPolicy: "auto" }),
-      }),
-    );
-  });
+  it.each(["", "x".repeat(257)])(
+    "rejects an invalid idempotency key before accepting a delivery",
+    async (idempotencyKey) => {
+      const runtime = createRuntime();
+      const address = createChannelAddress({
+        adapter: { kind: "http" },
+        channelName: "webhook",
+        continuationToken: "thread",
+        runtime,
+      });
+      await expect(
+        address.send("Alice asks for a report.", { auth: null, idempotencyKey }),
+      ).rejects.toThrow("idempotencyKey");
+      expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+      expect(runtime.createSession).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects channel addresses in the framework-reserved session namespace", () => {
     expect(() =>
@@ -58,7 +46,7 @@ describe("createChannelAddress", () => {
     ).toThrow("reserved session namespace");
   });
 
-  it("sends directly through the address and returns a fixed session handle", async () => {
+  it("sends through the address and attaches a fixed handle separately from its receipt", async () => {
     const runtime = createRuntime();
     const address = createChannelAddress({
       adapter: { kind: "slack" },
@@ -68,22 +56,34 @@ describe("createChannelAddress", () => {
     });
 
     const session = await address.send("hello", { auth: null });
-    await session.clear();
+    await createSession(session.sessionId, runtime).clear();
 
     expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
       command: {
         auth: null,
+        delivery: {
+          channelKind: "channel:slack",
+          channelName: "slack",
+          deliveryId: expect.any(String),
+        },
         kind: "send",
         payload: { message: "hello" },
         requestId: undefined,
         turnPolicy: "steer",
       },
       continuationToken: "slack:C1:T1",
+      // Fresh creation inputs, used only if the owner's deployment was retired.
+      successor: expect.objectContaining({
+        adapter: { kind: "slack", state: {} },
+        channelName: "slack",
+        continuationToken: "slack:C1:T1",
+        input: expect.objectContaining({ message: "hello" }),
+      }),
     });
     expect(runtime.resolveContinuation).not.toHaveBeenCalled();
     expect(runtime.createSession).not.toHaveBeenCalled();
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       sessionId: "sess_1",
     });
   });
@@ -100,7 +100,7 @@ describe("createChannelAddress", () => {
 
     await address.send("queued", { auth: null });
     await address.send("replace", { auth: null, turnPolicy: "steer" });
-    await address.respond([{ optionId: "yes", requestId: "input-1" }], { auth: null });
+    await address.respond([{ optionId: "yes", interactionId: "input-1" }], { auth: null });
 
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(
       1,
@@ -148,47 +148,6 @@ describe("createChannelAddress", () => {
     );
   });
 
-  it("enables activity only for a newly created session with configured renderers", async () => {
-    const runtime = createRuntime();
-    vi.mocked(runtime.dispatchContinuation).mockResolvedValue({ status: "session_not_active" });
-    vi.mocked(runtime.createSession).mockResolvedValue({
-      events: new ReadableStream(),
-      sessionId: "sess_activity",
-    });
-    const adapter = { kind: "slack" };
-    attachChannelActivityPresentation(adapter, {
-      destination: () => ({}),
-      renderers: [{ id: "status", render: vi.fn() }],
-    });
-    const address = createChannelAddress<{ channelId: string; threadTs: string }>({
-      adapter,
-      channelName: "slack",
-      continuationToken: "C1:T1",
-      runtime,
-    });
-
-    await address.send("hello", {
-      auth: null,
-      state: { channelId: "C1", threadTs: "T1" },
-    });
-
-    expect(runtime.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        adapter: expect.objectContaining({ state: { channelId: "C1", threadTs: "T1" } }),
-        capabilities: { requestInput: true },
-        continuationConflictCommand: expect.objectContaining({
-          kind: "send",
-          payload: { message: "hello" },
-        }),
-      }),
-    );
-    const created = vi.mocked(runtime.createSession).mock.calls[0]?.[0].adapter;
-    expect(created).toBeDefined();
-    expect(getChannelActivityPresentation(created!)?.renderers).toEqual([
-      expect.objectContaining({ id: "status" }),
-    ]);
-  });
-
   it("binds every control directly to the namespaced continuation token", async () => {
     const runtime = createRuntime();
     const address = createChannelAddress({
@@ -201,22 +160,22 @@ describe("createChannelAddress", () => {
     await address.cancel({ turnId: "turn_1" });
     await address.compact();
     await address.clear();
-    await address.reset({ reason: "fresh start" });
+    await address.end({ reason: "fresh start" });
 
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(1, {
-      command: { kind: "cancel", turnId: "turn_1" },
+      command: { deliveryId: expect.any(String), kind: "cancel", turnId: "turn_1" },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(2, {
-      command: { kind: "compact" },
+      command: { deliveryId: expect.any(String), kind: "compact" },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(3, {
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(4, {
-      command: { kind: "reset", reason: "fresh start" },
+      command: { deliveryId: expect.any(String), kind: "reset", reason: "fresh start" },
       continuationToken: "slack:C1:T1",
     });
     expect(runtime.resolveContinuation).not.toHaveBeenCalled();
@@ -237,8 +196,48 @@ describe("createChannelAddress", () => {
 
     expect(runtime.resolveContinuation).toHaveBeenCalledWith("slack:C1:T1");
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "clear" },
+      command: { deliveryId: expect.any(String), kind: "clear" },
       sessionId: "sess_2",
     });
+  });
+
+  it("reports whether create() started the session that owns the address", async () => {
+    const history = [{ text: "Earlier", role: "user" as const }];
+    const create = async (owners: readonly (string | undefined)[]) => {
+      const runtime = createRuntime();
+      vi.mocked(runtime.createSession).mockResolvedValue({
+        events: new ReadableStream(),
+        sessionId: "sess_started",
+      });
+      for (const owner of owners) {
+        vi.mocked(runtime.resolveContinuation).mockResolvedValueOnce(
+          owner === undefined ? undefined : { sessionId: owner },
+        );
+      }
+      const address = createChannelAddress({
+        adapter: { kind: "http" },
+        channelName: "app",
+        continuationToken: "conversation:1",
+        runtime,
+      });
+      const result = await address.create({ auth: null, history });
+      return { created: result.created, runtime, sessionId: result.session.id };
+    };
+
+    const won = await create([undefined, "sess_started"]);
+    expect(won).toMatchObject({ created: true, sessionId: "sess_started" });
+    expect(won.runtime.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ continuationToken: "app:conversation:1", input: { history } }),
+    );
+
+    // A concurrent send() or create() claimed the address first; this run's history never landed.
+    await expect(create([undefined, "sess_other"])).resolves.toMatchObject({
+      created: false,
+      sessionId: "sess_other",
+    });
+
+    const owned = await create(["sess_owner"]);
+    expect(owned).toMatchObject({ created: false, sessionId: "sess_owner" });
+    expect(owned.runtime.createSession).not.toHaveBeenCalled();
   });
 });

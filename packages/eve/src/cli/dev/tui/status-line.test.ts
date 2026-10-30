@@ -45,7 +45,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(line).toBe("openai/gpt-5.6-luna-fast · Vercel · acme");
+    expect(line).toBe("gpt-5.6-luna · ↯ · Vercel · acme");
   });
 
   it("omits raw team IDs while the slug is unavailable", () => {
@@ -68,7 +68,30 @@ describe("buildStatusLine", () => {
       width: 120,
     });
 
-    expect(line).toBe("anthropic/claude-sonnet-5 · ai-gateway(oidc:my-agent)");
+    expect(line).toBe("claude-sonnet-5 · ai-gateway(oidc:my-agent)");
+  });
+
+  it.each([
+    { reasoning: "high", fastMode: false, theme: plain, expected: "gpt-6-luna · high · ↯" },
+    { reasoning: "high", fastMode: true, theme: plain, expected: "gpt-6-luna · high · ↯" },
+    { reasoning: undefined, fastMode: undefined, theme: plain, expected: "gpt-6-luna · ↯" },
+    { reasoning: "high", fastMode: undefined, theme: ascii, expected: "gpt-6-luna · high · >>" },
+  ])("renders intrinsic speed with reasoning: $expected (Fast mode: $fastMode)", (input) => {
+    const line = buildStatusLine({
+      model: "openai/gpt-6-luna-fast",
+      reasoning: input.reasoning,
+      fastMode: input.fastMode,
+      theme: input.theme,
+      width: 120,
+    });
+
+    expect(line).toBe(input.expected);
+  });
+
+  it("keeps an interior -fast without showing an intrinsic speed marker", () => {
+    expect(buildStatusLine({ model: "model-fast-preview", theme: plain, width: 120 })).toBe(
+      "model-fast-preview",
+    );
   });
 
   it("folds the reasoning level and Fast mode marker into the model segment", () => {
@@ -82,7 +105,19 @@ describe("buildStatusLine", () => {
       width: 120,
     });
 
-    expect(line).toBe("xai/grok-4.5@xhigh ↯ · ai-gateway(oidc:my-agent)");
+    expect(line).toBe("grok-4.5 · xhigh · ↯ · ai-gateway(oidc:my-agent)");
+  });
+
+  it("keeps authored settings visible while a dynamic model is unresolved", () => {
+    expect(
+      buildStatusLine({
+        dynamicModel: true,
+        reasoning: "high",
+        fastMode: true,
+        theme: plain,
+        width: 120,
+      }),
+    ).toBe("dynamic model · high · ↯");
   });
 
   it("dims the whole model segment, reasoning level and fast marker included", () => {
@@ -94,7 +129,7 @@ describe("buildStatusLine", () => {
       width: 120,
     })!;
 
-    expect(line).toContain("\x1b[2mxai/grok-4.5@xhigh ↯\x1b[22m");
+    expect(line).toContain("\x1b[2mgrok-4.5 · xhigh · ↯\x1b[22m");
   });
 
   it("renders the fast marker with ASCII glyphs when unicode is unavailable", () => {
@@ -105,20 +140,19 @@ describe("buildStatusLine", () => {
       width: 120,
     });
 
-    expect(line).toBe("xai/grok-4.5 >>");
+    expect(line).toBe("grok-4.5 · >>");
   });
 
   it("strips terminal controls from a remote model id", () => {
     expect(
       buildStatusLine({
-        model: "openai/gpt\x1b[31m-5\n",
+        model: "openai/gpt\x1b[31m-6-luna-fast\n",
         reasoning: "high",
-        fastMode: true,
         remote: remote({ state: "ready", info: {} as never }),
         theme: plain,
         width: 120,
       }),
-    ).toBe(" ↗ vpoke.playground-vercel.tools  openai/gpt-5@high ↯");
+    ).toBe(" ↗ vpoke.playground-vercel.tools  gpt-6-luna · high · ↯");
   });
 
   it("dims the model segment", () => {
@@ -130,7 +164,7 @@ describe("buildStatusLine", () => {
       width: 120,
     });
 
-    expect(line).toContain("\x1b[2manthropic/claude-sonnet-5\x1b[22m");
+    expect(line).toContain("\x1b[2mclaude-sonnet-5\x1b[22m");
   });
 
   it("folds the linked project name into the connected gateway label", () => {
@@ -157,19 +191,16 @@ describe("buildStatusLine", () => {
     const status = (phase: "building" | "complete", width = 120) =>
       buildStatusLine({
         devBuild: { phase, summary: "agent/instructions.md changed" },
-        model: "anthropic/claude-sonnet-5",
+        model: "openai/gpt-6-luna-fast",
         theme,
         width,
       })!;
 
     const building = status("building");
     const complete = status("complete");
-    expect(stripAnsi(building)).toMatch(
-      /^anthropic\/claude-sonnet-5 +▪ agent\/instructions\.md updating…$/u,
-    );
-    expect(stripAnsi(complete)).toMatch(
-      /^anthropic\/claude-sonnet-5 +✓ agent\/instructions\.md updated$/u,
-    );
+    expect(Array.from(stripAnsi(complete))).toHaveLength(120);
+    expect(stripAnsi(building)).toMatch(/^gpt-6-luna · ↯ +▪ agent\/instructions\.md updating…$/u);
+    expect(stripAnsi(complete)).toMatch(/^gpt-6-luna · ↯ +✓ agent\/instructions\.md updated$/u);
     expect(visibleLength(complete)).toBe(120);
     expect(complete).not.toContain("\x1b[32m");
     expect(stripAnsi(status("complete", 20))).toBe("✓ agent/instructions");
@@ -177,7 +208,7 @@ describe("buildStatusLine", () => {
 
   it("leads with the transient logs hint and keeps it as width narrows", () => {
     const input = {
-      logLevel: "sandbox",
+      logLevel: "warn",
       model: "anthropic/claude-sonnet-5",
       endpoint: connected,
       vercel: { identity },
@@ -185,10 +216,10 @@ describe("buildStatusLine", () => {
     } as const;
 
     const full = buildStatusLine({ ...input, width: 120 })!;
-    expect(full.startsWith("logs: sandbox · ")).toBe(true);
+    expect(full.startsWith("logs: warn · ")).toBe(true);
 
     // Narrow enough that only the leading hint survives.
-    expect(buildStatusLine({ ...input, width: 13 })).toBe("logs: sandbox");
+    expect(buildStatusLine({ ...input, width: 13 })).toBe("logs: warn");
   });
 
   it("renders the logs hint alone at a bare prompt", () => {
@@ -212,7 +243,7 @@ describe("buildStatusLine", () => {
 
     const noEndpoint = buildStatusLine({ ...input, width: visibleLength(full) - 1 })!;
     expect(noEndpoint).not.toContain("ai-gateway");
-    expect(noEndpoint).toContain("anthropic/claude-sonnet-5");
+    expect(noEndpoint).toContain("claude-sonnet-5");
 
     const noModel = buildStatusLine({ ...input, width: visibleLength(noEndpoint) - 1 })!;
     expect(noModel).not.toContain("ai-gateway");
@@ -225,7 +256,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(external).toBe("anthropic/claude-sonnet-5 · anthropic⌝");
+    expect(external).toBe("claude-sonnet-5 · anthropic⌝");
 
     const linked = buildStatusLine({
       model: "m",
@@ -253,7 +284,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(chatgpt).toBe("openai/gpt-5.6-sol · chatgpt-sub⌝");
+    expect(chatgpt).toBe("gpt-5.6-sol · chatgpt-sub⌝");
 
     const chatgptLogin = buildStatusLine({
       model: "openai/gpt-5.6-sol",
@@ -261,7 +292,7 @@ describe("buildStatusLine", () => {
       theme: plain,
       width: 120,
     });
-    expect(chatgptLogin).toBe("openai/gpt-5.6-sol · ⚠ chatgpt-sub login · /login");
+    expect(chatgptLogin).toBe("gpt-5.6-sol · ⚠ chatgpt-sub login · /login");
 
     const notConnected = buildStatusLine({
       model: "m",
@@ -317,7 +348,7 @@ describe("buildStatusLine", () => {
       theme: ascii,
       width: 120,
     });
-    expect(stripAnsi(chatgpt!)).toBe("openai/gpt-5.6-sol · chatgpt-sub^");
+    expect(stripAnsi(chatgpt!)).toBe("gpt-5.6-sol · chatgpt-sub^");
   });
 
   it("renders the remote badge first and projects each authentication state", () => {

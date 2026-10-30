@@ -4,7 +4,10 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { build as buildNitro, copyPublicAssets, prepare, prerender } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 
-import { resolvePackageSourceFilePath } from "#internal/application/package.js";
+import {
+  resolveInstalledPackageInfo,
+  resolvePackageSourceFilePath,
+} from "#internal/application/package.js";
 import {
   prepareEveVersionedCacheDirectory,
   writeEveVersionedCacheMetadata,
@@ -25,12 +28,14 @@ import {
   RecoverablePublicationError,
 } from "#internal/application/output-publication.js";
 import { stageProductionCompilerArtifacts } from "#internal/application/production-compiler-artifacts.js";
+import { stageBuildDeploymentId } from "#internal/nitro/host/stage-build-deployment-id.js";
 import {
   materializeVercelWorkflowFunctionOutput,
   normalizeEveVercelFunctionOutput,
 } from "#internal/workflow-bundle/vercel-workflow-output.js";
 import { createProductionApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
+import { emitConnectManifest } from "#internal/external-resources.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
 import { copyHostMiddlewareFunctions } from "#internal/nitro/host/copy-host-middleware.js";
 import { normalizeVercelServiceCrons } from "#internal/nitro/host/normalize-vercel-service-crons.js";
@@ -84,6 +89,7 @@ function assertProfileOutputOutsideBuildOutput(
 }
 
 async function writeOptionalApplicationBuildProfile(input: {
+  readonly deploymentId: string | undefined;
   readonly outputDirectory: string;
   readonly profileOutputPath: string;
   readonly profiler: ApplicationBuildProfiler;
@@ -95,6 +101,7 @@ async function writeOptionalApplicationBuildProfile(input: {
     await writeApplicationBuildProfile(
       input.profileOutputPath,
       createApplicationBuildProfile({
+        deploymentId: input.deploymentId,
         output,
         target: process.env.VERCEL ? "vercel" : "local",
         timing,
@@ -258,9 +265,9 @@ export async function buildApplication(
   // staged artifacts inside this workspace; the next build's recovery
   // consumes and then removes it. Deleting it now would strand the journal.
   let preserveWorkspaceForRecovery = false;
-  let outputDirectory: string;
+  let built: BuiltApplicationOutput;
   try {
-    outputDirectory = await buildApplicationInWorkspace(workspace, options, profiler);
+    built = await buildApplicationInWorkspace(workspace, options, profiler);
   } catch (error) {
     preserveWorkspaceForRecovery = error instanceof RecoverablePublicationError;
     throw error;
@@ -274,20 +281,26 @@ export async function buildApplication(
 
   if (profiler !== undefined && profileOutputPath !== undefined) {
     await writeOptionalApplicationBuildProfile({
-      outputDirectory,
+      deploymentId: built.deploymentId,
+      outputDirectory: built.outputDirectory,
       profileOutputPath,
       profiler,
     });
   }
 
-  return outputDirectory;
+  return built.outputDirectory;
+}
+
+interface BuiltApplicationOutput {
+  readonly deploymentId: string | undefined;
+  readonly outputDirectory: string;
 }
 
 async function buildApplicationInWorkspace(
   workspace: ApplicationBuildWorkspace,
   options: ApplicationBuildOptions,
   profiler: ApplicationBuildProfiler | undefined,
-): Promise<string> {
+): Promise<BuiltApplicationOutput> {
   const preparedHost = await measureBuildPhase(profiler, "host.prepare", () =>
     prepareProductionApplicationHost(workspace),
   );
@@ -389,6 +402,15 @@ async function buildApplicationInWorkspace(
         outputPath: workspace.publication.summary.stagedPath,
       }),
     );
+    await measureBuildPhase(profiler, "connect-manifest.emit", () =>
+      emitConnectManifest({
+        appRoot: preparedHost.appRoot,
+        generatorVersion: resolveInstalledPackageInfo().version,
+        manifest: preparedHost.compileResult.manifest,
+        outputDirectory: workspace.publication.output.stagedDir,
+        publicRoutePrefix,
+      }),
+    );
     if (!isVercelBuild) {
       await measureBuildPhase(profiler, "compiler-artifacts.stage", () =>
         stageProductionCompilerArtifacts({
@@ -401,10 +423,17 @@ async function buildApplicationInWorkspace(
     await measureBuildPhase(profiler, "nitro.close", () => nitro.close());
   }
 
+  const deploymentId =
+    nitro.options.preset === "node-server"
+      ? await measureBuildPhase(profiler, "id.compute", () =>
+          stageBuildDeploymentId(workspace.publication.output.stagedDir),
+        )
+      : undefined;
+
   await measureBuildPhase(profiler, "output.publish", () =>
     publishCompletedApplicationBuild(workspace),
   );
-  return workspace.publication.output.finalDir;
+  return { deploymentId, outputDirectory: workspace.publication.output.finalDir };
 }
 
 async function publishCompletedApplicationBuild(

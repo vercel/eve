@@ -18,6 +18,8 @@ const KNOWN_TOP_LEVEL_KEYS = [
   "approval",
   "auth",
   "description",
+  "forwardPrincipal",
+  "experimental",
   "headers",
   "instanceKey",
   "protocolVersionDiscovery",
@@ -39,6 +41,7 @@ const KNOWN_OPENAPI_TOP_LEVEL_KEYS = [
 const KNOWN_AUTHORIZATION_KEYS = [
   "completeAuthorization",
   "credentialOwner",
+  "displayName",
   "evict",
   "getToken",
   "principalType",
@@ -95,11 +98,57 @@ export function normalizeMcpClientConnectionDefinition(
     url: record.url as string,
   };
 
+  const experimental =
+    record.experimental === undefined
+      ? undefined
+      : expectObjectRecord(record.experimental, `${message} experimental must be an object.`);
+  if (experimental !== undefined) expectOnlyKnownKeys(experimental, ["events"], message);
+  if (experimental?.events !== undefined) {
+    const events = expectObjectRecord(
+      experimental.events,
+      `${message} experimental.events must be an object.`,
+    );
+    expectOnlyKnownKeys(events, ["onEvent", "onGap", "onTerminated"], message);
+    if (
+      typeof events.onEvent !== "function" ||
+      (events.onGap !== undefined && typeof events.onGap !== "function") ||
+      (events.onTerminated !== undefined && typeof events.onTerminated !== "function")
+    ) {
+      throw new Error(
+        `${message} experimental.events requires onEvent; onGap and onTerminated must be functions when provided.`,
+      );
+    }
+    if (
+      authorization === undefined ||
+      typeof authorization === "function" ||
+      authorization.vercelConnect?.experimental_events === undefined
+    ) {
+      throw new Error(
+        `${message} experimental.events requires a static Connect auth provider with the events bridge.`,
+      );
+    }
+    type Events = NonNullable<NonNullable<McpClientConnectionDefinition["experimental"]>["events"]>;
+    result.experimental = {
+      events: {
+        onEvent: events.onEvent as Events["onEvent"],
+        onGap: events.onGap as Events["onGap"],
+        onTerminated: events.onTerminated as Events["onTerminated"],
+      },
+    };
+  }
+
   if (record.protocolVersionDiscovery !== undefined) {
     if (typeof record.protocolVersionDiscovery !== "boolean") {
       throw new Error(`${message} "protocolVersionDiscovery" must be a boolean.`);
     }
     result.protocolVersionDiscovery = record.protocolVersionDiscovery;
+  }
+
+  if (record.forwardPrincipal !== undefined) {
+    if (typeof record.forwardPrincipal !== "boolean") {
+      throw new Error(`${message} "forwardPrincipal" must be a boolean.`);
+    }
+    result.forwardPrincipal = record.forwardPrincipal;
   }
 
   if (record.instanceKey !== undefined) {

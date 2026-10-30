@@ -1,11 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { HTTP_ADAPTER, HTTP_ADAPTER_KIND } from "#channel/http.js";
-import {
-  attachChannelActivityPresentation,
-  getChannelActivityPresentation,
-} from "#channel/activity-renderer.js";
 import { SCHEDULE_ADAPTER, SCHEDULE_ADAPTER_KIND } from "#channel/schedule.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
@@ -59,7 +55,7 @@ describe("createRuntimeAdapterRegistry", () => {
     // channel-less schedule (i.e. every markdown schedule, which is
     // forbidden from declaring a channel). Locks the framework
     // registration so that rehydrating a serialized schedule adapter
-    // returns the bare discriminator instead of throwing.
+    // restores its kind and state instead of throwing.
     it("rehydrates a serialized schedule adapter through the framework registry", () => {
       const registry = createRuntimeAdapterRegistry({ channels: [] });
 
@@ -68,7 +64,7 @@ describe("createRuntimeAdapterRegistry", () => {
         state: {},
       });
 
-      expect(rehydrated).toEqual({ kind: SCHEDULE_ADAPTER_KIND, state: {} });
+      expect(rehydrated).toMatchObject({ kind: SCHEDULE_ADAPTER_KIND, state: {} });
     });
 
     // Mirror of the schedule rehydration regression — proves the
@@ -86,28 +82,6 @@ describe("createRuntimeAdapterRegistry", () => {
     });
   });
 
-  it("rehydrates non-enumerable activity renderer behavior", () => {
-    const adapter: ChannelAdapter = { kind: "slack", state: { channelId: null } };
-    const render = vi.fn();
-    const destination = vi.fn();
-    attachChannelActivityPresentation(adapter, {
-      destination,
-      renderers: [{ id: "slack.status.v1", render }],
-    });
-    const registry = createRuntimeAdapterRegistry({ channels: [makeChannelDefinition(adapter)] });
-
-    const rehydrated = deserializeRuntimeAdapter(registry, {
-      kind: "slack",
-      state: { channelId: "C1", threadTs: "T1" },
-    });
-
-    expect(getChannelActivityPresentation(rehydrated)).toEqual({
-      destination,
-      renderers: [{ id: "slack.status.v1", render }],
-    });
-    expect(rehydrated.state).toEqual({ channelId: "C1", threadTs: "T1" });
-  });
-
   describe("route-declared adapters sharing a framework kind", () => {
     it("silently merges a bare pass-through that re-declares a framework kind", () => {
       const registry = createRuntimeAdapterRegistry({
@@ -117,51 +91,6 @@ describe("createRuntimeAdapterRegistry", () => {
       // Framework adapter wins — a bare pass-through contributes no
       // behavior, so the registry keeps the framework entry.
       expect(registry.adaptersByKind.get("http")).toEqual({ kind: "http" });
-    });
-
-    it("rejects a route-declared subagent adapter that carries an input.requested handler", () => {
-      const offendingAdapter: ChannelAdapter = {
-        kind: SUBAGENT_ADAPTER_KIND,
-        "input.requested": async () => undefined,
-      };
-
-      expect(() =>
-        createRuntimeAdapterRegistry({
-          channels: [
-            makeChannelDefinition(offendingAdapter, {
-              logicalPath: "channels/sneaky.ts",
-              sourceId: "channels/sneaky",
-            }),
-          ],
-        }),
-      ).toThrow(RuntimeRegistryError);
-    });
-
-    it("surfaces the offending route's source location on the rejection", () => {
-      const offendingAdapter: ChannelAdapter = {
-        kind: SUBAGENT_ADAPTER_KIND,
-        "input.requested": async () => undefined,
-      };
-
-      try {
-        createRuntimeAdapterRegistry({
-          channels: [
-            makeChannelDefinition(offendingAdapter, {
-              logicalPath: "channels/sneaky.ts",
-              sourceId: "channels/sneaky",
-            }),
-          ],
-        });
-        throw new Error("expected createRuntimeAdapterRegistry to throw");
-      } catch (error) {
-        expect(error).toBeInstanceOf(RuntimeRegistryError);
-        const registryError = error as RuntimeRegistryError;
-        expect(registryError.registry).toBe("adapter");
-        expect(registryError.entryName).toBe(SUBAGENT_ADAPTER_KIND);
-        expect(registryError.logicalPath).toBe("channels/sneaky.ts");
-        expect(registryError.sourceId).toBe("channels/sneaky");
-        expect(registryError.message).toMatch(/framework|reserved|pass-through/);
-      }
     });
 
     it("rejects a route-declared http adapter that adds a deliver hook", () => {
@@ -230,5 +159,74 @@ describe("createRuntimeAdapterRegistry", () => {
         }),
       ).toThrow(RuntimeRegistryError);
     });
+  });
+});
+
+describe("deserializeRuntimeAdapter", () => {
+  // A session serialized under an older seed lacks fields a later deploy added
+  // to the channel's `state`; `context(state)` still promises them.
+  it("fills seed fields missing from stored state while stored values win", () => {
+    const registry = createRuntimeAdapterRegistry({
+      channels: [
+        makeChannelDefinition({
+          kind: "channel:test",
+          state: { addedLater: "seed-default", mode: "seed", nested: { items: [] } },
+        }),
+      ],
+    });
+
+    const rehydrated = deserializeRuntimeAdapter(registry, {
+      kind: "channel:test",
+      state: { mode: "stored", threadId: null },
+    });
+
+    expect(rehydrated.state).toEqual({
+      addedLater: "seed-default",
+      mode: "stored",
+      nested: { items: [] },
+      threadId: null,
+    });
+  });
+
+  // Rehydration runs at every step boundary: an explicit `undefined` is a
+  // stored value, but a deleted key looks like a field added to the seed later.
+  it("keeps a stored undefined field and restores a deleted one", () => {
+    const registry = createRuntimeAdapterRegistry({
+      channels: [
+        makeChannelDefinition({ kind: "channel:test", state: { cursor: "seed", mode: "seed" } }),
+      ],
+    });
+
+    const rehydrated = deserializeRuntimeAdapter(registry, {
+      kind: "channel:test",
+      state: { mode: undefined },
+    });
+
+    expect(rehydrated.state).toStrictEqual({ cursor: "seed", mode: undefined });
+  });
+
+  it("restores stored state unchanged for an adapter without a seed", () => {
+    const registry = createRuntimeAdapterRegistry({
+      channels: [makeChannelDefinition({ kind: "channel:test" })],
+    });
+
+    const rehydrated = deserializeRuntimeAdapter(registry, {
+      kind: "channel:test",
+      state: { mode: "stored" },
+    });
+
+    expect(rehydrated.state).toStrictEqual({ mode: "stored" });
+  });
+
+  it("does not share nested seed values with the registry entry", () => {
+    const registry = createRuntimeAdapterRegistry({
+      channels: [makeChannelDefinition({ kind: "channel:test", state: { items: [] } })],
+    });
+
+    const first = deserializeRuntimeAdapter(registry, { kind: "channel:test", state: {} });
+    (first.state as { items: string[] }).items.push("leaked");
+    const second = deserializeRuntimeAdapter(registry, { kind: "channel:test", state: {} });
+
+    expect(second.state).toEqual({ items: [] });
   });
 });

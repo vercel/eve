@@ -1,26 +1,34 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import type { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { settleDuplicateDeliveryStep } from "#execution/session/settle-duplicate-delivery-step.js";
 
-import type { RuntimeActionResultHookPayload, SessionCommand } from "#channel/types.js";
-import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
-import type { DeliveryAdmission, SessionInputQueue } from "#execution/session/input-queue.js";
+import type {
+  RuntimeActionResultHookPayload,
+  SessionAuthContext,
+  SessionControlIdentity,
+} from "#channel/types.js";
+import { controlDeliveryOf } from "#execution/session/control-delivery.js";
+import type { ControlSettlement } from "#harness/facts.js";
+import type {
+  ControlOrigin,
+  DeliveryAdmission,
+  SessionInputQueue,
+} from "#execution/session/input-queue.js";
 import { isWorkflowMessage, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import {
   decodeSessionInboxPayload,
   SessionInboxPayloadError,
 } from "#execution/session-inbox/protocol.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
-import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import { findRunningAgentHandle } from "#subagents/handles/query.js";
-import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
-
-export type SessionCancellation = Extract<SessionCommand, { readonly kind: "cancel" }>;
 
 /** One canonical admission result, after wire decoding but before turn policy. */
-export type SessionAdmission =
+type SessionAdmission =
   | { readonly admission: DeliveryAdmission; readonly kind: "delivery" }
-  | { readonly command: SessionCancellation; readonly kind: "cancel" }
+  | { readonly kind: "cancel"; readonly origin?: ControlOrigin }
   | { readonly kind: "consumed" }
+  /** A control this owner cannot run: settle it failed, so its sender doesn't wait forever. */
+  | { readonly kind: "unsupported"; readonly settlement: ControlSettlement }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
 
@@ -32,10 +40,11 @@ export type SessionAdmission =
 export async function admitSessionInboxPayload(
   value: SessionInboxPayload,
   input: {
-    readonly cursor: SessionStateCursor;
     readonly queue: SessionInputQueue;
+    readonly cursor: SessionStateCursor;
   },
 ): Promise<SessionAdmission> {
+  if (value.kind === "session-failure") throw new Error(value.error);
   if (value.kind === "runtime-action-result")
     return { kind: "runtime-action-result", payload: value };
   if (isWorkflowMessage(value)) return { kind: "workflow", message: value };
@@ -43,23 +52,8 @@ export async function admitSessionInboxPayload(
     input.queue.enqueueAuthorization(value.payloads);
     return { kind: "consumed" };
   }
-  if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
-    const handle = findRunningAgentHandle(input.cursor.sessionState.snapshot.session.state, {
-      callId: value.callId,
-    });
-    if (
-      handle?.identity.name === value.subagentName &&
-      handle.address.sessionId === value.childSessionId
-    ) {
-      await input.cursor.apply(
-        await runProxySubagentEventStep({
-          hookPayload: value,
-          sessionWritable: input.cursor.sessionWritable,
-          serializedContext: input.cursor.serializedContext,
-          sessionState: input.cursor.sessionState,
-        }),
-      );
-    }
+  // A child's questions reach the session only through the run that opened it.
+  if (value.kind === "subagent-interaction") {
     return { kind: "consumed" };
   }
 
@@ -69,20 +63,32 @@ export async function admitSessionInboxPayload(
   } catch (error) {
     if (!(error instanceof SessionInboxPayloadError)) throw error;
     await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
-    return { kind: "consumed" };
+    const settlement = unsupportedControl(value, error.message);
+    return settlement === undefined ? { kind: "consumed" } : { kind: "unsupported", settlement };
   }
 
   switch (command.kind) {
+    case "session-prewarm":
+      if (command.expectedOwnerRunId === getWorkflowMetadata().workflowRunId)
+        input.queue.prepareOnDeployment(command.targetDeploymentId);
+      return { kind: "consumed" };
     case "deliver": {
-      const admission = input.queue.enqueueDelivery(
-        command,
-        input.cursor.sessionState.snapshot.session.state,
-      );
-      return admission === undefined ? { kind: "consumed" } : { admission, kind: "delivery" };
+      const admission = input.queue.enqueueDelivery(command);
+      if (admission === undefined) {
+        await input.cursor.advance((state) =>
+          settleDuplicateDeliveryStep({ ...state, delivery: command }),
+        );
+        return { kind: "consumed" };
+      }
+      return { admission, kind: "delivery" };
     }
     case "clear":
+      // A clear starts over: it stops the running turn and its tasks, as a reset does, then runs.
+      // It carries no origin: the queued control, not the cancel, settles its delivery.
+      input.queue.enqueueControl("clear", controlOrigin(command));
+      return { kind: "cancel" };
     case "compact":
-      input.queue.enqueueControl(command.kind);
+      input.queue.enqueueControl("compact", controlOrigin(command));
       return { kind: "consumed" };
     case "session-timeout":
       // A previous owner's timer may fire after handoff; only this owner's deadline counts.
@@ -91,28 +97,41 @@ export async function admitSessionInboxPayload(
       }
       return { kind: "consumed" };
     case "reset":
-      input.queue.enqueueControl("reset");
-      return { command: { kind: "cancel" }, kind: "cancel" };
-    case "cancel":
-      return { command, kind: "cancel" };
+      input.queue.enqueueControl("reset", controlOrigin(command));
+      return { kind: "cancel" };
+    case "cancel": {
+      const origin = controlOrigin(command);
+      return origin === undefined ? { kind: "cancel" } : { kind: "cancel", origin };
+    }
   }
 }
 
-/** Applies accepted cancellation effects after the active-turn guard passes. */
-export async function applySessionCancellation(
-  command: SessionCancellation,
-  input: {
-    readonly cursor: SessionStateCursor;
-    readonly queue: SessionInputQueue;
-  },
-): Promise<void> {
-  if (command.tasks === true) {
-    const cancelled = await cancelAllIndexedSessionTasksStep({
-      serializedContext: input.cursor.serializedContext,
-      sessionState: input.cursor.sessionState,
-    });
-    await input.cursor.apply(cancelled);
-    input.queue.discardStaleNotifications(input.cursor.sessionState.snapshot.session.state);
-  }
-  if (command.taskId !== undefined) input.queue.cancelTask(command.taskId);
+/** The delivery a control arrived as. */
+export function controlOrigin(command: SessionControlIdentity): ControlOrigin {
+  return command.auth === undefined
+    ? { deliveryId: command.deliveryId }
+    : { auth: command.auth, deliveryId: command.deliveryId };
+}
+
+/**
+ * The failed settlement of an undecodable payload that names its delivery: a control from a newer eve, or
+ * a malformed one. Its sender awaits that delivery's settlement. Without a delivery id, nobody
+ * waits on it, and the payload is only dropped.
+ */
+function unsupportedControl(
+  value: SessionInboxPayload,
+  reason: string,
+): ControlSettlement | undefined {
+  const { auth, deliveryId, kind } = value as Record<string, unknown>;
+  if (typeof deliveryId !== "string" || deliveryId.length === 0) return undefined;
+  const origin =
+    typeof auth === "object" && auth !== null
+      ? { auth: auth as SessionAuthContext, deliveryId }
+      : { deliveryId };
+  return {
+    control: controlDeliveryOf(origin),
+    outcome: "failed",
+    reason,
+    source: typeof kind === "string" && kind.length > 0 ? kind : "unknown",
+  };
 }

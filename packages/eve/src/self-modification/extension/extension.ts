@@ -10,3 +10,5 @@ const config: StandardSchemaV1<SelfModificationExtensionConfig> = selfModificati
 
 /** Extension mount configured with the same policy as the agent and sandbox. */
 export default defineExtension({ config });
+
+export type { SelfModificationExtensionConfig } from "../config.js";

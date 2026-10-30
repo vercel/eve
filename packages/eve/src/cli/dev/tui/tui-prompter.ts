@@ -10,7 +10,6 @@ import type {
 } from "#setup/prompter.js";
 import { createSelectOptionCodec } from "#setup/cli/select-option-codec.js";
 import { searchActionQuery } from "#setup/cli/select-state.js";
-import type { SetupSpinnerIntent } from "#setup/cli/index.js";
 import { WizardCancelledError } from "#setup/step.js";
 
 import type { SetupFlowPrompterRenderer, SetupSelectRequest } from "./setup-flow.js";
@@ -33,9 +32,11 @@ function setupSelectRequest<T extends PrompterValue>(
     message: string;
     options: SetupSelectRequest["options"];
     description?: string;
+    helpText?: string;
     metadata?: SetupSelectRequest["metadata"];
   } = { message: opts.message, options };
   if (opts.description !== undefined) base.description = opts.description;
+  if (opts.helpText !== undefined) base.helpText = opts.helpText;
   if (opts.metadata !== undefined) base.metadata = opts.metadata;
   const withContext = <Request extends SetupSelectRequest>(request: Request): Request => {
     if (opts.notices !== undefined) request.notices = opts.notices;
@@ -225,12 +226,8 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
         renderer.renderLine(title, "info");
         for (const entry of lines) renderer.renderLine(`  ${entry}`, "info");
       },
-      spinner(message, intent?: SetupSpinnerIntent) {
-        renderer.setStatus(
-          intent?.kind === "external-action"
-            ? { kind: "external-action", text: message, emphasis: intent.emphasis }
-            : message,
-        );
+      spinner(message) {
+        renderer.setStatus(message);
         let stopped = false;
         return {
           stop() {

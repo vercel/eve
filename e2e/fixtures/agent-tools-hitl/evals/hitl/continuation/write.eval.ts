@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import {
+  expectApprovalCancelled,
   scriptedSession,
-  approveSavedChange,
   expectChangeStillUnexecuted,
   expectReply,
   requestFrom,
@@ -21,11 +21,11 @@ export default defineEval({
     // When the user asks to save the draft.
     const live = await session.start("Save the draft and report how many times it was written.");
 
-    // Then the reply confirms one write and completes; A stays unexecuted and answerable.
+    // Then the reply confirms one write and completes; the message cancelled A, which never runs.
     await expectToolResult(t, live, "save-draft");
     const turn = await expectReply(t, live, 'Draft saved: {"writes":1}.');
     turn.calledTool("save-draft", { status: "completed", count: 1 });
     expectChangeStillUnexecuted(session);
-    await approveSavedChange(t, session, approval);
+    expectApprovalCancelled(session, approval);
   },
 });

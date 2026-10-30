@@ -27,12 +27,12 @@ export const MAX_LINE_LENGTH = 2000;
 /**
  * Suffix appended to lines exceeding {@link MAX_LINE_LENGTH}.
  */
-export const LINE_TRUNCATION_SUFFIX = " [truncated]";
+const LINE_TRUNCATION_SUFFIX = " [truncated]";
 
 /**
  * Result of a {@link truncateTail} or {@link truncateHead} call.
  */
-export interface TruncationResult {
+interface TruncationResult {
   /** The truncated output text. */
   readonly output: string;
   /** True when the output was shortened. */

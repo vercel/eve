@@ -1,0 +1,81 @@
+import {
+  defineEval,
+  type EveEvalContext,
+  type EveEvalLiveTurn,
+  type EveEvalSession,
+} from "eve/evals";
+
+/** A human text answer resolves the child's proxied request at the parent by request ID. */
+export default defineEval({
+  description: "Plain-text approval at the parent resumes a delegated child's ctx.ask().",
+  timeoutMs: 90_000,
+  async test(t) {
+    const started = await t.send(
+      "Call the approval-child subagent exactly once and relay its final result when it completes.",
+    );
+    let parent = started.session;
+    let child = started.events.find(
+      (event) => event.type === "child.opened" && event.data.name === "approval-child",
+    );
+    if (child?.type !== "child.opened") {
+      const live = watchNextTurn(t, parent, "approval child dispatch wait");
+      child = await live.waitForEvent("child.opened", { data: { name: "approval-child" } });
+      parent = live.session;
+    }
+    if (child.type !== "child.opened") throw new Error("Approval child was not called.");
+    const childTurn = t.target.attach(child.data.sessionId).watch();
+    const pending = await waitForInput(t, parent);
+    const request = pending.requireInteraction({
+      prompt: /Approve the deployment/i,
+      toolName: "ask_question",
+    });
+    const parkedChild = await childTurn.result();
+
+    const resumedChild = t.target
+      .attach(child.data.sessionId, { startIndex: parkedChild.session.state.streamIndex })
+      .watch();
+    const approved = await pending.start("approve");
+    const resolution = await waitForObservedEvent(resumedChild, "interaction.settled");
+    if (resolution.type !== "interaction.settled") throw new Error("Question was not resolved.");
+    if (
+      resolution.data.outcome !== "accepted" ||
+      resolution.data.response?.optionId !== request.request.options?.[0]?.id
+    ) {
+      throw new Error("The child did not resolve the proxied question with the selected option.");
+    }
+    await approved.cancel();
+    t.noFailedCalls();
+  },
+});
+
+async function waitForInput(t: EveEvalContext, initial: EveEvalSession): Promise<EveEvalSession> {
+  let session = initial;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (session.pendingInteractions.some((request) => request.call?.name === "ask_question")) {
+      return session;
+    }
+    const turn = await watchNextTurn(t, session, "proxied ask wait").result();
+    turn.noFailedCalls();
+    session = turn.session;
+  }
+  throw new Error("Approval child did not surface its ctx.ask() request.");
+}
+
+async function waitForObservedEvent<TType extends "interaction.settled">(
+  turn: EveEvalLiveTurn,
+  type: TType,
+) {
+  for (let attempt = 0; attempt < 1_500; attempt += 1) {
+    const event = turn.events.find((candidate) => candidate.type === type);
+    if (event !== undefined) return event;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Child did not emit ${type}.`);
+}
+
+function watchNextTurn(t: EveEvalContext, session: EveEvalSession, operation: string) {
+  if (session.id === undefined || session.state === undefined) {
+    throw new Error(`${operation} has no parent session cursor.`);
+  }
+  return t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch();
+}

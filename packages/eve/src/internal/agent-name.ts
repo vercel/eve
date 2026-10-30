@@ -1,7 +1,7 @@
 const PUBLIC_AGENT_NAME_PATTERN = /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/;
 
 /** Whether a name is safe to expose as an eve public route segment. */
-export function isValidPublicAgentName(name: string): boolean {
+function isValidPublicAgentName(name: string): boolean {
   return PUBLIC_AGENT_NAME_PATTERN.test(name);
 }
 

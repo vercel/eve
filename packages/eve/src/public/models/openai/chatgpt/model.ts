@@ -3,12 +3,13 @@ import type {
   LanguageModelV4,
   LanguageModelV4CallOptions,
 } from "#compiled/@ai-sdk/provider/index.js";
+import { parseChatGptFastModelId } from "#shared/chatgpt-model.js";
 import { createCodexFetch, type CodexTransportOptions } from "./transport.js";
 
 const CODEX_LOCAL_AUTH_API_KEY = "codex-local-auth";
 
 /** Configures the Codex model selected by the local ChatGPT login. */
-export interface CodexModelOptions {
+interface CodexModelOptions {
   /** OpenAI model ID passed to the Codex Responses endpoint, for example `gpt-5.6-sol`. */
   readonly model: string;
 }
@@ -22,31 +23,33 @@ export function createCodexSubscriptionModel(
   if (model.length === 0) {
     throw new Error('Expected "model" to name a Codex model.');
   }
+  const { slug, fast } = parseChatGptFastModelId(model);
 
   const openaiModel = createOpenAI({
     apiKey: CODEX_LOCAL_AUTH_API_KEY,
     fetch: createCodexFetch(options),
     name: "codex",
-  }).responses(model);
+  }).responses(slug);
 
   // Keep item IDs until the provider has grouped streamed reasoning summaries.
   // The transport removes them from the stateless request sent to Codex.
   return {
     specificationVersion: openaiModel.specificationVersion,
     provider: openaiModel.provider,
-    modelId: openaiModel.modelId,
+    modelId: model,
     get supportedUrls() {
       return openaiModel.supportedUrls;
     },
     doGenerate: (callOptions: LanguageModelV4CallOptions) =>
-      openaiModel.doGenerate(normalizeCodexCallOptions(callOptions)),
+      openaiModel.doGenerate(normalizeCodexCallOptions(callOptions, fast)),
     doStream: (callOptions: LanguageModelV4CallOptions) =>
-      openaiModel.doStream(normalizeCodexCallOptions(callOptions)),
+      openaiModel.doStream(normalizeCodexCallOptions(callOptions, fast)),
   };
 }
 
 function normalizeCodexCallOptions(
   options: LanguageModelV4CallOptions,
+  fast: boolean,
 ): LanguageModelV4CallOptions {
   const providerOptions = options.providerOptions;
   const openaiOptions = providerOptions?.openai ?? {};
@@ -68,6 +71,10 @@ function normalizeCodexCallOptions(
       ...providerOptions,
       openai: {
         ...openaiOptions,
+        // OpenAI documents `fast` as an alias of `priority`, but the Codex
+        // backend rejects `fast`. Codex itself sends `priority` for Fast mode.
+        ...((openaiOptions.serviceTier === "fast" ||
+          (fast && openaiOptions.serviceTier === undefined)) && { serviceTier: "priority" }),
         ...(instructions !== undefined && { instructions }),
         store: false,
       },

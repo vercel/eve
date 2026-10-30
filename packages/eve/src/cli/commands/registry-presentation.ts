@@ -18,7 +18,7 @@ export interface RegistrySearchPresentationSection {
   total: number;
 }
 
-export function normalizeRegistryText(value: string): string {
+function normalizeRegistryText(value: string): string {
   return sanitizeForTerminal(value)
     .replaceAll('\\"', '"')
     .replaceAll("\\'", "'")

@@ -11,7 +11,7 @@ export type ConnectTriggerAttachmentResult =
   | { state: "attach-failed" };
 
 /** Inputs required to replace a Vercel Connect connector's trigger destination. */
-export interface ReplaceConnectTriggerOptions {
+interface ReplaceConnectTriggerOptions {
   connectorUid: string;
   projectRoot: string;
   triggerPath: string;

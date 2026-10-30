@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rename, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
@@ -14,7 +14,7 @@ import { eveCliBanner, EVE_WORDMARK } from "#cli/banner.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createLogger, isLogLevelEnabled } from "#internal/logging.js";
-import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
+import { resolveInitAgentSettings } from "#shared/default-agent-model.js";
 import type { NodeEngineOverride } from "#setup/node-engine.js";
 import {
   detectInvokingPackageManager,
@@ -149,8 +149,7 @@ async function addToExistingProject(
   const manager = await dependencies.detectPackageManager(targetPath);
   const result = await dependencies.addAgentToProject({
     projectRoot: targetPath,
-    model: options.model ?? DEFAULT_AGENT_MODEL_ID,
-    reasoning: options.reasoning,
+    ...resolveInitAgentSettings(options),
     packageManager: manager.kind,
     evePackage,
   });
@@ -191,6 +190,8 @@ async function scaffoldProject(
     throw new Error(`Cannot create project because "${projectPath}" already exists.`);
   }
 
+  // A fresh nested target such as `apps/my-agent` may name parents that do not exist yet.
+  await mkdir(parentPath, { recursive: true });
   const stagingDirectory =
     createInPlace && overwriteExisting ? undefined : await mkdtemp(join(parentPath, ".eve-init-"));
   const workspaceRootMutations: WorkspaceRootMutation[] = [];
@@ -208,8 +209,7 @@ async function scaffoldProject(
           : projectName;
     const scaffoldOptions = {
       projectName: stagedProjectName,
-      model: options.model ?? DEFAULT_AGENT_MODEL_ID,
-      reasoning: options.reasoning,
+      ...resolveInitAgentSettings(options),
       evePackage,
       targetDirectory: scaffoldDirectory,
       overwriteExisting,
@@ -287,7 +287,6 @@ async function runInitSteps(input: {
   const debug = isLogLevelEnabled("debug");
   const initTarget = await resolveInitTarget({ parentDirectory, target });
   const evePackage = resolveInitEvePackageOverride();
-  const selfModificationEnabled = false;
 
   const startedAt = dependencies.now();
   const progressOptions = {
@@ -466,7 +465,6 @@ async function runInitSteps(input: {
         elapsedMs: dependencies.now() - startedAt,
         agentLaunched,
         gitResult,
-        selfModificationEnabled,
       };
     }
 
@@ -474,7 +472,6 @@ async function runInitSteps(input: {
       ...project,
       elapsedMs: dependencies.now() - startedAt,
       agentLaunched,
-      selfModificationEnabled,
     };
   } catch (error) {
     trackTerminal?.(
@@ -499,8 +496,8 @@ export async function runInitCommand(
 ): Promise<void> {
   const agentLaunched = await dependencies.isCodingAgentLaunch();
   const interactive = dependencies.hasInteractiveTerminal();
+  const startDevelopment = interactive && !agentLaunched && !options.nonInteractive;
   if (interactive && !agentLaunched) logger.log("");
-  logger.log(eveCliBanner());
 
   trackStep?.("resolve_target");
   let result: InitResult;
@@ -519,6 +516,7 @@ export async function runInitCommand(
       return;
     }
 
+    if (!startDevelopment) logger.log(eveCliBanner());
     result = await runInitSteps({
       agentLaunched,
       interactive,
@@ -554,9 +552,6 @@ export async function runInitCommand(
       `${pc.green("✓")} Added an ${EVE_WORDMARK} agent to ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.elapsedMs)}`)}`,
     );
   }
-  if (result.selfModificationEnabled) {
-    logger.log(`${pc.green("✓")} Enabled self-modification`);
-  }
 
   if (result.kind === "created" && result.gitResult.kind === "failed") {
     logger.error(
@@ -590,7 +585,7 @@ export async function runInitCommand(
     return;
   }
 
-  if (options.nonInteractive || !interactive) {
+  if (!startDevelopment) {
     logger.log(agentHandoff);
     return;
   }

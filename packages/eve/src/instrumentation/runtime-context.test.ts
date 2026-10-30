@@ -3,14 +3,15 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, ChannelInstrumentationKey } from "#context/keys.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
+import type { TurnPosition } from "#harness/session-machine/view.js";
 import {
   buildTelemetryRuntimeContext,
   type BuildTelemetryRuntimeContextInput,
 } from "#instrumentation/runtime-context.js";
-import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
+import type { RuntimeContextResolver } from "#tracing/eve/otel-declaration.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
+import type { InstrumentationModelStartedInput } from "#public/instrumentation/index.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const session: HarnessSession = {
   agent: {
@@ -24,31 +25,26 @@ const session: HarnessSession = {
   sessionId: "test-session",
 };
 
-const emissionState: HarnessEmissionState = {
+const emissionState: TurnPosition = {
   sessionStarted: true,
   sequence: 2,
   stepIndex: 1,
   turnId: "turn_2",
+  runId: "run_1",
 };
 
 const messages: readonly ModelMessage[] = [{ content: "hello", role: "user" }];
 
 const FRAMEWORK_KEYS = {
-  "eve.channel.kind": "unknown",
   "eve.environment": "test",
-  "eve.session.id": "test-session",
-  "eve.step.index": "1",
-  "eve.turn.id": "turn_2",
-  "eve.turn.sequence": "2",
-  "eve.version": "0.0.0-test",
 };
 
 function build(
   overrides: Partial<BuildTelemetryRuntimeContextInput> = {},
 ): Record<string, unknown> | undefined {
   return buildTelemetryRuntimeContext({
+    attempt: 0,
     capturesContent: false,
-    eveVersion: "0.0.0-test",
     emissionState,
     environment: "test",
     modelInput: { instructions: undefined, messages },
@@ -63,11 +59,11 @@ describe("buildTelemetryRuntimeContext", () => {
     expect(build({ providerResolvers: undefined })).toBeUndefined();
   });
 
-  it("emits framework identifiers when no resolver is configured", () => {
+  it("emits only environment context when the resolver returns no values", () => {
     expect(build()).toEqual(FRAMEWORK_KEYS);
   });
 
-  it("reflects the active channel kind and exposes channel metadata to the resolver", () => {
+  it("exposes the active channel kind and metadata to the resolver", () => {
     const ctx = new ContextContainer();
     const resolver: RuntimeContextResolver = (input) => {
       if (input.channel.kind !== "channel:support") return undefined;
@@ -89,18 +85,18 @@ describe("buildTelemetryRuntimeContext", () => {
       }),
     );
 
-    expect(runtimeContext).toMatchObject({
-      "eve.channel.kind": "channel:support",
+    expect(runtimeContext).toEqual({
+      "eve.environment": "test",
       "slack.user_id": "U999",
     });
   });
 
   it("withholds model content from hosted unknown-audience resolvers", () => {
-    let captured: InstrumentationStepStartedEventInput | undefined;
+    let captured: InstrumentationModelStartedInput | undefined;
 
     build({
       providerResolvers: [
-        (input: InstrumentationStepStartedEventInput) => {
+        (input: InstrumentationModelStartedInput) => {
           captured = input;
           return {};
         },
@@ -116,13 +112,13 @@ describe("buildTelemetryRuntimeContext", () => {
       kind: "channel:public",
       metadata: { audience: "public" },
     });
-    let captured: InstrumentationStepStartedEventInput | undefined;
+    let captured: InstrumentationModelStartedInput | undefined;
 
     contextStorage.run(ctx, () =>
       build({
         capturesContent: true,
         providerResolvers: [
-          (input: InstrumentationStepStartedEventInput) => {
+          (input: InstrumentationModelStartedInput) => {
             captured = input;
             return {};
           },
@@ -148,11 +144,11 @@ describe("buildTelemetryRuntimeContext", () => {
       principalType: "user",
     });
 
-    let captured: InstrumentationStepStartedEventInput | undefined;
+    let captured: InstrumentationModelStartedInput | undefined;
     contextStorage.run(ctx, () =>
       build({
         providerResolvers: [
-          (input: InstrumentationStepStartedEventInput) => {
+          (input: InstrumentationModelStartedInput) => {
             captured = input;
             return {};
           },
@@ -196,14 +192,22 @@ describe("buildTelemetryRuntimeContext", () => {
     });
 
     it("drops reserved eve.* keys from resolver results", () => {
+      const logs = captureLogRecords();
       const resolver: RuntimeContextResolver = () =>
         ({ "eve.session.id": "override", team: "platform" }) as never;
       const runtimeContext = build({ providerResolvers: [resolver] });
 
       expect(runtimeContext).toEqual({ ...FRAMEWORK_KEYS, team: "platform" });
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "ignoring reserved instrumentation runtime context key",
+        }),
+      );
     });
 
     it("continues when a resolver throws", () => {
+      const logs = captureLogRecords();
       const failing: RuntimeContextResolver = () => {
         throw new Error("boom");
       };
@@ -213,6 +217,12 @@ describe("buildTelemetryRuntimeContext", () => {
       });
 
       expect(runtimeContext).toEqual({ ...FRAMEWORK_KEYS, team: "platform" });
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "ignoring instrumentation projection after projector failure",
+        }),
+      );
     });
 
     it("returns undefined when no resolvers are configured", () => {

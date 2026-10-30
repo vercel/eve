@@ -1,12 +1,9 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-const RECOVERY_REQUEST = "RESUME-CANCELLED-SLEEPER";
-const RECOVERY_RESULT = "CANCELLED-SUBAGENT-RECOVERED";
-
 export default defineEval({
   description:
-    "Cancel a parent turn, cascade cancellation to its local sleeper subagent, then resume that child.",
+    "Cancel a parent turn and cascade cancellation to the local sleeper session its workflow run opened.",
   timeoutMs: 240_000,
 
   async test(t) {
@@ -16,79 +13,47 @@ export default defineEval({
     const parent = await session.start(
       "Use the workflow tool exactly once to call the sleeper subagent with message 'Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled.' Return the sleeper result.",
     );
-    const called = await parent.waitForEvent("subagent.called", {
+    const started = await parent.waitForEvent("child.opened", {
       data: { name: "sleeper" },
     });
-    const agentId = called.data.agentId;
-    if (agentId === undefined) throw new Error("Cancelled sleeper call has no agent id.");
 
-    const child = t.target.watchTurn(called.data.childSessionId);
-    await child.waitForEvent("actions.requested", {
-      data: {
-        actions: (actions) =>
-          actions.some(
-            (action) => action.kind === "tool-call" && action.toolName === "wait-for-cancellation",
-          ),
-      },
+    const child = t.target.attach(started.data.sessionId).watch();
+    await child.waitForEvent("call.requested", {
+      data: { capability: { name: "wait-for-cancellation" } },
     });
 
     const cancelled = await parent.cancel();
     await t.require(
       cancelled,
       satisfies(
-        (value: typeof cancelled) => value.status === "accepted",
+        (value: typeof cancelled) => typeof value.deliveryId === "string",
         "parent cancel request is accepted",
       ),
     );
 
     const [parentTurn, childTurn] = await Promise.all([parent.result(), child.result()]);
-    childTurn.event("turn.cancelled", { count: 1 });
-    childTurn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    childTurn.notEvent("turn.failed");
-    childTurn.notEvent("session.failed");
+    childTurn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    childTurn.eventOrder([{ data: { outcome: "cancelled" }, type: "turn.settled" }]);
+    childTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    childTurn.notEvent("session.ended", { data: { outcome: "failed" } });
 
-    parentTurn.event("turn.cancelled", { count: 1 });
-    parentTurn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    parentTurn.notEvent("subagent.completed");
-    parentTurn.notEvent("turn.failed");
-    parentTurn.notEvent("session.failed");
+    parentTurn.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    parentTurn.eventOrder([{ data: { outcome: "cancelled" }, type: "turn.settled" }]);
+    parentTurn.notEvent("turn.settled", { data: { outcome: "failed" } });
+    parentTurn.notEvent("session.ended", { data: { outcome: "failed" } });
 
     const followUp = await session.send("Reply with exactly CANCELLATION-SUBAGENT-FOLLOW-UP-OK.");
     followUp.expectOk();
-    followUp.notEvent("turn.cancelled");
+    followUp.notEvent("turn.settled", { data: { outcome: "cancelled" } });
     followUp.messageIncludes(/CANCELLATION-SUBAGENT-FOLLOW-UP-OK/i);
 
-    // The cancelled child must survive in the parent's model-visible
-    // [Agents] listing as a parked "(cancelled)" handle. A handle leaked as
-    // `running` never re-enters the listing, so this catches the abandoned
-    // cancelled batch regressing to a permanent leak.
-    const listing = await session.send(
-      "Look at the [Agents] listing in your context and reply with the sleeper agent's entry verbatim, including its status.",
-    );
-    listing.expectOk();
-    listing.notEvent("turn.cancelled");
-    listing.messageIncludes(/sleeper/i);
-    listing.messageIncludes(/\(cancelled\)/);
-
-    const resumed = await session.send(
-      [
-        "Use the workflow tool exactly once.",
-        `In its JavaScript, call ctx.agent for sleeper with agentId ${JSON.stringify(agentId)} and message ${JSON.stringify(RECOVERY_REQUEST)}.`,
-        "Return the inline result and reply with it verbatim. Do not call sleeper outside workflow.",
-      ].join(" "),
-    );
-    resumed.expectOk();
-    resumed.messageIncludes(RECOVERY_RESULT);
-    resumed.event("subagent.called", {
+    // The eval watches both the parent and the sleeper session; each one's turn is cancelled once.
+    t.event("turn.settled", { count: 2, data: { outcome: "cancelled" } });
+    t.event("child.opened", { count: 1, data: { name: "sleeper" } });
+    t.event("call.settled", {
       count: 1,
-      data: {
-        agentId,
-        childSessionId: called.data.childSessionId,
-        name: "sleeper",
-      },
+      data: { outcome: "interrupted" },
+      scope: { taskId: /./u },
     });
-
-    t.event("turn.cancelled", { count: 2 });
-    t.event("subagent.called", { count: 2, data: { name: "sleeper" } });
   },
 });

@@ -6,7 +6,7 @@ import {
 } from "#setup/primitives/pm/run.js";
 
 /** Effects used to install dependencies added by an integration scaffold. */
-export interface IntegrationScaffoldDeps {
+interface IntegrationScaffoldDeps {
   detectPackageManager: typeof detectPackageManager;
   runPackageManagerInstall: typeof runPackageManagerInstall;
 }

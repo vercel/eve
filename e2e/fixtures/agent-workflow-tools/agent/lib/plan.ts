@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 
+/** The `sign_off_plan` request that asks a person to sign off; any other is a note on the plan. */
+export const SIGN_OFF_REQUEST = "sign off";
+
 export function describePlan(service: string): string {
   return `deploy ${service}`;
 }

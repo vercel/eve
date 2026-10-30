@@ -1,24 +1,35 @@
+import type {
+  WorkflowToolRunAnswer,
+  WorkflowToolRunControlMessage,
+} from "#execution/tools/workflow/messages.js";
+import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { InputResponse } from "#shared/input.js";
-import type { ToolInputResponse } from "#tools/definition.js";
+import type { Answer } from "#shared/input.js";
+import type { Principal } from "#protocol/session-events/envelope.js";
 
-/** Resumed with the bare response, not a session-inbox delivery, so the body can race the hook. */
-export async function resumeWorkflowToolRunAnswers(
-  answerToken: string,
-  responses: readonly InputResponse[] | undefined,
+export { principalOf } from "#execution/session/delivery-facts.js";
+
+/**
+ * Sends the answers the session accepted to the asking run's control hook,
+ * the same ordered inbox its commands use, so an answer the session accepted
+ * before an interrupt or cancel reaches the body before them.
+ */
+export async function sendWorkflowAskAnswers(
+  route: WorkflowAskRoute,
+  responses: readonly Answer[] | undefined,
+  responder?: Principal,
 ): Promise<void> {
   for (const response of responses ?? []) {
-    const answer: ToolInputResponse = {
-      optionId: response.optionId,
-      status: "answered",
-      text: response.text,
+    const { optionId, text } = response;
+    const answered: WorkflowToolRunAnswer =
+      responder === undefined
+        ? { optionId, status: "answered", text }
+        : { optionId, responder, status: "answered", text };
+    const answer: WorkflowToolRunControlMessage = {
+      kind: "answer",
+      requestId: response.interactionId,
+      response: answered,
     };
-    await resumeHook(answerToken, answer);
+    await resumeHook(route.control, answer);
   }
-}
-
-/** Resolves a dismissible `ctx.ask()` request the user moved past without answering. */
-export async function resumeWorkflowToolRunDismissal(answerToken: string): Promise<void> {
-  const answer: ToolInputResponse = { status: "dismissed" };
-  await resumeHook(answerToken, answer);
 }

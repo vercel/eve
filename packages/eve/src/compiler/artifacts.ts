@@ -2,23 +2,18 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 
-import { z } from "#compiled/zod/index.js";
-import {
-  discoverDiagnosticsSummarySchema,
-  type DiscoverDiagnostic,
-  type DiscoverDiagnosticsSummary,
-} from "#discover/diagnostics.js";
+import type { DiscoverDiagnostic, DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import {
-  compilerDiagnosticSchema,
   projectDiscoverDiagnostic,
   summarizeCompilerDiagnostics,
   type CompilerDiagnostic,
 } from "#compiler/diagnostics.js";
+import { createCompiledRuntimeModelCatalogLoader } from "#compiler/model-catalog.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
@@ -28,12 +23,12 @@ import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared
 /**
  * Stable diagnostics artifact kind emitted by the compiler.
  */
-export const COMPILER_DIAGNOSTICS_ARTIFACT_KIND = "eve-compiler-diagnostics";
+const COMPILER_DIAGNOSTICS_ARTIFACT_KIND = "eve-compiler-diagnostics";
 
 /**
  * Current diagnostics artifact schema version.
  */
-export const COMPILER_DIAGNOSTICS_ARTIFACT_VERSION = 2;
+const COMPILER_DIAGNOSTICS_ARTIFACT_VERSION = 2;
 
 /**
  * Stable compile metadata artifact kind emitted by the compiler.
@@ -56,6 +51,7 @@ export interface CompilerArtifactPaths {
   diagnosticsPath: string;
   discoveryManifestPath: string;
   discoveryDirectoryPath: string;
+  modelMetadataPath: string;
   moduleMapPath: string;
   sandboxPreparedArtifactsPath: string;
 }
@@ -63,21 +59,12 @@ export interface CompilerArtifactPaths {
 /**
  * Machine-readable compiler diagnostics artifact written by the compiler.
  */
-export interface CompilerDiagnosticsArtifact {
+interface CompilerDiagnosticsArtifact {
   diagnostics: CompilerDiagnostic[];
   kind: typeof COMPILER_DIAGNOSTICS_ARTIFACT_KIND;
   summary: DiscoverDiagnosticsSummary;
   version: typeof COMPILER_DIAGNOSTICS_ARTIFACT_VERSION;
 }
-
-export const compilerDiagnosticsArtifactSchema = z
-  .object({
-    diagnostics: z.array(compilerDiagnosticSchema),
-    kind: z.literal(COMPILER_DIAGNOSTICS_ARTIFACT_KIND),
-    summary: discoverDiagnosticsSummarySchema,
-    version: z.literal(COMPILER_DIAGNOSTICS_ARTIFACT_VERSION),
-  })
-  .strict();
 
 /**
  * One artifact digest recorded in compile metadata.
@@ -159,6 +146,7 @@ function resolveCompilerArtifactPathsAt(
     diagnosticsPath: join(discoveryDirectoryPath, "diagnostics.json"),
     discoveryManifestPath: join(discoveryDirectoryPath, "agent-discovery-manifest.json"),
     discoveryDirectoryPath,
+    modelMetadataPath: join(compileDirectoryPath, "model-metadata.json"),
     moduleMapPath: join(compileDirectoryPath, "module-map.mjs"),
     sandboxPreparedArtifactsPath: join(compileDirectoryPath, "sandbox-prepared-artifacts.json"),
   };
@@ -244,13 +232,21 @@ export async function writeCompilerArtifacts(
   const diagnostics = input.diagnostics.map((diagnostic) =>
     projectDiscoverDiagnostic(diagnostic, ROOT_COMPILED_AGENT_NODE_ID),
   );
+  const modelCatalog = createCompiledRuntimeModelCatalogLoader(input.manifest.appRoot);
+  // Checked before compiling so the manifest's diagnostics summary counts the warning.
+  if ((await modelCatalog.loadModelMetadata()).fetchedAt === null) {
+    diagnostics.push(createModelMetadataUnavailableDiagnostic(paths.modelMetadataPath));
+  }
   const compiledManifest = await materializeWorkspaceResources({
     compileDirectoryPath: paths.compileDirectoryPath,
     manifest: await compileAgentManifest(input.manifest, {
       developmentExtensions: input.developmentExtensions,
       diagnostics,
+      modelCatalog,
     }),
   });
+  // Read again after compiling: a static model the cached catalog missed refreshes it.
+  const modelMetadata = await modelCatalog.loadModelMetadata();
   const diagnosticsArtifact = createCompilerDiagnosticsArtifact(diagnostics);
   const compiledManifestJson = serializeArtifactJson(compiledManifest);
   const discoveryManifestJson = serializeArtifactJson(input.manifest);
@@ -285,6 +281,7 @@ export async function writeCompilerArtifacts(
     writeFile(paths.discoveryManifestPath, discoveryManifestJson),
     writeFile(paths.moduleMapPath, moduleMapSource),
     writeFile(paths.compileMetadataPath, metadataJson),
+    writeFile(paths.modelMetadataPath, serializeArtifactJson(modelMetadata)),
     writeFile(paths.sandboxPreparedArtifactsPath, sandboxPreparedArtifactsJson),
   ]);
 
@@ -294,6 +291,19 @@ export async function writeCompilerArtifacts(
     metadata,
     moduleMapSource,
     paths,
+  };
+}
+
+function createModelMetadataUnavailableDiagnostic(modelMetadataPath: string): CompilerDiagnostic {
+  return {
+    code: "compile/model-metadata-unavailable",
+    message:
+      "The AI Gateway model catalog was unavailable, so this build has no model metadata. " +
+      "Runtime model selections that omit modelContextWindowTokens, such as dynamic models and " +
+      "ctx.agent() model overrides, fail until you rebuild with network access to " +
+      "ai-gateway.vercel.sh or set modelContextWindowTokens on each selection.",
+    severity: "warning",
+    sources: [{ nodeId: ROOT_COMPILED_AGENT_NODE_ID, sourcePath: modelMetadataPath }],
   };
 }
 

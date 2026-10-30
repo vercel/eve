@@ -19,6 +19,7 @@ const CACHE_TTL_MS = 5 * 60_000;
 /** The sandbox mounts the authored `agent/` directory here in development. */
 const AUTHORED_SOURCE_MOUNT = "/source";
 const AUTHORED_PREFIX = "agent/";
+const SELF_MODIFICATION_MOUNT = "agent/extensions/self-modification";
 
 const inputSchema = {
   type: "object",
@@ -99,6 +100,8 @@ export interface CatalogEntry {
   readonly authoredTarget?: string;
   /** Whether `meta.eve.setup` declares one or more setup commands. */
   readonly declaresSetup?: boolean;
+  /** Whether any file would replace the self-modification extension mount. */
+  readonly selfModificationMount?: boolean;
   /** Names of environment variables the item declares. */
   readonly envVars?: readonly string[];
 }
@@ -166,6 +169,12 @@ function eveMetadata(entry: Record<string, unknown>): Record<string, unknown> {
   return isRecord(eve) ? eve : {};
 }
 
+function targetsSelfModificationMount(target: string): boolean {
+  return (
+    target === `${SELF_MODIFICATION_MOUNT}.ts` || target.startsWith(`${SELF_MODIFICATION_MOUNT}/`)
+  );
+}
+
 /** First authored file the item installs; identifies an existing install. */
 function authoredTargetOf(entry: Record<string, unknown>): string | undefined {
   const files = entry.files;
@@ -176,6 +185,16 @@ function authoredTargetOf(entry: Record<string, unknown>): string | undefined {
     if (target?.startsWith(AUTHORED_PREFIX) === true) return target;
   }
   return undefined;
+}
+
+function targetsSelfModificationMountOf(entry: Record<string, unknown>): boolean {
+  const files = entry.files;
+  return (
+    Array.isArray(files) &&
+    files.some(
+      (file) => isRecord(file) && targetsSelfModificationMount(optionalString(file.target) ?? ""),
+    )
+  );
 }
 
 /** Names of environment variables the item declares, used to report unset ones after install. */
@@ -200,6 +219,7 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
     if (address === undefined) continue;
     const eve = eveMetadata(item);
     if (eve.hidden === true) continue;
+    const authoredTarget = authoredTargetOf(item);
 
     const entry: {
       address: string;
@@ -209,6 +229,7 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
       description?: string;
       envVars?: readonly string[];
       requires?: string;
+      selfModificationMount?: boolean;
       title: string;
     } = { address, title: optionalString(item.title) ?? titleFromAddress(address) };
 
@@ -218,9 +239,9 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
     if (description !== undefined) entry.description = description;
     const requires = optionalString(eve.requires);
     if (requires !== undefined) entry.requires = requires;
-    const authoredTarget = authoredTargetOf(item);
     if (authoredTarget !== undefined) entry.authoredTarget = authoredTarget;
     if (eve.setup !== undefined && eve.setup !== null) entry.declaresSetup = true;
+    if (targetsSelfModificationMountOf(item)) entry.selfModificationMount = true;
     const envVars = declaredEnvVars(item);
     if (envVars.length > 0) entry.envVars = envVars;
 
@@ -485,7 +506,7 @@ export default defineTool({
       limit?: number;
       offset?: number;
       query?: string;
-    } = { entries };
+    } = { entries: entries.filter((entry) => entry.selfModificationMount !== true) };
     const category = typeof input.category === "string" ? input.category : undefined;
     if (category !== undefined && isCategory(category)) selection.category = category;
     if (typeof input.limit === "number") selection.limit = input.limit;

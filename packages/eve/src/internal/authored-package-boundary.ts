@@ -1,14 +1,14 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire, isBuiltin } from "node:module";
 import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
   resolvePackageDependencyPath,
+  resolvePackageRoot,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
-
-export const CACHED_CHANNEL_PREFIX = "eve-cached-channel:";
 
 export const RESOLVE_EXTENSIONS = [
   ".ts",
@@ -42,6 +42,8 @@ interface ResolvedAuthoredExternalModule {
 export function createGenerationPackageBoundaryPlugin(input: {
   readonly externalDependencies: readonly string[];
   readonly packageRoot: string;
+  readonly extensionSpecifiers?: ReadonlySet<string>;
+  readonly resolveExternalPaths?: boolean;
 }): Record<string, unknown> {
   return {
     name: "eve-generation-package-boundary",
@@ -55,8 +57,13 @@ export function createGenerationPackageBoundaryPlugin(input: {
         return undefined;
       }
 
+      if (input.extensionSpecifiers?.has(source)) return undefined;
       if (isFrameworkRuntimeImport(source, importer)) {
-        return { external: true, id: resolveFrameworkRuntimeImport(source) };
+        if (input.extensionSpecifiers?.has(source)) return undefined;
+        return {
+          external: true,
+          id: toExternalModuleId(resolveFrameworkRuntimeImport(source), options.kind),
+        };
       }
 
       // Package-private imports must be resolved before this bundle is moved
@@ -79,7 +86,12 @@ export function createGenerationPackageBoundaryPlugin(input: {
         return undefined;
       }
 
-      return { external: true, id: source };
+      return {
+        external: true,
+        id: input.resolveExternalPaths
+          ? toExternalModuleId(normalizeEsmImportSpecifier(externalModule.resolvedId), options.kind)
+          : source,
+      };
     },
   };
 }
@@ -87,6 +99,7 @@ export function createGenerationPackageBoundaryPlugin(input: {
 export function createRuntimeLoaderPackageBoundaryPlugin(input: {
   readonly externalDependencies: readonly string[];
   readonly packageRoot: string;
+  readonly extensionSpecifiers?: ReadonlySet<string>;
 }): Record<string, unknown> {
   const canonicalPackageRoot = toCanonicalPath(input.packageRoot);
 
@@ -102,10 +115,11 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
         return undefined;
       }
 
+      if (input.extensionSpecifiers?.has(source) === true) return undefined;
       if (isFrameworkRuntimeImport(source, importer)) {
         return {
           external: true,
-          id: resolveRuntimeLoaderFrameworkImport(source),
+          id: toExternalModuleId(resolveRuntimeLoaderFrameworkImport(source), options.kind),
         };
       }
 
@@ -113,10 +127,20 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
       // condition used by the app build maps them to TypeScript source.
       // Resolve through Node's default package-import conditions here so a
       // packed eve installation does not leak #shared/* into the bundle.
+      // eve's own compiled modules load by path: inlining them re-bundles most
+      // of the framework for every eve-owned module this loader evaluates.
       if (source.startsWith("#")) {
         const resolvedPackageImport = resolvePackageImport(source, importer, input.packageRoot);
         if (resolvedPackageImport !== undefined) {
-          return { id: resolvedPackageImport };
+          return isFrameworkPackagePath(resolvedPackageImport)
+            ? {
+                external: true,
+                id: toExternalModuleId(
+                  normalizeEsmImportSpecifier(resolvedPackageImport),
+                  options.kind,
+                ),
+              }
+            : { id: resolvedPackageImport };
         }
       }
 
@@ -133,16 +157,12 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
 
         return {
           external: true,
-          id: normalizeEsmImportSpecifier(resolvedId),
+          id: toExternalModuleId(normalizeEsmImportSpecifier(resolvedId), options.kind),
         };
       }
 
       const importerPath =
-        importer === undefined ||
-        importer.startsWith("\0") ||
-        importer.startsWith(CACHED_CHANNEL_PREFIX)
-          ? undefined
-          : resolve(importer);
+        importer === undefined || importer.startsWith("\0") ? undefined : resolve(importer);
 
       // Keep package imports authored directly by the app external by
       // default, but let symlinked/file workspace packages compile as
@@ -302,7 +322,8 @@ export function normalizeExternalDependencies(
   return [...new Set(externalDependencies)].sort();
 }
 
-function resolveConfiguredExternalDependency(
+/** Returns the configured external that `source` imports (the entry itself or one of its subpaths). */
+export function resolveConfiguredExternalDependency(
   source: string,
   externalDependencies: readonly string[],
 ): string | undefined {
@@ -311,7 +332,8 @@ function resolveConfiguredExternalDependency(
   );
 }
 
-function packageImportName(source: string): string {
+/** Returns the package part of a bare specifier: `@acme/db/x` → `@acme/db`, `pg/native` → `pg`. */
+export function packageImportName(source: string): string {
   return source.startsWith("@") ? source.split("/", 2).join("/") : source.split("/", 1)[0]!;
 }
 
@@ -360,6 +382,21 @@ function resolvePackageImport(
   }
 }
 
+let canonicalFrameworkPackageRoot: string | undefined;
+
+function isFrameworkPackagePath(path: string): boolean {
+  canonicalFrameworkPackageRoot ??= toCanonicalPath(resolvePackageRoot());
+  return nearestPackageRoot(path) === canonicalFrameworkPackageRoot;
+}
+
+/**
+ * ESM imports need `file:` URLs for Windows absolute paths, but CommonJS
+ * `require()` rejects URLs, so a `require()` of an external keeps its path.
+ */
+function toExternalModuleId(id: string, kind: string): string {
+  return kind === "require-call" && id.startsWith("file:") ? fileURLToPath(id) : id;
+}
+
 function resolveExistingExternalFilePath(id: string): string | undefined {
   if (existsSync(id)) {
     return id;
@@ -385,20 +422,22 @@ function isPackageImport(source: string): boolean {
     return false;
   }
 
-  if (source.startsWith("@/")) {
-    return false;
-  }
-
-  return !source.startsWith(CACHED_CHANNEL_PREFIX);
+  return !source.startsWith("@/");
 }
 
 export function isPathImport(source: string): boolean {
   return source.startsWith(".") || source.startsWith("/") || /^[A-Za-z]:[\\/]/.test(source);
 }
 
+const SELF_MODIFICATION_MOUNT_SPECIFIERS = new Set([
+  "eve/self-modification",
+  "eve/extensions/self-modification/local",
+  "eve/extensions/self-modification/remote",
+]);
+
 function isFrameworkRuntimeImport(source: string, importer: string | undefined): boolean {
-  // The packaged extension is authored code: its mount and child must share a scoped handle.
-  if (source === "eve/self-modification") return false;
+  // Packaged extension mounts are authored code: each mount and its child must share a scoped handle.
+  if (SELF_MODIFICATION_MOUNT_SPECIFIERS.has(source)) return false;
   if (source === "eve" || source.startsWith("eve/")) {
     return true;
   }
@@ -443,6 +482,33 @@ function resolveRuntimeLoaderFrameworkImport(source: string): string {
 
 export function isNodeModulesPath(path: string): boolean {
   return path.replaceAll("\\", "/").includes("/node_modules/");
+}
+
+export function resolveAuthoredPackageRoot(modulePath: string): string {
+  const packageRoot = findAuthoredPackageRoot(dirname(modulePath));
+  if (packageRoot === undefined) {
+    throw new Error(`Failed to resolve the authored package root for "${modulePath}".`);
+  }
+  return packageRoot;
+}
+
+/** Returns the nearest directory at or above `directory` that has a `package.json`. */
+export function findAuthoredPackageRoot(directory: string): string | undefined {
+  let currentDirectory = directory;
+
+  while (true) {
+    if (existsSync(join(currentDirectory, "package.json"))) {
+      return realpathSync(currentDirectory);
+    }
+
+    const parentDirectory = dirname(currentDirectory);
+
+    if (parentDirectory === currentDirectory) {
+      return undefined;
+    }
+
+    currentDirectory = parentDirectory;
+  }
 }
 
 function toCanonicalPath(path: string): string {

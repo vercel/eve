@@ -1,7 +1,8 @@
-import { evaluate } from "#ai/evaluate.js";
+import { decideWithMetadata } from "#ai/decision-adapter.js";
 import { runUntilAborted } from "#evals/abort.js";
 import type { AssertionCollector } from "#evals/assertions/collector.js";
 import { formatDiagnosticValue, toDiagnosticMetadataValue } from "#evals/diagnostics.js";
+import type { JsonValue } from "#shared/json.js";
 import type {
   AssertionHandle,
   EveEvalJudgeConfig,
@@ -13,7 +14,7 @@ import type {
   JudgeQuestionConstraint,
 } from "#evals/types.js";
 
-export interface JudgeDeps {
+interface JudgeDeps {
   readonly collector: AssertionCollector;
   readonly getReply: () => string | null;
   readonly getInput: () => string;
@@ -21,7 +22,7 @@ export interface JudgeDeps {
   readonly signal: AbortSignal;
 }
 
-/** Bind evaluation-backed judgments to the existing assertion lifecycle. */
+/** Bind decision-backed judgments to the existing assertion lifecycle. */
 export function buildJudgeContext(deps: JudgeDeps): JudgeContext {
   function judge(criteria: string, opts?: JudgeOpts): AssertionHandle;
   function judge<const Q extends JudgeQuestion>(
@@ -58,22 +59,25 @@ export function buildJudgeContext(deps: JudgeDeps): JudgeContext {
       (async () => {
         const capturedState = structuredClone(state);
         const capturedQuestions = structuredClone(questions);
-        const evaluationQuestions = Object.fromEntries(
+        const decisionQuestions = Object.fromEntries(
           Object.entries(capturedQuestions).map(([id, question]) => {
             if (question.type !== "choice") return [id, question];
-            const { expected, ...evaluationQuestion } = question;
+            const { expected, ...decisionQuestion } = question;
             if (typeof expected !== "string" || !Object.hasOwn(question.criteria, expected)) {
               throw new Error(`Judge question "${id}" expected must name an option in criteria.`);
             }
-            return [id, evaluationQuestion];
+            return [id, decisionQuestion];
           }),
         );
-        const result = await evaluate({
+        const result = await decideWithMetadata({
           model,
-          state: capturedState,
-          questions: evaluationQuestions,
+          // The AI SDK reads a bare array as state parts, so JSON arrays travel as one JSON part.
+          state: isJsonArray(capturedState)
+            ? [{ type: "json", value: capturedState }]
+            : capturedState,
+          questions: decisionQuestions,
           providerOptions: modelOptions?.providerOptions,
-          abortSignal: deps.signal,
+          signal: deps.signal,
         });
         return { result, state: capturedState, questions: capturedQuestions };
       })(),
@@ -118,6 +122,10 @@ export function buildJudgeContext(deps: JudgeDeps): JudgeContext {
   return judge;
 }
 
+function isJsonArray(state: JudgeInput): state is readonly JsonValue[] {
+  return Array.isArray(state);
+}
+
 function formatJudgeDetail(state: JudgeInput, question: JudgeQuestion, answer: unknown): string {
   return [
     ["state", state],
@@ -130,7 +138,7 @@ function formatJudgeDetail(state: JudgeInput, question: JudgeQuestion, answer: u
 
 function judgeScore(
   question: JudgeQuestion,
-  answer: Awaited<ReturnType<typeof evaluate>>["answers"][string],
+  answer: Awaited<ReturnType<typeof decideWithMetadata>>["answers"][string],
 ): number {
   switch (answer.type) {
     case "boolean":
@@ -142,5 +150,5 @@ function judgeScore(
       if (question.type === "choice") return answer.choice === question.expected ? 1 : 0;
       break;
   }
-  throw new Error("Evaluation answer does not match the judge question.");
+  throw new Error("Decision answer does not match the judge question.");
 }

@@ -20,7 +20,7 @@ vi.mock("node:module", () => ({
     },
   }),
 }));
-import { readVercelCliConnection } from "./vercel-cli.js";
+import { readVercelCliConnection, readVercelCliToken } from "./vercel-cli.js";
 const base =
   process.platform === "darwin"
     ? "/test/home/Library/Application Support"
@@ -70,4 +70,18 @@ it("falls back to file credentials when automatic keyring access is unavailable"
 it("does not guess a team when the CLI has no selection", async () => {
   mocks.read.mockResolvedValue("{}");
   expect(await readVercelCliConnection()).toBeUndefined();
+});
+it("reads personal-scope file credentials without a selected team", async () => {
+  mocks.read.mockImplementation(async (path: string) => {
+    if (path === configPath) return JSON.stringify({ credStorage: "file" });
+    if (path === authPath) return JSON.stringify({ token: "personal-token" });
+    throw new Error("ENOENT");
+  });
+  expect(await readVercelCliConnection()).toBeUndefined();
+  expect(await readVercelCliToken()).toBe("personal-token");
+});
+it("uses VERCEL_TOKEN without CLI configuration", async () => {
+  mocks.read.mockRejectedValue(new Error("ENOENT"));
+  vi.stubEnv("VERCEL_TOKEN", "env-token");
+  expect(await readVercelCliToken()).toBe("env-token");
 });

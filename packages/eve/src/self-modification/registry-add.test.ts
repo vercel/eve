@@ -24,6 +24,7 @@ import {
   unsetEnvVars,
 } from "./extension/subagents/agent/tools/registry_add.js";
 import { clearRegistryIndexCache } from "./extension/subagents/agent/tools/search_registry.js";
+import { productionRegistryAddTool } from "./remote/subagents/agent/tools/registry_add.js";
 
 const APP_ROOT = "/workspace/agent";
 const originalEveDev = process.env.EVE_DEV;
@@ -35,6 +36,11 @@ const INDEX = {
       title: "Browserbase",
       envVars: { BROWSERBASE_API_KEY: "", BROWSERBASE_PROJECT_ID: "" },
       files: [{ target: "agent/extensions/browserbase.ts" }],
+    },
+    {
+      name: "eve/self-modification",
+      title: "Self-modification",
+      files: [{ target: "agent/extensions/self-modification/extension.ts" }],
     },
     {
       name: "channel/slack",
@@ -155,17 +161,12 @@ describe("resolveRegistryAddTool", () => {
   });
 
   it("resolves the deployed lifecycle with continuation arguments and outcomes", () => {
-    delete process.env.EVE_DEV;
-
-    const tool = resolveRegistryAddTool({
-      localEnabled: true,
-      deployed: {
-        authorize: () => true,
-        credentials: { kind: "pat" },
-        directory: ".",
-        repository: { owner: "acme", repo: "agent" },
-        targetBranch: "main",
-      },
+    const tool = productionRegistryAddTool({
+      authorize: () => true,
+      credentials: { kind: "pat" },
+      directory: ".",
+      repository: { owner: "acme", repo: "agent" },
+      targetBranch: "main",
     });
 
     expect(tool).toMatchObject({
@@ -234,8 +235,9 @@ describe("addLocalRegistryItem", () => {
     });
 
     expect(result.nextCommand).toBeUndefined();
-    expect(result.message).toContain("setup panel");
-    expect(result.message).toContain("do not ask the developer to run another command");
+    expect(result.message).toContain("has not been installed yet");
+    expect(result.message).toContain("opens after this reply");
+    expect(result.message).toContain("Do not ask the developer to run another command");
   });
 
   it("installs an exact item from a configured registry without restricting its address", async () => {
@@ -257,6 +259,12 @@ describe("addLocalRegistryItem", () => {
     await expect(
       addLocalRegistryItem("channel/nonexistent", { getCapability: () => capability() }),
     ).rejects.toThrow(/No item in the configured eve registry is published/u);
+  });
+
+  it("directs self-modification mount changes to the authored mount", async () => {
+    await expect(
+      addLocalRegistryItem("eve/self-modification", { getCapability: () => capability() }),
+    ).rejects.toThrow(/cannot replace the self-modification subagent's own mount/u);
   });
 
   it("installs a no-setup item with a fixed argv and reports unset envVars", async () => {

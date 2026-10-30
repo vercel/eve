@@ -36,7 +36,7 @@ export interface LinkFlowDeps {
   applyAiGatewayCredential?: ApplyAiGatewayCredentialDeps;
 }
 
-export type LinkFlowResult =
+type LinkFlowResult =
   | {
       kind: "done";
       /**

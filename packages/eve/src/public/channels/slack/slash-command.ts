@@ -7,6 +7,7 @@ import type {
   SlackSlashCommand,
   SlackSlashCommandContext,
 } from "#public/channels/slack/slackChannel.js";
+import type { SlackTransportOptions } from "#public/channels/slack/transport.js";
 
 const log = createLogger("slack.slash-command");
 
@@ -18,10 +19,10 @@ type SlashCommandPayload = Extract<
 export function dispatchSlashCommand(
   payload: SlashCommandPayload,
   ctx: { readonly waitUntil: (task: Promise<unknown>) => void },
-  config: SlackChannelConfig,
+  deps: { readonly api: SlackTransportOptions | undefined; readonly config: SlackChannelConfig },
 ): void {
   const command = parseSlashCommandPayload(payload);
-  const onSlashCommand = config.onSlashCommand;
+  const onSlashCommand = deps.config.onSlashCommand;
   if (onSlashCommand === undefined) {
     log.warn("Slack slash command ignored because onSlashCommand is not configured", {
       command: command.command,
@@ -31,7 +32,8 @@ export function dispatchSlashCommand(
 
   const commandCtx: SlackSlashCommandContext = {
     slack: buildSlackWorkspaceHandle({
-      botToken: config.credentials?.botToken,
+      api: deps.api,
+      botToken: deps.config.credentials?.botToken,
       installationTeamId: command.teamId,
       teamId: command.teamId,
     }),

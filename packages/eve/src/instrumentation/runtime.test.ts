@@ -12,6 +12,7 @@ import {
   ScheduleIdKey,
   SessionTitleKey,
   SessionTraceSeedKey,
+  TraceRootKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
@@ -25,11 +26,12 @@ import {
   type InstrumentationRuntime,
   type InstrumentationStepScope,
 } from "#instrumentation/runtime.js";
-import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
-import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
-import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
+import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
+import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
+import type { TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 import { readForwardedAudienceBaggage, writeForwardedAudienceBaggage } from "#protocol/baggage.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const boundSession = {
   agentName: "test-agent",
@@ -43,6 +45,7 @@ function createRuntime(
 ): InstrumentationRuntime {
   return {
     forceFlush: async () => undefined,
+    idGenerator: new AgentSpanIdGenerator(),
     hooks,
     otelSettings: {
       recordInputs: true,
@@ -65,7 +68,6 @@ function createContext(audience: "private" | "public" | "unknown" = "public"): C
     audience,
     channel: { kind: "channel:test", name: "test" },
     environment: "production",
-    mode: "conversation",
     principalType: "anonymous",
   });
   return ctx;
@@ -111,7 +113,11 @@ function initializeRemoteSession(
     traceFlags: 1,
     traceId: "d".repeat(32),
   });
+  const logs = captureLogRecords();
   initializeSessionInstrumentation({ agentName: "remote-agent", ctx });
+  expect(logs.records).toContainEqual(
+    expect.objectContaining({ level: "info", message: "resolved forwarded trace policy" }),
+  );
   return ctx;
 }
 
@@ -142,7 +148,7 @@ describe("initializeSessionInstrumentation", () => {
       traceId: "d".repeat(32),
     });
     expect(ctx.get(SessionTraceSeedKey)?.spanId).not.toBe("c".repeat(16));
-    expect(ctx.get(SessionTraceSeedKey)?.traceId).not.toBe("d".repeat(32));
+    expect(ctx.get(SessionTraceSeedKey)?.traceId).toBe("d".repeat(32));
     expect(ctx.get(ParentTraceContextKey)).not.toHaveProperty("forwardedTracePolicy");
     expect(ctx.get(SessionTraceSeedKey)?.forwardedTracePolicy).toEqual({
       ceiling: { recordInputs: true, recordOutputs: true },
@@ -210,6 +216,7 @@ describe("initializeSessionInstrumentation", () => {
       action: "record",
       recordInputs: true,
       recordOutputs: false,
+      explicitContentAudience: "private",
     });
     await expect(
       readTelemetry(
@@ -224,6 +231,7 @@ describe("initializeSessionInstrumentation", () => {
   });
 
   it("redacts runtime-context model input when the forwarded ceiling denies inputs", async () => {
+    const logs = captureLogRecords();
     const ctx = createContext("public");
     const runtime: InstrumentationRuntime = {
       ...createRuntime({ capturesContent: true, publish: vi.fn() }, () => ({
@@ -265,8 +273,14 @@ describe("initializeSessionInstrumentation", () => {
         },
         async (scope) =>
           scope.resolveRuntimeContext({
-            eveVersion: "0.0.0",
-            emissionState: { sessionStarted: true, sequence: 0, stepIndex: 0, turnId: "turn-1" },
+            attempt: 0,
+            emissionState: {
+              runId: "run_0",
+              sessionStarted: true,
+              sequence: 0,
+              stepIndex: 0,
+              turnId: "turn-1",
+            },
             environment: "test",
             modelInput: {
               instructions: "private",
@@ -277,6 +291,13 @@ describe("initializeSessionInstrumentation", () => {
       );
 
     expect(messageCount).toBe(0);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "info",
+        message: "resolved forwarded trace policy",
+        fields: expect.objectContaining({ ceilingEffective: "i0o1", ceilingIn: "i0o1" }),
+      }),
+    );
   });
 
   it("narrows monotonically across a three-hop chain", () => {
@@ -342,6 +363,7 @@ describe("initializeSessionInstrumentation", () => {
   });
 
   it("does not widen an unsampled parent with a record decision", () => {
+    registerInstrumentationRuntime(createRuntime({ capturesContent: true, publish: vi.fn() }));
     const ctx = createContext("public");
     ctx.set(ParentTraceContextKey, {
       decision: { action: "record", recordInputs: true, recordOutputs: true },
@@ -354,11 +376,80 @@ describe("initializeSessionInstrumentation", () => {
       decision: { action: "drop" },
       traceFlags: 0,
     });
-    expect(ctx.get(SessionTraceSeedKey)?.traceId).not.toBe("d".repeat(32));
+    expect(ctx.get(SessionTraceSeedKey)?.traceId).toBe("d".repeat(32));
   });
 });
 
 describe("bindInstrumentationRuntime", () => {
+  it("carries the bound trace session through methods called under another session's context", async () => {
+    const publish = vi.fn();
+    const prepareSessionTrace = vi.fn(async (_event: unknown) => ({
+      spanId: "a".repeat(16),
+      traceId: "b".repeat(32),
+      traceFlags: 1,
+    }));
+    const prepareTurnTrace = vi.fn(async (_event: unknown) => ({
+      spanId: "a".repeat(16),
+      traceId: "b".repeat(32),
+      traceFlags: 1,
+    }));
+    const ctx = createContext();
+    ctx.set(TraceRootKey, { kind: "own" });
+    const other = createContext();
+    other.set(TraceRootKey, { kind: "inherited", sessionId: "unrelated" });
+    const bound = bindInstrumentationRuntime(
+      {
+        ...createRuntime({ capturesContent: true, publish }),
+        prepareSessionTrace,
+        prepareTurnTrace,
+        memoryOperations: true,
+      },
+      ctx,
+      boundSession,
+    )!;
+    await contextStorage.run(other, async () => {
+      await bound.preparePreamble({ sequence: 0, sessionStarted: false, turnId: "turn_0" });
+      await bound.memory!.execute(
+        {
+          idempotencyKey: "memory",
+          operationName: "search_memory",
+          phase: "turn.started",
+          slot: "notes",
+          storeId: "store",
+        },
+        async () => ({ value: undefined }),
+      );
+      await bound.prepareExecution().runStep(
+        {
+          environment: "test",
+          eveVersion: "test",
+          hasInput: true,
+          session: { sessionId: boundSession.sessionId },
+        },
+        async (step) => {
+          const attempt = step.prepareAttempt({
+            runId: "run_0",
+            attempt: 0,
+            stepIndex: 0,
+            turnId: "turn_0",
+          });
+          expect(attempt.scope.traceSessionId).toBe(boundSession.sessionId);
+        },
+      );
+    });
+    expect(prepareSessionTrace.mock.calls[0]?.[0]).toMatchObject({
+      traceSessionId: boundSession.sessionId,
+    });
+    expect(prepareTurnTrace.mock.calls[0]?.[0]).toMatchObject({
+      traceSessionId: boundSession.sessionId,
+    });
+    expect(
+      publish.mock.calls
+        .map(([event]) => event)
+        .filter((event) => event.type.startsWith("memory."))
+        .every((event) => event.traceSessionId === boundSession.sessionId),
+    ).toBe(true);
+  });
   it("initializes conversation identity without worker controls when no runtime is loaded", () => {
     const ctx = new ContextContainer();
     expect(bindInstrumentationRuntime(undefined, ctx, boundSession)).toBeUndefined();
@@ -419,7 +510,6 @@ describe("bindInstrumentationRuntime", () => {
       audience: "private",
       channel: { kind: "channel:test", name: "test" },
       environment: "production",
-      mode: "conversation",
       principalType: "anonymous",
     });
   });
@@ -553,7 +643,8 @@ describe("bindInstrumentationRuntime", () => {
         });
         expect(
           scope.prepareAttempt({
-            attemptIndex: 0,
+            runId: "run_0",
+            attempt: 0,
             stepIndex: 0,
             turnId: "turn-1",
           })?.scope.channelAudience,
@@ -586,7 +677,8 @@ describe("bindInstrumentationRuntime", () => {
         },
         async (scope) => ({
           integrations: scope.prepareAttempt({
-            attemptIndex: 0,
+            runId: "run_0",
+            attempt: 0,
             stepIndex: 0,
             turnId: "turn-1",
           }).telemetry?.integrations,
@@ -641,7 +733,15 @@ describe("bindInstrumentationRuntime", () => {
     expect(publish).not.toHaveBeenCalled();
   });
 
-  it("publishes memory operations with the effective session identity", async () => {
+  it.each([
+    { name: "local subagent", traceRoot: undefined, expected: "conversation-root" },
+    { name: "remote agent", traceRoot: { kind: "own" } as const, expected: "session-1" },
+    {
+      name: "remote agent's local subagent",
+      traceRoot: { kind: "inherited", sessionId: "remote-root" } as const,
+      expected: "remote-root",
+    },
+  ])("preserves the lifecycle lineage root for a $name", async ({ traceRoot, expected }) => {
     const publish = vi.fn();
     const ctx = createContext();
     ctx.set(ParentSessionKey, {
@@ -650,6 +750,7 @@ describe("bindInstrumentationRuntime", () => {
       sessionId: "parent-session",
       turn: { id: "parent-turn", sequence: 0 },
     });
+    if (traceRoot !== undefined) ctx.set(TraceRootKey, traceRoot);
     const instrumentation = bindInstrumentationRuntime(
       {
         ...createRuntime({ capturesContent: true, publish }),
@@ -676,17 +777,21 @@ describe("bindInstrumentationRuntime", () => {
       }),
     );
 
+    expect(ctx.get(ConversationIdKey)).toBe("conversation-root");
     expect(publish.mock.calls.map(([event]) => event)).toEqual([
       expect.objectContaining({
         rootSessionId: "conversation-root",
+        traceSessionId: expected,
         sessionId: "session-1",
         type: "memory.operation.started",
       }),
       expect.objectContaining({
+        outcome: "completed",
         recordCount: 1,
         rootSessionId: "conversation-root",
+        traceSessionId: expected,
         sessionId: "session-1",
-        type: "memory.operation.completed",
+        type: "memory.operation.settled",
       }),
     ]);
   });
@@ -714,8 +819,14 @@ describe("bindInstrumentationRuntime", () => {
     };
     const readScopedState = (scope: InstrumentationStepScope<{ sessionId: string }>) => ({
       messageCount: scope.resolveRuntimeContext({
-        eveVersion: "0.0.0",
-        emissionState: { sessionStarted: true, sequence: 0, stepIndex: 0, turnId: "turn-1" },
+        attempt: 0,
+        emissionState: {
+          runId: "run_0",
+          sessionStarted: true,
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn-1",
+        },
         environment: "test",
         modelInput: { instructions: undefined, messages: [{ content: "secret", role: "user" }] },
         session: { sessionId: "session-1" } as never,
@@ -735,7 +846,6 @@ describe("bindInstrumentationRuntime", () => {
       audience: "public",
       channel: { kind: "channel:test", name: "test" },
       environment: "production",
-      mode: "conversation",
       principalType: "anonymous",
     });
     const second = instrumentation?.runStep(stepInput, async (scope) => readScopedState(scope));
@@ -909,10 +1019,11 @@ describe("bindSessionInstrumentation", () => {
     );
     const ctx = createContext();
     contextStorage.run(ctx, () => {
-      new ContextAgentTraceStateStore().setSession("session-1", {
+      new ContextAgentTraceStateStore().set("session", "session-1", {
         context: { spanId: "1".repeat(16), traceFlags: 1, traceId: "2".repeat(32) },
         decision: { action: "record", recordInputs: false, recordOutputs: true },
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
       });
     });
 

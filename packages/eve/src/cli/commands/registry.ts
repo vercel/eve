@@ -7,13 +7,23 @@ import {
 } from "#compiled/shadcn-registry/index.js";
 import semver from "#compiled/semver/index.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import {
+  headlessAsker,
+  interactiveAsker,
+  InvalidAnswerError,
+  withAnswers,
+  withPolicy,
+} from "#setup/ask.js";
+import type { WebChatFramework } from "#setup/integrations/web/framework.js";
+import type { SetupPrerequisite } from "#setup/integrations/shared/prerequisite.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
+import { setupQuestionToWire } from "#setup/setup-question-wire.js";
 import { WizardCancelledError } from "#setup/step.js";
 
 import { hasInteractiveTerminal } from "./preconditions.js";
 import { installRegistryItemTransaction } from "./registry-install-transaction.js";
-import { runDeclaredSetups } from "./registry-declared-setups.js";
+import { RegistrySetupFailedError, runDeclaredSetups } from "./registry-declared-setups.js";
 import {
   errorMessage,
   reportRegistryCompletion as reportCompletion,
@@ -36,14 +46,24 @@ import {
   type RegistrySearchPresentationSection,
 } from "./registry-presentation.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
-import { serializeHeadlessSetupEvent } from "./setup-headless.js";
+import { headlessSetupContinuation, serializeHeadlessSetupEvent } from "./setup-headless.js";
 import {
   prepareWebChatProjectRoot,
   prepareWebRegistryProject,
   readRegistryConfig,
+  resolveWebChatFramework,
 } from "./registry-project.js";
 export { runRegistryAddCommand } from "./registry-add-command.js";
 export type { RegistryCommandLogger } from "./registry-recovery.js";
+/** Source was installed, but the item's setup was cancelled, skipped, or failed. */
+export interface RegistrySetupIncomplete {
+  resumeCommand: string;
+  /** Why setup failed; absent when it was cancelled or skipped. */
+  reason?: string;
+  /** A structured action that unblocks setup, such as `vercel login`. */
+  prerequisite?: SetupPrerequisite;
+}
+
 export interface AddCommandOptions {
   skipInstall?: boolean;
   overwrite?: boolean;
@@ -81,6 +101,8 @@ type RunAddCommandOptions = AddCommandOptions & {
   prompter?: Prompter;
   signal?: AbortSignal;
   setupAuthorized?: boolean;
+  /** Throw {@link RegistrySetupFailedError} to the caller instead of logging it. */
+  throwSetupFailures?: boolean;
 };
 
 /** One discoverable item from an eve-compatible registry catalog. */
@@ -145,7 +167,9 @@ const OFFICIAL_REGISTRY = resolveOfficialRegistryUrl();
 const OFFICIAL_CATALOG = `${OFFICIAL_REGISTRY}/registry.json`;
 const SKILLS_REGISTRY = "@skills";
 const SKILLS_REGISTRY_URL = "https://www.skills.sh/r/{name}?agent=eve";
-const CATALOG_PAGE_SIZE = 100;
+// Browsing loads the whole catalog in one page, so this must stay above the
+// official registry's item count (hidden items count until they are filtered).
+const CATALOG_PAGE_SIZE = 500;
 const DEFAULT_SEARCH_LIMIT = 10;
 const ADD_SUGGESTION_LIMIT = 5;
 
@@ -155,18 +179,68 @@ function itemAddress(item: string): string {
     : `${OFFICIAL_REGISTRY}/${item}.json`;
 }
 
-/** Installs an official registry item without running its declared setup command. */
-export async function installOfficialRegistryItem(
+/** The registry item that carries each Web Chat framework's files. */
+const WEB_CHAT_ITEMS: Readonly<Record<WebChatFramework, string>> = {
+  next: "channel/web",
+  tanstack: "channel/web-tanstack",
+};
+
+/**
+ * Asks which framework Web Chat uses. Only an interactive terminal prompts;
+ * every other run takes the `web-framework` answer or the Next.js default.
+ * Returns `false` when cancelled and `undefined` after reporting an invalid
+ * headless answer.
+ */
+async function askWebChatFramework(
+  logger: RegistryCommandLogger,
   appRoot: string,
   item: string,
-  options: AddCommandOptions = {},
-): Promise<void> {
-  const config = await readEveRegistryConfig(appRoot);
-  await addRegistryItems([itemAddress(item)], {
-    config,
-    cwd: appRoot,
-    overwrite: options.overwrite,
-  });
+  options: RunAddCommandOptions,
+  dependencies: AddCommandDependencies,
+): Promise<WebChatFramework | false | undefined> {
+  const nonInteractive = options.nonInteractive === true;
+  const canPrompt =
+    options.setupAuthorized === true ||
+    (
+      dependencies.hasInteractiveTerminal ?? defaultAddCommandDependencies.hasInteractiveTerminal!
+    )();
+  // Headless and scripted installs keep working without an answer, as before frameworks existed.
+  const asker = withAnswers(options.answers ?? {})(
+    options.yes === true || nonInteractive || !canPrompt
+      ? withPolicy("assume")(headlessAsker())
+      : interactiveAsker(
+          options.prompter ??
+            dependencies.createPrompter?.() ??
+            defaultAddCommandDependencies.createPrompter!(),
+        ),
+  );
+  try {
+    return await resolveWebChatFramework(appRoot, asker, options.answers);
+  } catch (error) {
+    if (error instanceof WizardCancelledError) return false;
+    if (!nonInteractive || !(error instanceof InvalidAnswerError)) throw error;
+    const question = setupQuestionToWire(error.question);
+    logger.error(
+      serializeHeadlessSetupEvent({
+        version: 1,
+        type: "blocked",
+        item,
+        installed: false,
+        completedItems: [],
+        status: "input_required",
+        question,
+        issue: { code: "invalid_answer", message: error.message },
+        next: headlessSetupContinuation({
+          item,
+          installed: false,
+          answers: options.answers,
+          question,
+        }),
+      }),
+    );
+    process.exitCode = 2;
+    return undefined;
+  }
 }
 
 function assertCompatibleEveVersion(requiredVersion: string | undefined): void {
@@ -417,20 +491,17 @@ async function browseRegistryItems(
   if (errors.length > 0) process.exitCode = 1;
 }
 
-/** Resolves one official, configured, or URL-addressed item manifest. */
-export async function getRegistryItemManifest(appRoot: string, item: string): Promise<unknown> {
-  const config = await readEveRegistryConfig(appRoot);
-  const items = await getRegistryItems([itemAddress(item)], { config });
-  return items.length === 1 ? items[0] : items;
-}
-
 /** Installs an official, configured, or URL-addressed registry item. */
 export async function installRegistryItem(
   appRoot: string,
   item: string,
   options: AddCommandOptions & { prompter?: Prompter; signal?: AbortSignal } = {},
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
-): Promise<{ output: readonly string[]; setup?: RegistrySetupCompletion }> {
+): Promise<{
+  output: readonly string[];
+  setup?: RegistrySetupCompletion;
+  setupIncomplete?: RegistrySetupIncomplete;
+}> {
   let failure: string | undefined;
   const output: string[] = [];
   const logger: RegistryCommandLogger = {
@@ -440,20 +511,38 @@ export async function installRegistryItem(
     log: (message) => output.push(message),
   };
   const previousExitCode = process.exitCode;
-  const setup = await runAddCommand(
-    logger,
-    appRoot,
-    item,
-    {
-      ...options,
-      yes: options.prompter === undefined ? true : options.yes,
-      setupAuthorized: options.prompter !== undefined,
-    },
-    dependencies,
-  );
+  let setup: Awaited<ReturnType<typeof runAddCommand>>;
+  try {
+    setup = await runAddCommand(
+      logger,
+      appRoot,
+      item,
+      {
+        ...options,
+        yes: options.prompter === undefined ? true : options.yes,
+        setupAuthorized: options.prompter !== undefined,
+        throwSetupFailures: true,
+      },
+      dependencies,
+    );
+  } catch (error) {
+    process.exitCode = previousExitCode;
+    if (!(error instanceof RegistrySetupFailedError)) throw error;
+    // The source is already installed, so this is unfinished setup rather
+    // than a failed add; keep the reason and any prerequisite for recovery.
+    const incomplete: RegistrySetupIncomplete = {
+      resumeCommand: error.resumeCommand,
+      reason: error.reason,
+    };
+    if (error.prerequisite !== undefined) incomplete.prerequisite = error.prerequisite;
+    return { output, setupIncomplete: incomplete };
+  }
   process.exitCode = previousExitCode;
   if (failure !== undefined) throw new Error(failure);
   if (setup === false) throw new WizardCancelledError();
+  if (setup === "setup-incomplete") {
+    return { output, setupIncomplete: { resumeCommand: setupResumeCommand(item) } };
+  }
   const result: { output: readonly string[]; setup?: RegistrySetupCompletion } = { output };
   if (setup !== undefined) result.setup = setup;
   return result;
@@ -466,11 +555,27 @@ export async function runAddCommand(
   item: string,
   options: RunAddCommandOptions,
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
-): Promise<RegistrySetupCompletion | false | undefined> {
-  return runRegistryAction(logger, appRoot, async () => {
+): Promise<RegistrySetupCompletion | false | "setup-incomplete" | undefined> {
+  // Silent callers render the resume hint themselves from the structured result.
+  const setupIncomplete = (outcome: "cancelled" | "skipped") => {
+    if (options.silent !== true) logger.log(setupReminder(item, outcome));
+    return "setup-incomplete" as const;
+  };
+  const action = async () => {
     const address = itemAddress(item);
+    let webChatFramework: WebChatFramework | undefined;
+    // Setup reads the framework from the installed files, so only installs ask.
+    if (address === itemAddress(WEB_CHAT_ITEMS.next) && options.skipInstall !== true) {
+      const framework = await askWebChatFramework(logger, appRoot, item, options, dependencies);
+      if (framework === false || framework === undefined) return framework;
+      webChatFramework = framework;
+    }
+    const installAddress =
+      webChatFramework === undefined ? address : itemAddress(WEB_CHAT_ITEMS[webChatFramework]);
     const projectRoot =
-      address === itemAddress("channel/web") ? await prepareWebChatProjectRoot(appRoot) : appRoot;
+      webChatFramework !== undefined
+        ? await prepareWebChatProjectRoot(appRoot, webChatFramework)
+        : appRoot;
     const config = await readEveRegistryConfig(appRoot);
     if (options.skipInstall === true) {
       if (options.overwrite === true) {
@@ -487,7 +592,7 @@ export async function runAddCommand(
     }
     const registryItemResult = await resolveRegistryItemForAdd(
       logger,
-      async () => (await getRegistryItems([address], { config }))[0],
+      async () => (await getRegistryItems([installAddress], { config }))[0],
       () => printAddSuggestions(logger, appRoot, item),
     );
     if (!registryItemResult.found) return;
@@ -508,9 +613,9 @@ export async function runAddCommand(
         setups: eveMetadata.setup,
         options,
         dependencies,
-        cancelledReminder: setupReminder(item, "cancelled"),
         resumeCommand: setupResumeCommand(item),
       });
+      if (completion === false && !options.nonInteractive) return setupIncomplete("cancelled");
       return reportCompletion(logger, item, completion, options);
     }
 
@@ -523,8 +628,11 @@ export async function runAddCommand(
     });
     if (!installReady) return false;
 
-    if (address === itemAddress("channel/web")) {
-      await (dependencies.prepareWebRegistryProject ?? prepareWebRegistryProject)(projectRoot);
+    if (webChatFramework !== undefined) {
+      await (dependencies.prepareWebRegistryProject ?? prepareWebRegistryProject)(
+        projectRoot,
+        webChatFramework,
+      );
     }
     await installRegistryItemTransaction({
       appRoot: projectRoot,
@@ -533,7 +641,7 @@ export async function runAddCommand(
       nonInteractive: options.nonInteractive,
       logger,
       install: async () => {
-        await addRegistryItems([address], {
+        await addRegistryItems([installAddress], {
           config,
           cwd: projectRoot,
           overwrite: options.overwrite,
@@ -557,8 +665,7 @@ export async function runAddCommand(
     }
     if (options.skipSetup === true) {
       if (options.nonInteractive) return reportCompletion(logger, item, { facts: [] }, options);
-      logger.log(setupReminder(item, "skipped"));
-      return;
+      return setupIncomplete("skipped");
     }
     if (
       !options.nonInteractive &&
@@ -566,8 +673,7 @@ export async function runAddCommand(
       !interactive &&
       options.setupAuthorized !== true
     ) {
-      logger.log(setupReminder(item, "skipped"));
-      return;
+      return setupIncomplete("skipped");
     }
 
     if (!options.nonInteractive && !options.yes && options.setupAuthorized !== true) {
@@ -584,14 +690,10 @@ export async function runAddCommand(
             { value: "no", label: "No" },
           ],
         });
-        if (shouldRun === "no") {
-          logger.log(setupReminder(item, "skipped"));
-          return;
-        }
+        if (shouldRun === "no") return setupIncomplete("skipped");
       } catch (error) {
         if (!(error instanceof WizardCancelledError)) throw error;
-        logger.log(setupReminder(item, "cancelled"));
-        return;
+        return setupIncomplete("cancelled");
       }
     }
 
@@ -602,10 +704,14 @@ export async function runAddCommand(
       setups: eveMetadata.setup,
       options: { ...options, force: options.overwrite },
       dependencies,
-      cancelledReminder: setupReminder(item, "cancelled"),
       resumeCommand: setupResumeCommand(item),
     });
+    if (completion === false && !options.nonInteractive) return setupIncomplete("cancelled");
     return reportCompletion(logger, item, completion, options);
+  };
+  return runRegistryAction(logger, appRoot, action, {
+    rethrow: (error) =>
+      options.throwSetupFailures === true && error instanceof RegistrySetupFailedError,
   });
 }
 /** Lists registry items from every configured source or one selected source. */

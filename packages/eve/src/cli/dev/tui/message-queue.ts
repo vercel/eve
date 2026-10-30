@@ -1,18 +1,7 @@
 /**
- * The pinned message-queue panel: client-side state and pure rendering for
- * messages submitted while a turn is still streaming.
- *
- * When steering is unavailable, Enter queues the draft (up to
- * {@link MESSAGE_QUEUE_LIMIT}); each queued
- * message waits for the turn to end, where the whole queue coalesces into
- * the next turn's message. Esc or Ctrl+C pops the oldest message to steer the
- * conversation instead of waiting: the renderer sends the popped message to
- * the active session for admission at its next execution boundary.
- * `/cancel` requests cancellation directly. Either key on an empty queue
- * cancels the turn immediately without a replacement message.
- *
- * The renderer owns lifecycle (keys, cancel requests, when the runner drains
- * the queue); this module only holds the queue state machine and paints rows.
+ * The pinned message-queue panel: messages submitted while the agent is still
+ * starting. Each queued message waits for the agent to become ready, where the
+ * whole queue coalesces into the first turn's message.
  */
 
 import type { Theme } from "./theme.js";
@@ -22,44 +11,17 @@ import { clipVisible, stripTerminalControls } from "#cli/ui/terminal-text.js";
 /** Most messages the queue holds; Enter on a full queue keeps the draft. */
 export const MESSAGE_QUEUE_LIMIT = 5;
 
-/** What one Esc press did to the queue state. */
-export type MessageQueueEscapeOutcome =
-  /**
-   * A message is staged for steering. The caller sends it to the active
-   * session; repeated presses may select more queued messages.
-   */
-  | "steer"
-  /** Empty queue — the caller should cancel the turn. */
-  | "cancel";
-
 /** Read-only projection consumed by {@link renderMessageQueueRows}. */
 export interface MessageQueueView {
   readonly messages: readonly string[];
   readonly full: boolean;
-  /** A popped message is awaiting steering admission. */
-  readonly steering: boolean;
-  /** A cancel key on an empty queue landed; cancellation was requested. */
-  readonly cancelling: boolean;
 }
 
 export class MessageQueue {
   #messages: string[] = [];
-  #steerMessage: string | undefined;
-  #cancelRequested = false;
-
-  get size(): number {
-    return this.#messages.length;
-  }
 
   get full(): boolean {
     return this.#messages.length >= MESSAGE_QUEUE_LIMIT;
-  }
-
-  /** True when nothing is queued, staged, or cancelling. */
-  get idle(): boolean {
-    return (
-      this.#messages.length === 0 && this.#steerMessage === undefined && !this.#cancelRequested
-    );
   }
 
   /** Queues one message; returns false (draft stays put) when full. */
@@ -69,141 +31,43 @@ export class MessageQueue {
     return true;
   }
 
-  /**
-   * Applies one Esc or Ctrl+C press. Pops the oldest queued message into the
-   * staged steer payload while any remain; with an empty queue, requests
-   * cancellation immediately.
-   */
-  handleEscape(): MessageQueueEscapeOutcome {
-    const popped = this.#messages.shift();
-    if (popped !== undefined) {
-      this.#steerMessage = joinMessages(this.#steerMessage, popped);
-      return "steer";
-    }
-    if (this.#steerMessage !== undefined) {
-      // Retry an unaccepted steering message before requesting cancellation.
-      return "steer";
-    }
-    this.#cancelRequested = true;
-    return "cancel";
-  }
-
-  /** Marks a direct cancellation request without consuming queued messages. */
-  requestCancellation(): void {
-    this.#cancelRequested = true;
-  }
-
-  /** Clears per-turn Esc state when a new stream starts rendering. */
-  beginTurn(): void {
-    this.#cancelRequested = false;
-  }
-
-  /**
-   * The next prompt to submit after a turn boundary: the staged steer
-   * message when one exists (remaining queued messages stay queued for the
-   * steered turn), otherwise the whole queue coalesced into one message.
-   */
+  /** Every queued message coalesced into one prompt; clears the queue. */
   takePrompt(): string | undefined {
-    this.#cancelRequested = false;
-    const steer = this.#steerMessage;
-    if (steer !== undefined) {
-      this.#steerMessage = undefined;
-      return steer;
-    }
-    return this.#takeAllMessages();
-  }
-
-  /** Takes only a key-selected message for immediate boundary steering. */
-  takeSteering(): string | undefined {
-    const message = this.#steerMessage;
-    this.#steerMessage = undefined;
-    return message;
-  }
-
-  /** Preserves an unaccepted steering message for a later retry. */
-  restoreSteering(message: string): void {
-    this.#steerMessage = joinOptionalMessages(message, this.#steerMessage);
-  }
-
-  /**
-   * Everything still held — staged steer payload plus queued messages —
-   * coalesced for restoring into the prompt editor when a turn ends without
-   * a clean boundary (interrupt, transport failure). Clears the queue.
-   */
-  restoreDraft(): string | undefined {
-    this.#cancelRequested = false;
-    const steer = this.#steerMessage;
-    this.#steerMessage = undefined;
-    return joinOptionalMessages(steer, this.#takeAllMessages());
-  }
-
-  reset(): void {
-    this.#messages = [];
-    this.#steerMessage = undefined;
-    this.#cancelRequested = false;
-  }
-
-  view(): MessageQueueView {
-    return {
-      messages: [...this.#messages],
-      full: this.full,
-      steering: this.#steerMessage !== undefined,
-      cancelling: this.#cancelRequested,
-    };
-  }
-
-  #takeAllMessages(): string | undefined {
     if (this.#messages.length === 0) return undefined;
-    const combined = this.#messages.reduce<string | undefined>(joinOptionalMessages, undefined);
+    const combined = this.#messages.join("\n\n");
     this.#messages = [];
     return combined;
   }
-}
 
-function joinMessages(existing: string | undefined, appended: string): string {
-  return existing === undefined ? appended : `${existing}\n\n${appended}`;
-}
-
-function joinOptionalMessages(a: string | undefined, b: string | undefined): string | undefined {
-  if (b === undefined) return a;
-  return joinMessages(a, b);
+  view(): MessageQueueView {
+    return { messages: [...this.#messages], full: this.full };
+  }
 }
 
 export interface MessageQueuePanelRowsInput {
   readonly view: MessageQueueView;
   readonly width: number;
   readonly theme: Theme;
-  /** True while a turn streams — the only state in which keys steer. */
-  readonly working: boolean;
 }
 
 /**
  * Paints the pinned queue panel, indented so its marks share the tool
  * column. Queued messages ride a `│` rail under the header (one clipped
- * line each) and the last closes it with `└`. The header carries the Esc
- * affordance — the panel is where steering and cancellation are taught.
+ * line each) and the last closes it with `└`.
  */
 export function renderMessageQueueRows(input: MessageQueuePanelRowsInput): string[] {
-  const { view, width, theme, working } = input;
+  const { view, width, theme } = input;
+  if (view.messages.length === 0) return [];
   const c = theme.colors;
   const g = theme.glyph;
   const lead = TOOL_COLUMN_LEAD;
-
-  if (view.messages.length === 0 && !view.steering) {
-    if (!working) return [];
-    if (view.cancelling) {
-      return [
-        clipVisible(
-          `${lead}${c.yellow(g.dotActive)} ${c.dim("Cancelling turn… · Ctrl+C to stop waiting, then again to exit")}`,
-          width,
-        ),
-      ];
-    }
-    return [];
-  }
-
+  const count = `${String(view.messages.length)}/${String(MESSAGE_QUEUE_LIMIT)}`;
+  const fullness = view.full ? ` ${g.dot} queue full` : "";
   const rows = [
-    clipVisible(`${lead}${c.gray(g.arrowUp)} ${headerBody(view, working, theme)}`, width),
+    clipVisible(
+      `${lead}${c.gray(g.arrowUp)} ${c.bold("Queue")} ${c.dim(`${count}${fullness}`)}`,
+      width,
+    ),
   ];
   for (const [index, message] of view.messages.entries()) {
     const rail = index === view.messages.length - 1 ? g.corner : g.rule;
@@ -211,19 +75,6 @@ export function renderMessageQueueRows(input: MessageQueuePanelRowsInput): strin
     rows.push(clipVisible(`${lead}${c.dim(rail)} ${c.dim(body)}`, width));
   }
   return rows;
-}
-
-function headerBody(view: MessageQueueView, working: boolean, theme: Theme): string {
-  const c = theme.colors;
-  const dot = ` ${theme.glyph.dot} `;
-  const count = `${String(view.messages.length)}/${String(MESSAGE_QUEUE_LIMIT)}`;
-  if (view.steering) {
-    const remaining = view.messages.length > 0 ? `${dot}${count} still queued` : "";
-    return c.dim(`Steering — waiting for the next boundary…${remaining}`);
-  }
-  const fullness = view.full ? `${dot}queue full` : "";
-  const hint = working ? `${dot}esc or ctrl+c steers with the next message` : "";
-  return `${c.bold("Queue")} ${c.dim(`${count}${fullness}${hint}`)}`;
 }
 
 function firstLine(text: string): string {

@@ -53,7 +53,7 @@ type ConnectorPlan =
   | { kind: "reuse"; connector: LinearConnectorRef }
   | { kind: "create"; slug: string };
 
-export interface LinearSetupPlan {
+interface LinearSetupPlan {
   connector: ConnectorPlan;
   project: VercelProjectReference;
 }

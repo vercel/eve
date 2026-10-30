@@ -2,7 +2,6 @@ import type { ChildProcess } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 
 import { addImports, defineNuxtModule, extendRouteRules } from "@nuxt/kit";
-import type { NuxtModule } from "@nuxt/schema";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import {
@@ -11,18 +10,31 @@ import {
   type ResolvedFrameworkAgent,
 } from "#shared/framework-agents.js";
 import {
+  resolveDevServerTimeout,
+  resolveSharedEveDevServer,
+  type EveFrameworkHost,
+} from "#shared/framework-eve-server.js";
+import {
   ensureEveVercelServicesConfig,
   mergeEveVercelConfig,
   type VercelBuildConfig,
 } from "#shared/vercel-services.js";
 
-import { EVE_BASE_URL_ENV, resolveSharedEveDevServer } from "./dev-server.js";
 import { joinRoutePrefix, normalizeOrigin, resolveProductionTarget } from "./routing.js";
+
+const EVE_BASE_URL_ENV = "EVE_BASE_URL";
+const EVE_NUXT_HOST: EveFrameworkHost = { label: "Nuxt", slug: "nuxt" };
 
 /**
  * Options for the eve Nuxt module.
  */
 export interface EveNuxtModuleOptions {
+  /**
+   * Maximum time in milliseconds to wait for the eve development server to
+   * start, including waiting for another Nuxt process to start it. Defaults
+   * to 180000 (three minutes).
+   */
+  devServerTimeoutMs?: number;
   /**
    * Path to the eve application root, resolved relative to the Nuxt project
    * root unless absolute. Defaults to the Nuxt project root. The dev server is
@@ -36,6 +48,11 @@ export interface EveNuxtModuleOptions {
    * dependencies (`node <path-to>/eve/bin/eve.js build`).
    */
   eveBuildCommand?: string;
+}
+
+/** Opaque setup entry consumed by Nuxt. Register it in `modules`, rather than invoking it directly. */
+export interface EveNuxtModule {
+  (options: EveNuxtModuleOptions, nuxt: object): void;
 }
 
 function resolveApplicationRoot(nuxtRoot: string, appPath: string | undefined): string {
@@ -70,6 +87,7 @@ async function resolveEveProxyTarget(input: {
   readonly agent: ResolvedFrameworkAgent;
   readonly dev: boolean;
   readonly localProductionPortOffset: number;
+  readonly devServerTimeoutMs?: number;
   readonly onDevServerSpawned?: (child: ChildProcess) => void;
 }): Promise<string> {
   if (!input.dev) {
@@ -84,7 +102,11 @@ async function resolveEveProxyTarget(input: {
     return joinRoutePrefix(normalizeOrigin(configuredEveBaseUrl), input.agent.transportRoutePrefix);
   }
 
-  const handle = await resolveSharedEveDevServer(input.agent.appRoot);
+  const handle = await resolveSharedEveDevServer({
+    appRoot: input.agent.appRoot,
+    host: EVE_NUXT_HOST,
+    timeoutMs: input.devServerTimeoutMs,
+  });
   if (handle.process !== undefined) {
     input.onDevServerSpawned?.(handle.process);
   }
@@ -101,7 +123,7 @@ async function resolveEveProxyTarget(input: {
  * production. Requires Nuxt >= 4.0.0. Configure via
  * {@link EveNuxtModuleOptions}.
  */
-const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxtModuleOptions>({
+const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
   meta: {
     name: "eve",
     configKey: "eve",
@@ -115,10 +137,19 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
     const appRoot = resolveApplicationRoot(nuxtRoot, options.eveRoot);
     const agents = await resolveFrameworkAgents(appRoot);
     assertFrameworkAgentsPresent(agents, appRoot);
+    const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, EVE_NUXT_HOST);
 
     // Auto-import the Vue composable so app code can call `useEveAgent()`
     // without an explicit import, matching Nuxt's composable conventions.
     addImports({ name: "useEveAgent", from: "eve/vue" });
+
+    // Vite's dependency scan never sees an auto-import, so without this it
+    // serves `eve/vue`'s CommonJS dependencies (such as `@vercel/oidc`) to the
+    // browser unbundled in dev, and the app fails to hydrate.
+    nuxt.options.vite.optimizeDeps = {
+      ...nuxt.options.vite.optimizeDeps,
+      include: [...(nuxt.options.vite.optimizeDeps?.include ?? []), "eve/vue"],
+    };
 
     // On Vercel the eve app deploys as a sibling service. A Nitro runtime
     // `proxy` rule can't reach it — the proxied request loops back into the
@@ -155,10 +186,11 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
               agent,
               dev: nuxt.options.dev,
               localProductionPortOffset: index,
+              devServerTimeoutMs,
               onDevServerSpawned: (child) => {
                 // Prefer Nuxt's lifecycle for cleanup so the dev server is torn
                 // down on graceful shutdown and dev restarts. The process-exit
-                // guard in dev-server.ts remains as a fallback for non-graceful
+                // guard in framework-eve-server.ts remains as a fallback for non-graceful
                 // exits.
                 nuxt.hook("close", () => {
                   if (!child.killed) child.kill();
@@ -174,6 +206,6 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
       });
     }
   },
-});
+}) as EveNuxtModule;
 
 export default eveNuxtModule;

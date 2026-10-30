@@ -1,3 +1,5 @@
+import { readDurableSession } from "#execution/durable-session-store.js";
+import { isBetweenTurns, storedProjection } from "#harness/session-machine/view.js";
 import {
   EntityConflictError,
   RunExpiredError,
@@ -8,26 +10,16 @@ import { createLogger, logError } from "#internal/logging.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
-import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
+import { settleCancelledTurn } from "#execution/settle-cancelled-turn-step.js";
 import type { PreparedLegacySession } from "./prepare-step.js";
 
 /** Only the elected importer may stop work or append cancellation events. */
 export async function interruptLegacySessionStep(prepared: PreparedLegacySession) {
   "use step";
-  const originalState = {
-    ...prepared.sessionState,
-    snapshot: {
-      session: {
-        ...prepared.originalSession,
-        history: prepared.sessionState.snapshot.session.history,
-      },
-    },
-  };
+  const { history: _history, ...originalSession } = prepared.originalSession;
+  const originalState = { ...prepared.sessionState, snapshot: { session: originalSession } };
   try {
-    await terminateChildSessionsStep({
-      sessionState: originalState,
-      serializedContext: prepared.serializedContext,
-    });
+    await terminateChildSessionsStep({ sessionState: originalState });
   } catch (error) {
     logError(
       createLogger("execution.legacy-session"),
@@ -79,12 +71,18 @@ export async function interruptLegacySessionStep(prepared: PreparedLegacySession
         throw error;
     }
   }
-  if (prepared.input.inputCommitted || prepared.sessionState.emissionState.turnId === "")
+  if (
+    prepared.input.inputCommitted ||
+    isBetweenTurns(storedProjection(readDurableSession(prepared.sessionState).state))
+  )
     return {
+      history: prepared.history,
       sessionState: prepared.sessionState,
       serializedContext: prepared.serializedContext,
     };
-  return await settleCancelledTurnStep({
+  return await settleCancelledTurn({
+    history: prepared.history,
+    reportUsage: false,
     sessionWritable: prepared.input.sessionWritable,
     serializedContext: prepared.serializedContext,
     sessionState: prepared.sessionState,

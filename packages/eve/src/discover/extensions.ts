@@ -1,15 +1,17 @@
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
+  checkExtensionVersionCompatibility,
   EXTENSION_COMPATIBILITY_MANIFEST_FILENAME,
-  findUnsupportedExtensionCapabilities,
   parseExtensionCompatibilityManifest,
+  UnsupportedExtensionManifestVersionError,
 } from "#compiler/extension-compatibility.js";
 import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
 import { parseExtensionMountSpecifier } from "#discover/extension-specifier.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
 import type { ExtensionSourceRef } from "#discover/manifest.js";
-import type { ProjectSource } from "#discover/project-source.js";
+import { type ProjectSource, readPackageJsonName } from "#discover/project-source.js";
+import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   parseBuiltInExtensionPackageRoots,
   parseExtensionPackageRoots,
@@ -18,7 +20,7 @@ import {
 /**
  * Emitted when a mount file cannot be resolved to an extension package.
  */
-export const DISCOVER_EXTENSION_MOUNT_UNRESOLVED = "discover/extension-mount-unresolved";
+const DISCOVER_EXTENSION_MOUNT_UNRESOLVED = "discover/extension-mount-unresolved";
 
 /**
  * Emitted when one namespace is claimed by both a file mount
@@ -44,7 +46,7 @@ export const DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED =
 /**
  * Emitted when a resolved package is not a valid eve extension.
  */
-export const DISCOVER_EXTENSION_PACKAGE_INVALID = "discover/extension-package-invalid";
+const DISCOVER_EXTENSION_PACKAGE_INVALID = "discover/extension-package-invalid";
 
 /**
  * Emitted when an extension distribution's compatibility manifest is missing
@@ -53,11 +55,9 @@ export const DISCOVER_EXTENSION_PACKAGE_INVALID = "discover/extension-package-in
 export const DISCOVER_EXTENSION_COMPATIBILITY_INVALID = "discover/extension-compatibility-invalid";
 
 /**
- * Emitted when this eve cannot consume one of the extension capabilities the
- * distribution requires.
+ * Emitted when the consumer cannot load this extension distribution.
  */
-export const DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE =
-  "discover/extension-capability-incompatible";
+export const DISCOVER_EXTENSION_VERSION_INCOMPATIBLE = "discover/extension-version-incompatible";
 
 /**
  * Emitted when an extension source tree declares agent-level config (`agent.ts`),
@@ -83,7 +83,7 @@ export const DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED =
 /**
  * Resolved on-disk location of one mounted extension package.
  */
-export interface ExtensionMountLocation {
+interface ExtensionMountLocation {
   /** Mount namespace derived from the mount filename (e.g. `crm`). */
   readonly namespace: string;
   /** Package specifier the mount imports (e.g. `@acme/crm`). */
@@ -103,7 +103,7 @@ export interface ExtensionMountLocation {
  * inspected. Development uses this to build a mounted workspace extension
  * before the consumer requires its dist tree to exist.
  */
-export interface ExtensionMountPackageLocation {
+interface ExtensionMountPackageLocation {
   /** Mount namespace derived from the mount filename. */
   readonly namespace: string;
   /** Package specifier read from the mount declaration. */
@@ -145,21 +145,6 @@ export function mountRefNamespace(logicalPath: string): string {
     return remainder.slice(0, slashIndex);
   }
   return mountNamespace(logicalPath);
-}
-
-/**
- * Derives the namespace that scopes an extension's durable state keys and config
- * binding from its package name. Unlike the mount namespace, this stays keyed to
- * the package (e.g. `@acme/crm` → `acme-crm`) so renaming the consumer's mount
- * file never orphans persisted state.
- */
-export function packageStateNamespace(packageName: string): string {
-  return (
-    packageName
-      .replace(/^@/, "")
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "extension"
-  );
 }
 
 /**
@@ -207,6 +192,17 @@ export async function locateExtensionMount(input: {
       compatibilityPath,
     );
   } catch (error) {
+    if (error instanceof UnsupportedExtensionManifestVersionError) {
+      return {
+        diagnostics: [
+          createDiscoverErrorDiagnostic({
+            code: DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
+            message: `Extension "${location.packageName}" uses an old epoch-based distribution manifest at "${compatibilityPath}". Rebuild the extension with this eve release or install a compatible extension release.`,
+            sourcePath: compatibilityPath,
+          }),
+        ],
+      };
+    }
     return {
       diagnostics: [
         createDiscoverErrorDiagnostic({
@@ -218,16 +214,22 @@ export async function locateExtensionMount(input: {
     };
   }
 
-  const unsupportedCapabilities = findUnsupportedExtensionCapabilities(compatibility);
-  if (unsupportedCapabilities.length > 0) {
+  const incompatible = checkExtensionVersionCompatibility(
+    compatibility,
+    resolveInstalledPackageInfo().version,
+  );
+  if (incompatible !== undefined) {
     return {
-      diagnostics: unsupportedCapabilities.map((unsupported) =>
+      diagnostics: [
         createDiscoverErrorDiagnostic({
-          code: DISCOVER_EXTENSION_CAPABILITY_INCOMPATIBLE,
-          message: `Extension "${location.packageName}" requires ${unsupported.capability} contract v${unsupported.requiredVersion}, but this eve supports ${unsupported.capability} contract ${formatSupportedVersions(unsupported.supportedVersions)}. Upgrade eve or install an extension release that requires a supported ${unsupported.capability} contract.`,
+          code: DISCOVER_EXTENSION_VERSION_INCOMPATIBLE,
+          message:
+            incompatible.kind === "newer-eve"
+              ? `Extension "${location.packageName}" was built with eve ${incompatible.minimumVersion}. Upgrade eve to ${incompatible.minimumVersion} or later, or install an extension built with your eve version.`
+              : `Extension "${location.packageName}" requires distribution contract ${incompatible.contractMajor}, which this eve does not support. Rebuild the extension with this eve or install a compatible extension release.`,
           sourcePath: compatibilityPath,
         }),
-      ),
+      ],
     };
   }
 
@@ -360,12 +362,6 @@ export async function locateExtensionMountPackage(input: {
   };
 }
 
-function formatSupportedVersions(versions: readonly number[]): string {
-  return versions.length === 0
-    ? "versions: none"
-    : `versions: ${versions.map((v) => `v${v}`).join(", ")}`;
-}
-
 async function resolvePackageRoot(input: {
   readonly source: ProjectSource;
   readonly appRoot: string;
@@ -382,6 +378,11 @@ async function resolvePackageRoot(input: {
   }
 
   const packageSubpath = bareSpecifierPackagePath(input.specifier);
+  // Node resolves a package's own name through self-reference; bundled extensions
+  // discovered from inside eve use it to mount other built-in extensions.
+  if ((await readPackageJsonName(input.source, input.appRoot)) === packageSubpath) {
+    return resolve(input.appRoot);
+  }
   let current = resolve(input.appRoot);
   while (true) {
     const candidate = join(current, "node_modules", packageSubpath);

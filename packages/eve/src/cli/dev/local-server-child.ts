@@ -1,11 +1,18 @@
-import { createDevelopmentServer } from "#internal/nitro/host/start-development-server.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 import { getDevelopmentSandboxRunId } from "#execution/sandbox/development-run.js";
-import { reconcileCleanupIntents, recordCleanupIntent } from "#cli/dev/local-server-cleanup.js";
+import { prewarmDevelopmentBuildProcess } from "#internal/nitro/host/dev-build-host.js";
+
+// The first build process loads the compiler while this process loads the server.
+prewarmDevelopmentBuildProcess();
+const [{ createDevelopmentServer }, { reconcileCleanupIntents, recordCleanupIntent }] =
+  await Promise.all([
+    import("#internal/nitro/host/start-development-server.js"),
+    import("#cli/dev/local-server-cleanup.js"),
+  ]);
 
 const options = JSON.parse(process.argv[2] ?? "{}") as Pick<
   DevelopmentServerOptions,
-  "developmentExtensions" | "existing" | "host" | "port"
+  "developmentExtensions" | "existing" | "host" | "port" | "resume"
 >;
 const server = createDevelopmentServer(process.cwd(), {
   ...options,

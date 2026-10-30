@@ -22,7 +22,7 @@ const PROMPT = "what can you do for me?";
 process.env.EVE_TUI_UNICODE = "1";
 
 void (async () => {
-  const client = new Client({ host: UNREACHABLE_HOST });
+  const client = new Client({ baseUrl: UNREACHABLE_HOST });
   const screen = new MockScreen({ columns: 100, rows: 40 });
   const input = new MockUserInput();
   const renderer = new TerminalRenderer({
@@ -50,7 +50,7 @@ void (async () => {
     input.enter();
     console.warn(WARNING);
 
-    await screen.waitForText("○ stderr", 5_000);
+    await screen.waitForText("○ warn", 5_000);
     await screen.waitForText(WARNING, 5_000);
 
     // The warning must ride the section's rail, not shred the prompt.

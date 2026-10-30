@@ -33,6 +33,56 @@ export const modelPricing = {
     cacheRead: 0.25,
     cacheWrite: 12.5,
   },
+  "anthropic/claude-opus-5.5": {
+    effectiveDate: "2026-10-07",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 4,
+    output: 20,
+    cacheRead: 0.2,
+    cacheWrite: 5,
+  },
+  "openai/gpt-6-sol": {
+    effectiveDate: "2026-10-07",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 2,
+    output: 10,
+    cacheRead: 0.2,
+    cacheWrite: 2.5,
+  },
+  "openai/gpt-6-luna": {
+    effectiveDate: "2026-10-07",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 0.1,
+    output: 0.5,
+    cacheRead: 0.01,
+    cacheWrite: 0.125,
+  },
+  // GPT-6 Sol and GPT-6.1 bill prompts over 272k tokens at higher rates, but
+  // Codex only reports per-turn usage, so these list prices are a lower bound.
+  "openai/gpt-6.1-sol": {
+    effectiveDate: "2026-10-27",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 2,
+    output: 10,
+    cacheRead: 0.1,
+    cacheWrite: 2.5,
+  },
+  "openai/gpt-6.1-terra": {
+    effectiveDate: "2026-10-27",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 1,
+    output: 5,
+    cacheRead: 0.05,
+    cacheWrite: 1.25,
+  },
+  "spacexai/grok-4.7": {
+    effectiveDate: "2026-10-07",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 2,
+    output: 6,
+    cacheRead: 0.5,
+    cacheWrite: 0,
+  },
   "xai/grok-4.6": {
     effectiveDate: "2026-08-17",
     source: "https://docs.x.ai/developers/models",
@@ -73,6 +123,25 @@ export const modelPricing = {
     cacheRead: 0.5,
     cacheWrite: 6.25,
   },
+  "anthropic/claude-sonnet-5.5": {
+    effectiveDate: "2026-10-27",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 2,
+    output: 10,
+    cacheRead: 0.1,
+    cacheWrite: 2.5,
+  },
+  "anthropic/claude-haiku-5.5": {
+    effectiveDate: "2026-10-27",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 0.1,
+    output: 0.5,
+    cacheRead: 0.01,
+    cacheWrite: 0.125,
+    // Requests whose prompt (input + cache read + cache write) exceeds 100k
+    // tokens are billed at these rates instead, for the whole request.
+    longContext: { above: 100_000, input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 },
+  },
   "anthropic/claude-sonnet-5": {
     effectiveDate: "2026-08-17",
     source: "https://docs.anthropic.com/en/docs/about-claude/pricing",
@@ -81,12 +150,13 @@ export const modelPricing = {
     cacheRead: 0.2,
     cacheWrite: 2.5,
   },
+  // Use the Gateway US endpoint's list rates, not the catalog's cheaper global route.
   "zai/glm-5.2": {
-    effectiveDate: "2026-08-17",
-    source: "https://docs.z.ai/guides/overview/pricing",
+    effectiveDate: "2026-10-07",
+    source: "https://ai-gateway.vercel.sh/v1/models",
     input: 1.4,
     output: 4.4,
-    cacheRead: 0.26,
+    cacheRead: 0.14,
     cacheWrite: 0,
   },
   "zai/glm-5.3": {
@@ -122,11 +192,11 @@ export const modelPricing = {
     cacheWrite: 0,
   },
   "moonshotai/kimi-k2.7-code": {
-    effectiveDate: "2026-09-10",
+    effectiveDate: "2026-10-07",
     source: "https://ai-gateway.vercel.sh/v1/models",
     input: 0.95,
     output: 4,
-    cacheRead: 0.16,
+    cacheRead: 0.19,
     cacheWrite: 0,
   },
 };
@@ -134,25 +204,46 @@ export const modelPricing = {
 const number = (value) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 const object = (value) => (value !== null && typeof value === "object" ? value : {});
 
-export function extractRunUsage(raw, harness) {
-  const usage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
-  let found = false;
+/**
+ * Usage per reported entry, in transcript order: one per model request for
+ * Claude Code and OpenCode, but one per turn for Codex, whose `turn.completed`
+ * sums every request in the turn. Claude Code streams one response as several
+ * `assistant` events (one per content block) that repeat the same message id
+ * and `usage`, so each id counts once, with its last usage.
+ */
+export function extractRunRequests(raw, harness) {
+  const requests = [];
+  const byMessageId = new Map();
   for (const line of raw.split("\n")) {
     try {
       const event = JSON.parse(line);
       const value = usageForEvent(event, harness);
       if (value === undefined) continue;
-      usage.input += value.input;
-      usage.output += value.output;
-      usage.reasoning += value.reasoning;
-      usage.cacheRead += value.cacheRead;
-      usage.cacheWrite += value.cacheWrite;
-      found = true;
+      const id = event.type === "assistant" ? object(event.message).id : undefined;
+      if (typeof id === "string" && byMessageId.has(id)) {
+        requests[byMessageId.get(id)] = value;
+        continue;
+      }
+      if (typeof id === "string") byMessageId.set(id, requests.length);
+      requests.push(value);
     } catch {
       // Ignore malformed transcript lines.
     }
   }
-  return found && tokenConsumption(usage) > 0 ? usage : null;
+  return requests;
+}
+
+export function extractRunUsage(raw, harness) {
+  const usage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
+  const requests = extractRunRequests(raw, harness);
+  for (const value of requests) {
+    usage.input += value.input;
+    usage.output += value.output;
+    usage.reasoning += value.reasoning;
+    usage.cacheRead += value.cacheRead;
+    usage.cacheWrite += value.cacheWrite;
+  }
+  return requests.length > 0 && tokenConsumption(usage) > 0 ? usage : null;
 }
 
 function usageForEvent(event, harness) {
@@ -234,6 +325,25 @@ export function countToolInvocations(raw) {
     }
   }
   return count;
+}
+
+/**
+ * Prices each request on its own, so a request whose prompt exceeds a model's
+ * `longContext.above` is billed at the long-context rates. Null when the run
+ * reported no usage.
+ */
+export function priceRequests(requests, pricing, harness) {
+  // Codex entries are per-turn totals, so a per-request threshold can't apply to them.
+  if (pricing.longContext !== undefined && harness === "Codex") {
+    throw new Error("Long-context pricing needs per-request usage, which Codex does not report.");
+  }
+  if (requests.reduce((total, r) => total + tokenConsumption(r), 0) === 0) return null;
+  return requests.reduce((total, r) => {
+    const long = pricing.longContext;
+    const rates =
+      long !== undefined && r.input + r.cacheRead + r.cacheWrite > long.above ? long : pricing;
+    return total + priceUsage(r, rates);
+  }, 0);
 }
 
 export function priceUsage(usage, pricing) {

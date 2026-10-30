@@ -23,9 +23,11 @@ export function registerIntegrationCommands(input: {
 }): void {
   const { applicationContext, logger, program } = input;
 
-  const integration = program.command("integration").description("Set up an eve integration");
+  const integration = program
+    .command("integration", { hidden: true })
+    .description("Set up an eve integration");
 
-  agentCommand(integration.command("setup <kind>"), applicationContext)
+  agentCommand(integration.command("setup <kind>", { hidden: true }), applicationContext)
     .description("Run a built-in integration setup flow")
     .option("-y, --yes")
     .option("--force", "Overwrite files created by setup.")

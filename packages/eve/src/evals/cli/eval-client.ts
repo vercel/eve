@@ -1,5 +1,6 @@
 import { Client } from "#client/client.js";
 import type { ClientOptions } from "#client/types.js";
+import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { resolveDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import {
   resolveVerifiedRemoteDevelopmentClient,
@@ -17,7 +18,7 @@ export function resolveEvalClientOptions(
   target: Pick<EveEvalTargetHandle, "kind" | "url">,
 ): ClientOptions {
   if (target.kind === "local") {
-    return { host: target.url };
+    return { baseUrl: target.url };
   }
 
   const options = resolveDevelopmentClientOptions(target.url);
@@ -29,7 +30,7 @@ export function resolveEvalClientOptions(
   return options;
 }
 
-export interface CreateEvalClientOptions {
+interface CreateEvalClientOptions {
   /** Working directory for Vercel lookup and the fallback on-disk project link. */
   readonly workspaceRoot?: string;
   /** Test seams for the two authority-resolution boundaries. */
@@ -46,7 +47,13 @@ export async function createEvalClient(
     return new Client(base);
   }
 
+  const orgId = process.env.VERCEL_ORG_ID?.trim();
+  const projectId = process.env.VERCEL_PROJECT_ID?.trim();
+  const projectSource =
+    orgId && projectId ? { orgId, projectId } : await readVercelProjectLink(options.workspaceRoot);
+
   const { options: verified } = await resolveVerifiedRemoteDevelopmentClient({
+    projectSource,
     serverUrl: target.url,
     workspaceRoot: options.workspaceRoot,
     deps: options.deps,

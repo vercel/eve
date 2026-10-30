@@ -1,43 +1,27 @@
-import { type ToolApprovalConfiguration, type ToolApprovalStatus, type ToolSet, tool } from "ai";
+import { type ToolSet, tool } from "ai";
 
-import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
+import type { ModelProfile } from "#harness/model-profile.js";
 import { isObject } from "#shared/guards.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { resolveApprovalPolicy, type ApprovalStatus } from "#approval/definition.js";
+import { resolveApprovalPolicy } from "#approval/definition.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import { loadContext } from "#context/container.js";
-import {
-  authorizationPendingModelText,
-  isAuthorizationPendingModelOutput,
-  isAuthorizationSignal,
-  modelFacingAuthorizationOutput,
-} from "#harness/authorization.js";
-import { stashToolInterrupt } from "#harness/tool-interrupts.js";
+import { isAuthorizationSignal } from "#harness/authorization.js";
+import { type ApprovalMemory, evaluateApproval } from "#approval/evaluation.js";
+import type { ApprovalDecision } from "#approval/status.js";
 import { toModelSchema } from "#tools/schema.js";
-import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
+import { normalizeToolJsonOutput } from "#harness/tool-model-output.js";
+import { createLogger } from "#internal/logging.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
-import {
-  createBackgroundToolCallBatch,
-  executeBackgroundToolCall,
-  type BackgroundExecutableTool,
-  type BackgroundToolCallBatch,
-} from "#harness/background-tools.js";
+import { executeWithToolStub } from "#tool-stubs/execute.js";
 
-type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
-
-const toolApprovals = new WeakMap<
-  object,
-  (toolInput: unknown, callId: string, abortSignal?: AbortSignal) => Promise<NativeApprovalStatus>
->();
+const log = createLogger("harness.tools");
 
 /**
- * Builds an AI SDK `ToolSet` from unified harness tool definitions.
- *
- * Tools without `execute` are surfaced to the model as client-side tools
- * (no server execution).
+ * Describes harness tools to the AI SDK, each as `describe` words it. The SDK only calls the
+ * model, so it gets no `execute`: eve runs every call itself (`#harness/call-executor.js`).
  *
  * Entries listed in `disabledProviderTools` are skipped entirely. Used
  * by the harness recovery path when a gateway fallback provider has
@@ -45,195 +29,64 @@ const toolApprovals = new WeakMap<
  * retry call so the request can proceed without it.
  */
 export function buildToolSet(input: {
-  readonly approvedTools?: ReadonlySet<string>;
-  readonly backgroundBatch?: BackgroundToolCallBatch;
+  readonly describe: (definition: HarnessToolDefinition) => string;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly tools: HarnessToolMap;
 }): ToolSet {
   const tools: Record<string, ToolSet[string]> = {};
-  const backgroundBatch = input.backgroundBatch ?? createBackgroundToolCallBatch();
   const disabled = input.disabledProviderTools;
 
   for (const definition of input.tools.values()) {
     if (disabled?.has(definition.name)) {
       continue;
     }
-
-    backgroundBatch.setTool(
-      definition.name,
-      definition.execution === "background" && definition.execute !== undefined
-        ? {
-            executeInput: definition.executeInput,
-            name: definition.name,
-            nodeId: definition.nodeId,
-            workflowId: requireBackgroundWorkflowId(definition),
-          }
-        : undefined,
-    );
-    const authorToModelOutput = definition.toModelOutput;
-    const approval = buildApprovalFn(definition, input);
-    const aiTool = tool({
-      description: definition.description,
-      execute: wrapToolExecute(definition, backgroundBatch),
+    tools[definition.name] = tool({
+      description: input.describe(definition),
       inputSchema: toModelSchema(definition.inputSchema, "input"),
-      ...(definition.execution === "background"
-        ? {
-            onInputAvailable: ({
-              input: toolInput,
-              toolCallId,
-            }: {
-              readonly input: unknown;
-              readonly toolCallId: string;
-            }) => {
-              if (definition.execute === undefined) {
-                throw new Error(`Background tool "${definition.name}" has no execute function.`);
-              }
-              backgroundBatch.register({
-                callId: toolCallId,
-                input: toolInput,
-                toolName: definition.name,
-              });
-            },
-          }
-        : {}),
+      strict: false,
       outputSchema: toModelSchema(definition.outputSchema, "output"),
-      ...(definition.execute !== undefined
-        ? {
-            toModelOutput: async ({
-              output,
-              toolCallId,
-            }: {
-              readonly output: unknown;
-              readonly toolCallId?: string;
-            }) => {
-              if (isAuthorizationPendingModelOutput(output)) {
-                return {
-                  type: "text" as const,
-                  value: authorizationPendingModelText(output.connections),
-                };
-              }
-              if (authorToModelOutput !== undefined) {
-                return normalizeToolModelOutput({
-                  output: await authorToModelOutput(output),
-                  toolCallId,
-                  toolName: definition.name,
-                });
-              }
-              if (typeof output === "string") {
-                return { type: "text" as const, value: output };
-              }
-              return normalizeToolModelOutput({
-                output: { type: "json" as const, value: output ?? null },
-                toolCallId,
-                toolName: definition.name,
-              });
-            },
-          }
-        : authorToModelOutput !== undefined
-          ? {
-              toModelOutput: async ({
-                output,
-                toolCallId,
-              }: {
-                readonly output: unknown;
-                readonly toolCallId?: string;
-              }) =>
-                normalizeToolModelOutput({
-                  output: await authorToModelOutput(output),
-                  toolCallId,
-                  toolName: definition.name,
-                }),
-            }
-          : {}),
     });
-    tools[definition.name] = aiTool;
-    if (definition.approval !== undefined) {
-      toolApprovals.set(aiTool, approval);
-    }
   }
 
   return tools as ToolSet;
 }
 
-function requireBackgroundWorkflowId(definition: HarnessToolDefinition): string {
-  if (definition.workflowId === undefined) {
-    throw new Error(
-      `Background tool "${definition.name}" must be defined with defineWorkflowTool().`,
-    );
-  }
-  return definition.workflowId;
+/** A tool eve runs inside the step, rather than the runtime or the provider. */
+export type RunnableTool = HarnessToolDefinition & {
+  readonly execute: NonNullable<HarnessToolDefinition["execute"]>;
+};
+
+export function isRunnableTool(
+  definition: HarnessToolDefinition | undefined,
+): definition is RunnableTool {
+  return definition?.execute !== undefined;
 }
 
 /**
- * Builds a ToolSet from an ordered list of harness definitions.
- *
- * The first definition for a name wins, matching the dynamic-tool scope
- * ordering where step tools override turn/session tools.
+ * Runs a tool's `execute` for one call, through its stub when an eval stubs it, as the caller who
+ * approved the call. Outputs are normalized to JSON, except an {@link AuthorizationSignal}, which
+ * the executor turns into a sign-in.
  */
-export function buildToolSetFromDefinitions(input: {
-  readonly approvedTools?: ReadonlySet<string>;
-  readonly backgroundBatch?: BackgroundToolCallBatch;
-  readonly disabledProviderTools?: ReadonlySet<string>;
-  readonly tools: readonly HarnessToolDefinition[];
-}): ToolSet {
-  const tools = new Map<string, HarnessToolDefinition>();
-  for (const definition of input.tools) {
-    if (!tools.has(definition.name)) {
-      tools.set(definition.name, definition);
-    }
+export function invokeTool(
+  definition: RunnableTool,
+  input: unknown,
+  options: ToolExecuteOptions,
+): Promise<unknown> | AsyncIterable<unknown> {
+  const { execute } = definition;
+  let output: unknown;
+  try {
+    output = executeWithToolStub(definition.name, input, options, () => execute(input, options));
+  } catch (error) {
+    return Promise.reject(error);
   }
-  return buildToolSet({
-    approvedTools: input.approvedTools,
-    backgroundBatch: input.backgroundBatch,
-    disabledProviderTools: input.disabledProviderTools,
-    tools,
-  });
-}
 
-/**
- * Wraps a tool's `execute` so a returned {@link AuthorizationSignal} is
- * stashed out-of-band ({@link stashToolInterrupt}) for the park detector while
- * the AI SDK records an opaque {@link AuthorizationPendingModelOutput} that
- * omits OAuth URLs, user codes, and hook URLs from model-facing history.
- * Returns `undefined` for client-side tools (no `execute`).
- */
-export function wrapToolExecute(
-  definition: HarnessToolDefinition,
-  backgroundBatch: BackgroundToolCallBatch = createBackgroundToolCallBatch(),
-): ((input: any, options: ToolExecuteOptions) => Promise<any> | AsyncIterable<any>) | undefined {
-  const execute = definition.execute;
-  if (execute === undefined) return undefined;
+  if (isAsyncIterable(output)) {
+    return normalizeToolExecuteIterable(output, definition.name, options);
+  }
 
-  return (input, options) => {
-    let output: unknown;
-    try {
-      if (definition.execution === "background") {
-        backgroundBatch.register({
-          callId: options.toolCallId,
-          input,
-          toolName: definition.name,
-        });
-        output = executeBackgroundToolCall({
-          batch: backgroundBatch,
-          definition: definition as BackgroundExecutableTool,
-          options,
-          toolInput: input,
-        });
-      } else {
-        output = execute(input, options);
-      }
-    } catch (error) {
-      return Promise.reject(error);
-    }
-
-    if (isAsyncIterable(output)) {
-      return normalizeToolExecuteIterable(output, definition.name, options);
-    }
-
-    return Promise.resolve(output).then((value) =>
-      normalizeToolExecuteOutput(value, definition.name, options),
-    );
-  };
+  return Promise.resolve(output).then((value) =>
+    normalizeToolExecuteOutput(value, definition.name, options),
+  );
 }
 
 async function* normalizeToolExecuteIterable(
@@ -251,10 +104,7 @@ function normalizeToolExecuteOutput(
   toolName: string,
   options: ToolExecuteOptions,
 ): unknown {
-  if (isAuthorizationSignal(output)) {
-    stashToolInterrupt(loadContext(), options.toolCallId, output);
-    return modelFacingAuthorizationOutput(output);
-  }
+  if (isAuthorizationSignal(output)) return output;
   return normalizeToolJsonOutput({
     boundary: "execute",
     output,
@@ -283,21 +133,13 @@ function normalizeToolExecuteOutput(
  * a gateway fallback provider has rejected a provider-specific tool.
  */
 export async function buildToolSetWithProviderTools(input: {
-  readonly approvedTools?: ReadonlySet<string>;
-  readonly backgroundBatch?: BackgroundToolCallBatch;
+  readonly describe: (definition: HarnessToolDefinition) => string;
   readonly disabledProviderTools?: ReadonlySet<string>;
-  readonly modelReference: RuntimeModelReference;
+  readonly profile: ModelProfile;
   readonly tools: HarnessToolMap;
 }): Promise<ToolSet> {
   const disabled = input.disabledProviderTools;
-  const tools: ToolSet = {
-    ...buildToolSet({
-      approvedTools: input.approvedTools,
-      backgroundBatch: input.backgroundBatch,
-      disabledProviderTools: disabled,
-      tools: input.tools,
-    }),
-  };
+  const tools: ToolSet = { ...buildToolSet(input) };
 
   for (const definition of input.tools.values()) {
     const handling = definition.behavior?.handling;
@@ -306,8 +148,14 @@ export async function buildToolSetWithProviderTools(input: {
       definition.execute === undefined &&
       !disabled?.has(definition.name)
     ) {
-      const backend = resolveWebSearchBackend(input.modelReference, handling.provider);
+      const backend = resolveWebSearchBackend(input.profile, handling);
       if (backend === null) {
+        log.debug("model has no web search backend; leaving the tool out", {
+          gateway: input.profile.gateway,
+          modelProvider: input.profile.provider,
+          searchProvider: handling.provider,
+          tool: definition.name,
+        });
         delete tools[definition.name];
       } else {
         tools[definition.name] = await resolveWebSearchProviderTool(backend);
@@ -318,45 +166,29 @@ export async function buildToolSetWithProviderTools(input: {
   return tools;
 }
 
-function buildApprovalFn(
-  definition: HarnessToolDefinition,
-  input: { readonly approvedTools?: ReadonlySet<string> },
-): (
-  toolInput: unknown,
-  callId: string,
-  abortSignal?: AbortSignal,
-) => Promise<NativeApprovalStatus> {
-  return async (toolInput: unknown, callId: string, abortSignal?: AbortSignal) => {
-    if (definition.approval === undefined) return undefined;
-
-    const toolInputRecord = isObject(toolInput) ? toolInput : undefined;
-
-    const status = await resolveApprovalPolicy(definition.approval)({
-      ...buildCallbackContext(),
-      abortSignal: abortSignal ?? new AbortController().signal,
-      approvedTools: input.approvedTools ?? new Set(),
-      callId,
-      toolInput: toolInputRecord,
-      toolName: definition.name,
-    });
-    return typeof status === "boolean" ? (status ? "user-approval" : "not-applicable") : status;
-  };
+interface ApprovalCall {
+  readonly callId: string;
+  readonly input: unknown;
+  readonly abortSignal?: AbortSignal;
+  readonly approvalMemory?: ApprovalMemory;
+  readonly recheck?: boolean;
 }
 
-/** Builds the AI SDK 7 call-level approval policy for an assembled tool set. */
-export function buildToolApproval(
-  tools: ToolSet,
-  abortSignal?: AbortSignal,
-): ToolApprovalConfiguration<ToolSet, Record<string, unknown>> {
-  return async ({ toolCall }) => {
-    const toolDefinition = tools[toolCall.toolName];
-    if (toolDefinition === undefined) return undefined;
-
-    const approval = toolApprovals.get(toolDefinition);
-    return (await approval?.(
-      toolCall.input,
-      toolCall.toolCallId,
-      abortSignal,
-    )) as ToolApprovalStatus;
-  };
+/** Decides whether a call runs, needs a person's approval, or is denied. */
+export async function decideApproval(
+  definition: HarnessToolDefinition,
+  call: ApprovalCall,
+): Promise<ApprovalDecision> {
+  if (definition.approval === undefined) return { denied: false };
+  return await evaluateApproval(
+    resolveApprovalPolicy(definition.approval),
+    {
+      ...buildCallbackContext(),
+      abortSignal: call.abortSignal ?? new AbortController().signal,
+      callId: call.callId,
+      toolInput: isObject(call.input) ? call.input : undefined,
+      toolName: definition.name,
+    },
+    { memory: call.approvalMemory, recheck: call.recheck },
+  );
 }

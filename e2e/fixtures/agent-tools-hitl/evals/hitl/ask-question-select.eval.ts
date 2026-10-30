@@ -18,15 +18,15 @@ export default defineEval({
       ].join("\n"),
     );
 
-    const request = session.requireInputRequest({
+    const request = session.requireInteraction({
       display: (value) => value === undefined || value === "select",
       optionIds: (ids) => ids.length === 2,
       toolName: "ask_question",
     });
-    const blue = request.options?.find((option) => /\bblue\b/i.test(option.label));
+    const blue = request.request.options?.find((option) => /\bblue\b/i.test(option.label));
     if (blue === undefined) throw new Error("ask_question did not offer a Blue option.");
 
-    await session.respond([{ optionId: blue.id, requestId: request.requestId }]);
+    await session.respond([{ optionId: blue.id, interactionId: request.interactionId }]);
 
     t.succeeded();
     t.messageIncludes(/\bblue\b/i);

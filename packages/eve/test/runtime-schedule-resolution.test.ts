@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { compileFromMemory } from "../src/compiler/compile-from-memory.js";
+import { compileFromMemory } from "../src/internal/testing/compile-from-memory.js";
 import { defineSchedule } from "../src/public/definitions/schedule.js";
 import { resolveSchedules } from "../src/runtime/schedules/resolve-schedule.js";
 
@@ -17,7 +17,7 @@ describe("resolveSchedules", () => {
         },
         {
           loadNamespace: async () => ({
-            default: defineSchedule({ cron: "0 0 * * 0", markdown: "Clean stale data." }),
+            default: defineSchedule({ cron: "0 0 * * 0", content: "Clean stale data." }),
           }),
           logicalPath: "schedules/cleanup.ts",
         },

@@ -1,14 +1,22 @@
-import type { ModelMessage, SystemModelMessage } from "ai";
+import type { SystemModelMessage } from "ai";
 import type { HistoryState } from "#context/keys.js";
+import type { Announcement } from "#harness/announcements.js";
 
 import {
   createFrameworkUserMessage,
   type FrameworkMessageKind,
   type HarnessModelMessage,
+  turnAnchorOf,
 } from "#harness/messages.js";
 
 interface AddCurrentMessageOptions {
   readonly cacheFriendly?: boolean;
+}
+
+/** Context for a model call that belongs with one turn's input. */
+export interface AnchoredContext {
+  readonly turnId: string;
+  readonly content: string;
 }
 
 interface CurrentMessagesOptions {
@@ -16,12 +24,6 @@ interface CurrentMessagesOptions {
   readonly currentTurnMessages?: readonly HarnessModelMessage[];
   readonly projectedMessages?: readonly HarnessModelMessage[];
 }
-
-const ANNOUNCEMENT_KINDS = {
-  availableSkills: "context.state",
-  deliveryInstruction: "context.instruction",
-  taskState: "context.state",
-} as const satisfies Record<keyof HistoryState, FrameworkMessageKind>;
 
 /** Builds the model view and durable history for one step. */
 export function createCurrentMessages(
@@ -33,11 +35,18 @@ export function createCurrentMessages(
   readonly nonSystemMessages: readonly HarnessModelMessage[];
   readonly systemMessages: readonly SystemModelMessage[];
   add(message: string, kind: FrameworkMessageKind, options?: AddCurrentMessageOptions): void;
-  addAnnouncements(announcements: HistoryState): void;
+  /**
+   * Adds context for this call without keeping it in history, each entry just ahead of the input
+   * its turn brought. Add it last: what's added after would land between it and that input.
+   */
+  addAnchored(entries: readonly AnchoredContext[], kind: FrameworkMessageKind): void;
+  addAnnouncements(announcements: Readonly<Record<string, Announcement>>): void;
   addSystem(messages: SystemModelMessage | readonly SystemModelMessage[]): void;
 } {
   const durableMessages = [...history];
-  const historyState = { ...options.historyState };
+  const historyState: { -readonly [K in keyof HistoryState]: HistoryState[K] } = {
+    ...options.historyState,
+  };
   const systemMessages: SystemModelMessage[] = [];
   const nonSystemMessages: HarnessModelMessage[] = [];
   const currentTurnMessages = new Set(options.currentTurnMessages);
@@ -56,37 +65,60 @@ export function createCurrentMessages(
   let userInsertionIndex = currentTurnInsertionIndex ?? nonSystemMessages.length;
   const currentInputIndex = history.findIndex((message) => currentTurnMessages.has(message));
   let historyInsertionIndex = currentInputIndex === -1 ? history.length : currentInputIndex;
-  // The AI SDK collects approval responses only from the tail tool message.
-  // Appending user-role context there would skip the approved tool's
-  // execution and send the provider a tool call with no result.
-  const canAppendUserMessages =
-    currentTurnInsertionIndex !== undefined || !hasTailApprovalResponse(nonSystemMessages);
+  function appendUserMessage(message: string, kind: FrameworkMessageKind): void {
+    const entry = createFrameworkUserMessage(kind, message);
+    nonSystemMessages.splice(userInsertionIndex, 0, entry);
+    durableMessages.splice(historyInsertionIndex, 0, entry);
+    userInsertionIndex += 1;
+    historyInsertionIndex += 1;
+  }
 
   function add(
     message: string,
     kind: FrameworkMessageKind,
     { cacheFriendly = true }: AddCurrentMessageOptions = {},
-  ): boolean {
-    if (cacheFriendly && canAppendUserMessages) {
-      const entry = createFrameworkUserMessage(kind, message);
-      nonSystemMessages.splice(userInsertionIndex, 0, entry);
-      durableMessages.splice(historyInsertionIndex, 0, entry);
-      userInsertionIndex += 1;
-      historyInsertionIndex += 1;
-      return true;
+  ): void {
+    if (cacheFriendly) {
+      appendUserMessage(message, kind);
+      return;
     }
     systemMessages.push({ role: "system", content: message });
-    return false;
   }
 
   return {
     add,
+    addAnchored(entries, kind) {
+      if (entries.length === 0) return;
+      // Every later call finds a turn's input where it was, so context ahead of it keeps the
+      // prompt before it cached. Context whose turn's input compaction summarized, or a turn
+      // that brought none, sits after the compaction's checkpoint instead.
+      const anchors = new Map<string, number>();
+      nonSystemMessages.forEach((message, index) => {
+        const turnId = turnAnchorOf(message);
+        if (turnId !== undefined && !anchors.has(turnId)) anchors.set(turnId, index);
+      });
+      const unanchored = checkpointLength(nonSystemMessages);
+      const at = entries.map(({ turnId }) => anchors.get(turnId) ?? unanchored);
+      const placed: HarnessModelMessage[] = [];
+      let shift = 0;
+      for (let index = 0; index <= nonSystemMessages.length; index += 1) {
+        entries.forEach((entry, entryIndex) => {
+          if (at[entryIndex] !== index) return;
+          placed.push(createFrameworkUserMessage(kind, entry.content));
+          if (index <= userInsertionIndex) shift += 1;
+        });
+        if (index < nonSystemMessages.length) placed.push(nonSystemMessages[index]!);
+      }
+      nonSystemMessages.splice(0, nonSystemMessages.length, ...placed);
+      userInsertionIndex += shift;
+    },
     addAnnouncements(announcements) {
-      for (const key of ["availableSkills", "taskState", "deliveryInstruction"] as const) {
-        const message = announcements[key];
-        if (message === undefined || message.length === 0 || historyState[key] === message)
-          continue;
-        if (add(message, ANNOUNCEMENT_KINDS[key])) historyState[key] = message;
+      for (const key of Object.keys(announcements).sort()) {
+        const announcement = announcements[key]!;
+        const previous = historyState.announcements?.[key];
+        if (previous === announcement.value) continue;
+        appendUserMessage(announcement.render(previous), "context.state");
+        historyState.announcements = { ...historyState.announcements, [key]: announcement.value };
       }
     },
     addSystem(messages) {
@@ -107,10 +139,12 @@ export function createCurrentMessages(
   };
 }
 
-/** True when the history ends with a tool message carrying a tool-approval-response. */
-export function hasTailApprovalResponse(messages: readonly ModelMessage[]): boolean {
-  const tail = messages.at(-1);
-  return (
-    tail?.role === "tool" && tail.content.some((part) => part.type === "tool-approval-response")
-  );
+/** How many messages a compacted history opens with: its checkpoint and the summary. */
+function checkpointLength(messages: readonly HarnessModelMessage[]): number {
+  const [marker, summary] = messages;
+  return marker?.role === "user" &&
+    marker.kind === "context.compaction" &&
+    summary?.role === "assistant"
+    ? 2
+    : 0;
 }

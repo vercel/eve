@@ -28,7 +28,7 @@ const log = createLogger("github.verify");
 export type GitHubWebhookVerifier = (request: Request, body: string) => unknown | Promise<unknown>;
 
 /** Options for {@link verifyGitHubRequest}. */
-export interface GitHubVerifyOptions {
+interface GitHubVerifyOptions {
   readonly webhookSecret?: GitHubWebhookSecret;
   readonly webhookVerifier?: GitHubWebhookVerifier;
 }

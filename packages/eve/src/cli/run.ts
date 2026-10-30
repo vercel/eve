@@ -1,6 +1,7 @@
-import { Command, CommanderError } from "#compiled/commander/index.js";
+import { Command, CommanderError, Option } from "#compiled/commander/index.js";
 import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
+import { areSchedulesDisabled } from "#internal/schedules/disabled.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import type { CliApplicationContext } from "#cli/application-command.js";
@@ -10,7 +11,7 @@ import { eveCliBanner } from "#cli/banner.js";
 import { registerIntegrationCommands } from "#cli/commands/register-integration-commands.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { registerRegistryCommands } from "#cli/commands/register-registry-commands.js";
-import { registerDevelopmentCommand } from "#cli/dev/command.js";
+import { registerDevelopmentCommand, registerRemoteCommands } from "#cli/dev/command.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
 import {
   registerAcpCommand,
@@ -21,10 +22,6 @@ import { waitForShutdownSignal } from "#cli/shutdown.js";
 import type { ProductionCliOptions } from "#cli/dev/command-options.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { EvalCliOptions } from "#evals/cli/eval.js";
-import {
-  registerRuntimeInvokeCommand,
-  type InvokeCliRuntimeDependencies,
-} from "#cli/invoke/command.js";
 import {
   parseAgentNamesOption,
   parsePortOption,
@@ -56,10 +53,6 @@ interface CliLogger {
 interface CliRuntimeDependencies {
   isCodingAgentLaunch(): Promise<boolean>;
   findApplicationRoot(cwd: string): Promise<string | undefined>;
-  isActiveDevelopmentServerForApp(input: {
-    readonly appRoot: string;
-    readonly serverUrl: string;
-  }): Promise<boolean>;
   buildHost: BuildHost;
   resolveVerifiedRemoteDevelopmentClient: ResolveVerifiedRemoteDevelopmentClient;
   runAcpServer: RunAcpServer;
@@ -69,7 +62,6 @@ interface CliRuntimeDependencies {
     options?: { json?: boolean },
   ): Promise<void>;
   runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void>;
-  runInvoke: InvokeCliRuntimeDependencies["runInvoke"];
   runEvalCommand(
     evalIds: readonly string[],
     options: EvalCliOptions,
@@ -83,6 +75,7 @@ interface CliRuntimeDependencies {
     options?: {
       host?: string;
       port?: number;
+      schedules?: boolean;
     },
   ): Promise<ProductionServerHandle>;
 }
@@ -136,20 +129,6 @@ export function createCliProgram(
       },
     });
 
-  agentCommand(
-    program
-      .command("channels")
-      .description("Manage user-authored channels in the current project.")
-      .command("list"),
-    applicationContext,
-  )
-    .description("List user-authored channels in the current project.")
-    .option("--json", "Output as JSON")
-    .action(async (options: { json?: boolean }) => {
-      const { runChannelsListCommand } = await import("#cli/commands/channels.js");
-      await runChannelsListCommand(logger, applicationContext.project!, options);
-    });
-
   registerEveTelemetryCommands(program, logger);
 
   registerIntegrationCommands({ program, logger, applicationContext });
@@ -189,7 +168,10 @@ export function createCliProgram(
   program
     .command("init [target]")
     .description("Create a new eve agent, or add one to an existing project directory.")
-    .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
+    // Superseded by `eve add channel/web`; still accepted, but no longer advertised.
+    .addOption(
+      new Option("--channel-web-nextjs", "Add the Web Chat application (Next.js)").hideHelp(),
+    )
     .option(
       "--agents <names>",
       "Create an agents/ workspace with comma-separated agent names",
@@ -242,18 +224,23 @@ export function createCliProgram(
       },
     );
 
-  agentCommand(program.command("set"), applicationContext)
-    .description("Change root agent model settings.")
-    .option("--model <model>", "Set the agent model (provider/model-id)")
+  const set = program.command("set").description("Change root agent model settings.");
+  agentCommand(set.command("model [model]"), applicationContext)
+    .description("Set the agent model and reasoning effort.")
     .option(
       "--reasoning <effort>",
       "Set reasoning (provider-default|none|minimal|low|medium|high|xhigh)",
       parseReasoningOption,
     )
-    .action(async (options: { model?: string; reasoning?: AgentReasoningDefinition }) => {
-      const { runSetCommand } = await import("#cli/commands/set.js");
-      await runSetCommand(logger, applicationContext.root, options);
-    });
+    .action(
+      async (model: string | undefined, options: { reasoning?: AgentReasoningDefinition }) => {
+        const { runSetCommand } = await import("#cli/commands/set.js");
+        await runSetCommand(logger, applicationContext.root, {
+          model,
+          reasoning: options.reasoning,
+        });
+      },
+    );
 
   registerProjectCommands({ program, logger, applicationContext });
 
@@ -266,6 +253,7 @@ export function createCliProgram(
 
   agentCommand(program.command("start"), applicationContext)
     .description("Start a built eve application.")
+    .option("--no-schedules", "Start without running authored cron schedules")
     .option("--host <host>", "Host interface to bind")
     .option("--port <port>", "Port to listen on (defaults to $PORT, then 3000)", parsePortOption)
     .action(async (options: ProductionCliOptions) => {
@@ -277,6 +265,7 @@ export function createCliProgram(
       const server = await startProductionHost(applicationContext.root, {
         host: options.host,
         port: options.port,
+        schedules: options.schedules,
       });
 
       logger.log(
@@ -287,10 +276,22 @@ export function createCliProgram(
         }),
       );
 
+      // The server inherits this process environment, including loaded env files.
+      if (options.schedules === false || areSchedulesDisabled()) {
+        logger.log(
+          renderCliTaggedLine(theme, {
+            message: "schedules disabled",
+            tag: "start",
+            tone: "info",
+          }),
+        );
+      }
+
       await waitForShutdownSignal({ close: () => server.close(), wait: () => server.wait() });
     });
 
-  registerRuntimeInvokeCommand({ applicationContext, logger, program, runtime });
+  const remote = program.command("remote").description("Connect to an existing eve agent.");
+  registerRemoteCommands({ applicationContext, logger, program: remote, runtime, telemetry });
 
   registerAcpCommand({
     applicationContext,
@@ -322,7 +323,7 @@ export function createCliProgram(
       await runLogsShowCommand(logger, applicationContext.root, logId, options);
     });
 
-  agentCommand(logs.command("ls"), applicationContext)
+  agentCommand(logs.command("list").alias("ls"), applicationContext)
     .description("List diagnostic logs, most recent first.")
     .option("--json", "Output as JSON")
     .action(async (options: { json?: boolean }) => {
@@ -330,9 +331,13 @@ export function createCliProgram(
       await runLogsListCommand(logger, applicationContext.root, options);
     });
 
-  const traces = agentCommand(program.command("traces [trace]"), applicationContext)
-    .usage("[options] [trace]\n       eve traces ls [options]")
-    .description("Show a local `eve dev` trace (the most recent when trace is omitted).")
+  const traces = program
+    .command("traces")
+    .usage("[options] [trace]\n       eve traces list [options]")
+    .description("Inspect local `eve dev` traces.");
+
+  agentCommand(traces.command("show [trace]", { isDefault: true }), applicationContext)
+    .description("Show a local trace (the most recent when trace is omitted).")
     .option("--verbose", "Expand every span with all attributes and events")
     .option("--json", "Output as JSON")
     .action(
@@ -342,8 +347,7 @@ export function createCliProgram(
       },
     );
 
-  traces
-    .command("ls")
+  agentCommand(traces.command("list").alias("ls"), applicationContext)
     .description("List local traces, most recent first.")
     .option("--json", "Output as JSON")
     .action(async (options: { json?: boolean }) => {
@@ -377,9 +381,14 @@ export function createCliProgram(
     .option("--list", "Print discovered evals without running them")
     .option("--timeout <ms>", "Per-eval timeout in milliseconds")
     .option("--max-concurrency <n>", "Max concurrent eval executions")
+    .option("--repeat <n>", "Run every eval n times to measure repeatability")
     .option("--json", "Output results as JSON")
     .option("--junit <path>", "Write JUnit XML results to a file")
     .option("--skip-report", "Skip eval-defined reporters (e.g. Braintrust)")
+    .option(
+      "--keep-state",
+      "Keep the local eval server's state, including its Workflow data, after the run",
+    )
     .option("--verbose", "Stream per-eval logs and workflow run IDs to stdout")
     .action(async (evalIds: string[], options: EvalCliOptions) => {
       const runEvalCommand = runtime.runEvalCommand ?? (await loadRunEvalCommand());

@@ -6,7 +6,7 @@ import {
   type SlackContext,
   type SlackMessage,
 } from "eve/channels/slack";
-import { buildAppSessionAuth } from "../../shared/slack-auth";
+import { buildAppSessionAuth } from "../../lib/slack-auth";
 import {
   consumeSlackLinkCodeRemote,
   fetchSlackLinkForMember,
@@ -78,7 +78,7 @@ async function tryHandleSlackLinkCommand(ctx: SlackContext, message: SlackMessag
 }
 
 async function resolveSlackInboundAuth(
-  slackAuth: ReturnType<typeof defaultSlackAuth>,
+  slackAuth: NonNullable<ReturnType<typeof defaultSlackAuth>>,
   member: {
     teamId?: string | null;
     userId: string;

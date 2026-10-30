@@ -1,5 +1,6 @@
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import { vercelOidc } from "#public/channels/auth.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
+import { sameEnvironmentVercelOidc } from "#public/channels/same-environment-oidc.js";
 import {
   chatSdkChannel,
   type ChatSdkChannelBridge,
@@ -11,14 +12,27 @@ import {
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
 import type { Channel } from "#public/definitions/channel.js";
 import {
+  dispatchIMessageTapbacks,
+  iMessageTapbackTool,
+  type IMessageTapback,
+  type IMessageTapbackContext,
+  type IMessageTapbackResult,
+  type IMessageTapbackToolInput,
+} from "#public/channels/imessage-tapbacks.js";
+import type { ToolDefinition } from "#public/tools/index.js";
+import {
   createLinqAdapter,
   type LinqAdapterConfig,
   type LinqCredentialProvider,
   type LinqCredentials,
-  type LinqWebhookVerifier,
 } from "#compiled/@linqapp/chat-sdk-adapter/index.js";
 import type { Message, Thread } from "#compiled/chat/index.js";
-import { linqInboundContent } from "#public/channels/linq/inboundContent.js";
+import { formatReplyContext } from "#public/channels/chat-sdk/reply-context.js";
+import {
+  linqInboundContent,
+  linqQuotedMessage,
+  rehydrateLinqAttachment,
+} from "#public/channels/linq/inboundContent.js";
 
 /** Context passed to {@link LinqChannelConfig.onMessage}. */
 export interface LinqInboundMessageContext {
@@ -30,15 +44,22 @@ export interface LinqInboundMessageContext {
 export type LinqInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Prior conversation added as user and assistant turns before this message. */
+  readonly history?: readonly SessionHistoryMessage[];
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
 } | null;
 
 /** Sync or async {@link LinqInboundResult}. */
-export type LinqInboundResultOrPromise = LinqInboundResult | Promise<LinqInboundResult>;
 
 /** A direct value or lazy resolver for a Linq credential. */
 export type LinqCredentialValue = string | (() => string | Promise<string>);
+
+/**
+ * Verifies a webhook forwarded by a trusted provider such as Vercel Connect, given the request
+ * and its raw body. Return a falsy value or throw to reject the request.
+ */
+export type LinqWebhookVerifier = (request: Request, rawBody: Uint8Array) => unknown;
 
 /** Linq credentials for outbound API calls and inbound webhook verification. */
 export interface LinqChannelCredentials {
@@ -62,7 +83,16 @@ export interface LinqChannelConfig {
   readonly onMessage?: (
     ctx: LinqInboundMessageContext,
     message: Message,
-  ) => LinqInboundResultOrPromise;
+  ) => LinqInboundResult | Promise<LinqInboundResult>;
+  /**
+   * Inbound tapback policy. Tapbacks are ignored by default. Return a result to
+   * send the tapback to the agent as a message such as `Tapback: Loved “See you at 7”`,
+   * or `null` to ignore it.
+   */
+  readonly onTapback?: (
+    ctx: IMessageTapbackContext,
+    tapback: IMessageTapback,
+  ) => IMessageTapbackResult | Promise<IMessageTapbackResult>;
   /** Override the default webhook route (`/eve/v1/linq`). */
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
@@ -76,7 +106,13 @@ export interface LinqChannel extends Channel<
   ChatSdkChannelState,
   ChatSdkReceiveTarget,
   ChatSdkInstrumentationMetadata
-> {}
+> {
+  /**
+   * Returns a tool that lets the model react to the latest message in the
+   * conversation with a tapback. Export it from a file in `agent/tools/`.
+   */
+  tapbackTool(): ToolDefinition<IMessageTapbackToolInput, string>;
+}
 
 /**
  * Creates an eve channel for Linq-powered iMessage and SMS conversations.
@@ -95,6 +131,8 @@ export function linqChannel(config: LinqChannelConfig): LinqChannel {
   const adapterConfig: LinqAdapterConfig = normalizeCredentials(config.credentials);
   if (config.baseURL !== undefined) adapterConfig.baseURL = config.baseURL;
   const linq = createLinqAdapter(adapterConfig);
+  // The channel downloads attachments in the step, after the message's own fetchData is gone.
+  linq.rehydrateAttachment = rehydrateLinqAttachment;
   const bridge = chatSdkChannel({
     adapters: { linq },
     concurrency: "concurrent",
@@ -113,8 +151,18 @@ export function linqChannel(config: LinqChannelConfig): LinqChannel {
   bridge.bot.onNewMessage(/[\s\S]*/, async (thread: Thread, message: Message) => {
     await dispatchMessage(bridge, onMessage, thread, message);
   });
+  if (config.onTapback) dispatchIMessageTapbacks(bridge, config.onTapback);
 
-  return bridge.channel;
+  const channel: LinqChannel = Object.assign(bridge.channel, {
+    tapbackTool: () =>
+      iMessageTapbackTool({
+        adapterName: "linq",
+        bot: bridge.bot,
+        channel,
+        channelLabel: "Linq",
+      }),
+  });
+  return channel;
 }
 
 function normalizeCredentials(
@@ -125,12 +173,17 @@ function normalizeCredentials(
   if (apiKey !== undefined) {
     config.credentials = createCredentialProvider(apiKey, signingSecret);
   }
-  if (webhookVerifier !== undefined) {
-    config.webhookVerifier = webhookVerifier;
-  } else if (signingSecret === undefined) {
-    config.webhookVerifier = vercelOidc();
-  }
+  const verifier =
+    webhookVerifier ?? (signingSecret === undefined ? sameEnvironmentVercelOidc() : undefined);
+  if (verifier !== undefined) config.webhookVerifier = rejectFalsyResults(verifier);
   return config;
+}
+
+// The Linq adapter rejects only a strict `false`, but eve verifiers such as
+// vercelOidc() reject with `null`, which the adapter would otherwise accept.
+function rejectFalsyResults(verifier: LinqWebhookVerifier): LinqWebhookVerifier {
+  return async (request: Request, rawBody: Uint8Array) =>
+    (await verifier(request, rawBody)) || false;
 }
 
 function createCredentialProvider(
@@ -151,7 +204,7 @@ async function resolveCredentialValue(value: LinqCredentialValue): Promise<strin
 }
 
 /** Default Linq auth projection for inbound Chat SDK message authors. */
-export function defaultLinqAuth(message: Message): SessionAuthContext {
+export function defaultLinqAuth(message: Pick<Message, "author">): SessionAuthContext {
   const attributes: Record<string, string> = {};
   if (message.author.userName !== undefined) attributes.user_name = message.author.userName;
   return {
@@ -179,13 +232,24 @@ async function dispatchMessage(
 ): Promise<void> {
   const result = await onMessage({ thread }, message);
   if (result === null) return;
-  await markReadBestEffort(bridge.bot.getAdapter("linq"), thread, message);
+  const adapter = bridge.bot.getAdapter("linq");
   const content = linqInboundContent(message);
+  // The quote lookup can take seconds, so it runs alongside the read receipt.
+  const [, quoted] = await Promise.all([
+    markReadBestEffort(adapter, thread, message),
+    content === undefined ? undefined : linqQuotedMessage(adapter, message),
+  ]);
   if (content === undefined) return;
-  await bridge.send(
-    { context: [...(result.context ?? [])], message: content },
-    { auth: result.auth, thread, title: result.title },
-  );
+  await bridge.send(content, {
+    auth: result.auth,
+    context: [
+      ...(result.context ?? []),
+      ...(quoted ? [formatReplyContext(quoted, message.text)] : []),
+    ],
+    history: result.history,
+    thread,
+    title: result.title,
+  });
 }
 
 async function markReadBestEffort(

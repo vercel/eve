@@ -14,7 +14,7 @@ const LocalDevelopmentUserOidcClaimsSchema = VercelOidcClaimsSchema.extend({
 });
 
 /** Vercel owner and project expected to have minted an OIDC token. */
-export interface DevelopmentOidcTarget {
+interface DevelopmentOidcTarget {
   readonly ownerId: string;
   readonly projectId: string;
   /** Ignore an ambient token and ask Vercel for this exact project. */

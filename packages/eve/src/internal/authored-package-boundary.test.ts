@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { resolvePackageDependencyPath } from "#internal/application/package.js";
 import {
   createGenerationPackageBoundaryPlugin,
@@ -35,16 +36,17 @@ describe("createGenerationPackageBoundaryPlugin", () => {
         kind: "import-statement",
       }),
     ).resolves.toEqual({ external: true, id: "eve/tools" });
-    await expect(
-      resolveId.call(
-        context,
-        "eve/self-modification",
-        join(PACKAGE_ROOT, "agent/extensions/edit.ts"),
-        {
+    for (const specifier of [
+      "eve/self-modification",
+      "eve/extensions/self-modification/local",
+      "eve/extensions/self-modification/remote",
+    ]) {
+      await expect(
+        resolveId.call(context, specifier, join(PACKAGE_ROOT, "agent/extensions/edit.ts"), {
           kind: "import-statement",
-        },
-      ),
-    ).resolves.toBeUndefined();
+        }),
+      ).resolves.toBeUndefined();
+    }
   });
 
   it("resolves package-private imports from the importing dependency", async () => {
@@ -68,7 +70,7 @@ describe("createGenerationPackageBoundaryPlugin", () => {
       resolveId.call(
         context,
         "#shared/git.js",
-        join(PACKAGE_ROOT, "dist/src/self-modification/agent.js"),
+        join(PACKAGE_ROOT, "dist/src/self-modification/extension/subagents/agent/agent.js"),
         { kind: "import-statement" },
       ),
     ).resolves.toEqual({
@@ -111,7 +113,7 @@ describe("createRuntimeLoaderPackageBoundaryPlugin", () => {
     });
   });
 
-  it("resolves eve package imports through the published dist mapping", async () => {
+  it("binds eve package imports to the published dist modules", async () => {
     const plugin = createRuntimeLoaderPackageBoundaryPlugin({
       externalDependencies: [],
       packageRoot: PACKAGE_ROOT,
@@ -132,11 +134,12 @@ describe("createRuntimeLoaderPackageBoundaryPlugin", () => {
       resolveId.call(
         context,
         "#shared/git.js",
-        join(PACKAGE_ROOT, "dist/src/self-modification/agent.js"),
+        join(PACKAGE_ROOT, "dist/src/self-modification/extension/subagents/agent/agent.js"),
         { kind: "import-statement" },
       ),
     ).resolves.toEqual({
-      id: join(PACKAGE_ROOT, "dist/src/shared/git.js"),
+      external: true,
+      id: normalizeEsmImportSpecifier(join(PACKAGE_ROOT, "dist/src/shared/git.js")),
     });
   });
 

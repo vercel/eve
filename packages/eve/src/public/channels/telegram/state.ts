@@ -13,6 +13,8 @@ export function stateFromTelegramMessage(
     chatType: message.chat.type,
     conversationId: privateChat ? null : conversationIdForMessage(message),
     messageThreadId: message.messageThreadId ?? null,
+    replyToBotMessageId:
+      message.replyToMessage?.from?.isBot === true ? message.replyToMessage.messageId : null,
     triggeringUserId: message.from?.id ?? null,
   };
 }

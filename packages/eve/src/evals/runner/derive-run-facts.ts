@@ -1,242 +1,182 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
+import { callOutputSource } from "#protocol/session-projection/selectors.js";
+import type { CallRow } from "#protocol/session-projection/tables.js";
+import { ownerOf } from "#protocol/session-projection/tree.js";
+import { interaction, type Interaction } from "#protocol/session-projection/reader.js";
 import { isJsonObjectValue } from "#shared/json.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
-import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
-import type { InputRequest } from "#shared/input.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
-import type { EveEvalDerivedFacts, EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
+import type {
+  EveEvalDerivedFacts,
+  EveEvalSkillLoad,
+  EveEvalSubagentCall,
+  EveEvalToolCall,
+} from "#evals/types.js";
 
-interface MutableToolCall {
-  name: string;
-  input: JsonObject;
-  output: JsonValue | undefined;
-  status: EveEvalToolCall["status"];
-  turnIndex: number;
-  sessionId?: string;
-}
-
-interface MutableSubagentCall {
-  callId: string;
-  childSessionId?: string;
-  name: string;
-  remoteUrl?: string;
-  output?: JsonValue;
-  status: EveEvalSubagentCall["status"];
-  turnIndex: number;
-  sessionId?: string;
-}
-
-/**
- * Options for {@link deriveRunFacts}.
- */
 export interface DeriveRunFactsOptions {
-  /** Session id stamped onto every derived tool and subagent call. */
+  /** Session id stamped onto every derived tool call, skill load, and subagent call. */
   readonly sessionId?: string;
+  /** Session events through this turn: cumulative usage and reusable task/child metadata. */
+  readonly usageEvents?: readonly SessionStreamEvent[];
 }
 
 /**
- * Event types that only close out a turn. When the last meaningful event
- * before this epilogue is `input.requested`, the run ended parked on
- * unanswered HITL input.
- */
-const TURN_EPILOGUE_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new Set([
-  "turn.completed",
-  "session.waiting",
-  "session.completed",
-]);
-
-/**
- * Extracts derived execution facts from a completed run's stream events.
- *
- * Tool calls pair each `actions.requested` entry with its matching
- * `action.result` by call id; subagent calls join `subagent.called` /
- * `subagent.started` with `subagent.completed` the same way. These facts
- * power checks, scorers, and reporters.
+ * What a segment of a session's events did: its tool calls, skill loads and subagent calls, the
+ * requests it opened, its content and models, read from the session's tables as the segment
+ * leaves them. A call counts when the segment requested or settled it, as an approved call
+ * requested in an earlier segment is; a subagent call when the segment started it on its task.
  */
 export function deriveRunFacts(
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
   options?: DeriveRunFactsOptions,
 ): EveEvalDerivedFacts {
   const sessionId = options?.sessionId;
-  const toolCalls: MutableToolCall[] = [];
-  const toolCallsByCallId = new Map<string, MutableToolCall>();
-  const subagentCalls: MutableSubagentCall[] = [];
-  const subagentCallsByCallId = new Map<string, MutableSubagentCall>();
-  const inputRequests: InputRequest[] = [];
-  let turnIndex = -1;
+  const view = emptySessionView();
+  // Readers of one session, such as a turn's and a steering message's, record its lines in the
+  // order each read them; the fold skips a line behind the last it read, so it reads them in
+  // stream order.
+  const folded = [...(options?.usageEvents ?? events)].sort(
+    (a, b) =>
+      a.meta.position.line - b.meta.position.line || a.meta.position.index - b.meta.position.index,
+  );
+  for (const event of folded) foldReceivedEvent(view, event);
+
+  // The turn each call happened in, in the order the segment first reports it.
+  const callTurns = new Map<string, number>();
+  const agentCalls = new Map<string, number>();
+  const interactions: Interaction[] = [];
+  const turnIndexes = new Map<string, number>();
+  const models = new Set<string>();
   let messageCount = 0;
   let reasoningBlockCount = 0;
   let failureCode: string | undefined;
-
-  const ensureToolCall = (callId: string, name: string, input: JsonObject): MutableToolCall => {
-    const existing = toolCallsByCallId.get(callId);
-    if (existing !== undefined) return existing;
-
-    const call: MutableToolCall = {
-      name,
-      input,
-      output: undefined,
-      status: "pending",
-      turnIndex: Math.max(turnIndex, 0),
-      sessionId,
-    };
-    toolCalls.push(call);
-    toolCallsByCallId.set(callId, call);
-    return call;
-  };
-
-  const ensureSubagentCall = (callId: string, name: string): MutableSubagentCall => {
-    const existing = subagentCallsByCallId.get(callId);
-    if (existing !== undefined) return existing;
-
-    const call: MutableSubagentCall = {
-      callId,
-      name,
-      status: "working",
-      turnIndex: Math.max(turnIndex, 0),
-      sessionId,
-    };
-    subagentCalls.push(call);
-    subagentCallsByCallId.set(callId, call);
-    return call;
-  };
-
+  const indexOf = (turnId: string | undefined) =>
+    Math.max(
+      (turnId === undefined ? undefined : turnIndexes.get(turnId)) ?? turnIndexes.size - 1,
+      0,
+    );
   for (const event of events) {
     switch (event.type) {
-      case "turn.started": {
-        turnIndex += 1;
+      case "turn.started":
+        if (!turnIndexes.has(event.data.turnId))
+          turnIndexes.set(event.data.turnId, turnIndexes.size);
+        break;
+      case "call.requested":
+        if (!callTurns.has(event.data.callId))
+          callTurns.set(event.data.callId, indexOf(event.scope?.turnId));
+        break;
+      case "call.settled":
+        if (!callTurns.has(event.data.callId)) callTurns.set(event.data.callId, indexOf(undefined));
+        break;
+      case "call.started": {
+        const { callId, taskId } = event.data;
+        if (taskId !== undefined && view.tasks[taskId]?.kind === "agent" && !agentCalls.has(callId))
+          agentCalls.set(callId, indexOf(event.scope?.turnId));
         break;
       }
-
-      case "actions.requested": {
-        for (const action of event.data.actions) {
-          if (action.kind === "tool-call") {
-            ensureToolCall(action.callId, action.toolName, action.input);
-          } else if (action.kind === "load-skill") {
-            ensureToolCall(action.callId, LOAD_SKILL_TOOL_NAME, action.input);
-          }
-        }
+      case "interaction.opened": {
+        const request = interaction(view, event.data.interactionId);
+        if (request !== undefined) interactions.push(request);
         break;
       }
-
-      case "action.result": {
-        const { result, status } = event.data;
-        if (result.kind === "tool-result") {
-          const call = ensureToolCall(result.callId, result.toolName, {});
-          call.output = result.output;
-          call.status = status;
-          const output = result.output;
-          if (
-            status === "completed" &&
-            isJsonObjectValue(output) &&
-            output.status === "working" &&
-            typeof output.taskId === "string" &&
-            typeof output.agentId === "string"
-          ) {
-            ensureSubagentCall(result.callId, result.toolName);
-          }
-        } else if (result.kind === "subagent-result") {
-          const call = ensureSubagentCall(result.callId, result.subagentName);
-          // A working receipt settles dispatch, not the delegated work.
-          if (result.origin === "child" && result.backgroundTask !== undefined) break;
-          call.output = call.output ?? result.output;
-          if (result.origin === "child" && result.outcome.result.kind === "cancelled") {
-            call.status = "cancelled";
-          } else {
-            call.status = status === "rejected" ? "failed" : status;
-          }
-        }
+      case "content.completed":
+        if (event.data.kind === "text" && event.data.phase === "reply") messageCount += 1;
+        else if (event.data.kind === "reasoning") reasoningBlockCount += 1;
         break;
-      }
-
-      case "subagent.called": {
-        const call = ensureSubagentCall(event.data.callId, event.data.name);
-        call.childSessionId = event.data.childSessionId;
-        if (event.data.remote !== undefined) {
-          call.remoteUrl = event.data.remote.url;
-        }
+      case "model.started":
+        models.add(event.data.modelId);
         break;
-      }
-
-      case "subagent.started": {
-        ensureSubagentCall(event.data.callId, event.data.subagentName);
+      case "turn.settled":
+      case "session.ended":
+        if (event.data.outcome === "failed") failureCode = event.data.error?.code;
         break;
-      }
-
-      case "subagent.completed": {
-        const call = ensureSubagentCall(event.data.callId, event.data.subagentName);
-        if (event.data.backgroundTask !== undefined || call.status !== "working") break;
-        call.output = event.data.output;
-        call.status = "completed";
-        break;
-      }
-
-      case "input.requested": {
-        inputRequests.push(...event.data.requests);
-        for (const request of event.data.requests) {
-          ensureToolCall(request.action.callId, request.action.toolName, request.action.input);
-        }
-        break;
-      }
-
-      case "message.completed": {
-        if (event.data.finishReason !== "tool-calls") {
-          messageCount += 1;
-        }
-        break;
-      }
-
-      case "reasoning.completed": {
-        reasoningBlockCount += 1;
-        break;
-      }
-
-      case "session.failed": {
-        failureCode = event.data.code;
-        break;
-      }
     }
   }
 
+  // A settled call's status is its outcome, and its output the one it carries or shares.
+  const settled = (row: CallRow) =>
+    row.status === "settled"
+      ? { output: callOutputSource(view, row.callId)?.output, status: row.outcome ?? "failed" }
+      : { output: undefined, status: "pending" as const };
+  const toolCalls: EveEvalToolCall[] = [];
+  const skillLoads: EveEvalSkillLoad[] = [];
+  for (const [callId, turnIndex] of callTurns) {
+    const row = view.calls[callId];
+    if (row === undefined) continue;
+    if (row.capability.kind === "skill") {
+      skillLoads.push({ sessionId, skill: row.capability.name, turnIndex, ...settled(row) });
+      continue;
+    }
+    // Every other call is a tool the model called by name: a tool, an agent or a task control.
+    const input = isJsonObjectValue(row.input) ? row.input : {};
+    toolCalls.push({
+      callId,
+      input,
+      name: row.capability.name,
+      sessionId,
+      turnIndex,
+      ...settled(row),
+    });
+  }
+  const subagentCalls = [...agentCalls].flatMap(([callId, turnIndex]): EveEvalSubagentCall[] => {
+    const row = view.calls[callId];
+    const task = row?.taskId === undefined ? undefined : view.tasks[row.taskId];
+    if (row === undefined || task === undefined) return [];
+    const child = Object.values(view.children)
+      .filter(
+        (entry) => ownerOf(view, { family: "child", id: entry.sessionId }, "task") === task.taskId,
+      )
+      .at(-1);
+    return [
+      {
+        callId,
+        childSessionId: child?.sessionId,
+        name: task.name,
+        sessionId,
+        turnIndex,
+        ...settled(row),
+      },
+    ];
+  });
+  const spent = Object.keys(view.usage.byKind).length > 0 ? view.usage.total : undefined;
   return {
-    toolCalls: toolCalls as readonly EveEvalToolCall[],
+    toolCalls,
     toolCallCount: toolCalls.length,
-    subagentCalls: subagentCalls as readonly EveEvalSubagentCall[],
+    skillLoads,
+    subagentCalls,
     subagentCallCount: subagentCalls.length,
-    inputRequests,
+    interactions,
     parked: endedParkedOnInput(events),
     messageCount,
     reasoningBlockCount,
+    models: [...models],
+    usage: spent,
     failureCode,
   };
 }
 
-/**
- * Returns empty derived facts, used when a case produced no events
- * (execution errors, transport failures).
- */
 export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
   return {
     toolCalls: [],
     toolCallCount: 0,
+    skillLoads: [],
     subagentCalls: [],
     subagentCallCount: 0,
-    inputRequests: [],
+    interactions: [],
     parked: false,
     messageCount: 0,
     reasoningBlockCount: 0,
+    models: [],
   };
 }
 
-/**
- * A run ended parked when the last event before the turn epilogue
- * (`turn.completed` → `session.waiting`) is `input.requested`: the harness
- * surfaced HITL requests and stopped without resolving them.
- */
-function endedParkedOnInput(events: readonly MessageStreamEvent[]): boolean {
+/** The explicit pause says whether the turn is waiting on a person rather than background work. */
+function endedParkedOnInput(events: readonly SessionStreamEvent[]): boolean {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
-    if (event === undefined || TURN_EPILOGUE_EVENT_TYPES.has(event.type)) continue;
-    return event.type === "input.requested";
+    if (event?.type === "turn.paused") {
+      return event.data.awaiting.some((awaiting) => "interactionId" in awaiting);
+    }
+    if (event?.type === "turn.settled" || event?.type === "session.ended") return false;
   }
   return false;
 }

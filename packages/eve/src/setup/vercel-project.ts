@@ -18,6 +18,9 @@ import {
   normalizeVercelApiResult,
 } from "./vercel-api-failure.js";
 import {
+  checkTeamRequirement,
+  checkTeamRequirements,
+  type VercelTeamRequirement,
   listRecentProjects,
   listTeams,
   parseVercelJson,
@@ -32,13 +35,14 @@ import {
   ensureCreatedProjectFramework,
   type CreatedProjectFrameworkOptions,
 } from "./vercel-project-framework.js";
+import { configureTraceSampling } from "./vercel-trace-sampling.js";
 
 const VercelProjectReferenceSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
 });
 
-export interface PickProjectOptions extends VercelProjectOperationOptions {
+interface PickProjectOptions extends VercelProjectOperationOptions {
   /** Whether an empty project list may fall back to entering a name to create. */
   allowCreateWhenEmpty?: boolean;
   /**
@@ -49,51 +53,19 @@ export interface PickProjectOptions extends VercelProjectOperationOptions {
   suggestedName?: string;
 }
 
-export interface PickTeamOptions extends VercelProjectOperationOptions {
+interface PickTeamOptions extends VercelProjectOperationOptions {
+  teamRequirement?: VercelTeamRequirement;
   /** Builds the team selector heading from the current team's display name. */
   selectMessage?: (currentTeam: string) => string;
 }
 
-export interface LinkProjectOperationOptions extends CreatedProjectFrameworkOptions {}
-
-/** Effects used to ensure an interactive Vercel project link. */
-export interface EnsureLinkedVercelProjectDeps {
-  readProjectLink: typeof readProjectLink;
-  runVercel: typeof runVercel;
-}
-
-/**
- * Returns the existing Vercel project link or creates one through the Vercel
- * CLI's interactive flow. The CLI owns team and project selection.
- */
-export async function ensureLinkedVercelProject(input: {
-  projectRoot: string;
-  prompter: Prompter;
-  signal?: AbortSignal;
-  deps?: EnsureLinkedVercelProjectDeps;
-}): Promise<NonNullable<Awaited<ReturnType<typeof readProjectLink>>>> {
-  const deps = input.deps ?? { readProjectLink, runVercel };
-  const existing = await deps.readProjectLink(input.projectRoot);
-  if (existing !== undefined) return existing;
-
-  const link = () => deps.runVercel(["link"], { cwd: input.projectRoot, signal: input.signal });
-  const linked = await (input.prompter.withInheritedStdio?.(link) ?? link());
-  if (!linked) {
-    input.signal?.throwIfAborted();
-    throw new Error("Vercel project linking failed.");
-  }
-  const project = await deps.readProjectLink(input.projectRoot);
-  if (project === undefined) throw new Error("Vercel project linking failed.");
-  return project;
+export interface LinkProjectOperationOptions extends CreatedProjectFrameworkOptions {
+  /** Configure 100% trace sampling when creating a Vercel project. Defaults to true. */
+  traceSampling?: boolean;
 }
 
 export function unresolvedProject(): ProjectResolution {
   return { kind: "unresolved" };
-}
-
-/** Resolves the linked project id from a resolution, if any. */
-export function projectIdFromResolution(project: ProjectResolution): string | undefined {
-  return project.kind === "unresolved" ? undefined : project.projectId;
 }
 
 function parseProjectReference(stdout: string, description: string): VercelProjectIdentity {
@@ -155,8 +127,9 @@ export async function assertNewProjectNameAvailable(
  * ever hears "log in", even when the real fault is a missing CLI or a transient
  * API error and the user is already authenticated.
  */
-export function requireVercelLogin(failure?: VercelCaptureFailure): never {
-  const base = "Provisioning a Vercel project requires you to be logged in to Vercel.";
+function requireVercelLogin(failure?: VercelCaptureFailure): never {
+  const base =
+    "The Vercel CLI is not logged in to an account with access to this project. Run `vercel login`.";
   const stderr = failure?.stderr.trim();
   const reason = failure
     ? `${base} The Vercel CLI check did not succeed: ${failure.message}${stderr ? ` ${stderr}` : ""}`
@@ -172,56 +145,124 @@ export function requireVercelLogin(failure?: VercelCaptureFailure): never {
 const WHOAMI_TIMEOUT_MS = 10_000;
 
 /**
+ * Structured `vercel whoami --format json` output. A missing saved token is
+ * `{ loggedIn: false }`; newer CLIs also report rejected credentials as an
+ * agent error with a `reason`. Logged in, it carries the principal.
+ */
+const WhoamiJsonSchema = z.object({
+  loggedIn: z.boolean().optional(),
+  reason: z.string().optional(),
+  username: z.string().optional(),
+  app: z.object({ id: z.string() }).optional(),
+});
+
+const LOGIN_REQUIRED_REASONS = new Set([
+  "login_required",
+  "not_authorized",
+  "scope_not_accessible",
+]);
+
+/** Reads whoami's JSON, tolerating CLIs that print it after a banner line or not at all. */
+function parseWhoamiJson(stdout: string): z.infer<typeof WhoamiJsonSchema> | undefined {
+  const start = stdout.indexOf("{");
+  const end = stdout.lastIndexOf("}");
+  if (start === -1 || end < start) return undefined;
+  try {
+    const parsed = WhoamiJsonSchema.safeParse(JSON.parse(stdout.slice(start, end + 1)));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+type WhoamiProbe =
+  | { status: "authenticated"; stdout: string }
+  | {
+      status: Exclude<VercelAuthStatus, "authenticated">;
+      failure: VercelCaptureFailure;
+    };
+
+/**
  * Runs the bounded, read-only `vercel whoami` probe shared by the auth checks.
  * A linked team project is the user's explicit scope choice, so authenticate
  * against that owner instead of whichever account scope the CLI last selected.
  */
-async function probeWhoami(projectRoot: string, options: VercelProjectOperationOptions) {
+async function probeWhoami(
+  projectRoot: string,
+  options: VercelProjectOperationOptions,
+): Promise<WhoamiProbe> {
   const link = await readProjectLink(projectRoot);
-  const args = ["whoami", ...(link?.orgId.startsWith("team_") ? ["--scope", link.orgId] : [])];
-  return captureVercel(args, {
+  const args = [
+    "whoami",
+    "--format",
+    "json",
+    ...(link?.orgId.startsWith("team_") ? ["--scope", link.orgId] : []),
+  ];
+  const result = await captureVercel(args, {
     cwd: projectRoot,
     signal: options.signal,
     timeoutMs: WHOAMI_TIMEOUT_MS,
   });
+  options.signal?.throwIfAborted();
+  if (result.ok) return { status: "authenticated", stdout: result.stdout };
+  return { status: classifyWhoamiFailure(result.failure), failure: result.failure };
 }
 
 /**
- * Whether a failed `whoami` explicitly calls for authentication recovery
- * rather than reporting a transient fault (DNS, network, API error, timeout).
+ * Classifies a failed `whoami`. ENOENT means the binary isn't installed. The
+ * CLI's structured JSON is authoritative for a logged-out session; only when it
+ * gives none (rejected tokens on some CLI versions, CLIs without JSON output)
+ * do we fall back to recognizing the diagnostic text. Anything unrecognized is
+ * a transient fault (DNS, network, API error, timeout), never a login prompt.
+ */
+function classifyWhoamiFailure(
+  failure: VercelCaptureFailure,
+): Exclude<VercelAuthStatus, "authenticated"> {
+  if (failure.errno === "ENOENT") return "cli-missing";
+  const json = parseWhoamiJson(failure.stdout);
+  if (
+    json?.loggedIn === false ||
+    (json?.reason !== undefined && LOGIN_REQUIRED_REASONS.has(json.reason))
+  ) {
+    return "logged-out";
+  }
+  return isLoggedOutDiagnostic(failure) ? "logged-out" : "unavailable";
+}
+
+/**
+ * Text fallback for CLIs that report a rejected or missing login without JSON.
  * Vercel reports an invalid stored token directly, but a linked team can mask
  * that diagnostic with `scope-not-accessible`; both require a fresh login.
  */
-function isLoggedOutFailure(failure: VercelCaptureFailure): boolean {
+function isLoggedOutDiagnostic(failure: VercelCaptureFailure): boolean {
   const text = `${failure.stdout} ${failure.stderr}`.toLowerCase();
   return (
     text.includes("credentials") ||
     text.includes("not authenticated") ||
+    text.includes("not authorized") ||
     text.includes("not logged in") ||
-    text.includes("specified token is not valid") ||
+    /token\b.*\bis not valid/u.test(text) ||
     text.includes("scope-not-accessible") ||
     text.includes("do not have access to the specified account")
   );
 }
 
 /**
- * Throws the right outcome for a failed `vercel whoami`. ENOENT means the
- * binary isn't installed (its own action, not a login that would fail
- * identically); the explicit not-authenticated diagnostic is a login action;
- * anything else is a transient fault surfaced as a plain error, so the caller
- * reports "try again" rather than mislabeling it "log in".
+ * Throws the right outcome for a failed `vercel whoami`: a missing CLI and a
+ * logged-out session are each their own action; anything else is a transient
+ * fault surfaced as a plain error, so the caller reports "try again" rather
+ * than mislabeling it "log in".
  */
-export function requireVercelAuth(failure: VercelCaptureFailure): never {
-  if (failure.errno === "ENOENT") {
+function requireVercelAuth(probe: Exclude<WhoamiProbe, { status: "authenticated" }>): never {
+  const { failure } = probe;
+  if (probe.status === "cli-missing") {
     throw new HumanActionRequiredError({
       kind: "vercel-cli-missing",
       command: "npm i -g vercel@latest",
       reason: failure.message,
     });
   }
-  if (isLoggedOutFailure(failure)) {
-    requireVercelLogin(failure);
-  }
+  if (probe.status === "logged-out") requireVercelLogin(failure);
   const stderr = failure.stderr.trim();
   throw new Error(
     `Couldn't verify your Vercel login: ${failure.message}${stderr ? ` ${stderr}` : ""}`,
@@ -232,38 +273,15 @@ export function requireVercelAuth(failure: VercelCaptureFailure): never {
  * The Vercel auth state, read-only. `cli-missing` (ENOENT) and `unavailable` (a
  * transient network/API fault) are each kept distinct from `logged-out` so a
  * caller never tells the user to log in when the real cause is a missing CLI or
- * an unreachable network. `logged-out` is claimed only from the explicit
- * not-authenticated diagnostic.
+ * an unreachable network.
  */
 export type VercelAuthStatus = "authenticated" | "logged-out" | "cli-missing" | "unavailable";
-
-/** Returns the user-facing reason Vercel-backed setup is unavailable. */
-export function vercelAuthBlockerReason(authStatus: VercelAuthStatus): string | undefined {
-  switch (authStatus) {
-    case "authenticated":
-      return undefined;
-    case "cli-missing":
-      return "Vercel CLI not found, see /deploy";
-    case "logged-out":
-      return "Log in to Vercel first, see /deploy";
-    case "unavailable":
-      return "Couldn't reach Vercel, check your connection";
-    default: {
-      const exhaustive: never = authStatus;
-      return exhaustive;
-    }
-  }
-}
 
 export async function getVercelAuthStatus(
   projectRoot: string,
   options: VercelProjectOperationOptions = {},
 ): Promise<VercelAuthStatus> {
-  const result = await probeWhoami(projectRoot, options);
-  options.signal?.throwIfAborted();
-  if (result.ok) return "authenticated";
-  if (result.failure.errno === "ENOENT") return "cli-missing";
-  return isLoggedOutFailure(result.failure) ? "logged-out" : "unavailable";
+  return (await probeWhoami(projectRoot, options)).status;
 }
 
 /**
@@ -277,11 +295,8 @@ export async function requireAuth(
   options: VercelProjectOperationOptions = {},
 ): Promise<void> {
   const check = async () => {
-    const result = await probeWhoami(projectRoot, options);
-    options.signal?.throwIfAborted();
-    if (!result.ok) {
-      requireVercelAuth(result.failure);
-    }
+    const probe = await probeWhoami(projectRoot, options);
+    if (probe.status !== "authenticated") requireVercelAuth(probe);
   };
   if (prompter === undefined) {
     await check();
@@ -307,12 +322,10 @@ async function whoamiScope(
   projectRoot: string,
   options: VercelProjectOperationOptions,
 ): Promise<string> {
-  const result = await probeWhoami(projectRoot, options);
-  options.signal?.throwIfAborted();
-  if (!result.ok) {
-    requireVercelAuth(result.failure);
-  }
-  return result.stdout.trim();
+  const probe = await probeWhoami(projectRoot, options);
+  if (probe.status !== "authenticated") requireVercelAuth(probe);
+  const json = parseWhoamiJson(probe.stdout);
+  return json?.username ?? json?.app?.id ?? probe.stdout.trim();
 }
 
 /**
@@ -359,7 +372,8 @@ export async function validateTeam(
 /**
  * Picks the Vercel team (scope). A passed slug is validated and resolved; with
  * zero or one team the current scope is used without prompting; otherwise the
- * user filters and chooses from the list with a single-selection picker.
+ * user filters and chooses from the list with a single-selection picker. Flows
+ * with a team requirement always show the picker and disable ineligible teams.
  */
 export async function pickTeam(
   prompter: Prompter,
@@ -369,11 +383,72 @@ export async function pickTeam(
 ): Promise<string> {
   if (presetTeam !== undefined) {
     await validateTeam(prompter, projectRoot, presetTeam, options);
-    return resolveTeam(projectRoot, presetTeam, options);
+    const team = await resolveTeam(projectRoot, presetTeam, options);
+    if (options.teamRequirement) {
+      const issue = await checkTeamRequirement(projectRoot, team, options.teamRequirement, options);
+      if (issue) throw new Error(`Cannot use Vercel team "${team}". ${issue}`);
+    }
+    return team;
   }
   const teams = await withSpinner(prompter, whimsyFor("teams"), () =>
     listTeams(projectRoot, options),
   );
+  if (options.teamRequirement) {
+    const requirement = options.teamRequirement;
+    const issues = await withSpinner(prompter, "Checking team permissions…", () =>
+      checkTeamRequirements(projectRoot, teams, requirement, options),
+    );
+    const choices = teams
+      .map((team) => {
+        const issue = issues.get(team.slug);
+        return {
+          value: team.slug,
+          label: team.current ? `${team.name} (current)` : team.name,
+          disabled: issue !== undefined,
+          disabledReason:
+            issue === undefined
+              ? undefined
+              : issue === requirement.disabledReason
+                ? "needs permission"
+                : "couldn't verify",
+        };
+      })
+      .sort((a, b) => Number(a.disabled) - Number(b.disabled));
+    const helpText = [
+      ...(choices.some((choice) => choice.disabledReason === "needs permission")
+        ? [
+            "For teams that need permission, ask a team owner to run setup,\nor choose another team.",
+          ]
+        : []),
+      ...(choices.some((choice) => choice.disabledReason === "couldn't verify")
+        ? ["Couldn't verify access? Retry, or run `vercel login` and try again."]
+        : []),
+    ].join("\n");
+    const enabled = choices.filter((choice) => !choice.disabled);
+    if (enabled.length === 0) {
+      if (choices.length)
+        prompter.note(
+          choices.map((choice) => `${choice.label}: ${choice.disabledReason}`).join("\n"),
+        );
+      throw new Error(
+        `No Vercel teams are available for this setup. ${requirement.disabledReason} If permissions could not be verified, run \`vercel login\` and retry.`,
+      );
+    }
+    const current = teams.find((team) => team.current);
+    const selected = await prompter.select({
+      message: options.selectMessage?.(current?.name ?? "your current team") ?? "Select your team",
+      search: true,
+      placeholder: "type to search teams",
+      options: choices,
+      helpText: helpText || undefined,
+      initialValue:
+        enabled.find((choice) => choice.value === current?.slug)?.value ?? enabled[0]!.value,
+    });
+    if (!enabled.some((choice) => choice.value === selected)) {
+      throw new Error(`Cannot use Vercel team "${selected}". ${requirement.disabledReason}`);
+    }
+    return selected;
+  }
   if (teams.length <= 1) {
     return teams.find((team) => team.current)?.slug ?? (await whoamiScope(projectRoot, options));
   }
@@ -659,6 +734,8 @@ export async function linkProject(
     if (!linked) return undefined;
     const link = await readProjectLink(projectRoot);
     if (link === undefined) return undefined;
+    if (options.traceSampling !== false)
+      await configureTraceSampling(link, prompter, options.signal);
     await ensureCreatedProjectFramework(
       prompter,
       projectRoot,

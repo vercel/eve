@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { installLocalDevCapabilityEnvironment } from "#runtime/local-dev-capability.js";
 
-import { createLocalSelfModificationFilesystem } from "./filesystem.js";
+import { createSelfModificationFilesystem } from "./filesystem.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -52,7 +52,7 @@ describe("self-modification filesystem", () => {
   it("mounts authored source read-write and traces, logs, and eve docs read-only", async () => {
     const appRoot = await createAppRoot();
     await withLocalDevCapability(appRoot, async () => {
-      const filesystem = await createLocalSelfModificationFilesystem({
+      const filesystem = await createSelfModificationFilesystem({
         appRoot,
         defaultFilesystem: new justBash.InMemoryFs(),
         justBash,
@@ -83,7 +83,7 @@ describe("self-modification filesystem", () => {
     const runtimeRoot = await createAppRoot();
 
     await withLocalDevCapability(authoredRoot, async () => {
-      const filesystem = await createLocalSelfModificationFilesystem({
+      const filesystem = await createSelfModificationFilesystem({
         appRoot: runtimeRoot,
         defaultFilesystem: new justBash.InMemoryFs(),
         justBash,
@@ -101,7 +101,7 @@ describe("self-modification filesystem", () => {
   it("mounts empty trace and log directories when nothing has been captured", async () => {
     const appRoot = await createAppRoot({ traces: false, logs: false });
     await withLocalDevCapability(appRoot, async () => {
-      const filesystem = await createLocalSelfModificationFilesystem({
+      const filesystem = await createSelfModificationFilesystem({
         appRoot,
         defaultFilesystem: new justBash.InMemoryFs(),
         justBash,
@@ -116,7 +116,7 @@ describe("self-modification filesystem", () => {
     const appRoot = await createAppRoot();
 
     await expect(
-      createLocalSelfModificationFilesystem({
+      createSelfModificationFilesystem({
         appRoot,
         defaultFilesystem: new justBash.InMemoryFs(),
         justBash,

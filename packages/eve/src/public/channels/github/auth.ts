@@ -252,26 +252,6 @@ export async function createGitHubInstallationToken(input: {
   return body.token;
 }
 
-/** Clears the in-memory GitHub installation token cache. Intended for tests. */
-export function clearGitHubInstallationTokenCache(): void {
-  installationTokenCache.clear();
-}
-
-/** Seeds the in-memory installation token cache. Intended for tests. */
-export function seedGitHubInstallationTokenForTests(input: {
-  readonly apiBaseUrl?: string;
-  readonly appId?: string;
-  readonly installationId: number;
-  readonly token: string;
-}): void {
-  const apiBaseUrl = input.apiBaseUrl ?? "https://api.github.com";
-  const appId = input.appId ?? "test-app";
-  installationTokenCache.set(`${apiBaseUrl}:${appId}:${input.installationId}`, {
-    expiresAtMs: Date.now() + 60 * 60 * 1000,
-    token: input.token,
-  });
-}
-
 function base64UrlJson(value: unknown): string {
   return Buffer.from(JSON.stringify(value)).toString("base64url");
 }

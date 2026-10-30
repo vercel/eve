@@ -14,7 +14,7 @@ describe("sleep", () => {
   });
 
   it("defines a model-facing tool", () => {
-    const definition = sleep();
+    const definition = sleep;
 
     expect(isWorkflowToolDefinition(definition)).toBe(true);
     expect(definition.description).toContain("before continuing");
@@ -29,8 +29,9 @@ describe("sleep", () => {
           wake = resolve;
         }),
     );
-    const definition = sleep();
-    const output = definition.execute({ seconds: 2.5001 }, {} as never);
+    const definition = sleep;
+    const abortSignal = new AbortController().signal;
+    const output = definition.execute({ seconds: 2.5001 }, { abortSignal } as never);
 
     await vi.waitFor(() => {
       expect(workflowSleep).toHaveBeenCalledExactlyOnceWith(2_501);
@@ -40,4 +41,19 @@ describe("sleep", () => {
 
     await expect(output).resolves.toEqual({ waitedSeconds: 2.5001 });
   });
+
+  it.each(["before", "during"])(
+    "stops when steering arrives %s execution",
+    async (timing) => {
+      vi.mocked(workflowSleep).mockImplementation(() => new Promise<void>(() => {}));
+      const controller = new AbortController();
+      if (timing === "before") controller.abort();
+
+      const output = sleep.execute({ seconds: 600 }, { abortSignal: controller.signal } as never);
+      if (timing === "during") controller.abort();
+
+      await expect(output).resolves.toEqual({ interrupted: true });
+    },
+    1_000,
+  );
 });

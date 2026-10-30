@@ -2,98 +2,28 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createNitroBundlerConfig } from "./nitro-bundler-config.js";
 
-type BundlerLogHandler = (
+type OnLog = (
   level: string,
   log: unknown,
-  defaultHandler: (level: string, log: { readonly message: string }) => void,
+  defaultHandler: (level: string, log: unknown) => void,
 ) => void;
 
-function getBundlerLogHandler(): BundlerLogHandler {
-  const config = createNitroBundlerConfig([]);
-  const onLog = config.onLog;
-
-  if (typeof onLog !== "function") {
-    throw new Error("Expected Nitro bundler config to install an onLog handler.");
-  }
-
-  return onLog as BundlerLogHandler;
-}
-
 describe("createNitroBundlerConfig", () => {
-  it("suppresses vendored dependency warnings without hiding actionable logs", () => {
-    const onLog = getBundlerLogHandler();
+  it.each([
+    ["Nitro's unlabeled code-splitting group", { code: "MISSING_CODE_SPLITTING_GROUP_DEBUG_NAME" }],
+    ["vendored dependency code", { code: "EVAL", id: "/app/node_modules/pkg/index.js" }],
+  ])("drops warnings about %s", (_label, log) => {
+    const onLog = createNitroBundlerConfig([]).onLog as OnLog;
     const defaultHandler = vi.fn();
-
-    onLog(
-      "warn",
-      {
-        id: "/repo/node_modules/fixture/index.js",
-        message: "dependency implementation detail",
-      },
-      defaultHandler,
-    );
-    onLog(
-      "warn",
-      {
-        loc: {
-          file: "/repo/packages/eve/.generated/compiled/gray-matter/index.js",
-        },
-        message: "generated compiled dependency implementation detail",
-      },
-      defaultHandler,
-    );
-    onLog(
-      "warn",
-      {
-        id: "/repo/packages/eve/dist/src/compiled/gray-matter/index.js",
-        message: "dist compiled dependency implementation detail",
-      },
-      defaultHandler,
-    );
-    onLog(
-      "warn",
-      {
-        id: "/repo/packages/eve/src/internal/nitro/host/create-application-nitro.ts",
-        message: "eve build warning",
-      },
-      defaultHandler,
-    );
-    onLog(
-      "error",
-      {
-        id: "/repo/packages/eve/dist/src/compiled/gray-matter/index.js",
-        message: "dependency build failure",
-      },
-      defaultHandler,
-    );
-
-    expect(defaultHandler).toHaveBeenCalledTimes(2);
-    expect(defaultHandler).toHaveBeenNthCalledWith(
-      1,
-      "warn",
-      expect.objectContaining({ message: "eve build warning" }),
-    );
-    expect(defaultHandler).toHaveBeenNthCalledWith(
-      2,
-      "error",
-      expect.objectContaining({ message: "dependency build failure" }),
-    );
+    onLog("warn", log, defaultHandler);
+    expect(defaultHandler).not.toHaveBeenCalled();
   });
 
-  it("preserves cross-module warnings that involve authored code", () => {
-    const onLog = getBundlerLogHandler();
+  it("forwards warnings about authored code", () => {
+    const onLog = createNitroBundlerConfig([]).onLog as OnLog;
     const defaultHandler = vi.fn();
-    const mixedWarning = {
-      id: "/app/agent/tools/evaluate.ts",
-      ids: [
-        "/app/agent/tools/evaluate.ts",
-        "/app/node_modules/eve/dist/src/compiled/vendor/index.js",
-      ],
-      pluginCode: "/app/node_modules/eve/dist/src/compiled/vendor/index.js",
-    };
-
-    onLog("warn", mixedWarning, defaultHandler);
-
-    expect(defaultHandler).toHaveBeenCalledWith("warn", mixedWarning);
+    const log = { code: "EVAL", id: "/app/agent/tools/weather.ts" };
+    onLog("warn", log, defaultHandler);
+    expect(defaultHandler).toHaveBeenCalledWith("warn", log);
   });
 });

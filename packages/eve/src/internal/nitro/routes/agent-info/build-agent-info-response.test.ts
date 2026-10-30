@@ -1,13 +1,30 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type { z } from "#compiled/zod/index.js";
+import type { AgentInfoResult } from "#client/agent-info-types.js";
+import { HealthResultSchema, type HealthResult } from "#client/health-schema.js";
 
-import { compileFromMemory } from "#compiler/compile-from-memory.js";
+type ReadonlyDeep<T> = T extends readonly (infer Item)[]
+  ? readonly ReadonlyDeep<Item>[]
+  : T extends object
+    ? { readonly [Key in keyof T]: ReadonlyDeep<T[Key]> }
+    : T;
+
+import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { AgentInfoResultSchema } from "#client/agent-info-schema.js";
 import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 import { webSearch } from "#tools/provided/web-search.js";
 import { defineMemory } from "#public/memory/index.js";
 
 describe("buildAgentInfoResponse", () => {
-  it("projects v4 exclusively from the effective compiled graph", async () => {
+  it("keeps the public inspection and health contracts aligned with their validators", () => {
+    type ValidatedInfo = ReadonlyDeep<z.output<typeof AgentInfoResultSchema>>;
+    // Flatten interfaces and intersections while preserving keys and modifiers.
+    type Shape<T> = T extends object ? { [K in keyof T]: Shape<T[K]> } : T;
+    expectTypeOf<Shape<AgentInfoResult>>().toEqualTypeOf<Shape<ValidatedInfo>>();
+    expectTypeOf<HealthResult>().toEqualTypeOf<z.output<typeof HealthResultSchema>>();
+  });
+
+  it("projects agent info exclusively from the effective compiled graph", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",
       name: "info-agent",
@@ -93,7 +110,6 @@ describe("buildAgentInfoResponse", () => {
       expect.objectContaining({
         description: "Caller profile.",
         slot: "profile",
-        visibility: "scope",
       }),
     );
     expect(response.tools.dynamic).toContainEqual(
@@ -155,7 +171,7 @@ describe("buildAgentInfoResponse", () => {
     );
   });
 
-  it("never serializes BYOK or credential-shaped providerOptions values", async () => {
+  it("only exposes the priority tier from providerOptions", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",
       name: "info-agent",
@@ -173,6 +189,7 @@ describe("buildAgentInfoResponse", () => {
         apiKey: "sk-canary-direct",
         headers: { authorization: "Bearer canary-header" },
         reasoningEffort: "high",
+        metadata: { workspace: "sk-canary-unrecognized" },
       },
     };
 
@@ -188,14 +205,21 @@ describe("buildAgentInfoResponse", () => {
     expect(serialized).not.toContain("sk-canary-byok");
     expect(serialized).not.toContain("sk-canary-direct");
     expect(serialized).not.toContain("canary-header");
+    expect(serialized).not.toContain("sk-canary-unrecognized");
     // Non-secret options survive for the dev TUI (`gateway.serviceTier`).
     expect(response.agent.model.providerOptions).toEqual({
       gateway: { serviceTier: "priority" },
-      openai: {
-        apiKey: "[redacted]",
-        headers: "[redacted]",
-        reasoningEffort: "high",
-      },
     });
+
+    model.providerOptions = { gateway: { serviceTier: "sk-canary-tier" } };
+    const customTierResponse = buildAgentInfoResponse(
+      { manifest, schedules: [] },
+      {
+        gatewayCredentials: { apiKey: false, oidc: false },
+        mode: "production",
+      },
+    );
+    expect(customTierResponse.agent.model.providerOptions).toBeUndefined();
+    expect(JSON.stringify(customTierResponse)).not.toContain("sk-canary-tier");
   });
 });

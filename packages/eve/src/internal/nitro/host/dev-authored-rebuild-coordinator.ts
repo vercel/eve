@@ -1,9 +1,11 @@
 import { stageDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { createDevelopmentApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
-import { buildDevelopmentHostCandidate } from "#internal/nitro/host/dev-host-candidate.js";
+import type {
+  DevelopmentBuilds,
+  DevelopmentBuildSession,
+} from "#internal/nitro/host/dev-build-host.js";
 import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host-fingerprint.js";
 import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
-import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import { toErrorMessage } from "#shared/errors.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
@@ -13,7 +15,7 @@ import {
   discardDevelopmentGeneration,
 } from "#internal/nitro/development-generation.js";
 
-export type DevelopmentRebuildKind = "structural" | "unchanged" | "runtime";
+type DevelopmentRebuildKind = "structural" | "unchanged" | "runtime";
 
 /**
  * Raised when generation activation fails after the replacement worker has
@@ -54,45 +56,57 @@ export interface DevelopmentAuthoredRebuildCoordinator {
 }
 
 export async function createDevelopmentAuthoredRebuildCoordinator(input: {
+  readonly builds: DevelopmentBuilds;
   readonly developmentExtensions?: DevelopmentExtensionSelection;
   readonly devServer: DrainedNitroDevServer;
   readonly initialHost: PreparedDevelopmentApplicationHost;
+  readonly onRuntimePruned?: () => Promise<void>;
 }): Promise<DevelopmentAuthoredRebuildCoordinator> {
   return new TransactionalDevelopmentAuthoredRebuildCoordinator({
+    builds: input.builds,
     currentHostFingerprint: await computeDevelopmentHostFingerprint(input.initialHost),
     developmentExtensions: input.developmentExtensions,
     currentRuntimeFingerprint: input.initialHost.generation.fingerprint,
     devServer: input.devServer,
     initialHost: input.initialHost,
+    onRuntimePruned: input.onRuntimePruned,
   });
 }
 
 /**
  * Serializes authored rebuilds into a transaction whose commit order makes
  * rollback unnecessary: a candidate generation and worker are prepared while
- * the previous worker keeps serving, the ready worker is swapped in first,
- * and the generation pointer is activated second. Workers are
- * generation-neutral (they load authored modules through the pointer), so
+ * the previous worker keeps serving. On a structural change the ready worker
+ * is swapped in first and the generation pointer is activated second. Workers
+ * are generation-neutral (they load authored modules through the pointer), so
  * every intermediate state serves consistent code, and any failure before
  * the swap simply discards the candidate. Failures after the swap must
  * never travel the discard path — see {@link PostCommitDevelopmentRebuildError}.
+ * A runtime change keeps the host, so it activates first and then moves to a
+ * fresh worker on the same host.
  */
 class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentAuthoredRebuildCoordinator {
+  readonly #builds: DevelopmentBuilds;
   #currentHost: PreparedDevelopmentApplicationHost;
   #currentHostFingerprint: string;
   #currentRuntimeFingerprint: string;
   readonly #developmentExtensions: DevelopmentExtensionSelection | undefined;
   readonly #devServer: DrainedNitroDevServer;
   readonly #usesParentWorkflowWorld: boolean;
+  readonly #onRuntimePruned: (() => Promise<void>) | undefined;
 
   constructor(input: {
+    readonly builds: DevelopmentBuilds;
     readonly currentHostFingerprint: string;
     readonly currentRuntimeFingerprint: string;
     readonly developmentExtensions: DevelopmentExtensionSelection | undefined;
     readonly devServer: DrainedNitroDevServer;
     readonly initialHost: PreparedDevelopmentApplicationHost;
+    readonly onRuntimePruned?: () => Promise<void>;
   }) {
+    this.#builds = input.builds;
     this.#currentHost = input.initialHost;
+    this.#onRuntimePruned = input.onRuntimePruned;
     this.#currentHostFingerprint = input.currentHostFingerprint;
     this.#developmentExtensions = input.developmentExtensions;
     this.#currentRuntimeFingerprint = input.currentRuntimeFingerprint;
@@ -111,10 +125,12 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
     // edit are consumed by that attempt — a later retry would otherwise
     // commit without ever reapplying the change.
     const environmentReload = stageDevelopmentEnvironmentFiles(previousHost.appRoot);
+    const build = this.#builds.begin();
     let nextHost: PreparedDevelopmentApplicationHost | undefined;
 
     try {
-      nextHost = await prepareDevelopmentApplicationHost(previousHost.appRoot, {
+      nextHost = await build.prepare({
+        appRoot: previousHost.appRoot,
         changedPaths: input.changedPaths,
         developmentExtensions: this.#developmentExtensions,
         previousExtensions: previousHost.workspaceExtensions,
@@ -153,14 +169,20 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
         await activateDevelopmentGeneration({
           appRoot: committedHost.appRoot,
           generation: committedHost.generation,
+          onRuntimePruned: this.#onRuntimePruned,
         });
         this.#commitState(committedHost, nextHostFingerprint, nextRuntimeFingerprint);
         nextHost = undefined;
         environmentReload.commit();
+        // A worker keeps every generation it imports, so each generation gets a fresh
+        // one. Activating first keeps the retired worker from loading the new
+        // generation when the spare is ready.
+        await this.#recycleWorker();
         return { host: committedHost, kind: "runtime" };
       }
 
       const result = await this.#commitStructuralHost({
+        build,
         hasRuntimeChange,
         nextHost,
         nextHostFingerprint,
@@ -168,6 +190,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
       });
       nextHost = undefined;
       environmentReload.commit();
+      this.#devServer.prepareSpareWorker();
       return result;
     } catch (error) {
       if (error instanceof PostCommitDevelopmentRebuildError) {
@@ -181,10 +204,25 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
         throw error;
       }
       throw await discardFailedHost(error, nextHost);
+    } finally {
+      build.close();
     }
   }
 
+  async #recycleWorker(): Promise<void> {
+    try {
+      await this.#devServer.recycleWorker();
+    } catch (error) {
+      // The new generation is already active, and the current worker serves it too.
+      console.warn(
+        `[eve:dev] could not start a fresh dev worker; the current worker keeps serving: ${toErrorMessage(error)}`,
+      );
+    }
+    this.#devServer.prepareSpareWorker();
+  }
+
   async #commitStructuralHost(input: {
+    readonly build: DevelopmentBuildSession;
     readonly hasRuntimeChange: boolean;
     readonly nextHost: PreparedDevelopmentApplicationHost;
     readonly nextHostFingerprint: string;
@@ -200,8 +238,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
       };
     }
 
-    const nitro = await createDevelopmentApplicationNitro(committedHost);
-    const payload = await buildDevelopmentHostCandidate({ host: committedHost, nitro });
+    const payload = await input.build.buildHost(committedHost);
 
     // Worker first, pointer second: a failed candidate leaves both the
     // previous worker and the previous pointer untouched, and the
@@ -223,6 +260,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
         await activateDevelopmentGeneration({
           appRoot: committedHost.appRoot,
           generation: committedHost.generation,
+          onRuntimePruned: this.#onRuntimePruned,
         });
       } catch (error) {
         await discardDevelopmentGeneration(committedHost.generation).catch(() => undefined);

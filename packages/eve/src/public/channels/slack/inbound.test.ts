@@ -177,7 +177,7 @@ describe("parseAppMentionEvent", () => {
     expect(message?.author?.isBot).toBe(true);
   });
 
-  it("collects file attachments with inferred type", () => {
+  it("collects file attachments with inferred type, skipping remote files", () => {
     const message = parseAppMentionEvent({
       type: "event_callback",
       event: {
@@ -193,6 +193,14 @@ describe("parseAppMentionEvent", () => {
             mimetype: "image/png",
             url_private: "https://files.slack.com/a/chart.png",
             size: 1024,
+          },
+          // A Google Drive file shared through Slack's integration (#855).
+          {
+            id: "F2",
+            mode: "external",
+            name: "Plan",
+            mimetype: "application/vnd.google-apps.document",
+            url_private: "https://docs.google.com/document/d/1",
           },
         ],
       },
@@ -210,7 +218,7 @@ describe("parseAppMentionEvent", () => {
 });
 
 describe("parseMessageEvent", () => {
-  it("preserves bot and subtype message events for onMessage", () => {
+  it("preserves bot messages for onMessage", () => {
     const bot = parseMessageEvent({
       type: "event_callback",
       event: {
@@ -222,20 +230,33 @@ describe("parseMessageEvent", () => {
         ts: "2.0",
       },
     });
-    const subtype = parseMessageEvent({
-      type: "event_callback",
-      event: {
-        type: "message",
-        subtype: "message_changed",
-        text: "edited",
-        channel: "C01",
-        ts: "3.0",
-      },
-    });
 
     expect(bot?.author?.isBot).toBe(true);
-    expect(subtype?.raw.subtype).toBe("message_changed");
   });
+
+  it.each(["bot_message", "file_share", "me_message", "thread_broadcast"])(
+    "keeps the posted-message subtype %s",
+    (subtype) => {
+      const message = parseMessageEvent({
+        type: "event_callback",
+        event: { type: "message", subtype, user: "U01", text: "hi", channel: "C01", ts: "2.0" },
+      });
+
+      expect(message?.raw.subtype).toBe(subtype);
+    },
+  );
+
+  it.each(["message_changed", "message_deleted", "channel_join"])(
+    "drops the system subtype %s",
+    (subtype) => {
+      const message = parseMessageEvent({
+        type: "event_callback",
+        event: { type: "message", subtype, text: "edited", channel: "C01", ts: "3.0" },
+      });
+
+      expect(message).toBeNull();
+    },
+  );
 });
 
 describe("parseDirectMessageEvent", () => {
@@ -413,6 +434,15 @@ describe("parseDirectMessageEvent", () => {
               name: "diagram.png",
               size: 2048,
             },
+            // A Dropbox file shared through Slack's integration is skipped (#855).
+            {
+              id: "F02",
+              is_external: true,
+              mimetype: "application/pdf",
+              mode: "external",
+              name: "plan.pdf",
+              url_private: "https://www.dropbox.com/s/abc/plan.pdf",
+            },
           ],
         },
       }),
@@ -536,6 +566,24 @@ describe("Block Kit inbound markdown", () => {
     expect(message?.markdown).toContain("Service");
     expect(message?.markdown).toContain("api");
     expect(message?.markdown).toContain("CI Bot");
+  });
+
+  it("keeps a short link preview alongside a question in the model-visible markdown", () => {
+    const message = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        user: "U01",
+        text: "Can you check this alert? <https://x/a>",
+        channel: "C01",
+        ts: "1234567890.123458",
+        attachments: [{ title: "Grafana Alerts", text: "[FIRING:12] parse errors" }],
+      },
+    });
+
+    expect(message?.markdown).toContain("Can you check this alert?");
+    expect(message?.markdown).toContain("Grafana Alerts");
+    expect(message?.markdown).toContain("[FIRING:12] parse errors");
   });
 
   it("keeps plain top-level text when there are no blocks or attachments", () => {

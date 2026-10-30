@@ -1,17 +1,16 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type {
   ChannelReceiveContext,
   ChannelRespondOptions,
   ChannelSendOptions,
-  InternalChannelSource,
+  ChannelSource,
 } from "#channel/channel-operations.js";
-import { INTERNAL_CHANNEL_DELIVER } from "#channel/channel-operations.js";
-import { type InputResponse, inputResponseSchema } from "#shared/input.js";
+import { type Answer, answerSchema } from "#shared/input.js";
 
 export type ObservedChannelDelivery<TState> =
-  | (ChannelSendOptions<TState> & { readonly message: string | UserContent })
-  | (ChannelRespondOptions<TState> & { readonly inputResponses: readonly InputResponse[] });
+  | (ChannelSendOptions<TState> & { readonly message: MessageContent })
+  | (ChannelRespondOptions<TState> & { readonly answers: readonly Answer[] });
 
 type DeliveryObserver<TState> = (
   continuationToken: string,
@@ -24,14 +23,17 @@ export function mockChannelContext<TState = undefined>(
 ): ChannelReceiveContext<TState> {
   return {
     from(continuationToken) {
-      const source: InternalChannelSource<TState> = {
+      const source: ChannelSource<TState> = {
+        async create() {
+          throw new Error("This delivery-only mock does not create sessions.");
+        },
         async send(message, options) {
           return (await observeDelivery(continuationToken, { ...options, message })) as never;
         },
-        async respond(inputResponses, options) {
+        async respond(answers, options) {
           return (await observeDelivery(continuationToken, {
             ...options,
-            inputResponses: inputResponseSchema.array().parse(inputResponses),
+            answers: answerSchema.array().parse(answers),
           })) as never;
         },
         async cancel() {
@@ -43,21 +45,8 @@ export function mockChannelContext<TState = undefined>(
         async clear() {
           return { status: "no_active_session" } as never;
         },
-        async reset() {
+        async end() {
           return { status: "no_active_session" } as never;
-        },
-        async [INTERNAL_CHANNEL_DELIVER](payload, options) {
-          const validatedPayload =
-            payload.inputResponses === undefined
-              ? payload
-              : {
-                  ...payload,
-                  inputResponses: inputResponseSchema.array().parse(payload.inputResponses),
-                };
-          return (await observeDelivery(continuationToken, {
-            ...options,
-            ...validatedPayload,
-          } as ObservedChannelDelivery<TState>)) as never;
         },
       };
       return source;

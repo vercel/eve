@@ -3,7 +3,7 @@
  * `standard` (no tier authored), the `priority` tier eve's Fast mode writes,
  * or any other authored `custom` tier value.
  */
-export type GatewayServiceTierState =
+type GatewayServiceTierState =
   | { kind: "standard" }
   | { kind: "priority" }
   | { kind: "custom"; value: string };

@@ -5,7 +5,6 @@
  */
 import acpSdk from "./@agentclientprotocol/sdk.mjs";
 import anthropic from "./@ai-sdk/anthropic.mjs";
-import codeMode from "./@ai-sdk/code-mode.mjs";
 import google from "./@ai-sdk/google.mjs";
 import mcp from "./@ai-sdk/mcp.mjs";
 import openai from "./@ai-sdk/openai.mjs";
@@ -25,12 +24,16 @@ import modelContextProtocolServer from "./@modelcontextprotocol/server.mjs";
 import opentelemetryApi from "./@opentelemetry/api.mjs";
 import opentelemetryOtlpTransformer from "./@opentelemetry/otlp-transformer.mjs";
 import standardSchemaSpec from "./@standard-schema/spec.mjs";
+import vercelAgentRuns from "./@vercel/agent-runs.mjs";
 import vercelBlob from "./@vercel/blob.mjs";
+import vercelConnect from "./@vercel/connect.mjs";
 import vercelDetectAgent from "./@vercel/detect-agent.mjs";
 import vercelOidc from "./@vercel/oidc.mjs";
 import vercelOtel from "./@vercel/otel.mjs";
+import vercelQueue from "./@vercel/queue.mjs";
 import vercelSandbox from "./@vercel/sandbox.mjs";
 import vercelSdk from "./@vercel/sdk.mjs";
+import vercelSchedules from "./@vercel/schedules.mjs";
 import workflowCore from "./@workflow/core.mjs";
 import workflowErrors from "./@workflow/errors.mjs";
 import workflowSerde from "./@workflow/serde.mjs";
@@ -44,13 +47,14 @@ import chokidar from "./chokidar.mjs";
 import commander from "./commander.mjs";
 import eventsourceParserStream from "./eventsource-parser-stream.mjs";
 import envRunner from "./env-runner.mjs";
-import grayMatter from "./gray-matter.mjs";
 import jose from "./jose.mjs";
+import jsYaml from "./js-yaml.mjs";
 import jsoncParser from "./jsonc-parser.mjs";
 import jsonSchema from "./json-schema.mjs";
 import justSecrets from "./just-secrets.mjs";
 import marked from "./marked.mjs";
 import picocolors from "./picocolors.mjs";
+import run from "./run.mjs";
 import semver from "./semver.mjs";
 import shadcnRegistry from "./shadcn-registry.mjs";
 import turndown from "./turndown.mjs";
@@ -61,7 +65,6 @@ export const MODULES = [
   acpSdk,
   anthropic,
   cfworkerJsonSchema,
-  codeMode,
   chat,
   chatAdapterSlack,
   chatAdapterStateMemory,
@@ -73,8 +76,8 @@ export const MODULES = [
   envRunner,
   eveCatalog,
   google,
-  grayMatter,
   jose,
+  jsYaml,
   jsoncParser,
   jsonSchema,
   justSecrets,
@@ -90,16 +93,21 @@ export const MODULES = [
   picocolors,
   provider,
   providerUtils,
+  run,
   semver,
   shadcnRegistry,
   standardSchemaSpec,
   turndown,
+  vercelAgentRuns,
   vercelBlob,
+  vercelConnect,
   vercelDetectAgent,
   vercelOidc,
   vercelOtel,
+  vercelQueue,
   vercelSandbox,
   vercelSdk,
+  vercelSchedules,
   workflowCore,
   workflowErrors,
   workflowSerde,

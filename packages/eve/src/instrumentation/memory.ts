@@ -32,6 +32,7 @@ export interface InstrumentationMemoryOperation {
 
 /** Bound session identity added when eve publishes a memory operation. */
 export interface InstrumentationMemoryOperationEvent extends InstrumentationMemoryOperation {
+  readonly traceSessionId?: string;
   readonly rootSessionId: string;
   readonly sessionId: string;
 }
@@ -41,7 +42,8 @@ export interface InstrumentationMemoryOperationStartedEvent extends Instrumentat
 }
 
 export interface InstrumentationMemoryOperationCompletedEvent extends InstrumentationMemoryOperationEvent {
-  readonly type: "memory.operation.completed";
+  readonly type: "memory.operation.settled";
+  readonly outcome: "completed";
   /** The number of records the operation returned or changed, when known. */
   readonly recordCount?: number;
   /** Content. Absent unless this provider's trace policy records inputs. */
@@ -49,7 +51,8 @@ export interface InstrumentationMemoryOperationCompletedEvent extends Instrument
 }
 
 export interface InstrumentationMemoryOperationFailedEvent extends InstrumentationMemoryOperationEvent {
-  readonly type: "memory.operation.failed";
+  readonly type: "memory.operation.settled";
+  readonly outcome: "failed";
   /** Content. Absent unless this provider's trace policy records outputs. */
   readonly error?: unknown;
 }
@@ -58,10 +61,7 @@ export type InstrumentationMemoryOperationTerminalEvent =
   | InstrumentationMemoryOperationCompletedEvent
   | InstrumentationMemoryOperationFailedEvent;
 
-export interface InstrumentationMemoryExecutionOperation {
-  readonly idempotencyKey: string;
-  readonly sessionId: string;
-  readonly turnId?: string;
+export interface InstrumentationMemoryExecutionOperation extends InstrumentationMemoryOperationEvent {
   readonly type: "memory.operation";
 }
 
@@ -84,34 +84,39 @@ export function createMemoryInstrumentation(input: {
   readonly resolveContext: () => {
     readonly hooks: InstrumentationHooks;
     readonly rootSessionId: string;
+    readonly traceSessionId: string;
   };
   readonly runInContext: InstrumentationContextRunner;
   readonly sessionId: string;
 }): MemoryInstrumentation {
   return {
     async execute(operation, execute) {
-      const { hooks, rootSessionId } = input.resolveContext();
-      const event = { ...operation, rootSessionId, sessionId: input.sessionId };
+      const { hooks, rootSessionId, traceSessionId } = input.resolveContext();
+      const event = { ...operation, rootSessionId, traceSessionId, sessionId: input.sessionId };
       await hooks.publish({ ...event, type: "memory.operation.started" });
       try {
         const result = await input.runInContext(
           {
-            idempotencyKey: operation.idempotencyKey,
-            sessionId: input.sessionId,
-            turnId: operation.turnId,
+            ...event,
             type: "memory.operation",
           },
           execute,
         );
         await hooks.publish({
+          outcome: "completed",
           ...event,
           outputRecords: result.outputRecords,
           recordCount: result.recordCount,
-          type: "memory.operation.completed",
+          type: "memory.operation.settled",
         });
         return result.value;
       } catch (error) {
-        await hooks.publish({ ...event, error, type: "memory.operation.failed" });
+        await hooks.publish({
+          outcome: "failed",
+          ...event,
+          error,
+          type: "memory.operation.settled",
+        });
         throw error;
       }
     },

@@ -26,7 +26,7 @@ export interface WebFetchInput {
 }
 
 /** Per-call options accepted by {@link executeWebFetchTool}. */
-export interface WebFetchExecuteOptions {
+interface WebFetchExecuteOptions {
   /** Signal combined with the request timeout. */
   readonly abortSignal?: AbortSignal;
 }
@@ -34,7 +34,7 @@ export interface WebFetchExecuteOptions {
 /**
  * Structured result returned from {@link executeWebFetchTool}.
  */
-export interface WebFetchResult {
+interface WebFetchResult {
   /** Response body, bounded to the shared tool-output limits. */
   readonly content: string;
   /** Response `Content-Type` header. */
@@ -94,8 +94,10 @@ export async function executeWebFetchTool(
   const buffer = await response.arrayBuffer();
 
   const contentType = response.headers.get("content-type") ?? "";
-  const isHtml = contentType.includes("text/html");
   const body = new TextDecoder().decode(buffer);
+  const isHtml =
+    contentType.includes("text/html") ||
+    (contentType.trim() === "" && /^\s*<(?:!doctype\s+html|html)[\s>]/i.test(body));
 
   let rawContent: string;
 

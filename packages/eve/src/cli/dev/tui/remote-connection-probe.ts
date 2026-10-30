@@ -4,18 +4,22 @@ import {
   isVercelAuthChallenge,
   vercelTrustedSourcesErrorCode,
 } from "#services/dev-client/vercel-auth-error.js";
+import {
+  formatAgentInfoForbiddenMessage,
+  isAgentInfoForbidden,
+} from "#shared/agent-info-access.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { isObject } from "#shared/guards.js";
 
 import { probeAgentInfo } from "#services/dev-client/agent-info-probe.js";
 import type { RemoteConnectionState } from "./remote-connection-types.js";
 
-export type RemoteProbeResult = Extract<
+type RemoteProbeResult = Extract<
   RemoteConnectionState,
   { state: "ready" | "auth-required" | "unavailable" }
 >;
 
-export type RemoteProbePhase = "connection-check" | "authentication-verification";
+type RemoteProbePhase = "connection-check" | "authentication-verification";
 
 function isEveOidcChallenge(error: unknown): boolean {
   if (!(error instanceof ClientError) || error.status !== 401) return false;
@@ -103,6 +107,11 @@ export async function probeRemoteInfo(input: {
     // The info route can be missing or use an older payload shape. Only call
     // the target ready once the public health route confirms a live Eve server.
     if (await probeDeploymentHealth(input.client)) return { state: "ready" };
+  }
+  // Chat works without inspection, so a credential the info route refuses
+  // still connects and only learns how to unlock the agent details.
+  if (isAgentInfoForbidden(error) && (await probeDeploymentHealth(input.client))) {
+    return { state: "ready", warning: formatAgentInfoForbiddenMessage("The remote agent") };
   }
   return classifyRemoteError(error, input.phase);
 }

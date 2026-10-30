@@ -8,17 +8,16 @@ import {
   context as otelContext,
   trace as otelTrace,
 } from "#compiled/@opentelemetry/api/index.js";
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { HookNotFoundError, WorkflowRunNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { attachChannelActivityPresentation } from "#channel/activity-renderer.js";
-import { ActivityObserverKey, ChannelRequestIdKey, SessionTitleKey } from "#context/keys.js";
+import { ChannelRequestIdKey, SessionTitleKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
   waitForCommandHookOwner,
-  activityCollectorWorkflowReference,
+  waitForSessionInbox,
   sessionTimeoutWorkflowReference,
-  startSessionOwnerStep,
+  startWorkflowOnDeployment,
   startWorkflowOnCurrentDeployment,
   workflowEntryReference,
   workflowToolRunWorkflowReference,
@@ -28,15 +27,21 @@ import {
   sessionHandoffMarkerToken,
 } from "#execution/session-inbox/address.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
-import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
-import type { TraceCaptureContext } from "#shared/trace-policy.js";
+import { markAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
+import type { TraceCaptureContext, TraceCapturePolicy } from "#shared/trace-policy.js";
+import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const getHookByTokenMock = vi.fn();
+const getRunRecordMock = vi.fn();
 const world = {
+  // Vercel-shaped: owners run on their own deployment, so ingress resumes by token.
+  capabilities: { deploymentAffinity: true },
   getDeploymentId: vi.fn(async () => "dpl_current"),
+  runs: { get: getRunRecordMock },
 };
 const getRunMock = vi.fn();
 const getWorldMock = vi.fn();
@@ -64,6 +69,7 @@ beforeEach(() => {
     return currentSessionHook(token);
   });
   getWorldMock.mockResolvedValue(world);
+  getRunRecordMock.mockResolvedValue({ status: "running" });
   getRunMock.mockReturnValue({ status: Promise.resolve("completed") });
   resumeHookMock.mockImplementation(async (token: string) => currentSessionHook(token));
 });
@@ -94,9 +100,6 @@ describe("workflowEntryReference", () => {
     );
     expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("/src/execution/");
     expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("@");
-    expect(activityCollectorWorkflowReference.workflowId).toBe(
-      `workflow//${packageInfo.name}//activityCollectorWorkflow`,
-    );
     expect(workflowToolRunWorkflowReference.workflowId).toBe(
       `workflow//${packageInfo.name}//workflowToolRunWorkflow`,
     );
@@ -140,60 +143,12 @@ describe("startWorkflowOnCurrentDeployment", () => {
   });
 });
 
-describe("session owner starts", () => {
+describe("deployment starts", () => {
   it("rejects non-exact deployment selectors", async () => {
-    getRunMock.mockReturnValue({ getWritable: () => new WritableStream<Uint8Array>() });
-    await expect(
-      startSessionOwnerStep({
-        activationToken: "owner-1:handoff",
-        anchorRunId: "anchor-1",
-        checkpoint: {} as never,
-        delivery: { kind: "deliver", payloads: [] },
-        targetDeploymentId: "latest",
-      }),
-    ).rejects.toThrow("exact deployment id");
-    expect(startMock).not.toHaveBeenCalled();
-  });
-
-  it("starts a successor on the accepted deployment with the original stream", async () => {
-    const sessionWritable = new WritableStream<Uint8Array>();
-    getRunMock.mockReturnValue({ getWritable: () => sessionWritable });
-    startMock.mockResolvedValue({ runId: "owner-2" });
-    const checkpoint = {
-      version: 8,
-      mode: "conversation",
-      serializedContext: {},
-      sessionState: { continuationToken: "continuation-1", sessionId: "session-1" },
-      sessionTimeoutMs: 60_000,
-    } as never;
-    const delivery = { kind: "deliver", payloads: [{ message: "hello" }] } as const;
-
-    await expect(
-      startSessionOwnerStep({
-        activationToken: "owner-1:handoff",
-        anchorRunId: "anchor-1",
-        checkpoint,
-        delivery,
-        targetDeploymentId: "deployment-b",
-      }),
-    ).resolves.toBeUndefined();
-
-    expect(getRunMock).toHaveBeenCalledWith("anchor-1");
-    expect(startMock).toHaveBeenCalledWith(
-      workflowEntryReference,
-      [
-        expect.objectContaining({
-          activationToken: "owner-1:handoff",
-          checkpoint,
-          delivery,
-          kind: "handoff",
-          ownerDeploymentId: "deployment-b",
-          sessionWritable,
-          sessionId: "anchor-1",
-        }),
-      ],
-      { deploymentId: "deployment-b" },
+    await expect(startWorkflowOnDeployment(workflowEntryReference, [], "latest")).rejects.toThrow(
+      "exact deployment id",
     );
+    expect(startMock).not.toHaveBeenCalled();
   });
 });
 
@@ -213,27 +168,32 @@ describe("createWorkflowRuntime command dispatch", () => {
       subagentName: "research",
     };
 
-    await expect(
-      buildRuntime().dispatchContinuation({
-        command: {
-          auth: null,
-          caller,
-          kind: "send",
-          payload: { message: "hello" },
-          requestId: "req_deliver",
-        },
-        continuationToken: "test:token",
-      }),
-    ).resolves.toEqual({ sessionId: "owner-run", status: "accepted" });
+    const result = await buildRuntime().dispatchContinuation({
+      command: {
+        auth: null,
+        caller,
+        kind: "send",
+        payload: { message: "hello" },
+        requestId: "req_deliver",
+      },
+      continuationToken: "test:token",
+    });
+    expect(result).toEqual({
+      sessionId: "owner-run",
+      status: "accepted",
+      deliveryId: expect.any(String),
+    });
 
     expect(resumeHookMock).toHaveBeenCalledWith(sessionInboxHookToken("test:token"), {
+      delivery: expect.objectContaining({
+        deliveryId: result.status === "accepted" ? result.deliveryId : undefined,
+      }),
       auth: null,
       caller,
       kind: "send",
       payload: { message: "hello" },
       requestId: "req_deliver",
     });
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it.each(["pending", "running", "completed", "failed", "cancelled"])(
@@ -260,21 +220,19 @@ describe("createWorkflowRuntime command dispatch", () => {
 
     await expect(
       buildRuntime().dispatchSession({
-        command: { kind: "clear" },
+        command: { deliveryId: "clear-delivery", kind: "clear" },
         sessionId: "session-1",
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
 
     expect(resumeHookMock).toHaveBeenCalledWith(
       sessionInboxHookToken(sessionCommandHookToken("session-1")),
-      {
-        kind: "clear",
-      },
+      { deliveryId: "clear-delivery", kind: "clear" },
     );
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("does not report an accepted command as missing when metadata hydration fails", async () => {
+    const logs = captureLogRecords();
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
     resumeHookMock.mockResolvedValue({
       runId: "owner",
@@ -291,26 +249,34 @@ describe("createWorkflowRuntime command dispatch", () => {
     expect(resumeHookMock).toHaveBeenCalledOnce();
     expect(startMock).not.toHaveBeenCalled();
     expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "failed to dispatch session command" }),
+    );
   });
 
   it("preserves the delivery payload through the stable session inbox", async () => {
     resumeHookMock.mockResolvedValue({ runId: "session-1" });
 
-    await expect(
-      buildRuntime().dispatchSession({
-        command: { kind: "send", payload: { message: "hello" } },
-        sessionId: "session-1",
-      }),
-    ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
+    const result = await buildRuntime().dispatchSession({
+      command: { kind: "send", payload: { message: "hello" } },
+      sessionId: "session-1",
+    });
+    expect(result).toEqual({
+      sessionId: "session-1",
+      status: "accepted",
+      deliveryId: expect.any(String),
+    });
 
     expect(resumeHookMock).toHaveBeenCalledWith(
       sessionInboxHookToken(sessionCommandHookToken("session-1")),
       {
+        delivery: expect.objectContaining({
+          deliveryId: result.status === "accepted" ? result.deliveryId : undefined,
+        }),
         kind: "send",
         payload: { message: "hello" },
       },
     );
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("acknowledges the exact delivery accepted by the session inbox", async () => {
@@ -333,9 +299,18 @@ describe("createWorkflowRuntime command dispatch", () => {
 
   it.each([
     { command: { kind: "send" as const, payload: {} }, status: "session_not_active" },
-    { command: { kind: "compact" as const }, status: "no_active_session" },
-    { command: { kind: "clear" as const }, status: "no_active_session" },
-    { command: { kind: "reset" as const }, status: "no_active_session" },
+    {
+      command: { kind: "compact" as const, deliveryId: "compact-delivery" },
+      status: "no_active_session",
+    },
+    {
+      command: { kind: "clear" as const, deliveryId: "clear-delivery" },
+      status: "no_active_session",
+    },
+    {
+      command: { kind: "reset" as const, deliveryId: "reset-delivery" },
+      status: "no_active_session",
+    },
   ])("maps a missing $command.kind target to $status", async ({ command, status }) => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
     resumeHookMock.mockRejectedValue(new HookNotFoundError(NOT_FOUND_TOKEN));
@@ -348,18 +323,23 @@ describe("createWorkflowRuntime command dispatch", () => {
     ).resolves.toEqual({ status });
   });
 
-  it("re-throws unexpected errors from `resumeHook`", async () => {
-    const failure = new Error("transient backing-store outage");
+  it("re-throws unexpected errors from `resumeHook` without logging capabilities", async () => {
+    const logs = captureLogRecords();
+    const failure = new Error(`transient backing-store outage for ${NOT_FOUND_TOKEN}`);
     resumeHookMock.mockRejectedValue(failure);
 
     const runtime = buildRuntime();
 
     await expect(
       runtime.dispatchContinuation({
-        command: { kind: "compact" },
+        command: { deliveryId: "compact-delivery", kind: "compact" },
         continuationToken: NOT_FOUND_TOKEN,
       }),
     ).rejects.toBe(failure);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "failed to dispatch session command" }),
+    );
+    expect(JSON.stringify(logs.records)).not.toContain(NOT_FOUND_TOKEN);
   });
 
   it("dispatches guarded cancellation through the stable inbox", async () => {
@@ -367,18 +347,14 @@ describe("createWorkflowRuntime command dispatch", () => {
 
     await expect(
       buildRuntime().dispatchSession({
-        command: { kind: "cancel", turnId: "turn-2" },
+        command: { deliveryId: "cancel-delivery", kind: "cancel", turnId: "turn-2" },
         sessionId: "session-1",
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
     expect(resumeHookMock).toHaveBeenCalledWith(
       sessionInboxHookToken(sessionCommandHookToken("session-1")),
-      {
-        kind: "cancel",
-        turnId: "turn-2",
-      },
+      { deliveryId: "cancel-delivery", kind: "cancel", turnId: "turn-2" },
     );
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("maps missing and terminal targets to 'no_active_turn'", async () => {
@@ -395,7 +371,7 @@ describe("createWorkflowRuntime command dispatch", () => {
       resumeHookMock.mockRejectedValue(error);
       await expect(
         buildRuntime().dispatchSession({
-          command: { kind: "cancel" },
+          command: { deliveryId: "cancel-delivery", kind: "cancel" },
           sessionId: "session-1",
         }),
       ).resolves.toEqual({ status: "no_active_turn" });
@@ -403,31 +379,38 @@ describe("createWorkflowRuntime command dispatch", () => {
   });
 
   it("rethrows unexpected runtime failures", async () => {
+    const logs = captureLogRecords();
     const failure = new Error("transient backing-store outage");
     resumeHookMock.mockRejectedValue(failure);
 
     await expect(
       buildRuntime().dispatchSession({
-        command: { kind: "cancel" },
+        command: { deliveryId: "cancel-delivery", kind: "cancel" },
         sessionId: "session-1",
       }),
     ).rejects.toBe(failure);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "failed to dispatch session command" }),
+    );
   });
 
   it("waits for reset to release the stable command inbox", async () => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
     resumeHookMock.mockResolvedValue(currentSessionHook("eve:token", "session-1"));
-    getHookByTokenMock.mockImplementation(async (token: string) => {
-      throw new HookNotFoundError(token);
-    });
+    getHookByTokenMock
+      .mockResolvedValueOnce(currentSessionHook(sessionInboxHookToken("eve:token"), "session-1"))
+      .mockImplementation(async (token: string) => {
+        throw new HookNotFoundError(token);
+      });
 
     await expect(
       buildRuntime().dispatchContinuation({
-        command: { kind: "reset", reason: "User requested /new" },
+        command: { deliveryId: "reset-delivery", kind: "reset", reason: "User requested /new" },
         continuationToken: "eve:token",
       }),
     ).resolves.toEqual({ previousSessionId: "session-1", status: "reset" });
     expect(resumeHookMock).toHaveBeenCalledWith(sessionInboxHookToken("eve:token"), {
+      deliveryId: "reset-delivery",
       kind: "reset",
       reason: "User requested /new",
     });
@@ -471,11 +454,21 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
     await expect(buildRuntime().resolveContinuation("test:token")).resolves.toBeUndefined();
   });
 
-  it("rethrows unexpected lookup failures", async () => {
-    const failure = new Error("transient backing-store outage");
+  it("rethrows unexpected lookup failures without logging the capability", async () => {
+    const logs = captureLogRecords();
+    const failure = new Error("lookup failed for test:token", {
+      cause: new Error("request included test:token"),
+    });
     getHookByTokenMock.mockRejectedValue(failure);
 
     await expect(buildRuntime().resolveContinuation("test:token")).rejects.toBe(failure);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "failed to resolve session by continuation token",
+      }),
+    );
+    expect(JSON.stringify(logs.records)).not.toContain("test:token");
   });
 });
 
@@ -501,6 +494,49 @@ describe("waitForCommandHookOwner", () => {
   });
 });
 
+describe("waitForSessionInbox", () => {
+  const inboxToken = sessionInboxHookToken(sessionCommandHookToken("child-session"));
+
+  it("waits for a started session to claim its inbox", async () => {
+    getHookByTokenMock
+      .mockRejectedValueOnce(new HookNotFoundError(inboxToken))
+      .mockResolvedValueOnce({ runId: "child-session" });
+    // `start()` may accept a run before it can be read.
+    getRunMock.mockReturnValue({
+      get status() {
+        return Promise.reject(new WorkflowRunNotFoundError("child-session"));
+      },
+    });
+
+    await expect(waitForSessionInbox("child-session")).resolves.toBe(true);
+    expect(getHookByTokenMock).toHaveBeenLastCalledWith(inboxToken);
+  });
+
+  it("stops waiting once the session's run ended without an inbox", async () => {
+    getHookByTokenMock.mockRejectedValue(new HookNotFoundError(inboxToken));
+    getRunMock.mockReturnValue({ status: Promise.resolve("completed") });
+
+    await expect(waitForSessionInbox("child-session")).resolves.toBe(false);
+  });
+
+  it("gives up on a running session that never claims its inbox", async () => {
+    vi.useFakeTimers();
+    try {
+      getHookByTokenMock.mockRejectedValue(new HookNotFoundError(inboxToken));
+      getRunMock.mockReturnValue({ status: Promise.resolve("running") });
+
+      const waiting = waitForSessionInbox("child-session");
+      const settled = expect(waiting).rejects.toThrow(
+        'Session "child-session" did not start taking commands within 30 seconds.',
+      );
+      await vi.advanceTimersByTimeAsync(31_000);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("createWorkflowRuntime#createSession", () => {
   const adapter: ChannelAdapter = { kind: "http" };
 
@@ -516,15 +552,6 @@ describe("createWorkflowRuntime#createSession", () => {
 
   function buildRuntime(compiledArtifactsSource: RuntimeCompiledArtifactsSource) {
     return createWorkflowRuntime({ compiledArtifactsSource });
-  }
-
-  function activityAdapter(): ChannelAdapter {
-    const adapter: ChannelAdapter = { kind: "slack" };
-    attachChannelActivityPresentation(adapter, {
-      destination: () => ({}),
-      renderers: [{ id: "status", render: vi.fn() }],
-    });
-    return adapter;
   }
 
   function mockBundleAndRun(
@@ -551,6 +578,28 @@ describe("createWorkflowRuntime#createSession", () => {
     });
   }
 
+  it("keeps the continuation out of start-failure diagnostics", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    const logs = captureLogRecords();
+    const token = "test-only:start-capability";
+    const failure = new Error(`Backing store unavailable for ${token}`);
+    startMock.mockRejectedValue(failure);
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter,
+        auth: null,
+        continuationToken: token,
+        input: { message: "hello" },
+      }),
+    ).rejects.toBe(failure);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ message: "failed to start workflow run" }),
+    );
+    expect(JSON.stringify(logs.records)).not.toContain(token);
+  });
+
   it("starts workflowEntry on the deployment accepting the request", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
@@ -561,7 +610,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter,
       auth: null,
       input: { message: "hello" },
-      mode: "task",
     });
 
     expect(startMock).toHaveBeenCalledWith(
@@ -571,10 +619,11 @@ describe("createWorkflowRuntime#createSession", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_current",
           input: { message: "hello" },
+          retention: 0,
           serializedContext: expect.objectContaining({
             "eve.bundle": { source: compiledArtifactsSource },
+            "eve.stateLayout": 1,
             "eve.channel": expect.objectContaining({ kind: "http", state: {} }),
-            "eve.mode": "task",
             "eve.otelTraceEnabled": false,
           }),
         },
@@ -584,11 +633,14 @@ describe("createWorkflowRuntime#createSession", () => {
         attributes: {
           "$eve.is_otel_trace_enabled": "false",
           "$eve.is_trace_content_visible": "false",
+          "$eve.prewarm": "1",
           "$eve.title": "hello",
           "$eve.trigger": "http",
           "$eve.type": "session",
+          "$eve.version": resolveInstalledPackageInfo().version,
         },
         deploymentId: "dpl_current",
+        experimental_retention: 0,
       },
     );
   });
@@ -603,7 +655,6 @@ describe("createWorkflowRuntime#createSession", () => {
         adapter,
         auth: null,
         input: { message: "hello" },
-        mode: "conversation",
       }),
     ).resolves.toMatchObject({ sessionId: "owner-run" });
 
@@ -625,7 +676,6 @@ describe("createWorkflowRuntime#createSession", () => {
           ownerKey: "owner",
         },
         input: { message: "hello" },
-        mode: "task",
       }),
     ).resolves.toMatchObject({ sessionId: "owner-run" });
 
@@ -648,7 +698,6 @@ describe("createWorkflowRuntime#createSession", () => {
       continuationConflictCommand,
       continuationToken: "slack:thread",
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     expect(startMock.mock.calls[0]?.[1][0]).toMatchObject({
@@ -666,7 +715,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter,
       auth: null,
       input: { message },
-      mode: "conversation",
       title: "ship it",
     });
 
@@ -687,7 +735,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter,
       auth: null,
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     const [, [workflowInput]] = startMock.mock.calls[0]!;
@@ -695,123 +742,6 @@ describe("createWorkflowRuntime#createSession", () => {
       input: { message: "hello" },
       sessionTimeoutMs: 86_400_000,
     });
-  });
-
-  it("starts one collector and injects its opaque sink for a root channel with renderers", async () => {
-    vi.stubEnv("VERCEL_URL", "agent.example.com");
-    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
-    mockBundleAndRun(compiledArtifactsSource, 60_000);
-    startMock
-      .mockResolvedValueOnce({ runId: "collector-run" })
-      .mockResolvedValueOnce({ runId: "owner-run" });
-
-    await buildRuntime(compiledArtifactsSource).createSession({
-      adapter: activityAdapter(),
-      auth: null,
-      input: { message: "hello" },
-      mode: "conversation",
-    });
-
-    expect(startMock.mock.calls[0]?.[0]).toBe(activityCollectorWorkflowReference);
-    const collectorInput = startMock.mock.calls[0]?.[1][0];
-    expect(collectorInput).toMatchObject({
-      serializedContext: expect.any(Object),
-      token: expect.any(String),
-    });
-    expect(collectorInput.token).toHaveLength(43);
-    const workflowInput = startMock.mock.calls[1]?.[1][0];
-    expect(workflowInput.activityCollectorRunId).toBe("collector-run");
-    expect(workflowInput.serializedContext[ActivityObserverKey.name]).toEqual({
-      sink: {
-        url: `https://agent.example.com/eve/v1/activity/${collectorInput.token}`,
-        version: 1,
-      },
-    });
-  });
-
-  it("uses independent collector retention when session timeout is disabled", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
-    try {
-      const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
-      mockBundleAndRun(compiledArtifactsSource, false);
-      startMock
-        .mockResolvedValueOnce({ runId: "collector-run" })
-        .mockResolvedValueOnce({ runId: "owner-run" });
-
-      await buildRuntime(compiledArtifactsSource).createSession({
-        adapter: activityAdapter(),
-        auth: null,
-        input: { message: "hello" },
-        mode: "conversation",
-      });
-
-      expect(startMock.mock.calls[0]?.[0]).toBe(activityCollectorWorkflowReference);
-      expect(startMock.mock.calls[0]?.[1][0]).toMatchObject({
-        expiresAt: "2026-01-02T00:00:00.000Z",
-      });
-      expect(startMock.mock.calls[1]?.[1][0]).toMatchObject({ sessionTimeoutMs: false });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("starts the root without activity when collector launch fails", async () => {
-    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
-    mockBundleAndRun(compiledArtifactsSource);
-    startMock
-      .mockRejectedValueOnce(new Error("collector failed"))
-      .mockResolvedValueOnce({ runId: "owner-run" });
-
-    await buildRuntime(compiledArtifactsSource).createSession({
-      adapter: activityAdapter(),
-      auth: null,
-      input: { message: "hello" },
-      mode: "conversation",
-    });
-
-    const workflowInput = startMock.mock.calls[1]?.[1][0];
-    expect(workflowInput.serializedContext[ActivityObserverKey.name]).toBeUndefined();
-  });
-
-  it("cancels the collector when root workflow startup fails", async () => {
-    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
-    mockBundleAndRun(compiledArtifactsSource);
-    const failure = new Error("root start failed");
-    startMock.mockResolvedValueOnce({ runId: "collector-run" }).mockRejectedValueOnce(failure);
-
-    await expect(
-      buildRuntime(compiledArtifactsSource).createSession({
-        adapter: activityAdapter(),
-        auth: null,
-        input: { message: "hello" },
-        mode: "conversation",
-      }),
-    ).rejects.toBe(failure);
-
-    expect(cancelRunMock).toHaveBeenCalledWith(world, "collector-run", {
-      cancelReason: "Root session creation did not complete",
-    });
-  });
-
-  it("does not inspect continuation ownership after accepting a root candidate", async () => {
-    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
-    mockBundleAndRun(compiledArtifactsSource);
-    startMock
-      .mockResolvedValueOnce({ runId: "collector-run" })
-      .mockResolvedValueOnce({ runId: "owner-run" });
-    await expect(
-      buildRuntime(compiledArtifactsSource).createSession({
-        adapter: activityAdapter(),
-        auth: null,
-        continuationToken: "slack:thread",
-        input: { message: "hello" },
-        mode: "conversation",
-      }),
-    ).resolves.toMatchObject({ sessionId: "owner-run" });
-
-    expect(getHookByTokenMock).not.toHaveBeenCalled();
-    expect(cancelRunMock).not.toHaveBeenCalled();
   });
 
   it("serializes the selected dynamic subagent config for the child workflow", async () => {
@@ -831,7 +761,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter,
       auth: null,
       input: { message: "research this" },
-      mode: "task",
     });
 
     const [, [workflowInput]] = startMock.mock.calls[0]!;
@@ -847,6 +776,33 @@ describe("createWorkflowRuntime#createSession", () => {
     });
   });
 
+  it("serializes a ctx.agent model override for the child workflow", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource, 86_400_000);
+    startMock.mockResolvedValue({ runId: "owner-run" });
+
+    await createWorkflowRuntime({
+      agentSessionRuntimeOverrides: {
+        model: { contextWindowTokens: 200_000, id: "anthropic/claude-opus-5.5" },
+      },
+      compiledArtifactsSource,
+      nodeId: "subagents/researcher",
+    }).createSession({
+      adapter,
+      auth: null,
+      input: { message: "research this" },
+    });
+
+    const [, [workflowInput]] = startMock.mock.calls[0]!;
+    expect(workflowInput).toMatchObject({
+      serializedContext: {
+        "eve.agentSessionRuntimeOverrides": {
+          model: { contextWindowTokens: 200_000, id: "anthropic/claude-opus-5.5" },
+        },
+      },
+    });
+  });
+
   it("serializes the channel request id into workflow context", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
@@ -857,7 +813,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter,
       auth: null,
       input: { message: "hello" },
-      mode: "task",
       requestId: "req_run",
     });
 
@@ -868,6 +823,7 @@ describe("createWorkflowRuntime#createSession", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_current",
           input: { message: "hello" },
+          retention: 0,
           serializedContext: expect.objectContaining({
             [ChannelRequestIdKey.name]: "req_run",
           }),
@@ -879,11 +835,14 @@ describe("createWorkflowRuntime#createSession", () => {
           "$eve.channel_request_id": "req_run",
           "$eve.is_otel_trace_enabled": "false",
           "$eve.is_trace_content_visible": "false",
+          "$eve.prewarm": "1",
           "$eve.title": "hello",
           "$eve.trigger": "http",
           "$eve.type": "session",
+          "$eve.version": resolveInstalledPackageInfo().version,
         },
         deploymentId: "dpl_current",
+        experimental_retention: 0,
       },
     );
   });
@@ -907,7 +866,6 @@ describe("createWorkflowRuntime#createSession", () => {
       auth: null,
       continuationToken: "subagent:parent-session:call-1",
       input: { message: "research this" },
-      mode: "task",
       parent: {
         callId: "call-1",
         rootSessionId: "root-session",
@@ -923,31 +881,17 @@ describe("createWorkflowRuntime#createSession", () => {
         "$eve.parent": "parent-session",
         "$eve.parent_call": "call-1",
         "$eve.parent_turn": "turn-1",
+        "$eve.prewarm": "1",
         "$eve.root": "root-session",
         "$eve.subagent": "researcher",
         "$eve.is_trace_content_visible": "false",
         "$eve.trigger": "subagent",
         "$eve.type": "subagent",
+        "$eve.version": resolveInstalledPackageInfo().version,
       },
       deploymentId: "dpl_current",
+      experimental_retention: 0,
     });
-  });
-
-  it("passes explicit task ownership to the durable session workflow", async () => {
-    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
-    mockBundleAndRun(compiledArtifactsSource);
-    startMock.mockResolvedValue({ runId: "subagent-run" });
-    getHookByTokenMock.mockResolvedValue({ runId: "subagent-run" });
-
-    await buildRuntime(compiledArtifactsSource).createSession({
-      adapter: { kind: "subagent", state: { parentContinuationToken: "opaque-reply-hook" } },
-      auth: null,
-      input: { message: "research this" },
-      mode: "conversation",
-      taskId: "task-1",
-    });
-
-    expect(startMock.mock.calls[0]?.[1][0]).toMatchObject({ taskId: "task-1" });
   });
 
   it("lets the Workflow world provide its current deployment when Vercel has no id", async () => {
@@ -959,7 +903,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter,
       auth: null,
       input: { message: "hello" },
-      mode: "task",
     });
 
     expect(startMock).toHaveBeenCalledTimes(1);
@@ -968,11 +911,14 @@ describe("createWorkflowRuntime#createSession", () => {
       attributes: {
         "$eve.is_otel_trace_enabled": "false",
         "$eve.is_trace_content_visible": "false",
+        "$eve.prewarm": "1",
         "$eve.title": "hello",
         "$eve.trigger": "http",
         "$eve.type": "session",
+        "$eve.version": resolveInstalledPackageInfo().version,
       },
       deploymentId: "dpl_current",
+      experimental_retention: 0,
     });
   });
 
@@ -983,7 +929,9 @@ describe("createWorkflowRuntime#createSession", () => {
       resolvedAgent: { config: {} },
       turnAgent: createTestTurnAgent(),
     } as never);
-    const bytes = new TextEncoder().encode('{"type":"test.event"}\n');
+    const bytes = new TextEncoder().encode(
+      `${JSON.stringify({ at: "2026-09-02T00:00:00.000Z", facts: [{ data: {}, type: "session.started" }] })}\n`,
+    );
     const getReadable = vi.fn(
       () =>
         new ReadableStream<Uint8Array>({
@@ -1001,7 +949,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter,
       auth: null,
       input: { message: "hello" },
-      mode: "task",
     });
 
     expect(getRunMock).not.toHaveBeenCalled();
@@ -1011,51 +958,23 @@ describe("createWorkflowRuntime#createSession", () => {
     const event = await reader.read();
     reader.releaseLock();
 
-    expect(event.value).toEqual({ type: "test.event" });
+    expect(event.value).toMatchObject({
+      meta: { position: { index: 0, line: 0 } },
+      type: "session.started",
+    });
     expect(getRunMock).toHaveBeenCalledWith("owner-run");
     expect(getReadable).toHaveBeenCalledTimes(1);
   });
 
-  it("normalizes persisted v24 appends before exposing a current event stream", async () => {
-    const legacy = {
-      data: {
-        messageDelta: "lo",
-        messageSoFar: "Hello",
-        sequence: 2,
-        stepIndex: 0,
-        turnId: "turn-1",
-      },
-      meta: { at: "2026-09-02T00:00:00.000Z", id: "evt-v24" },
-      type: "message.appended",
-    };
-    const bytes = new TextEncoder().encode(`${JSON.stringify(legacy)}\n`);
-    getRunMock.mockReturnValue({
-      getReadable: () =>
-        new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(bytes);
-            controller.close();
-          },
-        }),
-    });
+  it("rejects a following read of an unknown session before opening its stream", async () => {
+    const getReadable = vi.fn();
+    getRunMock.mockReturnValue({ getReadable });
+    getRunRecordMock.mockRejectedValueOnce(new WorkflowRunNotFoundError("missing-run"));
 
-    const stream = await buildRuntime({} as RuntimeCompiledArtifactsSource).getEventStream(
-      "owner-run",
-    );
-
-    await expect(stream.getReader().read()).resolves.toEqual({
-      done: false,
-      value: {
-        data: {
-          messageDelta: "lo",
-          sequence: 2,
-          stepIndex: 0,
-          turnId: "turn-1",
-        },
-        meta: legacy.meta,
-        type: "message.appended",
-      },
-    });
+    await expect(
+      buildRuntime({} as RuntimeCompiledArtifactsSource).getEventStream("missing-run"),
+    ).rejects.toBeInstanceOf(WorkflowRunNotFoundError);
+    expect(getReadable).not.toHaveBeenCalled();
   });
 });
 
@@ -1069,10 +988,10 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     return createWorkflowRuntime({ compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource });
   }
 
-  function mockBundleAndRun(): void {
+  function mockBundleAndRun(retention?: AgentWorkflowRetentionDefinition): void {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       compiledArtifactsSource: {},
-      resolvedAgent: { config: {} },
+      resolvedAgent: { config: { experimental: { workflow: { retention } } } },
       turnAgent: {
         id: "test-agent",
         instructions: [],
@@ -1094,7 +1013,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
 
   function installAgentOtelRuntime(
     idGenerator: AgentSpanIdGenerator,
-    tracePolicy: () => boolean,
+    tracePolicy: TraceCapturePolicy,
   ): void {
     registerInstrumentationRuntime({
       forceFlush: async () => undefined,
@@ -1117,6 +1036,96 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     delete global[Symbol.for("eve.instrumentation-runtime")];
   });
 
+  it.each<{
+    name: string;
+    policy: TraceCapturePolicy;
+    retention: AgentWorkflowRetentionDefinition | undefined;
+  }>([
+    { name: "full capture", policy: () => true, retention: undefined },
+    { name: "dropped trace", policy: () => false, retention: 0 },
+    {
+      name: "metadata-only capture",
+      policy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
+      retention: 0,
+    },
+    {
+      name: "input-only capture",
+      policy: () => ({ emit: true, recordInputs: true, recordOutputs: false }),
+      retention: 0,
+    },
+    {
+      name: "output-only capture",
+      policy: () => ({ emit: true, recordInputs: false, recordOutputs: true }),
+      retention: 0,
+    },
+    {
+      name: "throwing policy",
+      policy: () => {
+        throw new Error("Policy unavailable");
+      },
+      retention: 0,
+    },
+  ])(
+    "derives Workflow retention from $name without reevaluating the policy",
+    async ({ policy, retention }) => {
+      const tracePolicy = vi.fn(policy);
+      installAgentOtelRuntime(new AgentSpanIdGenerator(), tracePolicy);
+      mockBundleAndRun();
+      startMock.mockResolvedValue({ runId: "owner-run" });
+
+      await buildRuntime().createSession({ adapter, auth: null, input: { message: "hello" } });
+
+      const [, [workflowInput], options] = startMock.mock.calls[0]!;
+      expect(options.experimental_retention).toBe(retention);
+      expect(workflowInput.retention).toBe(retention);
+      expect(tracePolicy).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    { authored: 0, capture: true },
+    { authored: "default", capture: false },
+  ] as const)(
+    "honors explicit retention $authored over capture=$capture",
+    async ({ authored, capture }) => {
+      installAgentOtelRuntime(new AgentSpanIdGenerator(), () => capture);
+      mockBundleAndRun(authored);
+      startMock.mockResolvedValue({ runId: "owner-run" });
+
+      await buildRuntime().createSession({ adapter, auth: null, input: { message: "hello" } });
+
+      const [, [workflowInput], options] = startMock.mock.calls[0]!;
+      expect(options.experimental_retention).toBe(authored);
+      expect(workflowInput.retention).toBe(authored);
+    },
+  );
+
+  it.each([
+    { audience: "public", development: false, retention: undefined },
+    { audience: "private", development: false, retention: 0 },
+    { audience: "unknown", development: false, retention: 0 },
+    { audience: "private", development: true, retention: undefined },
+  ] as const)(
+    "uses audience=$audience development=$development without OTel",
+    async ({ audience, development, retention }) => {
+      vi.stubEnv("EVE_DEV", development ? "1" : "");
+      vi.stubEnv("VERCEL_ENV", "production");
+      mockBundleAndRun();
+      startMock.mockResolvedValue({ runId: "owner-run" });
+
+      await buildRuntime().createSession({
+        adapter: { kind: "http", instrumentation: { audience: () => audience } },
+        auth: null,
+        input: { message: "hello" },
+      });
+
+      const [, [workflowInput], options] = startMock.mock.calls[0]!;
+      expect(options.experimental_retention).toBe(retention);
+      expect(workflowInput.retention).toBe(retention);
+      expect(workflowInput.serializedContext["eve.sessionTraceSeed"]).toBeUndefined();
+    },
+  );
+
   it("allocates a sampled trace seed when the policy is sampled", async () => {
     const idGenerator = new AgentSpanIdGenerator();
     const tracePolicy = vi.fn(() => true);
@@ -1129,7 +1138,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       auth: null,
       channelMetadata: { kind: "http", metadata: {} },
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     const [, workflowInput] = startMock.mock.calls[0]!;
@@ -1178,7 +1186,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       auth: null,
       channelMetadata: { kind: "slack", metadata: {} },
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     expect(captured?.channel.kind).toBe("channel:slack");
@@ -1194,7 +1201,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       auth: null,
       channelMetadata: { kind: "http", metadata: { audience: "private" } },
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     const [, workflowInput] = startMock.mock.calls[0]!;
@@ -1207,7 +1213,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(seed!.traceFlags).toBe(0);
   });
 
-  it("inherits parent policy while allocating an independent delegated trace", async () => {
+  it("inherits parent policy and trace while allocating a distinct child span", async () => {
     const tracePolicy = vi.fn(() => false);
     installAgentOtelRuntime(new AgentSpanIdGenerator(), tracePolicy);
     mockBundleAndRun();
@@ -1224,7 +1230,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       adapter: { kind: "subagent" },
       auth: null,
       input: { message: "research" },
-      mode: "task",
       parent: {
         callId: "call-1",
         rootSessionId: "root-session",
@@ -1243,9 +1248,11 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       decision: parentTrace.decision,
       traceFlags: parentTrace.traceFlags,
     });
-    expect(seed!.traceId).not.toBe(parentTrace.traceId);
+    expect(seed!.traceId).toBe(parentTrace.traceId);
     expect(seed!.spanId).not.toBe(parentTrace.spanId);
     expect(serialized["eve.parentTraceContext"]).toEqual(parentTrace);
+    expect(workflowInput[0].retention).toBe(0);
+    expect(startMock.mock.calls[0]?.[2].experimental_retention).toBe(0);
     expect(serialized["eve.otelTraceEnabled"]).toBe(true);
     expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("true");
     expect(tracePolicy).not.toHaveBeenCalled();
@@ -1259,7 +1266,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       adapter,
       auth: null,
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     const [, workflowInput] = startMock.mock.calls[0]!;
@@ -1290,7 +1296,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       auth: null,
       channelMetadata: { kind: "http", metadata: { audience: "public" } },
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     const [, workflowInput] = startMock.mock.calls[0]!;

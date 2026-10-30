@@ -13,16 +13,17 @@ export interface NormalizedSkillPackageFile {
 }
 
 export interface MaterializableSkillPackage {
+  readonly deferred?: boolean;
   readonly description: string;
   readonly files: readonly NormalizedSkillPackageFile[];
   readonly license?: string;
-  readonly markdown: string;
+  readonly content: string;
   readonly metadata?: Readonly<Record<string, string>>;
   readonly name: string;
 }
 
-export function stripSkillFrontmatter(markdown: string): string {
-  return markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+export function stripSkillFrontmatter(content: string): string {
+  return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
 }
 
 /** Content hash over every package file, including `SKILL.md`. */
@@ -43,7 +44,7 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
 
   const files: NormalizedSkillPackageFile[] = [
     {
-      content: Buffer.from(input.markdown, "utf8"),
+      content: Buffer.from(input.content, "utf8"),
       relativePath: "SKILL.md",
     },
   ];
@@ -59,10 +60,11 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
   files.sort((left, right) => comparePaths(left.relativePath, right.relativePath));
 
   return {
+    deferred: input.deferred,
     description: input.description,
     files,
     license: input.license,
-    markdown: input.markdown,
+    content: input.content,
     metadata: input.metadata === undefined ? undefined : { ...input.metadata },
     name: input.name,
   };
@@ -93,16 +95,17 @@ export async function writeSkillPackageToSandbox(input: {
   readonly sandbox: SandboxSession;
   readonly skill: MaterializableSkillPackage;
 }): Promise<void> {
-  for (const file of input.skill.files) {
-    await input.sandbox.writeBinaryFile({
+  const files = await Promise.all(
+    input.skill.files.map(async (file) => ({
       content: file.content,
       path: await resolveSandboxSkillWritePath({
         name: input.skill.name,
         relativePath: file.relativePath,
         sandbox: input.sandbox,
       }),
-    });
-  }
+    })),
+  );
+  await input.sandbox.writeFiles({ files });
 }
 
 /**
@@ -126,7 +129,7 @@ export async function removeSkillPackageFromSandbox(input: {
  * Validates a runtime-contributed skill name before it becomes one path
  * segment under the sandbox skill root.
  */
-export function assertSafeSkillPackageName(name: string): void {
+function assertSafeSkillPackageName(name: string): void {
   if (
     name.length === 0 ||
     name.startsWith(".") ||

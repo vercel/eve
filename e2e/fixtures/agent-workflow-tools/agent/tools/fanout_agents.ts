@@ -1,6 +1,8 @@
 import { defineWorkflowTool } from "eve/tools";
 import { z } from "zod";
 
+import { replyFrom } from "../lib/agent-reply.ts";
+
 export default defineWorkflowTool({
   description: "Call two workflow-owned subagents in parallel and return both inline results.",
   inputSchema: z.strictObject({ service: z.string() }),
@@ -8,12 +10,8 @@ export default defineWorkflowTool({
     "use workflow";
 
     return await Promise.all([
-      ctx.agent("workflow-marker", {
-        message: `${service}:replica-0`,
-      }),
-      ctx.agent("workflow-marker", {
-        message: `${service}:replica-1`,
-      }),
+      replyFrom(ctx, "workflow-marker", `${service}:replica-0`),
+      replyFrom(ctx, "workflow-marker", `${service}:replica-1`),
     ]);
   },
 });

@@ -1,149 +1,89 @@
-import { EveAgentProjection } from "#client/eve-agent-projection.js";
-import type { PendingMessageSubmission } from "#client/eve-agent-store-state.js";
-import { createSubmissionId, summarizeUserContent } from "#client/eve-agent-store-helpers.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
+import type { LocalSubmission } from "#client/conversation.js";
+import { summarizeMessage } from "#client/session-store-helpers.js";
 import type { SendTurnPayload } from "#client/types.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
 
-interface ReconciledSubmissions {
-  readonly alreadyProjected: boolean;
-  readonly event: Extract<MessageStreamEvent, { readonly type: "message.received" }>;
-  readonly ids: readonly string[];
-}
+type Submission = LocalSubmission & { readonly deliveryId?: string };
 
-/** Owns optimistic message projection and server-delivery reconciliation. */
-export class OptimisticMessageSubmissions<TData> {
+let submissionSequence = 0;
+
+/** Local message echoes until their deliveries arrive, including failed sends. */
+export class OptimisticMessageSubmissions {
   readonly #optimistic: boolean;
-  readonly #projection: EveAgentProjection<TData>;
-  #pending: readonly PendingMessageSubmission[] = [];
+  readonly #show: (submissions: readonly LocalSubmission[]) => void;
+  readonly #submissions = new Map<string, Submission>();
 
-  constructor(projection: EveAgentProjection<TData>, optimistic: boolean) {
-    this.#projection = projection;
+  constructor(show: (submissions: readonly LocalSubmission[]) => void, optimistic: boolean) {
+    this.#show = show;
     this.#optimistic = optimistic;
   }
 
   reset(): void {
-    this.#pending = [];
+    this.#submissions.clear();
+    this.#publish();
   }
 
-  submit(input: SendTurnPayload, eventStartIndex: number): string | undefined {
+  submit(input: SendTurnPayload, turnId?: string): string | undefined {
     if (input.message === undefined) return undefined;
-    const pending = {
-      createdAt: Date.now(),
-      eventStartIndex,
-      id: createSubmissionId(),
-      message: summarizeUserContent(input.message),
-      requiresDeliveryId: true,
-    };
-    this.#pending = [...this.#pending, pending];
-    if (this.#optimistic) {
-      this.#projection.append({
-        data: { createdAt: pending.createdAt, message: pending.message, submissionId: pending.id },
-        type: "client.message.submitted",
-      });
-    }
-    return pending.id;
+    // Browsers expose `randomUUID` only in secure contexts, so plain-HTTP origins lack it.
+    const id = crypto.randomUUID?.() ?? `submission_${(submissionSequence += 1).toString()}`;
+    this.#submissions.set(id, { id, message: summarizeMessage(input.message), turnId });
+    this.#publish();
+    return id;
   }
 
-  apply(event: MessageStreamEvent): ReconciledSubmissions | undefined {
-    if (event.type !== "message.received") {
-      this.#projection.append(event);
-      return undefined;
-    }
-    if (event.data.kind === "execution.background_task") {
-      this.#projection.append(event);
-      return undefined;
-    }
-    const matching = this.#matching(event);
-    if (matching.length === 0) {
-      this.#projection.append(event);
-      return undefined;
-    }
-    return this.#reconcile(matching, event, false);
+  resubmit(id: string | undefined, input: SendTurnPayload): string | undefined {
+    if (id === undefined) return this.submit(input);
+    const previous = this.#submissions.get(id);
+    if (input.message === undefined) this.#submissions.delete(id);
+    else this.#submissions.set(id, { ...previous, id, message: summarizeMessage(input.message) });
+    this.#publish();
+    return input.message === undefined ? undefined : id;
   }
 
-  correlate(
-    submissionId: string | undefined,
-    deliveryId: string | undefined,
-    events: readonly MessageStreamEvent[],
-  ): ReconciledSubmissions | undefined {
-    if (submissionId === undefined) return undefined;
-    this.#pending = this.#pending.map((pending) =>
-      pending.id === submissionId
-        ? { ...pending, deliveryId, requiresDeliveryId: deliveryId !== undefined }
-        : pending,
-    );
-    const pending = this.#pending.find((candidate) => candidate.id === submissionId);
-    if (pending === undefined) return undefined;
-    for (const event of events.slice(pending.eventStartIndex)) {
-      if (event.type !== "message.received" || event.data.kind === "execution.background_task") {
-        continue;
-      }
-      const matching = this.#matching(event);
-      if (matching.some((candidate) => candidate.id === submissionId)) {
-        return this.#reconcile(matching, event, true);
+  correlate(id: string | undefined, deliveryId: string): void {
+    if (id === undefined) return;
+    const submission = this.#submissions.get(id);
+    if (submission !== undefined) this.#submissions.set(id, { ...submission, deliveryId });
+  }
+
+  reconcile(view: SessionView): void {
+    for (const [id, submission] of this.#submissions) {
+      const row =
+        submission.deliveryId === undefined ? undefined : view.deliveries[submission.deliveryId];
+      if (submission.turnId === undefined && row?.turnId !== undefined)
+        this.#submissions.set(id, { ...submission, turnId: row.turnId });
+      if (row?.consumedAt !== undefined) this.#submissions.delete(id);
+      else if (
+        (row?.status === "settled" || view.session.status === "ended") &&
+        submission.error === undefined
+      ) {
+        this.fail(new Error(row?.reason ?? "The message was not consumed."), id);
       }
     }
-    return undefined;
+    this.#publish();
   }
 
-  fail(error: Error, submissionId?: string): void {
-    const pending =
-      submissionId === undefined
-        ? this.#pending[0]
-        : this.#pending.find((candidate) => candidate.id === submissionId);
-    if (pending === undefined) return;
-    this.#pending = this.#pending.filter((candidate) => candidate.id !== pending.id);
-    this.#projection.replace(
-      (event) =>
-        event.type === "client.message.submitted" && event.data.submissionId === pending.id,
-      {
-        data: {
-          createdAt: pending.createdAt,
-          error: { message: error.message },
-          message: pending.message,
-          submissionId: pending.id,
-        },
-        type: "client.message.failed",
-      },
-    );
-  }
-
-  failAll(error: Error): void {
-    for (const pending of this.#pending) this.fail(error, pending.id);
-  }
-
-  #matching(event: Extract<MessageStreamEvent, { readonly type: "message.received" }>) {
-    return this.#pending.filter((pending) =>
-      pending.deliveryId === undefined
-        ? !pending.requiresDeliveryId
-        : event.meta.deliveryIds?.includes(pending.deliveryId) === true,
-    );
-  }
-
-  #reconcile(
-    submissions: readonly PendingMessageSubmission[],
-    event: Extract<MessageStreamEvent, { readonly type: "message.received" }>,
-    alreadyProjected: boolean,
-  ): ReconciledSubmissions {
-    const ids = submissions.map((pending) => pending.id);
-    const idSet = new Set(ids);
-    this.#pending = this.#pending.filter((pending) => !idSet.has(pending.id));
-    if (alreadyProjected) {
-      this.#projection.remove(
-        (candidate) =>
-          candidate.type === "client.message.submitted" && idSet.has(candidate.data.submissionId),
-      );
-    } else {
-      this.#projection.replace(
-        (candidate) =>
-          candidate.type === "client.message.submitted" && candidate.data.submissionId === ids[0],
-        event,
-      );
-      this.#projection.remove(
-        (candidate) =>
-          candidate.type === "client.message.submitted" && idSet.has(candidate.data.submissionId),
-      );
+  fail(error: Error, id: string | undefined): void {
+    if (id === undefined) return;
+    const submission = this.#submissions.get(id);
+    if (submission !== undefined) {
+      this.#submissions.set(id, { ...submission, error: { message: error.message } });
+      this.#publish();
     }
-    return { alreadyProjected, event, ids };
+  }
+
+  get awaitingReceipt(): boolean {
+    return [...this.#submissions.values()].some(
+      (submission) => submission.deliveryId === undefined && submission.error === undefined,
+    );
+  }
+
+  #publish(): void {
+    this.#show(
+      [...this.#submissions.values()].filter(
+        (submission) => this.#optimistic || submission.error !== undefined,
+      ),
+    );
   }
 }

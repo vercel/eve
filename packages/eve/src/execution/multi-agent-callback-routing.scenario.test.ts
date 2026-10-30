@@ -13,8 +13,8 @@ import {
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
-import { fireSessionCallbackStep } from "#subagents/callback-step.js";
-import { startRemoteAgentSession } from "#subagents/remote-dispatch.js";
+import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
+import { startRemoteAgentSession } from "#execution/agent-sessions/remote.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { authHookToken, CallbackBaseUrlKey, getHookUrl } from "#harness/authorization.js";
 import {
@@ -239,6 +239,7 @@ describe("multi-agent callback routing", () => {
         response.end(
           JSON.stringify({
             ok: true,
+            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
             sessionId: "remote-session-1",
             status: "accepted",
           }),
@@ -266,6 +267,9 @@ describe("multi-agent callback routing", () => {
     // and (post-fix) the agent's public route prefix.
     vi.stubEnv("VERCEL_ENV", "");
     vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", "");
+    // The stand-in deployment listens on loopback, which callbacks may only
+    // target on local development servers.
+    vi.stubEnv("EVE_DEV", "1");
     if (publicRoutePrefix !== undefined) {
       vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", publicRoutePrefix);
     }
@@ -320,11 +324,12 @@ describe("multi-agent callback routing", () => {
       const callbackToken = `${agent.name}-session:callback-token`;
 
       expect(remoteSessionId).toBe("remote-session-1");
+      // Every callback URL names the protocol the parent and child agreed.
       expect(callback.url).toBe(
         `${deploymentOrigin}${joinEveRoutePath(
           agent.publicRoutePrefix,
           createEveCallbackRoutePath(callbackToken),
-        )}`,
+        )}?eveRemoteProtocol=${String(REMOTE_AGENT_PROTOCOL_VERSION)}`,
       );
 
       // Remote-side create-session validation (public/channels/eve.ts):
@@ -401,7 +406,7 @@ describe("multi-agent callback routing", () => {
     }
   });
 
-  it.each(["session.completed", "turn.completed", "turn.failed"] as const)(
+  it.each(["turn.completed", "turn.failed"] as const)(
     "logs %s delivery failures when the public route prefix is absent",
     async (kind) => {
       stubAgentRuntimeEnvironment(undefined);
@@ -413,12 +418,11 @@ describe("multi-agent callback routing", () => {
       // Without the prefix the minted URL targets the bare /eve/v1 path that
       // nothing serves in multi-agent mode — the exact production failure.
       expect(callback.url).toBe(
-        `${deploymentOrigin}${createEveCallbackRoutePath("support-session:callback-token")}`,
+        `${deploymentOrigin}${createEveCallbackRoutePath("support-session:callback-token")}?eveRemoteProtocol=${String(REMOTE_AGENT_PROTOCOL_VERSION)}`,
       );
       const sessionCallback = {
         callId: "call-support",
         subagentName: "research",
-        taskId: "task-support",
         ...callback,
       };
       const serializedContext = {
@@ -426,23 +430,15 @@ describe("multi-agent callback routing", () => {
         [SessionCallbackKey.name]: sessionCallback,
       };
       const deliver = async () => {
-        if (kind === "session.completed") {
-          await fireSessionCallbackStep({
-            output: "report done",
-            serializedContext,
-            status: "completed",
-          });
-        } else {
-          await notifyTurnCallerStep({
-            caller: await resolveInitialTurnCallerStep({ serializedContext }),
-            lifecycle: "terminal",
-            sessionId: "remote-session-1",
-            settled:
-              kind === "turn.failed"
-                ? { isError: true, output: { message: "private failure" } }
-                : { output: "report done" },
-          });
-        }
+        await notifyTurnCallerStep({
+          caller: await resolveInitialTurnCallerStep({ serializedContext }),
+          lifecycle: "terminal",
+          sessionId: "remote-session-1",
+          settled:
+            kind === "turn.failed"
+              ? { isError: true, output: { message: "private failure" } }
+              : { output: "report done" },
+        });
       };
       await expect(deliver()).rejects.toThrow(/callback failed with HTTP 404/);
       expect(errorSpy).toHaveBeenCalledExactlyOnceWith(

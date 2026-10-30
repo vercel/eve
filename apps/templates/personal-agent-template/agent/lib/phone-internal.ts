@@ -1,4 +1,4 @@
-import type { PhoneLinkRecord } from "../../shared/types/phone-link.js";
+import type { PhoneLinkRecord } from "../../lib/types/phone-link.js";
 import { appOrigin, internalHeaders } from "./internal-api.js";
 
 export async function fetchPhoneLinkForNumber(phoneNumber: string) {

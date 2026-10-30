@@ -30,7 +30,12 @@ import { isObject } from "#shared/guards.js";
 export interface SlackAuthor {
   readonly userId: string;
   readonly userName: string | undefined;
+  /** Slack real name; set by `messageContext.users`. */
   readonly fullName: string | undefined;
+  /** Slack display name; set by `messageContext.users`. */
+  readonly displayName?: string;
+  /** Slack email; set by `messageContext.users` with `email: true`. */
+  readonly email?: string;
   readonly isBot: boolean;
   readonly isMe: boolean;
 }
@@ -73,6 +78,11 @@ export interface SlackMessage {
   readonly channelId: string;
   /** Slack team id, when the envelope carried one. */
   readonly teamId: string | undefined;
+  /**
+   * Workspace whose app installation received the message, when Slack reported
+   * one. eve pairs it with the author's user id to identify the author.
+   */
+  readonly installationTeamId?: string;
   /** Author of the message. May be `undefined` for system events. */
   readonly author: SlackAuthor | undefined;
   /** File / image attachments on the inbound message. */
@@ -133,7 +143,7 @@ interface SlackMessageEvent {
  * only about `team_id` (for ergonomic auth derivation) and the inner
  * `event` payload.
  */
-export interface SlackEventCallback {
+interface SlackEventCallback {
   readonly type: "event_callback";
   readonly team_id?: string;
   readonly authorizations?: readonly {
@@ -181,7 +191,7 @@ export function parseAppMentionEvent(envelope: SlackEventCallback): SlackMessage
   if (envelope.type !== "event_callback") return null;
   const event = envelope.event;
   if (!event || event.type !== "app_mention") return null;
-  return buildSlackMessage(event as SlackAppMentionEvent, envelope.team_id);
+  return buildSlackMessage(event as SlackAppMentionEvent, envelope);
 }
 
 /**
@@ -240,12 +250,30 @@ export function slackEventInstallationTeamId(envelope: SlackEventCallback): stri
   return authorizations.find((entry) => typeof entry.team_id === "string")?.team_id;
 }
 
-/** Parses a Slack message event without applying bot or subtype policy. */
+/**
+ * Parses a Slack message event that posts a new message. Bot-authored messages
+ * remain; edits, deletions, joins, and other system events return `null`.
+ */
 export function parseMessageEvent(envelope: SlackEventCallback): SlackMessage | null {
   if (envelope.type !== "event_callback") return null;
   const event = envelope.event;
   if (!event || event.type !== "message") return null;
-  return buildSlackMessage(event as SlackMessageEvent, envelope.team_id);
+  const message = event as SlackMessageEvent;
+  if (!isPostedMessageSubtype(message.subtype)) return null;
+  return buildSlackMessage(message, envelope);
+}
+
+// Change events such as `message_changed` carry the edit's own `ts` and nest
+// the author under `message`, so they cannot be routed as new messages.
+const POSTED_MESSAGE_SUBTYPES: ReadonlySet<string> = new Set([
+  "bot_message",
+  "file_share",
+  "me_message",
+  "thread_broadcast",
+]);
+
+function isPostedMessageSubtype(subtype: string | undefined): boolean {
+  return subtype === undefined || subtype === "" || POSTED_MESSAGE_SUBTYPES.has(subtype);
 }
 
 export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMessage | null {
@@ -257,7 +285,7 @@ export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMess
   if (message.channel_type !== "im") return null;
   if (!isHumanMessage(message)) return null;
 
-  return buildSlackMessage(message, envelope.team_id);
+  return buildSlackMessage(message, envelope);
 }
 
 function isHumanMessage(message: SlackMessageEvent): boolean {
@@ -273,6 +301,7 @@ function isHumanMessage(message: SlackMessageEvent): boolean {
 
 export function slackMessageFromWebhookPayload(
   payload: SlackAppMentionPayload | SlackDirectMessagePayload,
+  installationTeamId?: string,
 ): SlackMessage | null {
   if (payload.kind === "direct_message") {
     if (
@@ -294,6 +323,7 @@ export function slackMessageFromWebhookPayload(
     threadTs: payload.threadTs,
     channelId: payload.channelId,
     teamId: payload.teamId,
+    installationTeamId,
     author: parsePayloadAuthor(payload),
     attachments: parsePayloadAttachments(payload.files),
     raw: payload.raw,
@@ -302,7 +332,7 @@ export function slackMessageFromWebhookPayload(
 
 function buildSlackMessage(
   event: SlackAppMentionEvent | SlackMessageEvent,
-  envelopeTeamId: string | undefined,
+  envelope: SlackEventCallback,
 ): SlackMessage | null {
   const channelId = typeof event.channel === "string" ? event.channel : "";
   const ts = typeof event.ts === "string" ? event.ts : "";
@@ -311,7 +341,8 @@ function buildSlackMessage(
   const topLevelText = typeof event.text === "string" ? event.text : "";
   const text = resolveSlackInboundMrkdwn(topLevelText, event as Record<string, unknown>);
   const threadTs = typeof event.thread_ts === "string" ? event.thread_ts : ts;
-  const teamId = typeof envelopeTeamId === "string" ? envelopeTeamId : undefined;
+  const teamId = typeof envelope.team_id === "string" ? envelope.team_id : undefined;
+  const installationTeamId = slackEventInstallationTeamId(envelope);
 
   return {
     text,
@@ -320,6 +351,7 @@ function buildSlackMessage(
     threadTs,
     channelId,
     teamId,
+    installationTeamId,
     author: parseAuthor(event),
     attachments: parseAttachments(event.files),
     raw: event as Record<string, unknown>,
@@ -338,11 +370,20 @@ function parseAuthor(event: SlackAppMentionEvent | SlackMessageEvent): SlackAuth
   };
 }
 
-function parseAttachments(
+/**
+ * Parses the `files` of a raw Slack message. A remote file, such as a Google
+ * Drive link, carries `mode: "external"` and a URL on the third party's host
+ * that the bot token can't open; its link stays in the message text.
+ */
+export function parseAttachments(
   files: readonly Record<string, unknown>[] | undefined,
 ): SlackAttachment[] {
   if (!Array.isArray(files)) return [];
-  return files.map(toAttachment);
+  return files.filter((file) => !isRemoteFile(file)).map(toAttachment);
+}
+
+function isRemoteFile(file: Readonly<Record<string, unknown>>): boolean {
+  return file.mode === "external" || file.is_external === true;
 }
 
 function toAttachment(file: Record<string, unknown>): SlackAttachment {
@@ -393,7 +434,7 @@ function parsePayloadAuthor(
 
 function parsePayloadAttachments(files: readonly SlackFile[] | undefined): SlackAttachment[] {
   if (!Array.isArray(files)) return [];
-  return files.map(toPayloadAttachment);
+  return files.filter((file) => !isRemoteFile(file.raw)).map(toPayloadAttachment);
 }
 
 /**
@@ -407,6 +448,8 @@ export interface SlackInboundContext {
   readonly userId: string;
   readonly userName?: string;
   readonly fullName?: string;
+  readonly displayName?: string;
+  readonly email?: string;
   readonly channelId: string;
   readonly isMentioned?: boolean;
   readonly threadTs: string;

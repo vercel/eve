@@ -1,4 +1,4 @@
-import { parseFrontmatter } from "#internal/helpers/gray-matter.js";
+import { parseYaml } from "#internal/helpers/frontmatter.js";
 import { isArray } from "#runtime/connections/openapi-schema.js";
 import { isObject } from "#shared/guards.js";
 
@@ -6,10 +6,7 @@ import { isObject } from "#shared/guards.js";
  * Parses a fetched spec body as either JSON or YAML.
  *
  * JSON is tried first (the common case and fastest path); on a parse
- * failure the body is treated as YAML. YAML is parsed by wrapping the
- * document in front-matter delimiters so the bundled `gray-matter`
- * engine reads the whole file — the same approach the eval YAML loader
- * uses, avoiding a second YAML dependency.
+ * failure the body is treated as YAML.
  */
 export function parseSpecDocument(text: string): unknown {
   try {
@@ -17,9 +14,7 @@ export function parseSpecDocument(text: string): unknown {
   } catch {
     // Not JSON — fall through to YAML.
   }
-  const body = text.replace(/^\uFEFF/, "");
-  const wrapped = body.trimStart().startsWith("---") ? body : `---\n${body}\n---`;
-  return parseFrontmatter(wrapped).data;
+  return parseYaml(text.replace(/^\uFEFF/, ""));
 }
 
 /**

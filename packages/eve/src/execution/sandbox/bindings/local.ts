@@ -1,6 +1,6 @@
 /**
- * Facade over every local sandbox provider (Docker, just-bash,
- * microsandbox) plus their availability probes and cache pruning.
+ * Facade over every local sandbox provider (Docker, just-bash) plus their
+ * availability probes and cache pruning.
  *
  * This module is the single import path for local-engine functionality
  * from the public surface, so the hosted (Vercel) server bundle can
@@ -14,7 +14,6 @@ import {
 } from "#execution/sandbox/bindings/docker-cli.js";
 import { pruneDockerSandboxTemplates } from "#execution/sandbox/bindings/docker.js";
 import { pruneJustBashSandboxTemplates } from "#execution/sandbox/bindings/just-bash.js";
-import { pruneMicrosandboxTemplates } from "#execution/sandbox/bindings/microsandbox.js";
 
 export {
   createDockerSandboxProvider,
@@ -27,20 +26,14 @@ export {
   JUST_BASH_PROVIDER_NAME,
   pruneJustBashSandboxTemplates,
 } from "#execution/sandbox/bindings/just-bash.js";
-export {
-  createMicrosandboxSandboxProvider,
-  MICROSANDBOX_PROVIDER_NAME,
-  pruneMicrosandboxTemplates,
-} from "#execution/sandbox/bindings/microsandbox.js";
-export { isMicrosandboxPlatformSupported } from "#execution/sandbox/bindings/microsandbox-platform.js";
 export { stopDevelopmentSandboxResources } from "#execution/sandbox/development-cleanup.js";
 
 /**
  * Removes stale local sandbox template state for one application
- * across every local engine: just-bash template directories, Docker
- * template images (tracked through per-app marker files), and
- * microsandbox template snapshots. Docker pruning silently skips when
- * no Docker runtime is reachable so docker-less setups stay quiet.
+ * across every local engine: just-bash template directories and Docker
+ * template images (tracked through per-app marker files). Docker pruning
+ * silently skips when no Docker runtime is reachable so docker-less setups
+ * stay quiet.
  */
 export async function pruneLocalSandboxTemplates(input: {
   readonly appRoot: string;
@@ -50,7 +43,6 @@ export async function pruneLocalSandboxTemplates(input: {
 }): Promise<void> {
   await Promise.all([
     pruneJustBashSandboxTemplates(input),
-    pruneMicrosandboxTemplates(input),
     pruneDockerSandboxTemplates(input).catch((error: unknown) => {
       if (
         error instanceof DockerUnavailableError ||

@@ -1,4 +1,5 @@
 import { relative } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
 
 import {
   buildOpaqueTypesStub,
@@ -171,40 +172,11 @@ function stubCoreQuickJSEntrypoint() {
   };
 }
 
-function guardInlineStepExecution() {
-  return {
-    name: "eve:guard-inline-step-execution",
-    transform(source, id) {
-      if (!id.replaceAll("\\", "/").endsWith("/@workflow/core/dist/runtime.js")) return null;
-
-      // beta.55 only registers recovered inline steps with single-flight.
-      // A queued wake can therefore run a newly claimed step again while its
-      // original body is still active, especially when a local lease expires.
-      // Keep that protection quiet for expected fresh-step contention.
-      const unguarded =
-        /const executed = s\.lazyStepInput === undefined &&\s+s\.preclaimedStart === undefined\s+\? runStepSingleFlight\(runId, s\.correlationId, run\)\s+: run\(\);/;
-      if (!unguarded.test(source)) {
-        throw new Error("Recheck the @workflow/core inline step single-flight patch.");
-      }
-      return {
-        code: source.replace(
-          unguarded,
-          `const fresh = s.lazyStepInput !== undefined || s.preclaimedStart !== undefined;
-          const executed = s.preclaimedStart?.owned === false
-            ? run()
-            : runStepSingleFlight(runId, s.correlationId, run, fresh ? "debug" : "warn");`,
-        ),
-        map: null,
-      };
-    },
-  };
-}
-
 export default {
   packageName: "@workflow/core",
   compiledPath: "@workflow/core",
   chunkGroup: "workflow",
-  plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint(), guardInlineStepExecution()],
+  plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint()],
   entries: [
     { entry: "dist/serialization.js", outputPath: "serialization" },
     { entry: "dist/runtime/helpers.js", outputPath: "runtime/helpers" },
@@ -225,5 +197,14 @@ export default {
       outputPath: "private",
     },
   ],
-  copyDeclarations,
+  async copyDeclarations(context) {
+    await copyDeclarations(context);
+    // Workflow runs in Node, where Request.duplex is always "half". DOM's
+    // Request type deliberately lacks that Node-only property; do not augment it.
+    for (const path of await collectFilesRecursively(context.destinationRoot, [".d.ts"])) {
+      const source = await readFile(path, "utf8");
+      const portable = source.replace(/Request\[(?:"duplex"|'duplex')\]/g, '"half"');
+      if (source !== portable) await writeFile(path, portable);
+    }
+  },
 };

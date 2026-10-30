@@ -19,7 +19,7 @@ import { join, parse, relative } from "node:path";
 
 import { buildWithNitroRolldown } from "./nitro-rolldown.mjs";
 import vendoredZod from "./vendor-compiled/zod.mjs";
-import { createVendoredDependencyWarningFilter } from "./vendor-warning-log.mjs";
+import { onVendoredDependencyLog } from "../src/internal/bundler/vendored-dependency-log.ts";
 
 /**
  * Names of the CJS-interop helpers that rolldown injects into its
@@ -162,12 +162,10 @@ const EXCLUDED_DIRECTORIES = new Set([join("internal", "testing")]);
  */
 const EXTERNAL_PACKAGES = new Set([
   "@nuxt/kit",
-  "@opentelemetry/api",
   "@sveltejs/kit",
   "ai",
   "braintrust",
   "just-bash",
-  "microsandbox",
   "next",
   "nitro",
   "react",
@@ -237,6 +235,42 @@ function createVendoredZodPlugin() {
   };
 }
 
+/**
+ * The code extension imports `@vercel/connect`, whose `@vercel/oidc` tree is
+ * CommonJS. Resolve it to the standalone vendored bundle instead of inlining
+ * that CommonJS into `dist/src/node_modules`, where `polyfillRequire: false`
+ * would leave its `require` calls undefined.
+ */
+function createVendoredConnectPlugin() {
+  return {
+    name: "eve:vendored-connect",
+    resolveId(source, importer) {
+      if (source !== "@vercel/connect" && !source.startsWith("@vercel/connect/")) return null;
+      if (source !== "@vercel/connect") {
+        throw new Error(
+          `${importer ?? "eve"} imports "${source}", but eve vendors only the root ` +
+            `"@vercel/connect" entry. See scripts/vendor-compiled/@vercel/connect.mjs.`,
+        );
+      }
+      return { id: "#compiled/@vercel/connect/index.js", external: true };
+    },
+  };
+}
+
+function createVendoredTelemetryPlugin() {
+  const packages = new Set([
+    "@opentelemetry/api",
+    "@opentelemetry/otlp-transformer",
+    "@vercel/otel",
+  ]);
+  return {
+    name: "eve:vendored-telemetry",
+    resolveId(source) {
+      return packages.has(source) ? { id: `#compiled/${source}/index.js`, external: true } : null;
+    },
+  };
+}
+
 async function collectSourceFiles(directory, relativeRoot = "") {
   const entries = await readdir(directory, { withFileTypes: true });
   const sourceFiles = [];
@@ -286,14 +320,14 @@ const input = Object.fromEntries(
   }),
 );
 
-const warningFilter = createVendoredDependencyWarningFilter();
-
 await buildWithNitroRolldown({
   input,
   external: isExternalPackageSpecifier,
   platform: "node",
   plugins: [
     createVendoredZodPlugin(),
+    createVendoredConnectPlugin(),
+    createVendoredTelemetryPlugin(),
     createStripUnusedRolldownRuntimeImportPlugin(),
     createDynamicToolTransformPlugin(),
     createWorkflowMetadataTransformPlugin(),
@@ -328,7 +362,8 @@ await buildWithNitroRolldown({
     // every dist file would carry an `import "../_virtual/_rolldown/runtime.js"`
     // side-effect import, and the workflow bundler (which runs under
     // `platform: "neutral"`) would warn about the unresolved Node
-    // builtin every time it pulled an eve file into its graph.
+    // builtin every time it pulled an eve file into its graph. Dependencies
+    // with CommonJS code are vendored under `#compiled/*` instead.
     polyfillRequire: false,
     preserveModules: true,
     preserveModulesRoot: SRC_ROOT,
@@ -338,7 +373,7 @@ await buildWithNitroRolldown({
     // silent `undefined` reads deep inside the runtime.
     topLevelVar: false,
   },
-  onLog: warningFilter.onLog,
+  onLog: onVendoredDependencyLog,
 });
 
 // Vue integration — separate build that resolves `#` subpath imports so the
@@ -395,7 +430,7 @@ if (vueSourceFiles.length > 0) {
       minify: false,
       sourcemap: false,
     },
-    onLog: warningFilter.onLog,
+    onLog: onVendoredDependencyLog,
   });
 }
 
@@ -452,6 +487,6 @@ if (svelteSourceFiles.length > 0) {
       minify: false,
       sourcemap: false,
     },
-    onLog: warningFilter.onLog,
+    onLog: onVendoredDependencyLog,
   });
 }

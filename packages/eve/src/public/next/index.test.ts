@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("#shared/resolve-eve-binary.js", async () => {
@@ -39,12 +42,20 @@ vi.mock("./server.js", async (importOriginal) => {
 
 const { resolveEveDestinationPrefix } = await import("./server.js");
 
-import {
-  EVE_NEXT_SERVICE_PREFIX,
-  withEve,
-  type EveNextConfig,
-  type EveNextRewriteSections,
-} from "./index.js";
+vi.mock("#internal/nitro/host/workspace-extensions.js", () => ({
+  buildWorkspaceExtensions: vi.fn(async () => undefined),
+}));
+
+const { buildWorkspaceExtensions } = await import("#internal/nitro/host/workspace-extensions.js");
+
+import { withEve } from "./index.js";
+import type { NextConfig as EveNextConfig } from "next";
+type EveNextRewriteSections = Extract<
+  Awaited<ReturnType<NonNullable<EveNextConfig["rewrites"]>>>,
+  { beforeFiles?: unknown; afterFiles?: unknown; fallback?: unknown }
+>;
+
+const EVE_NEXT_SERVICE_PREFIX = "/_eve_internal/eve";
 
 interface TestConfig extends EveNextConfig {
   readonly basePath?: string;
@@ -60,7 +71,32 @@ describe("withEve", () => {
   afterEach(() => {
     vi.mocked(resolveEveDestinationPrefix).mockClear();
     vi.mocked(ensureEveVercelOutputConfig).mockClear();
+    vi.mocked(buildWorkspaceExtensions).mockClear();
     vi.unstubAllEnvs();
+  });
+
+  it("builds each agent's workspace extensions while Next.js is building", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+
+    await withEve<TestConfig>(
+      {},
+      { agents: { billing: "./agents/billing", support: "./agents/support" } },
+    )("phase-production-build", { defaultConfig: {} });
+
+    expect(vi.mocked(buildWorkspaceExtensions).mock.calls).toEqual([
+      [expect.stringMatching(/\/agents\/billing$/)],
+      [expect.stringMatching(/\/agents\/support$/)],
+    ]);
+  });
+
+  it("does not build workspace extensions outside the Next.js build phase", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+
+    await resolveConfig(withEve<TestConfig>({}));
+
+    expect(buildWorkspaceExtensions).not.toHaveBeenCalled();
   });
 
   it("does not add Next.js rewrites on Vercel", async () => {
@@ -434,6 +470,23 @@ describe("withEve", () => {
         },
       ),
     ).toThrow("eve Next.js agent name");
+  });
+});
+
+describe("eve/next package manifest", () => {
+  // The emitted declarations import `NextConfig` from "next". Without a peer
+  // entry, pnpm resolves that import to whichever next is hoisted rather than
+  // the app's own, so withEve's types can come from a different next copy.
+  it("declares next as an optional peer", () => {
+    const manifest = JSON.parse(
+      readFileSync(fileURLToPath(new URL("../../../package.json", import.meta.url)), "utf8"),
+    ) as {
+      readonly peerDependencies?: Record<string, string>;
+      readonly peerDependenciesMeta?: Record<string, { readonly optional?: boolean }>;
+    };
+
+    expect(manifest.peerDependencies).toHaveProperty("next");
+    expect(manifest.peerDependenciesMeta?.next).toEqual({ optional: true });
   });
 });
 

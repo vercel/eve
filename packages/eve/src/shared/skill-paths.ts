@@ -3,36 +3,13 @@ import type { SandboxSession } from "#shared/sandbox-session.js";
 const MODEL_HOME_ROOT = "$HOME";
 
 export const MODEL_SKILL_ROOT = `${MODEL_HOME_ROOT}/.agents/skills`;
-export const FALLBACK_SKILL_ROOT = "/workspace/skills";
 
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 const sandboxHomeCache = new WeakMap<SandboxSession, Promise<string | null>>();
 
-export function formatSkillModelPath(input: {
-  readonly name: string;
-  readonly relativePath: string;
-}): string {
-  return formatSkillPath({
-    name: input.name,
-    relativePath: input.relativePath,
-    root: MODEL_SKILL_ROOT,
-  });
-}
-
-export function formatFallbackSkillPath(input: {
-  readonly name: string;
-  readonly relativePath: string;
-}): string {
-  return formatSkillPath({
-    name: input.name,
-    relativePath: input.relativePath,
-    root: FALLBACK_SKILL_ROOT,
-  });
-}
-
 /**
  * Resolves where skills live in the sandbox: under the probed home when it has
- * one, and under {@link FALLBACK_SKILL_ROOT} when it does not.
+ * one, and under `skills/` in the workspace root when it does not.
  */
 export async function resolveSandboxSkillRoot(input: {
   readonly sandbox: SandboxSession;
@@ -42,9 +19,9 @@ export async function resolveSandboxSkillRoot(input: {
 
 /**
  * Resolves a leading `$HOME` in a model-supplied sandbox path without
- * evaluating any other shell syntax. Skill paths retain their documented
- * `/workspace/skills` fallback when the sandbox does not expose a usable
- * home directory.
+ * evaluating any other shell syntax. Skill paths fall back to `skills/` in
+ * the workspace root when the sandbox does not expose a usable home
+ * directory.
  */
 export async function resolveSandboxModelPath(input: {
   readonly path: string;
@@ -61,24 +38,10 @@ export async function resolveSandboxModelPath(input: {
   }
 
   if (isModelSkillPath(input.path)) {
-    return `${FALLBACK_SKILL_ROOT}${input.path.slice(MODEL_SKILL_ROOT.length)}`;
+    return input.sandbox.resolvePath(`skills${input.path.slice(MODEL_SKILL_ROOT.length)}`);
   }
 
   return input.path;
-}
-
-export async function resolveSandboxSkillReadPaths(input: {
-  readonly name: string;
-  readonly relativePath: string;
-  readonly sandbox: SandboxSession;
-}): Promise<readonly string[]> {
-  return [
-    formatSkillPath({
-      name: input.name,
-      relativePath: input.relativePath,
-      root: await resolveSandboxSkillRoot({ sandbox: input.sandbox }),
-    }),
-  ];
 }
 
 export async function resolveSandboxSkillWritePath(input: {

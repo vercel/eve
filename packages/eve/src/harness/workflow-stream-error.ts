@@ -47,16 +47,6 @@ export function extractWorkflowStreamWriteErrorDetails(error: unknown): JsonObje
   return null;
 }
 
-/**
- * Returns `true` when `error` is a durable event-stream write failure
- * raised by the workflow runtime's stream transport, not by the model
- * provider. Thin predicate over
- * {@link extractWorkflowStreamWriteErrorDetails}.
- */
-export function isWorkflowStreamWriteError(error: unknown): boolean {
-  return extractWorkflowStreamWriteErrorDetails(error) !== null;
-}
-
 function parseStreamErrorMessage(message: string): JsonObject | null {
   const match = WORKFLOW_STREAM_WRITE_ERROR_PATTERN.exec(message);
   if (match === null) {

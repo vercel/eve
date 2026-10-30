@@ -10,7 +10,7 @@ import {
 } from "../lib/diagnostics.ts";
 import { findGeneratedPatchTargets, generatedPatchTargetsError } from "../lib/generated-paths.ts";
 import { applyPatchToSandbox } from "../lib/patch.ts";
-import { validateRepositoryRoot } from "../lib/repository-root.ts";
+import { resolveWorkspaceDirectory } from "../lib/workspace-root.ts";
 
 const DiagnosticSchema = z.object({
   check: z.enum(["git-diff", "syntax", "typescript", "whitespace"]),
@@ -23,7 +23,7 @@ const DiagnosticSchema = z.object({
 
 export default defineTool({
   description: [
-    "Apply targeted changes inside a git checkout in the sandbox workspace.",
+    "Apply targeted changes to files in the sandbox workspace. No git checkout is required.",
     "Use this instead of rewriting complete files or writing through bash.",
     "Write small hunks against current file contents. If a hunk misses, re-read that file and rewrite only the failed hunk. Do not retry the same patch text.",
     "The patch is fully parsed and every source file is verified before any write.",
@@ -35,16 +35,22 @@ export default defineTool({
     "*** Update File: path (optional *** Move to: new-path, followed by @@ chunks)",
     "*** Delete File: path",
     "*** End Patch",
-    "Paths are relative to the repository and may not escape it.",
+    "Paths are relative to root and may not escape it.",
     "Generated files (lockfiles, dist/, vendor-compiled/) are rejected: change them",
     "through the command that generates them, never through a patch.",
   ].join("\n"),
   approval: never(),
   label: {
-    start: ({ root }) => `Patch ${root}`,
+    start: ({ root }) => `Patch ${root ?? "workspace"}`,
   },
   inputSchema: z.object({
-    root: z.string().min(1).describe("absolute git checkout root inside the sandbox workspace"),
+    root: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "absolute directory inside the sandbox workspace that patch paths are relative to; defaults to the workspace root",
+      ),
     patchText: z.string().min(1).max(500_000).describe("complete *** Begin Patch text"),
   }),
   outputSchema: z.object({
@@ -63,19 +69,21 @@ export default defineTool({
       throw new Error(generatedPatchTargetsError(generatedTargets));
     }
     const sandbox = await ctx.getSandbox();
-    const repoRoot = await validateRepositoryRoot(sandbox, root);
+    const patchRoot = await resolveWorkspaceDirectory(sandbox, root);
 
     let baseline: readonly PostEditDiagnostic[] = [];
+    const previousContents = new Map<string, string | null>();
     const files = await applyPatchToSandbox({
       async beforeCommit(planned) {
+        for (const file of planned) previousContents.set(file.path, file.previousContent);
         baseline = await runTypeScriptDiagnostics({
           paths: planned.filter((file) => file.operation === "update").map((file) => file.path),
-          repoRoot,
+          patchRoot,
           sandbox,
         });
       },
       patchText,
-      repoRoot,
+      patchRoot,
       sandbox,
       sessionId: ctx.session.id,
     });
@@ -91,7 +99,14 @@ export default defineTool({
       ),
     ];
     const diagnostics = onlyNewTypeDiagnostics(
-      await runPostEditDiagnostics({ addedPaths, changedPaths, deletedPaths, repoRoot, sandbox }),
+      await runPostEditDiagnostics({
+        addedPaths,
+        changedPaths,
+        deletedPaths,
+        patchRoot,
+        previousContents,
+        sandbox,
+      }),
       baseline,
     );
     return { diagnostics, files };

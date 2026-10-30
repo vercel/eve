@@ -3,25 +3,13 @@ import { describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
-  actionIdempotencyKey,
-  type InstrumentationAttemptScope,
-} from "#instrumentation/lifecycle.js";
-import {
   abandonInstrumentationState,
-  findInstrumentationActionScopeForCall,
   instrumentationStateSlot,
   isInstrumentationStateAbandoned,
-  rememberInstrumentationActionScope,
-  rememberInstrumentationBackgroundTaskForCall,
   releaseAllInstrumentationAttemptState,
   releaseAllInstrumentationState,
-  releaseAllInstrumentationTurnState,
-  takeInstrumentationActionScopeForTask,
-  takeInstrumentationActionScopeForCall,
-  takeInstrumentationActionScopes,
 } from "#instrumentation/state.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
-import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
 
 describe("instrumentation state", () => {
   it("survives a serialized step boundary", async () => {
@@ -45,96 +33,6 @@ describe("instrumentation state", () => {
       expect(instrumentationStateSlot("a", "turn:1").get()).toBe("a-1");
       expect(instrumentationStateSlot("b", "turn:1").get()).toBe("b-1");
       expect(instrumentationStateSlot("a", "turn:2").get()).toBe("a-2");
-    });
-  });
-
-  it("correlates same-turn actions with their stored attempt scopes", () => {
-    const first: InstrumentationAttemptScope = {
-      attemptId: "session-1:turn-1:0:0",
-      attemptIndex: 0,
-      sessionId: "session-1",
-      stepIndex: 0,
-      turnId: "turn-1",
-    };
-    const second: InstrumentationAttemptScope = {
-      ...first,
-      attemptId: "session-1:turn-1:1:0",
-      stepIndex: 1,
-    };
-    const firstKey = actionIdempotencyKey(first.sessionId, first.turnId, "call-1");
-    const secondKey = actionIdempotencyKey(second.sessionId, second.turnId, "call-2");
-
-    contextStorage.run(new ContextContainer(), () => {
-      rememberInstrumentationActionScope(firstKey, first);
-      rememberInstrumentationActionScope(secondKey, second);
-
-      expect(takeInstrumentationActionScopeForCall(second.sessionId, "call-2")).toEqual({
-        idempotencyKey: secondKey,
-        scope: second,
-      });
-      expect(takeInstrumentationActionScopeForCall(first.sessionId, "call-1")).toEqual({
-        idempotencyKey: firstKey,
-        scope: first,
-      });
-    });
-  });
-
-  it("keeps a background action across turn cleanup until its task settles", async () => {
-    const actionKey = actionIdempotencyKey("session-1", "turn-1", "call-1");
-    const scope: InstrumentationAttemptScope = {
-      attemptId: "session-1:turn-1:0:0",
-      attemptIndex: 0,
-      sessionId: "session-1",
-      stepIndex: 0,
-      turnId: "turn-1",
-    };
-    const context = new ContextContainer();
-    await contextStorage.run(context, async () => {
-      rememberInstrumentationActionScope(actionKey, scope);
-      rememberInstrumentationBackgroundTaskForCall(scope.sessionId, "call-1", "task-1");
-      instrumentationStateSlot("sink", actionKey, {
-        sessionId: scope.sessionId,
-        turnId: scope.turnId,
-      }).set("open");
-    });
-
-    const serialized = await serializeContext(context);
-    expect(serialized["eve.harness.instrumentationActionScopes"]).toEqual({
-      [actionKey]: { scope, taskId: "task-1" },
-    });
-    expect(serialized).not.toHaveProperty("eve.harness.instrumentationBackgroundTasks");
-    const restored = await deserializeContext(serialized);
-    contextStorage.run(restored, () => {
-      expect(takeInstrumentationActionScopes(scope.sessionId, scope.turnId)).toEqual([]);
-      releaseAllInstrumentationTurnState(scope.sessionId, scope.turnId);
-      expect(instrumentationStateSlot("sink", actionKey).get()).toBe("open");
-      expect(findInstrumentationActionScopeForCall(scope.sessionId, "call-1")).toBeDefined();
-      expect(takeInstrumentationActionScopeForTask("task-1")).toEqual({
-        idempotencyKey: actionKey,
-        scope,
-      });
-      expect(findInstrumentationActionScopeForCall(scope.sessionId, "call-1")).toBeUndefined();
-    });
-  });
-
-  it("deserializes the previous scope-only action state", async () => {
-    const scope: InstrumentationAttemptScope = {
-      attemptId: "session-1:turn-1:0:0",
-      attemptIndex: 0,
-      sessionId: "session-1",
-      stepIndex: 0,
-      turnId: "turn-1",
-    };
-    const actionKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1");
-    const restored = await deserializeContext({
-      "eve.harness.instrumentationActionScopes": { [actionKey]: scope },
-    });
-
-    contextStorage.run(restored, () => {
-      expect(findInstrumentationActionScopeForCall(scope.sessionId, "call-1")).toEqual({
-        idempotencyKey: actionKey,
-        scope,
-      });
     });
   });
 
@@ -196,116 +94,6 @@ describe("instrumentation state", () => {
     ).toEqual({
       authored: "original",
       "eve.harness.instrumentationState": { state: true },
-    });
-  });
-
-  it("preserves only observability state owned by committed background tasks", () => {
-    const existingAction = "action:session-1:turn-0:existing";
-    const backgroundAction = "action:session-1:turn-1:background";
-    const unrelatedAction = "action:session-1:turn-1:unrelated";
-    const original = {
-      authored: "original",
-      "eve.activeChannelDeliveries": { existing: true },
-      "eve.harness.agentTrace": {
-        actionAnchors: { [existingAction]: { callId: "existing", trace: "existing" } },
-        actions: { [existingAction]: { callId: "existing", trace: "existing" } },
-        invocations: {
-          "invocation-existing": {
-            callId: "existing-child",
-            parentActionCallId: "existing",
-          },
-        },
-        sessions: { "session-1": { trace: "session" } },
-        turns: { "session-1\0turn-0": { trace: "turn" } },
-      },
-      "eve.harness.instrumentationActionScopes": {
-        [existingAction]: { scope: { turnId: "turn-0" }, taskId: "task-existing" },
-      },
-      "eve.harness.instrumentationInputScopes": { existing: { turnId: "turn-0" } },
-      "eve.harness.instrumentationState": {
-        [`sink\0${existingAction}`]: { value: "existing" },
-      },
-    };
-    const completed = {
-      authored: "completed",
-      "eve.activeChannelDeliveries": { unrelated: true },
-      "eve.harness.agentTrace": {
-        actionAnchors: {
-          [backgroundAction]: { callId: "background", trace: "background" },
-          [unrelatedAction]: { callId: "unrelated", trace: "unrelated" },
-        },
-        actions: {
-          [backgroundAction]: { callId: "background", trace: "background" },
-          [unrelatedAction]: { callId: "unrelated", trace: "unrelated" },
-        },
-        invocations: {
-          "invocation-background": {
-            callId: "background-child",
-            parentActionCallId: "background",
-          },
-          "invocation-background-nested": {
-            callId: "background-grandchild",
-            parentActionCallId: "background-child",
-          },
-          "invocation-unrelated": {
-            callId: "unrelated-child",
-            parentActionCallId: "unrelated",
-          },
-        },
-        sessions: { "session-2": { trace: "unrelated" } },
-        turns: { "session-1\0turn-1": { trace: "unrelated" } },
-      },
-      "eve.harness.instrumentationActionScopes": {
-        [backgroundAction]: { scope: { turnId: "turn-1" }, taskId: "task-1" },
-        [unrelatedAction]: { scope: { turnId: "turn-1" }, taskId: "task-2" },
-      },
-      "eve.harness.instrumentationInputScopes": { unrelated: { turnId: "turn-1" } },
-      "eve.harness.instrumentationState": {
-        [`sink\0${backgroundAction}`]: { value: "background" },
-        [`sink\0${unrelatedAction}`]: { value: "unrelated" },
-      },
-    };
-
-    expect(
-      preserveSerializedBackgroundTaskObservabilityState(original, completed, [
-        { taskId: "task-1" },
-      ]),
-    ).toEqual({
-      ...original,
-      "eve.harness.agentTrace": {
-        actionAnchors: {
-          [existingAction]: { callId: "existing", trace: "existing" },
-          [backgroundAction]: { callId: "background", trace: "background" },
-        },
-        actions: {
-          [existingAction]: { callId: "existing", trace: "existing" },
-          [backgroundAction]: { callId: "background", trace: "background" },
-        },
-        invocations: {
-          "invocation-existing": {
-            callId: "existing-child",
-            parentActionCallId: "existing",
-          },
-          "invocation-background": {
-            callId: "background-child",
-            parentActionCallId: "background",
-          },
-          "invocation-background-nested": {
-            callId: "background-grandchild",
-            parentActionCallId: "background-child",
-          },
-        },
-        sessions: { "session-1": { trace: "session" } },
-        turns: { "session-1\0turn-0": { trace: "turn" } },
-      },
-      "eve.harness.instrumentationActionScopes": {
-        [existingAction]: { scope: { turnId: "turn-0" }, taskId: "task-existing" },
-        [backgroundAction]: { scope: { turnId: "turn-1" }, taskId: "task-1" },
-      },
-      "eve.harness.instrumentationState": {
-        [`sink\0${existingAction}`]: { value: "existing" },
-        [`sink\0${backgroundAction}`]: { value: "background" },
-      },
     });
   });
 

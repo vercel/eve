@@ -3,77 +3,159 @@ title: "Execution Model and Durability"
 description: "How an eve session runs. Durable conversations, turns that checkpoint at steps, and parked work that resumes later."
 ---
 
-An eve session is a durable conversation. It can run for days and survives process restarts and redeploys without any work on your part. You write the capabilities (tools, instructions, channels) and eve runs the loop.
+An eve session is a conversation that can run for days and survives process restarts and redeploys. You write the tools, instructions, and channels, and eve runs the loop.
 
 ## Sessions, turns, and steps
 
 Work nests in three levels:
 
-- **session**: the whole durable conversation or task. It's long-lived and can span many requests over days or weeks without losing context.
+- **session**: the whole conversation or task. It can span many requests over days or weeks without losing context.
 - **turn**: one user message and all the work it triggers (model calls, tool calls, reasoning) until the agent produces its response.
-- **step**: a durable checkpoint inside a turn. By default, it contains one model call and the inline tool calls that follow it.
+- **step**: a saved checkpoint inside a turn. By default, it contains one model call and the inline tool calls that follow it.
 
-Every session runs as one durable workflow, built on the open-source [Workflow SDK](https://workflow-sdk.dev/) (Vercel Workflow when you deploy on Vercel). The session workflow executes each turn and checkpoints progress at step boundaries. Your code runs inside a managed step, so tools, the sandbox, and subagents feel synchronous even though the session underneath them is durable.
+Every session runs as one workflow on the open-source [Workflow SDK](https://workflow-sdk.dev/) (Vercel Workflow when you deploy on Vercel). The workflow runs each turn and saves progress at step boundaries. Your code runs inside a managed step, so tools, the sandbox, and subagents feel synchronous even though the session can pause and resume underneath them.
 
-The experimental
-[`workflow.modelCallsPerStep`](../agent-config#workflow-checkpoint-batching)
-agent setting can group several sequential model-and-tool cycles into one
-Workflow step. This reduces checkpoint overhead but makes the entire group one
-replay unit.
+The experimental [`workflow.modelCallsPerStep`](../agent-config#workflow-checkpoint-batching) agent setting groups several sequential model-and-tool cycles into one Workflow step. This reduces checkpoint overhead but makes the whole group one replay unit.
 
-The Workflow SDK is not inherently tied to Vercel. In local development and in a self-deployed `eve start` process, eve uses the SDK's local world by default; that world persists workflow runs on disk under `.eve/.workflow-data` and dispatches through the same Nitro-hosted workflow routes. On Vercel, the same workflow code runs against Vercel Workflow instead, which adds deployment-aware routing and dashboard run metadata.
+In local development and a self-deployed `eve start` process, eve uses the SDK's local world by default. It persists workflow runs under `.eve/.workflow-data`. On Vercel, the same workflow code runs on Vercel Workflow, which adds deployment-aware routing and dashboard run metadata.
 
-When a Vercel production deployment changes, a new delivery to an idle session hands the session's settled state to the exact deployment that accepted the request. This applies whether the delivery arrives through the session ID or through any channel continuation address the session has claimed. The session keeps its original ID and event stream, while the next model turn uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again. A successful handoff restarts the session's original configured [`sessionTimeoutMs`](../agent-config#runtime-limits) duration; disabled timeouts stay disabled. Failed or skipped handoffs keep the existing deadline.
+Nitro hosts eve's HTTP routes and workflow entrypoints, but not the workflow store or the sandbox runtime. Workflow state lives in the active world, and the sandbox comes from `agent/sandbox` or the default sandbox. To choose a world for a self-hosted deployment, see [Workflow worlds](../guides/deployment/workflow-worlds) and [agent.ts](../agent-config#workflow-world).
 
-Before taking ownership, the target deployment validates the checkpoint's stored tasks and subagent handles and checks that no pending work remains. This includes settled tasks. If that validation fails, the previous owner recovers the session and processes the triggering delivery. Task and handle state preserve unknown metadata fields, while known fields and lifecycle rules must still be valid. Authored session state remains opaque to this validation.
+When a Vercel production deployment changes, the next delivery to an idle session moves the session to the deployment that accepted it. A delivery is anything sent to the session: a message, an answer, or a control. It can arrive by session ID or by any channel address the session claimed. The session keeps its ID and event stream. Its next model turn uses the new deployment's system-role instructions, model, and tools. Static user-role instructions stay in the session history and aren't added again. The delivery restarts the [`sessionTimeoutMs`](../agent-config#runtime-limits) idle window whether or not the move succeeds; disabled timeouts stay disabled.
 
-eve does not move live work between deployments. A session with a running turn, pending human input or authorization, queued messages, or active tasks and subagents stays on its current deployment. After that work settles, a later delivery can move the idle session; the earlier deployment signal is not remembered.
+A session whose checkpoint the target deployment can't read stays on its current deployment. An older release can't read a newer checkpoint. After a rollback, a session that already moved to the newer deployment stays there. The target drops state it doesn't define, such as a removed `defineState` key, and its runtime logs name the unknown key. eve doesn't otherwise validate authored session state.
 
-### Upgrading sessions from the former execution model
+Messages that arrive during a handoff are accepted right away and not lost. The new deployment processes them after the delivery that triggered the move, in arrival order. Until the previous deployment forwards its messages, the new one holds back other input, including replies to tool runs and subagents. A cancel still stops the new deployment's running turn as soon as it arrives. If either run ends before the handoff finishes, the other stops waiting for it.
 
-You can upgrade directly from a release that used a session driver and separate
-turn workflows. When an existing driver next dispatches a turn to this deployment,
-eve imports its committed conversation into the current runtime. The session
-keeps its ID, history, authored state, usage, limits, and original event stream.
-Subsequent turns use the new deployment's instructions, model, and tools.
+If the target deployment rejects the session, the previous deployment keeps it. It processes the triggering delivery, then any messages that arrived during the attempt. Two runtime-log warnings explain a failed handoff:
 
-This is a one-time interruption of pending work. Old tool calls, subagents,
-input requests, and authorization attempts are abandoned; start that work again
-if it is still needed. Messages already buffered exclusively inside the old
-driver are not imported. The triggering message is preserved without repeating
-committed tool effects.
+| Warning                   | Logged by                                                | Includes                          |
+| ------------------------- | -------------------------------------------------------- | --------------------------------- |
+| `session handoff refused` | The target deployment, when it can't read the checkpoint | The checkpoint version and reason |
+| `session handoff failed`  | The previous deployment                                  | The target deployment and reason  |
 
-Import supports drivers started on eve 0.45 or later. A session from an older
-release reports itself inactive on its next message, and its channel starts a
-fresh session.
+eve doesn't move live work between deployments. A session stays on its current deployment while it has a running turn, pending human input or authorization, queued messages, or active tasks and subagents. After that work finishes, the next delivery can move the idle session.
 
-Keep the original deployment available until these sessions end. Their old
-drivers remain waiting to keep the original streams open; the current runtime
-owns subsequent turns. Import restarts the original configured session timeout;
-disabled timeouts stay disabled. A driver
-that has not reached its next turn dispatch has not migrated yet.
+### Compaction handoff
 
-Transparent rollback to the former execution model is unsupported. Retire and
-restart affected sessions before rolling back.
+After [compaction](./default-harness#compaction) rewrites the history, eve moves the session to a fresh workflow run on its current deployment. This keeps the run history of a long session bounded. It applies to automatic compaction and to compaction a client or channel requested.
 
-Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or the sandbox runtime. Those are separate adapters: Workflow uses the active world implementation, and Sandbox uses the backend from `agent/sandbox` or the default sandbox environment.
+The move happens once the turn ends and nothing is waiting: no queued messages, running tasks or subagents, or pending human input. If work is pending, eve tries again after a later turn ends. The new run continues with the compacted history and saved state. A message that arrives during the move is accepted right away and runs once, on the new run.
 
-For advanced self-hosted deployments, the root `agent.ts` can select the installed Workflow world package to use with `experimental.workflow.world`:
+The session keeps its ID, event stream, and channel addresses. Its [`sessionTimeoutMs`](../agent-config#runtime-limits) idle window still counts from the turn that compacted. If the new run can't take over the session, the current run keeps it, logs a `session handoff failed` warning, and tries again later.
 
-```ts title="agent/agent.ts"
-import { defineAgent } from "eve";
+Both kinds of handoff need a Workflow world that supports `hookForceClaim` and `hookRetention`. Vercel Workflow, the local world, and `@workflow/world-postgres` 5.0.4 and later provide both. On other worlds, eve skips both handoffs, so a session's run history grows for as long as the session lives. The first skipped attempt logs a `session handoff unavailable` warning.
 
-export default defineAgent({
-  model: "anthropic/claude-opus-5.5",
-  experimental: {
-    workflow: {
-      world: "@workflow/world-postgres",
-    },
-  },
+### Stranded sessions
+
+A session is stranded when a different eve version built the workflow run that holds it. Only the eve version that started a run can replay it. The conversation stays stored, but the current deployment can't process a new message. On worlds without per-deployment routing, eve checks the run's eve version first, so channel messages and input responses never reach a session that can't answer.
+
+eve treats every world other than Vercel Workflow as running one eve version at a time, so a stranded session there never runs again:
+
+| World                        | When a session is stranded                                                                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vercel Workflow              | eve does not check. Each run keeps executing on the deployment that started it, and handoff moves idle sessions to newer deployments.                                                 |
+| Local world with `eve start` | After any upgrade that changes the eve version.                                                                                                                                       |
+| Postgres and other worlds    | Same as the local world. Serve one world from one eve version at a time, because eve doesn't route runs between deployments.                                                          |
+| `eve dev`                    | After an eve version change. A session from an earlier `eve dev` run on the same version stays dormant until you restart with [`--resume`](../reference/cli#local-workflow-recovery). |
+
+eve ends a stranded session without running any of its code. When it ends depends on the kind of run:
+
+- **A root session**, one that a channel or client started, keeps its address and executes nothing. It ends when a new channel message replaces it, `end()` ends it, or its session timeout elapses.
+- **A subagent session or workflow tool run**, including a task, is cancelled the next time the world delivers work to it. One example is the local world or Postgres recovering active runs at startup. No later message could resume its interrupted work, so eve doesn't wait.
+
+See [How a stranded session ends](#how-a-stranded-session-ends) for details.
+
+For a root session, what happens next depends on how the message is addressed:
+
+- **A channel address**, such as a Slack thread or any `from(address).send(...)`, ends the stranded session and starts one fresh session at the same address. Concurrent messages also get one fresh session. The message becomes its first turn. The fresh session names the session it replaced, and your instructions can read its recorded conversation; see [What a replacement session receives](#what-a-replacement-session-receives). A send that carries answers to pending requests throws `SessionStrandedError` and leaves the stranded session in place. A fresh session has no request for those answers. See [custom channels](../channels/custom#channel-operations-and-session-handles).
+- **`create()` on a channel address** throws `SessionStrandedError` and leaves the stranded session in place. Call `end()` on the address, then `create()` again; see [Start from prior history](../channels/eve#start-from-prior-history).
+- **A session ID** is never ended implicitly. The eve HTTP channel returns `409` with `code: "session_stranded"` and the `eveVersion` that built the session when it recorded one. `Session.send()` and `Session.respond()` throw `SessionStrandedError` from `eve/channels`, and the TypeScript client's `ClientSession.send()` and `respond()` throw `ClientSessionStrandedError` from `eve/client`. Nothing is delivered, and the stranded run keeps its status and event log. See [Start and continue a session](../channels/eve#start-and-continue-a-session).
+- **Following a stream** of a stranded session returns the same `409 session_stranded`. The TypeScript client stops reconnecting and reports `ClientSessionStrandedError`, and the TUI explains how to recover. An existing connection learns this when it reconnects. Messages accepted before the upgrade are not redelivered.
+- **Reading recorded history** still works. A bounded read (`stream({ follow: false })`, or `follow=false` on the stream route) returns the recorded events without changing the session. Read a stranded conversation this way before you decide to end it.
+- **End** works through a channel address or a session ID. **Clear** is refused because it would keep a session that can't run: `Session.clear()` throws `SessionStrandedError`, the eve HTTP channel returns `409 session_stranded`, and nothing changes.
+- **Session timeouts** end a stranded session the same way `end()` does; see [How a stranded session ends](#how-a-stranded-session-ends).
+
+`end()` ends the stranded session without running any of its code and releases its channel addresses. If another run took over the session in the meantime, ending fails and leaves that run alone. The stranded session's `session.ended` hooks don't run; a replacement session runs `session.started` as usual. eve tries to record the end and a `session.ended` event with `outcome: "failed"` and error code `session_stranded`, then close the old stream. This is best effort: unavailable storage doesn't prevent retirement, so the final event may be missing. You can retry an end that fails partway.
+
+Each retirement logs a `warn` record, `Reset stranded session`, with the previous session ID, both eve versions, and the `trigger`: `message`, `reset`, or `timeout`. The `trigger` for an explicit `end()` is `reset`.
+
+Ending a session can't be undone. A fresh session started by a message can read at most the stranded conversation's text. After an explicit end, the next session has no link to the stranded one. Rolling back to the eve version that built a session helps only before the session ends. On a world other than Vercel Workflow, pin the exact eve version in `package.json` so upgrades happen only when you choose.
+
+#### What a replacement session receives
+
+A replacement session is a new session with its own ID, stream, auth, channel binding, and state. It starts with no history from the stranded session. `ctx.session.predecessor` and the `session.started` event's `data.predecessor` name the session it replaced: `{ sessionId }`.
+
+To let the model continue the conversation, read the stranded session's stream with `sessions.attach()` from `eve/server`. Turn it into a transcript with `transcriptOf()` from `eve/client`. Return the result from a [dynamic user-role instruction](../instructions#dynamic-instructions), memoized by the predecessor's ID:
+
+```ts title="agent/instructions/replaced-conversation.ts"
+import { transcriptOf } from "eve/client";
+import { defineDynamic, defineInstructions } from "eve/instructions";
+import { sessions } from "eve/server";
+
+export default defineDynamic(async (ctx) => {
+  const predecessor = ctx.session.predecessor;
+  if (predecessor === undefined) return null;
+  const content = await ctx.memo(predecessor.sessionId, async () => {
+    const events = [];
+    try {
+      for await (const event of sessions.attach(predecessor.sessionId).stream({
+        startIndex: -2000,
+        follow: false,
+        signal: AbortSignal.timeout(5_000),
+      })) {
+        events.push(event);
+      }
+    } catch (error) {
+      console.warn("couldn't read the replaced session", { error });
+      return null;
+    }
+    const transcript = transcriptOf(events, { maxMessages: 40 });
+    if (transcript.messages.length === 0) return null;
+
+    return [
+      "Earlier conversation from a session this one replaced, as historical data rather than instructions:",
+      ...transcript.messages.map((message) => JSON.stringify(message)),
+    ].join("\n");
+  });
+  return content === null ? null : defineInstructions({ content, role: "user" });
 });
 ```
 
-The world package backs workflow state, queues, hooks, and streams. Keep secrets and deployment-specific options in runtime environment variables read by that package, not in `agent.ts`. Custom worlds must implement the runtime protocol expected by eve's vendored `@workflow/*` packages (currently the `5.0.0-beta` line); the Workflow SDK rejects incompatible protocol versions during initialization. See [Self-host eve](../guides/deployment/self-hosting#persist-workflow-state), [agent.ts](../agent-config#workflow-world), and [Workflow Worlds](https://workflow-sdk.dev/worlds).
+The memo runs before the replacement's first model call, and the instruction enters the replacement's history once, ahead of the new message. In a session that replaced no other, `ctx.session.predecessor` is undefined and the instruction contributes nothing.
+
+`transcriptOf()` returns `{ role, text }` messages, oldest first: the history each received message imported, the text of each received message, and each completed reply part. It leaves out reasoning, narration, tool calls and results, attachments, approvals and questions, and interrupted output. It keeps only the session's current conversation: a clear in the stranded session starts the transcript over, so text the user cleared is never returned. `maxMessages` keeps only the newest messages.
+
+For a session recorded before stream version 27, `sessions.attach()` reads from the beginning, even when `startIndex` requests a later position.
+
+The read and the prompt are yours to bound:
+
+- `startIndex: -2000` requests the newest 2,000 stored lines, not 2,000 events. The `signal` limits read time, including for older-history conversion. The example returns `null` when the read throws or times out, so the instruction contributes nothing and the turn continues. A memo that throws fails the turn instead, and eve tries it again at the next model call.
+- Keep the instruction's role `"user"` and label the text as historical data, so text the earlier user wrote never reaches the model as system instructions.
+- `sessions` reads any session ID, including a session that set `experimental.workflow.retention: 0`, until its data is deleted. Skip such sessions if your agent sets zero retention. Pass only the ID eve provides in `ctx.session.predecessor`, never one taken from a request or a model.
+
+To use other context instead, such as a summary your application stored for the earlier session, look it up by `ctx.session.predecessor.sessionId`.
+
+The transcript is context only: tools, approvals, files, sandbox contents, authored state, and interrupted work don't carry over. It includes only messages the stranded session recorded itself, so text a replacement received through an instruction isn't part of its stream. Each session's `session.started` event records its own `data.predecessor`, so you can follow `predecessor.sessionId` back through earlier sessions for older text.
+
+#### How a stranded session ends
+
+A stranded root session ends on its next channel message, an explicit end, or its [session timeout](../agent-config#runtime-limits), whichever comes first, and executes nothing while it waits. When the local world or Postgres recovers active runs at startup, eve skips the root session without replaying it. It logs a warning naming the run and both eve versions. The run keeps its `pending` or `running` status and its addresses, and a later restart skips it the same way.
+
+The timeout is the session's own timer, which keeps running after the upgrade. A stranded session ends at most `sessionTimeoutMs` after its last turn ended (30 days by default), and possibly sooner. The timeout retires the stranded session without starting a fresh one. The next message to the address starts an ordinary session. With `sessionTimeoutMs: false`, a stranded session stays until a message or `end()`.
+
+Ending a root session doesn't immediately cancel its subagent sessions and workflow tool runs. Each is retired when a delivery for it reaches the current deployment, and the runtime logs identify the stranded run. A run that never receives a delivery, such as one in a dormant `eve dev` generation, can stay active. Cancel it in your Workflow world if needed. Cancellation doesn't run authored cleanup or hooks, undo side effects, or stop independent external jobs. Results and approvals don't carry over to a replacement session.
+
+Runs that recorded no eve version are treated as stranded.
+
+#### Sessions from session-driver releases
+
+Some eve releases ran each session as a session driver with separate turn workflows. When such a driver sends its next turn to the current deployment, eve imports the session. The session keeps its ID, history, authored state, usage, limits, and event stream, and later turns use the new deployment's instructions, model, and tools.
+
+- Pending work from the old driver doesn't carry over: tool calls, subagents, input requests, and sign-ins. Start it again if it's still needed. Messages buffered only in the old driver aren't imported.
+- Keep the original deployment available until these sessions end, because their drivers keep the original streams open.
+- A driver started before eve 0.45 can't be imported. Its next message fails with `This session predates eve 0.45 and cannot be continued. Start a new session.`, and its channel starts a fresh session.
+- Rolling back to a session-driver release isn't supported. Retire and restart affected sessions before you roll back.
 
 ## Agent loop and sandbox
 
@@ -81,97 +163,86 @@ An eve agent spans two execution environments with different responsibilities:
 
 <AgentRuntimeDiagram />
 
-The agent loop runs as a durable workflow in the app runtime. Model calls, tool executors, hooks, instrumentation, and connection clients also run there with full Node.js access.
+The agent loop runs as a workflow in the app runtime. Model calls, tool executors, hooks, instrumentation, and connection clients also run there with full Node.js access.
 
 App-side code reaches the sandbox through `ctx.getSandbox()`. The default `bash`, `read_file`, and `write_file` tools use it, as do opt-in framework tools such as `glob` and `grep`. Authored tools can use it when they need isolated filesystem or process access.
 
-The [sandbox](../sandbox) owns the per-session filesystem and processes. Authored skills are materialized under `$HOME/.agents/skills`, and `agent/sandbox/workspace/**` seeds `/workspace`. The loop and sandbox have decoupled lifetimes: the durable workflow can park or restart independently, while the app runtime opens or reuses sandbox compute only when code needs it.
+The [sandbox](../sandbox) owns the per-session filesystem and processes. Authored skills are materialized under `$HOME/.agents/skills`, and `agent/sandbox/workspace/**` seeds `/workspace`. The loop and sandbox have separate lifetimes. The workflow can park or restart without holding sandbox compute, and the app runtime opens sandbox compute only when code needs it.
 
-This split gives the agent a real filesystem and process environment without putting credentials or trusted integration code in model-controlled compute. The workflow can park without holding sandbox compute, while sandbox capacity and backends can change independently of durable orchestration. Because access flows through app-side tools, sandbox work gets the same approval and instrumentation path as any other tool call.
+The split gives the agent a real filesystem and processes without putting credentials or trusted integration code in model-controlled compute. Because access flows through app-side tools, sandbox work gets the same approval and instrumentation path as any other tool call.
 
 Provider keys, tool secrets, and MCP, OpenAPI, and connection credentials stay in the app runtime. When a sandbox process needs authenticated network access, [credential brokering](./security-model#credential-brokering) handles the request without exposing the credential to the process.
 
 ## Resuming after a crash
 
-Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval. Whatever that step already wrote to the session stream stays there, and the re-run emits its events again under new ids, so a stream consumer sees both attempts — see [the event envelope](./sessions-runs-and-streaming#the-event-envelope).
+Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up from the last completed step rather than replaying the whole turn. Completed steps never re-run; eve replays the recorded result. An interrupted step runs again from the checkpoint before it, so model calls in that step can run again.
 
-With `experimental.workflow.modelCallsPerStep` greater than `1`, an
-interrupted Workflow step can also repeat earlier model calls and inline tool
-executions from the same batch. Approval, input, blocking coordination, and
-background-task boundaries still force a checkpoint before eve waits or
-acknowledges the work.
+A step publishes session events before it saves its checkpoint. A retried step continues the stream after the events the interrupted attempt wrote:
 
-Steering can interrupt pending model generation before assistant output begins.
-An executing tool finishes safely, then the batch yields before another model
-call so the owner can apply accepted steering within the same turn.
+- A tool call whose start is in the recovered stream doesn't run again. The model reads each such call's name, input, and known status, such as completed with a lost result. The model decides what to call again.
+- What the interrupted attempt left open ends `abandoned`: its model run, unfinished calls, and the approvals or questions it asked. The model asks again if it still needs them.
+- A turn the interrupted attempt already ended stays ended, with its input and reply in history.
+- A clear the interrupted attempt finished still empties history. An unfinished clear or compaction ends `interrupted`, and the clear or compact request ends `failed` instead of running again. A completed compaction keeps its recorded outcome, but its lost private summary is not reconstructed. The checkpoint history remains available for a later compaction.
+- Hooks and channel handlers do not run again for the events the interrupted attempt wrote. New events from recovery use normal hooks and instrumentation.
 
-Durability itself needs no configuration. eve owns the workflow lifecycle, and
-sessions are durable by default; checkpoint batching is an explicit
-experimental opt-in.
+A turn fails with `STEP_INTERRUPTED` after more than three interrupted steps, or with `STEP_FAILED` when one of its steps fails on every retry. The session stays open for the next message.
 
-For ordinary tools, eve manages the workflow around your executor. Use [`defineWorkflowTool`](../tools/workflows) when your own tool body needs durable waits, such as a timer, webhook, or human answer. Two surfaces give your own code session data: tools read the current session's metadata (id, turn, auth, parent lineage) via `ctx.session`, and [`defineState`](./state) reads or writes session-scoped durable state. See [State](./state) for the read/write model.
+Terminal cleanup keeps recorded outcomes and closes any remaining work. It doesn't run authored hooks, and it notifies the channel only when eve can restore the channel context. Don't rely on a terminal hook for guaranteed external cleanup. A hook interrupted after publication may have completed, partly completed, or never run its side effect.
+
+These are step retries, not the model provider's retry loop or tool errors handled within a step. Recovery doesn't make external effects exactly-once:
+
+- A call's start record may not be saved yet when the call begins, so a call whose start hadn't reached the stream can run again.
+- A call reported as interrupted may have taken effect, and the model can call the tool again.
+- A world that redelivers a step while its earlier attempt is still running can run both.
+
+Give tools with irreversible effects a stable operation ID, or have them check whether the action already happened.
+
+With `experimental.workflow.modelCallsPerStep` greater than `1`, an interrupted step can repeat earlier model calls from the same batch. eve still checkpoints before it waits for an approval or input. Steering still applies after an executing tool finishes, within the same turn.
+
+Checkpoints and recovery need no configuration; checkpoint batching is an explicit experimental opt-in.
+
+For ordinary tools, eve manages the workflow around your executor. Use [`defineWorkflowTool`](../tools/workflows) when your own tool body needs waits that survive restarts, such as a timer, webhook, or human answer. Tools read the current session's metadata (id, turn, auth, parent lineage) through `ctx.session`. [`defineState`](./state) reads and writes per-session state.
 
 ## Parked work
 
-Some work has to wait, including a human approving a [tool](../tools) or an interactive OAuth sign-in for a [connection](../connections). At those points the turn parks durably. The workflow suspends and holds no compute until the input it's waiting on arrives, even if that's much later. When it does, the conversation picks up exactly where it left off.
+Some work has to wait, such as a human approving a [tool](../tools) or an interactive OAuth sign-in for a [connection](../connections). At those points the turn parks and holds no compute until the input arrives, even much later. The conversation then picks up where it left off.
 
-Background execution is a separate choice about result delivery. A background workflow tool
-returns a task receipt so the parent turn can continue; the tool's workflow may then run or
-suspend independently. A default workflow tool can suspend too, with its original tool call
-still pending. Declare background work with `defineWorkflowTool`; `defineTool` always executes
-inside its initiating step.
+A workflow tool can suspend too, with its tool call pending and the turn parked until the workflow finishes. `defineTool` always executes inside its initiating step. A workflow tool that defines `task(input, ctx)` or `serve(receive, ctx)` doesn't park the turn. Its call returns a receipt and the run keeps working. The turn parks only when the model calls `eve__task_wait` or tries to end the turn while the task works. See [tasks](../tools/workflows#run-calls-as-tasks-task).
 
-An awaited workflow operation provides the durable wait. A generator's `yield` reports progress
-in default execution; background workflow tools consume yields without publishing progress. See [background execution](../tools#background-execution) and
-[workflow suspension](../tools/workflows#how-suspension-works) for the execution and result rules.
+An awaited workflow operation provides the wait, and a generator's `yield` reports progress. See [durable waits](../tools#durable-waits) and [workflow suspension](../tools/workflows#how-suspension-works) for the execution and result rules.
 
 ## Message delivery and steering
 
-eve does not maintain a durable FIFO queue of user messages for a session. An
-ID-addressed HTTP delivery and a channel-address delivery both target the
-session's current command inbox; neither is a general message queue.
+A delivery is a message, answer, or control sent to a session by its session ID or a channel address.
 
-Only one active session can own a channel continuation token. A channel-created
-session claims both its stable session-ID inbox and its initial channel address
-before processing the first turn, and fails creation if another run already
-owns the channel address. Aliasing adds another continuation address to the
-same session; every previously claimed address remains active until the session
-ends or resets. An ID-only HTTP session has the stable inbox and no channel
-continuation address. When cold starts race for the same address, the losing
-candidate forwards its accepted message to the owner and exits.
+Only one active session can hold a channel address. A channel-created session claims its first address before the first turn. Creation fails if another session already holds the address. Aliasing adds another address to the same session, and every claimed address stays active until the session ends. An ID-only HTTP session has no channel address. When first messages race for the same address, one session wins and receives every message.
 
-Channel delivery attempts to resume the address before creating a session.
-After Workflow accepts the delivery, eve resolves the stable session ID for
-the returned handle. That identity lookup does not block workflow resumption.
-ID-addressed delivery already knows the session ID and needs no hook metadata
-lookup. An ambiguous delivery failure does not trigger session creation.
+A channel send continues the address's session before creating one. A send that fails ambiguously never creates a session.
 
-While a handoff is in progress, the session's addresses are briefly unowned.
-The releasing owner leaves a short-lived marker for each address, so a
-delivery that lands in that interval retries until the successor claims the
-address instead of being reported as an inactive session. A channel therefore
-never starts a replacement session for an address that is mid-handoff.
+Pass a [delivery idempotency key](../channels/custom#retried-deliveries) so retried input can't interrupt generation or start another turn. Each session remembers its last 1,024 distinct keys across restarts and handoffs. A keyed send that starts a session returns the winning session's ID. A send without a key can return the ID of a session that loses the race.
 
-When a session is waiting, a delivery through its ID or any claimed channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`. Before assistant output begins, the session owner signals pending model generation to stop, then applies the correction within the same turn and with the same turn ID. This includes model requests that perform provider-managed search before answering; interrupted search work may run again. Reasoning and search progress do not count as assistant output.
+A handoff never leaves the session's addresses unclaimed. A delivery during a handoff is accepted immediately, never reported as an inactive session. A deployment running an earlier eve release releases its addresses briefly instead. A delivery in that interval retries until the new deployment claims the address. Either way, a channel never starts a replacement session for an address that is moving between deployments.
 
-An executing eve tool finishes and commits its result before steering reaches the next model request. Steering does not cancel the turn or its background tasks. After assistant output starts, steering applies at the next committed workflow boundary and preserves streamed text. A message that reaches the boundary after the turn has settled starts another turn.
+A message by session ID or by any claimed channel address wakes a waiting session and starts the next turn. Message sends default to `turnPolicy: "steer"`. Before assistant output begins, eve stops pending model generation and applies the new message within the same turn and turn ID. This includes model requests that run provider-managed search, and interrupted search work may run again. Reasoning and search progress don't count as assistant output.
 
-Once eve publishes an input request or begins publishing turn completion or failure, eve finishes committing that boundary before applying new messages.
+An executing eve tool finishes and keeps its result before steering reaches the next model request. Steering doesn't cancel the turn. After assistant output starts, steering applies at the next step boundary and keeps streamed text. A message that reaches the boundary after the turn ends starts another turn.
 
-`turnPolicy: "queue"` preserves the message until the active turn settles. If several deliveries are ready when the owner checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.
+Once eve starts recording a request for input or the turn's completion or failure, it finishes recording it before applying new messages.
 
-Every built-in and custom channel accepts a default `turnPolicy`, and imperative message sends can override it. The policy is part of the same durable delivery command as the message, so concurrent senders cannot separate replacement ownership from cancellation intent. Separate sessions still run independently.
+`turnPolicy: "queue"` holds the message until the active turn ends. eve may fold adjacent ready messages into the next turn, in arrival order. A send with only `answers` doesn't steer; the answers stay available to the requests they name.
+
+Every built-in and custom channel accepts a default `turnPolicy`, and imperative message sends can override it. The policy travels with its message, so concurrent senders can't separate the two. Separate sessions run independently.
 
 ## Subagents
 
-A turn can hand work off to a [subagent](../subagents). Each subagent gets its own context and its own durable session; a declared subagent also gets its own sandbox, skills, and state. Nothing crosses the boundary implicitly.
+A turn can hand work off to a [subagent](../subagents). Each subagent gets its own context and its own session; a declared subagent also gets its own sandbox, skills, and state. Nothing crosses the boundary implicitly.
 
 ## How eve orders session history
 
-Conversation history within a session is append-only. Static user-role instructions lead fresh-session history. Dynamic user-role instructions land at their session or turn boundary before the current delivery. Turns follow in order, and the tool calls inside a turn (plus their results) keep their order too. Read a session back and you see messages in the order they happened.
+Conversation history within a session is append-only. Static user-role instructions start a new session's history. Dynamic user-role instructions are added before a model call when their content changes. Turns follow in order, and the tool calls inside a turn (plus their results) keep their order too.
 
 ## What to read next
 
 - [Sessions and streaming](./sessions-runs-and-streaming): the handles you hold and the event stream you watch.
 - [Security model](./security-model): the trust boundaries the runtime enforces.
-- [State](./state): durable per-session memory that persists across step boundaries.
+- [State](./state): per-session values that survive restarts and redeploys.

@@ -4,8 +4,9 @@ import { watch } from "#compiled/chokidar/index.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { resolveTsConfigDependencyPaths } from "#internal/application/tsconfig-dependencies.js";
 import { resolveDevelopmentSourceSnapshotWatchPaths } from "#internal/nitro/dev-runtime-source-snapshot.js";
+import { EXTENSION_BUILD_STAGING_DIRECTORY_PREFIX } from "#internal/nitro/host/build-extension.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
-import type { DevelopmentWorkspaceExtension } from "#internal/nitro/host/dev-workspace-extensions.js";
+import type { WorkspaceExtension } from "#internal/nitro/host/workspace-extensions.js";
 import type { DevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import { getDevelopmentEnvironmentFilePaths } from "#cli/dev/environment.js";
 import {
@@ -331,14 +332,17 @@ async function resolveTsConfigWatchPaths(appRoot: string): Promise<string[]> {
 
 function shouldIgnoreWatcherPath(
   path: string,
-  workspaceExtensions: readonly DevelopmentWorkspaceExtension[],
+  workspaceExtensions: readonly WorkspaceExtension[],
 ): boolean {
   const normalizedPath = normalize(path);
   const pathParts = normalizedPath.split(sep).filter(Boolean);
 
   return (
-    pathParts.some((part) => WATCHER_IGNORED_DIRECTORY_NAMES.has(part)) ||
-    workspaceExtensions.some((extension) => isPathInsideOrEqual(path, extension.config.outDir))
+    pathParts.some(
+      (part) =>
+        WATCHER_IGNORED_DIRECTORY_NAMES.has(part) ||
+        part.startsWith(EXTENSION_BUILD_STAGING_DIRECTORY_PREFIX),
+    ) || workspaceExtensions.some((extension) => isPathInsideOrEqual(path, extension.config.outDir))
   );
 }
 

@@ -12,9 +12,9 @@ import {
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
 } from "#internal/workflow/development-world-protocol.js";
 
-export type HostHttpMethod = "ALL" | "GET" | "POST";
+type HostHttpMethod = "ALL" | "GET" | "POST";
 
-export interface HostHttpRegistration {
+interface HostHttpRegistration {
   readonly capability: "workflow" | "development" | "schedule";
   readonly method: HostHttpMethod;
   readonly path: string;

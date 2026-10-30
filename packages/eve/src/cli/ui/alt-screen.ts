@@ -25,11 +25,11 @@ const CURSOR_HOME = `${ESC}[H`;
 const SYNC_START = `${ESC}[?2026h`;
 const SYNC_END = `${ESC}[?2026l`;
 
-export interface AltScreenOutput {
+interface AltScreenOutput {
   write(chunk: string): boolean;
 }
 
-export interface AltScreenEnterOptions {
+interface AltScreenEnterOptions {
   /** Interactive subprocesses need the terminal cursor; rendered views do not. */
   cursor?: "hidden" | "visible";
   /** Rendered views use mouse events; inherited subprocesses retain native selection. */

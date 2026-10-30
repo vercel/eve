@@ -1,9 +1,22 @@
+import { existsSync, readFileSync } from "node:fs";
+
 import { expect, test } from "vitest";
 
-import { authoringEval } from "./grader.js";
-
-const { commands, worldEvents } = authoringEval();
+// agent-eval records the model's shell commands here before grading.
+const results = JSON.parse(readFileSync("__agent_eval__/results.json", "utf8")) as {
+  o11y?: { shellCommands?: Array<{ command: string }> };
+};
+const commands = (results.o11y?.shellCommands ?? []).map((entry) => entry.command);
 const commandLog = commands.join("\n");
+
+// The mock Vercel CLI from `lib/setups/vercel.ts` appends one event per call.
+const worldEventsPath = "/tmp/photon/world-events.jsonl";
+const worldEvents = existsSync(worldEventsPath)
+  ? readFileSync(worldEventsPath, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { type: string; data: unknown })
+  : [];
 
 test("reaches the named Vercel project through eve without prompting", () => {
   // The project name can be established by `eve link` or passed to `eve deploy`;
@@ -34,10 +47,11 @@ test("deploys the newly linked project to production", () => {
     type: "project.deployed",
     data: { project: "field-notes", url: "https://field-notes.example.test" },
   });
+  // eve owns the remaining deploy flags, such as `--logs`.
   expect(worldEvents).toContainEqual({
     type: "vercel.invoked",
     data: {
-      args: ["deploy", "--prod", "--yes", "--non-interactive"],
+      args: expect.arrayContaining(["deploy", "--prod", "--yes", "--non-interactive"]),
       nonInteractive: true,
     },
   });

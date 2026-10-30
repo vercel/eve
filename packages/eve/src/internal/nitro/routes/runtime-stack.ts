@@ -1,6 +1,6 @@
 import type { Runtime } from "#channel/types.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { resolveRemoteAgentStreamHeaders } from "#subagents/remote-dispatch.js";
+import { resolveRemoteAgentStreamHeaders } from "#execution/agent-sessions/remote.js";
 import type { RemoteAgentStreamHeadersResolver } from "#internal/nitro/routes/channel-route-context.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
@@ -18,7 +18,7 @@ import {
  * against a registered URL pattern, then calls the matched channel's
  * `fetch` with a `RouteContext` built from `runtime`.
  */
-export interface NitroChannelRuntimeBundle {
+interface NitroChannelRuntimeBundle {
   readonly agentName: string;
   readonly channels: readonly ResolvedChannelDefinition[];
   readonly resolveRemoteAgentStreamHeaders?: RemoteAgentStreamHeadersResolver;

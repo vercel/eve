@@ -7,13 +7,12 @@ import { createInstrumentationSetupContext } from "#instrumentation/setup-contex
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 import { agentRuns, localTraces } from "#public/instrumentation/otel.js";
-import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
-import { collectOtelPipeline } from "#tracing/otel-declaration.js";
+import { installInstrumentationRuntime } from "#tracing/eve/install-instrumentation-runtime.js";
+import { collectOtelPipeline } from "#tracing/eve/otel-declaration.js";
 import {
   isInstrumentationDisabled,
-  isInstrumentationProvider,
   type InstrumentationProvider,
-} from "#public/instrumentation/provider.js";
+} from "#instrumentation/provider.js";
 
 /**
  * Process-global registry of the providers authored under
@@ -162,3 +161,5 @@ function toProviderDefinition(
     tracePolicy: entry.provider.tracePolicy,
   };
 }
+
+import { isInstrumentationProvider } from "#instrumentation/provider.js";

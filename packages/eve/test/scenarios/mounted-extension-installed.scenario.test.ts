@@ -1,33 +1,45 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
-import { EXTENSION_CAPABILITY_VERSIONS } from "../../src/compiler/extension-compatibility.js";
+import {
+  EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+  EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
+} from "../../src/compiler/extension-compatibility.js";
+import { loadCompiledModuleMapFromAuthoredSource } from "../../src/internal/authored-module-map-loader.js";
 import {
   buildExtensionPackage,
   tryReadExtensionBuildConfig,
 } from "../../src/internal/nitro/host/build-extension.js";
-import { loadCompiledModuleMapFromAuthoredSource } from "../../src/internal/authored-module-map-loader.js";
-import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
+import {
+  useTemporaryAppRoots,
+  useTemporaryDirectories,
+} from "../../src/internal/testing/use-temporary-app-roots.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "../../src/runtime/loaders/manifest.js";
 import { resolveRuntimeAgentGraph } from "../../src/runtime/resolve-agent-graph.js";
 import { loadResolvedModuleExport } from "../../src/runtime/resolve-helpers.js";
 
-const scenarioApp = useScenarioApp();
-const tempRoots: string[] = [];
+// Scenario tier: building the extension package spawns tsc for declarations.
+const createAppRoot = useTemporaryAppRoots();
+const createScratchDirectory = useTemporaryDirectories();
 
-afterEach(async () => {
-  await Promise.all(
-    tempRoots
-      .splice(0)
-      .map((root) => rm(root, { force: true, maxRetries: 5, recursive: true, retryDelay: 200 })),
-  );
-});
+/**
+ * Compiles the app and hydrates the module map from authored source, the
+ * `eve eval` / `eve dev` path.
+ */
+async function compileRuntimeGraph(appRoot: string) {
+  await compileAgent({ startPath: appRoot });
+  const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
+  const [manifest, moduleMap] = await Promise.all([
+    loadCompiledManifest({ compiledArtifactsSource }),
+    loadCompiledModuleMapFromAuthoredSource({ compiledArtifactsSource }),
+  ]);
+  return { graph: await resolveRuntimeAgentGraph({ manifest, moduleMap }), manifest, moduleMap };
+}
 
 const PACKAGE_NAME = "@acme/installed-crm";
 const EXT_TREE: Readonly<Record<string, string>> = {
@@ -65,17 +77,14 @@ const EXT_TREE: Readonly<Record<string, string>> = {
   "extension/tools/dynamic.ts": [
     'import { defineDynamic, defineTool } from "eve/tools";',
     'import extension from "../extension.js";',
-    "export default defineDynamic({",
-    "  events: {",
-    '    "session.started": async () => ({',
-    "      quote: defineTool({",
-    '        description: "Quote the configured API key.",',
-    '        inputSchema: { type: "object", properties: {}, additionalProperties: false },',
-    "        async execute() { return { apiKey: extension.config.apiKey }; },",
-    "      }),",
+    "export default defineDynamic(() => ({",
+    "    quote: defineTool({",
+    '      description: "Quote the configured API key.",',
+    '      inputSchema: { type: "object", properties: {}, additionalProperties: false },',
+    "      async execute() { return { apiKey: extension.config.apiKey }; },",
     "    }),",
-    "  },",
-    "});",
+    "  }),",
+    ");",
     "",
   ].join("\n"),
   "extension/channels/status.ts": [
@@ -131,7 +140,7 @@ const EXT_TREE: Readonly<Record<string, string>> = {
     'import { defineSkill } from "eve/skills";',
     "export default defineSkill({",
     '  description: "Take structured notes.",',
-    '  markdown: "# Notes\\nRecord decisions as bullet points.",',
+    '  content: "# Notes\\nRecord decisions as bullet points.",',
     "});",
     "",
   ].join("\n"),
@@ -139,7 +148,7 @@ const EXT_TREE: Readonly<Record<string, string>> = {
     'import { defineSkill } from "eve/skills";',
     "export default defineSkill({",
     '  description: "Research an account.",',
-    '  markdown: "# Research\\nUse the checklist.",',
+    '  content: "# Research\\nUse the checklist.",',
     '  files: { "references/checklist.md": "# Checklist\\n" },',
     "});",
     "",
@@ -157,27 +166,21 @@ const EXT_TREE: Readonly<Record<string, string>> = {
   "extension/skills/guide/references/steps.md": "# Steps\n",
   "extension/skills/oncall.ts": [
     'import { defineDynamic, defineSkill } from "eve/skills";',
-    "export default defineDynamic({",
-    "  events: {",
-    '    "session.started": async () => ({',
-    "      escalation: defineSkill({",
-    '        description: "Escalate an incident.",',
-    '        markdown: "# Escalation\\nPage the on-call.",',
-    "      }),",
+    "export default defineDynamic(() => ({",
+    "    escalation: defineSkill({",
+    '      description: "Escalate an incident.",',
+    '      content: "# Escalation\\nPage the on-call.",',
     "    }),",
-    "  },",
-    "});",
+    "  }),",
+    ");",
     "",
   ].join("\n"),
   "extension/instructions/policy.md": "Prefer the CRM tools for account questions.\n",
   "extension/instructions/dynamic.ts": [
     'import { defineDynamic, defineInstructions } from "eve/instructions";',
-    "export default defineDynamic({",
-    "  events: {",
-    '    "session.started": async () =>',
-    '      defineInstructions({ markdown: "Treat CRM results as authoritative." }),',
-    "  },",
-    "});",
+    "export default defineDynamic(() =>",
+    '  defineInstructions({ content: "Treat CRM results as authoritative." }),',
+    ");",
     "",
   ].join("\n"),
 };
@@ -188,9 +191,10 @@ const EXT_TREE: Readonly<Record<string, string>> = {
  * is placed under the consumer's node_modules, so the consumer must discover
  * and normalize the emitted agent-shaped distribution.
  */
-async function buildInstalledExtensionFiles(): Promise<Record<string, string>> {
-  const extRoot = await mkdtemp(join(tmpdir(), "eve-ext-src-"));
-  tempRoots.push(extRoot);
+async function buildInstalledExtensionFiles(
+  tree: Readonly<Record<string, string>> = EXT_TREE,
+): Promise<Record<string, string>> {
+  const extRoot = await createScratchDirectory("eve-ext-src-");
   await writeFile(
     join(extRoot, "package.json"),
     `${JSON.stringify(
@@ -213,7 +217,7 @@ async function buildInstalledExtensionFiles(): Promise<Record<string, string>> {
     join(extRoot, "node_modules", "eve"),
     "dir",
   );
-  for (const [path, contents] of Object.entries(EXT_TREE)) {
+  for (const [path, contents] of Object.entries(tree)) {
     await mkdir(dirname(join(extRoot, path)), { recursive: true });
     await writeFile(join(extRoot, path), contents, "utf8");
   }
@@ -251,23 +255,20 @@ describe("mounted extension installed under node_modules", () => {
     expect(
       JSON.parse(extensionFiles[`node_modules/${PACKAGE_NAME}/dist/extension/_manifest.json`]!),
     ).toMatchObject({
-      requires: {
-        channel: EXTENSION_CAPABILITY_VERSIONS.channel,
-        schedule: EXTENSION_CAPABILITY_VERSIONS.schedule,
-        subagent: EXTENSION_CAPABILITY_VERSIONS.subagent,
-      },
+      formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+      contractMajor: EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
     });
-    const app = await scenarioApp({
-      name: "mounted-extension-installed",
-      installDependencies: true,
+    const app = await createAppRoot("eve-mounted-extension-installed-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/subagents/manager/agent.mjs": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  model: "openai/gpt-5.4",',
           '  description: "Manage CRM reviews.",',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "agent/subagents/manager/extensions/nested.mjs": [
@@ -284,14 +285,7 @@ describe("mounted extension installed under node_modules", () => {
       },
     });
 
-    await compileAgent({ startPath: app.appRoot });
-
-    const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(app.appRoot);
-    const [manifest, moduleMap] = await Promise.all([
-      loadCompiledManifest({ compiledArtifactsSource }),
-      loadCompiledModuleMapFromAuthoredSource({ compiledArtifactsSource }),
-    ]);
-    const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
+    const { graph, manifest, moduleMap } = await compileRuntimeGraph(app.appRoot);
 
     const echo = graph.root.agent.tools.find((entry) => entry.name === "crm__echo");
     expect(echo).toBeDefined();
@@ -371,9 +365,9 @@ describe("mounted extension installed under node_modules", () => {
     expect(graph.root.agent.skills.map((skill) => skill.name)).toEqual(
       expect.arrayContaining(["crm__notes", "crm__research", "crm__guide"]),
     );
-    expect(
-      graph.root.agent.skills.find((skill) => skill.name === "crm__notes")?.markdown,
-    ).toContain("Record decisions as bullet points.");
+    expect(graph.root.agent.skills.find((skill) => skill.name === "crm__notes")?.content).toContain(
+      "Record decisions as bullet points.",
+    );
 
     const skillsResourceRoot = join(
       app.appRoot,
@@ -393,7 +387,7 @@ describe("mounted extension installed under node_modules", () => {
     const dynamicTools = graph.root.agent.dynamicToolResolvers.find(
       (resolver) => resolver.slug === "crm__dynamic",
     );
-    const producedTools = (await dynamicTools?.events["session.started"]?.({}, {})) as {
+    const producedTools = (await dynamicTools?.evaluate({} as never)) as {
       quote: { execute(input: unknown, context: unknown): Promise<unknown> };
     };
     await expect(producedTools.quote.execute({}, {})).resolves.toEqual({ apiKey: "sk-installed" });
@@ -401,21 +395,89 @@ describe("mounted extension installed under node_modules", () => {
     const dynamicSkills = graph.root.agent.dynamicSkillResolvers.find(
       (resolver) => resolver.slug === "crm__oncall",
     );
-    const producedSkills = (await dynamicSkills?.events["session.started"]?.({}, {})) as {
-      escalation: { markdown: string };
+    const producedSkills = (await dynamicSkills?.evaluate({} as never)) as {
+      escalation: { content: string };
     };
-    expect(producedSkills.escalation.markdown).toContain("Page the on-call.");
+    expect(producedSkills.escalation.content).toContain("Page the on-call.");
 
     const dynamicInstructions = graph.root.agent.dynamicInstructionsResolvers.find(
       (resolver) => resolver.slug === "crm__dynamic",
     );
-    const producedInstructions = (await dynamicInstructions?.events["session.started"]?.(
-      {},
-      {},
-    )) as { markdown: string };
-    expect(producedInstructions.markdown).toBe("Treat CRM results as authoritative.");
+    const producedInstructions = (await dynamicInstructions?.evaluate({} as never)) as {
+      content: string;
+    };
+    expect(producedInstructions.content).toBe("Treat CRM results as authoritative.");
     expect(manifest.instructions.map((entry) => entry.content).join("\n")).toContain(
       "Prefer the CRM tools for account questions.",
     );
+  });
+
+  it("binds each mount's config in a shared chunk when mounted in the root and a subagent", async () => {
+    const tool = (description: string) =>
+      [
+        'import { defineTool } from "eve/tools";',
+        'import { apiKey } from "../../lib/api-key.js";',
+        "export default defineTool({",
+        `  description: "${description}",`,
+        '  inputSchema: { type: "object", properties: {}, additionalProperties: false },',
+        "  async execute() { return { apiKey: apiKey() }; },",
+        "});",
+        "",
+      ].join("\n");
+    // A helper outside the extension source shared by two tools is emitted to `dist/_chunks`.
+    const extensionFiles = await buildInstalledExtensionFiles({
+      "extension/extension.ts": EXT_TREE["extension/extension.ts"]!,
+      "lib/api-key.ts": [
+        'import extension from "../extension/extension.js";',
+        "export const apiKey = () => extension.config.apiKey;",
+        "",
+      ].join("\n"),
+      "extension/tools/echo.ts": tool("Echo the configured API key."),
+      "extension/tools/shout.ts": tool("Shout the configured API key."),
+    });
+    expect(
+      Object.keys(extensionFiles).some((path) =>
+        path.startsWith(`node_modules/${PACKAGE_NAME}/dist/_chunks/`),
+      ),
+    ).toBe(true);
+    const app = await createAppRoot("eve-mounted-extension-chunks-", {
+      files: {
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
+        "agent/instructions.md": "You are a precise assistant.\n",
+        "agent/extensions/crm.mjs": [
+          `import crm from "${PACKAGE_NAME}";`,
+          'export default crm({ apiKey: "sk-root" });',
+          "",
+        ].join("\n"),
+        "agent/subagents/manager/agent.mjs": [
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
+          '  model: "openai/gpt-5.4",',
+          '  description: "Manage CRM reviews.",',
+          "});",
+          "",
+        ].join("\n"),
+        "agent/subagents/manager/extensions/crm.mjs": [
+          `import crm from "${PACKAGE_NAME}";`,
+          'export default crm({ apiKey: "sk-manager" });',
+          "",
+        ].join("\n"),
+        ...extensionFiles,
+      },
+    });
+
+    const { graph } = await compileRuntimeGraph(app.appRoot);
+
+    const rootEcho = graph.root.agent.tools.find((entry) => entry.name === "crm__echo");
+    await expect(rootEcho?.execute?.({}, { messages: [], toolCallId: "call_1" })).resolves.toEqual({
+      apiKey: "sk-root",
+    });
+    const manager = graph.root.subagentRegistry.subagentsByName.get("manager");
+    const managerNode = graph.nodesByNodeId.get(manager!.definition.nodeId);
+    const managerShout = managerNode?.agent.tools.find((entry) => entry.name === "crm__shout");
+    await expect(
+      managerShout?.execute?.({}, { messages: [], toolCallId: "call_2" }),
+    ).resolves.toEqual({ apiKey: "sk-manager" });
   });
 });

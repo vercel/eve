@@ -1,42 +1,39 @@
 import type { EveEvalContext, EveEvalSession, EveEvalStreamEvent, EveEvalTurn } from "eve/evals";
 
+type SignInOutcome = EveEvalStreamEvent<"interaction.settled">["data"]["outcome"];
+
 import { fixtureAuthorizationCallback } from "../agent/lib/fake-service.ts";
 
 export type ProbeCase = { readonly kind: "auth" | "hitl" };
 
 type SessionCursor = Pick<
   EveEvalSession,
-  "pendingInputRequests" | "requireInputRequest" | "respondAll" | "sessionId" | "state"
+  "pendingInteractions" | "requireInteraction" | "respondAll" | "id" | "state"
 >;
 
 export async function runProbe(t: EveEvalContext, probe: ProbeCase): Promise<void> {
   const directive = `WORKFLOW-PROBE-blocking-local-${probe.kind}`;
-  const started = await t.send(directive);
-  started.expectOk();
 
   if (probe.kind === "hitl") {
+    const started = await t.send(directive);
+    started.expectOk();
     const blocked = await waitForInput(t, started.session, "approval-gate");
     const approved = await blocked.respondAll("approve");
     approved.expectOk();
     await waitForMarker(t, blocked, approved, "WORKFLOW-HITL:approved");
   } else {
-    const required = await waitForEvent(t, started.session, started, "authorization.required");
-    const url = required.event.data.authorization?.url;
-    if (url === undefined) {
-      throw new Error("Authorization probe produced no callback URL.");
-    }
-
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Authorization callback failed (${response.status}).`);
-    }
-
-    await waitForEvent(t, required.session, undefined, "authorization.completed");
-    await waitForMarker(t, required.session, undefined, "WORKFLOW-AUTH:authorized");
+    const signIn = await completeSignIn(t, directive, (url) => {
+      if (url === undefined) {
+        throw new Error("Authorization probe produced no callback URL.");
+      }
+      return new URL(url);
+    });
+    requireAuthorizationOutcome(signIn, "accepted");
+    requireMarker(signIn.turn, "WORKFLOW-AUTH:authorized");
   }
 
   t.succeeded();
-  t.noFailedActions();
+  t.noFailedCalls();
 }
 
 async function waitForInput(
@@ -47,14 +44,14 @@ async function waitForInput(
   let session = initial;
 
   for (let attempt = 0; attempt < 10; attempt += 1) {
-    if (session.pendingInputRequests.some((request) => request.action.toolName === toolName)) {
-      session.requireInputRequest({ toolName });
+    if (session.pendingInteractions.some((request) => request.call?.name === toolName)) {
+      session.requireInteraction({ toolName });
       return session;
     }
 
     const live = watchNext(t, session);
     const turn = await live.result();
-    turn.noFailedActions();
+    turn.noFailedCalls();
     session = live.session;
   }
 
@@ -67,7 +64,7 @@ async function waitForMarker(
   initialTurn: EveEvalTurn | undefined,
   marker: string,
 ): Promise<EveEvalTurn> {
-  if (initialTurn?.message?.includes(marker)) {
+  if (initialTurn?.reply?.includes(marker)) {
     return initialTurn;
   }
 
@@ -76,8 +73,8 @@ async function waitForMarker(
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const live = watchNext(t, session);
     const turn = await live.result();
-    turn.noFailedActions();
-    if (turn.message?.includes(marker)) {
+    turn.noFailedCalls();
+    if (turn.reply?.includes(marker)) {
       return turn;
     }
 
@@ -87,81 +84,81 @@ async function waitForMarker(
   throw new Error(`Probe did not produce ${marker}.`);
 }
 
-async function waitForEvent<T extends "authorization.completed" | "authorization.required">(
+/**
+ * A sign-in inside a running call holds the turn: the response stops when its
+ * delivery settles awaiting input. Complete the sign-in, then read the same
+ * turn to its end.
+ */
+async function completeSignIn(
   t: EveEvalContext,
-  initial: SessionCursor,
-  initialTurn: EveEvalTurn | undefined,
-  type: T,
-  options: { allowFailedActions?: boolean } = {},
-): Promise<{
-  readonly event: EveEvalStreamEvent<T>;
-  readonly session: SessionCursor;
-}> {
-  let session = initial;
-  let turn = initialTurn;
-
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const event = turn?.events.find(
-      (candidate): candidate is EveEvalStreamEvent<T> => candidate.type === type,
-    );
-    if (event !== undefined) {
-      return { event, session };
-    }
-
-    const live = watchNext(t, session);
-    turn = await live.result();
-    if (!options.allowFailedActions) {
-      turn.noFailedActions();
-    }
-    session = live.session;
+  message: string,
+  toCallbackUrl: (authorizationUrl: string | undefined) => URL,
+): Promise<{ readonly callbackUrl: URL; readonly signInId: string; readonly turn: EveEvalTurn }> {
+  const session = await t.session();
+  const live = await session.start(message);
+  const held = await live.result();
+  const required = held.events.find(
+    (event) => event.type === "interaction.opened" && event.data.request.kind === "sign-in",
+  );
+  if (required?.type !== "interaction.opened") {
+    throw new Error("Expected the held turn to request a sign-in.");
   }
+  const callbackUrl = toCallbackUrl(required.data.request.signIn?.url);
+  const resumed = watchNext(t, live.session);
+  const response = await t.target.fetch(`${callbackUrl.pathname}${callbackUrl.search}`);
+  if (!response.ok) {
+    throw new Error(`Authorization callback failed (${response.status}).`);
+  }
+  return { callbackUrl, signInId: required.data.interactionId, turn: await resumed.result() };
+}
 
-  throw new Error(`Probe did not surface ${type}.`);
+/** The turn settled the sign-in, once, with `outcome`. */
+function requireAuthorizationOutcome(
+  { signInId, turn }: { readonly signInId: string; readonly turn: EveEvalTurn },
+  outcome: SignInOutcome,
+): void {
+  const completed = turn.events.filter(
+    (event): event is EveEvalStreamEvent<"interaction.settled"> =>
+      event.type === "interaction.settled" && event.data.interactionId === signInId,
+  );
+  if (completed.length !== 1 || completed[0]?.data.outcome !== outcome) {
+    throw new Error(`Expected one sign-in to settle with outcome "${outcome}".`);
+  }
+}
+
+function requireMarker(turn: EveEvalTurn, marker: string): void {
+  if (!turn.reply?.includes(marker)) {
+    throw new Error(`Probe did not produce ${marker}.`);
+  }
 }
 
 function watchNext(t: EveEvalContext, session: SessionCursor) {
-  if (session.sessionId === undefined || session.state === undefined) {
+  if (session.id === undefined || session.state === undefined) {
     throw new Error("Probe session cursor is incomplete.");
   }
-  return t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
+  return t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch();
 }
 
 export async function runStepAuth(
   t: EveEvalContext,
   scenario: "EXPLICIT" | "IMPLICIT",
 ): Promise<void> {
-  const started = await t.send(`WORKFLOW-STEP-AUTH-${scenario}`);
-  const required = await waitForEvent(t, started.session, started, "authorization.required");
-
-  const url = fixtureAuthorizationCallback(t.target.url, required.event.data.authorization?.url);
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Authorization callback failed (${response.status}).`);
-  }
-
-  await waitForEvent(t, required.session, undefined, "authorization.completed");
-  await waitForMarker(t, required.session, undefined, "WORKFLOW-STEP-AUTH:authorized");
-  t.noFailedActions();
+  const signIn = await completeSignIn(t, `WORKFLOW-STEP-AUTH-${scenario}`, (url) =>
+    fixtureAuthorizationCallback(t.target.url, url),
+  );
+  requireAuthorizationOutcome(signIn, "accepted");
+  requireMarker(signIn.turn, "WORKFLOW-STEP-AUTH:authorized");
+  t.noFailedCalls();
 }
 
 export async function runRejectedStepAuth(t: EveEvalContext): Promise<void> {
-  const started = await t.send("WORKFLOW-STEP-AUTH-REJECTED");
-  const required = await waitForEvent(t, started.session, started, "authorization.required");
+  const signIn = await completeSignIn(t, "WORKFLOW-STEP-AUTH-REJECTED", (url) =>
+    fixtureAuthorizationCallback(t.target.url, url),
+  );
+  const { callbackUrl } = signIn;
+  requireAuthorizationOutcome(signIn, "failed");
 
-  const url = fixtureAuthorizationCallback(t.target.url, required.event.data.authorization?.url);
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Authorization callback failed (${response.status}).`);
-  }
-
-  const completed = await waitForEvent(t, required.session, undefined, "authorization.completed", {
-    allowFailedActions: true,
-  });
-  if (completed.event.data.outcome !== "failed") {
-    throw new Error("A token rejected immediately after sign-in must fail authorization.");
-  }
-
-  const repeatedCallback = await fetch(url);
+  const repeatedCallback = await t.target.fetch(`${callbackUrl.pathname}${callbackUrl.search}`);
   if (repeatedCallback.status !== 404) {
     throw new Error("The completed authorization callback must be disposed.");
   }

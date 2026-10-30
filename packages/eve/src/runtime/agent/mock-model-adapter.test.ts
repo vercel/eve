@@ -73,56 +73,6 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
-  it("reports a task notification instead of re-calling the named tool", async () => {
-    const result = await generateWithPrompt(
-      [
-        {
-          content:
-            "Background task task_abc123 (conditional-marker) is completed.\n\nResult:\nDYNAMIC_SUBAGENT_ENABLED",
-          role: "user",
-        },
-      ],
-      [
-        {
-          inputSchema: { properties: { message: { type: "string" } }, type: "object" },
-          name: "conditional-marker",
-          type: "function",
-        },
-      ],
-    );
-
-    expect(result.content).toEqual([
-      expect.objectContaining({ text: expect.stringContaining("DYNAMIC_SUBAGENT_ENABLED") }),
-    ]);
-  });
-
-  it("activates a matching skill when the available skill line includes a skill path", async () => {
-    const result = await generateWithPrompt([
-      {
-        content: [
-          "Available skills\n",
-          "Listed skills are available in this run.\n",
-          "- weather-skill: Use the weather tool before answering forecast or temperature questions. (path: /home/agent/.agents/skills/weather-skill/SKILL.md)",
-        ].join(""),
-        role: "system",
-      },
-      {
-        content: "What is the weather in Brooklyn?",
-        role: "user",
-      },
-    ]);
-
-    expect(result.finishReason).toEqual({ raw: undefined, unified: "tool-calls" });
-    expect(result.content).toEqual([
-      {
-        input: JSON.stringify({ skill: "weather-skill" }),
-        toolCallId: "call_load_skill",
-        toolName: "load_skill",
-        type: "tool-call",
-      },
-    ]);
-  });
-
   it("does not treat the available skills menu as a prompt-layer label", async () => {
     const result = await generateWithPrompt([
       {
@@ -143,154 +93,6 @@ describe("createMockAuthoredRuntimeModel", () => {
     expect(result.content).toEqual([
       {
         text: "Bootstrap reply: Hello there",
-        type: "text",
-      },
-    ]);
-  });
-
-  it("discovers skills announced in later system history messages", async () => {
-    const result = await generateWithPrompt([
-      {
-        content: [
-          "Available skills\n",
-          "Listed skills are available in this run.\n",
-          "- release: Use for release checklist requests. (path: /home/agent/.agents/skills/release/SKILL.md)",
-        ].join(""),
-        role: "system",
-      },
-      {
-        content: [
-          "Available skills\n",
-          "Listed skills are available in this run.\n",
-          "- tenant-weather: Use tenant weather policy before answering forecast questions. (path: /home/agent/.agents/skills/tenant-weather/SKILL.md)",
-        ].join(""),
-        role: "system",
-      },
-      {
-        content: "What is the weather in Brooklyn?",
-        role: "user",
-      },
-    ]);
-
-    expect(result.finishReason).toEqual({ raw: undefined, unified: "tool-calls" });
-    expect(result.content).toEqual([
-      {
-        input: JSON.stringify({ skill: "tenant-weather" }),
-        toolCallId: "call_load_skill",
-        toolName: "load_skill",
-        type: "tool-call",
-      },
-    ]);
-  });
-
-  it("discovers skills advertised inside larger static instruction text", async () => {
-    const result = await generateWithPrompt([
-      {
-        content: [
-          "# Identity",
-          "",
-          "You are a helpful assistant.",
-          "",
-          "Available skills",
-          "Listed skills are available in this run.",
-          "- echo-marker: Use when the user asks for the echo marker. (path: /home/agent/.agents/skills/echo-marker/SKILL.md)",
-          "",
-          "Another section that must not be parsed as skills.",
-        ].join("\n"),
-        role: "system",
-      },
-      {
-        content: "Please use the echo marker skill and follow its instructions exactly.",
-        role: "user",
-      },
-    ]);
-
-    expect(result.finishReason).toEqual({ raw: undefined, unified: "tool-calls" });
-    expect(result.content).toEqual([
-      {
-        input: JSON.stringify({ skill: "echo-marker" }),
-        toolCallId: "call_load_skill",
-        toolName: "load_skill",
-        type: "tool-call",
-      },
-    ]);
-  });
-
-  it("does not reload a skill already loaded earlier in the session", async () => {
-    const result = await generateWithPrompt([
-      {
-        content: [
-          "Available skills",
-          "Listed skills are available in this run.",
-          "- echo-marker: Use when the user asks for the echo marker. (path: /home/agent/.agents/skills/echo-marker/SKILL.md)",
-        ].join("\n"),
-        role: "system",
-      },
-      {
-        content: "Please use the echo marker skill and follow its instructions exactly.",
-        role: "user",
-      },
-      {
-        content: [
-          {
-            input: JSON.stringify({ skill: "echo-marker" }),
-            toolCallId: "call_load_skill",
-            toolName: "load_skill",
-            type: "tool-call",
-          },
-        ],
-        role: "assistant",
-      },
-      {
-        content: [
-          {
-            output: {
-              type: "json",
-              value: "Reply with exactly the following text and nothing else:\nskill-echo-ok-V1",
-            },
-            toolCallId: "call_load_skill",
-            toolName: "load_skill",
-            type: "tool-result",
-          },
-        ],
-        role: "tool",
-      },
-    ]);
-
-    expect(result.finishReason).toEqual({ raw: undefined, unified: "stop" });
-    expect(result.content).toEqual([
-      {
-        text: "skill-echo-ok-V1",
-        type: "text",
-      },
-    ]);
-  });
-
-  it("never matches load_skill by explicit name in the user message", async () => {
-    const result = await generateWithPrompt(
-      [
-        {
-          content: 'Call the load_skill tool with skill "echo-marker".',
-          role: "user",
-        },
-      ],
-      [
-        {
-          inputSchema: {
-            properties: { skill: { type: "string" } },
-            required: ["skill"],
-            type: "object",
-          },
-          name: "load_skill",
-          type: "function",
-        },
-      ],
-    );
-
-    expect(result.finishReason).toEqual({ raw: undefined, unified: "stop" });
-    expect(result.content).toEqual([
-      {
-        text: 'Bootstrap reply: Call the load_skill tool with skill "echo-marker".',
         type: "text",
       },
     ]);
@@ -533,46 +335,6 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
-  it("prefers loaded skill exact text over ambient instruction tokens", async () => {
-    const result = await generateWithPrompt([
-      {
-        content:
-          "When you reply to the next user message, include the exact token ambient-ok-M3K8 verbatim.",
-        role: "system",
-      },
-      {
-        content: [
-          {
-            output: {
-              type: "text",
-              value: [
-                "Skill (dynamic-tenant-policy)",
-                "Reply with exactly the following text and nothing else:",
-                "loaded-skill-ok-P4K9",
-              ].join("\n"),
-            },
-            toolCallId: "call_load_skill",
-            toolName: "load_skill",
-            type: "tool-result",
-          },
-        ],
-        role: "tool",
-      },
-      {
-        content: "Please use the dynamic tenant policy skill.",
-        role: "user",
-      },
-    ]);
-
-    expect(result.finishReason).toEqual({ raw: undefined, unified: "stop" });
-    expect(result.content).toEqual([
-      {
-        text: "loaded-skill-ok-P4K9",
-        type: "text",
-      },
-    ]);
-  });
-
   it("honors exact-token directives delivered as trailing user context", async () => {
     const result = await generateWithPrompt([
       {
@@ -721,12 +483,10 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
-  // Regression: the [Agents] announcement is user-role scaffolding injected
-  // after a subagent settles. Treating it as a turn boundary masked the tool
-  // result, and the adapter re-issued the same deterministic tool call — a
-  // duplicate start operation that fatally failed the parent session in the
-  // mock world suites.
-  it("replies to a tool result behind a framework [Agents] announcement instead of re-calling", async () => {
+  // Regression: the [Tasks] note is user-role scaffolding injected at a step
+  // boundary. Treating it as a turn boundary masked the tool result, and the
+  // adapter re-issued the same deterministic tool call.
+  it("replies to a tool result behind a framework [Tasks] note instead of re-calling", async () => {
     const result = await generateWithPrompt(
       [
         {
@@ -757,7 +517,7 @@ describe("createMockAuthoredRuntimeModel", () => {
         },
         {
           content:
-            '[Agents]\n<agents>\n<agent id="ag_conditional-marker:5ae9bfd35776" name="conditional-marker">DYNAMIC_SUBAGENT_ENABLED</agent>\n</agents>',
+            '[Tasks]\n<tasks>\n</tasks>\n<idle>\n<task id="conditional-marker-5ae9bf" tool="conditional-marker"/>\n</idle>',
           role: "user",
         },
       ],
@@ -849,7 +609,7 @@ describe("createMockAuthoredRuntimeModel", () => {
       [{ content: "Summarize this", role: "user" }],
       [
         {
-          name: "final_output",
+          name: "eve__reply",
           type: "function",
           description: "Deliver your final answer.",
           inputSchema: {
@@ -869,7 +629,7 @@ describe("createMockAuthoredRuntimeModel", () => {
       {
         input: JSON.stringify({ title: "structured-output", count: 1 }),
         toolCallId: expect.any(String),
-        toolName: "final_output",
+        toolName: "eve__reply",
         type: "tool-call",
       },
     ]);

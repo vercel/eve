@@ -1,3 +1,4 @@
+import { unstable_getResponseFromNextConfig } from "next/experimental/testing/server";
 import { describe, expect, it } from "vitest";
 import {
   createDocsRedirects,
@@ -131,6 +132,11 @@ describe("docsRedirects", () => {
     ["/docs/guides/ucp", "/docs/protocols/ucp"],
     ["/docs/guides/ucp.mdx", "/docs/protocols/ucp.mdx"],
     ["/docs/evals", "/docs/evals/overview"],
+    ["/docs/guides/evaluate", "/docs/guides/decide"],
+    ["/docs/guides/evaluate.md", "/docs/guides/decide.md"],
+    ["/docs/sandbox/microsandbox", "/docs/sandbox"],
+    ["/docs/sandbox/microsandbox.md", "/docs/sandbox.md"],
+    ["/en/docs/sandbox/microsandbox.mdx", "/docs/sandbox.mdx"],
   ])("redirects %s to %s", (source, destination) => {
     expect(docsRedirects).toContainEqual({ source, destination, permanent: true });
   });
@@ -169,6 +175,68 @@ describe("rootMarkdownRedirects", () => {
 });
 
 describe("compatibilityRedirects", () => {
+  it.each([
+    "/templates",
+    "/templates.md",
+    "/templates.mdx",
+    "/templates/eve-voice-template",
+    "/templates/eve-discord-agent.md",
+    "/templates/eve-company-brain-template",
+    "/templates/eve-coding-agent-template",
+    "/templates/bell-stack",
+    "/templates/eve-design-template",
+    "/templates/unknown-template.mdx",
+    "/resources",
+    "/en/templates",
+    "/en/templates.md",
+    "/en/templates.mdx",
+    "/en/templates/eve-voice-template.mdx",
+    "/en/templates/unknown-template",
+    "/en/resources",
+  ])("falls back to the gallery for %s", async (source) => {
+    const response = await unstable_getResponseFromNextConfig({
+      url: `https://eve.dev${source}`,
+      nextConfig: {
+        redirects: async () => [...compatibilityRedirects, ...defaultLanguageRedirects],
+      },
+    });
+    expect(response.status).toBe(308);
+    expect(response.headers.get("location")).toBe("https://vercel.com/templates/eve");
+  });
+
+  it.each([
+    ["eve-chat-template", "eve-chat-template"],
+    ["eve-agent-with-python", "eve-agent-with-python"],
+    ["eve-slack-agent", "eve-slack-agent"],
+    ["eve-data-analyst-template", "eve-data-analyst"],
+    ["eve-contentful-agent-template", "eve-contentful-agent"],
+    ["eve-vercel-drives-starter", "eve-vercel-drives-starter"],
+    ["eve-memory-agent-template", "eve-memory-agent"],
+    ["eve-tanstack-start-template", "eve-tanstack-agent"],
+    ["eve-software-factory-template", "eve-software-factory"],
+    ["marketing-team-eve-template", "eve-marketing-team"],
+    ["openinstinct-eve-template", "openinstinct-eve-agent"],
+    ["kody-eve-template", "eve-github-maintainer"],
+    ["typefully-eve-template", "eve-typefully-agent"],
+    ["eve-sre-agent-template", "eve-incident-response-agent"],
+    ["sanity-copilot-eve-template", "eve-sanity-copilot"],
+  ])("redirects %s directly to its matching Vercel listing", async (slug, destination) => {
+    for (const prefix of ["", "/en"]) {
+      for (const extension of ["", ".md", ".mdx"]) {
+        const response = await unstable_getResponseFromNextConfig({
+          url: `https://eve.dev${prefix}/templates/${slug}${extension}`,
+          nextConfig: {
+            redirects: async () => [...compatibilityRedirects, ...defaultLanguageRedirects],
+          },
+        });
+        expect(response.status).toBe(308);
+        expect(response.headers.get("location")).toBe(
+          `https://vercel.com/templates/eve/${destination}`,
+        );
+      }
+    }
+  });
+
   it("redirects the previous benchmark route", () => {
     expect(compatibilityRedirects).toContainEqual({
       source: "/evals",
@@ -192,6 +260,14 @@ describe("compatibilityRedirects", () => {
       permanent: true,
     });
   });
+
+  it("redirects the Hindsight extension registry item to its memory provider", () => {
+    expect(compatibilityRedirects).toContainEqual({
+      source: "/r/extension/hindsight.json",
+      destination: "/r/memory/hindsight.json",
+      permanent: true,
+    });
+  });
 });
 
 describe("defaultLanguageRedirects", () => {
@@ -200,11 +276,6 @@ describe("defaultLanguageRedirects", () => {
       {
         source: "/en/docs",
         destination: "/docs/getting-started",
-        permanent: true,
-      },
-      {
-        source: "/en/resources",
-        destination: "/templates",
         permanent: true,
       },
       {

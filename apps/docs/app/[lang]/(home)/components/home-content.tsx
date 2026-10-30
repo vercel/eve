@@ -1,15 +1,18 @@
 import type { Metadata } from "next";
+import { JsonLd } from "@/components/geistdocs/json-ld";
 import { canonicalAlternates, canonicalRoutes } from "@/lib/geistdocs/canonical";
 import { pageTitleMetadata, siteTitle } from "@/lib/geistdocs/metadata-title";
 import { staticOgImage } from "@/lib/geistdocs/og";
+import { webSiteStructuredData } from "@/lib/geistdocs/structured-data";
+import { AgentTypes } from "./agent-types";
 import { ArchitectureDiagram } from "./architecture";
-import { CTA } from "./cta";
-import { FeatureGrid } from "./feature-grid";
-import { FileTree } from "./file-tree";
-import { HeroAudience } from "./hero-audience";
-import { NextjsInterop } from "./nextjs-interop";
+import { GetStarted } from "./get-started";
+import { Hero } from "./hero";
+import { Production } from "./production";
+import { WhyEve } from "./why-eve";
 
-const tagline = "Like Next.js for agents. Build durable agents with one folder.";
+const tagline =
+  "eve is an open-source agent framework for durable, long-running work. Build, govern, and evolve enterprise-grade agents that can scale.";
 const titleMetadata = pageTitleMetadata(siteTitle);
 
 export const homeMetadata: Metadata = {
@@ -21,6 +24,7 @@ export const homeMetadata: Metadata = {
     description: tagline,
     images: [staticOgImage],
     type: "website",
+    url: canonicalRoutes.home,
   },
   twitter: {
     ...titleMetadata.twitter,
@@ -31,14 +35,13 @@ export const homeMetadata: Metadata = {
 };
 
 export const HomeContent = () => (
-  <div className="mx-auto w-full max-w-[1080px] pb-8">
-    <section className="relative isolate flex min-h-[80vh] flex-col items-center justify-center gap-y-5 px-4 pt-24 pb-12 text-center sm:px-12 sm:pb-16 sm:pt-42">
-      <HeroAudience tagline={tagline} />
-    </section>
-    <FileTree />
-    <NextjsInterop />
+  <div className="mx-auto w-full max-w-[1448px] px-6">
+    <JsonLd data={webSiteStructuredData(tagline)} />
+    <Hero tagline={tagline} />
+    <AgentTypes />
+    <WhyEve />
+    <Production />
     <ArchitectureDiagram />
-    <CTA />
-    <FeatureGrid />
+    <GetStarted />
   </div>
 );

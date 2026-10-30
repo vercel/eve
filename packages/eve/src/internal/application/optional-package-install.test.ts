@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import { Worker } from "node:worker_threads";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import { ensurePnpmOptionalDependencyDefaults } from "#setup/primitives/pm/pnpm-build-policy.js";
 
@@ -113,9 +113,14 @@ function mockProcessPlatform(platform: NodeJS.Platform): () => void {
   };
 }
 
+// Installs report progress on the console for the `eve dev` user; capture it
+// so the assertions below can check what that user sees.
+let consoleInfo: MockInstance<typeof console.info>;
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
   workerMockState.messages = [];
   workerMockState.workers = [];
   mockedExistsSync.mockReturnValue(false);
@@ -125,6 +130,10 @@ beforeEach(() => {
     queueMicrotask(() => child.emit("close", 0));
     return child;
   });
+});
+
+afterEach(() => {
+  consoleInfo.mockRestore();
 });
 
 describe("loadOptionalEnginePackage", () => {
@@ -142,10 +151,10 @@ describe("loadOptionalEnginePackage", () => {
     });
     const loadedModule = { ok: true };
     const importModule = vi.fn(async () => {
-      throw new Error("Cannot find module 'microsandbox'");
+      throw new Error("Cannot find module 'example-engine'");
     });
     const importInstalledModule = vi.fn(async () => {
-      if (!installed) throw new Error("Cannot find module 'microsandbox'");
+      if (!installed) throw new Error("Cannot find module 'example-engine'");
       return loadedModule;
     });
 
@@ -155,8 +164,8 @@ describe("loadOptionalEnginePackage", () => {
         autoInstall: true,
         importInstalledModule,
         importModule,
-        missingMessage: "missing microsandbox",
-        packageName: "microsandbox",
+        missingMessage: "missing example-engine",
+        packageName: "example-engine",
       }),
     ).resolves.toBe(loadedModule);
 
@@ -168,7 +177,7 @@ describe("loadOptionalEnginePackage", () => {
   it("installs a versioned specifier while loading by package name", async () => {
     vi.stubEnv(EVE_DEV_ENV_FLAG, "1");
     const importModule = vi.fn(async () => {
-      throw new Error("Cannot find module 'microsandbox'");
+      throw new Error("Cannot find module 'example-engine'");
     });
     const installedModule = { ok: true };
     let installed = false;
@@ -186,19 +195,19 @@ describe("loadOptionalEnginePackage", () => {
         appRoot: "/repo/versioned-app",
         autoInstall: true,
         importInstalledModule: vi.fn(async () => {
-          if (!installed) throw new Error("Cannot find module 'microsandbox'");
+          if (!installed) throw new Error("Cannot find module 'example-engine'");
           return installedModule;
         }),
         importModule,
-        installPackageName: "microsandbox@0.5.5",
-        missingMessage: "missing microsandbox",
-        packageName: "microsandbox",
+        installPackageName: "example-engine@1.0.0",
+        missingMessage: "missing example-engine",
+        packageName: "example-engine",
       }),
     ).resolves.toBe(installedModule);
 
     expect(mockedSpawn).toHaveBeenCalledWith(
       "npm",
-      ["install", "--save-dev", "microsandbox@0.5.5"],
+      ["install", "--save-dev", "example-engine@1.0.0"],
       expect.objectContaining({ cwd: "/repo/versioned-app" }),
     );
   });
@@ -214,10 +223,10 @@ describe("loadOptionalEnginePackage", () => {
     });
     const loadedModule = { ok: true };
     const importModule = vi.fn(async () => {
-      throw new Error("Cannot find module 'microsandbox'");
+      throw new Error("Cannot find module 'example-engine'");
     });
     const importInstalledModule = vi.fn(async () => {
-      if (!installed) throw new Error("Cannot find module 'microsandbox'");
+      if (!installed) throw new Error("Cannot find module 'example-engine'");
       return loadedModule;
     });
 
@@ -226,8 +235,8 @@ describe("loadOptionalEnginePackage", () => {
       autoInstall: true,
       importInstalledModule,
       importModule,
-      missingMessage: "missing microsandbox",
-      packageName: "microsandbox",
+      missingMessage: "missing example-engine",
+      packageName: "example-engine",
     });
     await flushMicrotasks();
     const second = loadOptionalEnginePackage({
@@ -235,8 +244,8 @@ describe("loadOptionalEnginePackage", () => {
       autoInstall: true,
       importInstalledModule,
       importModule,
-      missingMessage: "missing microsandbox",
-      packageName: "microsandbox",
+      missingMessage: "missing example-engine",
+      packageName: "example-engine",
     });
     await flushMicrotasks();
 
@@ -275,19 +284,19 @@ describe("loadOptionalEnginePackage", () => {
             return packageName;
           },
         });
-      const first = load("/workspace/apps/one", "microsandbox").catch((error: unknown) => error);
+      const first = load("/workspace/apps/one", "example-engine").catch((error: unknown) => error);
       await vi.waitFor(() => expect(children).toHaveLength(1));
       const second = load("/workspace/apps/two", "just-bash");
       await flushMicrotasks();
       expect(children).toHaveLength(1);
       expect(ensurePnpmOptionalDependencyDefaults).not.toHaveBeenCalled();
-      installed.add("microsandbox");
+      installed.add("example-engine");
       children[0]!.emit("close", firstFails ? 1 : 0);
       await vi.waitFor(() => expect(children).toHaveLength(2));
       installed.add("just-bash");
       children[1]!.emit("close", 0);
       if (firstFails) expect(await first).toBeInstanceOf(Error);
-      else expect(await first).toBe("microsandbox");
+      else expect(await first).toBe("example-engine");
       await expect(second).resolves.toBe("just-bash");
       expect(
         vi
@@ -335,12 +344,12 @@ describe("loadOptionalEnginePackage", () => {
     const appRoot = "/repo/misconfigured-app";
     vi.stubEnv(EVE_DEV_ENV_FLAG, "1");
     const importModule = vi.fn(async () => {
-      throw Object.assign(new Error("Cannot find package 'microsandbox'"), {
+      throw Object.assign(new Error("Cannot find package 'example-engine'"), {
         code: "ERR_MODULE_NOT_FOUND",
       });
     });
     const importInstalledModule = vi.fn(async () => {
-      throw Object.assign(new Error("Cannot find package 'microsandbox'"), {
+      throw Object.assign(new Error("Cannot find package 'example-engine'"), {
         code: "ERR_MODULE_NOT_FOUND",
       });
     });
@@ -351,11 +360,11 @@ describe("loadOptionalEnginePackage", () => {
         autoInstall: true,
         importInstalledModule,
         importModule,
-        missingMessage: "missing microsandbox",
-        packageName: "microsandbox",
+        missingMessage: "missing example-engine",
+        packageName: "example-engine",
       }),
     ).rejects.toThrow(
-      'missing microsandbox Automatic installation completed, but "microsandbox" still could not be loaded from "/repo/misconfigured-app".',
+      'missing example-engine Automatic installation completed, but "example-engine" still could not be loaded from "/repo/misconfigured-app".',
     );
 
     expect(mockedSpawn).toHaveBeenCalledTimes(1);
@@ -366,7 +375,7 @@ describe("loadOptionalEnginePackage", () => {
     const appRoot = "/repo/missing-root-app";
     vi.stubEnv(EVE_DEV_ENV_FLAG, "1");
     const importModule = vi.fn(async () => {
-      throw Object.assign(new Error("Cannot find package 'microsandbox'"), {
+      throw Object.assign(new Error("Cannot find package 'example-engine'"), {
         code: "ERR_MODULE_NOT_FOUND",
       });
     });
@@ -375,12 +384,12 @@ describe("loadOptionalEnginePackage", () => {
       appRoot,
       autoInstall: true,
       importModule,
-      missingMessage: "missing microsandbox",
-      packageName: "microsandbox",
+      missingMessage: "missing example-engine",
+      packageName: "example-engine",
     });
 
     await expect(result).rejects.toThrow(
-      'missing microsandbox Automatic installation completed, but "microsandbox" still could not be loaded from "/repo/missing-root-app".',
+      'missing example-engine Automatic installation completed, but "example-engine" still could not be loaded from "/repo/missing-root-app".',
     );
     await expect(result).rejects.toThrow("Could not find installed optional dependency");
 
@@ -392,7 +401,7 @@ describe("loadOptionalEnginePackage", () => {
     const appRoot = "/repo/worker-app";
     vi.stubEnv(EVE_DEV_ENV_FLAG, "1");
     mockedExistsSync.mockImplementation(
-      (path) => path === "/repo/worker-app/node_modules/microsandbox/package.json",
+      (path) => path === "/repo/worker-app/node_modules/example-engine/package.json",
     );
     mockedReadFile.mockResolvedValue(
       JSON.stringify({
@@ -408,7 +417,7 @@ describe("loadOptionalEnginePackage", () => {
       message: "worker cache-isolated miss",
     });
     const importModule = vi.fn(async () => {
-      throw Object.assign(new Error("Cannot find package 'microsandbox'"), {
+      throw Object.assign(new Error("Cannot find package 'example-engine'"), {
         code: "ERR_MODULE_NOT_FOUND",
       });
     });
@@ -418,16 +427,16 @@ describe("loadOptionalEnginePackage", () => {
         appRoot,
         autoInstall: true,
         importModule,
-        missingMessage: "missing microsandbox",
-        packageName: "microsandbox",
+        missingMessage: "missing example-engine",
+        packageName: "example-engine",
       }),
     ).rejects.toThrow(
-      'missing microsandbox Automatic installation completed, but "microsandbox" still could not be loaded from "/repo/worker-app".',
+      'missing example-engine Automatic installation completed, but "example-engine" still could not be loaded from "/repo/worker-app".',
     );
 
     expect(mockedWorker).toHaveBeenCalledTimes(1);
     expect(workerMockState.workers[0]?.options.workerData).toEqual({
-      entrypointHref: "file:///repo/worker-app/node_modules/microsandbox/dist/index.js",
+      entrypointHref: "file:///repo/worker-app/node_modules/example-engine/dist/index.js",
     });
     expect(mockedSpawn).toHaveBeenCalledTimes(1);
     expect(importModule).toHaveBeenCalledTimes(1);
@@ -464,6 +473,21 @@ describe("installPackageIntoProject", () => {
     expect(ensurePnpmOptionalDependencyDefaults).not.toHaveBeenCalled();
   });
 
+  it("hides the optional package installer console on Windows", async () => {
+    const restorePlatform = mockProcessPlatform("win32");
+    try {
+      await installPackageIntoProject({ appRoot: "/repo/app", packageName: "just-bash" });
+    } finally {
+      restorePlatform();
+    }
+
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      "npm",
+      ["install", "--save-dev", "just-bash"],
+      expect.objectContaining({ shell: true, windowsHide: true }),
+    );
+  });
+
   it("does not install if policy preparation fails", async () => {
     mockedExistsSync.mockImplementation((path) => path === "/repo/pnpm-lock.yaml");
     vi.mocked(ensurePnpmOptionalDependencyDefaults).mockRejectedValueOnce(
@@ -493,6 +517,7 @@ describe("installPackageIntoProject", () => {
         ignoredOptionalDependencies: ["node-liblzma"],
       }),
     ).rejects.toThrow("exit 1");
+    expect(consoleInfo).not.toHaveBeenCalledWith('[eve:dev] installed "just-bash".');
   });
 
   it("uses the project's package manager", async () => {
@@ -501,18 +526,24 @@ describe("installPackageIntoProject", () => {
     await expect(
       installPackageIntoProject({
         appRoot: "/repo/app",
-        packageName: "microsandbox",
+        packageName: "example-engine",
       }),
     ).resolves.toBeUndefined();
 
     expect(mockedSpawn).toHaveBeenCalledWith(
       "pnpm",
-      ["add", "-D", "microsandbox"],
+      ["add", "-D", "example-engine"],
       expect.objectContaining({
         cwd: "/repo/app",
         shell: process.platform === "win32",
       }),
     );
+    expect(consoleInfo.mock.calls).toEqual([
+      [
+        '[eve:dev] installing optional dependency "example-engine" via `pnpm add -D example-engine`...',
+      ],
+      ['[eve:dev] installed "example-engine".'],
+    ]);
   });
 
   it("enables shell spawning on Windows so package manager shims resolve", async () => {
@@ -522,7 +553,7 @@ describe("installPackageIntoProject", () => {
       await expect(
         installPackageIntoProject({
           appRoot: "/repo/app",
-          packageName: "microsandbox",
+          packageName: "example-engine",
         }),
       ).resolves.toBeUndefined();
     } finally {
@@ -531,7 +562,7 @@ describe("installPackageIntoProject", () => {
 
     expect(mockedSpawn).toHaveBeenCalledWith(
       "pnpm",
-      ["add", "-D", "microsandbox"],
+      ["add", "-D", "example-engine"],
       expect.objectContaining({
         cwd: "/repo/app",
         shell: true,

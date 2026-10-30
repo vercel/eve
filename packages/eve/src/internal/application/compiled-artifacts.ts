@@ -5,6 +5,7 @@ import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-
 import type { CompileMetadata } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { stringifyEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import { modelMetadataSchema, type ModelMetadata } from "#internal/model-catalog.js";
 import {
   resolvePackageCompiledFilePath,
   resolvePackageSourceFilePath,
@@ -26,6 +27,7 @@ import {
 import { type InstrumentationLayout } from "#internal/instrumentation-layout.js";
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
 import { resolveWorkflowWorldImport } from "#internal/workflow/world-target.js";
+import { BUILD_DEPLOYMENT_ID_PLACEHOLDER } from "#internal/nitro/host/build-deployment-id.js";
 
 export type BuiltInWorkflowWorldTarget = "local" | "vercel";
 
@@ -80,6 +82,9 @@ export async function writeCompiledArtifactsFiles(input: {
   const sandboxPreparedArtifacts = sandboxPreparedArtifactsManifestSchema.parse(
     JSON.parse(await readFile(input.compileResult.paths.sandboxPreparedArtifactsPath, "utf8")),
   );
+  const modelMetadata = modelMetadataSchema.parse(
+    JSON.parse(await readFile(input.compileResult.paths.modelMetadataPath, "utf8")),
+  );
   const prepared = await prepareAuthoredRuntimeModules({
     appRoot: input.compileResult.project.appRoot,
     manifest: input.compileResult.manifest,
@@ -94,6 +99,7 @@ export async function writeCompiledArtifactsFiles(input: {
       compileResult: input.compileResult,
       installModulePath: resolvePackageSourceFilePath("src/runtime/loaders/bundled-artifacts.ts"),
       metadata: input.compileResult.metadata,
+      modelMetadata,
       moduleMapImportPath: moduleMapPath,
       sandboxPreparedArtifacts,
     }),
@@ -259,6 +265,7 @@ export function createCompiledArtifactsBootstrapSource(input: {
   compileResult: CompileAgentResult;
   installModulePath: string;
   metadata: CompileMetadata;
+  modelMetadata: ModelMetadata;
   moduleMapImportPath: string;
   sandboxPreparedArtifacts: SandboxPreparedArtifactsManifest;
 }): string {
@@ -278,12 +285,15 @@ export function createCompiledArtifactsBootstrapSource(input: {
     "",
     `const sandboxPreparedArtifacts = ${JSON.stringify(input.sandboxPreparedArtifacts, null, 2)};`,
     "",
+    `const modelMetadata = ${JSON.stringify(input.modelMetadata)};`,
+    "",
     "export { moduleMap };",
     "",
     "export function installCompiledArtifactsBootstrap() {",
     "  installBundledCompiledArtifacts({",
     "    manifest,",
     "    metadata,",
+    "    modelMetadata,",
     "    moduleMap,",
     "    sandboxPreparedArtifacts,",
     "  });",
@@ -300,19 +310,21 @@ export function createCompiledArtifactsBootstrapSource(input: {
   ].join("\n");
 }
 
+function resolveInstallWorldImportSpecifier(): string {
+  return resolvePackageSourceFilePath("src/execution/install-workflow-world.ts");
+}
+
 interface WorkflowWorldWiring {
   /** Import specifier for the `workflowWorldModule` namespace import. */
   readonly moduleImportSpecifier: string;
   /** Extra import lines the construction source depends on. */
   readonly extraImportLines: readonly string[];
-  /** Named imports pulled from the workflow core runtime. */
-  readonly runtimeImports: string;
   /** Statement that assigns `workflowWorld`. */
   readonly createWorldSource: string;
 }
 
 /**
- * Per-world wiring for the generated workflow-world plugin. The four pieces
+ * Per-world wiring for the generated workflow-world plugin. The pieces
  * co-vary and must stay together: a world constructed through an explicit
  * `createWorld(config)` call must not import `createWorldFromModule`, and
  * only the vendored local World needs the data-directory resolver import.
@@ -325,21 +337,27 @@ function resolveWorkflowWorldWiring(packageName: string): WorkflowWorldWiring {
     const deliveryTimeoutsImportSpecifier = stringifyEsmImportSpecifier(
       resolvePackageSourceFilePath("src/internal/workflow/local-world-delivery-timeouts.ts"),
     );
+    const deliveryAuthImportSpecifier = stringifyEsmImportSpecifier(
+      resolvePackageSourceFilePath("src/internal/workflow/local-world-delivery-auth.ts"),
+    );
     const moduleImportSpecifier = resolvePackageCompiledFilePath(
       `src/compiled/${packageName}/index.js`,
     );
     const importLines = `
 import { applyLocalWorkflowWorldDeliveryTimeoutDefaults } from ${deliveryTimeoutsImportSpecifier};
+import { authenticateLocalWorkflowDeliveries } from ${deliveryAuthImportSpecifier};
 import { resolveLocalWorkflowWorldDataDirectory } from ${dataDirectoryImportSpecifier};`.trimStart();
     const createWorldSource = `
 applyLocalWorkflowWorldDeliveryTimeoutDefaults();
-const workflowWorld = await workflowWorldModule.createWorld({
-  dataDir: resolveLocalWorkflowWorldDataDirectory(process.cwd()),
-});`.trimStart();
+const workflowWorld = authenticateLocalWorkflowDeliveries(
+  await workflowWorldModule.createWorld({
+    dataDir: resolveLocalWorkflowWorldDataDirectory(process.cwd()),
+    recoverActiveRuns: false,
+  }),
+);`.trimStart();
     return {
       moduleImportSpecifier,
       extraImportLines: importLines.split("\n"),
-      runtimeImports: "getWorld, setWorld",
       createWorldSource,
     };
   }
@@ -361,15 +379,16 @@ applyVercelWorkflowWorldDefaults(workflowWorld);`.trimStart();
       extraImportLines: [
         `import { applyVercelWorkflowWorldDefaults } from ${defaultsImportSpecifier};`,
       ],
-      runtimeImports: "getWorld, setWorld",
       createWorldSource,
     };
   }
 
+  const workflowRuntimeImportSpecifier = stringifyEsmImportSpecifier(
+    resolvePackageCompiledFilePath("src/compiled/@workflow/core/runtime.js"),
+  );
   return {
     moduleImportSpecifier: packageName,
-    extraImportLines: [],
-    runtimeImports: "createWorldFromModule, getWorld, setWorld",
+    extraImportLines: [`import { createWorldFromModule } from ${workflowRuntimeImportSpecifier};`],
     createWorldSource: "const workflowWorld = await createWorldFromModule(workflowWorldModule);",
   };
 }
@@ -382,26 +401,18 @@ export function createWorkflowWorldPluginSource(input: {
   const targetWorld = input.configuredWorld ?? input.defaultWorld;
   const packageName = resolveWorkflowWorldImport(targetWorld);
   const wiring = resolveWorkflowWorldWiring(packageName);
-  const workflowRuntimeImportSpecifier = resolvePackageCompiledFilePath(
-    "src/compiled/@workflow/core/runtime.js",
-  );
-  const workflowWorldValidationImportSpecifier = resolvePackageSourceFilePath(
-    "src/internal/workflow/validate-world.ts",
-  );
 
   return [
     "// Generated by eve. Do not edit by hand.",
     `import ${stringifyEsmImportSpecifier(input.compiledArtifactsBootstrapPath)};`,
     `import * as workflowWorldModule from ${stringifyEsmImportSpecifier(wiring.moduleImportSpecifier)};`,
     ...wiring.extraImportLines,
-    `import { ${wiring.runtimeImports} } from ${stringifyEsmImportSpecifier(workflowRuntimeImportSpecifier)};`,
-    `import { validateWorkflowWorld } from ${stringifyEsmImportSpecifier(workflowWorldValidationImportSpecifier)};`,
+    `import { installWorkflowWorld } from ${stringifyEsmImportSpecifier(resolveInstallWorldImportSpecifier())};`,
+    `import { installWorkflowDeploymentId } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/execution/install-workflow-deployment-id.ts"))};`,
     "",
+    `installWorkflowDeploymentId(${JSON.stringify(BUILD_DEPLOYMENT_ID_PLACEHOLDER)});`,
     wiring.createWorldSource,
-    `validateWorkflowWorld({ packageName: ${JSON.stringify(input.configuredWorld)}, world: workflowWorld });`,
-    "setWorld(workflowWorld);",
-    "await getWorld();",
-    "await workflowWorld.start?.();",
+    `await installWorkflowWorld({ packageName: ${JSON.stringify(input.configuredWorld)}, world: workflowWorld });`,
     "",
     "export default function installWorkflowWorldPlugin() {}",
     "",
@@ -427,20 +438,16 @@ export function createDevelopmentWorkflowWorldPluginSource(input: {
       defaultWorld: "local",
     });
   }
-  const workflowRuntimeImportSpecifier = resolvePackageCompiledFilePath(
-    "src/compiled/@workflow/core/runtime.js",
-  );
   const developmentWorldImportSpecifier = resolvePackageSourceFilePath(
     "src/internal/workflow/development-world-client.ts",
   );
   return [
     "// Generated by eve. Do not edit by hand.",
     `import ${stringifyEsmImportSpecifier(input.compiledArtifactsBootstrapPath)};`,
-    `import { getWorld, setWorld } from ${stringifyEsmImportSpecifier(workflowRuntimeImportSpecifier)};`,
     `import { createDevelopmentWorkflowWorld } from ${stringifyEsmImportSpecifier(developmentWorldImportSpecifier)};`,
+    `import { installWorkflowWorld } from ${stringifyEsmImportSpecifier(resolveInstallWorldImportSpecifier())};`,
     "",
-    "setWorld(createDevelopmentWorkflowWorld());",
-    "await getWorld();",
+    "await installWorkflowWorld({ world: createDevelopmentWorkflowWorld() });",
     "",
     "export default function installDevelopmentWorkflowWorldPlugin() {}",
     "",

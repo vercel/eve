@@ -3,7 +3,7 @@ import { dirname, join, relative } from "node:path";
 
 import { z } from "#compiled/zod/index.js";
 
-export const VercelProjectLinkSchema = z.object({
+const VercelProjectLinkSchema = z.object({
   projectId: z.string().min(1),
   orgId: z.string().min(1),
   projectName: z.string().min(1).optional(),

@@ -60,6 +60,7 @@ describe("integration catalog", () => {
   });
 
   it("keeps extensions free of connection identity", () => {
+    expect(extensionEntries().length).toBeGreaterThan(0);
     for (const entry of extensionEntries()) {
       expect(entry.connection).toBeUndefined();
     }
@@ -107,50 +108,15 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("linear")!.connection!.mcp!.url).toBe("https://mcp.linear.app/mcp");
   });
 
-  it("exposes Kernel as an extension", () => {
-    expect(getIntegrationEntry("kernel")?.kind).toBe("extension");
-    expect(getIntegrationEntry("kernel")?.connection).toBeUndefined();
-  });
-
-  it("exposes Browserbase as an extension", () => {
-    expect(getIntegrationEntry("browserbase")?.kind).toBe("extension");
-    expect(getIntegrationEntry("browserbase")?.connection).toBeUndefined();
-  });
-
-  it("exposes Jetty as an extension", () => {
-    expect(getIntegrationEntry("jetty")?.kind).toBe("extension");
-    expect(getIntegrationEntry("jetty")?.connection).toBeUndefined();
-  });
-
-  it("exposes Upstash AgentKit as a memory provider", () => {
-    expect(getIntegrationEntry("upstash-agentkit")?.kind).toBe("memory");
-    expect(getIntegrationEntry("upstash-agentkit")?.connection).toBeUndefined();
-  });
-
-  it("exposes Kybernesis Arcana as a memory provider", () => {
-    expect(getIntegrationEntry("arcana")?.kind).toBe("memory");
-    expect(getIntegrationEntry("arcana")?.connection).toBeUndefined();
-  });
-
-  it("exposes Hindsight as an extension", () => {
-    expect(getIntegrationEntry("hindsight")?.kind).toBe("extension");
-    expect(getIntegrationEntry("hindsight")?.connection).toBeUndefined();
-  });
-
-  it("exposes Supermemory as a memory provider", () => {
-    expect(getIntegrationEntry("supermemory")?.kind).toBe("memory");
-    expect(getIntegrationEntry("supermemory")?.connection).toBeUndefined();
-  });
-
-  it("exposes file memory as a memory provider", () => {
-    expect(getIntegrationEntry("file")?.kind).toBe("memory");
-    expect(getIntegrationEntry("file")?.connection).toBeUndefined();
-  });
-
-  it("exposes Buzz as a gallery-only channel", () => {
-    expect(getIntegrationEntry("buzz")).toMatchObject({
-      kind: "channel",
-      surfaces: { scaffoldable: false, registry: false, gallery: true },
+  it("uses FLORA's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("flora")).toMatchObject({
+      name: "FLORA",
+      kind: "connection",
+      surfaces: { scaffoldable: false, registry: true, gallery: true },
+      connection: {
+        description: "FLORA: generate image, video, audio, text, and 3D assets on a canvas.",
+        mcp: { url: "https://agents.flora.ai/mcp" },
+      },
     });
   });
 
@@ -161,16 +127,14 @@ describe("integration catalog", () => {
     });
   });
 
-  it("exposes GitHub Tools as an extension distinct from the GitHub channel", () => {
-    expect(getIntegrationEntry("github")?.kind).toBe("channel");
-    expect(getIntegrationEntry("github-tools")?.kind).toBe("extension");
-    expect(getIntegrationEntry("github-tools")?.connection).toBeUndefined();
-  });
-
   it("uses Browser Use's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("browser-use")!.connection!.mcp!.url).toBe(
       "https://api.browser-use.com/v3/mcp",
     );
+  });
+
+  it("uses Waydock's streamable HTTP MCP endpoint", () => {
+    expect(getIntegrationEntry("waydock")!.connection!.mcp!.url).toBe("https://mcp.waydock.ai/mcp");
   });
 
   it("uses Natural's streamable HTTP MCP endpoint", () => {

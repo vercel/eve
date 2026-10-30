@@ -22,17 +22,18 @@ vi.mock("#services/inspect-application.js", () => ({
   inspectApplication: async () => ({
     compiledState: {
       manifest: {
-        config: { model: { id: "openai/gpt-5.6-luna-fast", routing: { kind: "gateway" } } },
+        config: { model: { id: "openai/gpt-6-luna-fast", routing: { kind: "gateway" } } },
       },
     },
   }),
 }));
 vi.mock("./model-source-change.js", () => ({
-  readAuthoredModelSelection: async () => "openai/gpt-5.6-luna-fast",
+  readAuthoredModelSelection: async () => "openai/gpt-6-luna-fast",
   changeValidatedAgentModel: state.model,
 }));
 import { runModelLogin } from "./model-login.js";
 import { openai } from "#public/models/openai/index.js";
+import { toAiSdkLanguageModel } from "#internal/runtime-model.js";
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -58,7 +59,7 @@ it("logs in and streams the first response without exposing the entered key", as
       response: {
         id: "resp_1",
         created_at: 0,
-        model: "gpt-5.6-luna-fast",
+        model: "gpt-6-luna-fast",
         status: "completed",
         usage: { input_tokens: 3, output_tokens: 3 },
       },
@@ -67,8 +68,9 @@ it("logs in and streams the first response without exposing the entered key", as
   const fetch = vi.fn(async (url: Parameters<typeof globalThis.fetch>[0], init?: RequestInit) => {
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture-key");
     if (String(url).endsWith("/models"))
-      return Response.json({ data: [{ id: "gpt-5.6-luna-fast" }] });
+      return Response.json({ data: [{ id: "gpt-5.6-luna-fast" }, { id: "gpt-6-luna-fast" }] });
     expect(String(url)).toBe("https://api.openai.com/v1/responses");
+    expect(JSON.parse(String(init?.body))).toMatchObject({ model: "gpt-6-luna-fast" });
     expect(init?.body).not.toContain("fixture-key");
     return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
       headers: { "content-type": "text/event-stream" },
@@ -82,11 +84,11 @@ it("logs in and streams the first response without exposing the entered key", as
   });
   expect(state.model).toHaveBeenCalledWith({
     appRoot: "/fixture",
-    slug: "openai-api/gpt-5.6-luna-fast",
+    slug: "openai-api/gpt-6-luna-fast",
   });
   expect(state.defaults).toHaveBeenCalledWith("openai");
   expect(JSON.stringify(fake)).not.toContain("fixture-key");
-  const model = openai();
+  const model = toAiSdkLanguageModel(openai());
   if (typeof model === "string") throw new Error("Expected a model");
   const response = await model.doStream({
     prompt: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],

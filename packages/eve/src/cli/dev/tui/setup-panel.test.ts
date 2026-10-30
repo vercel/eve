@@ -4,11 +4,11 @@ import { initialSelectState } from "#setup/cli/select-state.js";
 import { lineOf } from "./line-editor.js";
 import {
   renderAcknowledgeQuestion,
-  renderFlowDrawer,
   renderFlowPanel,
   renderSelectQuestion,
   renderTextQuestion,
 } from "./setup-panel.js";
+import { renderFlowDrawer, renderTransientDrawer } from "./flow-drawer.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 
@@ -105,7 +105,7 @@ describe("renderFlowPanel", () => {
             tone: "error",
           },
         ],
-        content: { kind: "idle", indicator: { glyph: "▪", color: "green" } },
+        content: { kind: "idle", indicator: { glyph: "▪" } },
       },
       theme,
       60,
@@ -125,7 +125,7 @@ describe("renderFlowPanel", () => {
       {
         title: "/channels",
         lines,
-        content: { kind: "idle", indicator: { glyph: "⠏", color: "yellow" } },
+        content: { kind: "idle", indicator: { glyph: "⠏" } },
       },
       theme,
       60,
@@ -144,9 +144,8 @@ describe("renderFlowPanel", () => {
         content: {
           kind: "status",
           status: {
-            kind: "progress",
             text: "Loading teams…",
-            indicator: { glyph: "⠼", color: "yellow" },
+            indicator: { glyph: "⠼" },
           },
         },
       },
@@ -165,9 +164,8 @@ describe("renderFlowPanel", () => {
         content: {
           kind: "status",
           status: {
-            kind: "progress",
             text: "Checking the project…",
-            indicator: { glyph: "▪", color: "green" },
+            indicator: { glyph: "▪" },
           },
         },
       },
@@ -187,9 +185,8 @@ describe("renderFlowPanel", () => {
         content: {
           kind: "question",
           status: {
-            kind: "progress",
             text: "Creating a Slackbot through Vercel Connect…",
-            indicator: { glyph: "▪", color: "green" },
+            indicator: { glyph: "▪" },
           },
           rows: ["    Try again", "    Cancel"],
         },
@@ -207,7 +204,7 @@ describe("renderFlowPanel", () => {
 });
 
 describe("renderFlowDrawer", () => {
-  it("frames an active flow while keeping its title out of the body", () => {
+  it("frames an active flow without repeating its command title", () => {
     const rows = renderFlowDrawer(
       {
         title: "add to your agent",
@@ -224,10 +221,22 @@ describe("renderFlowDrawer", () => {
 
     expect(rows.rows[0]).toBe("─".repeat(60));
     expect(rows.rows[1]).toBe("");
-    expect(rows.rows[2]).toBe(" ┃ add to your agent");
+    expect(rows.rows[2]).toBe("   add to your agent");
     expect(rows.rows.at(-2)).toBe("");
     expect(rows.rows.at(-1)).toBe("─".repeat(60));
     expect(rows.rows.join("\n").split("add to your agent")).toHaveLength(2);
+  });
+
+  it("clips a corner label so the top rule keeps the terminal width", () => {
+    const { rows } = renderTransientDrawer(
+      ["  Approve random_number?"],
+      [],
+      theme,
+      30,
+      "subagent(number_picker:13) · 2 of 10",
+    );
+
+    expect(rows[0]).toBe("── subagent(number_picker:… ──");
   });
 
   it("places question controls below the drawer boundary", () => {
@@ -248,7 +257,7 @@ describe("renderFlowDrawer", () => {
     expect(drawer.controls).toEqual(["↑/↓ move · Enter select · Esc close"]);
   });
 
-  it("omits the drawer header for a titleless flow", () => {
+  it("frames a flow without a redundant header", () => {
     const rows = renderFlowDrawer(
       {
         title: "",
@@ -263,6 +272,27 @@ describe("renderFlowDrawer", () => {
       rows: ["─".repeat(60), "", "   Vercel account", "", "─".repeat(60)],
       controls: [],
     });
+  });
+
+  it("keeps a live status inside the drawer after flow progress", () => {
+    const drawer = renderFlowDrawer(
+      {
+        title: "",
+        lines: [{ text: "Checked credentials", tone: "success" }],
+        content: {
+          kind: "status",
+          status: {
+            text: "Loading teams…",
+            indicator: { glyph: "⠼" },
+          },
+        },
+      },
+      theme,
+      60,
+    );
+
+    expect(drawer.rows.join("\n")).toContain("Loading teams…");
+    expect(drawer.controls).toEqual([]);
   });
 });
 
@@ -519,6 +549,29 @@ describe("renderSelectQuestion", () => {
     );
     const clipped = rows.find((row) => row.includes("\x1b[34m"));
     expect(clipped?.endsWith("\x1b[0m")).toBe(true);
+  });
+
+  it("wraps shared help below the options without repeating it on rows", () => {
+    const options = [
+      { value: "owner", label: "Owner team" },
+      { value: "member", label: "Member team", disabled: true, disabledReason: "needs permission" },
+    ];
+    const rows = renderSelectQuestion(
+      {
+        kind: "search",
+        message: "Select your team",
+        options,
+        helpText: "For disabled teams, ask a team owner to run setup, or choose another team.",
+        select: initialSelectState({ options }),
+      },
+      theme,
+      50,
+    );
+    const text = rows.join("\n");
+    expect(text.indexOf("For disabled teams")).toBeGreaterThan(text.indexOf("Member team"));
+    expect(text.match(/ask a team owner/g)).toHaveLength(1);
+    expect(text).toContain("choose another team.");
+    expect(rows.every((line) => line.length <= 50)).toBe(true);
   });
 
   it("renders a warning-toned disabled row with a dim label and yellow alert annotation", () => {

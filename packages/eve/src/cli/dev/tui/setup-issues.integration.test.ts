@@ -75,7 +75,7 @@ describe("BOOT_DETECTIONS against a real directory", () => {
 
   it("opens only login during onboarding when inspection is unavailable", async () => {
     const appRoot = await linkedAppRoot();
-    const client = new Client({ host: "http://localhost:3000" });
+    const client = new Client({ baseUrl: "http://localhost:3000" });
     vi.spyOn(client, "info").mockRejectedValue(new Error("inspection unavailable"));
     vi.stubGlobal(
       "fetch",
@@ -86,13 +86,12 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       order.push(command.name);
       return { message: `/${command.name} dismissed.` };
     });
-    const readPrompt = vi.fn(async () => {
+    const readInput = vi.fn(async () => {
       order.push("prompt");
       return undefined;
     });
     const renderer: AgentTUIRenderer = {
-      readPrompt,
-      renderStream: vi.fn(async () => {}),
+      readInput,
       setupFlow: createFakeSetupFlowRenderer(),
     };
     const runner = new EveTUIRunner({
@@ -103,7 +102,6 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       promptCommandHandler: { handle },
       renderer,
       serverUrl: "http://localhost:3000",
-      session: client.sessions.attach("session_test"),
       onboard: true,
     });
 
@@ -113,7 +111,7 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       { type: "extension", name: "login", argument: "" },
       expect.objectContaining({ renderer, title: "eve", initialModelStep: "provider" }),
     );
-    expect(readPrompt).toHaveBeenCalledOnce();
+    expect(readInput).toHaveBeenCalledOnce();
     expect(order).toEqual(["login", "prompt"]);
   });
 });

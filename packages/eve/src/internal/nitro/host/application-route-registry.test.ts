@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
+import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { createApplicationRouteRegistry } from "#internal/nitro/host/application-route-registry.js";
 import {
   EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN,
@@ -63,4 +64,57 @@ describe("createApplicationRouteRegistry", () => {
     });
     expect(registry.routes.filter((route) => route.kind === "workflow")).toHaveLength(1);
   });
+});
+
+it("mounts only opted-in connection receivers from the compiled manifest", async () => {
+  const { manifest } = await compileFromMemory({
+    model: "openai/gpt-5.4",
+    modules: [
+      {
+        logicalPath: "connections/issues.ts",
+        loadNamespace: async () => ({
+          default: defineMcpClientConnection({
+            url: "https://issues.example/mcp",
+            description: "Issues",
+            auth: {
+              getToken: async () => ({ token: "credential" }),
+              vercelConnect: {
+                connector: "oauth/issues",
+                experimental_events: {
+                  createAdapter: async () => {
+                    throw new Error("must not run during build");
+                  },
+                  verify: async () => {
+                    throw new Error("must not run during build");
+                  },
+                },
+              },
+            },
+            experimental: { events: { onEvent() {} } },
+          }),
+        }),
+      },
+    ],
+  });
+  const registry = createApplicationRouteRegistry({ compileResult: { manifest } });
+  expect(registry.routes.filter((route) => route.kind === "connection-event")).toEqual([
+    {
+      kind: "connection-event",
+      method: "POST",
+      path: "/eve/v1/hooks/issues",
+      connectionName: "issues",
+    },
+  ]);
+  expect(manifest.connections[0]!.vercelConnect).toEqual({ connector: "oauth/issues" });
+  const optedOut = {
+    ...manifest,
+    connections: manifest.connections.map(
+      ({ experimental_events: _events, ...connection }) => connection,
+    ),
+  };
+  expect(
+    createApplicationRouteRegistry({ compileResult: { manifest: optedOut } }).routes.some(
+      (route) => route.kind === "connection-event",
+    ),
+  ).toBe(false);
 });

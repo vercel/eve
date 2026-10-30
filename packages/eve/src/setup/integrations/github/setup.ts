@@ -93,7 +93,7 @@ export default githubChannel({
 `;
 }
 
-export interface GitHubSetupPlan {
+interface GitHubSetupPlan {
   events: readonly GitHubWebhookEvent[];
   project: VercelProjectReference;
   slug: string;

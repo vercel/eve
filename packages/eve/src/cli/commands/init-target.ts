@@ -17,7 +17,7 @@ const ENVIRONMENT_ONLY_ENTRIES = new Set([
   ".vscode",
 ]);
 
-export type InitTarget =
+type InitTarget =
   | {
       kind: "existing";
       projectPath: string;

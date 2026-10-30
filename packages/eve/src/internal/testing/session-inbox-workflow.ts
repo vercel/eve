@@ -1,45 +1,97 @@
-import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import { createSessionInbox, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 
 export async function sessionCommandInboxWorkflow(input: {
-  readonly messageCount?: number;
-  readonly nextToken?: string;
+  /** Session whose stable inbox this owner holds; a handoff successor names its anchor. */
+  readonly sessionId?: string;
   readonly token: string;
-}): Promise<string[]> {
+}): Promise<void> {
   "use workflow";
 
-  const { workflowRunId } = getWorkflowMetadata();
-  const inbox = createSessionInbox(workflowRunId);
+  const sessionId = input.sessionId ?? getWorkflowMetadata().workflowRunId;
+  const inbox = createSessionInbox(sessionId);
 
   try {
-    await inbox.claimSessionHook(sessionCommandHookToken(workflowRunId));
+    await inbox.claimSessionHook(sessionCommandHookToken(sessionId));
     await inbox.claimSessionHook(input.token);
-    const pending = inbox.next();
-    if (input.nextToken !== undefined) {
-      await inbox.claimSessionHook(input.nextToken);
-    }
-
-    const messages: string[] = [];
-    let payload = await pending;
     while (true) {
-      if (payload === undefined) return messages;
-      if (payload.kind === "reset") return messages;
-      collectMessage(payload, messages);
-      if (messages.length >= (input.messageCount ?? 2)) return messages;
-      payload = await inbox.next();
+      const payload = await inbox.next();
+      if (payload === undefined || payload.kind === "reset") return;
     }
   } finally {
     await inbox.dispose();
   }
 }
 
-function collectMessage(command: SessionInboxPayload, messages: string[]): void {
-  if (command.kind === "send" && typeof command.payload.message === "string") {
-    messages.push(command.payload.message);
+/** Parks like a session anchor after a handoff: it holds no session address of its own. */
+export async function parkedAnchorWorkflow(input: { readonly token: string }): Promise<void> {
+  "use workflow";
+
+  using gate = createHook<void>({ token: input.token });
+  await gate;
+}
+
+/**
+ * Holds `token` until another run force-claims it, reads what arrived before
+ * the takeover, then takes the token back and returns the next payload.
+ */
+export async function sessionInboxTakeoverWorkflow(input: { readonly token: string }): Promise<{
+  readonly beforeTakeover: readonly SessionInboxPayload[];
+  readonly afterReclaim: SessionInboxPayload | undefined;
+}> {
+  "use workflow";
+
+  const inbox = createSessionInbox(getWorkflowMetadata().workflowRunId);
+  try {
+    await inbox.claimSessionHook(input.token);
+    await inbox.whenTakenOver();
+    const beforeTakeover: SessionInboxPayload[] = [];
+    for (let payload = await inbox.next(); payload !== undefined; payload = await inbox.next())
+      beforeTakeover.push(payload);
+    await inbox.claimSessionHook(input.token, { force: true });
+    return { afterReclaim: await inbox.next(), beforeTakeover };
+  } finally {
+    await inbox.dispose();
   }
-  if (command.kind === "deliver" && typeof command.payloads[0]?.message === "string") {
-    messages.push(command.payloads[0].message);
+}
+
+/** Force-claims `token` and returns once another run takes it back. */
+export async function sessionInboxForceClaimWorkflow(input: {
+  readonly token: string;
+}): Promise<void> {
+  "use workflow";
+
+  const inbox = createSessionInbox(getWorkflowMetadata().workflowRunId);
+  try {
+    await inbox.claimSessionHook(input.token, { force: true });
+    await inbox.whenTakenOver();
+  } finally {
+    await inbox.dispose();
+  }
+}
+
+/**
+ * A session owner from before handoff version 3: on `release` it releases its
+ * addresses, then waits for its successor's activation signal.
+ */
+export async function releasingSessionOwnerWorkflow(input: {
+  readonly aliases: readonly string[];
+  readonly release: string;
+}): Promise<{ readonly activation: unknown; readonly released: readonly SessionInboxPayload[] }> {
+  "use workflow";
+
+  const sessionId = getWorkflowMetadata().workflowRunId;
+  const inbox = createSessionInbox(sessionId);
+  using release = createHook<void>({ token: input.release });
+  using activation = createHook<unknown>({ token: `${sessionId}:handoff` });
+  try {
+    await inbox.claimSessionHooks([sessionCommandHookToken(sessionId), ...input.aliases]);
+    await release;
+    const released = await inbox.release();
+    return { activation: await activation, released };
+  } finally {
+    await inbox.dispose();
   }
 }

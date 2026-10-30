@@ -20,7 +20,7 @@ export class WriteFileExistsError extends Error {
   }
 }
 
-export interface WriteFileOptions {
+interface WriteFileOptions {
   force?: boolean;
 }
 

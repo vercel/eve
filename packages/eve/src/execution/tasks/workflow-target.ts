@@ -21,3 +21,12 @@ export function isTaskWorkflowTargetGone(error: unknown): boolean {
   }
   return false;
 }
+
+/** Awaits traffic to a workflow hook or run, which a target already gone makes moot. */
+export async function ignoreGoneTarget(pending: Promise<unknown>): Promise<void> {
+  try {
+    await pending;
+  } catch (error) {
+    if (!isTaskWorkflowTargetGone(error)) throw error;
+  }
+}

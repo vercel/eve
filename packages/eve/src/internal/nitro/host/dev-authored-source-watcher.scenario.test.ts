@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import type { DevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 import { STRUCTURAL_RELOAD_LOG_LINE } from "#internal/nitro/host/dev-watcher-log.js";
@@ -298,7 +298,7 @@ describe("startAuthoredSourceWatcher", () => {
     }
   });
 
-  it("watches workspace extension build inputs and ignores its managed output", async () => {
+  it("watches workspace extension build inputs and ignores its build output", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "eve-dev-watch-extension-"));
     const packageRoot = join(appRoot, "packages", "crm");
     const sourceRoot = join(packageRoot, "extension");
@@ -339,6 +339,9 @@ describe("startAuthoredSourceWatcher", () => {
       expect(paths).toContain(tsconfigPath);
       const ignored = getIgnoredPredicate();
       expect(ignored(join(outDir, "extension", "tools", "search.mjs"))).toBe(true);
+      expect(
+        ignored(join(packageRoot, ".eve-extension-build-a1B2c3", "barrels", "index.mjs")),
+      ).toBe(true);
       expect(ignored(join(sourceRoot, "tools", "search.ts"))).toBe(false);
     } finally {
       await watcher.close();

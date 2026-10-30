@@ -1,63 +1,44 @@
-import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
-import type {
-  AgentInvocationRequest,
-  AgentSettlementRequest,
-} from "#execution/tools/subagent/invoke-agent.js";
-import type { InputRequest } from "#shared/input.js";
+import type { Principal } from "#protocol/session-events/envelope.js";
+import type { SubagentInteractionHookPayload } from "#channel/types.js";
+import type { SessionAuth } from "#context/session-context.js";
+import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
+import type { AgentSessionAddress } from "#execution/agent-sessions/steps.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import type { ToolInputRequest } from "#tools/definition.js";
+import type { TokenUsage } from "#shared/token-usage.js";
+import type { ToolQuestion, ToolAnswer } from "#tools/definition.js";
 
 export interface WorkflowToolRunOwner {
   readonly inbox: string;
 }
 
 /**
- * Requests the owner must apply on the run's behalf because they touch
- * owner-held state: spawning an agent and releasing its handle afterwards.
+ * An interaction fact the run relays: one a session it opened with `ctx.agent` published, or the
+ * run's own sign-in. The session that owns the run mirrors it.
  */
-export type WorkflowToolAgentRequest = AgentInvocationRequest | AgentSettlementRequest;
-
-/**
- * A child authorization event the owner should display. Unlike input requests
- * it has no answer: the authorization callback completes against the child
- * directly, so the owner only re-emits it.
- */
-export interface WorkflowToolAuthorizationRequest {
-  readonly event: SubagentAuthorizationEventHookPayload;
-  readonly kind: "authorization-request";
+export interface WorkflowToolRelay {
+  readonly event: SubagentInteractionHookPayload;
+  readonly kind: "relay";
 }
 
 /** A question authored with `ask()` from `eve/workflow`, before owner normalization. */
 export interface WorkflowToolAskRequest {
+  /** The run's control hook, where the session sends its decision on the question. */
+  readonly control: string;
   readonly kind: "ask";
-  readonly request: ToolInputRequest;
+  readonly request: ToolQuestion;
 }
 
-/**
- * A child subagent's pending input requests for one step, forwarded as a unit
- * so the owner resolves them against the same child step they came from.
- */
-export interface WorkflowToolInputRequestBatch {
-  readonly kind: "input-batch";
-  readonly requests: readonly InputRequest[];
-}
-
-export type WorkflowToolRequest =
-  | WorkflowToolAgentRequest
-  | WorkflowToolAuthorizationRequest
-  | WorkflowToolAskRequest
-  | InputRequest
-  | WorkflowToolInputRequestBatch;
+export type WorkflowToolRequest = WorkflowToolRelay | WorkflowToolAskRequest;
 
 /** Identifies the sending workflow tool run to an owner shared by many runs. */
 export interface WorkflowToolRunRef {
   readonly callId: string;
-  readonly execution: "background" | "blocking";
   readonly input: JsonObject;
-
   readonly runId: string;
   readonly sequence: number;
   readonly stepIndex: number;
+  /** Set when the run does a task's work; the session routes its messages by it. */
+  readonly taskId?: string;
   readonly toolName: string;
   readonly turnId: string;
 }
@@ -76,29 +57,261 @@ export interface WorkflowToolRunRequestMessage {
   readonly from: WorkflowToolRunRef;
   readonly replyTo: string;
   readonly request: WorkflowToolRequest;
-  readonly requestCoordinates?: {
-    readonly sequence: number;
-    readonly stepIndex: number;
-    readonly turnId: string;
-  };
 }
 
 export interface WorkflowToolRunOutcomeMessage {
   readonly from: WorkflowToolRunRef;
   readonly result: WorkflowToolRunOutcome;
+  /** What the run's `ctx.agent` sessions spent in all, once any of their turns ended. */
+  readonly usage?: TokenUsage;
+}
+
+/**
+ * The run asks the session to withdraw the `ctx.ask()` question sent under
+ * `replyTo`. The session answers `withdrawn` on `control`, unless it accepted
+ * an answer first.
+ */
+export interface WorkflowToolRunWithdrawMessage {
+  readonly control: string;
+  readonly from: WorkflowToolRunRef;
+  readonly replyTo: string;
+}
+
+/** The run opened a session with `ctx.agent`, which its session announces as `child.opened`. */
+export interface WorkflowToolRunAgentStartedMessage {
+  readonly from: WorkflowToolRunRef;
+  readonly session: AgentSessionAddress;
+  readonly context: AgentSessionContext;
+}
+
+/** A delivery a session the run opened accepted, sent for the call the run serves. */
+export interface WorkflowToolRunAgentSentMessage {
+  readonly from: WorkflowToolRunRef;
+  /** The session that accepted the delivery. */
+  readonly sessionId: string;
+  readonly deliveryId: string;
+}
+
+/**
+ * A `serve` body's reply, sent once for each `ctx.reply()`. It settles every
+ * call the body received since its last reply, so the session settles them
+ * together and the model receives the reply once.
+ */
+export interface WorkflowToolRunReplyMessage {
+  /** The calls the reply settles, oldest first. */
+  readonly callIds: readonly string[];
+  /** The latest call the reply settles, which the body serves now. */
+  readonly from: WorkflowToolRunRef;
+  readonly output: JsonValue;
+  /**
+   * What the run's `ctx.agent` sessions spent so far, once any of their turns
+   * ended. A running total, so the session counts only what it adds to the
+   * last one it counted, and a redelivered reply adds nothing.
+   */
+  readonly usage?: TokenUsage;
+}
+
+/**
+ * A `serve` body's delegated spend that no reply carries: its `ctx.agent`
+ * sessions ended a turn while no call waited for a reply, such as a turn a
+ * cancel stopped. A running total, like a reply's.
+ */
+export interface WorkflowToolRunUsageMessage {
+  readonly from: WorkflowToolRunRef;
+  readonly usage: TokenUsage;
+}
+
+/** A task's run can take commands: its control hook is registered. */
+export interface WorkflowToolRunStartedMessage {
+  readonly from: WorkflowToolRunRef;
 }
 
 export type WorkflowToolRunMessage =
+  | ({ readonly kind: "agent-started" } & WorkflowToolRunAgentStartedMessage)
+  | ({ readonly kind: "agent-sent" } & WorkflowToolRunAgentSentMessage)
+  | ({ readonly kind: "started" } & WorkflowToolRunStartedMessage)
   | ({ readonly kind: "report" } & WorkflowToolRunReport)
+  | ({ readonly kind: "reply" } & WorkflowToolRunReplyMessage)
   | ({ readonly kind: "request" } & WorkflowToolRunRequestMessage)
+  | ({ readonly kind: "withdraw" } & WorkflowToolRunWithdrawMessage)
+  | ({ readonly kind: "usage" } & WorkflowToolRunUsageMessage)
   | ({ readonly kind: "outcome" } & WorkflowToolRunOutcomeMessage);
 
-export type WorkflowToolRunControlMessage = { readonly kind: "cancel"; readonly reason: string };
+/** A run's report of a session it opened or a delivery that session accepted. */
+export function isAgentSessionMessage(
+  message: WorkflowToolRunMessage,
+): message is Extract<WorkflowToolRunMessage, { readonly kind: "agent-started" | "agent-sent" }> {
+  return message.kind === "agent-started" || message.kind === "agent-sent";
+}
+
+/**
+ * Messages a run relays to its session in one delivery, in the order its body
+ * sent them. The session's inbox reads them as separate messages.
+ */
+export interface WorkflowToolRunMessageBatch {
+  readonly kind: "workflow-batch";
+  readonly messages: readonly WorkflowToolRunMessage[];
+}
+
+/**
+ * Approximate size cap for one batch of run messages, both a run's relay and
+ * the session step that applies them. Workflow keeps a hook payload or step
+ * input up to 64 KB inline in the event log and moves a larger one to blob
+ * storage, which every replay then reads back.
+ */
+const RUN_MESSAGE_BATCH_MAX_CHARS = 64_000;
+
+/**
+ * Returns a predicate that admits messages, in order, while their batch stays
+ * under the size cap. The first message always fits, so one larger than the
+ * cap still goes, alone.
+ */
+export function runMessageBatchBudget(): (message: WorkflowToolRunMessage) => boolean {
+  let used = 0;
+  let admitted = false;
+  return (message) => {
+    const size = serializedLength(message);
+    if (admitted && used + size > RUN_MESSAGE_BATCH_MAX_CHARS) return false;
+    used += size;
+    admitted = true;
+    return true;
+  };
+}
+
+function serializedLength(value: unknown): number {
+  try {
+    return JSON.stringify(value)?.length ?? 0;
+  } catch {
+    // Values JSON can't encode, such as a bigint, still serialize for the workflow.
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+/**
+ * A later call to a `serve` task, which its run hands to `receive()`. It
+ * carries everything the session knew of the call when it admitted it, as a
+ * run's input does for the call that started it: the coordinates of the model
+ * step that made it, the caller's auth, and the context of sessions opened
+ * for it, with the agents it may open. Everything the run does while serving
+ * the call comes from these.
+ */
+export interface WorkflowToolRunCall extends Pick<
+  WorkflowToolRunRef,
+  "callId" | "sequence" | "stepIndex" | "turnId"
+> {
+  /** Sessions opened while serving the call are its children, in its trace. */
+  readonly agentContext: AgentSessionContext;
+  /** The caller's auth the session admitted the call with, which messages sent while serving it carry. */
+  readonly auth: SessionAuth;
+  readonly executeInput?: JsonValue;
+  /** The call's input, without the `taskId` that named the task. */
+  readonly input: JsonObject;
+}
+
+/** A person's answer to a `ctx.ask()` question, as the session accepted it. */
+export type WorkflowToolRunAnswer = Extract<ToolAnswer, { readonly status: "answered" }>;
+
+/**
+ * The session's decision on one `ctx.ask()` question: it accepted an answer,
+ * or it withdrew the question first. It decides once, and the ask resolves
+ * from that decision alone.
+ */
+export type WorkflowToolRunAskDecision =
+  | {
+      readonly kind: "answer";
+      readonly requestId: string;
+      readonly response: WorkflowToolRunAnswer;
+    }
+  | { readonly kind: "withdrawn"; readonly requestId: string };
+
+/**
+ * Commands the body applies, in the order the session sent them.
+ *
+ * - `cancel` stops the current work: an `execute` or `task` call's run, or a
+ *   `serve` task's current stretch of work, after which it waits for more calls.
+ * - `end` stops the run for good, because the session ended.
+ * - `interrupt` aborts an `execute` call's `abortSignal` without cancelling the
+ *   call, because steering arrived while the turn waits on it.
+ * - `call` delivers a later call to a `serve` task.
+ */
+export type WorkflowBodyCommand =
+  | { readonly kind: "call"; readonly call: WorkflowToolRunCall }
+  | { readonly kind: "cancel"; readonly reason: string }
+  | { readonly kind: "end"; readonly reason: string }
+  | { readonly kind: "interrupt" };
+
+/**
+ * Everything the session sends a run, on the run's control hook: its one
+ * inbox. Only the session writes to it, so the run receives commands and
+ * decisions in the order the session made them.
+ */
+export type WorkflowToolRunControlMessage = WorkflowBodyCommand | WorkflowToolRunAskDecision;
 
 export function isWorkflowToolRunControlMessage(
   value: unknown,
 ): value is WorkflowToolRunControlMessage {
   if (typeof value !== "object" || value === null) return false;
-  const { kind, reason } = value as { kind?: unknown; reason?: unknown };
-  return kind === "cancel" && typeof reason === "string";
+  const { call, kind, reason, requestId, response } = value as Record<string, unknown>;
+  switch (kind) {
+    case "interrupt":
+      return true;
+    case "cancel":
+    case "end":
+      return typeof reason === "string";
+    case "call":
+      return isWorkflowToolRunCall(call);
+    case "answer":
+      return typeof requestId === "string" && isWorkflowToolRunAnswer(response);
+    case "withdrawn":
+      return typeof requestId === "string";
+    default:
+      return false;
+  }
+}
+
+export function isWorkflowToolRunAskDecision(
+  message: WorkflowToolRunControlMessage,
+): message is WorkflowToolRunAskDecision {
+  return message.kind === "answer" || message.kind === "withdrawn";
+}
+
+function isWorkflowToolRunAnswer(value: unknown): value is WorkflowToolRunAnswer {
+  if (typeof value !== "object" || value === null) return false;
+  const { optionId, responder, status, text } = value as Record<string, unknown>;
+  return (
+    status === "answered" &&
+    (optionId === undefined || typeof optionId === "string") &&
+    (responder === undefined || isPrincipal(responder)) &&
+    (text === undefined || typeof text === "string")
+  );
+}
+
+function isPrincipal(value: unknown): value is Principal {
+  if (typeof value !== "object" || value === null) return false;
+  const { id, type, issuer } = value as Record<string, unknown>;
+  return (
+    typeof id === "string" &&
+    typeof type === "string" &&
+    (issuer === undefined || typeof issuer === "string")
+  );
+}
+
+function isWorkflowToolRunCall(value: unknown): value is WorkflowToolRunCall {
+  if (typeof value !== "object" || value === null) return false;
+  const { agentContext, auth, callId, input, sequence, stepIndex, turnId } = value as Record<
+    string,
+    unknown
+  >;
+  return (
+    typeof agentContext === "object" &&
+    agentContext !== null &&
+    typeof auth === "object" &&
+    auth !== null &&
+    typeof callId === "string" &&
+    typeof input === "object" &&
+    input !== null &&
+    typeof sequence === "number" &&
+    typeof stepIndex === "number" &&
+    typeof turnId === "string"
+  );
 }

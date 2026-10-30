@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
+import { resolveDevelopmentStateDirectory } from "#internal/application/dev-environment.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
 import { copyDevelopmentSourceSnapshot } from "#internal/nitro/dev-runtime-source-snapshot-copy.js";
@@ -19,6 +20,7 @@ import {
 } from "#internal/nitro/dev-runtime-artifacts-retention.js";
 import { renameWithTransientBusyRetry } from "#shared/rename-with-retry.js";
 import { resolvePackageRoot } from "#internal/application/package.js";
+import { resolveDevelopmentRuntimeArtifactsSnapshotsDirectory } from "#internal/nitro/dev-runtime-generation-metadata.js";
 
 const DEV_RUNTIME_ARTIFACTS_DIRECTORY = "dev-runtime";
 const DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA = "generation.json";
@@ -65,11 +67,11 @@ export interface DevelopmentRuntimeArtifactsActivation {
  * snapshot for new sessions.
  */
 export function resolveDevelopmentRuntimeArtifactsPointerPath(appRoot: string): string {
-  return join(appRoot, ".eve", DEV_RUNTIME_ARTIFACTS_DIRECTORY, "current.json");
-}
-
-function resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(appRoot: string): string {
-  return join(appRoot, ".eve", DEV_RUNTIME_ARTIFACTS_DIRECTORY, "snapshots");
+  return join(
+    resolveDevelopmentStateDirectory(appRoot),
+    DEV_RUNTIME_ARTIFACTS_DIRECTORY,
+    "current.json",
+  );
 }
 
 function isDevelopmentRuntimeArtifactsSnapshotRoot(appRoot: string, snapshotRoot: string): boolean {
@@ -213,14 +215,6 @@ function findPackageRoot(entryPath: string, packageName: string): string {
 /**
  * Moves the dev runtime pointer so future sessions use a staged snapshot.
  */
-export async function activateDevelopmentRuntimeArtifactsSnapshot(input: {
-  readonly appRoot: string;
-  readonly snapshot: DevelopmentRuntimeArtifactsSnapshot;
-}): Promise<void> {
-  const activation = await activateDevelopmentRuntimeArtifactsSnapshotTransaction(input);
-  activation.commit();
-}
-
 export async function activateDevelopmentRuntimeArtifactsSnapshotTransaction(input: {
   readonly appRoot: string;
   readonly snapshot: DevelopmentRuntimeArtifactsSnapshot;
@@ -326,9 +320,7 @@ export function readActiveDevelopmentRuntimeArtifactsSnapshot(
   };
 }
 
-/**
- * Reads a revision token for the latest dev runtime artifact snapshot.
- */
+/** Reads a revision token for the latest dev runtime artifact snapshot. */
 export function readDevelopmentRuntimeArtifactsRevision(
   appRoot: string,
 ): DevelopmentRuntimeArtifactsRevision {
@@ -350,11 +342,11 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
   readonly gracePeriodMs?: number;
   readonly now?: number;
   readonly retainCount?: number;
-}): Promise<void> {
+}): Promise<boolean> {
   const pointer = readDevelopmentRuntimeArtifactsPointer(
     resolveDevelopmentRuntimeArtifactsPointerPath(input.appRoot),
   );
-  await pruneDevelopmentRuntimeArtifactsSnapshotDirectory({
+  return await pruneDevelopmentRuntimeArtifactsSnapshotDirectory({
     activeSnapshotRoot:
       pointer?.version === DEV_RUNTIME_ARTIFACTS_POINTER_VERSION ? pointer.snapshotRoot : undefined,
     gracePeriodMs: input.gracePeriodMs,

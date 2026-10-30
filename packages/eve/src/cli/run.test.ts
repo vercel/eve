@@ -1,12 +1,15 @@
 import { resolve } from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCliProgram, resolveDevUiMode, resolveTuiDisplayOptions, runCli } from "#cli/run.js";
 import { cliTelemetryCommandPaths, internalCliCommandPaths } from "#cli/telemetry/index.js";
 import { MockScreen } from "#cli/dev/tui/test/mock-terminal.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { DevelopmentServerOptions } from "#internal/nitro/host/types.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
+import { encodeTestLine, testTurnFacts } from "#internal/testing/events.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 
 function resolvedProject(appRoot: string) {
   return { agentRoot: `${appRoot}/agent`, appRoot, layout: "nested" as const };
@@ -34,14 +37,22 @@ vi.mock("#internal/project-context.js", () => ({
   })),
 }));
 
-async function withInteractiveTerminal<T>(fn: () => Promise<T>): Promise<T> {
+async function withInteractiveTerminal<T>(
+  fn: () => Promise<T>,
+  stdoutWrites: string[] = [],
+): Promise<T> {
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
   const stdoutDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
   Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true });
   Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+  const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+    stdoutWrites.push(String(chunk));
+    return true;
+  });
   try {
     return await fn();
   } finally {
+    stdoutWrite.mockRestore();
     if (stdinDescriptor !== undefined) {
       Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
     } else {
@@ -99,7 +110,7 @@ describe("CLI command registration", () => {
 
     const help = output.join("\n");
     expect(help).toContain("init [options] [target]");
-    expect(help).toContain("set [options]");
+    expect(help).toContain("set");
     expect(help).toContain("link");
     expect(help).toContain("deploy");
     expect(help).toContain("registry");
@@ -107,11 +118,22 @@ describe("CLI command registration", () => {
     expect(help).not.toContain("setup [options] <item>");
   });
 
+  it("lists the trace sampling opt-out on deploy", async () => {
+    const output: string[] = [];
+
+    await runCli(["deploy", "--help"], {
+      error: (message) => output.push(message),
+      log: (message) => output.push(message),
+    });
+
+    expect(output.join("\n")).toContain("--no-trace-sampling");
+  });
+
   it("forwards model settings to the set command", async () => {
     const logger = { error: vi.fn(), log: vi.fn() };
     runSetCommand.mockClear();
 
-    await runCli(["set", "--model", "openai/gpt-5.6-sol", "--reasoning", "high"], logger);
+    await runCli(["set", "model", "openai/gpt-5.6-sol", "--reasoning", "high"], logger);
 
     expect(runSetCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), {
       model: "openai/gpt-5.6-sol",
@@ -133,6 +155,22 @@ describe("CLI command registration", () => {
       nonInteractive: undefined,
       project: undefined,
       team: undefined,
+      traceSampling: true,
+      yes: undefined,
+    });
+  });
+
+  it("lets deploy opt out of default trace sampling for a new project", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runDeployCommand.mockClear();
+
+    await runCli(["deploy", "--no-trace-sampling"], logger);
+
+    expect(runDeployCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), undefined, {
+      nonInteractive: undefined,
+      project: undefined,
+      team: undefined,
+      traceSampling: false,
       yes: undefined,
     });
   });
@@ -142,7 +180,7 @@ describe("CLI command registration", () => {
     const resolveProject = vi.fn(async () => resolvedProject("/workspace/weather"));
     runSetCommand.mockClear();
 
-    await runCli(["set", "--model", "openai/gpt-5.6-sol"], logger, {
+    await runCli(["set", "model", "openai/gpt-5.6-sol"], logger, {
       resolveApplicationProject: resolveProject,
     });
 
@@ -157,7 +195,7 @@ describe("CLI command registration", () => {
     const resolveProject = vi.fn(async () => resolvedProject("/workspace/weather"));
 
     await runCli(
-      ["set", "--help"],
+      ["set", "model", "--help"],
       { error: vi.fn(), log: vi.fn() },
       {
         resolveApplicationProject: resolveProject,
@@ -170,13 +208,13 @@ describe("CLI command registration", () => {
   it("lists model and reasoning options for the set command", async () => {
     const output: string[] = [];
 
-    await runCli(["set", "--help"], {
+    await runCli(["set", "model", "--help"], {
       error: (message) => output.push(message),
       log: (message) => output.push(message),
     });
 
     const help = output.join("\n");
-    expect(help).toContain("--model <model>");
+    expect(help).toContain("[model]");
     expect(help).toContain("--reasoning <effort>");
   });
 
@@ -184,7 +222,7 @@ describe("CLI command registration", () => {
     const logger = { error: vi.fn(), log: vi.fn() };
     runSetCommand.mockClear();
 
-    await expect(runCli(["set", "--reasoning", "extreme"], logger)).rejects.toThrow();
+    await expect(runCli(["set", "reasoning", "extreme"], logger)).rejects.toThrow();
 
     expect(runSetCommand).not.toHaveBeenCalled();
   });
@@ -348,6 +386,7 @@ describe("bare eve command", () => {
 
     expect(findApplicationRoot).toHaveBeenCalledWith(resolve(process.cwd()));
     expect(startHost).toHaveBeenCalledWith("/resolved/app", {
+      resume: undefined,
       existing: "attach-if-unconfigured",
       host: undefined,
       onBootProgress: expect.any(Function),
@@ -380,9 +419,27 @@ describe("eve init compatibility flags", () => {
 
     const help = output.join("\n");
     expect(help).toContain("-y, --yes");
-    expect(help).toContain("--model <model>");
+    expect(help).toContain("<model>");
     expect(help).toContain("--reasoning <effort>");
     expect(help).toContain("-n, --non-interactive");
+    expect(help).not.toContain("--channel-web-nextjs");
+  });
+
+  it("still accepts the hidden --channel-web-nextjs flag", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runInitCommand.mockClear();
+
+    await runCli(["init", "my-agent", "--channel-web-nextjs"], logger);
+
+    expect(runInitCommand).toHaveBeenCalledWith(
+      logger,
+      resolve(process.cwd()),
+      "my-agent",
+      expect.objectContaining({ channelWebNextjs: true }),
+      undefined,
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   it("does not print the boot banner because interactive onboarding owns its header", async () => {
@@ -492,7 +549,8 @@ describe("eve CLI malformed argument handling", () => {
 describe("eve dev --input", () => {
   it("forwards the initial draft to the interactive TUI", async () => {
     const runDevelopmentTui = await runInteractiveDev([
-      "dev",
+      "remote",
+      "connect",
       "--url",
       "https://example.com",
       "--input",
@@ -514,11 +572,11 @@ describe("eve dev --input", () => {
   it("rejects the option when the terminal cannot run the interactive UI", async () => {
     await expect(
       runCli(
-        ["dev", "--url", "https://example.com", "--input", "/model"],
+        ["remote", "connect", "--url", "https://example.com", "--input", "/model"],
         { error: () => {}, log: () => {} },
         { runDevelopmentTui: vi.fn(async () => {}) },
       ),
-    ).rejects.toThrow("--input requires the interactive UI");
+    ).rejects.toThrow("eve remote connect requires an interactive terminal.");
   });
 
   it.each([false, true])(
@@ -569,6 +627,51 @@ describe("eve dev --input", () => {
     },
   );
 
+  it.each([["dev"], ["remote", "connect", "--url", "https://example.com"]])(
+    "passes --show-* display flags through %s",
+    async (...command) => {
+      const startHost = vi.fn(() => ({
+        start: async () => ({
+          kind: "existing" as const,
+          appRoot: "/canonical/app",
+          url: "http://127.0.0.1:4321/",
+        }),
+        close: async () => {},
+      }));
+      const runDevelopmentTui = await runInteractiveDev(
+        [
+          ...command,
+          "--show-tools",
+          "hidden",
+          "--show-reasoning",
+          "collapsed",
+          "--show-subagents",
+          "full",
+          "--show-connection-auth",
+          "hidden",
+          "--assistant-response-stats",
+          "tokens",
+          "--context-size",
+          "200000",
+          "--logs",
+          "warn",
+        ],
+        { startHost },
+      );
+      expect(runDevelopmentTui).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tools: "hidden",
+          reasoning: "collapsed",
+          subagents: "full",
+          connectionAuth: "hidden",
+          assistantResponseStats: "tokens",
+          contextSize: 200000,
+          logs: "warn",
+        }),
+      );
+    },
+  );
+
   it("passes the default extension opt-out to the local server", async () => {
     const startHost = vi.fn(() => ({
       start: async () => ({
@@ -584,6 +687,22 @@ describe("eve dev --input", () => {
     expect(startHost).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ developmentExtensions: { enabled: [] } }),
+    );
+  });
+
+  it("passes explicit recovery to the local host", async () => {
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "started" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+    await runInteractiveDev(["dev", "--resume"], { startHost });
+    expect(startHost).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ resume: true }),
     );
   });
 
@@ -611,120 +730,201 @@ describe("eve dev --input", () => {
   });
 });
 
-describe("eve invoke", () => {
-  it("runs a fresh remote task without starting the TUI", async () => {
-    const runInvoke = vi.fn(async () => ({
-      status: "ready" as const,
-      outcome: { status: "completed" as const, message: "done" },
-      resume: {
-        session: { sessionId: "ses_1", streamIndex: 1 },
-        target: { kind: "remote" as const, serverUrl: "https://example.com/" },
-      },
-    }));
-    const output: string[] = [];
+describe("eve start schedules", () => {
+  afterEach(() => vi.unstubAllEnvs());
 
-    await runCli(
-      ["invoke", "--url", "https://example.com", "--scope", "target-team", "do foo"],
-      { error: () => {}, log: (message) => output.push(message) },
-      { runInvoke },
-    );
+  it.each([
+    { argv: ["start", "--no-schedules"], inherited: undefined, schedules: false, reported: true },
+    { argv: ["start"], inherited: "1", schedules: true, reported: true },
+    { argv: ["start"], inherited: undefined, schedules: true, reported: false },
+  ])(
+    "passes schedules=$schedules and reports disabled=$reported for $argv with $inherited",
+    async ({ argv, inherited, schedules, reported }) => {
+      vi.stubEnv("EVE_SCHEDULES_DISABLED", inherited);
+      const lines: string[] = [];
+      const startProductionHost = vi.fn(async () => ({
+        close: async () => {},
+        url: "http://127.0.0.1:4321/",
+        wait: async () => {},
+      }));
 
-    expect(runInvoke).toHaveBeenCalledWith({
-      operation: { kind: "send", payload: { message: "do foo" } },
-      signal: expect.any(AbortSignal),
-      target: {
-        kind: "remote",
-        serverUrl: "https://example.com/",
-        workspaceRoot: process.cwd(),
-      },
-      vercelScope: "target-team",
-    });
-    expect(JSON.parse(output.at(-1)!)).toMatchObject({
-      status: "ready",
-      outcome: { status: "completed", message: "done" },
-    });
-  });
-
-  it("rejects a Vercel scope without a URL target", async () => {
-    await expect(
-      runCli(["invoke", "--scope", "target-team", "do foo"], {
-        error: () => {},
-        log: () => {},
-      }),
-    ).rejects.toThrow("--scope option requires a URL target");
-  });
-
-  it("accepts an explicitly supplied URL equivalent to the stored resume target", async () => {
-    const runInvoke = vi.fn(async () => ({
-      status: "running" as const,
-      resume: {
-        session: { sessionId: "ses_1", streamIndex: 0 },
-        target: { kind: "remote" as const, serverUrl: "https://example.com/" },
-      },
-    }));
-    const resumeResult = JSON.stringify({
-      status: "ready",
-      outcome: { status: "completed", message: "done" },
-      resume: {
-        session: { sessionId: "ses_1", streamIndex: 0 },
-        target: { kind: "remote", serverUrl: "https://example.com/" },
-      },
-    });
-    const stdin = vi
-      .spyOn(process.stdin, Symbol.asyncIterator)
-      .mockImplementation(async function* () {
-        yield resumeResult;
-        return undefined;
-      });
-
-    try {
       await runCli(
-        ["invoke", "--resume", "--url", "https://example.com", "follow up"],
-        { error: () => {}, log: () => {} },
-        { runInvoke },
+        argv,
+        { error: () => {}, log: (line) => lines.push(line) },
+        {
+          startProductionHost,
+        },
       );
-    } finally {
-      stdin.mockRestore();
-    }
 
-    expect(runInvoke).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target: expect.objectContaining({ serverUrl: "https://example.com/" }),
-      }),
-    );
-  });
+      expect(startProductionHost).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ schedules }),
+      );
+      expect(lines.some((line) => line.includes("schedules disabled"))).toBe(reported);
+    },
+  );
+});
 
-  it("prints the JSON schema without resolving or invoking an agent", async () => {
-    const runInvoke = vi.fn();
-    const resolveProject = vi.fn(async () => resolvedProject("/workspace/weather"));
+describe("eve remote connect --print", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function respondWith(events: readonly SessionEvent[]) {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ sessionId: "session_1", deliveryId: "delivery_1" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(events.map(encodeTestLine).join(""), {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        }),
+      );
+    return fetch;
+  }
+
+  const argv = [
+    "remote",
+    "connect",
+    "--url",
+    "https://example.com",
+    "-H",
+    "Authorization: Bearer test",
+    "--print",
+    "do foo",
+  ];
+
+  it("prints only the final assistant text without starting the TUI", async () => {
+    const fetch = respondWith(testTurnFacts(0, "done", ["delivery_1"]));
     const output: string[] = [];
+    const runDevelopmentTui = vi.fn(async () => {});
 
     await runCli(
-      ["invoke", "--json-schema"],
-      { error: () => {}, log: (message) => output.push(message) },
-      { resolveApplicationProject: resolveProject, runInvoke },
+      argv,
+      { error: () => {}, log: (line) => output.push(line) },
+      { runDevelopmentTui },
     );
 
-    expect(resolveProject).not.toHaveBeenCalled();
-    expect(runInvoke).not.toHaveBeenCalled();
-    expect(JSON.parse(output[0]!)).toMatchObject({ title: "eve invoke result" });
+    expect(output).toEqual(["done"]);
+    expect(runDevelopmentTui).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(new Headers(fetch.mock.calls[0]![1]?.headers).get("authorization")).toBe("Bearer test");
   });
 
-  it("requires a prompt for a fresh invocation", async () => {
+  it("fails without printing a partial answer when the agent needs input", async () => {
+    respondWith([
+      ...testTurnFacts(0, "partial", ["delivery_1"]).slice(0, 6),
+      {
+        type: "interaction.opened",
+        data: {
+          interactionId: "approval_1",
+          request: { kind: "approval", prompt: "Approve?", options: [{ id: "yes", label: "Yes" }] },
+          subject: { turnId: "turn_0" },
+        },
+      },
+      {
+        type: "turn.paused",
+        data: { turnId: "turn_0", awaiting: [{ interactionId: "approval_1" }] },
+      },
+      {
+        type: "delivery.settled",
+        data: { deliveryId: "delivery_1", turnId: "turn_0", outcome: "awaiting-input" },
+      },
+    ]);
+    const output: string[] = [];
+
     await expect(
-      runCli(["invoke", "--url", "https://example.com"], {
-        error: () => {},
-        log: () => {},
-      }),
-    ).rejects.toThrow("requires a prompt");
+      runCli(argv, { error: () => {}, log: (line) => output.push(line) }),
+    ).rejects.toThrow(/Session session_1 is waiting for input/);
+    expect(output).toEqual([]);
+  });
+
+  it("fails without printing a partial answer when the agent needs authorization", async () => {
+    respondWith([
+      ...testTurnFacts(0, "partial", ["delivery_1"]).slice(0, 6),
+      {
+        type: "interaction.opened",
+        data: {
+          interactionId: "sign-in_1",
+          request: { kind: "sign-in", prompt: "Sign in to Linear", signIn: { name: "linear" } },
+          subject: { turnId: "turn_0" },
+        },
+      },
+      {
+        type: "turn.paused",
+        data: { turnId: "turn_0", awaiting: [{ interactionId: "sign-in_1" }] },
+      },
+      {
+        type: "delivery.settled",
+        data: { deliveryId: "delivery_1", turnId: "turn_0", outcome: "awaiting-input" },
+      },
+    ]);
+
+    await expect(runCli(argv, { error: () => {}, log: () => {} })).rejects.toThrow(
+      /Session session_1 is waiting for authorization/,
+    );
+  });
+
+  it("reports a failed turn without printing its partial answer", async () => {
+    respondWith([
+      ...testTurnFacts(0, "partial", ["delivery_1"]).slice(0, -2),
+      {
+        type: "turn.settled",
+        data: {
+          turnId: "turn_0",
+          outcome: "failed",
+          error: { code: "provider_error", message: "Model unavailable" },
+        },
+      },
+      {
+        type: "delivery.settled",
+        data: { deliveryId: "delivery_1", turnId: "turn_0", outcome: "handled" },
+      },
+    ]);
+    const output: string[] = [];
+
+    await expect(
+      runCli(argv, { error: () => {}, log: (line) => output.push(line) }),
+    ).rejects.toThrow(/Session session_1 failed: Model unavailable/);
+    expect(output).toEqual([]);
+  });
+
+  it("reports a cancelled turn without printing its partial answer", async () => {
+    respondWith([
+      ...testTurnFacts(0, "partial", ["delivery_1"]).slice(0, -2),
+      { type: "turn.settled", data: { turnId: "turn_0", outcome: "cancelled", reply: ["part_0"] } },
+      {
+        type: "delivery.settled",
+        data: { deliveryId: "delivery_1", turnId: "turn_0", outcome: "handled" },
+      },
+    ]);
+    const output: string[] = [];
+
+    await expect(
+      runCli(argv, { error: () => {}, log: (line) => output.push(line) }),
+    ).rejects.toThrow(/Turn in session session_1 was cancelled/);
+    expect(output).toEqual([]);
+  });
+
+  it("rejects prompts without --print and --input with --print", async () => {
+    const logger = { error: () => {}, log: () => {} };
+    await expect(
+      runCli(
+        argv.filter((argument) => argument !== "--print"),
+        logger,
+      ),
+    ).rejects.toThrow(/A prompt requires --print/);
+    await expect(runCli([...argv, "--input", "draft"], logger)).rejects.toThrow(
+      /--input pre-fills the terminal UI/,
+    );
+    await expect(runCli(argv.slice(0, -1), logger)).rejects.toThrow(/--print requires a prompt/);
   });
 });
 
-describe("eve dev --url protocol", () => {
+describe("eve remote connect", () => {
   it("does not resolve a local application for a remote URL", async () => {
     const resolveProject = vi.fn(async () => resolvedProject("/workspace/weather"));
 
-    await runInteractiveDev(["dev", "https://example.com"], {
+    await runInteractiveDev(["remote", "connect", "--url", "https://example.com"], {
       resolveApplicationProject: resolveProject,
     });
 
@@ -733,7 +933,9 @@ describe("eve dev --url protocol", () => {
 
   it("preserves query parameters on the remote target URL", async () => {
     const runDevelopmentTui = await runInteractiveDev([
-      "dev",
+      "remote",
+      "connect",
+      "--url",
       "https://example.com?x-vercel-protection-bypass=secret",
     ]);
 
@@ -750,7 +952,9 @@ describe("eve dev --url protocol", () => {
 
   it("lowers URL userinfo to a Basic authorization header and strips it from the target URL", async () => {
     const runDevelopmentTui = await runInteractiveDev([
-      "dev",
+      "remote",
+      "connect",
+      "--url",
       "https://test%40user:p%20ss@example.com",
     ]);
 
@@ -770,7 +974,9 @@ describe("eve dev --url protocol", () => {
 
   it("prefers explicit authorization headers over URL userinfo", async () => {
     const runDevelopmentTui = await runInteractiveDev([
-      "dev",
+      "remote",
+      "connect",
+      "--url",
       "https://user:pass@example.com",
       "-H",
       "Authorization: Bearer explicit-token",
@@ -792,7 +998,8 @@ describe("eve dev --url protocol", () => {
 
   it("forwards repeatable request headers to the remote TUI", async () => {
     const runDevelopmentTui = await runInteractiveDev([
-      "dev",
+      "remote",
+      "connect",
       "--url",
       "https://example.com",
       "-H",
@@ -819,42 +1026,20 @@ describe("eve dev --url protocol", () => {
   it("rejects malformed request headers", async () => {
     await expect(
       runCli(
-        ["dev", "--url", "https://example.com", "-H", "Authorization"],
+        ["remote", "connect", "--url", "https://example.com", "-H", "Authorization"],
         { error: () => {}, log: () => {} },
         { runDevelopmentTui: vi.fn(async () => {}) },
       ),
     ).rejects.toThrow('Expected header in "Name: value" format');
   });
 
-  it("rejects request headers without a URL target", async () => {
-    await expect(
-      runCli(["dev", "-H", "Authorization: Bearer dev-token"], {
-        error: () => {},
-        log: () => {},
-      }),
-    ).rejects.toThrow("The --header option can only be used with --url or a bare URL.");
-  });
-
-  it("uses the local TUI credential path only for this app's running dev server", async () => {
-    const runDevelopmentTui = await runInteractiveDev(["dev", "--url", "http://127.0.0.1:2000"], {
-      isActiveDevelopmentServerForApp: async () => true,
-    });
-
-    expect(runDevelopmentTui).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target: {
-          kind: "local",
-          serverUrl: "http://127.0.0.1:2000/",
-          workspaceRoot: process.cwd(),
-        },
-      }),
-    );
-  });
-
   it("keeps an unverified loopback URL on the remote credential path", async () => {
-    const runDevelopmentTui = await runInteractiveDev(["dev", "--url", "http://127.0.0.1:2000"], {
-      isActiveDevelopmentServerForApp: async () => false,
-    });
+    const runDevelopmentTui = await runInteractiveDev([
+      "remote",
+      "connect",
+      "--url",
+      "http://127.0.0.1:2000",
+    ]);
 
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -867,14 +1052,6 @@ describe("eve dev --url protocol", () => {
     );
   });
 
-  it("rejects an http:// remote URL up front instead of crashing during connect", async () => {
-    await expect(
-      runCli(["dev", "--url", "http://my-app.vercel.app"], { error: () => {}, log: () => {} }),
-    ).rejects.toThrow(/https/);
-  });
-});
-
-describe("eve eval --url protocol", () => {
   it("rejects an http:// remote URL up front", async () => {
     await expect(
       runCli(["eval", "--url", "http://my-app.vercel.app"], { error: () => {}, log: () => {} }),
@@ -883,18 +1060,19 @@ describe("eve eval --url protocol", () => {
 });
 
 describe("eve dev --logs", () => {
-  it("accepts sandbox as the initial TUI log mode", async () => {
+  it("accepts warn as the initial TUI log mode", async () => {
     const runDevelopmentTui = await runInteractiveDev([
-      "dev",
+      "remote",
+      "connect",
       "--url",
       "https://example.com",
       "--logs",
-      "sandbox",
+      "warn",
     ]);
 
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
-        logs: "sandbox",
+        logs: "warn",
         target: {
           kind: "remote",
           serverUrl: "https://example.com/",
@@ -960,13 +1138,13 @@ describe("eve acp", () => {
       options: {
         auth: { vercelOidc: { token: "oidc-token" } } as const,
         headers: { "x-vercel-protection-bypass": "bypass" },
-        host: "https://agent.example.com/",
+        baseUrl: "https://agent.example.com/",
       },
       lastOidcTokenFailure: () => undefined,
     }));
 
     await runCli(
-      ["acp", "https://agent.example.com", "--scope", "vercel-internal-playground"],
+      ["acp", "--url", "https://agent.example.com", "--scope", "vercel-internal-playground"],
       { error: () => {}, log: () => {} },
       { resolveVerifiedRemoteDevelopmentClient, runAcpServer },
     );
@@ -992,7 +1170,7 @@ describe("eve acp", () => {
     const runAcpServer = vi.fn(async () => {});
 
     await runCli(
-      ["acp", "https://user:pass@example.com", "-H", "X-Tenant: acme"],
+      ["acp", "--url", "https://user:pass@example.com", "-H", "X-Tenant: acme"],
       { error: () => {}, log: () => {} },
       { runAcpServer, startHost },
     );
@@ -1052,20 +1230,13 @@ describe("eve dev boot progress", () => {
       tuiReporter = input.onBootProgress;
       throw new Error("TUI startup failed");
     });
-    const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
-      writes.push(String(chunk));
-      return true;
-    });
 
-    try {
-      await expect(
-        withInteractiveTerminal(() =>
-          runCli(["dev"], { error: () => {}, log: () => {} }, { runDevelopmentTui, startHost }),
-        ),
-      ).rejects.toThrow("TUI startup failed");
-    } finally {
-      stdoutWrite.mockRestore();
-    }
+    await expect(
+      withInteractiveTerminal(
+        () => runCli(["dev"], { error: () => {}, log: () => {} }, { runDevelopmentTui, startHost }),
+        writes,
+      ),
+    ).rejects.toThrow("TUI startup failed");
 
     expect(hostReporter).toBeTypeOf("function");
     expect(tuiReporter).toBe(hostReporter);
@@ -1093,6 +1264,7 @@ describe("eve dev local server ownership", () => {
     const runDevelopmentTui = await runInteractiveDev(["dev"], { startHost });
 
     expect(startHost).toHaveBeenCalledWith(expect.any(String), {
+      resume: undefined,
       existing: "attach-if-unconfigured",
       host: undefined,
       onBootProgress: expect.any(Function),
@@ -1234,40 +1406,18 @@ describe("resolveDevUiMode", () => {
 describe("resolveTuiDisplayOptions", () => {
   it("defaults tools and reasoning to auto-collapsed with stderr logs visible", () => {
     expect(resolveTuiDisplayOptions({})).toEqual({
-      logs: "stderr",
-      // Collapsed reasoning is the fixed thinking line; `--reasoning full`
+      logs: "error",
+      // Collapsed reasoning is the fixed thinking line; `--show-reasoning full`
       // restores the streaming transcript trace.
       reasoning: "auto-collapsed",
       tools: "auto-collapsed",
     });
   });
 
-  it("passes through every provided display dimension", () => {
-    expect(
-      resolveTuiDisplayOptions({
-        tools: "hidden",
-        reasoning: "collapsed",
-        subagents: "auto-collapsed",
-        connectionAuth: "full",
-        assistantResponseStats: "tokens",
-        contextSize: 200_000,
-        logs: "stderr",
-      }),
-    ).toEqual({
-      tools: "hidden",
-      reasoning: "collapsed",
-      subagents: "auto-collapsed",
-      connectionAuth: "full",
-      assistantResponseStats: "tokens",
-      contextSize: 200_000,
-      logs: "stderr",
-    });
-  });
-
   it("omits optional display dimensions that were not provided", () => {
-    const resolved = resolveTuiDisplayOptions({ tools: "full" });
+    const resolved = resolveTuiDisplayOptions({ showTools: "full" });
     expect(resolved).not.toHaveProperty("subagents");
     expect(resolved).not.toHaveProperty("contextSize");
-    expect(resolved.logs).toBe("stderr");
+    expect(resolved.logs).toBe("error");
   });
 });

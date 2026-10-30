@@ -19,7 +19,7 @@ async function readObject(path: string): Promise<Record<string, unknown> | undef
 }
 
 async function readCliConfiguration(): Promise<
-  { directory: string; config: Record<string, unknown>; teamId: string } | undefined
+  { directory: string; config: Record<string, unknown>; teamId?: string } | undefined
 > {
   const home = homedir();
   const base =
@@ -32,7 +32,6 @@ async function readCliConfiguration(): Promise<
     const config = await readObject(join(dir, "config.json"));
     if (config === undefined) continue;
     const teamId = typeof config.currentTeam === "string" ? config.currentTeam : undefined;
-    if (!teamId) return undefined;
     return { directory: dir, config, teamId };
   }
   return undefined;
@@ -47,9 +46,22 @@ export async function readVercelCliConnection(): Promise<
   { token: string; teamId: string } | undefined
 > {
   const configuration = await readCliConfiguration();
+  if (!configuration?.teamId) return undefined;
+  const token = await readCliToken(configuration);
+  return token === undefined ? undefined : { token, teamId: configuration.teamId };
+}
+
+/** Read a CLI token without requiring a selected team (personal accounts have none). */
+export async function readVercelCliToken(): Promise<string | undefined> {
+  return readCliToken(await readCliConfiguration());
+}
+
+async function readCliToken(
+  configuration: Awaited<ReturnType<typeof readCliConfiguration>>,
+): Promise<string | undefined> {
+  if (process.env.VERCEL_TOKEN) return process.env.VERCEL_TOKEN;
   if (!configuration) return undefined;
-  const { directory: dir, config, teamId } = configuration;
-  if (process.env.VERCEL_TOKEN) return { token: process.env.VERCEL_TOKEN, teamId };
+  const { directory: dir, config } = configuration;
   const storage = process.env.VERCEL_TOKEN_STORAGE ?? config.credStorage ?? "file";
   const path = join(dir, "auth.json");
   let auth: Record<string, unknown> | undefined;
@@ -66,7 +78,7 @@ export async function readVercelCliConnection(): Promise<
     if (!auth && storage === "auto") auth = await readObject(path);
   }
   if (typeof auth?.token !== "string" || !auth.token) return undefined;
-  return { token: auth.token, teamId };
+  return auth.token;
 }
 
 export async function refreshVercelCliConnection(): Promise<void> {

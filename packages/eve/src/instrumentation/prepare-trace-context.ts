@@ -1,6 +1,6 @@
 import { createLogger, formatError } from "#internal/logging.js";
 import { contextStorage } from "#context/container.js";
-import type { RuntimeTraceContext } from "#protocol/message.js";
+import type { TraceContext } from "#protocol/session-events/families/session.js";
 import type {
   InstrumentationSessionStartedEvent,
   InstrumentationTraceSeed,
@@ -28,14 +28,14 @@ export interface PrepareTurnTraceContextInput {
   >;
   readonly sequence: number;
   readonly sessionStarted: boolean;
-  readonly traceContext?: RuntimeTraceContext;
+  readonly traceContext?: TraceContext;
   /** Omit when preparing the session boundary before the first turn exists. */
   readonly turnId?: string;
 }
 
 export async function prepareTurnTraceContext(
   input: PrepareTurnTraceContextInput,
-): Promise<RuntimeTraceContext | undefined> {
+): Promise<TraceContext | undefined> {
   let prepared: InstrumentationTraceSeed | undefined;
   const { channelAudience, channelKind, channelType, traceSeed, ...session } = input.session;
 

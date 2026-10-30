@@ -1,77 +1,74 @@
-import type { UserContent } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
+import type { Delivery } from "#shared/delivery.js";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
-import {
-  createChannelAddressFn,
-  type ChannelAddressDeliveryOptions,
-} from "#channel/channel-address.js";
-import type { SendPayload } from "#channel/routes.js";
-import type { Session } from "#channel/session.js";
+import { type ChannelCreateResult, createChannelAddressFn } from "#channel/channel-address.js";
+
+export type { ChannelCreateResult } from "#channel/channel-address.js";
+import type { SessionSendOptions, Session } from "#channel/session.js";
 import type {
-  CancelTurnResult,
-  ClearSessionResult,
-  CompactSessionResult,
-  ResetSessionResult,
   Runtime,
   SessionAuthContext,
-  SessionCallback,
   TurnPolicy,
-  TaskDeliveryPolicy,
+  SessionControlOptions,
 } from "#channel/types.js";
-import {
-  type InputResponse,
-  parseInputResponses,
-  type StrictInputResponses,
-} from "#shared/input.js";
+import { type Answer, parseAnswers, type StrictAnswers } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
-import type { RunMode } from "#shared/run-mode.js";
-
-interface BaseChannelSendOptions {
-  readonly auth: SessionAuthContext | null;
-  readonly callback?: SessionCallback;
-  readonly context?: readonly string[];
-  readonly initiatorAuth?: SessionAuthContext | null;
-  readonly mode?: RunMode;
-  readonly outputSchema?: JsonObject;
-  readonly title?: string;
-  readonly turnPolicy?: TurnPolicy;
-  /** Updates the session policy; omission preserves it. New sessions default to auto, schedules to cohort. */
-  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
-}
+import type { SessionHistoryMessage } from "#shared/session-history.js";
+import { attachInputText, readInputText } from "#internal/input-text.js";
 
 /** Options for sending a message from a channel-local continuation address. */
-export type ChannelSendOptions<TState = undefined> = [TState] extends [undefined]
-  ? BaseChannelSendOptions
-  : BaseChannelSendOptions & { readonly state: TState };
+export type ChannelSendOptions<TState = undefined> = SessionSendOptions & {
+  readonly state?: Partial<TState>;
+};
 
 interface BaseChannelRespondOptions<TState = undefined> {
+  /** Stable delivery identity, with the same scope and retention as `send()`. */
+  readonly idempotencyKey?: string;
   readonly auth: SessionAuthContext | null;
-  readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;
+  readonly context?: readonly string[];
   readonly state?: Partial<TState>;
 }
 
 /** Options for answering pending input requests at an existing continuation address. */
 export type ChannelRespondOptions<TState = undefined> = BaseChannelRespondOptions<TState>;
 
+/** Options for creating a session at a channel-local address without running a turn. */
+export type ChannelCreateOptions<TState = undefined> = {
+  readonly auth: SessionAuthContext | null;
+  /** Prior conversation the session starts with; it joins history with the first message. */
+  readonly history?: readonly SessionHistoryMessage[];
+  readonly initiatorAuth?: SessionAuthContext | null;
+  readonly title?: string;
+} & ([TState] extends [undefined] ? unknown : { readonly state: TState });
+
 /** Dynamic handle for whichever session currently owns one channel-local address. */
 export interface ChannelSource<TState = undefined> {
+  /**
+   * Creates a session that waits for its first message, without running a
+   * turn. When another session owns the address, or claims it concurrently,
+   * returns that session unchanged with `created: false`; its `history` was not
+   * added. Throws `SessionStrandedError` when the owner is stranded; end the session at the
+   * address, then create again.
+   */
+  create(options: ChannelCreateOptions<TState>): Promise<ChannelCreateResult>;
   /** Starts or resumes a turn with a user message. May create a session. */
-  send(message: string | UserContent, options: ChannelSendOptions<TState>): Promise<Session>;
+  send(message: MessageContent, options: ChannelSendOptions<TState>): Promise<Delivery>;
   /** Answers pending input requests. Never creates a session. */
-  respond<const TResponses extends readonly InputResponse[]>(
-    inputResponses: StrictInputResponses<TResponses>,
+  respond<const TResponses extends readonly Answer[]>(
+    answers: StrictAnswers<TResponses>,
     options: ChannelRespondOptions<TState>,
-  ): Promise<Session>;
+  ): Promise<Delivery>;
   /** Cooperatively cancels the active turn without creating a session. */
-  cancel(options?: { readonly turnId?: string }): Promise<CancelTurnResult>;
+  cancel(options?: { readonly turnId?: string | null } & SessionControlOptions): Promise<Delivery>;
   /** Queues context compaction without creating a session. */
-  compact(): Promise<CompactSessionResult>;
-  /** Clears model-message history without creating a session. */
-  clear(): Promise<ClearSessionResult>;
+  compact(options?: SessionControlOptions): Promise<Delivery>;
+  /** Cancels a running turn and every working task, then clears model-message history in place. */
+  clear(options?: SessionControlOptions): Promise<Delivery>;
   /** Retires the current owner without creating a replacement. */
-  reset(options?: { readonly reason?: string }): Promise<ResetSessionResult>;
+  end(options?: { readonly reason?: string } & SessionControlOptions): Promise<Delivery>;
 }
 
 /** Binds a raw channel-local continuation address to its current-owner operations. */
@@ -86,16 +83,6 @@ export interface ChannelReceiveContext<TState = undefined> {
   readonly resolveSession: ChannelResolveSession;
 }
 
-export const INTERNAL_CHANNEL_DELIVER = Symbol("eve.internal.channel-deliver");
-
-/** @internal Permissive transport delivery retained below public authoring surfaces. */
-export interface InternalChannelSource<TState = undefined> extends ChannelSource<TState> {
-  [INTERNAL_CHANNEL_DELIVER](
-    payload: SendPayload,
-    options: ChannelAddressDeliveryOptions<TState>,
-  ): Promise<Session>;
-}
-
 /** Creates request-scoped channel operations backed by continuation dispatch. */
 export function createChannelOperations<TState = undefined>(input: {
   readonly adapter: ChannelAdapter<any>;
@@ -103,34 +90,43 @@ export function createChannelOperations<TState = undefined>(input: {
   readonly metadata?: ChannelDeliverySource;
   readonly runtime: Runtime;
   readonly turnPolicy?: TurnPolicy;
-  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 }): ChannelReceiveContext<TState> {
   const channelAddress = createChannelAddressFn<TState>(input);
 
   return {
     from(address) {
       const bound = channelAddress(address);
-      const source: InternalChannelSource<TState> = {
+      const source: ChannelSource<TState> = {
         async send(message, options) {
+          // Deliver hooks read per-delivery state (such as the message author)
+          // from the payload, as they do for `respond()`.
           return await bound.deliver(
-            {
-              context: options.context,
-              message,
-              outputSchema: options.outputSchema,
-            },
+            attachInputText(
+              {
+                context: options.context,
+                history: options.history,
+                message,
+                outputSchema: options.outputSchema,
+                state: (options as { readonly state?: TState }).state,
+              },
+              readInputText(options),
+            ),
             options,
           );
         },
-        async respond(inputResponses, options) {
-          if (inputResponses.length === 0) {
-            throw new Error("respond() requires at least one input response.");
+        async create(options) {
+          return await bound.create(options);
+        },
+        async respond(answers, options) {
+          if (answers.length === 0) {
+            throw new Error("respond() requires at least one answer.");
           }
-          const validatedInputResponses = parseInputResponses(inputResponses);
+          const validatedAnswers = parseAnswers(answers);
           return await bound.deliver(
             {
               context: options.context,
-              inputResponses: validatedInputResponses,
               outputSchema: options.outputSchema,
+              answers: validatedAnswers,
               state: options.state,
             },
             options,
@@ -139,17 +135,14 @@ export function createChannelOperations<TState = undefined>(input: {
         async cancel(options) {
           return await bound.cancel(options);
         },
-        async compact() {
-          return await bound.compact();
+        async compact(options) {
+          return await bound.compact(options);
         },
-        async clear() {
-          return await bound.clear();
+        async clear(options) {
+          return await bound.clear(options);
         },
-        async reset(options) {
-          return await bound.reset(options);
-        },
-        async [INTERNAL_CHANNEL_DELIVER](payload, options) {
-          return await bound.deliver(payload, options);
+        async end(options) {
+          return await bound.end(options);
         },
       };
       return source;

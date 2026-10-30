@@ -2,6 +2,7 @@
   "pages": [
     "---Introduction---",
     "getting-started",
+    "use-cases",
     "tutorial",
     "concepts",
     "---Build---",
@@ -20,6 +21,7 @@
     "---Integrate---",
     "install-integrations",
     "extensions",
+    "code-extension",
     "protocols/acp",
     "guides/client",
     "guides/frontend",
@@ -29,6 +31,7 @@
     "evals",
     "guides/instrumentation",
     "---Reference---",
+    "guides/prepare-for-1-0",
     "guides/dev-tui",
     "guides/self-modification",
     "...reference",

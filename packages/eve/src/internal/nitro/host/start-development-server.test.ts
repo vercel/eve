@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => {
     suspend: vi.fn(async () => undefined),
   };
   const mocksWorldInstance = {
+    reconcileExpiredRuns: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
     handleRequest: vi.fn(async () => undefined),
     start: vi.fn(async () => undefined),
@@ -34,6 +35,8 @@ const mocks = vi.hoisted(() => {
     close: vi.fn(async () => undefined),
     discardCandidate: vi.fn(async () => undefined),
     listen: vi.fn(() => listenerServer),
+    prepareSpareWorker: vi.fn(),
+    recycleWorker: vi.fn(async () => undefined),
     replaceWorker: vi.fn(async () => undefined),
     setClientAddressSecret: vi.fn(),
     setControlHandler: vi.fn(),
@@ -305,40 +308,6 @@ describe("normalizeDevelopmentServerClientUrl", () => {
   });
 });
 
-describe("isActiveDevelopmentServerForApp", () => {
-  it("matches only this app's recorded healthy loopback server", async () => {
-    const { isActiveDevelopmentServerForApp } = await import("./start-development-server.js");
-    seedStateRecord({ url: "http://127.0.0.1:42123/" });
-    mocks.fetch.mockImplementation(async () => Response.json({ revision: "test" }));
-    vi.stubGlobal("fetch", mocks.fetch);
-
-    try {
-      await expect(
-        isActiveDevelopmentServerForApp({
-          appRoot: "/tmp/eve-test",
-          serverUrl: "http://127.0.0.1:42123/",
-        }),
-      ).resolves.toBe(true);
-      await expect(
-        isActiveDevelopmentServerForApp({
-          appRoot: "/tmp/eve-test",
-          serverUrl: "http://127.0.0.1:42124/",
-        }),
-      ).resolves.toBe(false);
-      mocks.fetch.mockResolvedValueOnce(new Response(null, { status: 200 }));
-      await expect(
-        isActiveDevelopmentServerForApp({
-          appRoot: "/tmp/eve-test",
-          serverUrl: "http://127.0.0.1:42123/",
-        }),
-      ).resolves.toBe(false);
-    } finally {
-      mocks.files.clear();
-      vi.unstubAllGlobals();
-    }
-  });
-});
-
 describe("createDevelopmentServer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -403,7 +372,6 @@ describe("createDevelopmentServer", () => {
     await server.close();
 
     expect(mocks.stopDevelopmentSandboxResources).toHaveBeenCalledWith({
-      appRoot: "/tmp/eve-test",
       devRunId: expect.any(String),
       log: expect.any(Function),
     });
@@ -697,7 +665,7 @@ describe("createDevelopmentServer", () => {
     await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow(
       [
         "A dev server is already running for this eve agent.",
-        "To connect to the existing instance, run: pnpm exec eve dev http://localhost:2000/",
+        "To connect to the existing instance, run: pnpm exec eve remote connect --url http://localhost:2000/",
       ].join("\n"),
     );
     expect(mocks.createDevelopmentApplicationNitro).not.toHaveBeenCalled();

@@ -6,7 +6,7 @@ import {
 export type { SlackWebhookVerifier };
 
 /** Verification inputs for Eve's Slack webhook route. */
-export interface SlackVerifyOptions {
+interface SlackVerifyOptions {
   readonly signingSecret: string | undefined;
   readonly webhookVerifier: SlackWebhookVerifier | undefined;
   readonly maxSkewSeconds?: number;

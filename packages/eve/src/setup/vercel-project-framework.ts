@@ -32,6 +32,7 @@ const EVE_FRAMEWORK_INTEGRATIONS: Readonly<Record<string, EveFrameworkIntegratio
   nuxt: { label: "Nuxt", importSpecifier: "eve/nuxt" },
   nuxtjs: { label: "Nuxt", importSpecifier: "eve/nuxt" },
   sveltekit: { label: "SvelteKit", importSpecifier: "eve/sveltekit" },
+  "tanstack-start": { label: "TanStack Start", importSpecifier: "eve/tanstack" },
 };
 
 const FRAMEWORK_INTEGRATION_SOURCE_EXTENSIONS = new Set([
@@ -55,6 +56,7 @@ const FRAMEWORK_INTEGRATION_IGNORED_DIRECTORIES = new Set([
   ".nuxt",
   ".output",
   ".svelte-kit",
+  ".tanstack",
   ".turbo",
   ".vercel",
   "build",
@@ -304,6 +306,13 @@ export async function ensureCreatedProjectFramework(
   options: CreatedProjectFrameworkOptions,
 ): Promise<void> {
   const framework = await fetchProjectFramework(projectRoot, team, projectId, options);
+  // vercel.ts owns the service graph; a detected Next.js dependency is only a peer service.
+  if ((await resolveVercelHostFrameworkPreset(projectRoot)) === "services") {
+    if (framework !== "services") {
+      await setProjectFramework(projectRoot, team, projectId, "services", onOutput, options);
+    }
+    return;
+  }
   if (framework === EVE_FRAMEWORK_PRESET) return;
   const frameworkAction =
     framework === undefined

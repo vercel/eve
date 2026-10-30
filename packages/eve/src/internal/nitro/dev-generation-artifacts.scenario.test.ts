@@ -5,6 +5,8 @@ import { basename, dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
+import { dynamicEvaluate, isDynamicSentinel, type DynamicSentinel } from "#dynamic/definition.js";
+import { readDevelopmentGenerationAvailability } from "#internal/workflow/development-runtime-compatibility.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { resolvePackageRoot } from "#internal/application/package.js";
@@ -23,14 +25,16 @@ describe("development generation artifacts", () => {
     const sharedMarker = "eve-shared-generation-module-marker";
     const app = await scenarioApp({
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
         "agent/instructions.md": "Use the available tools.",
         "agent/lib/shared.mjs": `export const shared = ${JSON.stringify(sharedMarker)};\n`,
         "agent/subagents/reader/agent.mjs": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  description: "Read the shared value.",',
           '  model: "openai/gpt-5.4",',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "agent/subagents/reader/tools/read_shared.mjs": [
@@ -85,33 +89,28 @@ describe("development generation artifacts", () => {
     expect(subagentTool.default.execute()).toBe(sharedMarker);
   });
 
-  it("materializes dynamic remote credential metadata for the development runtime", async () => {
+  it("loads a dynamic remote agent's render, credentials included, in the development runtime", async () => {
     const app = await scenarioApp({
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
         "agent/instructions.md": "Use the available tools.",
         "agent/subagents/remote.mjs": [
-          'const defineDynamic = (definition) => ({ ...definition, kind: "eve:dynamic" });',
-          "const defineRemoteAgent = (definition) => ({",
-          "  ...definition,",
-          '  kind: "remote",',
-          '  path: "/eve/v1/session",',
-          "});",
-          "export default defineDynamic({",
-          "  events: {",
-          '    "session.started": () =>',
-          "      defineRemoteAgent({",
-          '        description: "Remote research.",',
-          '        headers: () => ({ authorization: "Bearer fresh" }),',
-          '        url: "https://research.example.com",',
-          "      }),",
-          "  },",
-          "});",
+          'import { defineDynamic, defineRemoteAgent } from "eve";',
+          "export default defineDynamic(() =>",
+          "    defineRemoteAgent({",
+          '      description: "Remote research.",',
+          '      headers: () => ({ authorization: "Bearer fresh" }),',
+          '      url: "https://research.example.com",',
+          "    }),",
+          ");",
           "",
         ].join("\n"),
       },
       name: "dynamic-remote-development-generation",
     });
+    await mkdir(join(app.appRoot, "node_modules"), { recursive: true });
+    await symlink(resolvePackageRoot(), join(app.appRoot, "node_modules", "eve"), "junction");
 
     const compileResult = await compileAgent({ startPath: app.appRoot });
     const snapshot = await stageDevelopmentGeneration(compileResult);
@@ -124,46 +123,39 @@ describe("development generation artifacts", () => {
     const sourceId = subagent?.sourceId;
     expect(sourceId).toBeDefined();
     const moduleNamespace = moduleMap.nodes[subagent!.nodeId]?.modules[sourceId!] as {
-      default: { events: Record<string, Function> };
+      default: DynamicSentinel<Record<string, unknown>, unknown>;
     };
-    const handler = moduleNamespace.default.events["session.started"];
-    expect(handler).toBeDefined();
-    const remote = handler!() as Record<string, unknown>;
-    const credentialsFactory = remote.__eveResolveRemoteAgentCredentials as {
-      stepId?: string;
+    // Credentials are code the definition builds, so the runtime builds them where it needs them:
+    // nothing is transformed or registered for them.
+    const remote = dynamicEvaluate(moduleNamespace.default)({}) as {
+      headers(): Record<string, string>;
+      url: string;
     };
-
-    expect(Object.keys(remote)).not.toContain("__eveResolveRemoteAgentCredentials");
-    expect(credentialsFactory.stepId).toMatch(/^eve:dynamic-remote-agent\/\//);
-    const registry = (globalThis as Record<symbol, Map<string, Function> | undefined>)[
-      Symbol.for("@workflow/core//registeredSteps")
-    ];
-    const registered = registry?.get(credentialsFactory.stepId!);
-    expect(registered).toBeDefined();
-    const credentials = registered!() as { headers(): Record<string, string> };
-    expect(credentials.headers()).toEqual({ authorization: "Bearer fresh" });
+    expect(remote.url).toBe("https://research.example.com");
+    expect(remote.headers()).toEqual({ authorization: "Bearer fresh" });
   });
 
   it("hydrates a dynamic directory subagent resolver relative to the child root", async () => {
     const app = await scenarioApp({
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
         "agent/instructions.md": "Use the available subagent.",
         "agent/subagents/conditional/agent.mjs": [
-          'const defineDynamic = (definition) => ({ ...definition, kind: "eve:dynamic" });',
-          "export default defineDynamic({",
-          "  events: {",
-          '    "session.started": () => ({',
-          '      description: "Conditionally available.",',
-          '      model: "openai/gpt-5.4",',
-          "    }),",
-          "  },",
-          "});",
+          'import { defineAgent, defineDynamic } from "eve";',
+          "export default defineDynamic(() =>",
+          "  defineAgent({",
+          '    description: "Conditionally available.",',
+          '    model: "openai/gpt-5.4",',
+          "  }),",
+          ");",
           "",
         ].join("\n"),
       },
       name: "dynamic-directory-subagent-source-map",
     });
+    await mkdir(join(app.appRoot, "node_modules"), { recursive: true });
+    await symlink(resolvePackageRoot(), join(app.appRoot, "node_modules", "eve"), "junction");
 
     const compileResult = await compileAgent({ startPath: app.appRoot });
     const snapshot = await stageDevelopmentGeneration(compileResult);
@@ -177,9 +169,9 @@ describe("development generation artifacts", () => {
 
     const moduleNamespace = moduleMap.nodes[subagent.nodeId]?.modules[
       subagent.configResolver.sourceId
-    ] as { default: { events: Record<string, Function> } };
+    ] as { default: unknown };
 
-    expect(moduleNamespace.default.events["session.started"]).toBeDefined();
+    expect(isDynamicSentinel(moduleNamespace.default)).toBe(true);
   });
 
   it("preserves extension scope in a shared generation graph", async () => {
@@ -189,7 +181,8 @@ describe("development generation artifacts", () => {
         [packageName]: "workspace:*",
       },
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
         "agent/extensions/acme.mjs": [
           `import extension from ${JSON.stringify(packageName)};`,
           'export default extension({ label: "configured" });',
@@ -220,9 +213,9 @@ describe("development generation artifacts", () => {
         })}\n`,
         "packages/shared-graph-extension/extension/_manifest.json": JSON.stringify({
           kind: "eve-extension",
-          formatVersion: 1,
-          builtWithEve: "0.0.0-test",
-          requires: { extension: 1, tool: 1, config: 1 },
+          formatVersion: 3,
+          builtWithEve: "0.0.0",
+          contractMajor: 0,
         }),
         "pnpm-workspace.yaml": "packages:\n  - packages/*\n",
       },
@@ -261,10 +254,11 @@ describe("development generation artifacts", () => {
     try {
       const app = await scenarioApp({
         files: {
-          "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+          "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
           "agent/instructions.md": "Use the available tools.",
           "agent/extensions/self-modification.mjs": [
-            'import selfModification from "eve/self-modification";',
+            'import selfModification from "eve/extensions/self-modification/local";',
             "export default selfModification({ local: { enabled: false } });",
             "",
           ].join("\n"),
@@ -285,11 +279,11 @@ describe("development generation artifacts", () => {
       if (child?.configResolver === undefined) throw new Error("expected a dynamic subagent");
       const modules = moduleMap.nodes[child.nodeId]!.modules;
       const agent = modules[child.configResolver.sourceId] as {
-        default: { events: Record<string, Function> };
+        default: DynamicSentinel<unknown, unknown>;
       };
-      for (const event of ["session.started", "turn.started"]) {
-        await expect(agent.default.events[event]!({}, { model: null })).resolves.toBeNull();
-      }
+      await expect(
+        Promise.resolve(dynamicEvaluate(agent.default)({ model: { id: "openai/gpt-5.4" } })),
+      ).resolves.toBeNull();
 
       const sandbox = modules[child.agent.sandbox.sourceId] as {
         defineSelfModificationSandbox(): Function;
@@ -310,7 +304,8 @@ describe("development generation artifacts", () => {
         [packageName]: "1.0.0",
       },
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
         "agent/extensions/physical.mjs": `export { default } from ${JSON.stringify(packageName)};\n`,
         "agent/instructions.md": "Use the available tools.",
       },
@@ -332,14 +327,16 @@ describe("development generation artifacts", () => {
       join(packageRoot, "extension", "_manifest.json"),
       `${JSON.stringify({
         kind: "eve-extension",
-        formatVersion: 1,
-        builtWithEve: "0.0.0-test",
-        requires: { extension: 1, tool: 1 },
+        formatVersion: 3,
+        builtWithEve: "0.0.0",
+        contractMajor: 0,
       })}\n`,
     );
     await writeFile(
       join(packageRoot, "extension", "extension.mjs"),
-      'import { defineExtension } from "eve/extension";\nexport default defineExtension();\n',
+      `import { defineExtension } from "eve/extension";
+export default defineExtension();
+`,
     );
     await writeFile(
       join(packageRoot, "extension", "tools", "read_marker.mjs"),
@@ -391,7 +388,8 @@ describe("development generation artifacts", () => {
         pg: "1.0.0",
       },
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
         "agent/instructions.md": "Use the available tools.",
         "agent/tools/read_dynamic.mjs": [
           'import { readDynamicValue } from "pg";',
@@ -460,10 +458,11 @@ describe("development generation artifacts", () => {
       },
       files: {
         "agent/agent.mjs": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  model: "openai/gpt-5.4",',
           '  build: { externalDependencies: ["fixture-external"] },',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "agent/instructions.md": "Use the available tools.",
@@ -526,7 +525,8 @@ describe("development generation artifacts", () => {
   it("uses a path-independent fingerprint that includes instrumentation", async () => {
     const app = await scenarioApp({
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
         "agent/instrumentation/audit.mjs": [
           'import { defineInstrumentation } from "eve/instrumentation";',
           'const marker = "one";',
@@ -618,9 +618,11 @@ describe("development generation artifacts", () => {
   it("compiles authored workflow tools for the development runtime", async () => {
     const app = await scenarioApp({
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
         "agent/instructions.md": "Use the available tools.",
-        "agent/lib/plan.mjs": 'export const PLAN_PREFIX = "plan:";\n',
+        "agent/lib/plan.mjs": `export const PLAN_PREFIX = "plan:";
+`,
         "agent/tools/deploy.mjs": [
           'import { defineWorkflowTool } from "eve/tools";',
           'import { PLAN_PREFIX } from "../lib/plan.mjs";',
@@ -652,6 +654,9 @@ describe("development generation artifacts", () => {
     const compileResult = await compileAgent({ startPath: app.appRoot });
     const generation = await stageDevelopmentGeneration(compileResult);
     expect(generation.workflowSourceFingerprint).toEqual(expect.any(String));
+    await expect(
+      readDevelopmentGenerationAvailability(app.appRoot, basename(generation.snapshotRoot)),
+    ).resolves.toEqual({ kind: "ready", runtimeAppRoot: generation.runtimeAppRoot });
 
     const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
       compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
@@ -666,42 +671,50 @@ describe("development generation artifacts", () => {
     };
     expect(deploy.default.execute.workflowId).toBe("workflow//./agent/tools/deploy//execute");
     await expect(deploy.default.execute({ service: "api" })).rejects.toThrow(
-      /use start\(execute\) from workflow\/api/u,
+      /use start\(execute\) from eve\/workflow\/api/u,
     );
 
     // A helper the step imports is part of the workflow source graph; an
     // unrelated tool is not.
     await writeFile(
       join(app.appRoot, "agent", "lib", "plan.mjs"),
-      'export const PLAN_PREFIX = "plan v2:";\n',
+      `export const PLAN_PREFIX = "plan v2:";
+`,
     );
     const helperChanged = await stageDevelopmentGeneration(
       await compileAgent({ startPath: app.appRoot }),
     );
     expect(helperChanged.workflowSourceFingerprint).not.toBe(generation.workflowSourceFingerprint);
+    await expect(
+      readDevelopmentGenerationAvailability(app.appRoot, basename(generation.snapshotRoot)),
+    ).resolves.toEqual({ kind: "ready", runtimeAppRoot: generation.runtimeAppRoot });
 
     await writeFile(
       join(app.appRoot, "agent", "tools", "plain.mjs"),
-      'export default { description: "Plain tool.", execute: () => "plain v2" };\n',
+      `export default { description: "Plain tool.", execute: () => "plain v2" };
+`,
     );
     const plainChanged = await stageDevelopmentGeneration(
       await compileAgent({ startPath: app.appRoot }),
     );
     expect(plainChanged.workflowSourceFingerprint).toBe(helperChanged.workflowSourceFingerprint);
+    await expect(
+      readDevelopmentGenerationAvailability(app.appRoot, basename(helperChanged.snapshotRoot)),
+    ).resolves.toEqual({ kind: "ready", runtimeAppRoot: helperChanged.runtimeAppRoot });
     expect(plainChanged.fingerprint).not.toBe(helperChanged.fingerprint);
   });
 
   it("uses an app-relative workflow id for a workspace agent", async () => {
     const app = await scenarioApp({
       files: {
-        "agents/assistant/agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
-        "agents/assistant/agent/instructions.md": "Use the background tool.",
+        "agents/assistant/agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
+        "agents/assistant/agent/instructions.md": "Use the mission plan tool.",
         "agents/assistant/agent/tools/request_mission_plan.mjs": [
           'import { defineWorkflowTool } from "eve/tools";',
           "",
           "export default defineWorkflowTool({",
           '  description: "Run a mission plan.",',
-          '  execution: "background",',
           "  inputSchema: {},",
           "  async execute() {",
           '    "use workflow";',
@@ -710,7 +723,8 @@ describe("development generation artifacts", () => {
           "});",
           "",
         ].join("\n"),
-        "agents/monitor/agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agents/monitor/agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
         "agents/monitor/agent/instructions.md": "Monitor events.",
       },
       installDependencies: true,
@@ -739,7 +753,8 @@ describe("development generation artifacts", () => {
   it("rejects module-level authored workflow directives", async () => {
     const app = await scenarioApp({
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
         "agent/instructions.md": "Use the available tools.",
         "agent/tools/directive_text.mjs": [
           '// "use workflow" is documentation.',
@@ -774,7 +789,8 @@ describe("development generation artifacts", () => {
   it("discards a staged generation that was never activated", async () => {
     const app = await scenarioApp({
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
+`,
         "agent/instructions.md": "Use the configured model.",
       },
       name: "discard-generation",
@@ -821,7 +837,8 @@ async function writeDependencyFixture(appRoot: string): Promise<string> {
   );
   await writeFile(
     join(vendoredWorkflowRoot, "index.mjs"),
-    'export const serdeMarker = "serde-original";\n',
+    `export const serdeMarker = "serde-original";
+`,
   );
 
   await mkdir(externalRoot, { recursive: true });
@@ -848,7 +865,11 @@ async function writeDependencyFixture(appRoot: string): Promise<string> {
       "",
     ].join("\n"),
   );
-  await writeFile(join(externalRoot, "wrong.cjs"), 'throw new Error("require export used");\n');
+  await writeFile(
+    join(externalRoot, "wrong.cjs"),
+    `throw new Error("require export used");
+`,
+  );
   await writeFile(join(externalRoot, "binding.node"), "native-addon-placeholder\n");
   await writeFile(join(externalRoot, "payload.txt"), "payload-original\n");
   await mkdir(join(externalRoot, "node_modules"), { recursive: true });
@@ -864,7 +885,8 @@ async function writeDependencyFixture(appRoot: string): Promise<string> {
   );
   await writeFile(
     join(transitiveRoot, "index.mjs"),
-    'export const transitiveValue = "external-original";\n',
+    `export const transitiveValue = "external-original";
+`,
   );
 
   await symlink(

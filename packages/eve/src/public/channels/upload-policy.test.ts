@@ -1,4 +1,4 @@
-import type { FilePart, UserContent } from "ai";
+import type { MessageContent, MessageFilePart } from "#shared/message-content.js";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -9,7 +9,6 @@ import {
   isMediaTypeAllowed,
   isUploadsDisabled,
   mergeUploadPolicy,
-  stripDisallowedFileParts,
   type UploadPolicy,
   type UploadPolicyConfig,
   type UploadPolicyViolation,
@@ -21,7 +20,7 @@ function makeBytes(byteCount: number): Uint8Array {
   return new Uint8Array(byteCount).fill(0x61);
 }
 
-function filePart(overrides: Partial<FilePart> = {}): FilePart {
+function filePart(overrides: Partial<MessageFilePart> = {}): MessageFilePart {
   return {
     data: overrides.data ?? makeBytes(32),
     filename: overrides.filename ?? "report.csv",
@@ -180,7 +179,7 @@ describe("evaluateFilePart", () => {
 
   it("omits filename from the violation when the part has none", () => {
     const policy: UploadPolicy = { allowedMediaTypes: "*", maxBytes: 4 };
-    const part: FilePart = {
+    const part: MessageFilePart = {
       data: makeBytes(16),
       mediaType: "application/octet-stream",
       type: "file",
@@ -248,7 +247,7 @@ describe("collectUploadPolicyViolations", () => {
       allowedMediaTypes: ["text/csv"],
       maxBytes: 4,
     };
-    const content: UserContent = [
+    const content: MessageContent = [
       { type: "text", text: "summarize" },
       filePart({ data: makeBytes(64), filename: "too-big.csv", mediaType: "text/csv" }),
       filePart({ filename: "nope.png", mediaType: "image/png" }),
@@ -264,42 +263,12 @@ describe("collectUploadPolicyViolations", () => {
     expect(violations[1]?.filename).toBe("nope.png");
   });
 
-  it("skips non-file parts", () => {
-    const content: UserContent = [
-      { type: "text", text: "hello" },
-      { type: "image", mediaType: "image/png", image: makeBytes(8) },
-    ];
+  it("skips text parts", () => {
+    const content: MessageContent = [{ type: "text", text: "hello" }];
 
     expect(collectUploadPolicyViolations(content, { allowedMediaTypes: [], maxBytes: 1 })).toEqual(
       [],
     );
-  });
-});
-
-describe("stripDisallowedFileParts", () => {
-  it("removes violating file parts and keeps text/image parts", () => {
-    const policy: UploadPolicy = {
-      allowedMediaTypes: ["text/csv"],
-      maxBytes: 4,
-    };
-    const content: UserContent = [
-      { type: "text", text: "hi" },
-      filePart({ data: makeBytes(1), filename: "keep.csv", mediaType: "text/csv" }),
-      filePart({ data: makeBytes(64), filename: "drop-size.csv", mediaType: "text/csv" }),
-      filePart({ filename: "drop-type.png", mediaType: "image/png" }),
-    ];
-
-    const stripped = stripDisallowedFileParts(content, policy);
-
-    expect(Array.isArray(stripped)).toBe(true);
-    expect(stripped).toHaveLength(2);
-    const parts = stripped as ReadonlyArray<FilePart | { type: "text"; text: string }>;
-    expect(parts[0]).toEqual({ type: "text", text: "hi" });
-    expect((parts[1] as FilePart).filename).toBe("keep.csv");
-  });
-
-  it("returns the input unchanged for plain strings", () => {
-    expect(stripDisallowedFileParts("untouched", DEFAULT_UPLOAD_POLICY)).toBe("untouched");
   });
 });
 

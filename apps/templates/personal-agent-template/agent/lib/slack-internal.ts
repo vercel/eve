@@ -1,4 +1,4 @@
-import type { SlackLinkRecord } from "../../shared/types/slack-link.js";
+import type { SlackLinkRecord } from "../../lib/types/slack-link.js";
 import { appOrigin, internalHeaders } from "./internal-api.js";
 
 export async function fetchSlackLinkForMember(teamId: string, userId: string) {

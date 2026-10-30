@@ -14,7 +14,7 @@ export interface VerifiedRemoteAgentInspection {
   readonly vercelScope?: string;
 }
 
-/** @internal Dependencies for testing verified remote inspection. */
+/** Dependencies for testing verified remote inspection. */
 export interface InspectVerifiedRemoteAgentDeps {
   readonly createClient: (options: ClientOptions) => Pick<Client, "info">;
   readonly resolveVerifiedRemoteDevelopmentClient: (
@@ -36,6 +36,7 @@ const defaultDeps: InspectVerifiedRemoteAgentDeps = {
  * before inspection is retried.
  */
 export async function inspectVerifiedRemoteAgent(input: {
+  readonly headers?: Readonly<Record<string, string>>;
   readonly serverUrl: string;
   readonly workspaceRoot: string;
   readonly prompter?: Prompter;
@@ -45,6 +46,7 @@ export async function inspectVerifiedRemoteAgent(input: {
 }): Promise<VerifiedRemoteAgentInspection> {
   const deps = { ...defaultDeps, ...input.deps };
   const verified = await deps.resolveVerifiedRemoteDevelopmentClient({
+    headers: input.headers,
     serverUrl: input.serverUrl,
     signal: input.signal,
     workspaceRoot: input.workspaceRoot,
@@ -75,7 +77,8 @@ export async function inspectVerifiedRemoteAgent(input: {
   const options: ClientOptions = {
     ...verified.options,
     auth: { vercelOidc: { token: authentication.resolveToken } },
-    host: input.serverUrl,
+    headers: input.headers,
+    baseUrl: input.serverUrl,
     redirect: "manual",
   };
   return inspection(

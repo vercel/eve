@@ -1,18 +1,20 @@
+import type { TelegramChannelCredentials } from "#public/channels/telegram/credentials.js";
+export type { TelegramChannelCredentials } from "#public/channels/telegram/credentials.js";
+import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
+import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
+import type { ChannelContext } from "#shared/channel-context.js";
 import {
-  INTERNAL_CHANNEL_DELIVER,
-  type ChannelFrom,
-  type ChannelResolveSession,
-  type InternalChannelSource,
-} from "#channel/channel-operations.js";
-import type { SessionHandle } from "#channel/session.js";
+  INACTIVE_REQUEST_NOTICE,
+  respondOrRetireInactivePrompt,
+} from "#channel/inactive-prompt.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   answerTelegramCallbackQuery,
   callTelegramApi,
@@ -24,7 +26,6 @@ import {
   telegramContinuationToken,
   type TelegramApiOptions,
   type TelegramApiResponse,
-  type TelegramCredentials,
   type TelegramMessageBody,
   type TelegramMessageResult,
 } from "#public/channels/telegram/api.js";
@@ -38,14 +39,16 @@ import {
 import {
   defaultEvents,
   defaultOnMessage,
+  defaultTelegramAuth,
   isTelegramBotMentioned,
 } from "#public/channels/telegram/defaults.js";
 import {
   TELEGRAM_HITL_CALLBACK_PREFIX,
   isTelegramSyntheticResponse,
-  resolveTelegramInputResponses,
-  telegramCallbackInputResponse,
-  telegramReplyInputResponse,
+  resolveTelegramAnswers,
+  telegramCallbackAnswer,
+  telegramReplyAnswers,
+  telegramResolvedPromptText,
   type TelegramHitlState,
 } from "#public/channels/telegram/hitl.js";
 import {
@@ -54,6 +57,7 @@ import {
   type TelegramCallbackQuery,
   type TelegramChatType,
   type TelegramMessage,
+  type TelegramMessageReference,
 } from "#public/channels/telegram/inbound.js";
 import {
   mergeUploadPolicy,
@@ -66,19 +70,12 @@ import {
   stateFromTelegramMessage,
   telegramContinuationTokenFromState,
 } from "#public/channels/telegram/state.js";
-import {
-  verifyTelegramRequest,
-  type TelegramWebhookSecretToken,
-  type TelegramWebhookVerifier,
-} from "#public/channels/telegram/verify.js";
+import { verifyTelegramRequest } from "#public/channels/telegram/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import { telegramInstrumentation } from "#public/channels/telegram/audience.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 const log = createLogger("telegram.channel");
-
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Minimal Telegram context (only `telegram`, no `state` or session ops), passed to `onMessage` and `onCallbackQuery` hooks before a session exists. Event handlers receive the richer {@link TelegramEventContext}. */
 export interface TelegramContext {
@@ -107,16 +104,16 @@ export interface TelegramChannelState extends TelegramHitlState {
   messageThreadId: number | null;
   /** Telegram user id that triggered the current session/turn. */
   triggeringUserId?: string | null;
-  /** Public authorization status messages, keyed by connection name. */
+  /**
+   * Bot message id that the triggering message replied to. The deliver hook
+   * reads it from delivery state to answer a pending ForceReply prompt.
+   */
+  replyToBotMessageId?: string | null;
+  /** @internal Public authorization status messages, keyed by connection name. */
   pendingAuthMessageIds?: Record<string, string>;
 }
 
 /** Telegram channel credentials. `webhookVerifier` is a custom inbound webhook verifier for forwarded webhooks. */
-export interface TelegramChannelCredentials extends TelegramCredentials {
-  /** Webhook secret token configured via setWebhook. Falls back to `TELEGRAM_WEBHOOK_SECRET_TOKEN` when neither this nor `webhookVerifier` is set. */
-  readonly webhookSecretToken?: TelegramWebhookSecretToken;
-  readonly webhookVerifier?: TelegramWebhookVerifier;
-}
 
 /** Target for `receive(telegram, { target })` proactive sessions. `chatId` is required. `conversationId` resumes an existing thread; `initialMessage` posts a seed message and starts a new thread from it. The two are mutually exclusive: supplying both throws. */
 export interface TelegramReceiveTarget {
@@ -130,41 +127,36 @@ export interface TelegramReceiveTarget {
 export type TelegramInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Prior conversation added as user and assistant turns before this message. */
+  readonly history?: readonly SessionHistoryMessage[];
   /** Overrides the workflow run title without changing the message sent to the model. */
   readonly title?: string;
 } | null;
 
 /** Sync or async {@link TelegramInboundResult}. */
-export type TelegramInboundResultOrPromise = TelegramInboundResult | Promise<TelegramInboundResult>;
 
-type TelegramEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
-  data: EventData<T>,
-  channel: TelegramEventContext,
-  ctx: SessionContext,
+type TelegramEventHandler<T extends SessionEvent["type"]> = (
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<TelegramEventContext>,
 ) => void | Promise<void>;
 
-type TelegramSessionFailedHandler = (
-  data: EventData<"session.failed">,
-  channel: TelegramEventContext,
-) => void | Promise<void>;
-
-/** Per-event handlers for `telegramChannel({ events })`. Each entry overrides the built-in default (handlers merge over {@link defaultEvents}). `session.failed` receives `(data, channel)` and exposes the ID as `data.sessionId`; all others also receive the {@link SessionContext}. */
+/**
+ * Per-event handlers for `telegramChannel({ events })`. Each entry overrides the built-in default
+ * (handlers merge over {@link defaultEvents}). Every handler receives the event and a `ctx` whose
+ * `channel` is the Telegram context.
+ */
 export interface TelegramChannelEvents {
   readonly "turn.started"?: TelegramEventHandler<"turn.started">;
-  readonly "actions.requested"?: TelegramEventHandler<"actions.requested">;
-  readonly "action.partial"?: TelegramEventHandler<"action.partial">;
-  readonly "action.result"?: TelegramEventHandler<"action.result">;
-  readonly "message.completed"?: TelegramEventHandler<"message.completed">;
-  readonly "message.appended"?: TelegramEventHandler<"message.appended">;
-  readonly "input.requested"?: TelegramEventHandler<"input.requested">;
-  readonly "turn.failed"?: TelegramEventHandler<"turn.failed">;
-  readonly "turn.completed"?: TelegramEventHandler<"turn.completed">;
-  readonly "turn.cancelled"?: TelegramEventHandler<"turn.cancelled">;
-  readonly "session.failed"?: TelegramSessionFailedHandler;
-  readonly "session.completed"?: TelegramEventHandler<"session.completed">;
-  readonly "session.waiting"?: TelegramEventHandler<"session.waiting">;
-  readonly "authorization.required"?: TelegramEventHandler<"authorization.required">;
-  readonly "authorization.completed"?: TelegramEventHandler<"authorization.completed">;
+  readonly "call.requested"?: TelegramEventHandler<"call.requested">;
+  readonly "call.progress"?: TelegramEventHandler<"call.progress">;
+  readonly "call.settled"?: TelegramEventHandler<"call.settled">;
+  readonly "content.completed"?: TelegramEventHandler<"content.completed">;
+  readonly "content.delta"?: TelegramEventHandler<"content.delta">;
+  readonly "interaction.opened"?: TelegramEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: TelegramEventHandler<"interaction.settled">;
+  readonly "turn.settled"?: TelegramEventHandler<"turn.settled">;
+  readonly "session.ended"?: TelegramEventHandler<"session.ended">;
+  readonly "delivery.settled"?: TelegramEventHandler<"delivery.settled">;
 }
 
 /** Configuration for {@link telegramChannel}. */
@@ -186,7 +178,7 @@ export interface TelegramChannelConfig {
   readonly onMessage?: (
     ctx: TelegramContext,
     message: TelegramMessage,
-  ) => TelegramInboundResultOrPromise;
+  ) => TelegramInboundResult | Promise<TelegramInboundResult>;
   /** Override the default webhook route path (`/eve/v1/telegram`). */
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
@@ -248,8 +240,8 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
     TelegramReceiveTarget,
     TelegramInstrumentationMetadata
   >({
-    kindHint: "telegram",
     turnPolicy: config.turnPolicy,
+    uploadPolicy: config.uploadPolicy,
     state: initialTelegramState(config.botUsername),
     ...telegramInstrumentation,
     fetchFile: createTelegramFetchFile({
@@ -306,8 +298,8 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
       ),
     ],
 
-    async receive(input, { from }) {
-      const receiveTarget = input.target as Partial<TelegramReceiveTarget>;
+    async receive({ message, target, ...send }, { from }) {
+      const receiveTarget = target as Partial<TelegramReceiveTarget>;
       const chatId = readChatId(receiveTarget.chatId);
       if (chatId === undefined) {
         throw new Error("telegramChannel().receive requires target.chatId.");
@@ -339,8 +331,8 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
         await handle.sendMessage(initialMessage);
       }
 
-      return from(telegramContinuationTokenFromState(receiveState)).send(input.message, {
-        auth: input.auth,
+      return from(telegramContinuationTokenFromState(receiveState)).send(message, {
+        ...send,
         state: receiveState,
       });
     },
@@ -354,7 +346,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
 
 function rebuildTelegramContext(
   state: TelegramChannelState,
-  session: SessionHandle,
+  session: ChannelContext,
   config: TelegramChannelConfig,
 ): TelegramChannelContext {
   return {
@@ -365,7 +357,7 @@ function rebuildTelegramContext(
 
 function buildTelegramHandle(input: {
   readonly config: TelegramChannelConfig;
-  readonly session?: SessionHandle;
+  readonly session?: ChannelContext;
   readonly state: TelegramChannelState;
 }): TelegramHandle {
   const api = input.config.api;
@@ -583,29 +575,15 @@ async function dispatchMessage(input: {
     username: input.message.from?.username,
   });
   const channelContext = result.context ?? [];
-  const replyText = input.message.text || input.message.caption;
-  const replyInputResponses =
-    input.message.replyToMessage?.from?.isBot === true && replyText.trim().length > 0
-      ? [
-          telegramReplyInputResponse({
-            messageId: input.message.replyToMessage.messageId,
-            text: replyText,
-          }),
-        ]
-      : undefined;
 
   try {
-    const source = input.from(
-      telegramContinuationTokenFromState(state),
-    ) as InternalChannelSource<TelegramChannelState>;
-    await source[INTERNAL_CHANNEL_DELIVER](
-      {
-        context: [contextBlock, ...channelContext],
-        inputResponses: replyInputResponses,
-        message: turnMessage,
-      },
-      { auth: result.auth, state, title: result.title },
-    );
+    await input.from(telegramContinuationTokenFromState(state)).send(turnMessage, {
+      auth: result.auth,
+      context: [contextBlock, ...channelContext],
+      history: result.history,
+      state,
+      title: result.title,
+    });
   } catch (error) {
     log.error("message delivery failed", { error });
   }
@@ -634,24 +612,35 @@ async function dispatchCallbackQuery(input: {
   }
 
   if (input.query.data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX) === true) {
+    // Telegram takes one answer per callback, so it waits for delivery: a press
+    // no session can take is answered with the inactive notice instead.
+    // The prompt's edit starts before the answer and finishes after it.
+    const message = input.query.message;
+    const data = input.query.data;
+    const answer =
+      message && state.chatId
+        ? await respondOrRetireInactivePrompt(
+            // The presser acts as themselves, so a press that starts a turn lets
+            // their next message steer it.
+            () =>
+              input
+                .from(telegramContinuationTokenFromState(state))
+                .respond([telegramCallbackAnswer(data)], {
+                  auth: defaultTelegramAuth({ ...message, from: input.query.from }),
+                }),
+            { retirePrompt: (label) => retireInactivePrompt(telegram, message, label) },
+            log,
+          )
+        : undefined;
     try {
       await telegram.telegram.answerCallbackQuery({
         callbackQueryId: input.query.id,
-        text: "Answer received.",
+        text: answer?.outcome === "inactive" ? INACTIVE_REQUEST_NOTICE : "Answer received.",
       });
     } catch (error) {
       log.warn("Telegram callback-query acknowledgement failed", { error });
     }
-
-    if (!input.query.message || !state.chatId) return;
-    try {
-      const source = input.from(telegramContinuationTokenFromState(state));
-      await source.respond([telegramCallbackInputResponse(input.query.data)], {
-        auth: null,
-      });
-    } catch (error) {
-      log.error("callback query delivery failed", { error });
-    }
+    if (answer?.outcome === "inactive") await answer.retirement;
     return;
   }
 
@@ -674,15 +663,41 @@ async function dispatchCallbackQuery(input: {
   }
 }
 
+/**
+ * Edits a prompt no session holds the way `input.resolved` edits a resolved
+ * one. The session's record of the prompt is gone, so its text comes from the
+ * pressed message.
+ */
+async function retireInactivePrompt(
+  telegram: TelegramContext,
+  message: TelegramMessageReference,
+  label: string,
+): Promise<void> {
+  const replyMarkup = { inline_keyboard: [] };
+  if (message.text === undefined) {
+    await telegram.telegram.editMessageReplyMarkup({ messageId: message.messageId, replyMarkup });
+    return;
+  }
+  await telegram.telegram.editMessageText({
+    messageId: message.messageId,
+    replyMarkup,
+    text: telegramResolvedPromptText(message.text, label),
+  });
+}
+
 function attachTelegramDeliver(channel: TelegramChannel): void {
   if (!isCompiledChannel(channel)) return;
   const adapter = channel.adapter;
   adapter.deliver = (payload: DeliverPayload, ctx: ChannelAdapterContext<TelegramChannelState>) => {
-    const responses = payload.inputResponses ?? [];
+    const state = payload.state as Partial<TelegramChannelState> | undefined;
+    const responses = [
+      ...(payload.answers ?? []),
+      ...telegramReplyAnswers(state?.replyToBotMessageId, payload.message),
+    ];
     if (responses.some(isTelegramSyntheticResponse)) {
-      const resolved = resolveTelegramInputResponses(ctx.state, responses);
+      const resolved = resolveTelegramAnswers(ctx.state, responses);
       if (resolved.length > 0) {
-        return { inputResponses: resolved, context: payload.context };
+        return { answers: resolved, context: payload.context };
       }
       if (payload.message !== undefined) {
         return { message: payload.message, context: payload.context };

@@ -11,17 +11,15 @@
 import {
   createLocalTracesProcessor,
   resolveLocalTracesExportPolicy,
-} from "#tracing/local-traces.js";
+} from "#tracing/local/traces.js";
 import {
   agentRunsIntegration,
   managedOtelIntegration,
   type ManagedTraceOptions,
   type OtelIntegration,
-} from "#tracing/otel-declaration.js";
+} from "#tracing/eve/otel-declaration.js";
 
 export {
-  isOtelDeclaration,
-  isOtelIntegration,
   otel,
   otelIntegration,
   type OtelDeclaration,
@@ -37,9 +35,13 @@ export {
   type TraceCaptureContext,
   type TraceCapturePolicy,
   type TracePolicyDecision,
-} from "#tracing/otel-declaration.js";
+} from "#tracing/eve/otel-declaration.js";
 
-export type { SpanExporter, SpanProcessor } from "#compiled/@vercel/otel/index.js";
+export type {
+  SpanExporter,
+  SpanProcessor,
+  SpanProcessorOrName,
+} from "#tracing/eve/otel-configuration.js";
 
 /**
  * Vercel Agent Runs, enabled by default in preview and production deployments.

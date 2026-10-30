@@ -1,5 +1,12 @@
+import { outputOf } from "#evals/output.js";
 import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
+import {
+  composeAssertionScoreMetadata,
+  exportedAssertionName,
+  groupAssertionScores,
+} from "#evals/runner/reporters/assertion-scores.js";
 import { resolveLocalGitMetadata } from "#evals/runner/resolve-git-metadata.js";
+import { formatAttemptLabel } from "#evals/runner/attempt-label.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
 /**
@@ -80,7 +87,7 @@ interface BraintrustExperimentSummary {
  * missing. `config` is optional and defaults to an empty object (the project
  * name then falls back to the first observed eval id).
  */
-export function Braintrust(config: BraintrustReporterConfig = {}): EvalReporter {
+export function braintrustReporter(config: BraintrustReporterConfig = {}): EvalReporter {
   return new BraintrustReporter(config);
 }
 
@@ -129,32 +136,29 @@ class BraintrustReporter implements EvalReporter {
     if (!this.#experiment) return;
     const evaluation = this.#evaluations.get(result.id);
 
-    // Soft assertions log under their own name; gate assertions log as binary
-    // scores under a `gate:` prefix so experiments diff gate regressions the
-    // same way they diff soft-score regressions.
     const scores: Record<string, number> = {};
-    const scoreNameCounts = new Map<string, number>();
-    for (const assertion of result.assertions) {
-      const baseName = assertion.severity === "gate" ? `gate:${assertion.name}` : assertion.name;
-      const count = (scoreNameCounts.get(baseName) ?? 0) + 1;
-      scoreNameCounts.set(baseName, count);
-      const key = count === 1 ? baseName : `${baseName}#${count}`;
-      scores[key] = assertion.score;
+    const groups = groupAssertionScores(result.assertions, exportedAssertionName);
+    for (const [name, group] of groups) {
+      if (group.score !== undefined) scores[name] = group.score;
     }
 
     const failedAssertions = result.assertions
-      .filter((assertion) => !assertion.passed)
+      .filter((assertion) => assertion.passed === false)
       .map((assertion) => ({ ...assertion }));
 
     const metadata: Record<string, unknown> = {
       ...evaluation?.metadata,
+      eveAttempt: result.attempt,
       eveSessionId: result.result.sessionId,
       eveStatus: result.result.status,
       eveVerdict: result.verdict,
       eveSkipReason: result.skipReason,
       eveToolCalls: result.result.derived.toolCalls.map((call) => call.name),
       eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
-      eveParked: result.result.derived.parked,
+      eveSkillLoads: result.result.derived.skillLoads.map((load) => load.skill),
+      eveAwaitingInput: result.result.status === "awaiting-input",
+      eveSessionEnded: result.result.sessionEnded,
+      eveAssertionScores: composeAssertionScoreMetadata(result.assertions),
     };
 
     if (result.result.traceContexts.length > 0) {
@@ -180,9 +184,10 @@ class BraintrustReporter implements EvalReporter {
     };
 
     this.#experiment.log({
-      id: result.id,
+      // Braintrust upserts rows by id, so each attempt needs its own row id.
+      id: formatAttemptLabel(result.id, result.attempt),
       input: evaluation?.description ?? "",
-      output: result.result.output,
+      output: outputOf(result.result) ?? "",
       error: result.error ?? undefined,
       scores,
       metadata,

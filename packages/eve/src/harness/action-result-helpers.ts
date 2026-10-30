@@ -38,7 +38,7 @@ function toJsonValue(value: unknown): JsonValue {
 /**
  * Builds a `RuntimeToolResultActionResult` from a raw tool output value.
  *
- * This is the single coercion point for `action.result` projection. Both
+ * This is the single coercion point for `call.settled` projection. Both
  * native tool execution (via {@link createRuntimeToolResultFromStepResult} /
  * {@link createRuntimeToolResultFromMessagePart}) and Workflow child calls
  * funnel through here, so the raw-output-vs-`toModelOutput` decision —
@@ -51,16 +51,14 @@ export function createRuntimeToolResultFromValue(input: {
   readonly output: unknown;
   readonly isError?: boolean;
 }): RuntimeToolResultActionResult {
+  const thrown = input.isError === true && input.output instanceof Error ? input.output : undefined;
   const result: RuntimeToolResultActionResult = {
     callId: input.callId,
     kind: "tool-result",
     output: toolResultOutputToJsonValue({
       output: {
         type: input.isError === true ? "error-json" : "json",
-        value:
-          input.isError === true && input.output instanceof Error
-            ? input.output.message
-            : input.output,
+        value: thrown === undefined ? input.output : thrown.message,
       },
       toolCallId: input.callId,
       toolName: input.toolName,
@@ -68,7 +66,11 @@ export function createRuntimeToolResultFromValue(input: {
     toolName: input.toolName,
   };
 
-  return input.isError === true ? { ...result, isError: true } : result;
+  if (input.isError !== true) return result;
+  // The output keeps only a thrown error's message; its name lets instrumentation classify the failure.
+  return thrown === undefined
+    ? { ...result, isError: true }
+    : { ...result, errorName: thrown.name, isError: true };
 }
 
 /**
@@ -125,15 +127,17 @@ export function createToolResultMessagePartFromToolError(
  */
 export function createRuntimeToolResultFromMessagePart(
   part: ToolResultPart,
+  /** The entry the result's call ran, which history names after the catalog tool for a call made through one. */
+  toolName: string,
 ): RuntimeToolResultActionResult {
   return createRuntimeToolResultFromValue({
     callId: part.toolCallId,
     output: toolResultOutputToJsonValue({
       output: part.output,
       toolCallId: part.toolCallId,
-      toolName: part.toolName,
+      toolName,
     }),
-    toolName: part.toolName,
+    toolName,
     isError: isToolResultError(part.output),
   });
 }
@@ -169,7 +173,7 @@ function toolResultOutputToJsonValue(input: {
   );
 }
 
-function isToolResultError(output: ToolResultPart["output"]): boolean {
+export function isToolResultError(output: ToolResultPart["output"]): boolean {
   return (
     output.type === "error-json" ||
     output.type === "error-text" ||

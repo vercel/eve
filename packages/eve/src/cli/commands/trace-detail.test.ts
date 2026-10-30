@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { LocalTraceSpan } from "#tracing/local-trace-reader.js";
+import type { LocalTraceSpan } from "#tracing/local/trace-reader.js";
 
 import {
   formatCostUsd,
   formatTokenSummary,
   renderSpanDetailTree,
   spanMetricChips,
-  summarizeLocalTrace,
 } from "./trace-detail.js";
 
 function span(overrides: Partial<LocalTraceSpan> = {}): LocalTraceSpan {
@@ -45,68 +44,15 @@ describe("spanMetricChips", () => {
   it("prefers gateway cost over provider cost and parses string ints", () => {
     expect(
       spanMetricChips(
-        span({ attributes: { "gen_ai.usage.cost": 0.5, "agent.usage.input_tokens": "900" } }),
+        span({
+          attributes: {
+            "gen_ai.operation.name": "chat",
+            "gen_ai.usage.cost": 0.5,
+            "gen_ai.usage.input_tokens": "900",
+          },
+        }),
       ),
     ).toEqual(["↑900", "$0.5000"]);
-  });
-});
-
-describe("summarizeLocalTrace", () => {
-  it("sums usage over agent.step spans only, avoiding double counts", () => {
-    const summary = summarizeLocalTrace([
-      span({
-        attributes: {
-          "agent.model.id": "gpt-5",
-          "agent.usage.input_tokens": 1000,
-          "agent.usage.output_tokens": 100,
-          "agent.usage.cache_read_tokens": 800,
-          "gen_ai.usage.cost": 0.01,
-        },
-      }),
-      // Same usage repeated on the model span must not double-count.
-      span({
-        name: "ai.streamText.doStream",
-        attributes: {
-          "agent.usage.input_tokens": 1000,
-          "agent.usage.output_tokens": 100,
-          "gen_ai.request.model": "gpt-5",
-        },
-      }),
-      span({
-        attributes: {
-          "agent.model.id": "claude-sonnet-4",
-          "agent.usage.input_tokens": 500,
-          "agent.usage.output_tokens": 50,
-        },
-      }),
-    ]);
-
-    expect(summary.inputTokens).toBe(1500);
-    expect(summary.outputTokens).toBe(150);
-    expect(summary.cacheReadTokens).toBe(800);
-    expect(summary.costUsd).toBeCloseTo(0.01);
-    expect(summary.models).toEqual(["gpt-5", "claude-sonnet-4"]);
-    expect(summary.errorCount).toBe(0);
-  });
-
-  it("reads legacy GenAI cache details from persisted step spans", () => {
-    const summary = summarizeLocalTrace([
-      span({
-        attributes: {
-          "gen_ai.usage.cache_creation.input_tokens": 20,
-          "gen_ai.usage.cache_read.input_tokens": 40,
-        },
-      }),
-    ]);
-
-    expect(summary.cacheReadTokens).toBe(40);
-    expect(summary.cacheWriteTokens).toBe(20);
-  });
-
-  it("reports errors and leaves cost undefined when unreported", () => {
-    const summary = summarizeLocalTrace([span({ statusCode: 2 }), span()]);
-    expect(summary.errorCount).toBe(1);
-    expect(summary.costUsd).toBeUndefined();
   });
 });
 
@@ -116,9 +62,7 @@ describe("formatTokenSummary / formatCostUsd", () => {
       formatTokenSummary({
         cacheReadTokens: 1100,
         cacheWriteTokens: 0,
-        errorCount: 0,
         inputTokens: 1200,
-        models: [],
         outputTokens: 340,
       }),
     ).toBe("↑1.2K in · ↓340 out · 1.1K cached");

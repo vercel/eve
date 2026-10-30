@@ -35,7 +35,7 @@ const GENERATED_PATH_RULES: readonly {
   },
 ];
 
-export interface GeneratedPathMatch {
+interface GeneratedPathMatch {
   readonly path: string;
   readonly label: string;
   readonly remedy: string;

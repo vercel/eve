@@ -1,13 +1,21 @@
 import { defineState } from "eve/context";
 import type { HookContext, HookEvent } from "eve/hooks";
 
+export type SubagentHookType = "task.started" | "task.ended" | "call.settled" | "child.opened";
+
 export interface SubagentHookObservation {
   readonly subscriber: "typed" | "wildcard";
-  readonly type: "subagent.called" | "subagent.completed";
+  readonly type: SubagentHookType;
+  /** The call that started the task, or that owns the child session. */
   readonly callId: string;
-  readonly eventId: string;
+  /** The event's position, as `line:index`. */
+  readonly position: string;
   readonly sessionId: string;
+  readonly taskId?: string;
+  /** What a task's call settled with. */
   readonly output?: string;
+  /** The session a `child.opened` event announced. */
+  readonly childSessionId?: string;
 }
 
 export const subagentHookAudit = defineState<SubagentHookObservation[]>(
@@ -15,29 +23,89 @@ export const subagentHookAudit = defineState<SubagentHookObservation[]>(
   () => [],
 );
 
+/** The call that started `taskId`, from the `task.started` this subscriber already recorded. */
+function callOfTask(subscriber: string, taskId: string): string | undefined {
+  return subagentHookAudit
+    .get()
+    .find(
+      (record) =>
+        record.subscriber === subscriber &&
+        record.type === "task.started" &&
+        record.taskId === taskId,
+    )?.callId;
+}
+
+function isTaskCall(subscriber: string, callId: string): boolean {
+  return subagentHookAudit
+    .get()
+    .some(
+      (record) =>
+        record.subscriber === subscriber &&
+        record.type === "task.started" &&
+        record.callId === callId,
+    );
+}
+
+function observe(
+  subscriber: SubagentHookObservation["subscriber"],
+  event: HookEvent,
+): Omit<SubagentHookObservation, "position" | "sessionId" | "subscriber"> | undefined {
+  switch (event.type) {
+    case "task.started":
+      return {
+        type: event.type,
+        callId: event.data.startedBy.callId,
+        taskId: event.data.taskId,
+      };
+    case "task.ended": {
+      const callId = callOfTask(subscriber, event.data.taskId);
+      return callId === undefined
+        ? undefined
+        : { type: event.type, callId, taskId: event.data.taskId };
+    }
+    case "call.settled":
+      if (!isTaskCall(subscriber, event.data.callId)) return undefined;
+      return {
+        type: event.type,
+        callId: event.data.callId,
+        output: typeof event.data.output === "string" ? event.data.output : undefined,
+      };
+    case "child.opened": {
+      const { owner } = event.data;
+      const callId = "callId" in owner ? owner.callId : callOfTask(subscriber, owner.taskId);
+      return callId === undefined
+        ? undefined
+        : { type: event.type, callId, childSessionId: event.data.sessionId };
+    }
+    default:
+      return undefined;
+  }
+}
+
 export async function recordSubagentHook(
   subscriber: SubagentHookObservation["subscriber"],
   event: HookEvent,
   ctx: HookContext,
 ): Promise<void> {
-  if (event.type !== "subagent.called" && event.type !== "subagent.completed") return;
-  if (event.type === "subagent.called" && ctx.session.id !== event.data.sessionId) {
-    throw new Error("Subagent hook received a different parent session.");
-  }
+  const observation = observe(subscriber, event);
+  if (observation === undefined) return;
+  const position = `${ctx.position.line}:${ctx.position.index}`;
   const sandbox = await ctx.getSandbox();
   await sandbox.writeTextFile({
-    path: `subagent-hook-${event.meta.id}-${subscriber}.txt`,
-    content: event.data.callId,
+    path: `subagent-hook-${position.replace(":", "-")}-${subscriber}.txt`,
+    content: observation.callId,
   });
   subagentHookAudit.update((observations) => [
     ...observations,
-    {
-      subscriber,
-      type: event.type,
-      callId: event.data.callId,
-      eventId: event.meta.id,
-      sessionId: ctx.session.id,
-      output: event.type === "subagent.completed" ? event.data.output : undefined,
-    },
+    { ...observation, position, sessionId: ctx.session.id, subscriber },
   ]);
+  if (subscriber === "typed") {
+    // An observer that fails after recording its event catches the failure itself: a hook that
+    // throws during a turn fails the turn.
+    try {
+      throw new Error("Fixture subagent observer failed after recording its event.");
+    } catch (error) {
+      console.warn("subagent observer failed", { error: (error as Error).message });
+    }
+  }
 }

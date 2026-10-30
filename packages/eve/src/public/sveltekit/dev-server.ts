@@ -19,12 +19,12 @@ const EVE_SVELTEKIT_DEV_SERVER_FILE_NAME = "sveltekit-dev-server.json";
 const EVE_SVELTEKIT_DEV_SERVER_LOCK_FILE_NAME = "sveltekit-dev-server.lock";
 const LOCAL_SERVER_URL_PATTERN = /https?:\/\/(?:\[[^\]\s]+\]|[^\s/:[\]]+)(?::\d+)?/;
 
-export interface EveProcessHandle {
+interface EveProcessHandle {
   readonly origin: string;
   readonly process?: ChildProcess;
 }
 
-export interface EveDevServerRegistry {
+interface EveDevServerRegistry {
   readonly appRoot: string;
   readonly origin: string;
   readonly pid: number | null;

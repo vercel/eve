@@ -1,10 +1,11 @@
+import type { DeliverHookPayload } from "#channel/types.js";
 import type { Telemetry, TelemetryOptions } from "ai";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import type {
-  InstrumentationAttemptScope,
+  InstrumentationScope,
   InstrumentationContextRunner,
   InstrumentationHooks,
   InstrumentationSessionStartedEvent,
@@ -12,7 +13,6 @@ import type {
   InstrumentationTraceSeed,
   InstrumentationTurnStartedEvent,
 } from "#instrumentation/lifecycle.js";
-import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import {
   buildTelemetryRuntimeContext,
   snapshotInstrumentationRuntimeContext,
@@ -24,29 +24,20 @@ import {
 } from "#instrumentation/ai-sdk-telemetry.js";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import {
+  attemptScopeOf,
   createInstrumentationHandleEvent,
-  publishInputResolutions,
+  type AttemptPlace,
   type CreateInstrumentationHandleEventInput,
 } from "#instrumentation/native-events.js";
-import {
-  createBackgroundTaskInstrumentation,
-  type BackgroundTaskInstrumentation,
-} from "#instrumentation/background-task-runtime.js";
-import type { ResolvedInputBatch } from "#harness/input-requests.js";
 import type { HandleEventFn } from "#harness/types.js";
-import {
-  instrumentChannelDelivery,
-  type ChannelDeliveryStartInstrumentation,
-  type ChannelDeliveryTerminalInstrumentation,
-} from "#instrumentation/channel-delivery.js";
 import { recordErrorOnSpan } from "#internal/logging.js";
 import {
   prepareTurnTraceContext,
   type PrepareTurnTraceContextInput,
 } from "#instrumentation/prepare-trace-context.js";
-import type { RuntimeTraceContext } from "#protocol/message.js";
-import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/otel-declaration.js";
-import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import type { TraceContext } from "#protocol/session-events/families/session.js";
+import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/eve/otel-declaration.js";
+import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import { contextStorage, type ContextContainer } from "#context/container.js";
 import {
   createMemoryInstrumentation,
@@ -54,24 +45,26 @@ import {
 } from "#instrumentation/memory.js";
 import { ConversationIdKey, ParentSessionKey } from "#context/keys.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
-import { withErrorContent } from "#tracing/error-content-context.js";
-import type { AgentSamplingOperation } from "#tracing/agent-span-contract.js";
+import { withCapture } from "#compiled/@vercel/agent-runs/otel.js";
+import type { SamplingOperation as AgentSamplingOperation } from "#tracing/eve/otel-registration.js";
 import {
   isSampledTrace,
   resolveTracePolicy,
   resolveTracePolicyDecision,
-} from "#tracing/sampled-trace.js";
+} from "#shared/trace-policy.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
-import { readSessionTraceDecision } from "#tracing/agent-trace-context-store.js";
+import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
-import { readConversationId } from "#tracing/conversation-context.js";
+import { readConversationId } from "#shared/conversation-identity.js";
+import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import {
   getInstrumentationRuntime,
   registerInstrumentationRuntime,
 } from "#instrumentation/runtime-global.js";
 import { initializeSessionInstrumentation } from "#instrumentation/session-init.js";
 import { ensureAiSdkWarningLogger } from "#instrumentation/ai-sdk-warnings.js";
+import { createGatewayTraceContextHeaders } from "#tracing/eve/gateway.js";
 
 export { getInstrumentationRuntime, registerInstrumentationRuntime };
 export { initializeSessionInstrumentation };
@@ -84,6 +77,7 @@ interface InstrumentedStepSession {
 }
 
 export interface InstrumentationStepScope<TSession> {
+  readonly gatewayTraceContextHeaders?: () => Record<string, string> | undefined;
   readonly createHandleEvent: (
     input: Omit<
       CreateInstrumentationHandleEventInput,
@@ -94,22 +88,20 @@ export interface InstrumentationStepScope<TSession> {
       | "parentLineage"
       | "parentTraceContext"
       | "rootSessionId"
+      | "traceSessionId"
       | "sessionId"
     >,
   ) => HandleEventFn | undefined;
-  readonly prepareAttempt: (input: {
-    readonly attemptIndex: number;
-    readonly runtimeContext?: Readonly<Record<string, unknown>>;
-    readonly stepIndex: number;
-    readonly turnId: string;
-  }) => PreparedInstrumentationAttempt;
+  /** The AI SDK telemetry for one attempt; the attempt's start and end come from its facts. */
+  readonly prepareAttempt: (
+    input: AttemptPlace & {
+      readonly isFrameworkTool?: (name: string) => boolean;
+      readonly runtimeContext?: Readonly<Record<string, unknown>>;
+    },
+  ) => PreparedInstrumentationAttempt;
   readonly preparePreamble: (
     input: Omit<PrepareTurnTraceContextInput, "instrumentation" | "principals" | "session">,
-  ) => Promise<RuntimeTraceContext | undefined>;
-  readonly publishInputResolutions: (input: {
-    readonly batch: ResolvedInputBatch;
-    readonly sessionId: string;
-  }) => Promise<void>;
+  ) => Promise<TraceContext | undefined>;
   readonly recordError: (error: unknown) => void;
   readonly resolveRuntimeContext: (
     input: Omit<
@@ -124,15 +116,12 @@ export interface InstrumentationStepScope<TSession> {
 }
 
 export interface PreparedInstrumentationAttempt {
-  readonly complete: () => Promise<void>;
-  readonly fail: (error: unknown) => Promise<void>;
-  readonly scope: InstrumentationAttemptScope;
+  readonly scope: InstrumentationScope;
   readonly telemetry: TelemetryOptions | undefined;
 }
 
-export type InstrumentationAttempt = InstrumentationAttemptScope;
-
 export interface BoundInstrumentationSession {
+  readonly traceSessionId: string;
   readonly agentName: string;
   readonly rootSessionId: string;
   readonly sessionId: string;
@@ -140,8 +129,6 @@ export interface BoundInstrumentationSession {
 
 /** Process-wide runtime consumed by every harness execution surface. */
 export interface InstrumentationRuntime {
-  /** Materializes settled invocation spans without draining the exporter pipeline. */
-  readonly flushSettledInvocations?: () => Promise<void>;
   readonly forceFlush: () => Promise<void>;
   readonly hooks: InstrumentationHooks;
   readonly idGenerator?: AgentSpanIdGenerator;
@@ -175,17 +162,12 @@ export interface SessionInstrumentation {
   ) => Promise<TResult>;
 }
 
-export interface ExecutionInstrumentation extends BackgroundTaskInstrumentation {
+export interface ExecutionInstrumentation {
+  readonly prepareDelivery: (delivery: DeliverHookPayload) => void;
   readonly createHandleEvent: (input: {
     readonly handleEvent?: HandleEventFn;
-    readonly turnId?: string;
   }) => HandleEventFn | undefined;
   readonly flush: () => Promise<void>;
-  readonly instrumentChannelDelivery: (
-    input:
-      | Omit<ChannelDeliveryStartInstrumentation, "hooks" | "policyAgentName">
-      | Omit<ChannelDeliveryTerminalInstrumentation, "hooks">,
-  ) => Promise<void>;
   readonly memory?: MemoryInstrumentation;
   readonly prepareExecution: () => SessionInstrumentation;
   readonly preparePreamble: InstrumentationStepScope<never>["preparePreamble"];
@@ -194,8 +176,12 @@ export interface ExecutionInstrumentation extends BackgroundTaskInstrumentation 
 export function bindInstrumentationRuntime(
   runtime: InstrumentationRuntime | undefined,
   ctx: ContextContainer,
-  boundSession: BoundInstrumentationSession,
+  boundInput: Omit<BoundInstrumentationSession, "traceSessionId">,
 ): ExecutionInstrumentation | undefined {
+  const boundSession: BoundInstrumentationSession = {
+    ...boundInput,
+    traceSessionId: resolveTraceRootSessionId(ctx, boundInput.sessionId),
+  };
   if (readConversationId(ctx.get(ConversationIdKey)) === undefined) {
     ctx.set(
       ConversationIdKey,
@@ -203,9 +189,17 @@ export function bindInstrumentationRuntime(
     );
   }
   if (runtime === undefined) return undefined;
+  let deliveryInput: DeliverHookPayload | undefined;
   const baseHooks = runtime.hooks;
-  const readSessionContext = () =>
-    readInstrumentationSessionContext(contextStorage.getStore() ?? ctx);
+  const traceSessionId = boundSession.traceSessionId;
+  const readSessionContext = () => {
+    const sessionContext = readInstrumentationSessionContext(contextStorage.getStore() ?? ctx);
+    return {
+      ...sessionContext,
+      rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
+      traceSessionId,
+    };
+  };
   const bindHooks = (sessionContext: ReturnType<typeof readSessionContext>) => {
     return (
       baseHooks.forTrace?.({
@@ -241,7 +235,8 @@ export function bindInstrumentationRuntime(
         channelType: sessionContext.instrumentation?.channelType,
         parentLineage: sessionContext.parentLineage,
         parentTraceContext: sessionContext.parentTraceContext,
-        rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
+        rootSessionId: sessionContext.rootSessionId,
+        traceSessionId: sessionContext.traceSessionId,
         scheduleId: sessionContext.scheduleId,
         sessionId: boundSession.sessionId,
         title: sessionContext.title,
@@ -256,7 +251,8 @@ export function bindInstrumentationRuntime(
             const sessionContext = readSessionContext();
             return {
               hooks: bindHooks(sessionContext),
-              rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
+              rootSessionId: sessionContext.rootSessionId,
+              traceSessionId: sessionContext.traceSessionId,
             };
           },
           runInContext: runtime.runInContext,
@@ -391,53 +387,40 @@ export function bindInstrumentationRuntime(
             recordOutputs: content.recordOutputs,
           };
         };
+        const attemptSession = {
+          channelAudience: audience,
+          functionId: settings?.functionId ?? boundSession.agentName,
+          rootSessionId: sessionContext.rootSessionId,
+          sessionId: boundSession.sessionId,
+          traceSessionId: sessionContext.traceSessionId,
+        };
         const run = () =>
           execute({
+            gatewayTraceContextHeaders: createGatewayTraceContextHeaders,
             createHandleEvent: (eventInput) =>
               createInstrumentationHandleEvent({
                 ...eventInput,
+                ...attemptSession,
+                deliveryInput,
                 agentName: boundSession.agentName,
-                channelAudience: audience,
                 channelKind: conversation.channel.kind,
+                environment: conversation.environment,
                 hooks,
                 parentLineage: sessionContext.parentLineage,
                 parentTraceContext: sessionContext.parentTraceContext,
-                rootSessionId: sessionContext.parent?.rootSessionId,
                 scheduleId: sessionContext.scheduleId,
-                sessionId: boundSession.sessionId,
                 title: sessionContext.title,
               }),
             prepareAttempt: (attemptInput) => {
-              const scope: InstrumentationAttemptScope = {
-                attemptId: `${boundSession.sessionId}:${attemptInput.turnId}:${attemptInput.stepIndex}:${attemptInput.attemptIndex}`,
-                attemptIndex: attemptInput.attemptIndex,
-                channelAudience: audience,
-                functionId: settings?.functionId ?? boundSession.agentName,
-                rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.sessionId,
-                sessionId: boundSession.sessionId,
-                stepIndex: attemptInput.stepIndex,
-                turnId: attemptInput.turnId,
-              };
+              const scope = attemptScopeOf(attemptSession, attemptInput);
               const bridgeIntegration = createAiSdkHookBridge(
                 scope,
                 hooks,
                 runtime.runInContext,
                 attemptInput.runtimeContext,
+                attemptInput.isFrameworkTool,
               );
               return {
-                complete: () =>
-                  hooks.publish({
-                    idempotencyKey: attemptIdempotencyKey(scope),
-                    scope,
-                    type: "step.attempt.completed",
-                  }),
-                fail: (error) =>
-                  hooks.publish({
-                    error,
-                    idempotencyKey: attemptIdempotencyKey(scope),
-                    scope,
-                    type: "step.attempt.failed",
-                  }),
                 scope,
                 telemetry: telemetry({
                   bridgeIntegration,
@@ -446,8 +429,6 @@ export function bindInstrumentationRuntime(
               };
             },
             preparePreamble: (preambleInput) => preparePreamble(preambleInput, sessionContext),
-            publishInputResolutions: (resolutionInput) =>
-              publishInputResolutions({ ...resolutionInput, hooks }),
             recordError: (error) => {
               if (turnSpan !== undefined) recordErrorOnSpan(turnSpan, error);
             },
@@ -473,7 +454,11 @@ export function bindInstrumentationRuntime(
           });
         try {
           return await otelContext.with(
-            withErrorContent(parentContext ?? otelContext.active(), content.recordOutputs),
+            withCapture(parentContext ?? otelContext.active(), {
+              emit: true,
+              recordInputs: content.recordInputs,
+              recordOutputs: content.recordOutputs,
+            }),
             run,
           );
         } finally {
@@ -484,31 +469,30 @@ export function bindInstrumentationRuntime(
     };
   };
   return {
-    ...createBackgroundTaskInstrumentation({
-      ctx,
-      hooks: () => bindHooks(readSessionContext()),
-      sessionId: boundSession.sessionId,
-    }),
+    prepareDelivery: (delivery) => {
+      deliveryInput = delivery;
+    },
     createHandleEvent: (input) => {
       const sessionContext = readSessionContext();
       return createInstrumentationHandleEvent({
         agentName: boundSession.agentName,
+        channelAudience: sessionContext.conversation.audience,
         channelKind: sessionContext.conversation.channel.kind,
+        environment: sessionContext.conversation.environment,
+        functionId: captureExecutionRuntime().otelSettings?.functionId ?? boundSession.agentName,
         handleEvent: input.handleEvent,
+        deliveryInput,
         hooks: bindHooks(sessionContext),
+        rootSessionId: sessionContext.rootSessionId,
+        traceSessionId: sessionContext.traceSessionId,
+        parentLineage: sessionContext.parentLineage,
+        parentTraceContext: sessionContext.parentTraceContext,
         scheduleId: sessionContext.scheduleId,
         sessionId: boundSession.sessionId,
         title: sessionContext.title,
-        turnId: input.turnId,
       });
     },
     flush: runtime.forceFlush,
-    instrumentChannelDelivery: (input) =>
-      instrumentChannelDelivery({
-        ...input,
-        hooks: baseHooks,
-        policyAgentName: boundSession.agentName,
-      }),
     memory,
     prepareExecution,
     preparePreamble: (input) => preparePreamble(input, readSessionContext()),
@@ -521,11 +505,13 @@ export function bindSessionInstrumentation(input: {
   readonly rootSessionId: string;
   readonly sessionId: string;
 }): ExecutionInstrumentation | undefined {
-  return bindInstrumentationRuntime(getInstrumentationRuntime(), input.ctx, {
+  const session: BoundInstrumentationSession = {
     agentName: input.agentName,
     rootSessionId: input.rootSessionId,
+    traceSessionId: resolveTraceRootSessionId(input.ctx, input.sessionId),
     sessionId: input.sessionId,
-  });
+  };
+  return bindInstrumentationRuntime(getInstrumentationRuntime(), input.ctx, session);
 }
 
 function resolveStepInstrumentationDecision(

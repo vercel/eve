@@ -1,8 +1,10 @@
+import type { JsonValue } from "#shared/json.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
+import type { SkillFileSource } from "#channel/skill-files.js";
 import type { RunHandle, RunInput } from "#channel/types.js";
 
 type AgentInfoRouteResponse = () => Promise<Response>;
-export interface HomeRouteMetadata {
+interface HomeRouteMetadata {
   readonly agentName: string;
 }
 /**
@@ -11,12 +13,16 @@ export interface HomeRouteMetadata {
  * established here is visible to `resolveSession` on the same channel.
  */
 export type RouteSessionCreator = (
-  input: Omit<RunInput, "adapter" | "channelName" | "requestId">,
-) => Promise<RunHandle>;
+  input: Omit<RunInput, "adapter" | "channelName" | "requestId"> & {
+    /** Stable initial receipt for an idempotent HTTP creation operation. */
+    readonly deliveryId?: string;
+  },
+) => Promise<RunHandle & { readonly deliveryId?: string }>;
 
 export type RemoteAgentStreamHeadersResolver = (input: {
   readonly name: string;
   readonly resolverId?: string;
+  readonly dynamicBinding?: JsonValue;
   readonly url: string;
 }) => Promise<Record<string, string>>;
 
@@ -25,6 +31,7 @@ const homeRouteMetadataKey = "__eveHomeRouteMetadata";
 const routeChannelNameKey = "__eveRouteChannelName";
 const remoteAgentStreamHeadersResolverKey = "__eveRemoteAgentStreamHeadersResolver";
 const routeSessionCreatorKey = "__eveRouteSessionCreator";
+const skillFileSourceKey = "__eveSkillFileSource";
 
 type InternalRouteArgs = RouteHandlerArgs & {
   [agentInfoRouteResponseKey]?: AgentInfoRouteResponse;
@@ -32,6 +39,7 @@ type InternalRouteArgs = RouteHandlerArgs & {
   [routeChannelNameKey]?: string;
   [remoteAgentStreamHeadersResolverKey]?: RemoteAgentStreamHeadersResolver;
   [routeSessionCreatorKey]?: RouteSessionCreator;
+  [skillFileSourceKey]?: SkillFileSource;
 };
 
 export function attachRouteChannelName<TArgs extends RouteHandlerArgs>(
@@ -106,4 +114,19 @@ export function readRemoteAgentStreamHeadersResolver(
 ): RemoteAgentStreamHeadersResolver | undefined {
   const routeArgs: InternalRouteArgs = args;
   return routeArgs[remoteAgentStreamHeadersResolverKey];
+}
+
+/** The agent's skill files behind `readSkill`, for channels that serve files they already listed. */
+export function attachSkillFileSource<TArgs extends RouteHandlerArgs>(
+  args: TArgs,
+  files: SkillFileSource,
+): TArgs {
+  const routeArgs: InternalRouteArgs = args;
+  routeArgs[skillFileSourceKey] = files;
+  return args;
+}
+
+export function readSkillFileSource(args: RouteHandlerArgs): SkillFileSource | undefined {
+  const routeArgs: InternalRouteArgs = args;
+  return routeArgs[skillFileSourceKey];
 }

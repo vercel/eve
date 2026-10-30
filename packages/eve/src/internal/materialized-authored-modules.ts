@@ -20,7 +20,7 @@ export interface MaterializedInstrumentation {
   readonly modulePathsBySlot: Readonly<Record<string, string>>;
 }
 
-export interface MaterializedAuthoredModuleIndex {
+interface MaterializedAuthoredModuleIndex {
   readonly fingerprint: string;
   readonly instrumentation?: MaterializedInstrumentation;
   readonly moduleMap: string;

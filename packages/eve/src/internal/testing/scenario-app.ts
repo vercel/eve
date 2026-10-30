@@ -4,6 +4,7 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  readFile,
   readdir,
   rm,
   writeFile,
@@ -49,11 +50,6 @@ export interface ScenarioAppDescriptor {
    */
   readonly files: Readonly<Record<string, string>>;
   /**
-   * Directories to create without any files. Parents of paths in {@link files}
-   * are inferred automatically; list explicit empty directories here.
-   */
-  readonly directories?: readonly string[];
-  /**
    * Additional dependencies installed alongside `eve`. Keys are
    * package names, values are npm version specifiers or `file:` specifiers.
    *
@@ -62,10 +58,6 @@ export interface ScenarioAppDescriptor {
    * installed version by default unless a descriptor overrides `ai`.
    */
   readonly dependencies?: Readonly<Record<string, string>>;
-  /**
-   * Optional `package.json#type` value. Defaults to `"module"`.
-   */
-  readonly packageType?: "module" | "commonjs";
   /**
    * When `true`, the materialized app has a populated `node_modules/` tree
    * containing the `eve` tarball and the requested dependencies.
@@ -91,7 +83,7 @@ export interface ScenarioAppDescriptor {
  * Handle to a materialized scenario app. Callers must call
  * {@link ScenarioApp.cleanup} in `afterEach` / `afterAll`.
  */
-export interface ScenarioApp {
+interface ScenarioApp {
   /** Absolute filesystem path to the materialized app root. */
   readonly appRoot: string;
   /** Removes the app root and all transient artifacts. */
@@ -117,10 +109,6 @@ export async function materializeScenarioApp(
 
   try {
     await writePackageManifest({
-      appRoot,
-      descriptor,
-    });
-    await writeDescriptorDirectories({
       appRoot,
       descriptor,
     });
@@ -199,7 +187,7 @@ async function writePackageManifest(input: {
     },
     name: input.descriptor.name,
     private: true,
-    type: input.descriptor.packageType ?? "module",
+    type: "module",
   };
 
   await writeFile(
@@ -221,19 +209,29 @@ function resolvePackageVersion(packageName: string): string {
   return manifest.version;
 }
 
-async function writeDescriptorDirectories(input: {
-  readonly appRoot: string;
-  readonly descriptor: ScenarioAppDescriptor;
-}): Promise<void> {
-  const directories = input.descriptor.directories ?? [];
+export async function resolveScenarioPackageVersion(packageName: string): Promise<string> {
+  let currentPath = dirname(require.resolve(packageName));
 
-  await Promise.all(
-    directories.map(async (relativePath) => {
-      await mkdir(join(input.appRoot, relativePath), {
-        recursive: true,
-      });
-    }),
-  );
+  while (true) {
+    try {
+      const manifest = JSON.parse(await readFile(join(currentPath, "package.json"), "utf8")) as {
+        name?: unknown;
+        version?: unknown;
+      };
+
+      if (manifest.name === packageName && typeof manifest.version === "string") {
+        return manifest.version;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+
+    const parentPath = dirname(currentPath);
+    if (parentPath === currentPath) {
+      throw new Error(`Could not find the installed package manifest for ${packageName}.`);
+    }
+    currentPath = parentPath;
+  }
 }
 
 async function writeDescriptorFiles(input: {

@@ -1,11 +1,13 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
 /** The old driver owns final notifications for the dispatch that became this session. */
 export async function completeLegacyDriverStep(input: {
   readonly completionToken: string;
+  readonly history: HarnessModelMessage[];
   readonly result: WorkflowEntryResult;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -27,7 +29,10 @@ export async function completeLegacyDriverStep(input: {
         serializedContext: input.serializedContext,
         sessionState: {
           ...input.sessionState,
-          snapshot: { version: 1, session: input.sessionState.snapshot.session },
+          snapshot: {
+            version: 1,
+            session: { ...input.sessionState.snapshot.session, history: input.history },
+          },
         },
       },
     });

@@ -1,6 +1,4 @@
-import type { LanguageModel } from "ai";
-
-import type { ModelRouting } from "#shared/agent-definition.js";
+import type { EveLanguageModel, ModelRouting } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 const GATEWAY_PROVIDER = "gateway";
@@ -26,7 +24,7 @@ const GATEWAY_PROVIDER = "gateway";
  * answer. Model-existence is the catalog's concern, not this function's.
  */
 export function classifyModelRouting(
-  model: string | LanguageModel,
+  model: string | EveLanguageModel,
   providerOptions?: Record<string, JsonObject>,
 ): ModelRouting {
   if (typeof model === "string") {

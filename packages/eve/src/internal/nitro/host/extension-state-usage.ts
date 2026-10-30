@@ -1,20 +1,23 @@
 import { readFile, readdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
-import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
+import {
+  isAuthoredTestPath,
+  SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS,
+} from "#discover/filesystem.js";
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 
 const STATE_MODULE = "eve/context";
 const STATE_EXPORT = "defineState";
 
 /**
- * Detects whether an authored extension tree calls `defineState` from
+ * Detects whether emitted extension modules call `defineState` from
  * `eve/context`. Usage is followed through local re-export barrels — aliased
  * re-exports, `export *`, and import-then-re-export chains — so indirect
  * usage still stamps the `state` capability requirement.
  */
-export async function extensionUsesState(sourceRoot: string): Promise<boolean> {
-  const modulePaths = await collectAuthoredModules(sourceRoot);
+export async function extensionUsesState(runtimeRoot: string): Promise<boolean> {
+  const modulePaths = await collectRuntimeModules(runtimeRoot);
   const sources = new Map<string, string>();
   for (const modulePath of modulePaths) {
     sources.set(modulePath, await readFile(modulePath, "utf8"));
@@ -93,12 +96,13 @@ interface ModuleStateShape {
   readonly calledMembers: Map<string, Set<string>>;
 }
 
-async function collectAuthoredModules(directory: string): Promise<string[]> {
+async function collectRuntimeModules(directory: string): Promise<string[]> {
   const modules: string[] = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (isAuthoredTestPath(entry.name)) continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
-      modules.push(...(await collectAuthoredModules(path)));
+      modules.push(...(await collectRuntimeModules(path)));
     } else if (
       entry.isFile() &&
       !/\.d\.[cm]?ts$/.test(entry.name) &&

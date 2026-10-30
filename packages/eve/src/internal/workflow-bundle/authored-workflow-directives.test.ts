@@ -56,6 +56,21 @@ describe("prepareAuthoredWorkflowDirectives", () => {
     expect(prepared.source).not.toContain("async execute(");
   });
 
+  it("hoists a task method, the other workflow entry point", async () => {
+    const source = toolModule(
+      ["  async *task({ service }) {", '    "use workflow";', "    yield service;", "  },"].join(
+        "\n",
+      ),
+    );
+
+    const prepared = await prepareAuthoredWorkflowDirectives({ filePath: FILE, source });
+
+    expect(prepared.source).toContain("  task,\n  toModelOutput: (output) => output,");
+    expect(prepared.source).toContain(
+      'async function* task({ service }) {\n    "use workflow";\n    yield service;\n  }',
+    );
+  });
+
   it("hoists an arrow function execute property", async () => {
     const source = toolModule(
       [
@@ -131,6 +146,49 @@ return inner();
     await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).resolves.toEqual({
       hasDirectives: true,
       hasWorkflowDirective: true,
+      source,
+    });
+  });
+
+  const runtimeApiSpecifier = JSON.stringify("workflow/api");
+  it.each([
+    'import { sleep } from "workflow";',
+    'import type { Hook } from "workflow";',
+    'export { resumeHook } from "workflow/api";',
+    `export async function resume() { return import(${runtimeApiSpecifier}); }`,
+    `const api = require(${runtimeApiSpecifier});`,
+  ])("rejects a bare Workflow import: %s", async (source) => {
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+      /Import from `eve\/workflow` \(or `eve\/workflow\/api`\)/u,
+    );
+  });
+
+  it.each([
+    'import { agent } from "eve/workflow";',
+    'import { sleep, ask as askUser } from "eve/workflow";',
+    'export { agent } from "eve/workflow";',
+  ])("points removed eve/workflow helpers at defineWorkflowTool: %s", async (source) => {
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+      /is no longer exported from "eve\/workflow"\. Use defineWorkflowTool\(\)/u,
+    );
+  });
+
+  it("accepts public primitives without mistaking a bare-import string for an import", async () => {
+    const source = `import { sleep } from "eve/workflow";
+import { resumeHook } from "eve/workflow/api";
+const message = 'import { sleep } from "workflow";';`;
+    await expect(
+      prepareAuthoredWorkflowDirectives({ filePath: FILE, source }),
+    ).resolves.toMatchObject({
+      hasDirectives: false,
+    });
+  });
+
+  it("ignores a workflow directive that is not the executor's first statement", async () => {
+    const source = toolModule('  async execute() { void 0; "use workflow"; return 1; },');
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).resolves.toEqual({
+      hasDirectives: true,
+      hasWorkflowDirective: false,
       source,
     });
   });

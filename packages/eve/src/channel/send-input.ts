@@ -1,26 +1,39 @@
-import type { FilePart, UserContent } from "ai";
+import type { MessageContent, MessageFilePart } from "#shared/message-content.js";
 
 import type { SendPayload } from "#channel/routes.js";
 import { serializeUrlFilePart } from "#internal/attachments/url-refs.js";
 
 /** Normalizes the shorthand input forms accepted by channel and session sends. */
-export function normalizeSendInput(input: string | UserContent | SendPayload): SendPayload {
-  if (typeof input === "string") return { message: input };
-  if (Array.isArray(input)) return { message: input };
-  return input;
+export function normalizeSendInput(input: MessageContent | SendPayload): SendPayload {
+  return isMessageContent(input) ? { message: input } : input;
 }
 
-/** Serializes non-data URL file parts before input crosses the durable boundary. */
-export function serializeUrlFilePartsInMessage(
-  message: string | UserContent | undefined,
-): string | UserContent | undefined {
+// `Array.isArray` doesn't narrow a readonly array, so this guard does.
+function isMessageContent(input: MessageContent | SendPayload): input is MessageContent {
+  return typeof input === "string" || Array.isArray(input);
+}
+
+/**
+ * Serializes file parts before input crosses the durable boundary: `URL`s
+ * become `eve-url:` markers and bytes become `data:` URLs, so no world
+ * serializer has to round-trip a `URL` or a typed array.
+ */
+export function serializeFilePartsInMessage(
+  message: MessageContent | undefined,
+): MessageContent | undefined {
   if (message === undefined || typeof message === "string") return message;
 
   let changed = false;
-  const result = message.map((part): FilePart | typeof part => {
-    if (part.type === "file" && part.data instanceof URL && part.data.protocol !== "data:") {
+  const result = message.map((part): MessageFilePart | typeof part => {
+    if (part.type !== "file") return part;
+    if (part.data instanceof URL && part.data.protocol !== "data:") {
       changed = true;
       return { ...part, data: serializeUrlFilePart(part.data) };
+    }
+    if (part.data instanceof Uint8Array || part.data instanceof ArrayBuffer) {
+      changed = true;
+      const base64 = Buffer.from(new Uint8Array(part.data)).toString("base64");
+      return { ...part, data: `data:${part.mediaType};base64,${base64}` };
     }
     return part;
   });

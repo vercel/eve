@@ -21,7 +21,7 @@ describe("createClientUrl", () => {
     );
   });
 
-  it("preserves host query parameters on agent routes", () => {
+  it("preserves base URL query parameters on agent routes", () => {
     expect(
       createClientUrl(
         "https://agent.example.com?x-vercel-protection-bypass=secret",
@@ -30,7 +30,7 @@ describe("createClientUrl", () => {
     ).toBe("https://agent.example.com/eve/v1/session?x-vercel-protection-bypass=secret");
   });
 
-  it("merges route query parameters over host query parameters", () => {
+  it("merges route query parameters over base URL query parameters", () => {
     expect(
       createClientUrl(
         "https://agent.example.com?token=secret&startIndex=stale",

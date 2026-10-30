@@ -1,33 +1,38 @@
 import { defineEval } from "eve/evals";
-import { includes } from "eve/evals/expect";
+import { equals, includes } from "eve/evals/expect";
 
 const TOKEN = "custom-provider-session-ok-P7M";
+const WORKSPACE_ROOT = "/srv/app";
+const CHECKLIST = "Bob, the checklist is ready.";
 
 export default defineEval({
-  description: "Sandbox: custom provider session methods survive framework lifecycle wrapping.",
-  timeoutMs: 60_000,
+  description:
+    "Sandbox: custom provider session methods survive framework lifecycle wrapping, and paths resolve from the connection's workspace root.",
   async test(t) {
     const turn = await t.send(
-      "Ask the `custom-provider` subagent with message: Verify the custom provider session marker.",
+      "Ask the `custom-provider` subagent with message: Verify the custom provider session marker and leave Bob his checklist.",
     );
     turn.expectOk();
-    const sessionId = turn.sessionId;
-    if (sessionId === undefined) throw new Error("Custom provider turn has no session id.");
-    const completed = await t.target
-      .watchTurn(sessionId, { startIndex: requireStreamIndex(turn.session) })
-      .result();
-    completed.expectOk();
+    const opened = turn.events.find(
+      (event) => event.type === "child.opened" && event.data.name === "custom-provider",
+    );
+    if (opened?.type !== "child.opened") {
+      throw new Error("The turn did not call the custom-provider subagent.");
+    }
+    const child = (await t.target.attach(opened.data.sessionId).watch().result()).expectOk();
 
     t.succeeded();
-    t.calledSubagent("custom-provider", { count: 1, status: "completed" });
-    t.check(completed.message, includes(TOKEN));
+    t.calledAgent("custom-provider", { count: 1, status: "completed" });
+    const verified = child.requireToolCall("verify-provider-session").output as {
+      checklist: string | null;
+      checklistAtRoot: string | null;
+      probe: string | null;
+      root: string;
+    };
+    // The selector's relative write and the tool's relative round trip land under the connection's root.
+    t.check(verified.root, equals(WORKSPACE_ROOT));
+    t.check(verified.probe, includes(TOKEN));
+    t.check(verified.checklist, equals(CHECKLIST));
+    t.check(verified.checklistAtRoot, equals(CHECKLIST));
   },
 });
-
-function requireStreamIndex(session: {
-  readonly state?: { readonly streamIndex?: number };
-}): number {
-  const streamIndex = session.state?.streamIndex;
-  if (streamIndex === undefined) throw new Error("Custom provider turn has no stream index.");
-  return streamIndex;
-}

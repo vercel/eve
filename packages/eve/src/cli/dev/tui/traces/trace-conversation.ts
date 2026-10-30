@@ -1,15 +1,18 @@
 /**
  * Conversation view for the `/traces` viewer: the same trace, re-told as a
  * flow of user messages, assistant replies, and tool calls instead of a
- * latency waterfall. Activation and action spans provide the user and tool
+ * latency waterfall. Activation and tool spans provide the user and tool
  * cards directly; model response spans provide assistant cards.
  */
 
+import { formatCostUsd } from "#cli/commands/trace-detail.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { clipVisible, stripTerminalControls, visibleLength } from "#cli/ui/terminal-text.js";
-import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
-import { compareLocalTraceSpans, isAgentTurnSpan } from "#tracing/local-trace-reader.js";
-import { agentTurnIdentity } from "#tracing/agent-span-contract.js";
+import type { LocalTrace, LocalTraceSpan } from "#tracing/local/trace-reader.js";
+import { compareLocalTraceSpans, isAgentTurnSpan } from "#tracing/local/trace-reader.js";
+import { agentTurnIdentity } from "#tracing/local/inspection.js";
+import { localTraceSpanCostUsd } from "#tracing/local/trace-summary.js";
+import { traceStringAttribute } from "#tracing/local/trace-operations.js";
 
 import { formatCompactTokenCount } from "../stream-format.js";
 import type { Theme } from "../theme.js";
@@ -57,7 +60,7 @@ export interface ConversationSubagent {
 /** Max rendered lines for one collapsed card payload (args, result, or text). */
 const CARD_PAYLOAD_LINES = 3;
 
-/** Builds the conversation flow from eve's activation, model, and action spans. */
+/** Builds the conversation flow from eve's activation, model, and tool spans. */
 export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
   const byId = new Map(trace.spans.map((span) => [span.spanId, span]));
   const subagents = new Map<string, ConversationSubagent>();
@@ -68,19 +71,23 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
     if (turnId !== undefined && subagent !== undefined) subagents.set(turnId, subagent);
   }
   const entries: { readonly item: ConversationItem; readonly order: bigint }[] = [];
-  const firstSystemSpan = [...trace.spans]
-    .sort(compareLocalTraceSpans)
-    .find((span) => isModelSpan(span) && typeof span.attributes["ai.prompt.system"] === "string");
-  const systemText = firstSystemSpan?.attributes["ai.prompt.system"];
-  if (firstSystemSpan !== undefined && typeof systemText === "string" && systemText.length > 0) {
+  let system: { readonly span: LocalTraceSpan; readonly text: string } | undefined;
+  for (const span of [...trace.spans].sort(compareLocalTraceSpans)) {
+    const text = isModelSpan(span) ? systemInstructionsText(span.attributes) : undefined;
+    if (text !== undefined) {
+      system = { span, text };
+      break;
+    }
+  }
+  if (system !== undefined) {
     entries.push({
       item: {
         kind: "system",
         durationMs: 0,
         error: false,
-        span: firstSystemSpan,
-        subagent: subagentFor(firstSystemSpan, subagents, byId),
-        text: systemText,
+        span: system.span,
+        subagent: subagentFor(system.span, subagents, byId),
+        text: system.text,
       },
       order: 0n,
     });
@@ -108,9 +115,9 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
     if (isModelSpan(span)) {
       const text = stringAttribute(span, "ai.response.text");
       const reasoning = stringAttribute(span, "ai.response.reasoning");
-      const hasUsage =
-        numberAttribute(span, "agent.usage.input_tokens") !== undefined ||
-        numberAttribute(span, "agent.usage.output_tokens") !== undefined;
+      const inputTokens = numberAttribute(span, "gen_ai.usage.input_tokens");
+      const outputTokens = numberAttribute(span, "gen_ai.usage.output_tokens");
+      const hasUsage = inputTokens !== undefined || outputTokens !== undefined;
       const hasToolCalls = span.attributes["ai.response.tool_calls"] !== undefined;
       const isEmpty =
         (text === undefined || text.trim().length === 0) &&
@@ -125,9 +132,9 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
           costUsd: stepCostUsd(span, byId),
           durationMs: spanDurationMs(span),
           error: span.statusCode === 2,
-          inputTokens: numberAttribute(span, "agent.usage.input_tokens"),
+          inputTokens,
           model: stringAttribute(span, "gen_ai.request.model"),
-          outputTokens: numberAttribute(span, "agent.usage.output_tokens"),
+          outputTokens,
           reasoning,
           span,
           subagent,
@@ -160,8 +167,8 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
       continue;
     }
     if (
-      span.name === "agent.action" ||
-      stringAttribute(span, "gen_ai.operation.name") === "invoke_workflow"
+      span.attributes["gen_ai.operation.name"] === "execute_tool" ||
+      span.name === "agent.action"
     ) {
       entries.push({
         item: {
@@ -170,9 +177,9 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
           durationMs: spanDurationMs(span),
           error: span.statusCode === 2,
           name: stripTerminalControls(
-            stringAttribute(span, "agent.action.name") ??
-              stringAttribute(span, "gen_ai.workflow.name") ??
-              "action",
+            stringAttribute(span, "gen_ai.tool.name") ??
+              stringAttribute(span, "agent.action.name") ??
+              "tool",
           ),
           result: unwrapJsonString(stringAttribute(span, "gen_ai.tool.call.result")),
           span,
@@ -185,6 +192,32 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
   return entries
     .sort((left, right) => (left.order === right.order ? 0 : left.order < right.order ? -1 : 1))
     .map((entry) => entry.item);
+}
+
+function systemInstructionsText(attributes: Readonly<Record<string, unknown>>): string | undefined {
+  const value = attributes["gen_ai.system_instructions"];
+  if (typeof value !== "string") return undefined;
+  try {
+    const instructions: unknown = JSON.parse(value);
+    if (!Array.isArray(instructions)) return undefined;
+    const text = instructions
+      .flatMap((instruction: unknown) => {
+        if (
+          typeof instruction !== "object" ||
+          instruction === null ||
+          !("type" in instruction) ||
+          instruction.type !== "text" ||
+          !("content" in instruction) ||
+          typeof instruction.content !== "string"
+        )
+          return [];
+        return [instruction.content];
+      })
+      .join("\n\n");
+    return text.length > 0 ? text : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function subagentFor(
@@ -213,7 +246,7 @@ function turnSubagent(
     };
   }
   const parent = turn.parentSpanId === undefined ? undefined : byId.get(turn.parentSpanId);
-  if (parent === undefined || parent.name !== "agent.action") return undefined;
+  if (parent === undefined) return undefined;
   const kind = stringAttribute(parent, "agent.action.kind");
   if (kind !== "subagent-call" && kind !== "remote-agent-call") return undefined;
   const parentTurnId = stringAttribute(parent, "agent.turn.id");
@@ -221,7 +254,7 @@ function turnSubagent(
   const name = stringAttribute(parent, "agent.action.name");
   return {
     name: name === undefined ? undefined : stripTerminalControls(name),
-    parentCallId: stringAttribute(parent, "agent.action.call_id"),
+    parentCallId: traceStringAttribute(parent, "gen_ai.tool.call.id"),
     parentTurnId,
   };
 }
@@ -443,14 +476,8 @@ function assistantMetrics(
     parts.push(`${glyph.arrowUp}${formatCompactTokenCount(item.inputTokens)}`);
   if (item.outputTokens !== undefined)
     parts.push(`${glyph.arrowDown}${formatCompactTokenCount(item.outputTokens)}`);
-  if (item.costUsd !== undefined) parts.push(formatCost(item.costUsd));
+  if (item.costUsd !== undefined) parts.push(formatCostUsd(item.costUsd));
   return parts.length === 0 ? "" : colors.dim(parts.join(" · "));
-}
-
-/** Formats a USD cost with enough precision for typical AI inference prices. */
-function formatCost(usd: number): string {
-  if (usd >= 0.01) return `$${usd.toFixed(2)}`;
-  return `$${usd.toFixed(4)}`;
 }
 
 /** Reads the gateway cost from the model span's ancestor step span. */
@@ -464,7 +491,7 @@ function stepCostUsd(
   while (span.parentSpanId !== undefined) {
     span = byId.get(span.parentSpanId);
     if (span === undefined) return undefined;
-    if (span.name === "agent.step") return numberAttribute(span, "gen_ai.usage.cost");
+    if (span.name === "agent.step") return localTraceSpanCostUsd(span);
   }
   return undefined;
 }

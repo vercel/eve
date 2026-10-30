@@ -1,59 +1,54 @@
 import { defineEval } from "eve/evals";
+import { equals } from "eve/evals/expect";
 
 const MARKER = "followup-dedup-H4K8";
 const TOOL_NAME = "gate";
 const FOLLOW_UP_QUESTIONS = [
-  "What is the current status of my request?",
+  "Is the gate call still waiting for my approval?",
   "Has the requested action executed yet?",
   "What are you waiting for before continuing?",
   "Can you summarize what remains blocked?",
   "What will happen after I approve the request?",
 ] as const;
 
-/** Regression coverage for https://github.com/vercel/eve/issues/2217. */
+/**
+ * Regression coverage for https://github.com/vercel/eve/issues/2217: follow-up
+ * questions never create another call or approval. The approval holds the
+ * turn, so the first follow-up steers it and cancels the approval.
+ */
 export default defineEval({
   tags: ["real-model"],
-  description: "One pending approval stays singular across many follow-up questions.",
+  description: "Follow-up questions about a held approval never create another one.",
   async test(t) {
-    const parked = await t.send(`Call the ${TOOL_NAME} tool exactly once with marker "${MARKER}".`);
-    const session = parked.session;
-    parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
-    const approval = session.requireInputRequest({
+    const held = await t.send(`Call the ${TOOL_NAME} tool exactly once with marker "${MARKER}".`);
+    const session = held.session;
+    held.calledTool(TOOL_NAME, { status: "pending", count: 1 });
+    const approval = session.requireInteraction({
       display: "confirmation",
       toolName: TOOL_NAME,
     });
 
-    for (const question of FOLLOW_UP_QUESTIONS) {
+    for (const [index, question] of FOLLOW_UP_QUESTIONS.entries()) {
       const followup = await session.send(question);
 
       followup.expectOk();
-      followup.usedNoTools();
-      followup.notEvent("input.requested");
-      followup.event("session.waiting", { count: 1 });
+      followup.notEvent("call.requested");
+      followup.notEvent("interaction.opened");
+      if (index === 0) {
+        // The steer cancels the held call, so its not-run result lands in this turn.
+        followup.calledTool(TOOL_NAME, { status: "completed", count: 0 });
+        followup.event("interaction.settled", {
+          count: 1,
+          data: { interactionId: approval.interactionId, outcome: "withdrawn" },
+        });
+      } else {
+        followup.usedNoTools();
+      }
+      followup.event("turn.settled", { count: 1, data: { outcome: "completed" } });
     }
 
-    const approved = await session.respond([
-      {
-        optionId: "approve",
-        requestId: approval.requestId,
-      },
-    ]);
-
-    approved.expectOk();
-    approved.event("action.result", {
-      data: {
-        result: {
-          kind: "tool-result",
-          output: new RegExp(MARKER),
-          toolName: TOOL_NAME,
-        },
-        status: "completed",
-      },
-      count: 1,
-    });
     t.succeeded();
-    // The original request completes once; each scoped follow-up above proves
-    // that no intervening turn created another tool call or approval.
-    t.calledTool(TOOL_NAME, { count: 1 });
+    t.check(session.pendingInteractions.length, equals(0));
+    t.calledTool(TOOL_NAME, { output: new RegExp(MARKER), count: 0 });
   },
 });

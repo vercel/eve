@@ -7,6 +7,7 @@ export type {
   SessionAuth,
   SessionAuthContext,
   SessionParent,
+  SessionPredecessor,
   SessionTurn,
 } from "#context/keys.js";
 
@@ -17,25 +18,6 @@ export type {
  */
 export function getContext<T>(key: ContextKey<T>): T | undefined {
   return loadContext().get(key);
-}
-
-/**
- * Returns the current value of a context key, throwing when unset.
- *
- * @throws When the key is not set or when called outside of a managed
- *   step execution.
- */
-export function requireContext<T>(key: ContextKey<T>): T {
-  return loadContext().require(key);
-}
-
-/**
- * Returns whether the key is currently set in the active context.
- *
- * @throws When called outside of a managed step execution.
- */
-export function hasContext<T>(key: ContextKey<T>): boolean {
-  return loadContext().has(key);
 }
 
 /**

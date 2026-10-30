@@ -2,13 +2,11 @@ import type { ContextContainer } from "#context/container.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
-  ModeKey,
   OtelTraceEnabledKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
   type SessionTraceSeed,
 } from "#context/keys.js";
-import type { SessionTraceContext } from "#channel/types.js";
 import { createLogger } from "#internal/logging.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import {
@@ -25,13 +23,14 @@ import {
 import {
   intersectInstrumentationDecisions,
   readInstrumentationDecision,
+  type InstrumentationDecision,
 } from "#shared/instrumentation-decision.js";
 import {
   isSampledTrace,
   resolveTracePolicy,
   resolveTracePolicyDecision,
-} from "#tracing/sampled-trace.js";
-import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+} from "#shared/trace-policy.js";
+import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
 
@@ -40,7 +39,7 @@ const log = createLogger("instrumentation.session-init");
 export function initializeSessionInstrumentation(input: {
   readonly agentName: string;
   readonly ctx: ContextContainer;
-}): void {
+}): InstrumentationDecision {
   const runtime = getInstrumentationRuntime();
   const parentTraceContext = input.ctx.get(ParentTraceContextKey);
   const forwardedTracePolicy = readForwardedTraceAssertion(
@@ -53,7 +52,6 @@ export function initializeSessionInstrumentation(input: {
       channelKind: input.ctx.get(ChannelInstrumentationKey)?.kind,
       environment: resolveInstrumentationEnvironment(),
       forwardedTracePolicy,
-      mode: input.ctx.get(ModeKey),
       principalType: input.ctx.get(AuthKey)?.principalType,
     },
     { forwardedOverridesStored: true },
@@ -89,6 +87,13 @@ export function initializeSessionInstrumentation(input: {
     }
   }
   input.ctx.set(OtelTraceEnabledKey, runtime?.prepareSessionTrace !== undefined);
+  return (
+    traceSeed?.decision ??
+    resolveTracePolicy(runtime?.otelSettings?.tracePolicy, {
+      agentName: input.agentName,
+      ...conversation,
+    })
+  );
 }
 
 function allocateSessionTraceSeed(input: {
@@ -96,7 +101,7 @@ function allocateSessionTraceSeed(input: {
   readonly conversation: ConversationContext;
   readonly channelType?: string;
   readonly forwardedTracePolicy: ForwardedTraceAssertion | undefined;
-  readonly parentTraceContext?: SessionTraceContext;
+  readonly parentTraceContext?: SessionTraceSeed;
   readonly runtime: InstrumentationRuntime | undefined;
 }): SessionTraceSeed | undefined {
   const localDecision = () =>
@@ -117,9 +122,12 @@ function allocateSessionTraceSeed(input: {
           : intersectInstrumentationDecisions(forwardedCeiling, inheritedDecision)
         : (inheritedDecision ??
           resolveTracePolicyDecision(isSampledTrace(input.parentTraceContext), input.conversation));
-    const decision = input.forwardedTracePolicy
-      ? intersectInstrumentationDecisions(parentDecision, localDecision())
-      : parentDecision;
+    const isRemote =
+      "isRemote" in input.parentTraceContext && input.parentTraceContext.isRemote === true;
+    const decision =
+      input.forwardedTracePolicy || isRemote
+        ? intersectInstrumentationDecisions(parentDecision, localDecision())
+        : parentDecision;
     const idGenerator = input.runtime?.idGenerator ?? new AgentSpanIdGenerator();
     return {
       decision,
@@ -128,7 +136,7 @@ function allocateSessionTraceSeed(input: {
         : { forwardedTracePolicy: input.forwardedTracePolicy }),
       spanId: idGenerator.allocateSpanId(),
       traceFlags: decision.action === "drop" ? 0 : input.parentTraceContext.traceFlags,
-      traceId: idGenerator.generateTraceId(),
+      traceId: isRemote ? idGenerator.generateTraceId() : input.parentTraceContext.traceId,
     };
   }
   if (input.runtime?.prepareSessionTrace === undefined || input.runtime.idGenerator === undefined)

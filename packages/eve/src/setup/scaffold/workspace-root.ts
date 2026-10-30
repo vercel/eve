@@ -27,7 +27,7 @@ export interface WorkspaceRootMutation {
   path: string;
 }
 
-export interface WorkspaceRootPackageJsonPatchResult extends PackageJsonPatchResult {
+interface WorkspaceRootPackageJsonPatchResult extends PackageJsonPatchResult {
   /** Root package.json path when an ancestor workspace root was eligible for patching. */
   path?: string;
 }

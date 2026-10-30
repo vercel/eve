@@ -1,6 +1,6 @@
 import type { SlackApiResponse } from "#public/channels/slack/api.js";
 
-export type SlackConversationPrivacy = "private" | "public" | "unknown";
+type SlackConversationPrivacy = "private" | "public" | "unknown";
 
 export function readSlackConversationPrivacy(
   raw: Readonly<Record<string, unknown>> | undefined,

@@ -10,7 +10,6 @@ describe("session inbox payloads", () => {
     expect(
       decodeSessionInboxPayload({
         delivery: { deliveryId: "delivery-1" },
-        taskDeliveryPolicy: "cohort",
         kind: "send",
         payload: { message: "hello" },
       }),
@@ -21,9 +20,8 @@ describe("session inbox payloads", () => {
       kind: "deliver",
       payloads: [{ message: "hello" }],
       requestId: undefined,
-      taskDeliveryId: undefined,
+      title: undefined,
       turnPolicy: undefined,
-      taskDeliveryPolicy: "cohort",
     });
   });
 
@@ -35,5 +33,10 @@ describe("session inbox payloads", () => {
     expect(() => decodeSessionInboxPayload({ kind: "legacy-send" })).toThrowError(
       SessionInboxPayloadError,
     );
+    for (const idempotencyKey of ["", "x".repeat(257), 1]) {
+      expect(() =>
+        decodeSessionInboxPayload({ kind: "send", idempotencyKey, payload: { message: "hello" } }),
+      ).toThrowError(SessionInboxPayloadError);
+    }
   });
 });

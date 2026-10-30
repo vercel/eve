@@ -14,7 +14,7 @@ interface EncodedValue {
   readonly data?: unknown;
 }
 
-export interface SerializedDevelopmentWorldError {
+interface SerializedDevelopmentWorldError {
   readonly details: Readonly<Record<string, unknown>>;
   readonly message: string;
   readonly name: string;

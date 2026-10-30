@@ -25,13 +25,13 @@ export interface ForwardedTraceAssertion {
   readonly originAudience: ChannelAudience;
 }
 
-export interface ResolvedForwardedTraceState {
+interface ResolvedForwardedTraceState {
   readonly decision?: InstrumentationDecision;
   readonly forwardedTracePolicy?: ForwardedTraceAssertion;
   readonly traceFlags: number;
 }
 
-export interface ForwardedTraceSeedState {
+interface ForwardedTraceSeedState {
   readonly decision?: unknown;
   readonly forwardedTracePolicy?: unknown;
   readonly traceFlags: number;

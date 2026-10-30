@@ -15,7 +15,7 @@ import {
   resolveModelEndpointStatus,
 } from "#internal/resolve-model-endpoint-status.js";
 import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broker.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { JsonObject } from "#shared/json.js";
 
 export type AgentInfoResponse = AgentInfoResult;
 
@@ -28,11 +28,11 @@ function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
   return endpoint;
 }
 
-/** Projects v4 exclusively from the effective compiled graph. */
+/** Projects agent info exclusively from the effective compiled graph. */
 export function buildAgentInfoResponse(
   data: AgentInfoManifestData,
   input: {
-    readonly mode: AgentInfoResponse["mode"];
+    readonly mode: "development" | "production";
     readonly gatewayCredentials: GatewayCredentialPresence;
     readonly chatgptAuth?: ChatGptAuthState;
   },
@@ -61,9 +61,7 @@ export function buildAgentInfoResponse(
                 toChatGptEndpoint(input.chatgptAuth),
               ),
               id: manifest.config.model.id,
-              providerOptions: sanitizeProviderOptionsForInfo(
-                manifest.config.model.providerOptions,
-              ),
+              providerOptions: projectProviderOptionsForInfo(manifest.config.model.providerOptions),
               reasoning: manifest.config.reasoning,
               routing: manifest.config.model.routing,
               source:
@@ -83,7 +81,6 @@ export function buildAgentInfoResponse(
             },
       name: manifest.config.name,
       nodeId: ROOT_COMPILED_AGENT_NODE_ID,
-      outputSchema: manifest.config.outputSchema,
     },
     capabilities: { devRoutes: input.mode === "development" },
     channels: {
@@ -133,7 +130,6 @@ export function buildAgentInfoResponse(
       ...toModuleSource(manifest, memory),
       description: memory.description,
       slot: memory.slot,
-      visibility: memory.visibility,
     })),
     mode: input.mode,
     remoteAgents: {
@@ -159,7 +155,7 @@ export function buildAgentInfoResponse(
         ...toOwnedSource(manifest, skill),
         description: skill.description,
         license: skill.license,
-        markdown: skill.markdown,
+        markdown: skill.content,
         metadata: skill.metadata,
         name: skill.name,
       })),
@@ -210,62 +206,12 @@ export function buildAgentInfoResponse(
   };
 }
 
-/**
- * `providerOptions` can carry deployment-owner credentials: the shipped BYOK
- * scaffold places the provider `apiKey` under `gateway.byok`, and custom
- * providers may accept credential-bearing fields such as `headers`. The info
- * route is served to every caller the application's channel auth admits, so
- * the inspection payload must never serialize credential material. Drop the
- * BYOK block (its provider slug is already reported via `routing.byok`) and
- * redact credential-shaped keys recursively, while keeping non-secret options
- * such as `gateway.serviceTier` that the dev TUI reads.
- */
-const CREDENTIAL_OPTION_KEY =
-  /^(api[-_]?key|access[-_]?token|auth|authorization|bearer|client[-_]?secret|credentials?|headers|password|private[-_]?key|secret|token)$/i;
-
-const REDACTED_CREDENTIAL = "[redacted]";
-
-function sanitizeProviderOptionsForInfo(
+/** Only the literal priority tier is needed by the dev TUI; other options may contain secrets. */
+function projectProviderOptionsForInfo(
   providerOptions: Record<string, JsonObject> | undefined,
 ): Record<string, JsonObject> | undefined {
-  if (providerOptions === undefined) return undefined;
-  const sanitized: Record<string, JsonObject> = {};
-  for (const [provider, options] of Object.entries(providerOptions)) {
-    sanitized[provider] = redactCredentialOptions(options);
-  }
-  return sanitized;
-}
-
-function redactCredentialOptions(value: JsonValue): JsonObject {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-  const redacted: Record<string, JsonValue> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (key === "byok") {
-      // BYOK entries are `{ apiKey }` credential objects; the provider slug is
-      // already exposed through `routing.byok`.
-      continue;
-    }
-    if (CREDENTIAL_OPTION_KEY.test(key)) {
-      redacted[key] = REDACTED_CREDENTIAL;
-      continue;
-    }
-    if (entry !== null && typeof entry === "object") {
-      if (Array.isArray(entry)) {
-        redacted[key] = entry.map((item) =>
-          item !== null && typeof item === "object" && !Array.isArray(item)
-            ? redactCredentialOptions(item)
-            : item,
-        );
-      } else {
-        redacted[key] = redactCredentialOptions(entry);
-      }
-      continue;
-    }
-    redacted[key] = entry;
-  }
-  return redacted;
+  if (providerOptions?.gateway?.serviceTier !== "priority") return undefined;
+  return { gateway: { serviceTier: "priority" } };
 }
 
 function toModuleSource(
@@ -352,7 +298,6 @@ function renderDynamicResolver(
     | CompiledDynamicSkillDefinition
     | CompiledDynamicToolDefinition
     | {
-        readonly eventNames: readonly string[];
         readonly exportName?: string;
         readonly logicalPath: string;
         readonly slug: string;
@@ -362,7 +307,6 @@ function renderDynamicResolver(
 ) {
   return {
     ...toModuleSource(node, resolver),
-    eventNames: [...resolver.eventNames],
     slug: resolver.slug,
   };
 }

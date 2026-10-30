@@ -74,6 +74,8 @@ describe("discoverSandboxSource (memory)", () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
         "sandbox/workspace/notes.md": "seed",
+        "sandbox/workspace/check.test.ts": "test resource",
+        "sandbox/workspace/__tests__/check.ts": "test resource",
       },
     });
 
@@ -88,7 +90,11 @@ describe("discoverSandboxSource (memory)", () => {
     expect(result.sandbox).toBeNull();
     expect(result.sandboxWorkspace).not.toBeNull();
     expect(result.sandboxWorkspace?.logicalPath).toBe("sandbox/workspace");
-    expect(result.sandboxWorkspace?.rootEntries).toEqual(["notes.md"]);
+    expect(result.sandboxWorkspace?.rootEntries).toEqual([
+      "__tests__/",
+      "check.test.ts",
+      "notes.md",
+    ]);
   });
 
   it("discovers both a sandbox module and a workspace folder", async () => {
@@ -203,29 +209,35 @@ describe("discoverSandboxSource (memory)", () => {
     expect(result.sandboxWorkspace).toBeNull();
   });
 
-  it("prefers the sandbox/ folder when both it and a top-level sandbox.<ext> exist", async () => {
-    const project = buildMemoryAgentProject({
-      agentFiles: {
-        "sandbox.ts": "export default { ignored: true };\n",
-        "sandbox/sandbox.ts": "export default {};\n",
-      },
-    });
+  it.each(["sandbox/sandbox.ts", "sandbox/workspace/notes.md", "sandbox/Dockerfile"])(
+    "rejects a top-level sandbox module beside %s",
+    async (folderFile) => {
+      const project = buildMemoryAgentProject({
+        agentFiles: {
+          "sandbox.ts": "export default {};\n",
+          [folderFile]: "content\n",
+        },
+      });
 
-    const rootEntries = await readSortedDirectoryEntries(project.source, project.agentRoot);
-    const result = await discoverSandboxSource({
-      rootEntries,
-      rootPath: project.agentRoot,
-      source: project.source,
-    });
+      const rootEntries = await readSortedDirectoryEntries(project.source, project.agentRoot);
+      const result = await discoverSandboxSource({
+        rootEntries,
+        rootPath: project.agentRoot,
+        source: project.source,
+      });
 
-    expect(result.diagnostics).toEqual([]);
-    expect(result.sandbox).toEqual({
-      sourceKind: "module",
-      logicalPath: "sandbox/sandbox.ts",
-      sourceId: "sandbox/sandbox.ts",
-    });
-    expect(result.sandboxWorkspace).toBeNull();
-  });
+      expect(result.diagnostics).toEqual([
+        expect.objectContaining({
+          code: DISCOVER_MODULE_SLOT_COLLISION,
+          message: expect.stringContaining(
+            'Move "sandbox.ts" into "sandbox/sandbox.ts", or delete it if that file already exists.',
+          ),
+        }),
+      ]);
+      expect(result.sandbox).toBeNull();
+      expect(result.sandboxWorkspace).toBeNull();
+    },
+  );
 
   it("reports DISCOVER_MODULE_SLOT_COLLISION when multiple top-level sandbox.<ext> files are present", async () => {
     const project = buildMemoryAgentProject({

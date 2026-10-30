@@ -1,31 +1,64 @@
 import { describe, expect, it } from "vitest";
-
 import {
-  LOG_DISPLAY_MODE_CYCLE,
+  isLogVisible,
   LOG_DISPLAY_MODES,
   nextLogDisplayMode,
   parseLogDisplayMode,
-  type LogDisplayMode,
 } from "./log-display-mode.js";
 
-describe("parseLogDisplayMode", () => {
-  it("accepts every supported mode and rejects unknown values", () => {
+describe("log severity modes", () => {
+  it("accepts the severity modes and rejects old source filters", () => {
     for (const mode of LOG_DISPLAY_MODES) expect(parseLogDisplayMode(mode)).toBe(mode);
-    expect(parseLogDisplayMode("bogus")).toBeUndefined();
+    for (const mode of ["stderr", "sandbox", "bogus"])
+      expect(parseLogDisplayMode(mode)).toBeUndefined();
   });
-});
-
-describe("nextLogDisplayMode", () => {
-  it("advances none → all → stderr → sandbox → none", () => {
-    expect(nextLogDisplayMode("none")).toBe("all");
-    expect(nextLogDisplayMode("all")).toBe("stderr");
-    expect(nextLogDisplayMode("stderr")).toBe("sandbox");
-    expect(nextLogDisplayMode("sandbox")).toBe("none");
+  it("cycles none → error → warn → debug → all → none", () => {
+    expect(LOG_DISPLAY_MODES.map(nextLogDisplayMode)).toEqual([
+      "error",
+      "warn",
+      "debug",
+      "all",
+      "none",
+    ]);
   });
-
-  it("returns to the start after one full lap", () => {
-    let mode: LogDisplayMode = LOG_DISPLAY_MODE_CYCLE[0];
-    for (let i = 0; i < LOG_DISPLAY_MODE_CYCLE.length; i++) mode = nextLogDisplayMode(mode);
-    expect(mode).toBe(LOG_DISPLAY_MODE_CYCLE[0]);
+  it("shows unclassified output only under all", () => {
+    const records = [
+      ["stderr", "error"],
+      ["stderr", "warn"],
+      ["stdout", "info"],
+      ["stdout", "debug"],
+      ["stderr", undefined],
+      ["stdout", undefined],
+      ["sandbox", undefined],
+    ] as const;
+    expect(records.map(([, level]) => isLogVisible("error", level))).toEqual([
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(records.map(([, level]) => isLogVisible("warn", level))).toEqual([
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(records.map(([, level]) => isLogVisible("debug", level))).toEqual([
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(records.every(([, level]) => isLogVisible("all", level))).toBe(true);
+    expect(records.some(([, level]) => isLogVisible("none", level))).toBe(false);
   });
 });

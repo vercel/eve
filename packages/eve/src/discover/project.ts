@@ -119,7 +119,7 @@ async function tryResolveNestedProjectFromAgentDirectory(
   source: ProjectSource,
   directoryPath: string,
 ): Promise<ResolvedDiscoveryProject | null> {
-  if (basename(directoryPath) !== "agent") {
+  if (basename(directoryPath) !== "agent" || (await hasProjectMarkers(source, directoryPath))) {
     return null;
   }
 

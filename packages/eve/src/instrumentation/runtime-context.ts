@@ -1,3 +1,4 @@
+import type { InstrumentationChannel } from "#public/channels/index.js";
 import type { ModelMessage, SystemModelMessage } from "ai";
 
 import type {
@@ -13,28 +14,27 @@ import {
   InitiatorAuthKey,
   ParentSessionKey,
 } from "#context/keys.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
+import type { TurnPosition } from "#harness/session-machine/view.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
+import type { RuntimeContextResolver } from "#tracing/eve/otel-declaration.js";
 import {
   normalizeInstrumentationChannelKind,
   resolveInstrumentationProjection,
 } from "#internal/instrumentation.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import type {
-  InstrumentationChannel,
   InstrumentationRuntimeContext,
-  InstrumentationStepStartedEventInput,
+  InstrumentationModelStartedInput,
 } from "#public/instrumentation/index.js";
 import { parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
 
 const log = createLogger("harness.instrumentation-runtime-context");
 
 export interface BuildTelemetryRuntimeContextInput {
+  readonly attempt: number;
   readonly capturesContent: boolean;
   readonly context?: InstrumentationRuntimeContextSnapshot;
-  readonly eveVersion: string;
-  readonly emissionState: HarnessEmissionState;
+  readonly emissionState: TurnPosition;
   readonly environment: string;
   readonly modelInput: {
     readonly instructions: string | SystemModelMessage | undefined;
@@ -85,25 +85,21 @@ export function buildTelemetryRuntimeContext(
     return undefined;
   }
 
+  if (input.emissionState.runId === undefined) {
+    log.warn("cannot resolve instrumentation context without a model run");
+    return undefined;
+  }
   const providerRuntimeContext = resolveProviderRuntimeContext(input);
-  const context = input.context ?? snapshotInstrumentationRuntimeContext(contextStorage.getStore());
-  const projection = context.channel;
 
   return {
     ...providerRuntimeContext,
-    "eve.channel.kind": normalizeInstrumentationChannelKind(projection?.kind),
     "eve.environment": input.environment,
-    "eve.session.id": input.session.sessionId,
-    "eve.step.index": String(input.emissionState.stepIndex),
-    "eve.turn.id": input.emissionState.turnId,
-    "eve.turn.sequence": String(input.emissionState.sequence),
-    "eve.version": input.eveVersion,
   };
 }
 
-function buildInstrumentationStepStartedInput(
-  input: Omit<BuildTelemetryRuntimeContextInput, "eveVersion" | "environment">,
-): InstrumentationStepStartedEventInput {
+function buildInstrumentationModelStartedInput(
+  input: Omit<BuildTelemetryRuntimeContextInput, "environment">,
+): InstrumentationModelStartedInput {
   const context = input.context ?? snapshotInstrumentationRuntimeContext(contextStorage.getStore());
   const projection = context.channel;
 
@@ -123,13 +119,14 @@ function buildInstrumentationStepStartedInput(
       id: input.session.sessionId,
       parent: context.parent,
     },
-    step: {
-      index: input.emissionState.stepIndex,
-    },
-    turn: {
-      id: input.emissionState.turnId,
-      sequence: input.emissionState.sequence,
-    },
+    run: { id: input.emissionState.runId!, attempt: input.attempt },
+    turn:
+      input.emissionState.turnId === undefined
+        ? undefined
+        : {
+            id: input.emissionState.turnId,
+            sequence: input.emissionState.sequence,
+          },
   };
 }
 
@@ -174,7 +171,7 @@ function resolveProviderRuntimeContext(
   for (const resolver of resolvers) {
     const source = "provider.runtimeContext";
     const invoke = () => {
-      const stepStartedInput = buildInstrumentationStepStartedInput(input);
+      const stepStartedInput = buildInstrumentationModelStartedInput(input);
       return resolver(stepStartedInput);
     };
     const result = resolveInstrumentationProjection({

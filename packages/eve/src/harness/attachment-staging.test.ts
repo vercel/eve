@@ -1,14 +1,22 @@
-import type { FilePart, UserContent } from "ai";
-import { describe, expect, it } from "vitest";
+import type { FilePart, ModelMessage, UserContent } from "ai";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapterContext } from "#channel/adapter.js";
-import { ContextContainer } from "#context/container.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SandboxKey, SessionIdKey } from "#context/keys.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
-import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import { ATTACHMENTS_ROOT, stageAttachmentsForAdapter } from "#harness/attachment-staging.js";
+import { pngBytes } from "#internal/testing/media-fixtures.js";
+import { type MockSandbox, mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
+import {
+  hydrateSandboxAttachments,
+  moveToolResultFilesToUserMessages,
+  stageAttachmentsForAdapter,
+  stageAttachmentsToSandbox,
+  stageToolResultMedia,
+} from "#harness/attachment-staging.js";
 
 const UTF8 = new TextEncoder();
-const ATTACHMENTS_PATH_PATTERN = /^\/workspace\/attachments\/[0-9a-f]{16}\//;
+const ATTACHMENTS_PATH_PATTERN = /^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\//;
 
 /**
  * Minimal {@link ChannelAdapterContext} for tests that never encounter
@@ -23,7 +31,6 @@ const STUB_ADAPTER_CTX: ChannelAdapterContext = {
   session: {
     id: "",
     auth: { current: null, initiator: null },
-    continuation: { token: "", alias: () => {} },
   },
 };
 
@@ -75,12 +82,12 @@ describe("stageAttachmentsForAdapter", () => {
     const ref = decodeSandboxRef(filePart.data as URL);
     expect(ref.mediaType).toBe("text/csv");
     expect(ref.size).toBe(data.byteLength);
-    expect(ref.path).toMatch(/^\/workspace\/attachments\/[0-9a-f]{16}\/quarterly\.csv$/);
+    expect(ref.path).toMatch(/^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/quarterly\.csv$/);
     expect(filePart.filename).toBe(ref.path);
 
     expect(sandbox.writes).toHaveLength(1);
     const write = sandbox.writes[0];
-    expect(write?.path).toMatch(new RegExp(`^${ATTACHMENTS_ROOT}/[0-9a-f]{16}/quarterly\\.csv$`));
+    expect(write?.path).toBe(ref.path);
     expect(write?.content).toEqual(data);
   });
 
@@ -202,30 +209,6 @@ describe("stageAttachmentsForAdapter", () => {
 
     const written = sandbox.writes[0]?.content as Buffer;
     expect(written.toString("utf8")).toBe(payload);
-  });
-
-  it("leaves remote URL parts unchanged — the provider fetches them at call time", async () => {
-    const sandbox = mockSandbox();
-    const content: UserContent = [
-      {
-        data: new URL("https://example.com/chart.png"),
-        filename: "chart.png",
-        mediaType: "image/png",
-        type: "file",
-      },
-    ];
-
-    const staged = (await stageAttachmentsForAdapter(
-      content,
-      sandbox.session,
-      STUB_ADAPTER_CTX,
-    )) as UserContent;
-    const filePart = staged[0] as FilePart;
-
-    expect(filePart.filename).toBe("chart.png");
-    expect(filePart.data).toBeInstanceOf(URL);
-    expect((filePart.data as URL).protocol).toBe("https:");
-    expect(sandbox.writes).toHaveLength(0);
   });
 
   it("passes already-staged eve-sandbox: ref parts through unchanged (idempotent)", async () => {
@@ -362,5 +345,342 @@ describe("stageAttachmentsForAdapter", () => {
     const filePart = staged[0] as FilePart;
 
     expect(filePart.filename).toMatch(ATTACHMENTS_PATH_PATTERN);
+  });
+});
+
+function unresumableSandboxContext(): ContextContainer {
+  const ctx = new ContextContainer();
+  ctx.set(SandboxKey, {
+    captureState: async () => ({ session: null }),
+    get: async () => {
+      throw new Error('docker session "ses_1" is no longer available to resume.');
+    },
+    open: async () => {
+      throw new Error('docker session "ses_1" is no longer available to resume.');
+    },
+    prepare() {},
+    stop: async () => {},
+  });
+  return ctx;
+}
+
+describe("stageAttachmentsToSandbox", () => {
+  it("replaces an inbound file with a note when the sandbox cannot be resumed", async () => {
+    const staged = await contextStorage.run(unresumableSandboxContext(), () =>
+      stageAttachmentsToSandbox([
+        { text: "see attached", type: "text" },
+        {
+          data: UTF8.encode("hello"),
+          filename: "notes.txt",
+          mediaType: "text/plain",
+          type: "file",
+        },
+      ]),
+    );
+
+    expect(staged).toEqual([
+      { text: "see attached", type: "text" },
+      { text: "Attachment notes.txt could not be stored: no sandbox is available.", type: "text" },
+    ]);
+  });
+});
+
+describe("stageToolResultMedia", () => {
+  it("preserves a remote tool-result file without resuming a sandbox", async () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-1",
+            toolName: "report",
+            output: {
+              type: "content",
+              value: [
+                {
+                  type: "file",
+                  data: { type: "url", url: new URL("https://files.example/report.pdf") },
+                  mediaType: "application/pdf",
+                  filename: "report.pdf",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ];
+
+    const staged = await contextStorage.run(unresumableSandboxContext(), () =>
+      stageToolResultMedia(messages),
+    );
+
+    expect(staged).toEqual(messages);
+  });
+
+  // #4839: a throw here escapes the step after its model call and tools ran,
+  // so the step retries and replays them.
+  it("replaces a returned file with a note when the sandbox cannot be resumed", async () => {
+    const ctx = unresumableSandboxContext();
+    const toolResult = (value: unknown) =>
+      ({
+        content: [
+          {
+            output: { type: "content", value },
+            toolCallId: "call-1",
+            toolName: "inspect",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      }) as ModelMessage;
+
+    const staged = await contextStorage.run(ctx, () =>
+      stageToolResultMedia([
+        toolResult([
+          {
+            data: { data: "iVBORw0KGgo=", type: "data" },
+            filename: "chart.png",
+            mediaType: "image/png",
+            type: "file",
+          },
+        ]),
+      ]),
+    );
+
+    expect(staged).toEqual([
+      toolResult([
+        { text: "Returned file chart.png (image/png) could not be stored.", type: "text" },
+      ]),
+    ]);
+  });
+
+  // #4839: a sandbox that opens but rejects the write (a cached handle to a
+  // dead VM, a sandbox past its timeout) throws out of the step the same way.
+  it("replaces a returned file with a note when the sandbox rejects the write", async () => {
+    const sandbox = mockSandbox();
+    const ctx = new ContextContainer();
+    ctx.set(SandboxKey, {
+      ...sandbox.access,
+      open: async () => ({
+        ...sandbox.session,
+        writeBinaryFile: async () => {
+          throw new Error("sandbox is past its timeout");
+        },
+      }),
+    });
+    const toolResult = (value: unknown) =>
+      ({
+        content: [
+          {
+            output: { type: "content", value },
+            toolCallId: "call-1",
+            toolName: "inspect",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      }) as ModelMessage;
+
+    const staged = await contextStorage.run(ctx, () =>
+      stageToolResultMedia([
+        toolResult([
+          {
+            data: { data: "iVBORw0KGgo=", type: "data" },
+            filename: "chart.png",
+            mediaType: "image/png",
+            type: "file",
+          },
+        ]),
+      ]),
+    );
+
+    expect(staged).toEqual([
+      toolResult([
+        { text: "Returned file chart.png (image/png) could not be stored.", type: "text" },
+      ]),
+    ]);
+  });
+});
+
+// Each test hydrates under its own session id, so bytes cached by one test
+// never satisfy another.
+describe("hydrateSandboxAttachments", () => {
+  function sessionContext(sessionId: string, sandbox: MockSandbox): ContextContainer {
+    const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, sessionId);
+    ctx.set(SandboxKey, sandbox.access);
+    return ctx;
+  }
+
+  function hydrate(ctx: ContextContainer, content: UserContent): Promise<ModelMessage[]> {
+    return contextStorage.run(ctx, () => hydrateSandboxAttachments([{ content, role: "user" }]));
+  }
+
+  // Staged outside any session, as by another process: nothing is cached.
+  async function stageElsewhere(sandbox: MockSandbox, file: FilePart): Promise<FilePart> {
+    const [staged] = (await stageAttachmentsForAdapter(
+      [file],
+      sandbox.session,
+      STUB_ADAPTER_CTX,
+    )) as FilePart[];
+    return staged!;
+  }
+
+  async function stageInSession(ctx: ContextContainer, file: FilePart): Promise<FilePart> {
+    const [staged] = (await contextStorage.run(ctx, () =>
+      stageAttachmentsToSandbox([file]),
+    )) as FilePart[];
+    return staged!;
+  }
+
+  function png(filename: string, bytes: Buffer): FilePart {
+    return { data: bytes, filename, mediaType: "image/png", type: "file" };
+  }
+
+  function fileNotFound(part: FilePart) {
+    return {
+      text: `FileNotFound: Current snapshot may be newer and does not contain ${part.filename}.`,
+      type: "text",
+    };
+  }
+
+  it("renders label-only refs without resuming the sandbox", async () => {
+    const sandbox = mockSandbox();
+    const csv = await stageElsewhere(sandbox, {
+      data: Buffer.from("id,name\n1,alpha\n"),
+      filename: "report.csv",
+      mediaType: "text/csv",
+      type: "file",
+    });
+    const open = vi.spyOn(sandbox.access, "open");
+
+    const hydrated = await hydrate(sessionContext("ses_label_only", sandbox), [csv]);
+
+    expect(hydrated[0]?.content).toEqual([
+      { text: `Attached file ${csv.filename} (text/csv)`, type: "text" },
+    ]);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("hydrates an image staged in this session without resuming the sandbox", async () => {
+    const sandbox = mockSandbox();
+    const ctx = sessionContext("ses_staged_here", sandbox);
+    const bytes = pngBytes(32, 32, 64);
+    const image = await stageInSession(ctx, png("logo.png", bytes));
+    const open = vi.spyOn(sandbox.access, "open");
+
+    const hydrated = await hydrate(ctx, [image]);
+
+    expect(hydrated[0]?.content).toEqual([
+      { text: `Attached file ${image.filename} (image/png)`, type: "text" },
+      { ...image, data: bytes, mediaType: "image/png" },
+    ]);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("does not serve bytes cached for one session to another", async () => {
+    const image = await stageInSession(
+      sessionContext("ses_owner", mockSandbox()),
+      png("private.png", pngBytes(32, 32, 64)),
+    );
+
+    // Bob's sandbox never held the file, so only a cache hit could inline it.
+    const hydrated = await hydrate(sessionContext("ses_bob", mockSandbox()), [image]);
+
+    expect(hydrated[0]?.content).toEqual([fileNotFound(image)]);
+  });
+
+  it("reads uncached refs through one sandbox resume and serves later calls from memory", async () => {
+    const sandbox = mockSandbox();
+    const firstBytes = pngBytes(32, 32, 64);
+    const secondBytes = pngBytes(16, 16, 64);
+    const first = await stageElsewhere(sandbox, png("first.png", firstBytes));
+    const second = await stageElsewhere(sandbox, png("second.png", secondBytes));
+    const ctx = sessionContext("ses_cold_process", sandbox);
+    const open = vi.spyOn(sandbox.access, "open");
+
+    const calls = [await hydrate(ctx, [first, second]), await hydrate(ctx, [first, second])];
+
+    for (const hydrated of calls) {
+      expect(hydrated[0]?.content).toEqual([
+        { text: `Attached file ${first.filename} (image/png)`, type: "text" },
+        { ...first, data: firstBytes, mediaType: "image/png" },
+        { text: `Attached file ${second.filename} (image/png)`, type: "text" },
+        { ...second, data: secondBytes, mediaType: "image/png" },
+      ]);
+    }
+    expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  it("never caches bytes that changed since staging", async () => {
+    const sandbox = mockSandbox();
+    const bytes = pngBytes(32, 32, 64);
+    const image = await stageElsewhere(sandbox, png("logo.png", bytes));
+    // Same size, different bytes: only the content address can tell them apart.
+    await sandbox.session.writeBinaryFile({
+      content: Buffer.alloc(bytes.byteLength, 0x41),
+      path: image.filename!,
+    });
+    const ctx = sessionContext("ses_overwritten", sandbox);
+
+    expect((await hydrate(ctx, [image]))[0]?.content).toEqual([fileNotFound(image)]);
+    expect((await hydrate(ctx, [image]))[0]?.content).toEqual([fileNotFound(image)]);
+  });
+});
+
+describe("moveToolResultFilesToUserMessages", () => {
+  it("moves tool-result files into a user message after the tool results", () => {
+    const file = {
+      data: { data: "iVBORw0KGgo=", type: "data" as const },
+      filename: "chart.png",
+      mediaType: "image/png",
+      type: "file" as const,
+    };
+    const messages: ModelMessage[] = [
+      {
+        content: [{ input: {}, toolCallId: "call-1", toolName: "render", type: "tool-call" }],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: { type: "content", value: [{ text: "Rendered.", type: "text" }, file] },
+            toolCallId: "call-1",
+            toolName: "render",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+      { content: "It is a chart.", role: "assistant" },
+    ];
+
+    const moved = moveToolResultFilesToUserMessages(messages);
+
+    expect(moved.map((message) => message.role)).toEqual([
+      "assistant",
+      "tool",
+      "user",
+      "assistant",
+    ]);
+    expect(moved[1]?.content).toEqual([
+      {
+        output: {
+          type: "content",
+          value: [
+            { text: "Rendered.", type: "text" },
+            { text: "Attached file chart.png (image/png) follows this tool result.", type: "text" },
+          ],
+        },
+        toolCallId: "call-1",
+        toolName: "render",
+        type: "tool-result",
+      },
+    ]);
+    expect(moved[2]?.content).toEqual([
+      { text: "Files returned by the preceding tool results:", type: "text" },
+      file,
+    ]);
   });
 });

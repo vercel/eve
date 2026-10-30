@@ -3,13 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPromptCommandOutput, WHIMSY_POOLS } from "#setup/cli/index.js";
 import { captureVercel, runVercel, type VercelCaptureResult } from "#setup/primitives/index.js";
 
+import { WEB_CHAT_TEAM_REQUIREMENT } from "./integrations/web/auth-options.js";
+
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import type { Prompter, PrompterValue, SingleSelectOptions } from "./prompter.js";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { readProjectLink } from "./project-resolution.js";
+import { configureTraceSampling } from "./vercel-trace-sampling.js";
 import {
   assertNewProjectNameAvailable,
-  ensureLinkedVercelProject,
   getVercelAuthStatus,
   linkProject,
   pickNewProjectName,
@@ -17,8 +19,8 @@ import {
   pickTeam,
   requireAuth,
   resolveProjectByNameOrId,
+  resolveTeam,
   validateTeam,
-  vercelAuthBlockerReason,
 } from "./vercel-project.js";
 
 vi.mock("#setup/primitives/index.js", async (importOriginal) => {
@@ -30,6 +32,8 @@ vi.mock("#setup/primitives/index.js", async (importOriginal) => {
   };
 });
 
+vi.mock("./vercel-trace-sampling.js", () => ({ configureTraceSampling: vi.fn() }));
+
 vi.mock("./project-resolution.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("./project-resolution.js")>();
   return {
@@ -40,6 +44,7 @@ vi.mock("./project-resolution.js", async (importOriginal) => {
 
 const mockedCaptureVercel = vi.mocked(captureVercel);
 const mockedRunVercel = vi.mocked(runVercel);
+const mockedConfigureTraceSampling = vi.mocked(configureTraceSampling);
 const mockedReadProjectLink = vi.mocked(readProjectLink);
 
 /** Wraps stdout as a successful capture result for the mocked `captureVercel`. */
@@ -71,23 +76,8 @@ beforeEach(() => {
   mockedCaptureVercel.mockReset();
   mockedRunVercel.mockReset();
   mockedRunVercel.mockResolvedValue(true);
+  mockedConfigureTraceSampling.mockReset();
   mockedReadProjectLink.mockReset();
-});
-
-describe("vercelAuthBlockerReason", () => {
-  it("maps non-authenticated states to their setup blockers", () => {
-    expect([
-      vercelAuthBlockerReason("authenticated"),
-      vercelAuthBlockerReason("cli-missing"),
-      vercelAuthBlockerReason("logged-out"),
-      vercelAuthBlockerReason("unavailable"),
-    ]).toEqual([
-      undefined,
-      "Vercel CLI not found, see /deploy",
-      "Log in to Vercel first, see /deploy",
-      "Couldn't reach Vercel, check your connection",
-    ]);
-  });
 });
 
 describe("getVercelAuthStatus", () => {
@@ -96,7 +86,7 @@ describe("getVercelAuthStatus", () => {
     mockedCaptureVercel.mockResolvedValueOnce(captured("acme\n"));
     await expect(getVercelAuthStatus("/tmp/eve-agent")).resolves.toBe("authenticated");
     expect(mockedCaptureVercel).toHaveBeenCalledWith(
-      ["whoami"],
+      ["whoami", "--format", "json"],
       expect.objectContaining({ cwd: "/tmp/eve-agent" }),
     );
   });
@@ -107,16 +97,34 @@ describe("getVercelAuthStatus", () => {
 
     await expect(getVercelAuthStatus("/tmp/eve-agent")).resolves.toBe("authenticated");
     expect(mockedCaptureVercel).toHaveBeenCalledWith(
-      ["whoami", "--scope", "team_demo"],
+      ["whoami", "--format", "json", "--scope", "team_demo"],
       expect.objectContaining({ cwd: "/tmp/eve-agent" }),
     );
   });
 
   it.each([
+    ["no saved token (CLI 62)", '{\n  "loggedIn": false\n}\n'],
+    [
+      "no saved token (agent error)",
+      JSON.stringify({ loggedIn: false, status: "action_required", reason: "login_required" }),
+    ],
+    [
+      "rejected token (agent error)",
+      JSON.stringify({ status: "error", reason: "not_authorized", userActionRequired: true }),
+    ],
+  ])("reports logged-out from whoami's structured JSON: %s", async (_case, stdout) => {
+    mockedCaptureVercel.mockResolvedValueOnce(failedCapture(stdout));
+    await expect(getVercelAuthStatus("/tmp/eve-agent")).resolves.toBe("logged-out");
+  });
+
+  it.each([
+    'Error: No existing credentials found. Please run `vercel login` or pass "--token"',
     "Error: Not authenticated",
+    "Vercel CLI 62.1.0\nError: Not authorized",
     "Error: The specified token is not valid. Use `vercel login` to generate a new token.",
+    "Error: The token provided via VERCEL_TOKEN environment variable is not valid. Please provide a valid token.",
     "Error: You do not have access to the specified account\nLearn More: https://err.sh/vercel/scope-not-accessible",
-  ])("reports logged-out for an authentication-recovery diagnostic: %s", async (stderr) => {
+  ])("falls back to the diagnostic text when whoami prints no JSON: %s", async (stderr) => {
     mockedCaptureVercel.mockResolvedValueOnce(failedCapture("", stderr));
     await expect(getVercelAuthStatus("/tmp/eve-agent")).resolves.toBe("logged-out");
   });
@@ -165,6 +173,16 @@ describe("requireAuth", () => {
     expect(error).toMatchObject({
       message: expect.stringContaining("Couldn't verify your Vercel"),
     });
+  });
+});
+
+describe("resolveTeam", () => {
+  it("falls back to the whoami principal when no team is current", async () => {
+    stubVercel({
+      teams: [],
+      whoami: JSON.stringify({ username: "alice", team: null, plan: "hobby" }),
+    });
+    await expect(resolveTeam("/tmp/eve-agent", undefined)).resolves.toBe("alice");
   });
 });
 
@@ -591,47 +609,6 @@ describe("resolveProjectByNameOrId", () => {
   });
 });
 
-describe("ensureLinkedVercelProject", () => {
-  it("returns the existing project link without invoking the CLI", async () => {
-    mockedReadProjectLink.mockResolvedValue({ orgId: "team_a", projectId: "prj_a" });
-    const { prompter } = createFakePrompter();
-
-    await expect(
-      ensureLinkedVercelProject({ projectRoot: "/tmp/eve-agent", prompter }),
-    ).resolves.toEqual({ orgId: "team_a", projectId: "prj_a" });
-
-    expect(mockedRunVercel).not.toHaveBeenCalled();
-  });
-
-  it("links interactively and reads the resulting project link", async () => {
-    mockedReadProjectLink
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce({ orgId: "team_a", projectId: "prj_a" });
-    const { prompter } = createFakePrompter();
-    prompter.withInheritedStdio = vi.fn((task) => task());
-
-    await expect(
-      ensureLinkedVercelProject({ projectRoot: "/tmp/eve-agent", prompter }),
-    ).resolves.toEqual({ orgId: "team_a", projectId: "prj_a" });
-
-    expect(prompter.withInheritedStdio).toHaveBeenCalledOnce();
-    expect(mockedRunVercel).toHaveBeenCalledWith(["link"], {
-      cwd: "/tmp/eve-agent",
-      signal: undefined,
-    });
-  });
-
-  it("fails when the interactive link does not complete", async () => {
-    mockedReadProjectLink.mockResolvedValue(undefined);
-    mockedRunVercel.mockResolvedValue(false);
-    const { prompter } = createFakePrompter();
-
-    await expect(
-      ensureLinkedVercelProject({ projectRoot: "/tmp/eve-agent", prompter }),
-    ).rejects.toThrow("Vercel project linking failed.");
-  });
-});
-
 describe("linkProject", () => {
   it("links a resolved existing project through `vercel link`", async () => {
     const { prompter } = createFakePrompter();
@@ -650,6 +627,7 @@ describe("linkProject", () => {
     ).resolves.toEqual({ projectId: "prj_existing", projectName: "my-agent" });
 
     expect(mockedCaptureVercel).not.toHaveBeenCalled();
+    expect(mockedConfigureTraceSampling).not.toHaveBeenCalled();
     expect(mockedRunVercel).toHaveBeenCalledWith(
       ["link", "--project", "prj_existing", "--scope", "team-a", "--yes"],
       expect.objectContaining({ cwd: "/tmp/eve-agent", nonInteractive: true }),
@@ -702,7 +680,7 @@ describe("linkProject", () => {
       )
       .mockResolvedValueOnce(captured({ framework: "eve" }));
     mockedReadProjectLink.mockResolvedValueOnce({
-      orgId: "team-a",
+      orgId: "team_123",
       projectId: "prj_new",
       projectName: "my-agent",
     });
@@ -731,6 +709,40 @@ describe("linkProject", () => {
       ["link", "--project", "my-agent", "--scope", "team-a", "--yes"],
       expect.objectContaining({ cwd: "/tmp/eve-agent", nonInteractive: true }),
     );
+    expect(mockedRunVercel).toHaveBeenCalledTimes(1);
+    expect(mockedConfigureTraceSampling).toHaveBeenCalledWith(
+      { orgId: "team_123", projectId: "prj_new", projectName: "my-agent" },
+      prompter,
+      undefined,
+    );
+  });
+
+  it("does not configure sampling when explicitly disabled", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
+      )
+      .mockResolvedValueOnce(captured({ framework: "eve" }));
+    mockedReadProjectLink.mockResolvedValueOnce({
+      orgId: "team-a",
+      projectId: "prj_new",
+      projectName: "my-agent",
+    });
+    const { prompter } = createFakePrompter();
+
+    await expect(
+      linkProject(
+        prompter,
+        "/tmp/eve-agent",
+        { kind: "new", project: "my-agent", team: "team-a" },
+        createPromptCommandOutput(prompter.log),
+        { traceSampling: false },
+      ),
+    ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
+
+    expect(mockedConfigureTraceSampling).not.toHaveBeenCalled();
   });
 
   it("uses the requested project name when Vercel's link metadata omits the name", async () => {
@@ -790,6 +802,7 @@ describe("linkProject", () => {
   it.each([
     { framework: "nuxtjs", importSpecifier: "eve/nuxt" },
     { framework: "sveltekit", importSpecifier: "eve/sveltekit" },
+    { framework: "tanstack-start", importSpecifier: "eve/tanstack" },
   ])("keeps a detected $framework project when $importSpecifier is present", async (testCase) => {
     mockedCaptureVercel
       .mockResolvedValueOnce(
@@ -1091,6 +1104,8 @@ describe("linkProject", () => {
 function stubVercel(responses: {
   whoami?: string;
   teams?: { name: string; slug: string; current: boolean }[];
+  permissions?: Record<string, Record<string, string[]> | null>;
+  limitedTeams?: string[];
   projects?: { name: string; id: string; updatedAt?: number }[];
 }): void {
   mockedCaptureVercel.mockImplementation(async (args): Promise<VercelCaptureResult> => {
@@ -1108,6 +1123,19 @@ function stubVercel(responses: {
       return responses.teams === undefined
         ? failed()
         : { ok: true, stdout: JSON.stringify({ teams: responses.teams }) };
+    }
+    if (args[0] === "api" && args[1] === "/v2/teams?permissions=true&limit=100") {
+      return captured({
+        teams: Object.entries(responses.permissions ?? {}).map(([slug, permissions]) => ({
+          slug,
+          permissions,
+          limited: responses.limitedTeams?.includes(slug),
+        })),
+      });
+    }
+    if (args[0] === "api" && args[1] === "/v1/user/permissions") {
+      const permissions = responses.permissions?.[String(args[args.indexOf("--scope") + 1])];
+      return permissions == null ? failed() : captured({ permissions });
     }
     if (args[0] === "project" && args[1] === "ls") {
       return responses.projects === undefined
@@ -1155,6 +1183,72 @@ describe("pickTeam selection", () => {
     await expect(pickTeam(prompter, "/tmp/parent", undefined)).resolves.toBe("other");
     expect(selectMessages).toEqual(["Select your team"]);
   });
+
+  it("keeps ineligible teams visible and defaults to a team with Web Chat permissions", async () => {
+    const permitted = {
+      oauth2Application: ["create", "update"],
+      projectEnvVars: ["create"],
+      projectEnvVarsProduction: ["create"],
+    };
+    stubVercel({
+      teams: [
+        { name: "Member team", slug: "member", current: true },
+        { name: "Owner team", slug: "owner", current: false },
+        { name: "Unavailable team", slug: "unavailable", current: false },
+        { name: "No production env access", slug: "restricted", current: false },
+        { name: "SSO required", slug: "sso", current: false },
+      ],
+      permissions: {
+        member: { ...permitted, oauth2Application: ["read", "list"] },
+        owner: permitted,
+        unavailable: null,
+        restricted: { ...permitted, projectEnvVarsProduction: [] },
+        sso: permitted,
+      },
+      limitedTeams: ["sso"],
+    });
+    const { prompter } = createFakePrompter({
+      single: (opts) => {
+        expect(opts.initialValue).toBe("owner");
+        expect(opts.options).toMatchObject([
+          { value: "owner", disabled: false },
+          { value: "member", disabled: true, disabledReason: "needs permission" },
+          {
+            value: "unavailable",
+            disabled: true,
+            disabledReason: "couldn't verify",
+          },
+          { value: "restricted", disabled: true },
+          { value: "sso", disabled: true },
+        ]);
+        expect(opts.search).toBe(true);
+        expect(opts.helpText).toContain("ask a team owner");
+        expect(opts.helpText).toContain("vercel login");
+        return "owner";
+      },
+    });
+    await expect(
+      pickTeam(prompter, "/tmp/parent", undefined, {
+        teamRequirement: WEB_CHAT_TEAM_REQUIREMENT,
+      }),
+    ).resolves.toBe("owner");
+  });
+
+  it.each([undefined, "member"])(
+    "rejects an ineligible sole or preset team (%s)",
+    async (preset) => {
+      stubVercel({
+        teams: [{ name: "Member", slug: "member", current: true }],
+        permissions: { member: { oauth2Application: ["read"] } },
+      });
+      const { prompter } = createFakePrompter();
+      await expect(
+        pickTeam(prompter, "/tmp/parent", preset, {
+          teamRequirement: WEB_CHAT_TEAM_REQUIREMENT,
+        }),
+      ).rejects.toThrow(/owner/);
+    },
+  );
 
   it("uses a current-team-aware heading when the caller supplies one", async () => {
     stubVercel({

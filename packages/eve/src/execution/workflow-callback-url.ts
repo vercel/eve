@@ -5,13 +5,7 @@ import {
 } from "#shared/public-route-prefix.js";
 
 const PRODUCTION_ENVIRONMENT = "production";
-const VERCEL_PROTECTION_BYPASS_QUERY = "x-vercel-protection-bypass";
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
-const VERCEL_CALLBACK_HOST_ENVS = [
-  "VERCEL_URL",
-  "VERCEL_BRANCH_URL",
-  "VERCEL_PROJECT_PRODUCTION_URL",
-] as const;
 
 /**
  * Workflow metadata is deployment-specific, so on Vercel it can point at
@@ -55,42 +49,27 @@ export function resolveWorkflowCallbackBaseUrl(metadataUrl: string): string {
 }
 
 /**
- * Builds a framework-owned callback URL from a resolved callback base URL.
+ * Builds a framework-owned callback URL that a browser or third party sees,
+ * such as the connection sign-in redirect handed to an IdP.
  *
  * `callbackPath` is appended to the full base URL rather than resolved
  * against it: the base may carry a public route prefix path, which
  * `new URL(path, base)` would drop for absolute paths.
  */
-export function createWorkflowCallbackUrl(baseUrl: string, callbackPath: string): string {
+export function createBrowserCallbackUrl(baseUrl: string, callbackPath: string): string {
   const callback = new URL(callbackPath, "http://eve.local");
   const url = new URL(baseUrl);
   url.pathname = joinEveRoutePath(url.pathname, callback.pathname);
   url.search = callback.search;
-
-  // https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation
-  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
-  if (bypassSecret) {
-    url.searchParams.set(VERCEL_PROTECTION_BYPASS_QUERY, bypassSecret);
-  }
-
   return url.toString();
 }
 
 /**
- * Builds a callback to a remote task child without disclosing this deployment's
- * protection bypass secret to an authored external origin.
+ * Builds a framework-owned callback URL for server-to-server delivery.
+ *
+ * The URL carries only the callback's scoped capability. Deployment protection
+ * credentials belong to the delivering deployment's trusted-origin transport.
  */
-export function createRemoteTaskInputCallbackUrl(baseUrl: string, callbackPath: string): string {
-  const callback = new URL(callbackPath, "http://eve.local");
-  const url = new URL(baseUrl);
-  url.pathname = joinEveRoutePath(url.pathname, callback.pathname);
-  url.search = callback.search;
-  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
-  const isCurrentVercelHost = VERCEL_CALLBACK_HOST_ENVS.some(
-    (name) => process.env[name]?.trim().toLowerCase() === url.hostname.toLowerCase(),
-  );
-  if (bypassSecret && url.protocol === "https:" && isCurrentVercelHost) {
-    url.searchParams.set(VERCEL_PROTECTION_BYPASS_QUERY, bypassSecret);
-  }
-  return url.toString();
+export function createWorkflowCallbackUrl(baseUrl: string, callbackPath: string): string {
+  return createBrowserCallbackUrl(baseUrl, callbackPath);
 }

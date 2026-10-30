@@ -6,6 +6,15 @@ import { FILE_MEMORY_FACT, FILE_MEMORY_PHRASE } from "./constants.js";
 export default defineAgent({
   ...e2eAgentConfig({
     mock: ({ lastUserMessage, messages, toolResults, tools }) => {
+      if (lastUserMessage?.startsWith("Reply with exactly CAPTURE-E2E-N7Q4")) {
+        return "CAPTURE-E2E-N7Q4";
+      }
+      if (lastUserMessage?.startsWith("Read the recalled capture-state JSON")) {
+        const visible = messages.map((message) => message.text).join("\n");
+        return visible.includes('{"count":1,"sawAssistant":true,"sawMarker":true}')
+          ? "CAPTURE-STATE-OK"
+          : "CAPTURE-STATE-BAD";
+      }
       if (lastUserMessage?.startsWith("What is the verification phrase")) {
         const recalls = messages.filter((message) => message.text.includes(FILE_MEMORY_FACT));
         return recalls.length === 1

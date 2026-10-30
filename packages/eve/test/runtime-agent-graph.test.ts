@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { compileFromMemory } from "../src/compiler/compile-from-memory.js";
+import { compileFromMemory } from "../src/internal/testing/compile-from-memory.js";
 import { disableTool } from "../src/tools/definition.js";
 import { resolveRuntimeAgentGraph } from "../src/runtime/resolve-agent-graph.js";
 
@@ -25,7 +25,7 @@ describe("resolveRuntimeAgentGraph", () => {
     expect(graph.root.nodeId).toBe("__root__");
     const definition = graph.root.sandboxRegistry.sandbox.definition;
     expect(definition.kind).toBe("independent");
-    if (definition.kind === "independent") expect(definition.environment.provider).toBe("vercel");
+    if (definition.kind === "independent") expect(definition.environment.provider).toBe("default");
     expect(names).toEqual(manifest.tools.map((tool) => tool.name));
     expect(names).toContain("web_search");
     expect(graph.root.agent.tools.every((tool) => tool.owner.kind === "framework")).toBe(true);

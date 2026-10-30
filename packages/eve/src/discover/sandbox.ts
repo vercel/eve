@@ -91,6 +91,23 @@ export async function discoverSandboxSource(input: {
     };
   }
 
+  const rootCandidates = collectFlatSlotCandidates(input.rootEntries, {
+    moduleBaseName: SANDBOX_DEFINITION_BASE_NAME,
+  });
+  if (rootCandidates.moduleFileNames.length > 0) {
+    const rootFileNames = rootCandidates.moduleFileNames.map((name) => `"${name}"`).join(", ");
+    diagnostics.push(
+      createDiscoverErrorDiagnostic({
+        code: DISCOVER_MODULE_SLOT_COLLISION,
+        message:
+          `Found both ${rootFileNames} and "sandbox/". ` +
+          `Move ${rootFileNames} into "sandbox/sandbox.ts", or delete it if that file already exists.`,
+        sourcePath: directoryPath,
+      }),
+    );
+    return { diagnostics, sandbox: null, sandboxWorkspace: null };
+  }
+
   const folderEntries = await readSortedDirectoryEntries(input.source, directoryPath);
   const sandboxModuleCandidates = collectFolderSandboxModuleCandidates(folderEntries);
   const workspaceFolderEntry = folderEntries.find(
@@ -253,7 +270,7 @@ async function collectWorkspaceRootEntries(
   source: ProjectSource,
   workspacePath: string,
 ): Promise<readonly string[]> {
-  const entries = await readSortedDirectoryEntries(source, workspacePath);
+  const entries = await readSortedDirectoryEntries(source, workspacePath, { includeTests: true });
   const rendered: string[] = [];
 
   for (const entry of entries) {

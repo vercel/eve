@@ -3,7 +3,7 @@ import type { ResolvedScheduleDefinition } from "#runtime/types.js";
 /**
  * Stable Nitro task-name prefix for framework-owned authored schedules.
  */
-export const EVE_SCHEDULE_TASK_NAME_PREFIX = "eve.schedule.";
+const EVE_SCHEDULE_TASK_NAME_PREFIX = "eve.schedule.";
 
 /**
  * One compiled schedule registration consumed by the Nitro host wiring.

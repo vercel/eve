@@ -64,7 +64,7 @@ export type TerminalKey =
   | { type: "ignore" };
 
 /** One decoded key plus the UTF-16 code units it consumed from the input buffer. */
-export interface KeyToken {
+interface KeyToken {
   key?: TerminalKey;
   consumed: number;
   /** The buffer ends mid-sequence; wait for more bytes before decoding. */
@@ -272,10 +272,11 @@ export function parseKey(chunk: Buffer): TerminalKey {
     case "\u0003":
       return { type: "ctrl-c" };
     case "\r":
-    case "\n":
       return { type: "enter" };
     // Shift+Enter inserts a newline instead of submitting. Terminals report it
-    // as xterm modifyOtherKeys (`CSI 27 ; 2 ; 13 ~`) or the kitty/CSI-u form.
+    // as xterm modifyOtherKeys (`CSI 27 ; 2 ; 13 ~`), the kitty/CSI-u form, or
+    // LF (Warp). Raw-mode Enter is CR, so LF is otherwise only Ctrl+J.
+    case "\n":
     case "\x1b[27;2;13~":
     case "\x1b[13;2u":
       return { type: "newline" };
@@ -334,7 +335,7 @@ export function parseKey(chunk: Buffer): TerminalKey {
   }
 }
 
-export interface AssistantResponseStats {
+interface AssistantResponseStats {
   totalTokens: number | undefined;
   outputTokens: number | undefined;
   tokensPerSecond: number | undefined;

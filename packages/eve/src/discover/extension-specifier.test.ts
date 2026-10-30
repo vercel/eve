@@ -44,6 +44,35 @@ describe("parseExtensionMountSpecifier", () => {
     );
   });
 
+  it.each(["const", "let", "var"])("reads a %s mount with an emitted default export", (kind) => {
+    const source = `import{config}from"./config.js";import code from"eve/extensions/code";${kind} code_default=code({github:config()});export{code_default as default};`;
+    expect(parseExtensionMountSpecifier(source)).toBe("eve/extensions/code");
+  });
+
+  it("resolves an emitted factory's aliased named import", () => {
+    const source =
+      'import{crm as mount}from"@acme/crm";const crm_default=mount({});export{crm_default as default};';
+    expect(parseExtensionMountSpecifier(source)).toBe("@acme/crm");
+  });
+
+  // https://github.com/vercel/eve/issues/4953
+  it("reads a compiled identifier default export", () => {
+    const source = 'import b from "@acme/b";\nvar b_default = b;\nexport { b_default as default };';
+    expect(parseExtensionMountSpecifier(source)).toBe("@acme/b");
+  });
+
+  // https://github.com/vercel/eve/issues/4953
+  it("reads an emitted default re-export", () => {
+    const source = 'import b_default from "@acme/b";\nexport { b_default as default };';
+    expect(parseExtensionMountSpecifier(source)).toBe("@acme/b");
+  });
+
+  it("does not use an unrelated factory for an emitted default export", () => {
+    const source =
+      'import crm from"@acme/crm";const other=crm({});const exported={};export{exported as default};';
+    expect(parseExtensionMountSpecifier(source)).toBeNull();
+  });
+
   it("returns null when no mount shape is present", () => {
     expect(parseExtensionMountSpecifier("export const value = 1;")).toBeNull();
   });

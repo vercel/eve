@@ -108,7 +108,7 @@ export function uploadStaticNoiseTexture(
   );
 }
 
-export function hashPaintCell(x: number, y: number, salt: number) {
+function hashPaintCell(x: number, y: number, salt: number) {
   let h = (Math.imul(x >>> 0, 0x8da6b343) ^ Math.imul(y >>> 0, 0xd8163841) ^ salt) >>> 0;
   h = (h ^ (h >>> 13)) >>> 0;
   h = Math.imul(h, 0x85ebca6b) >>> 0;

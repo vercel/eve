@@ -1,79 +1,111 @@
 import { expect, it, vi } from "vitest";
 import type { ToolContext } from "#tools/definition.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
-import { executeWorkflowBody, type WorkflowBodyInput } from "#execution/tools/workflow/body.js";
-import { readWorkflowToolRunRef } from "#execution/tools/workflow/ask.js";
+import { startCallBody, type WorkflowBodyInput } from "#execution/tools/workflow/body.js";
+import { findWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
+import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 
-const mocks = vi.hoisted(() => ({ execute: vi.fn(), agent: vi.fn(), ask: vi.fn() }));
+const mocks = vi.hoisted(() => ({ execute: vi.fn(), openAgent: vi.fn(), ask: vi.fn() }));
 vi.mock("#execution/workflow-registry.js", () => ({ readRegisteredWorkflow: () => mocks.execute }));
-vi.mock("#execution/tools/subagent/invoke-agent.js", () => ({ agent: mocks.agent }));
 vi.mock("#execution/tools/workflow/ask.js", async (importOriginal) => ({
   ...(await importOriginal()),
   ask: mocks.ask,
 }));
+vi.mock("#execution/agent-sessions/session.js", () => ({
+  createAgentSessions: () => ({ close: async () => {}, open: mocks.openAgent }),
+}));
 
-it("defaults agent metadata to an empty registry for older workflow payloads", async () => {
-  mocks.execute.mockImplementation(async (_input, ctx: WorkflowToolContext) => {
-    expect(ctx.agents).toEqual({});
-    return null;
-  });
-  await executeWorkflowBody(
-    {
-      callId: "legacy-call",
-      input: {},
-      session: {
-        auth: { current: null, initiator: null },
-        id: "session",
-        turn: { id: "turn", sequence: 1 },
-      },
-      stepIndex: 0,
-      toolName: "legacy",
-      workflowId: "workflow//test//legacy",
-      owner: { inbox: "inbox" },
-      execution: "blocking",
-      runId: "run",
-    },
-    new AbortController().signal,
-  );
-});
+const agentContext = {
+  agents: { reviewer: { description: "Review deployments." } },
+  capabilities: { requestInput: true },
+} as Partial<AgentSessionContext> as AgentSessionContext;
+
+const input = {
+  agentContext,
+  callId: "call",
+  entry: { entryPoint: "execute" },
+  hookToken: "control",
+  input: {},
+  session: {
+    auth: { current: null, initiator: null },
+    id: "session",
+    turn: { id: "turn", sequence: 1 },
+  },
+  stepIndex: 0,
+  toolName: "deploy",
+  workflowId: "workflow//test//execute",
+  owner: { send: vi.fn(), sent: 0 },
+  runId: "run",
+} as WorkflowBodyInput;
 
 it("binds workflow-only methods to the run context", async () => {
-  const signal = new AbortController().signal;
-  const input = {
-    agents: { reviewer: { description: "Review deployments." } },
-    callId: "call",
-    input: {},
-    session: {
-      auth: { current: null, initiator: null },
-      id: "session",
-      turn: { id: "turn", sequence: 1 },
-    },
-    stepIndex: 0,
-    toolName: "deploy",
-    workflowId: "workflow//test//execute",
-    owner: { inbox: "inbox" },
-    execution: "blocking",
-    runId: "run",
-  } as WorkflowBodyInput & { execution: "blocking"; runId: string };
   const question = { prompt: "Continue?" };
   const target = "reviewer";
-  const invocation = { message: "Review" };
+  const session = { send: vi.fn() };
   mocks.ask.mockResolvedValue({ optionId: "yes" });
-  mocks.agent.mockResolvedValue("reviewed");
+  mocks.openAgent.mockReturnValue(session);
   mocks.execute.mockImplementation(async (_input, ctx: WorkflowToolContext & ToolContext) => {
-    expect(readWorkflowToolRunRef(ctx).runId).toBe("run");
-    expect(ctx.abortSignal).toBe(signal);
+    expect(findWorkflowToolRunContext(ctx)?.from.runId).toBe("run");
     expect(ctx.agents).toEqual({ reviewer: { description: "Review deployments." } });
     expect(Object.isFrozen(ctx.agents)).toBe(true);
     expect(Object.isFrozen(ctx.agents.reviewer)).toBe(true);
     const answer = await ctx.ask(question);
-    const result = await ctx.agent(target, invocation);
-    expect(mocks.ask).toHaveBeenCalledWith(ctx, question);
-    expect(mocks.agent).toHaveBeenCalledWith(ctx, target, invocation);
-    return { answer, result };
+    expect(ctx.agent(target)).toBe(session);
+    expect(mocks.ask).toHaveBeenCalledWith(ctx, question, undefined);
+    expect(mocks.openAgent).toHaveBeenCalledWith(target);
+    return { answer };
   });
-  await expect(executeWorkflowBody(input, signal)).resolves.toEqual({
-    outcome: { status: "completed", output: { answer: { optionId: "yes" }, result: "reviewed" } },
-    reportCount: 0,
+  const started = startCallBody(input);
+  await expect(started.outcome).resolves.toEqual({
+    status: "completed",
+    output: { answer: { optionId: "yes" } },
+  });
+});
+
+it("points a workflow body that opens the sandbox to a step helper", async () => {
+  mocks.execute.mockImplementation(async (_input, ctx: WorkflowToolContext) => ctx.getSandbox());
+  await expect(startCallBody(input).outcome).resolves.toMatchObject({
+    error: {
+      message:
+        'ctx.getSandbox() is not available inside a workflow tool; pass ctx directly to a "use step" helper to open the session\'s sandbox. Tool "deploy" runs as a durable workflow body, which only replays deterministic code.',
+    },
+    status: "failed",
+  });
+});
+
+// #3836: a selected option's answer carries `text: undefined`, and a tool that
+// returns it as-is, or returns nothing, must still complete with JSON.
+it.each([
+  { expected: { optionId: "yes", status: "answered" }, returnsAnswer: true },
+  { expected: null, returnsAnswer: false },
+])("completes with JSON output (returns the answer: $returnsAnswer)", async (row) => {
+  mocks.ask.mockResolvedValue({ optionId: "yes", status: "answered", text: undefined });
+  mocks.execute.mockImplementation(async (_input, ctx: WorkflowToolContext) => {
+    const answer = await ctx.ask({ prompt: "Continue?" });
+    return row.returnsAnswer ? answer : undefined;
+  });
+  const outcome = await startCallBody(input).outcome;
+  expect(outcome).toEqual({ output: row.expected, status: "completed" });
+  const output = outcome.status === "completed" ? outcome.output : null;
+  expect(output !== null && Object.hasOwn(output as object, "text")).toBe(false);
+});
+
+it("gives ctx.channel the calling session's channel kind, address, and metadata", async () => {
+  mocks.execute.mockImplementation(async (_input, ctx: WorkflowToolContext) => ctx.channel);
+  const started = startCallBody({
+    ...input,
+    agentContext: {
+      ...agentContext,
+      channelMetadata: { kind: "channel:slack-prod", metadata: { channelId: "C1" } },
+      continuationToken: "slack:C1:1700000000.000100",
+    },
+  });
+  await expect(started.outcome).resolves.toMatchObject({
+    output: {
+      continuationToken: "slack:C1:1700000000.000100",
+      kind: "channel:slack-prod",
+      metadata: { channelId: "C1" },
+    },
+    status: "completed",
   });
 });
