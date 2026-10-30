@@ -436,10 +436,12 @@ beta's behavior, and the RC's GET fallback must not change it.
 ### Vercel output
 
 - **Up front, in the host spec:**
-  - `vercel.functions.runtime: "nodejs24.x"`;
   - `functionRules` and the cron route from route-table intent;
   - for service builds, `output.serverDir` under `functions/eve/__server.func`. Adopt this only if
     the service scenarios prove the layout; otherwise keep today's copy step.
+- **Leave the function runtime to Nitro's Vercel preset.** eve sets no `vercel.functions.runtime`.
+  The beta picks the build machine's Node major, capped at its `SUPPORTED_NODE_VERSIONS`; the RC
+  reads `package.json` `engines` first. Node 26 needs Nitro to add 26 to that list.
 - **Fix the schedule consumer in service builds.** It's broken today: its `.func` falls outside
   eve's keep list and is deleted, and its route is rewritten to the shared server, which loses the
   queue trigger. Classify functions and routes by route-table intent, never by path text or `src`.
@@ -557,8 +559,7 @@ clean base and stays focused on what needs the RC.
 2. **Runtime, output, and dev correctness (beta).**
    - Skill files and the bootstrap through `text:`/`bytes:`; workflow-sandbox fallback deletion.
    - Channel dispatch fixes, WebSocket routes as `GET`.
-   - Schedule consumer fix and route-intent classification; deleting `materialize`; the Vercel
-     runtime pin.
+   - Schedule consumer fix and route-intent classification; deleting `materialize`.
    - Environment scrub in `eve start`.
    - Dev deletions and restructuring that don't need env-runner 0.3.
    - Test tier moves and consolidation.
@@ -670,6 +671,7 @@ in CI.
   - documenting that `watchOptions` doesn't apply to the rolldown builder;
   - the runner host exposed from a `nitro/*` subpath;
   - a Vercel public cron path and a configurable or `serverDir`-derived catch-all fallback;
+  - Node 26 in the Vercel preset's `SUPPORTED_NODE_VERSIONS`, so apps can deploy on it;
   - optionally, waiting for running tasks on close.
 - **env-runner:**
   - `reload(runner, { drain, ready })`, which waits for readiness and rejects without swapping;

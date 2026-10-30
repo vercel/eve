@@ -10,7 +10,7 @@ Agent text that mentions a Nitro build constant such as `import.meta.dev` now re
 
 A channel path that declares both `GET()` and `WS()` now accepts WebSocket upgrades, which the `GET` route used to answer as a plain HTTP request. WebSocket routes register for `GET` only, the method an upgrade uses.
 
-Vercel service builds keep the schedule consumer function and its queue trigger, so dynamic schedules deliver their occurrences. Hosted Vercel functions always use the Node.js 24 runtime eve requires, instead of following the Node.js version of the machine that ran `eve build`.
+Vercel service builds keep the schedule consumer function and its queue trigger, so dynamic schedules deliver their occurrences.
 
 `eve start` now runs the server's shutdown hooks, such as flushing instrumentation, when it stops the server in an environment that sets `CI`. The built server no longer inherits `CI` or `NITRO_UNIX_SOCKET` from `eve start`.
 

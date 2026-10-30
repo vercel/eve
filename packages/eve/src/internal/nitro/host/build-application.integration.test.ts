@@ -537,7 +537,6 @@ describe("buildApplication", () => {
     expect(flowFunctionConfig).toMatchObject({
       experimentalTriggers: [{ topic: "eve-test", type: "queue/v2beta" }],
       maxDuration: "max",
-      runtime: "nodejs24.x",
     });
     expect(vercelConfig.routes).toEqual([
       { handle: "filesystem" },
