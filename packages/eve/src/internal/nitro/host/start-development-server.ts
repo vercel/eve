@@ -2,10 +2,7 @@ import { handleDevelopmentModelCredentialRequest } from "#internal/model-auth/de
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
 import { defaultDevelopmentExtensions } from "#compiler/development-extensions.js";
 
-import {
-  createDevelopmentBuilds,
-  type DevelopmentBuilds,
-} from "#internal/nitro/host/dev-build-host.js";
+import { createDevelopmentBuilds } from "#internal/nitro/host/dev-build-host.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
 import type { AuthoredSourceWatcherHandle } from "#internal/nitro/host/dev-authored-source-watcher.js";
 import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
@@ -35,12 +32,11 @@ import type {
   DevelopmentServerHandle,
   DevelopmentServerOptions,
   StartedDevelopmentServer,
-  PreparedDevelopmentApplicationHost,
 } from "#internal/nitro/host/types.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import {
-  DEFAULT_DEVELOPMENT_SERVER_PORT,
-  MAX_DEVELOPMENT_SERVER_PORT_ATTEMPTS,
+  readDevelopmentServerEnvironmentPort,
+  resolveDevelopmentServerPorts,
 } from "#internal/nitro/host/ports.js";
 import { installLocalDevCapabilityEnvironment } from "#runtime/local-dev-capability.js";
 import { detectPackageManager, type PackageManagerKind } from "#setup/package-manager.js";
@@ -62,9 +58,7 @@ import {
   normalizeDevelopmentServerClientUrl,
 } from "#internal/nitro/host/dev-server-url.js";
 
-const MAX_ALLOWED_DEVELOPMENT_SERVER_PORT = 65_535;
 const DEVELOPMENT_SERVER_READINESS_TIMEOUT_MS = 1_000;
-const PORT_ENV = "PORT";
 
 export { normalizeDevelopmentServerClientUrl };
 
@@ -82,41 +76,6 @@ function isAddressInUseError(error: unknown): error is NodeJS.ErrnoException {
 }
 
 type NitroDevelopmentServer = DrainedNitroDevServer;
-
-function resolveDevelopmentServerPort(port: number | string | undefined): number {
-  const resolvedPort =
-    typeof port === "string" ? Number(port) : (port ?? DEFAULT_DEVELOPMENT_SERVER_PORT);
-
-  if (
-    !Number.isInteger(resolvedPort) ||
-    resolvedPort < 0 ||
-    resolvedPort > MAX_ALLOWED_DEVELOPMENT_SERVER_PORT
-  ) {
-    throw new Error(
-      `Invalid development server port "${String(port)}". Expected an integer between 0 and ${MAX_ALLOWED_DEVELOPMENT_SERVER_PORT}.`,
-    );
-  }
-
-  return resolvedPort;
-}
-
-function readEnvironmentPort(): number | undefined {
-  const raw = process.env[PORT_ENV];
-
-  if (raw === undefined || raw.trim() === "") {
-    return undefined;
-  }
-
-  const parsed = Number(raw);
-
-  if (!Number.isInteger(parsed) || parsed < 0 || parsed > MAX_ALLOWED_DEVELOPMENT_SERVER_PORT) {
-    throw new Error(
-      `Invalid ${PORT_ENV} environment variable "${raw}". Expected an integer between 0 and ${MAX_ALLOWED_DEVELOPMENT_SERVER_PORT}.`,
-    );
-  }
-
-  return parsed;
-}
 
 async function detectDevelopmentCommandPackageManager(
   appRoot: string,
@@ -154,31 +113,6 @@ async function createDevelopmentServerAlreadyRunningError(
       `To connect to the existing instance, run: ${connectCommand}`,
     ].join("\n"),
   );
-}
-
-function resolveDevelopmentServerPorts(input: {
-  readonly port: number | string | undefined;
-  readonly retryOnAddressInUse: boolean;
-}): readonly [number, ...number[]] {
-  const resolvedPort = resolveDevelopmentServerPort(input.port);
-
-  if (resolvedPort === 0 || !input.retryOnAddressInUse) {
-    return [resolvedPort];
-  }
-
-  const ports: number[] = [];
-
-  for (let offset = 0; offset < MAX_DEVELOPMENT_SERVER_PORT_ATTEMPTS; offset += 1) {
-    const candidate = resolvedPort + offset;
-
-    if (candidate > 65_535) {
-      break;
-    }
-
-    ports.push(candidate);
-  }
-
-  return ports as [number, ...number[]];
 }
 
 function addDevelopmentControlHandler(input: {
@@ -237,46 +171,21 @@ function addDevelopmentControlHandler(input: {
   });
 }
 
-async function closeDevelopmentServerResources(input: {
-  readonly appRoot: string;
-  readonly authoredSourceWatcher: AuthoredSourceWatcherHandle | undefined;
-  readonly builds: DevelopmentBuilds;
-  readonly devServer: NitroDevelopmentServer | undefined;
-  readonly developmentSandboxRunId: string;
-  readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
-}): Promise<{ readonly errors: readonly unknown[]; readonly listenerClosed: boolean }> {
-  const errors: unknown[] = [];
-  const attempt = async (operation: () => Promise<void>): Promise<boolean> => {
-    try {
-      await operation();
-      return true;
-    } catch (error) {
-      errors.push(error);
-      return false;
-    }
-  };
-
-  // Before the watcher, which waits for an in-flight rebuild: that rebuild's
-  // build process exits, so the rebuild fails instead of finishing first.
-  input.builds.close();
-  const authoredSourceWatcher = input.authoredSourceWatcher;
-  if (authoredSourceWatcher !== undefined) {
-    await attempt(() => authoredSourceWatcher.close());
+/** Disposes a cleanup stack and returns every failure in teardown order. */
+async function disposeCollectingErrors(cleanup: AsyncDisposableStack): Promise<unknown[]> {
+  try {
+    await cleanup.disposeAsync();
+    return [];
+  } catch (error) {
+    return collectDisposalErrors(error);
   }
-  const workflowWorld = input.workflowWorld;
-  if (workflowWorld !== undefined) {
-    await attempt(() => workflowWorld.close());
-  }
-  const devServer = input.devServer;
-  const listenerClosed = devServer === undefined ? true : await attempt(() => devServer.close());
-  await attempt(() =>
-    stopDevelopmentSandboxResources({
-      devRunId: input.developmentSandboxRunId,
-      log: (message) => console.warn(`[eve:dev] ${message}`),
-    }),
-  );
+}
 
-  return { errors, listenerClosed };
+function collectDisposalErrors(error: unknown): unknown[] {
+  // Each later failure wraps the earlier ones as `suppressed`.
+  return error instanceof SuppressedError
+    ? [...collectDisposalErrors(error.suppressed), error.error]
+    : [error];
 }
 
 function createDevelopmentServerCleanupError(errors: readonly unknown[]): Error | undefined {
@@ -369,7 +278,7 @@ async function startNitroDevelopmentServer(
   const project = await resolveDiscoveryProject(rootDir);
   await loadDevelopmentEnvironmentFiles(project.appRoot);
 
-  const environmentPort = readEnvironmentPort();
+  const environmentPort = readDevelopmentServerEnvironmentPort();
   const requestedPort = options.port ?? environmentPort;
   const hasExplicitServerConfiguration =
     options.resume === true ||
@@ -394,18 +303,38 @@ async function startNitroDevelopmentServer(
     throw await createDevelopmentServerAlreadyRunningError(project.appRoot, existingServerUrl);
   }
 
+  // Teardown runs in reverse registration order, shared by failed startup and close().
+  const cleanup = new AsyncDisposableStack();
   const previousDevelopmentSandboxRunId = process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV];
   const developmentSandboxRunId = createDevelopmentSandboxRunId();
   process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV] = developmentSandboxRunId;
-  const builds = createDevelopmentBuilds();
-  const build = builds.begin();
-  let devServer: NitroDevelopmentServer | undefined;
+  cleanup.defer(() => restoreDevelopmentSandboxRunId(previousDevelopmentSandboxRunId));
+  let listenerClosed = true;
+  cleanup.defer(async () => {
+    if (listenerClosed) {
+      await state.remove().catch(() => {});
+    }
+  });
   let restoreLocalDevCapabilityEnvironment: (() => void) | undefined;
   let restoreWorkflowLocalQueueEnvironment: (() => void) | undefined;
   let restoreWorkflowTransportEnvironment: (() => void) | undefined;
-  let workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
+  cleanup.defer(() => {
+    restoreWorkflowLocalQueueEnvironment?.();
+    restoreWorkflowTransportEnvironment?.();
+    restoreLocalDevCapabilityEnvironment?.();
+  });
+  cleanup.defer(
+    async () =>
+      await stopDevelopmentSandboxResources({
+        devRunId: developmentSandboxRunId,
+        log: (message) => console.warn(`[eve:dev] ${message}`),
+      }),
+  );
+  const builds = createDevelopmentBuilds();
+  const build = builds.begin();
+  cleanup.defer(() => build.close());
+  cleanup.defer(() => builds.close());
   let authoredSourceWatcher: AuthoredSourceWatcherHandle | undefined;
-  let preparedDevelopmentHost: PreparedDevelopmentApplicationHost | undefined;
   let initialGenerationPublished = false;
   let initialWorkspaceTransferred = false;
 
@@ -415,33 +344,49 @@ async function startNitroDevelopmentServer(
       () => build.prepare({ appRoot: project.appRoot, developmentExtensions }),
       options.onBootProgress,
     );
-    preparedDevelopmentHost = preparedHost;
+    cleanup.defer(async () => {
+      if (!initialWorkspaceTransferred) {
+        await removeDevelopmentHostWorkspace(preparedHost.workspace);
+      }
+    });
+    cleanup.defer(async () => {
+      if (!initialGenerationPublished) {
+        await discardDevelopmentGeneration(preparedHost.generation);
+      }
+    });
     pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
-    devServer = new DrainedNitroDevServer();
-    const activeDevServer = devServer;
+    const devServer = new DrainedNitroDevServer();
+    cleanup.defer(async () => {
+      try {
+        await devServer.close();
+      } catch (error) {
+        listenerClosed = false;
+        throw error;
+      }
+    });
     const workflowTransportSecret = randomBytes(32).toString("base64url");
-    activeDevServer.setClientAddressSecret(workflowTransportSecret);
+    devServer.setClientAddressSecret(workflowTransportSecret);
     restoreWorkflowTransportEnvironment = installWorkflowTransportEnvironment(
       project.appRoot,
       workflowTransportSecret,
     );
-    workflowWorld = createDevelopmentWorkflowWorld({
+    const workflowWorld = createDevelopmentWorkflowWorld({
       appRoot: project.appRoot,
       preparedHost,
       resume: options.resume,
       transportSecret: workflowTransportSecret,
     });
-    const localWorkflowWorld = workflowWorld;
+    if (workflowWorld !== undefined) {
+      cleanup.defer(async () => await workflowWorld.close());
+    }
     const onRuntimePruned =
-      localWorkflowWorld === undefined
-        ? undefined
-        : () => localWorkflowWorld.reconcileExpiredRuns();
+      workflowWorld === undefined ? undefined : () => workflowWorld.reconcileExpiredRuns();
     // Parent-owned control routes must answer before the World starts: queue
     // redelivery begins at start(), and a delivery's World calls would
     // otherwise fall through to the worker and 404.
     addDevelopmentControlHandler({
       appRoot: project.appRoot,
-      devServer: activeDevServer,
+      devServer: devServer,
       getWatcher: () => authoredSourceWatcher,
       workflowWorld,
       transportSecret: workflowTransportSecret,
@@ -452,7 +397,7 @@ async function startNitroDevelopmentServer(
       "binding port",
       () =>
         listenForDevelopmentServer({
-          devServer: activeDevServer,
+          devServer: devServer,
           host: hostname,
           port: requestedPort,
           retryOnAddressInUse,
@@ -479,7 +424,7 @@ async function startNitroDevelopmentServer(
         build.close();
         const workspace = preparedHost.workspace;
         initialWorkspaceTransferred = true;
-        await activeDevServer.replaceWorker({
+        await devServer.replaceWorker({
           dispose: async () => await removeDevelopmentHostWorkspace(workspace),
           entry: payload.entry,
           workerData: payload.workerData,
@@ -493,18 +438,18 @@ async function startNitroDevelopmentServer(
       },
       options.onBootProgress,
     );
-    activeDevServer.prepareSpareWorker();
+    devServer.prepareSpareWorker();
     await workflowWorld?.start();
 
     const rebuildCoordinator = await createDevelopmentAuthoredRebuildCoordinator({
       builds,
       developmentExtensions,
-      devServer: activeDevServer,
+      devServer: devServer,
       initialHost: preparedHost,
       onRuntimePruned,
     });
 
-    authoredSourceWatcher = await devBootPhase(
+    const watcher = await devBootPhase(
       "starting file watcher",
       async () => {
         const { startAuthoredSourceWatcher } =
@@ -516,42 +461,23 @@ async function startNitroDevelopmentServer(
       },
       options.onBootProgress,
     );
+    authoredSourceWatcher = watcher;
+    cleanup.defer(async () => {
+      // Before the watcher, which waits for an in-flight rebuild: that rebuild's
+      // build process exits, so the rebuild fails instead of finishing first.
+      builds.close();
+      await watcher.close();
+    });
     await state.write(serverUrl);
-    const restoreWorkflowLocalQueueEnvironmentOnClose = restoreWorkflowLocalQueueEnvironment;
-    if (restoreWorkflowLocalQueueEnvironmentOnClose === undefined) {
-      throw new Error("Workflow local queue environment was not initialized.");
-    }
-
-    const authoredSourceWatcherOnClose = authoredSourceWatcher;
-    const devServerOnClose = devServer;
-    const workflowWorldOnClose = workflowWorld;
-    const restoreWorkflowTransportEnvironmentOnClose = restoreWorkflowTransportEnvironment;
-    const restoreLocalDevCapabilityEnvironmentOnClose = restoreLocalDevCapabilityEnvironment;
+    const owned = cleanup.move();
     let closePromise: Promise<void> | undefined;
     const close = (): Promise<void> => {
       closePromise ??= (async () => {
-        const cleanup = await closeDevelopmentServerResources({
-          appRoot: project.appRoot,
-          authoredSourceWatcher: authoredSourceWatcherOnClose,
-          builds,
-          devServer: devServerOnClose,
-          developmentSandboxRunId,
-          workflowWorld: workflowWorldOnClose,
-        });
-        if (cleanup.listenerClosed) {
-          await state.remove().catch(() => {});
-        }
-
-        try {
-          const cleanupError = createDevelopmentServerCleanupError(cleanup.errors);
-          if (cleanupError !== undefined) {
-            throw cleanupError;
-          }
-        } finally {
-          restoreWorkflowLocalQueueEnvironmentOnClose();
-          restoreWorkflowTransportEnvironmentOnClose?.();
-          restoreLocalDevCapabilityEnvironmentOnClose?.();
-          restoreDevelopmentSandboxRunId(previousDevelopmentSandboxRunId);
+        const cleanupError = createDevelopmentServerCleanupError(
+          await disposeCollectingErrors(owned),
+        );
+        if (cleanupError !== undefined) {
+          throw cleanupError;
         }
       })();
       return closePromise;
@@ -561,37 +487,7 @@ async function startNitroDevelopmentServer(
       close,
     };
   } catch (error) {
-    const cleanup = await closeDevelopmentServerResources({
-      appRoot: project.appRoot,
-      authoredSourceWatcher,
-      builds,
-      devServer,
-      developmentSandboxRunId,
-      workflowWorld,
-    });
-    build.close();
-    const cleanupErrors = [...cleanup.errors];
-    if (preparedDevelopmentHost !== undefined && !initialGenerationPublished) {
-      await discardDevelopmentGeneration(preparedDevelopmentHost.generation).catch(
-        (cleanupError) => {
-          cleanupErrors.push(cleanupError);
-        },
-      );
-    }
-    if (preparedDevelopmentHost !== undefined && !initialWorkspaceTransferred) {
-      await removeDevelopmentHostWorkspace(preparedDevelopmentHost.workspace).catch(
-        (cleanupError) => {
-          cleanupErrors.push(cleanupError);
-        },
-      );
-    }
-    restoreWorkflowLocalQueueEnvironment?.();
-    restoreWorkflowTransportEnvironment?.();
-    restoreLocalDevCapabilityEnvironment?.();
-    if (cleanup.listenerClosed) {
-      await state.remove().catch(() => {});
-    }
-    restoreDevelopmentSandboxRunId(previousDevelopmentSandboxRunId);
+    const cleanupErrors = await disposeCollectingErrors(cleanup);
     if (cleanupErrors.length > 0) {
       throw createDevelopmentServerStartupCleanupError(error, cleanupErrors);
     }

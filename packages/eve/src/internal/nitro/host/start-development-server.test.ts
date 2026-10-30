@@ -1,7 +1,6 @@
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Nitro } from "nitro/types";
 
 import type {
   DevelopmentServerHandle,
@@ -33,31 +32,14 @@ const mocks = vi.hoisted(() => {
   };
   const devServer = {
     close: vi.fn(async () => undefined),
-    discardCandidate: vi.fn(async () => undefined),
     listen: vi.fn(() => listenerServer),
     prepareSpareWorker: vi.fn(),
-    recycleWorker: vi.fn(async () => undefined),
     replaceWorker: vi.fn(async () => undefined),
     setClientAddressSecret: vi.fn(),
     setControlHandler: vi.fn(),
-    upgrade: vi.fn(async (_req: unknown, _socket: unknown, _head: unknown) => undefined),
-    waitForActiveRunner: vi.fn(async () => undefined),
   };
   const files = new Map<string, string>();
-  const devHandlers: Nitro["options"]["devHandlers"] = [];
-  const nitro = {
-    close: vi.fn(async () => undefined),
-    options: {
-      buildDir: "/tmp/eve-test/.eve/nitro",
-      devServer: {
-        hostname: "127.0.0.1",
-        port: 0,
-      },
-      experimental: {},
-      features: {},
-      devHandlers,
-    },
-  };
+  const nitro = { close: vi.fn(async () => undefined) };
 
   return {
     authoredSourceWatcher,
@@ -135,11 +117,6 @@ const mocks = vi.hoisted(() => {
       appRoot: "/tmp/eve-test",
       layout: "nested" as const,
     })),
-    resolveNitroCompiledArtifactsSource: vi.fn(() => ({
-      appRoot: "/tmp/eve-test/.eve/dev-runtime-test",
-      kind: "disk" as const,
-      moduleMapLoaderPath: "/tmp/eve-package/authored-module-map-loader.ts",
-    })),
     startAuthoredSourceWatcher: vi.fn(async () => authoredSourceWatcher),
     writeFile: vi.fn(async (path: string, value: string) => {
       if (
@@ -201,10 +178,6 @@ vi.mock("./prepare-application-host.js", () => ({
 
 vi.mock("#discover/project.js", () => ({
   resolveDiscoveryProject: mocks.resolveDiscoveryProject,
-}));
-
-vi.mock("#internal/nitro/host/artifacts-config.js", () => ({
-  createDevelopmentGenerationArtifactsSource: () => mocks.resolveNitroCompiledArtifactsSource(),
 }));
 
 vi.mock("#execution/sandbox/bindings/local.js", () => ({
@@ -318,25 +291,12 @@ describe("createDevelopmentServer", () => {
     mocks.authoredSourceWatcher.flush.mockResolvedValue(undefined);
     mocks.authoredSourceWatcher.rebuild.mockResolvedValue(undefined);
     mocks.devServer.close.mockResolvedValue(undefined);
-    mocks.nitro.close.mockResolvedValue(undefined);
     mocks.stopDevelopmentSandboxResources.mockResolvedValue(undefined);
     vi.stubGlobal("fetch", mocks.fetch);
     delete process.env.WORKFLOW_LOCAL_BASE_URL;
     delete process.env.PORT;
     delete process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID;
     mocks.files.clear();
-    mocks.devServer.upgrade = vi.fn(
-      async (_req: unknown, _socket: unknown, _head: unknown) => undefined,
-    );
-    Object.assign(mocks.nitro.options, {
-      devHandlers: [],
-      experimental: {},
-      features: {},
-    });
-    Object.assign(mocks.nitro.options.devServer, {
-      hostname: "127.0.0.1",
-      port: undefined,
-    });
     Object.assign(mocks.listenerServer, {
       url: "http://localhost:2000/",
     });
@@ -434,9 +394,6 @@ describe("createDevelopmentServer", () => {
 
   it("uses Eve's default port when no port is requested", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
-    Object.assign(mocks.nitro.options.devServer, {
-      port: 3000,
-    });
 
     const server = await startDevelopmentServer("/tmp/eve-test");
 
@@ -467,9 +424,6 @@ describe("createDevelopmentServer", () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
     const addressInUseError = Object.assign(new Error("Address already in use"), {
       code: "EADDRINUSE",
-    });
-    Object.assign(mocks.nitro.options.devServer, {
-      hostname: undefined,
     });
     Object.assign(mocks.listenerServer, {
       url: "http://127.0.0.1:2001/",
@@ -621,7 +575,6 @@ describe("createDevelopmentServer", () => {
     await expect(server.close()).rejects.toThrow("watcher close failed");
 
     expect(mocks.devServer.close).toHaveBeenCalledOnce();
-    expect(mocks.nitro.close).toHaveBeenCalledOnce();
     expect(mocks.stopDevelopmentSandboxResources).toHaveBeenCalledOnce();
     expect(readStateRecord()).toBeUndefined();
   });
@@ -633,9 +586,65 @@ describe("createDevelopmentServer", () => {
 
     await expect(server.close()).rejects.toThrow("listener close failed");
 
-    expect(mocks.nitro.close).toHaveBeenCalledOnce();
     expect(mocks.stopDevelopmentSandboxResources).toHaveBeenCalledOnce();
     expect(readStateRecord()).toEqual({ url: "http://localhost:2000/" });
+  });
+
+  it("reports every resource that fails to close, in teardown order", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    const server = await startDevelopmentServer("/tmp/eve-test");
+    const watcherError = new Error("watcher close failed");
+    const listenerError = new Error("listener close failed");
+    mocks.authoredSourceWatcher.close.mockRejectedValueOnce(watcherError);
+    mocks.devServer.close.mockRejectedValueOnce(listenerError);
+
+    const error = await server.close().catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error).toMatchObject({
+      errors: [watcherError, listenerError],
+      message: "Multiple development-server resources failed to close.",
+    });
+    expect(process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID).toBeUndefined();
+  });
+
+  it("discards the unpublished generation and host workspace when the first build fails", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    mocks.buildDevelopmentHostCandidate.mockRejectedValueOnce(new Error("bundle failed"));
+
+    await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow("bundle failed");
+
+    expect(mocks.discardDevelopmentGeneration).toHaveBeenCalledWith(
+      expect.objectContaining({ snapshotRoot: "/tmp/eve-test/.eve/dev-runtime/snapshots/test" }),
+    );
+    expect(mocks.removeDevelopmentHostWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ rootDir: "/tmp/eve-test/.eve/dev-hosts/test" }),
+    );
+    expect(mocks.devServer.close).toHaveBeenCalledOnce();
+    expect(mocks.worldInstance.close).toHaveBeenCalledOnce();
+    expect(mocks.stopDevelopmentSandboxResources).toHaveBeenCalledOnce();
+    expect(readStateRecord()).toBeUndefined();
+    expect(process.env.WORKFLOW_LOCAL_BASE_URL).toBeUndefined();
+    expect(process.env.EVE_DEV_WORKFLOW_TRANSPORT_SECRET).toBeUndefined();
+    expect(process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID).toBeUndefined();
+  });
+
+  it("reports the startup error first when startup cleanup also fails", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    const startupError = new Error("bundle failed");
+    const cleanupError = new Error("snapshot busy");
+    mocks.buildDevelopmentHostCandidate.mockRejectedValueOnce(startupError);
+    mocks.discardDevelopmentGeneration.mockRejectedValueOnce(cleanupError);
+
+    const error = await startDevelopmentServer("/tmp/eve-test").catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error).toMatchObject({
+      cause: startupError,
+      errors: [startupError, cleanupError],
+      message: "bundle failed Cleanup also failed.",
+    });
+    expect(mocks.removeDevelopmentHostWorkspace).toHaveBeenCalledOnce();
   });
 
   it("closes the server when its state record cannot be written", async () => {
@@ -645,8 +654,10 @@ describe("createDevelopmentServer", () => {
     await expect(startDevelopmentServer("/tmp/eve-test")).rejects.toThrow("disk full");
 
     expect(mocks.devServer.close).toHaveBeenCalledOnce();
-    expect(mocks.nitro.close).toHaveBeenCalledOnce();
     expect(readStateRecord()).toBeUndefined();
+    // The worker and the published pointer already own the first generation.
+    expect(mocks.discardDevelopmentGeneration).not.toHaveBeenCalled();
+    expect(mocks.removeDevelopmentHostWorkspace).not.toHaveBeenCalled();
   });
 
   it("does not start when the state record cannot be read", async () => {
