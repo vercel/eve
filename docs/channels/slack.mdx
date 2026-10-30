@@ -4,7 +4,7 @@ description: "Reach your agent from Slack app mentions, DMs, slash commands, and
 type: integration
 ---
 
-The Slack channel puts your agent inside a workspace. It handles `@mentions`, DMs, slash commands, shortcuts, and interactive callbacks; replies in threads; shows typing indicators; and turns human-in-the-loop (HITL) prompts into buttons. [Vercel Connect](https://vercel.com/kb/guide/vercel-connect) is the recommended setup: it manages the Slack bot token, verifies inbound requests, supports token rotation and multiple workspace installations, and forwards events to your agent without copying Slack secrets into your project environment. If you cannot use Vercel Connect, you can provide the bot token and signing secret through environment variables. See [Channels](./overview) for the contract this builds on.
+The Slack channel puts your agent inside a workspace. It handles `@mentions`, DMs, slash commands, shortcuts, and interactive callbacks; replies in threads; shows typing indicators; turns human-in-the-loop (HITL) prompts into buttons; and can move multi-step work into [Slack code channels](#code-channels). [Vercel Connect](https://vercel.com/kb/guide/vercel-connect) is the recommended setup: it manages the Slack bot token, verifies inbound requests, supports token rotation and multiple workspace installations, and forwards events to your agent without copying Slack secrets into your project environment. If you cannot use Vercel Connect, you can provide the bot token and signing secret through environment variables. See [Channels](./overview) for the contract this builds on.
 
 ## Add the channel
 
@@ -87,6 +87,36 @@ Slack must reach the preview route without an authentication challenge. For a Co
 | A long response can't be uploaded as a snippet          | Add the `files:write` bot scope and reinstall the Slack app.                                                                                                                 |
 | The thread says the agent couldn't deliver its answer   | Search the Vercel runtime logs for the notice's error id. The `final reply was not delivered to Slack` line carries the error, including one thrown by an authored renderer. |
 | The webhook arrives but the agent doesn't reply         | Check the Vercel runtime logs, then the session in [**Agent Runs**](/docs/observability/agent-runs) when your team has access.                                               |
+| The agent can't open a code channel                     | Enable code channels on the Slack app, add their scopes and events, and reinstall it. See [Set up the Slack app for code channels](#set-up-the-slack-app-for-code-channels). |
+
+## Code channels
+
+A [Slack code channel](https://docs.slack.dev/ai/slack-code) is a channel dedicated to one agent task. People mention the agent in a thread, the agent opens a code channel for work that needs more than one message, and everyone in the channel can follow along and talk to the agent without mentioning it. The channel shows the session status, a context bar, and view tabs such as a diff. eve serves the whole channel as one session.
+
+To try it end to end, start from the [coding agent template](https://github.com/vercel/eve/tree/main/apps/templates/eve-coding-agent-template), which opens code channels for coding work and keeps the context bar and diff view current. To add code channels to your own agent:
+
+1. Set `codeChannels: true` on the Slack channel. See [Serve Slack code channels](#serve-slack-code-channels).
+2. Enable code channels on the Slack app and reinstall it. See [Set up the Slack app for code channels](#set-up-the-slack-app-for-code-channels).
+3. Give the agent a way to open one: a tool that calls [`openCodeChannel()`](#open-a-code-channel-from-a-thread), or [`ctx.openCodeChannel()`](#open-a-code-channel-from-a-message-hook) in a message hook.
+
+### Set up the Slack app for code channels
+
+Code channels are a Slack feature your workspace needs access to. See Slack's [code channels partner page](https://api.slack.com/partners/code-channels) to request access.
+
+The Slack app needs three things:
+
+- The code channels feature in its app manifest:
+
+  ```yaml
+  features:
+    code_channels:
+      enabled: true
+  ```
+
+- The `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:read`, and `mpim:read` bot scopes. `code_channels:manage` creates and updates code channels, the read and history scopes let eve detect code channels and read their messages, and `im:read` and `mpim:read` let eve read a DM or group DM origin.
+- The `message.session` and `agent_session_stopped` bot events, so the agent receives un-mentioned messages in code channels and stops when someone stops the session.
+
+With a Slack app you manage yourself, eve's generated app manifest includes all three when `codeChannels` is set. A Vercel Connect connector doesn't get them from `eve add channel/slack`, including one setup creates: add the scopes and events to the connector in the Connect dashboard, enable `features.code_channels` in the Slack app's manifest, then reinstall the app in your workspace. Until the feature is enabled, Slack refuses to create code channels, and `openCodeChannel()` relays Slack's error.
 
 ## Audience
 
@@ -396,7 +426,7 @@ A code channel session has no single thread, so `ctx.slack.threadTs` is empty, `
 
 A code channel someone opens from Slack's UI starts without the origin conversation. When Slack opens a code channel from a message, it posts a quote of that message into the channel. eve skips the quote, so it never starts a turn, and doesn't add it to the session either. To start a code channel with the conversation so far, open it from eve with [`openCodeChannel()`](#open-a-code-channel-from-a-thread), which copies the conversation, or with [`ctx.openCodeChannel()`](#open-a-code-channel-from-a-message-hook) and pass `history`.
 
-eve detects a code channel with Slack's `conversations.info` API, so the app needs `channels:read` (and `groups:read` for private code channels). If the lookup fails, eve logs an error, serves the channel per thread, and retries the lookup a minute later. With `codeChannels` set, the generated app manifest enables the code channels feature, adds the `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, and `groups:read` bot scopes (plus `im:read` and `mpim:read`, so eve can read a DM or group DM origin), and subscribes to the `message.session` and `agent_session_stopped` events. For Vercel Connect, add the same scopes and events under **Advanced** when you create the connector. To tell whether you're in a code channel, use `ctx.slack.codeChannel` in message hooks and `channel.state.codeChannel` in [renderers](#customize-rendering).
+eve detects a code channel with Slack's `conversations.info` API, so the app needs `channels:read` (and `groups:read` for private code channels). If the lookup fails, eve logs an error, serves the channel per thread, and retries the lookup a minute later. For the feature, scopes, and events the Slack app needs, see [Set up the Slack app for code channels](#set-up-the-slack-app-for-code-channels). To tell whether you're in a code channel, use `ctx.slack.codeChannel` in message hooks and `channel.state.codeChannel` in [renderers](#customize-rendering).
 
 #### Open a code channel from a thread
 

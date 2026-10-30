@@ -47,7 +47,16 @@ pnpm dev
 
 ## Connect Slack and GitHub
 
-**Slack.** Run `eve add channel/slack`. It creates or picks a Slack app through Vercel Connect, routes its events to `/eve/v1/slack`, and writes the connector UID into `agent/channels/slack.ts`. Because the channel sets `codeChannels`, the generated app manifest enables Slack's code channels feature and adds its scopes and events. For an existing Connect connector, add the `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:read`, and `mpim:read` scopes and the `message.session` and `agent_session_stopped` events under **Advanced**. To keep all Slack work in the thread, set `CODE_CHANNELS` to `false` in `agent/lib/code-channel.ts`. The agent then never opens a code channel, its instructions leave code channels out, and the generated manifest skips their scopes and events.
+**Slack.** Run `eve add channel/slack`. It creates or picks a Slack app through Vercel Connect, routes its events to `/eve/v1/slack`, and writes the connector UID into `agent/channels/slack.ts`. Then turn on code channels for the app. Setup doesn't do this for a Connect connector, including one it creates:
+
+1. Make sure your workspace has access to code channels. See Slack's [code channels partner page](https://api.slack.com/partners/code-channels).
+2. In the Connect dashboard, add the `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:read`, and `mpim:read` bot scopes and the `message.session` and `agent_session_stopped` trigger events to the connector.
+3. Enable `features.code_channels` in the Slack app's manifest.
+4. Reinstall the app in your workspace.
+
+Until code channels are enabled, Slack refuses to open one and the agent says so in the thread. See [Set up the Slack app for code channels](https://eve.dev/docs/channels/slack#set-up-the-slack-app-for-code-channels) for what each scope and event is for.
+
+To keep all Slack work in the thread, set `CODE_CHANNELS` to `false` in `agent/lib/code-channel.ts`. The agent then never opens a code channel, and its instructions leave code channels out.
 
 **GitHub.** Don't use `eve add channel/github` here. It stops with an error because `agent/channels/github.ts` already exists, and `--overwrite` replaces the file along with its rule that only repository owners, members, and collaborators can start a turn. Create the connector with the Vercel CLI instead:
 
