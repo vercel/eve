@@ -4,11 +4,12 @@ import type { ConfigEnv, Plugin, UserConfig } from "vite";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { ensureEveVercelServicesConfig } from "#shared/vercel-services.js";
 
-import { eveSvelteKit } from "./index.js";
-import { resolveSharedEveDevServer } from "./dev-server.js";
+import { resolveSharedEveDevServer } from "#shared/framework-eve-server.js";
 
-vi.mock("./dev-server.js", () => ({
-  EVE_BASE_URL_ENV: "EVE_BASE_URL",
+import { eveSvelteKit } from "./index.js";
+
+vi.mock("#shared/framework-eve-server.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#shared/framework-eve-server.js")>()),
   resolveSharedEveDevServer: vi.fn(async () => ({ origin: "http://127.0.0.1:49152" })),
 }));
 
@@ -48,7 +49,11 @@ describe("eveSvelteKit", () => {
       { command: "serve", mode: "development" },
     )) as UserConfig;
 
-    expect(resolveSharedEveDevServerMock).toHaveBeenCalledWith(process.cwd());
+    expect(resolveSharedEveDevServerMock).toHaveBeenCalledWith({
+      appRoot: process.cwd(),
+      host: { label: "SvelteKit", slug: "sveltekit" },
+      timeoutMs: undefined,
+    });
     expect(result).toEqual({
       server: {
         proxy: {
@@ -75,7 +80,11 @@ describe("eveSvelteKit", () => {
       { command: "serve", isPreview: true, mode: "production" },
     )) as UserConfig;
 
-    expect(resolveSharedEveDevServerMock).toHaveBeenCalledWith(process.cwd());
+    expect(resolveSharedEveDevServerMock).toHaveBeenCalledWith({
+      appRoot: process.cwd(),
+      host: { label: "SvelteKit", slug: "sveltekit" },
+      timeoutMs: undefined,
+    });
     expect(result).toEqual({
       preview: {
         proxy: {
@@ -104,6 +113,24 @@ describe("eveSvelteKit", () => {
         target: "https://agent.example.com",
       },
     });
+  });
+
+  it("forwards a configured devServerTimeoutMs to the shared dev server", async () => {
+    const plugin = eveSvelteKit({ devServerTimeoutMs: 5_000 });
+
+    await getConfigHook(plugin)({}, { command: "serve", mode: "development" });
+
+    expect(resolveSharedEveDevServerMock).toHaveBeenCalledWith({
+      appRoot: process.cwd(),
+      host: { label: "SvelteKit", slug: "sveltekit" },
+      timeoutMs: 5_000,
+    });
+  });
+
+  it("rejects a non-positive devServerTimeoutMs", () => {
+    expect(() => eveSvelteKit({ devServerTimeoutMs: 0 })).toThrow(
+      /SvelteKit development server timeout/,
+    );
   });
 
   it("configures a generated Vercel service during Vercel production builds", async () => {
