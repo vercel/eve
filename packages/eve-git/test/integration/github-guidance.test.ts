@@ -54,7 +54,16 @@ test("with github config, GitHub goes through the brokered gh tool and signed co
     },
   });
   const { content, skill, tool } = await resolve();
-  assert.ok(tool && "execute" in tool);
+  assert.ok(tool && "execute" in tool && "label" in tool);
+  const label = tool.label as { start: (input: unknown) => string };
+  assert.equal(
+    label.start({
+      command: "gh -R vercel/eve pr view 123 --comments",
+      description: "Read review comments on PR 123",
+      repository: "vercel/eve",
+    }),
+    "Read review comments on PR 123",
+  );
   assert.match(content, /GitHub credentials are not available to ordinary `bash`/u);
   assert.match(content, /Use the `gh` tool for every authenticated GitHub operation/u);
   assert.match(content, /Load the pr skill before publishing/u);
