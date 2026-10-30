@@ -2,12 +2,26 @@ import { resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const workers = vi.hoisted(() => ({ cluster: false, thread: false }));
+vi.mock("node:cluster", () => ({
+  default: {
+    get isWorker() {
+      return workers.cluster;
+    },
+  },
+}));
+vi.mock("node:worker_threads", () => ({
+  get isMainThread() {
+    return !workers.thread;
+  },
+}));
+
 vi.mock("#shared/framework-eve-server.js", () => ({
   startEveProductionServer: vi.fn(async () => ({ origin: "http://127.0.0.1:5000" })),
 }));
 
 const { startEveProductionServer } = await import("#shared/framework-eve-server.js");
-const { ensureEveProductionServer } = await import("./production-server.js");
+const { ensureEveProductionServer, default: createPlugin } = await import("./production-server.js");
 const config = { origin: "http://127.0.0.1:5000", relativeRoot: "agent" };
 
 beforeEach(() => {
@@ -17,6 +31,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  workers.cluster = false;
+  workers.thread = false;
 });
 
 describe("ensureEveProductionServer", () => {
@@ -64,6 +80,49 @@ describe("ensureEveProductionServer", () => {
       process.argv[1] = argv as string;
     }
     expect(startEveProductionServer).not.toHaveBeenCalled();
+  });
+
+  it.each(["cluster", "thread"] as const)(
+    "rejects managed startup in a %s worker",
+    async (kind) => {
+      workers[kind] = true;
+      await expect(ensureEveProductionServer(config)).rejects.toThrow(
+        /EVE_NUXT_PRODUCTION_ORIGIN.*building Nuxt/,
+      );
+      expect(startEveProductionServer).not.toHaveBeenCalled();
+    },
+  );
+
+  it("cancels pending startup through Nitro close and waits for termination", async () => {
+    let finish!: () => void;
+    const terminated = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    vi.mocked(startEveProductionServer).mockImplementationOnce(async (input) => {
+      await new Promise<void>((resolve) =>
+        input.signal!.addEventListener("abort", () => resolve(), { once: true }),
+      );
+      await terminated;
+      throw new Error("cancelled");
+    });
+    const hook = vi.fn();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      createPlugin(config)({ hooks: { hook } });
+      const close = hook.mock.calls.find(([name]) => name === "close")![1] as () => Promise<void>;
+      let closed = false;
+      const closing = close().then(() => {
+        closed = true;
+      });
+      await Promise.resolve();
+      expect(closed).toBe(false);
+      finish();
+      await closing;
+      expect(closed).toBe(true);
+    } finally {
+      finish();
+      vi.restoreAllMocks();
+    }
   });
 
   it("retries after a failed start", async () => {

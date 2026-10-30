@@ -1,10 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createConnection } from "node:net";
 import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
-import { EVE_HEALTH_ROUTE_PATH } from "#protocol/routes.js";
 import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
 import { readBuiltServerStartFailure } from "#shared/built-server-start-failure.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
@@ -32,6 +32,7 @@ export interface EveFrameworkHost {
 export interface EveProcessHandle {
   readonly origin: string;
   readonly process?: ChildProcess;
+  readonly close?: () => Promise<void>;
 }
 
 interface EveDevServerRegistry {
@@ -325,6 +326,28 @@ function createEveDevOutputWriter(input: {
   };
 }
 
+function isListening(origin: string, signal?: AbortSignal): Promise<boolean> {
+  const url = new URL(origin);
+  return new Promise((resolvePromise) => {
+    const socket = createConnection({
+      host: url.hostname.replace(/^\[|\]$/g, ""),
+      port: Number(url.port || (url.protocol === "https:" ? "443" : "80")),
+      signal,
+    });
+    let finished = false;
+    const finish = (listening: boolean) => {
+      if (finished) return;
+      finished = true;
+      socket.setTimeout(0);
+      socket.destroy();
+      resolvePromise(listening);
+    };
+    socket.setTimeout(DEV_SERVER_READINESS_TIMEOUT_MS, () => finish(false));
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
+}
+
 function startServerProcess(input: {
   readonly args: readonly string[];
   readonly command: string;
@@ -333,11 +356,13 @@ function startServerProcess(input: {
   readonly listen?: { readonly host: string; readonly port: string; readonly retryHint: string };
   readonly logLabel?: string;
   readonly readinessOrigin?: string;
+  readonly signal?: AbortSignal;
   readonly readOrigin?: (output: string) => string | undefined;
   readonly timeoutMs?: number;
 }): Promise<EveProcessHandle> {
   const timeoutMs = input.timeoutMs ?? DEFAULT_EVE_SERVER_TIMEOUT_MS;
 
+  input.signal?.throwIfAborted();
   return new Promise((resolvePromise, reject) => {
     const child = spawn(input.command, input.args, {
       cwd: input.cwd,
@@ -347,6 +372,54 @@ function startServerProcess(input: {
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
+    let closed = false;
+    let closing: Promise<void> | undefined;
+    const close = (): Promise<void> => {
+      closing ??= new Promise<void>((resolveClose) => {
+        if (closed) {
+          resolveClose();
+          return;
+        }
+        // Allow eve's bounded sandbox shutdown (15s) before escalation.
+        const force = setTimeout(() => child.kill("SIGKILL"), 20_000);
+        const deadline = setTimeout(finish, 21_000);
+        function finish() {
+          clearTimeout(force);
+          clearTimeout(deadline);
+          child.off("exit", finish);
+          releaseOwnership();
+          child.stdout.destroy();
+          child.stderr.destroy();
+          resolveClose();
+        }
+        child.once("exit", finish);
+        child.kill("SIGTERM");
+      });
+      return closing;
+    };
+    const exit = () => {
+      if (!closed) child.kill("SIGTERM");
+    };
+    const abort = () => {
+      if (!settled) {
+        cleanup();
+        void close().then(() => reject(new Error("eve server startup was cancelled.")));
+      } else {
+        void close();
+      }
+    };
+    const releaseOwnership = () => {
+      closed = true;
+      child.off("exit", releaseOwnership);
+      child.off("error", releaseOwnership);
+      process.off("beforeExit", exit);
+      process.off("exit", exit);
+      input.signal?.removeEventListener("abort", abort);
+    };
+    process.once("beforeExit", exit);
+    process.once("exit", exit);
+    child.once("exit", releaseOwnership);
+    child.once("error", releaseOwnership);
     const stderrWriter = createEveDevOutputWriter({
       logLabel: input.logLabel,
       stream: process.stderr,
@@ -357,14 +430,16 @@ function startServerProcess(input: {
     });
     const timeout = setTimeout(() => {
       cleanup();
-      child.kill();
       const condition =
         input.readinessOrigin === undefined ? "print its server URL" : "become ready";
-      reject(new Error(`Timed out after ${timeoutMs}ms waiting for eve to ${condition}.`));
+      void close().then(() =>
+        reject(new Error(`Timed out after ${timeoutMs}ms waiting for eve to ${condition}.`)),
+      );
     }, timeoutMs);
 
     let readinessTimer: ReturnType<typeof setTimeout> | undefined;
     let settled = false;
+    const readinessAbort = new AbortController();
     // Accumulated because a failure line can span several `data` chunks.
     let startupOutput = "";
     const cleanup = () => {
@@ -372,6 +447,7 @@ function startServerProcess(input: {
       startupOutput = "";
       clearTimeout(timeout);
       clearTimeout(readinessTimer);
+      readinessAbort.abort();
       child.off("error", handleError);
       child.off("exit", handleEarlyExit);
     };
@@ -408,8 +484,7 @@ function startServerProcess(input: {
       if (startFailure !== undefined) {
         flushOutput();
         cleanup();
-        child.kill();
-        reject(startFailure);
+        void close().then(() => reject(startFailure));
         return;
       }
 
@@ -423,6 +498,7 @@ function startServerProcess(input: {
       resolvePromise({
         origin,
         process: child,
+        close,
       });
     };
     const handleStdout = (chunk: Buffer) => {
@@ -439,52 +515,24 @@ function startServerProcess(input: {
     child.stdout.on("data", handleStdout);
     child.stderr.on("data", handleStderr);
 
-    // Production can listen without printing a URL. Gate on the health endpoint,
-    // while keeping child exit/bind failures and the overall timeout authoritative.
+    // Authored channels may omit health routes; readiness belongs to the listener.
     const checkReadiness = async () => {
       if (settled || input.readinessOrigin === undefined) return;
-      let ready = false;
-      try {
-        const response = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, input.readinessOrigin), {
-          redirect: "error",
-          signal: AbortSignal.timeout(DEV_SERVER_READINESS_TIMEOUT_MS),
-        });
-        ready = response.status === 200;
-        await response.body?.cancel();
-      } catch {
-        // The listener may not exist yet.
-      }
+      const ready = await isListening(input.readinessOrigin, readinessAbort.signal);
       if (settled) return;
-      if (ready) {
+      if (ready && child.exitCode === null && child.signalCode === null) {
         cleanup();
-        resolvePromise({ origin: input.readinessOrigin, process: child });
+        resolvePromise({ origin: input.readinessOrigin, process: child, close });
       } else {
         readinessTimer = setTimeout(checkReadiness, DEV_SERVER_REGISTRY_POLL_MS);
       }
     };
-    if (input.readinessOrigin !== undefined) {
+    input.signal?.addEventListener("abort", abort, { once: true });
+    if (input.signal?.aborted) abort();
+    if (!settled && input.readinessOrigin !== undefined) {
       readinessTimer = setTimeout(checkReadiness, DEV_SERVER_REGISTRY_POLL_MS);
     }
   });
-}
-
-function installProcessShutdown(handle: EveProcessHandle): EveProcessHandle {
-  const childProcess = handle.process;
-
-  if (childProcess === undefined) {
-    return handle;
-  }
-
-  const close = () => {
-    if (!childProcess.killed) {
-      childProcess.kill();
-    }
-  };
-
-  process.once("beforeExit", close);
-  process.once("exit", close);
-
-  return handle;
 }
 
 function startEveDevServer(input: {
@@ -507,7 +555,7 @@ function startEveDevServer(input: {
     logLabel: input.logLabel,
     readOrigin: findLocalServerOrigin,
     timeoutMs: input.timeoutMs,
-  }).then(installProcessShutdown);
+  });
 }
 
 /**
@@ -520,6 +568,7 @@ export async function startEveProductionServer(input: {
   readonly origin: string;
   /** How to pick another port, completing "stop it or ..." when the port is taken. */
   readonly portRetryHint: string;
+  readonly signal?: AbortSignal;
 }): Promise<EveProcessHandle> {
   const parsedOrigin = new URL(input.origin);
   const port = parsedOrigin.port || (parsedOrigin.protocol === "https:" ? "443" : "80");
@@ -531,17 +580,10 @@ export async function startEveProductionServer(input: {
     );
   }
 
-  // A healthy occupant must not satisfy the new child's readiness check.
-  const occupied = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, input.origin), {
-    redirect: "manual",
-    signal: AbortSignal.timeout(DEV_SERVER_READINESS_TIMEOUT_MS),
-  }).then(
-    async (response) => {
-      await response.body?.cancel();
-      return true;
-    },
-    () => false,
-  );
+  input.signal?.throwIfAborted();
+  // An existing listener must not satisfy the new child's readiness check.
+  const occupied = await isListening(input.origin, input.signal);
+  input.signal?.throwIfAborted();
   if (occupied) {
     throw new Error(
       `Port ${port} on ${parsedOrigin.hostname} is already in use. Another process is listening there; stop it or ${input.portRetryHint}.`,
@@ -560,7 +602,8 @@ export async function startEveProductionServer(input: {
     },
     listen: { host: parsedOrigin.hostname, port, retryHint: input.portRetryHint },
     readinessOrigin: input.origin,
-  }).then(installProcessShutdown);
+    signal: input.signal,
+  });
 }
 
 /**

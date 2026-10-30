@@ -73,11 +73,15 @@ async function assertNuxtHealth(
   deployment: string,
   env: NodeJS.ProcessEnv,
   expectedStatus = 200,
+  pendingStartupPidPath?: string,
 ): Promise<void> {
   const port = await findFreePort();
   let output = "";
+  let backendPid: number | undefined;
+  const clustered = env.NITRO_CLUSTER_WORKERS !== undefined;
   const child = spawn(process.execPath, [join(deployment, ".output/server/index.mjs")], {
     cwd: deployment,
+    detached: clustered && process.platform !== "win32",
     env: { ...env, PORT: String(port), NITRO_PORT: String(port), HOST: "127.0.0.1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -102,6 +106,30 @@ async function assertNuxtHealth(
       () => `Nuxt did not serve eve.\n${output}`,
       60_000,
     );
+    if (pendingStartupPidPath) {
+      await waitForCondition(
+        async () => {
+          backendPid = Number(await readFile(pendingStartupPidPath, "utf8").catch(() => "0"));
+          return backendPid > 0;
+        },
+        () => `eve child did not start.\n${output}`,
+        5_000,
+      );
+      child.kill("SIGTERM");
+      await waitForCondition(
+        () => {
+          try {
+            process.kill(backendPid!, 0);
+            return false;
+          } catch {
+            return true;
+          }
+        },
+        () => `Nuxt left its pending eve child running.\n${output}`,
+        5_000,
+      );
+      return;
+    }
     // Do not poll eve: the first transport request must wait for startup.
     const health = await fetch(`http://127.0.0.1:${port}/eve/v1/health`, {
       signal: AbortSignal.timeout(15_000),
@@ -122,7 +150,21 @@ async function assertNuxtHealth(
       cause: error,
     });
   } finally {
+    if (clustered && process.platform !== "win32" && child.pid) {
+      try {
+        process.kill(-child.pid, "SIGTERM");
+      } catch {
+        /* Already exited. */
+      }
+    }
     await stopChildProcess(child);
+    if (backendPid) {
+      try {
+        process.kill(backendPid, "SIGKILL");
+      } catch {
+        /* Already reaped. */
+      }
+    }
   }
 }
 
@@ -147,6 +189,34 @@ describe("framework-nuxt build", () => {
       "eve nuxt deployment",
     );
 
+    const configPath = join(app.appRoot, "nuxt.config.ts");
+    const originalConfig = await readFile(configPath, "utf8");
+    for (const configured of [false, true]) {
+      if (configured)
+        await writeFile(
+          configPath,
+          originalConfig.replace(
+            "telemetry: false,",
+            'telemetry: false, nitro: { preset: "node-cluster" },',
+          ),
+        );
+      try {
+        await expect(
+          runPnpmCommand({
+            args: ["exec", "nuxt", "build"],
+            cwd: app.appRoot,
+            env: {
+              ...env,
+              NITRO_PRESET: configured ? undefined : "node-cluster",
+              SERVER_PRESET: undefined,
+            },
+          }),
+        ).rejects.toThrow(/EVE_NUXT_PRODUCTION_ORIGIN.*building Nuxt/);
+      } finally {
+        await writeFile(configPath, originalConfig);
+      }
+    }
+
     const backend = createHttpServer((_request, response) => {
       response.setHeader("content-type", "application/json");
       response.end(JSON.stringify({ ok: true, status: "ready" }));
@@ -160,11 +230,16 @@ describe("framework-nuxt build", () => {
         cwd: app.appRoot,
         env: {
           ...env,
+          NITRO_PRESET: "node-cluster",
           EVE_NUXT_PRODUCTION_ORIGIN: `http://127.0.0.1:${address.port}`,
         },
       });
       // No eve build exists here, and the origin variable is absent at runtime.
-      await assertNuxtHealth(app.appRoot, { ...env, EVE_NUXT_PRODUCTION_ORIGIN: undefined });
+      await assertNuxtHealth(app.appRoot, {
+        ...env,
+        NITRO_CLUSTER_WORKERS: "2",
+        EVE_NUXT_PRODUCTION_ORIGIN: undefined,
+      });
     } finally {
       await new Promise<void>((resolve, reject) =>
         backend.close((error) => (error ? reject(error) : resolve())),
@@ -226,9 +301,17 @@ describe("framework-nuxt build", () => {
       const entry = join(serverDirectory, "index.mjs");
       await writeFile(
         entry,
-        `if (process.env.TEST_EVE_START_FAILURE) throw new Error("fixture startup failure");
-await new Promise((resolve) => setTimeout(resolve, 1500));
+        `import { writeFileSync as writeFixturePid } from "node:fs";
+writeFixturePid("startup-pid", String(process.pid));
+if (process.env.TEST_EVE_START_FAILURE) throw new Error("fixture startup failure");
+await new Promise((resolve) => setTimeout(resolve, process.env.TEST_EVE_START_DELAY ? 60000 : 1500));
 ${await readFile(entry, "utf8")}`,
+      );
+      await assertNuxtHealth(
+        deployment,
+        { ...env, TEST_EVE_START_DELAY: "1" },
+        200,
+        join(deployment, "backend/startup-pid"),
       );
       for (const root of [undefined, "./relocated-agent"]) {
         if (root) await rename(join(deployment, "backend"), join(deployment, "relocated-agent"));

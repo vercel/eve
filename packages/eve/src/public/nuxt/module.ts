@@ -70,6 +70,7 @@ function resolveApplicationRoot(nuxtRoot: string, appPath: string | undefined): 
  * this package's build, so model only the surface we touch.
  */
 interface NitroConfigHost {
+  preset?: string;
   externals?: {
     inline?: string[];
     [key: string]: unknown;
@@ -205,6 +206,19 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
           !(nuxt.options as { _generate?: boolean })._generate &&
           !configuredOrigin
         ) {
+          const preset = (
+            readNitroConfig(nuxt.options).preset ||
+            process.env.NITRO_PRESET ||
+            process.env.SERVER_PRESET ||
+            "node-server"
+          )
+            .replace(/([a-z])([A-Z])/g, "$1-$2")
+            .toLowerCase();
+          if (preset !== "node-server") {
+            throw new Error(
+              `eve managed Nuxt startup requires the single-process node-server preset, not ${preset}. Set EVE_NUXT_PRODUCTION_ORIGIN to an externally managed eve service when building Nuxt.`,
+            );
+          }
           // Keep startup and the proxy tied to the same build-time destination.
           const config = {
             origin: new URL(proxyTarget).origin,
