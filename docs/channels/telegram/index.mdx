@@ -41,9 +41,10 @@ eve rejects any request whose `X-Telegram-Bot-Api-Secret-Token` header doesn't m
 
 ## Default channel behavior
 
-In a private chat, the agent answers every message. In a group, a message starts a turn when it's a command (`/ask` or `/ask@my_bot`), mentions `@my_bot`, or replies to one of the agent's messages. Mentions need `botUsername`. Each forum topic is its own session. Group privacy mode is a BotFather setting, not a channel option.
+By default, the agent answers every message in a private chat. In a group, a message wakes the agent when it's a command directed at the bot (`/ask` or `/ask@my_bot`), mentions `@my_bot`, or replies to one of the agent's messages. Mentions need `botUsername`. Each forum topic is its own session. Group privacy mode is a BotFather setting, not a channel option.
 
-To change which messages start a turn, see [Dispatch](/docs/channels/telegram/reference#dispatch). To change how replies are sent, see [Delivery](/docs/channels/telegram/reference#delivery).
+- To customize which commands, mentions, or replies wake the agent, override `onMessage`. See [Dispatch](/docs/channels/telegram/reference#dispatch).
+- To change how replies are sent, see [Delivery](/docs/channels/telegram/reference#delivery).
 
 ## Configure approval prompts
 

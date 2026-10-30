@@ -32,9 +32,11 @@ After deploying, point your Twilio number's Messaging webhook at `https://your-a
 
 ## Default channel behavior
 
-The agent answers texts from numbers in `allowFrom` by SMS. When someone calls, eve answers, asks the caller to speak, and sends the transcript to the agent. The caller hears a short acknowledgement, and the reply arrives by SMS. Texts and calls from the same number share one session.
+By default, the agent answers texts from numbers in `allowFrom` by SMS. When someone calls, eve answers, asks the caller to speak, and sends the transcript to the agent. The caller hears a short acknowledgement, and the reply arrives by SMS. Texts and calls from the same number share one session.
 
-To change who can start a turn, or the spoken prompt and speech recognition with `onVoice`, see [Dispatch](/docs/channels/twilio/reference#dispatch). To change how replies are sent, see [Delivery](/docs/channels/twilio/reference#delivery).
+- To customize what happens on a text, override `onText`. See [Dispatch](/docs/channels/twilio/reference#dispatch).
+- To customize the call greeting, language, or speech recognition, or to reject calls, use `onVoice` or the `voice` option. See [Dispatch](/docs/channels/twilio/reference#dispatch) and [Options](/docs/channels/twilio/reference#options).
+- To change how replies are sent, see [Delivery](/docs/channels/twilio/reference#delivery).
 
 ## Restrict access
 

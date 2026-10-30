@@ -64,9 +64,11 @@ curl -X PUT "https://discord.com/api/v10/applications/$DISCORD_APPLICATION_ID/co
 
 ## Default channel behavior
 
-By default, the bot answers a slash command as the person who ran it, and replies to the command in the channel. Approvals and questions appear as buttons. To also answer DMs, mentions, and replies, [enable bot behavior](#enable-bot-behavior).
+By default, the bot answers a slash command such as `/ask` as the person who ran it, and replies to the command in the channel. Approvals and questions appear as buttons.
 
-To change who can run the agent, see [Dispatch](/docs/channels/discord/reference#dispatch). To change how replies are sent, see [Delivery](/docs/channels/discord/reference#delivery).
+- To customize what a slash command does or who can run it, override `onCommand`. See [Dispatch](/docs/channels/discord/reference#dispatch).
+- To also answer DMs, mentions, and replies, see [Enable bot behavior](#enable-bot-behavior).
+- To change how replies are sent, see [Delivery](/docs/channels/discord/reference#delivery).
 
 ## Enable bot behavior
 

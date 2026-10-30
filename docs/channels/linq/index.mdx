@@ -54,9 +54,11 @@ After deploying, create a Linq webhook for `https://your-agent.example/eve/v1/li
 
 ## Default channel behavior
 
-The agent answers every message, as the person who sent it, and marks it as read. Messages in a conversation share one session, so the agent keeps the context of earlier messages. Images and other files people send reach the agent as files.
+By default, the agent answers every message, as the person who sent it, and marks it as read. Messages in a conversation share one session, so the agent keeps the context of earlier messages. Images and other files people send reach the agent as files.
 
-To change which messages start a turn, see [Message hook](/docs/channels/linq/reference#message-hook). For how messages that arrive mid-turn are handled, see [Inbound messages](/docs/channels/linq/reference#inbound-messages).
+- To customize which messages start a turn, override `onMessage`. See [Filter messages](#filter-messages).
+- To react with tapbacks or answer approvals with them, see [Send tapbacks](#send-tapbacks) and [Approve requests with tapbacks](#approve-requests-with-tapbacks).
+- For how messages that arrive mid-turn are handled, see [Inbound messages](/docs/channels/linq/reference#inbound-messages).
 
 ## Filter messages
 
