@@ -24,6 +24,7 @@ import {
 } from "../create/web-template.js";
 import {
   resolveWebPackageVersions,
+  WEB_AUTH_OPENTELEMETRY_API_VERSION,
   type WebAuthentication,
   type WebPackageVersions,
 } from "./web-options.js";
@@ -268,7 +269,7 @@ async function patchWebPackageJson(
     zod: resolveVersionToken("zodPackageVersion", options.zodPackageVersion),
     ...(authentication === "sign-in-with-vercel"
       ? {
-          "@opentelemetry/api": "1.9.0",
+          "@opentelemetry/api": WEB_AUTH_OPENTELEMETRY_API_VERSION,
           "better-auth": resolveVersionToken(
             "betterAuthPackageVersion",
             options.betterAuthPackageVersion,
