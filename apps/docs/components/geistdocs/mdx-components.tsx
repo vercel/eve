@@ -6,6 +6,7 @@ import type { MDXComponents } from "mdx/types";
 import Link from "next/link";
 import { AgentRuntimeDiagram } from "./agent-runtime-diagram";
 import { EveCodeBenchmark } from "./eve-code-benchmark";
+import { TabsWithChildren } from "./synced-tabs";
 import {
   Capabilities,
   Capability,
@@ -37,6 +38,7 @@ const localComponents: MDXComponents = {
   EveCodeBenchmark,
   Step,
   Steps,
+  TabsWithChildren,
   TemplateCard,
   TemplateCards,
   UseCaseSummaries,

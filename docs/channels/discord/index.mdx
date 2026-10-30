@@ -10,7 +10,7 @@ For information on all configuration and customization options, see the [Discord
 
 ## Set up
 
-<TabsWithChildren ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
+<TabsWithChildren groupId="vercel" ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
 <TabContent order={1}>
 
 Run the guided setup from your agent project, then deploy:
@@ -59,14 +59,17 @@ curl -X PUT "https://discord.com/api/v10/applications/$DISCORD_APPLICATION_ID/co
     "options":[{"name":"message","description":"What should the agent do?","type":3,"required":true}]}]'
 ```
 
-To answer DMs and mentions from another host, see [Run the relay outside Vercel](/docs/channels/discord/reference#run-the-relay-outside-vercel).
-
 </TabContent>
 </TabsWithChildren>
 
 ## Answer DMs and mentions
 
-Discord sends ordinary messages only over its Gateway WebSocket, so eve runs a relay that stays connected and forwards them to the agent. Gateway support is experimental. When you choose DMs, mentions, and threads, setup adds `gateway: {}` to the channel and writes the relay as a [Vercel Daemon](/docs/channels/discord/reference#run-the-relay-as-a-vercel-daemon) in `daemon/`:
+Discord sends ordinary messages only over its Gateway WebSocket, so eve runs a relay that stays connected and forwards them to the agent. Gateway support is experimental.
+
+<TabsWithChildren groupId="vercel" ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
+<TabContent order={1}>
+
+When you choose DMs, mentions, and threads, setup adds `gateway: {}` to the channel and writes the relay as a [Vercel Daemon](/docs/channels/discord/reference#run-the-relay-as-a-vercel-daemon) in `daemon/`. The relay signs its requests with your project's Vercel OIDC token, so the agent and relay share no secret:
 
 ```ts title="agent/channels/discord.ts"
 import { connectDiscordCredentials } from "@vercel/connect/eve";
@@ -77,6 +80,42 @@ export default discordChannel({
   gateway: {},
 });
 ```
+
+</TabContent>
+<TabContent order={2}>
+
+Run `runDiscordGatewayRelay` on any host that keeps a Node.js 24 process up, with exactly one relay per bot. Generate a shared secret, set it as `DISCORD_RELAY_SECRET` on both the agent and the relay host, and accept it on the Gateway route:
+
+```ts title="agent/channels/discord.ts"
+import { httpBasic, localDev } from "eve/channels/auth";
+import { discordChannel } from "eve/channels/discord";
+
+export default discordChannel({
+  gateway: {
+    auth: [
+      localDev(),
+      httpBasic({ username: "discord-relay", password: process.env.DISCORD_RELAY_SECRET! }),
+    ],
+  },
+});
+```
+
+On the relay host, set `DISCORD_BOT_TOKEN` and `EVE_URL`, the agent's URL:
+
+```ts title="relay/main.ts"
+import { httpBasic } from "eve/agents/auth";
+import { runDiscordGatewayRelay } from "eve/experimental/channels/discord/gateway";
+
+await runDiscordGatewayRelay({
+  url: process.env.EVE_URL,
+  auth: httpBasic({ username: "discord-relay", password: process.env.DISCORD_RELAY_SECRET! }),
+});
+```
+
+See [Run the relay outside Vercel](/docs/channels/discord/reference#run-the-relay-outside-vercel) for a Dockerfile and restart policy.
+
+</TabContent>
+</TabsWithChildren>
 
 The bot answers DMs, mentions of its user, replies to its messages, and messages in threads where it's already talking. A mention in a text channel starts a public thread, and the thread is one session. Set `gateway: { startThread: false }` to answer in the channel instead.
 

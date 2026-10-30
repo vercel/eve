@@ -10,7 +10,7 @@ For information on all configuration and customization options, see the [Slack r
 
 ## Set up
 
-<TabsWithChildren ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
+<TabsWithChildren groupId="vercel" ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
 <TabContent order={1}>
 
 Run the guided setup from your agent project, then deploy:
@@ -82,7 +82,20 @@ export default slackChannel({
 
 To answer only the thread replies that expect the agent, ask a decision model from the hook. See [Classify ambient replies with a decision model](/docs/channels/slack/reference#classify-ambient-replies-with-a-decision-model).
 
-Slack sends un-mentioned channel messages only when the app subscribes to them. In the Connect connector's **Advanced** settings, add the `message.channels` event and `channels:history` scope, plus `message.groups` and `groups:history` for private channels.
+Slack sends un-mentioned channel messages only when the app subscribes to them:
+
+<TabsWithChildren groupId="vercel" ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
+<TabContent order={1}>
+
+In the Connect connector's **Advanced** settings, add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. For private channels, also add `message.groups` and `groups:history`.
+
+</TabContent>
+<TabContent order={2}>
+
+In [Slack app settings](https://api.slack.com/apps), subscribe to the `message.channels` event and add the `channels:history` bot scope. For private channels, also add `message.groups` and `groups:history`. Then reinstall the app.
+
+</TabContent>
+</TabsWithChildren>
 
 ## Give the agent the thread so far
 
@@ -230,7 +243,22 @@ export default defineTool({
 });
 ```
 
-Code channels need extra scopes and events. See [Serve Slack code channels](/docs/channels/slack/reference#serve-slack-code-channels).
+Code channels need extra scopes and events:
+
+<TabsWithChildren groupId="vercel" ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
+<TabContent order={1}>
+
+With `codeChannels: true`, the app manifest enables code channels and requests what they need. When you create the Connect connector, add the same scopes and events under **Advanced**: the `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:read`, and `mpim:read` bot scopes, and the `message.session` and `agent_session_stopped` events.
+
+</TabContent>
+<TabContent order={2}>
+
+In [Slack app settings](https://api.slack.com/apps), enable code channels, add the `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:read`, and `mpim:read` bot scopes, and subscribe to the `message.session` and `agent_session_stopped` events. Then reinstall the app.
+
+</TabContent>
+</TabsWithChildren>
+
+See [Serve Slack code channels](/docs/channels/slack/reference#serve-slack-code-channels) for how eve detects code channels and opens them.
 
 ## Change what the agent posts
 
