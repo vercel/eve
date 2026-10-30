@@ -10,7 +10,7 @@ For information on all configuration and customization options, see the [Slack r
 
 ## Set up
 
-<TabsWithChildren groupId="vercel" ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
+<TabsWithChildren groupId="vercel" ariaLabel="How credentials are managed" tabs={["Vercel Connect", "Self-managed"]}>
 <TabContent order={1}>
 
 Run the guided setup from your agent project, then deploy:
@@ -84,7 +84,7 @@ To answer only the thread replies that expect the agent, ask a decision model fr
 
 Slack sends un-mentioned channel messages only when the app subscribes to them:
 
-<TabsWithChildren groupId="vercel" ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
+<TabsWithChildren groupId="vercel" ariaLabel="How credentials are managed" tabs={["Vercel Connect", "Self-managed"]}>
 <TabContent order={1}>
 
 In the Connect connector's **Advanced** settings, add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. For private channels, also add `message.groups` and `groups:history`.
@@ -245,7 +245,7 @@ export default defineTool({
 
 Code channels need extra scopes and events:
 
-<TabsWithChildren groupId="vercel" ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
+<TabsWithChildren groupId="vercel" ariaLabel="How credentials are managed" tabs={["Vercel Connect", "Self-managed"]}>
 <TabContent order={1}>
 
 With `codeChannels: true`, the app manifest enables code channels and requests what they need. When you create the Connect connector, add the same scopes and events under **Advanced**: the `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:read`, and `mpim:read` bot scopes, and the `message.session` and `agent_session_stopped` events.
