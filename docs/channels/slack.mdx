@@ -579,10 +579,7 @@ export default slackChannel({
 });
 ```
 
-Code channels need extra Slack app permissions. With `codeChannels` set, the generated app manifest includes them. For Vercel Connect, add them under **Advanced** when you create the connector:
-
-- Bot scopes: `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:read`, and `mpim:read`
-- Events: `message.session` and `agent_session_stopped`
+Code channels need extra Slack app permissions. With `codeChannels` set, the generated app manifest includes them. With Vercel Connect, turn on **Code Channels** in the connector's settings, which adds the `code_channels:manage` scope and the `message.session` and `agent_session_stopped` events. Then add `groups:read` and `mpim:read` under **Bot Scopes**.
 
 Without `codeChannels`, eve treats a code channel like any other channel.
 
