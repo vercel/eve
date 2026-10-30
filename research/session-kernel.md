@@ -8,227 +8,182 @@ last_updated: "2026-10-30"
 
 ## Summary
 
-eve is built for sessions that run for a long time and involve more than one person. Several people share a conversation, approvals and sign-ins wait for days, and channels and clients all read the same record. That record is the session's event stream, and its facts carry guarantees. The clearest one: when the model asks for a call that needs approval, the request appears in the stream, and the call cannot run until someone allowed to answer approves it.
+eve is built for long-running sessions that involve more than one person. People share a conversation, approvals and sign-ins wait for days, and every channel and client reads the same event stream. The stream's facts carry guarantees. For example, a call that needs approval can't run until someone allowed to answer approves it.
 
-This plan splits eve into layers so those guarantees hold whatever runs on top of them and wherever they run:
+This plan splits eve into layers so those guarantees hold whatever loop runs and wherever the session runs:
 
 - A sealed **kernel** becomes the only code that writes facts and the only path by which a call runs.
-- A **harness** is a function the kernel evaluates: the model, instructions, tools, and history the next model call gets, and what the turn does next. eve's own loop is one harness, written in the shape any author would use.
-- A **host** decides where a session runs: on Workflow when deployed, or inside one process for an agent embedded in a CLI, a worker, or a test.
+- A **harness** tells the kernel what the next model call gets and what the turn does next. eve's own loop becomes one harness.
+- A **host** runs the session: Workflow when deployed, or one process for an agent embedded in a CLI, a worker, or a test.
 
-The plan covers internal refactors that leave the stream unchanged, and an experimental API that could follow after 1.0. Nothing here is part of 1.0. A draft of the kernel and harness split is GitHub stack #5638, #5566, #5604, #5609, #5621, and #5640, and this document uses its names. What the stack doesn't have yet is marked as proposed, including the harness's flat shape: the stack groups the model, instructions, and tools under `agent`. Code in this document is pseudocode, and signatures are simplified.
+None of this is part of 1.0. The kernel and harness split is drafted in stack #5638, #5566, #5604, #5609, #5621, and #5640, and this document uses its names. Anything the stack doesn't have is marked proposed, including the flat harness shape; the stack groups the model, instructions, and tools under `agent`. Code here is pseudocode.
 
 ## What eve guarantees
 
-A multi-party session needs more than a model loop. It needs to know who said what, who may approve what, which requests are waiting on which person, and what happened to every call the model asked for. eve records all of it as facts that clients, channels, hooks, and the kernel fold into one view.
+A multi-party session has to track who said what, who may approve what, which requests wait on whom, and what happened to every call. eve records all of it as facts, which clients, channels, hooks, and the kernel fold into one view. An approval shows how much depends on them:
 
-An approval shows how much rests on those facts:
-
-```text
-model asks for a call ──► call.requested
-                               │
-                     gate: the tool's approval policy
-             ┌─────────────────┼──────────────────────┐
-          allowed       needs a person              denied
-             │                 │                       │
-             │        interaction.opened               │
-             │        turn.paused                      │
-             │                 │                       │
-             │        an answer arrives                │
-             │        interaction.settled              │
-             │          ┌──────┴───────┐               │
-             │      accepted        declined           │
-             │          │              │               │
-             │   policy and input      │               │
-             │   checked again         │               │
-             ▼          ▼              ▼               ▼
-     call.started (clearedBy)     call.settled: rejected
-             │
-       call.settled
+```mermaid
+flowchart TD
+  Requested["call.requested"] --> Gate{"approval policy"}
+  Gate -- allowed --> Started["call.started"]
+  Gate -- needs a person --> Opened["interaction.opened<br/>turn.paused"]
+  Gate -- denied --> Rejected["call.settled: rejected"]
+  Opened --> Answered["interaction.settled"]
+  Answered -- declined --> Rejected
+  Answered -- accepted --> Recheck{"policy and input<br/>checked again"}
+  Recheck -- allowed --> Started
+  Recheck -- denied --> Rejected
+  Started --> Settled["call.settled"]
 ```
 
-A client that shows "waiting for approval" trusts that `call.started` never comes first. A channel that posts an approval card trusts that one answer settles the whole batch the model asked for together. Whoever approves, the call still runs as the person whose turn made it, so an approval doesn't lend the approver's credentials.
+A client that shows "waiting for approval" relies on `call.started` never coming first. A channel that posts an approval card relies on one answer settling the whole batch. Whoever approves, the call runs as the person whose turn made it, so approving doesn't lend the approver's credentials.
 
-Much of this is enforced today. The gate decides every call the model makes. The stream checker (`protocol/session-events/checker.ts`) checks lifecycle rules on every line in unit and integration tests and under `eve dev`. Guard rule 51 limits which modules build lifecycle events, and rule 53 keeps the protocol standalone.
+Much of this is enforced today. The gate decides every call the model makes, and the stream checker (`protocol/session-events/checker.ts`) checks lifecycle rules on every line in tests and under `eve dev`. But no single component owns the guarantee:
 
-No single component owns the guarantee, though. Rule 51 documents its own gaps: approval candidates are written to state directly, and call results are built in `call-executor.ts` rather than in the session machine. Outside `harness/`, a few facts are built by hand, and one path writes to the stream without the checker. The checker has no rule that ties a call's start to its approval. Nothing in eve is known to break the contract, but the contract holds because separate pieces of code agree, not because one owner enforces it.
+- Guard rule 51, which limits which modules build lifecycle facts, documents its own gaps.
+- A few facts outside `harness/` are built by hand, and one path writes to the stream without the checker.
+- The checker has no rule that ties a call's start to its approval.
 
-The contract covers effects that go through eve. Arbitrary code in a tool or a host can still reach an external service directly, so the contract is not a defense against a malicious host. Provider-executed tools, such as a provider's web search, run inside the model call, where eve cannot gate them, so offering one is the decision to allow it. Sandboxes and scoped credentials limit what an approved call can reach, and they complement the gate rather than replace it.
+Nothing is known to break the contract. It holds because separate pieces of code agree, not because one owner enforces it.
+
+The contract covers effects that go through eve. It isn't a defense against a malicious tool or host, which can reach a service directly. Provider-executed tools, such as a provider's web search, run inside the model call where eve can't gate them, so offering one is the decision to allow it. Sandboxes and scoped credentials limit what an approved call can reach. They complement the gate; they don't replace it.
 
 ## The layers
 
-These are the layers this plan proposes. The kernel section describes where today's code differs.
+This is the proposed layering. The kernel section covers where today's code differs.
 
-```text
-authoring        agent/ files and the compiler · an agent defined in code
-session runtime  admission · inbox · answers · controls · tasks · hooks
-harness          model · instructions · tools · history · next         replaceable
-kernel           machine · commit · step                               sealed
-protocol         facts · progress · fold · selectors
-host             input · timers · storage · durable runs               Workflow, or one process
+```mermaid
+flowchart TD
+  Authoring["Authoring<br/>agent/ files or code"] -- resolved agent --> Runtime
+  Runtime["Session runtime<br/>admission, answers, controls, tasks, hooks"] -- inputs --> Kernel
+  Harness["Harness: replaceable<br/>model, instructions, tools, history, next"] -- policy --> Kernel
+  Kernel["Kernel: sealed<br/>machine, commit, step"] -- facts --> Protocol["Protocol<br/>facts, progress, fold, selectors"]
+  Kernel -- lines --> Host["Host<br/>inbox, timers, storage, durable runs"]
+  Host -- next input --> Runtime
 ```
 
-- **Protocol** is the session's record: facts, which are authoritative; progress, which previews work in flight; the fold that turns both into a view; and the selectors that read the view.
+- **Session runtime** works between steps. It submits inputs to the kernel and doesn't write facts.
+- **Harness** is policy. It returns data the kernel applies.
 - **Kernel** owns the guarantees. Its machine turns the session's view and an input into facts, its commit orders and checks them, and its step calls the model and runs calls through the gate.
-- **Harness** is policy. It returns data that the kernel applies.
-- **Session runtime** is everything between steps: admitting deliveries, queueing input, routing answers, applying controls such as cancel and compact, running tasks, and running hooks after each commit. It submits inputs to the kernel and never writes facts itself.
-- **Host** is what the session runtime waits on and writes to: an inbox, timers, storage for the stream and the session's values, and, where it can, durable runs for workflow tools, tasks, and child sessions.
-- **Authoring** produces the resolved agent the other layers run. `agent/` files through the compiler is one way; an agent defined in code is another.
+- **Host** is what the runtime waits on and writes to. Durable runs for workflow tools, tasks, and child sessions exist only where the host provides them.
 
-Hooks and `ctx.continue()` belong to the session runtime. A hook is an effect that runs after a commit, and `ctx.continue()` on `turn.settled` (#5555) queues the next turn. `next` decides how a turn ends; `ctx.continue()` decides whether another one begins.
+Hooks and `ctx.continue()` (#5555) belong to the runtime: a hook is an effect after a commit. `next` decides how a turn ends; `ctx.continue()` decides whether another begins.
 
 ## The kernel
 
 ### A step
 
-A step starts when the harness chooses the model and ends when the harness is asked what happens next:
+A step runs from the harness choosing the model to the harness deciding what's next:
 
-```text
-harness: next = model
-     │
-     ▼
-kernel evaluates model · instructions · tools · history
-     │   a history change is checked and recorded
-     ▼
-provider call through the AI SDK ──► normalized response
-                                            │
-                                ┌───────────┴───────────┐
-                              text                 tool calls
-                                │                       │
-                        content facts           each through the gate
-                                                  allowed ──► runs
-                                                  a person ──► interaction, park
-                                                  denied ──► rejected result
-     ┌──────────────────────────────────────────────────┘
-     ▼
-results join history ──► harness: next
+```mermaid
+flowchart TD
+  Model["next: model"] --> Evaluate["evaluate model, instructions, tools, history"]
+  Evaluate --> Provider["provider call through the AI SDK"]
+  Provider --> Text["text: content facts"]
+  Provider --> Calls["tool calls"]
+  Calls --> Gate{"gate"}
+  Gate -- allowed --> Adapter["execution adapter<br/>function, sandbox, or durable run"]
+  Gate -- needs a person --> Park["interaction.opened, park"]
+  Gate -- denied --> History["results join history"]
+  Adapter --> History
+  Text --> Next["next"]
+  History --> Next
 ```
 
-Two translations happen. The provider adapter turns the provider's response into text, tool calls, and usage; that is mechanics, and the AI SDK does it. The kernel turns each tool call into a governed call: it resolves the tool, validates the input, applies approval and authorization, and runs the call or parks it. Choosing `model` includes dispatching the tool calls the response makes through the gate, so a harness doesn't repeat that bookkeeping. A harness that wants to inspect calls before they run would need a separate, explicit capability.
+The AI SDK turns the provider's response into text, tool calls, and usage. The kernel turns each tool call into a governed call: it resolves the tool, validates the input, applies approval and authorization, and then runs or parks the call. Choosing `model` includes that dispatch, so a harness doesn't repeat it. Inspecting calls before they run would need a separate, explicit capability.
 
-### Dispatch
+The kernel decides whether a call runs, and an execution adapter decides how. A call runs as a function in the step, as an operation in the session's sandbox, or as a durable run the host starts for a workflow tool, task, or child session. A durable run reports back as input, and the kernel settles the call. No adapter bypasses the gate.
 
-The kernel decides whether a call runs. An execution adapter decides how:
-
-```text
-call requested, by the model or the harness
-        │
-kernel: validate · gate · authorize · call.started
-        │
-execution adapter
-  ├─ function            runs in the step
-  ├─ sandbox operation   runs in the session's sandbox
-  └─ durable run         the host starts a workflow tool, task, or child session
-        │
-kernel: call.settled · the result joins history
-```
-
-A durable run reports back to the session as input, and the kernel settles the call. No adapter is a second route around the gate.
-
-### Sandboxes and connections
-
-A sandbox is where an operation runs and what it can reach. A connection is an authenticated client for an external service. Both are execution environments: the host provides or provisions them, tools use them, and the kernel governs each call into them. An approval covers the operation the tool declares, not every effect the operation can reach, so approving `bash` grants whatever the sandbox allows.
+Sandboxes and connections are execution environments that the host provides and tools use. An approval covers the operation a tool declares, not everything the operation can reach, so approving `bash` grants whatever the sandbox allows.
 
 ### What no harness can change
 
-Whatever a harness returns, the kernel enforces these rules:
-
-- Every call, the model's or the harness's, passes the gate. A harness cannot skip, answer, or forge an approval or a sign-in.
+- Every call, the model's or the harness's, passes the gate. A harness can't skip, answer, or forge an approval or a sign-in.
 - A call runs as the person whose turn made it.
 - A turn doesn't settle while its tasks work. The kernel waits for them and calls the model with their results.
 - Input that arrives during a turn is read in that turn.
-- After a model step, `model` needs something the model hasn't read: tool results or a note. A note must say something, and a turn gets at most three. Past that, eve's own decision applies.
-- Usage limits apply before every model call and before a harness's calls, and every model call is billed, including the summarizer's and `decide()`'s (#5638).
-- History changes are checked: every tool result follows its call once, no call loses its result, a summary opens the history, the running turn's input stays, and the history fits the model's window.
-- A settled output is validated against the turn's output schema, as a model's would be.
-- A harness that throws or returns something invalid fails the turn with "The agent's harness failed." The reason goes to the logs only.
+- After a model step, `model` needs something unread: tool results or a nonblank note. A turn gets at most three notes, and then eve's own decision applies.
+- Usage limits apply before every model call and every batch of harness calls. Every model call is billed, including the summarizer's and `decide()`'s (#5638).
+- History changes are checked: each tool result follows its call once, no call loses its result, a summary opens the history, the running turn's input stays, and the history fits the model's window.
+- A settled output must match the turn's output schema.
+- A harness that throws or returns something invalid fails the turn with "The agent's harness failed." The reason goes only to the logs.
 
 ### One author for facts
 
-Today the session machine (`harness/session-machine/`) builds most facts, but not all of them, and not all facts reach the stream through the same path:
+Today the session machine (`harness/session-machine/`) builds most facts, but not all of them, and not every fact reaches the stream the same way:
 
-```text
-today
-
-turn steps ─────────────► step loop → session machine · hitl ·   ──┐
-                                      call-facts · facts.ts        │
-other session steps ────► machine transitions · facts.ts ──────────┤
-  controls · duplicates · cancel · tasks ·                         ▼
-  session end · relays · run messages             publish-session-events.ts (execution/)
-                                                  closes what owners leave open · positions ·
-built by hand in execution/ ───────────────────►  dev checker · hooks · World writer
-  delivery admit and ignore · session.started ·                    │
-  child.opened and child.sent                                      ▼
-                                                             session stream
-end-stranded-session.ts ──► World writer directly, unchecked ──────┘
+```mermaid
+flowchart LR
+  Turn["turn steps"] --> Machine["session machine<br/>and fact helpers"]
+  Other["controls, tasks, relays,<br/>session end"] --> Machine
+  Machine --> Publisher["publish-session-events.ts<br/>close, position, check, hooks, write"]
+  Hand["delivery admit and ignore,<br/>session.started, child.opened, child.sent"] -- built by hand --> Publisher
+  Publisher --> Stream[("session stream")]
+  Stranded["end-stranded-session.ts"] -- unchecked --> Stream
 ```
 
-Proposed, the machine is the only author, and the publisher splits by owner:
+Proposed, the machine builds every fact, and the publisher splits by owner. The kernel's commit closes, positions, and checks lines, the host writes them, and the runtime runs hooks:
 
-```text
-proposed
-                     kernel
-               ┌────────────────────────────────────────────┐
-turn step ───► │ step (model and tools) ──┐                 │
-               │                          ▼                 │
-inputs ──────► │ machine: view + input → facts + state      │  the only author of facts
-  delivery     │                          ▼                 │
-  control      │ commit: order · close · check → lines      │
-  run message  └──────────────────────────┬─────────────────┘
-  relay                                   │ lines
-  session end                             ▼
-                               host writes bytes ──► session stream, unchanged
-                                          │
-                               runtime runs hooks ──► new inputs
+```mermaid
+flowchart LR
+  subgraph Kernel["kernel"]
+    Step["step<br/>model and tools"] --> Machine["machine<br/>view + input → facts"]
+    Machine --> Commit["commit<br/>order, close, check"]
+  end
+  Inputs["deliveries, controls, run messages,<br/>relays, session end"] --> Machine
+  Commit -- lines --> Host["host writer"]
+  Host --> Stream[("session stream, unchanged")]
+  Stream -.-> Hooks["runtime runs hooks"]
+  Hooks -. new inputs .-> Inputs
 ```
 
-The hand-built facts become machine transitions, the stranded-session end goes through the commit like any other fact, and rule 51's guard extends from `harness/` to the whole package. The one exemption is `execution/v26-history.ts`, which translates streams recorded before v27 as they are read and never writes.
+The hand-built facts become machine transitions, the stranded-session end goes through the commit, and rule 51 extends to the whole package. The one exemption is `execution/v26-history.ts`, which translates streams recorded before v27 as they're read and never writes. The stream format doesn't change.
 
-Relays already work this way. A child session or a workflow run sends its parent a relay message whose events look like facts. The parent's `relay()` transition treats them as input: it skips events that aren't about a call the parent is running, ignores repeats, sets the subject and origin itself, and builds its own facts. The relay message and the stream both stay as they are. A relayed interaction carries an `origin`, so an approval relayed from a child never clears one of the parent's own calls.
+Relays already work this way. A child session or a workflow run sends its parent relay messages whose events look like facts. The parent's `relay()` transition treats them as input: it ignores repeats and events for interactions it doesn't mirror, sets the subject and origin itself, and builds its own facts. Neither the relay message nor the stream changes. A relayed interaction carries an `origin`, which tells it apart from the parent's own approvals.
 
-The machine and the commit need only the session's view, not a loaded agent. That matters because some facts are written exactly when an agent can't be built: a session's end, a terminal failure, or a session stranded by an upgrade. `createKernel`, which builds a step for one agent's model, tools, and harness, sits on top of the machine; it isn't where the authority lives.
+The machine and the commit need only the session's view, not a loaded agent. Some facts are written exactly when an agent can't be built: a session's end, a terminal failure, or a session stranded by an upgrade. `createKernel`, which builds a step from one agent's model, tools, and harness, sits on top of the machine. The authority lives below it.
 
 ### How the kernel is checked
 
-The stream checker already enforces introduction before reference, one terminal fact per entity, closed outcome sets, closure when an owner ends, one open turn, attempts, progress, pauses that wait on a person, calls served by running tasks, and approval batches that settle together. It runs in the writer during unit and integration tests and under `eve dev`, so a producer's mistake fails where it happens.
+Among other rules, the stream checker already enforces:
 
-The proposed addition is authorization. A `call.started` for a call that has its own approval request must follow that request's `interaction.settled` with `accepted`, and its `clearedBy` must name that request. A negative control proves the rule: a test that deliberately skips the gate must fail the checker. Because a harness's calls emit the same facts as the model's, the rule covers them with no extra work.
+- introduction before reference;
+- one terminal fact per entity;
+- closed outcome sets;
+- closure when an owner ends;
+- one open turn;
+- pauses that wait on a person;
+- approval batches that settle together.
 
-Two more properties keep the kernel testable apart from any host. Guard rule 58 keeps Workflow out of `harness/`, so the step can run with a fake model and no Workflow world. The machine's transitions are pure, so they are tested directly.
+It runs in the writer during tests and under `eve dev`, so a mistake fails where it's made.
+
+The proposed addition is authorization. A `call.started` for a call with its own approval request must follow that request's accepted `interaction.settled`, and its `clearedBy` must name the request. To prove the rule, a test that skips the gate on purpose must fail the checker. Harness calls emit the same facts, so the rule covers them too.
+
+Guard rule 58 keeps Workflow out of `harness/`, so the step can run with a fake model and no Workflow world. The machine's transitions are pure, so they're tested directly.
 
 ## Harnesses
 
 ### The shape
 
 ```ts title="agent/harness.ts"
-import { builtins, declared, defineHarness } from "eve/experimental/harness";
+import { defineHarness } from "eve/experimental/harness";
 
-export default defineHarness((ctx) => ({
-  model: ..., // which model, with its options
-  instructions: ..., // the whole system prompt
-  tools: ..., // every tool the model is offered
-  history: ..., // what the model remembers, which becomes the session's history
-  next: ..., // what the turn does next
-}));
+export default defineHarness((ctx) => ({ model, instructions, tools, history, next }));
 ```
 
-The function itself is cheap and synchronous: it says what each field is. Every field can be a value or a function, and the kernel calls a function only where it needs that value. A field the harness leaves out, or returns `undefined` for, is eve's own.
+The function runs synchronously and only says what each field is. A field is a value or a function, and the kernel calls a function only when it needs the value. A missing field, or one that returns `undefined`, falls back to eve's. The flat shape is proposed.
 
-The flat shape is proposed. Everything except `next` describes the next model call, and the kernel evaluates those fields only when `next` chooses the model, or, for `history`, when `session.compact()` asks. `history` differs from the other three in one way: what it returns persists as the session's history, while the model, instructions, and tools apply to one call.
+| Field          | What it returns                                          | When the kernel evaluates it                                               |
+| -------------- | -------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `model`        | Which model, with its options                            | Before each model call                                                     |
+| `instructions` | The whole system prompt                                  | Before each model call                                                     |
+| `tools`        | Every tool the model is offered                          | Before each model call                                                     |
+| `history`      | What the model remembers, saved as the session's history | Before each model call, and on `session.compact()`                         |
+| `next`         | What the turn does next                                  | At turn start, after each model step, and after the harness's calls settle |
 
-The kernel evaluates the harness at these points:
-
-| Where                                | What the kernel evaluates                                       |
-| ------------------------------------ | --------------------------------------------------------------- |
-| Turn start, before any model call    | `next`, which can settle, fail, or call tools without the model |
-| Before each model call               | `model`, `instructions`, `tools`, and `history`                 |
-| After each model step                | `next`                                                          |
-| After the harness's own calls settle | `next`                                                          |
-| `session.compact()`                  | `history`                                                       |
+`model`, `instructions`, and `tools` apply to one call. `history` persists.
 
 ### `next`
-
-`next` returns one of four values:
 
 ```ts
 type Next =
@@ -238,75 +193,57 @@ type Next =
   | { fail: { message: string } }; // end the turn as failed
 ```
 
-A harness's `calls` go through the same gate as the model's: approval, sign-in, and workflow and task tools park the same way, and history records the batch as calls the agent made. Today a harness can call the tools the step offers the model. Letting it call any of the agent's tools, offered or not, is proposed.
+A harness's `calls` pass the same gate as the model's. Approvals, sign-ins, and workflow and task tools park the same way, and history records the calls as the agent's. Today a harness can call only the tools the step offers the model. Calling the agent's other tools is proposed.
 
-When a harness decides the reply, the model's text streams as a draft until the harness settles the turn, and channels such as Slack post only the reply. A critic can then reject a draft before a channel posts it.
+When a harness decides the reply, the model's text streams as a draft until the turn settles. Channels such as Slack post only the reply, so a critic can reject a draft before any channel posts it.
 
 ### `model`, `instructions`, and `tools`
 
-`model` accepts what `agent.ts`'s `model` accepts: an AI Gateway model id, a model instance, or a selection such as `{ model, modelOptions, reasoning }`, the value `defineDynamic()` returns. Provider options travel with the selection.
+`model` accepts anything `agent.ts`'s `model` does: a model id, a model instance, or a selection such as `{ model, modelOptions, reasoning }`. Provider options travel with the selection.
 
-`instructions` is the whole system prompt. A string is all of it; an array's entries join, and empty ones are skipped. The kernel puts only its own recovery note first, when a provider rejected a tool and the kernel retried without it. The kernel places the prompt cache breakpoint at the end of the system prompt, so system text that changes from call to call costs the cache wherever it sits.
+`instructions` is the whole system prompt: a string, or an array whose non-empty entries are joined. The kernel adds only its own recovery note, at the start, when it retried without a tool the provider rejected. The prompt cache breakpoint is at the end of the system prompt, so text that changes from call to call costs the cache wherever it sits.
 
-`tools` is every tool the model is offered, exactly as returned. Leaving out one of eve's tools turns off what it serves. Without `eve__skill`, skills can't load. Without `eve__task_wait`, the model can't wait on tasks, though the turn still waits for them. Without `eve__reply`, the model can't deliver a structured result, so the harness settles the turn itself.
+`tools` is exactly the set the model is offered. Leaving out one of eve's tools turns off its feature:
 
-Two functions give a harness the parts to compose these from:
+- Without `eve__skill`, skills can't load.
+- Without `eve__task_wait`, the model can't wait on tasks, though the turn still does.
+- Without `eve__reply`, the model can't return structured output, so the harness settles the turn.
 
-- **`declared(ctx)`** is what the agent's files declare, as data: `instructions` (the agent's own and each file under `agent/instructions/`, with its role), `skills` (`name`, `description`, `deferred`, and `load()`), `tools`, `workspace`, and `model`. Default tools such as `bash` count as declared, because each fills an `agent/tools/<name>` slot that a file can replace or turn off. It is evaluated only when a harness asks.
-- **`builtins(ctx)`** is what eve adds for its own features: the `eve__` tools, and renderers that turn declared data into eve's prompt sections (`skills`, `workspace`, `tools`, `tasks`, and `instructions`, which composes eve's whole default prompt).
+Two helpers provide the parts:
 
-Skills show why rendering belongs to the author. eve's skills list mixes data (each skill's name and description), mechanism (load one with `eve__skill({ name })`), and policy ("activate the minimal set"). With skills as data, all three are the author's:
-
-```ts title="agent/harness.ts"
-import { declared, defineHarness } from "eve/experimental/harness";
-
-export default defineHarness((ctx) => ({
-  instructions: async () => {
-    const files = await declared(ctx);
-    const refunds = files.skills.find((skill) => skill.name === "refunds");
-    const others = files.skills.filter((skill) => skill !== refunds && !skill.deferred);
-
-    return [
-      "You are Acme's billing assistant.",
-      files.instructions.agent.content,
-      await refunds?.load(), // always in context, not loaded on demand
-      "Load these with eve__skill({ name }) when a request needs one:\n" +
-        others.map((skill) => `- ${skill.name}: ${skill.description}`).join("\n"),
-    ];
-  },
-}));
-```
+- **`declared(ctx)`** is what the agent's files declare, as data: `instructions` with their roles, `skills` (`name`, `description`, `deferred`, `load()`), `tools`, `workspace`, and `model`. Default tools such as `bash` count as declared, because a file can replace or turn off each one.
+- **`builtins(ctx)`** is what eve adds: the `eve__` tools, and renderers for eve's prompt sections. The renderers cover `skills`, `workspace`, `tools`, `tasks`, and `instructions`, which composes the whole default prompt.
 
 ### `history`
 
-The stream records what happened, and history is what the model remembers. `history` is one function the kernel evaluates before every model call and for `session.compact()`. It returns an array, and the kernel works out what changed:
+The stream records what happened, and history is what the model remembers. `history` returns the full array, and the kernel compares it with the current history:
 
 - If nothing changed, nothing is recorded.
-- If only messages the model hasn't read yet changed, the change joins the append.
-- If messages the model has read changed, the kernel checks the new history and records the change as a rewrite.
+- If only unread messages changed, the change joins the append.
+- If read messages changed, the kernel checks the new history and records a rewrite.
 
-Compaction is one history policy, not a stage of its own. The kernel knows the model's context window, which is a physical limit, and reports the next call's size as `ctx.size`. It doesn't know a compaction threshold, which is policy and lives in eve's harness. `ctx.summarize(history)` is eve's summarizer, and the kernel announces and bills its model call. The kernel doesn't react to a provider's context-overflow error, because providers don't share an error shape; compacting before the call is the harness's job.
+Compaction is one history policy. Trimming large tool results and dropping irrelevant turns are others. The kernel knows the model's context window, a physical limit, and reports the next call's size as `ctx.size`. The compaction threshold is policy, so it lives in eve's harness.
 
-Other history policies use the same function: dropping large tool results, keeping only relevant turns, or keeping some messages verbatim. The kernel checks a new history's structure, not whether a summary is faithful to what it replaced.
+`ctx.summarize(history)` is eve's summarizer, and its model call is announced and billed. The kernel doesn't react to providers' context-overflow errors, which have no common shape, so the harness compacts before the call. The kernel checks a new history's structure, not whether a summary is faithful.
 
 ### What a harness reads
 
-| Field                                      | Meaning                                                                                         |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| `ctx.history`                              | The model history as of this decision                                                           |
-| `ctx.calls`                                | The turn's calls: tool, input, status, outcome, and output when small enough                    |
-| `ctx.lastStep`                             | The latest model step: `text`, `output`, and `endsTurn`                                         |
-| `ctx.steps`, `ctx.continuations`           | Model calls this turn, and the notes the harness added                                          |
-| `ctx.size`, `ctx.compact`, `ctx.summarize` | The next call's tokens and the model's window; a `session.compact()` request; eve's summarizer  |
-| `ctx.memo`                                 | A cache across evaluations. A crash or a deployment can run it again, so it isn't an effect log |
-| `ctx.session`                              | The session's id, identity, and metadata, as dynamic values read them                           |
-| `ctx.input`                                | Proposed: the message that opened the turn                                                      |
-| `ctx.unread`                               | Proposed: history ends with tool results the model hasn't read                                  |
-| `ctx.signal`                               | Proposed: the turn's abort signal                                                               |
+| Field                                      | Meaning                                                                                 |
+| ------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `ctx.history`                              | The model history as of this decision                                                   |
+| `ctx.calls`                                | The turn's calls: tool, input, status, outcome, and output when small enough            |
+| `ctx.lastStep`                             | The latest model step: `text`, `output`, and `endsTurn`                                 |
+| `ctx.steps`, `ctx.continuations`           | Model calls this turn, and the notes the harness added                                  |
+| `ctx.size`, `ctx.compact`, `ctx.summarize` | The next call's tokens and the window; a `session.compact()` request; eve's summarizer  |
+| `ctx.memo`                                 | A cache across evaluations. A crash or a deploy can rerun it, so it isn't an effect log |
+| `ctx.session`                              | The session's id, identity, and metadata                                                |
+| `ctx.input`                                | Proposed: the message that opened the turn                                              |
+| `ctx.unread`                               | Proposed: history ends with tool results the model hasn't read                          |
+| `ctx.signal`                               | Proposed: the turn's abort signal                                                       |
 
 ### eve's harness
 
-This is eve's whole default harness:
+This is eve's entire default harness:
 
 ```ts
 export const native = defineHarness((ctx) => ({
@@ -329,11 +266,38 @@ export const native = defineHarness((ctx) => ({
 }));
 ```
 
-Everything else today's loop decides, such as parking for approvals, reading queued input, and waiting for tasks, is a kernel rule, so it doesn't appear here.
+Parking for approvals, reading queued input, and waiting for tasks are kernel rules, so they don't appear here.
 
 ### What you can build
 
-Each example is a complete `agent/harness.ts`, and some use the proposed `ctx` fields from the table above. Fields an example leaves out are eve's own. Small helpers such as `textOf`, `size`, and `preview` aren't shown.
+Each example is a complete `agent/harness.ts`, and some use the proposed `ctx` fields. Fields an example leaves out are eve's. Small helpers such as `textOf`, `size`, and `preview` aren't shown.
+
+<details>
+<summary><strong>Skills your way:</strong> keep one skill always loaded, and list the rest in your own words.</summary>
+
+```ts title="agent/harness.ts"
+import { declared, defineHarness } from "eve/experimental/harness";
+
+export default defineHarness((ctx) => ({
+  instructions: async () => {
+    const files = await declared(ctx);
+    const refunds = files.skills.find((skill) => skill.name === "refunds");
+    const others = files.skills.filter((skill) => skill !== refunds && !skill.deferred);
+
+    return [
+      "You are Acme's billing assistant.",
+      files.instructions.agent.content,
+      await refunds?.load(),
+      "Load these with eve__skill({ name }) when a request needs one:\n" +
+        others.map((skill) => `- ${skill.name}: ${skill.description}`).join("\n"),
+    ];
+  },
+}));
+```
+
+eve's skills section mixes data (names and descriptions), mechanism (load with `eve__skill`), and policy ("activate the minimal set"). With skills as data, the author owns all three.
+
+</details>
 
 <details>
 <summary><strong>Large tool results:</strong> keep a preview in history while the full output stays on the stream.</summary>
@@ -358,7 +322,7 @@ export default defineHarness((ctx) => ({
 }));
 ```
 
-This manages history without compacting it. `preview` returns at most `LIMIT` characters, so results trimmed earlier come back unchanged. Only the newest result changes, and the kernel folds that change into the append, so there is no rewrite and no prompt-cache miss. Clients still show the full output from `call.settled`.
+A trimmed result is already under `LIMIT`, so only the newest result changes. The kernel folds that change into the append, which means no rewrite and no prompt-cache miss. Clients still show the full output from `call.settled`.
 
 </details>
 
@@ -383,7 +347,7 @@ export default defineHarness((ctx) => ({
 }));
 ```
 
-When to compact is a line of code, not a setting. The summarizer's model call is announced as a compaction and billed to the session. If the result still doesn't fit the window, the turn fails; eve doesn't fall back to its own compaction.
+The summarizer's call is announced as a compaction and billed to the session. If the result still doesn't fit, the turn fails; eve doesn't fall back to its own compaction.
 
 </details>
 
@@ -417,7 +381,7 @@ export default defineHarness((ctx) => ({
 }));
 ```
 
-The turn has one reply. The rejected draft stays in history before the note, so the model revises with both in view, and channels never post it. The `decide()` call is billed to the turn.
+The rejected draft stays in history before the note, so the model revises with both in view, and channels never post it. The `decide()` call is billed to the turn. To escalate instead of revising, also return a stronger `model` once `ctx.continuations > 0`.
 
 </details>
 
@@ -442,47 +406,7 @@ export default defineHarness((ctx) => ({
 }));
 ```
 
-The call still passes the gate. If `deploy` needs approval, the turn waits for an answer, and a denial settles the call as `rejected`. Every other message falls through to eve's loop.
-
-</details>
-
-<details>
-<summary><strong>Model cascade:</strong> answer on a fast model, and escalate when the draft falls short.</summary>
-
-```ts title="agent/harness.ts"
-import { decide } from "eve/ai";
-import { defineHarness } from "eve/experimental/harness";
-
-export default defineHarness((ctx) => {
-  const escalated = ctx.continuations > 0;
-
-  return {
-    model: escalated ? "openai/gpt-6-sol" : "openai/gpt-6-luna",
-
-    next: async () => {
-      const draft = ctx.lastStep?.text;
-      if (escalated || !draft || ctx.unread) return undefined;
-
-      const { answers } = await decide({
-        state: { request: textOf(ctx.input), draft },
-        questions: {
-          complete: {
-            type: "boolean",
-            instructions: "Does the draft fully and correctly answer the request?",
-          },
-        },
-        signal: ctx.signal,
-      });
-
-      return answers.complete.probability >= 0.7
-        ? undefined
-        : { model: { note: "Review the draft above and give a complete, careful answer." } };
-    },
-  };
-});
-```
-
-Whether the turn has escalated comes from the turn itself, a note the harness added, so it holds across crashes and deployments without stored state.
+The call still passes the gate. If `deploy` needs approval, the turn waits, and a denial settles the call as `rejected`. Other messages fall through to eve's loop.
 
 </details>
 
@@ -520,40 +444,37 @@ export default defineHarness((ctx) => {
 });
 ```
 
-One cached lookup drives three decisions. A suspended workspace fails before the model runs, and workspaces off the enterprise plan never see `deploy` or `bash`. The harness adds eve's tools back, because a harness that sets `tools` offers exactly what it returns.
+One cached lookup drives three decisions. The harness adds eve's tools back, because a harness that sets `tools` offers exactly what it returns.
 
 </details>
 
 ## Hosts and embedded eve
 
-### What a session needs to run
+### What a session needs
 
-The compiler and the `agent/` layout produce a resolved agent, and deployment features such as channels, schedules, and routes need them. The kernel and the session's semantics don't. The compiler already accepts programmatic sources, modules at logical paths, which framework defaults and the in-memory test compiler use. Running an agent defined in code through that same path gives it the compiler's validation and errors, and names still come from paths.
+Channels, schedules, and routes need the compiler and the `agent/` layout. The kernel and the session's semantics don't. The compiler already accepts programmatic sources, modules at logical paths, which framework defaults and the in-memory test compiler use. An agent defined in code goes through that path, so it gets the compiler's validation and errors, and names still come from paths.
 
-The kernel alone is not enough to run a session, though. Routing an answer to the call it decides, admitting a message that arrives during a turn, binding identity, applying cancel and compact, and recovering an interrupted step all live in the session runtime. A local prototype that drove the kernel directly had to rebuild that glue, and routing answers is the part it got wrong. An embedded session has to reuse the session runtime, not only the kernel.
+The kernel alone can't run a session. Routing an answer to its call, admitting a message mid-turn, binding identity, applying cancel and compact, and recovering an interrupted step all live in the session runtime. A prototype that drove the kernel directly had to rebuild that glue, and it got answer routing wrong. An embedded session reuses the session runtime.
 
-```text
-agent/ files ──► compiler ──┐
-agent defined in code ──────┴──► resolved agent
-                                       │
-                          Session handle (eve/sessions)
-                                       │
-                                    Runtime
-                           ┌───────────┴────────────┐
-                createWorkflowRuntime      in-process Runtime (proposed)
-                           └───────────┬────────────┘
-                       one session loop, given a host
-                                       │
-                                harness · kernel
-                                       │
-                              protocol · fold · selectors
+```mermaid
+flowchart TD
+  Files["agent/ files"] --> Compiler["compiler"]
+  Code["agent defined in code"] --> Compiler
+  Compiler --> Agent["resolved agent"]
+  Handle["Session handle<br/>eve/sessions"] --> Runtime{"Runtime"}
+  Runtime --> Workflow["createWorkflowRuntime"]
+  Runtime --> Process["in-process Runtime<br/>proposed"]
+  Workflow --> Loop["one session loop, given a host"]
+  Process --> Loop
+  Agent --> Loop
+  Loop --> Kernel["harness and kernel"]
 ```
 
-`Session` from `eve/sessions` already reaches sessions through a `Runtime` interface, and `createWorkflowRuntime` is its only implementation. An in-process `Runtime` would be a second implementation behind the same handle, so a UI written against one runs against the other.
+`Session` from `eve/sessions` already talks to a `Runtime` interface, and `createWorkflowRuntime` is its only implementation. An in-process `Runtime` would be a second implementation behind the same handle, so a UI written against one works with the other.
 
 ### What a host provides
 
-Today the session loop (`runSessionLoop`) and the session step (`turnStep`) are written against Workflow. They wait on Workflow hooks, arm Workflow sleeps, and read Workflow's step metadata. Proposed, the loop takes its mechanisms from a host, and the Workflow-specific reads move into a thin Workflow adapter around a shared step:
+Today the session loop (`runSessionLoop`) and step (`turnStep`) are written against Workflow. They wait on Workflow hooks, arm Workflow sleeps, and read step metadata. Proposed, the loop gets these from a host, and the Workflow reads move into a thin adapter around a shared step:
 
 ```ts
 // Proposed.
@@ -566,7 +487,7 @@ interface SessionHost {
 }
 ```
 
-The loop itself doesn't change. Its rules, such as controls that arrive before a session starts, prewarming, and how cancel, clear, and compact settle, are what keep an embedded session the same as a deployed one. The publisher's split above gives the shared step its other port: the host writes the lines the kernel commits, and reads back what an interrupted attempt wrote.
+The loop's rules don't change: controls that arrive before the session starts, prewarming, and how cancel, clear, and compact settle. Those rules keep an embedded session identical to a deployed one. With the publisher split, the host also writes committed lines and reads back what an interrupted attempt wrote.
 
 |                                      | Workflow host                     | In-process host                                     |
 | ------------------------------------ | --------------------------------- | --------------------------------------------------- |
@@ -575,15 +496,17 @@ The loop itself doesn't change. Its rules, such as controls that arrive before a
 | Storage                              | The run's stream and step results | A store the embedder passes, or memory              |
 | Workflow tools, tasks, and subagents | Workflow runs                     | Not provided; calls fail with an error that says so |
 | Moving between deployments           | Handoff                           | Not needed                                          |
-| A session that outlives the process  | Yes                               | Only with a store                                   |
+| Sessions that outlive the process    | Yes                               | Only with a store                                   |
 
-The in-process store would keep the format handoff already uses, `SessionCheckpoint` and its migrations, so a session saved by one host reads in any host. Each step's input and output would round-trip through Workflow's serializer, so a value that couldn't cross a Workflow step fails in process too. The first users would be integration tests that don't depend on Workflow's behavior. Running the same scenarios through both hosts and comparing their streams and prompts would show the hosts agree: a batch with one approval and one denial, a follow-up turn, cancel, compact, clear, and a restart from the store.
+The in-process store would use the format handoff already uses, `SessionCheckpoint` and its migrations, so either host can read a session the other saved. Step inputs and outputs would round-trip through Workflow's serializer, so a value that can't cross a Workflow step fails in process too.
 
-A host could also keep a deployed session as a checkpoint plus records instead of replaying a Workflow run, which would end version pinning. That is a separate proposal.
+Integration tests that don't depend on Workflow would be the first users. Running the same scenarios through both hosts and comparing streams and prompts would show the hosts agree. The scenarios cover a batch with one approval and one denial, a follow-up turn, cancel, compact, clear, and a restart from the store.
+
+A host could also store a deployed session as a checkpoint plus records instead of replaying a Workflow run, which would end version pinning. That's a separate proposal.
 
 ### A terminal agent in one file
 
-This sketch of a proposed `createSession` is a complete local terminal agent with eve's `bash`, `read_file`, and `write_file` tools in an in-process just-bash sandbox, and approvals answered inline:
+This sketch uses the proposed `createSession` to build a local terminal agent. It has eve's `bash`, `read_file`, and `write_file` tools in an in-process just-bash sandbox, and it asks for approvals inline:
 
 ```ts title="terminal.ts"
 import { createInterface } from "node:readline/promises";
@@ -636,19 +559,19 @@ for (let line; (line = await ask("> ")) !== undefined;) {
 }
 ```
 
-`createSession` compiles the definition as a programmatic agent and returns the `Session` handle over an in-process `Runtime`, with the host's user as its default identity. `send` returns a `Delivery` with `stream()` and `result()`, and `respond`, `cancel`, and `compact` work as they do on a deployed session. The tools, the gate, the facts, the fold, and the session loop are the ones a deployed agent uses, so `bash` runs at once, `write_file` waits for its approval, and `result().interactions` comes from the same selectors a deployed client reads.
+`createSession` compiles the definition as a programmatic agent and returns a `Session` over an in-process `Runtime`, with the host's user as the default identity. `send`, `respond`, `cancel`, and `compact` work as they do on a deployed session. The tools, gate, facts, fold, and loop are the ones a deployed agent uses. So `bash` runs at once, `write_file` waits for approval, and `result().interactions` comes from the same selectors a deployed client reads.
 
-The same handle could sit behind a web chat in a small worker. The worker still needs the routes a client calls and server-side authentication for its users, and a sign-in needs a callback URL the worker can receive. Approvals can wait as long as the process lives, or across restarts with a store.
+The same handle could back a web chat in a small worker. The worker still needs routes for its client, server-side authentication for its users, and a callback URL for sign-ins. Approvals wait as long as the process lives, or across restarts with a store.
 
 ## Later: exposing it
 
-The draft stack exports the first piece, `defineHarness` with `declared(ctx)` and `builtins(ctx)`, from `eve/experimental/harness`. The rest could become public in steps after 1.0, each experimental first:
+The draft stack already exports `defineHarness`, `declared(ctx)`, and `builtins(ctx)` from `eve/experimental/harness`. The rest could become public in steps after 1.0, each one experimental first:
 
-- **`agent/harness.ts`** default-exports `defineHarness((ctx) => ({ model, instructions, tools, history, next }))`. Authors adopt one field at a time: `next` for a critic or a command, `history` for compaction or trimming, `model`, `instructions`, or `tools` per call, or all of them.
-- **Composition is a function call.** A harness that wants eve's compaction plus its own trimming calls eve's exported native pieces inside its own `history`. There is no ordered pipeline of processors.
+- **`agent/harness.ts`** default-exports `defineHarness((ctx) => ({ model, instructions, tools, history, next }))`. Authors can adopt one field at a time.
+- **Composition is a function call.** To combine eve's compaction with its own trimming, a harness calls eve's exported pieces inside its own `history`. There's no processor pipeline.
 - **`compaction` options in `agent.ts`** keep configuring eve's harness. A harness that defines `history` owns compaction.
-- **`eve/experimental/embed`** exports `createSession`, which takes an agent defined in code, with a store, an identity, and a sandbox optional, and returns the `Session` handle.
-- **A host interface** for other stores, queues, and timers could follow once the Workflow host and the in-process host have proven it.
-- **What stays sealed** is the kernel: its rules above, and its authorship of every fact.
+- **`eve/experimental/embed`** exports `createSession`. It takes an agent defined in code, plus an optional store, identity, and sandbox, and returns a `Session`.
+- **A host interface** for other stores, queues, and timers could follow once the Workflow and in-process hosts have proven it.
+- **The kernel stays sealed:** both its rules and its authorship of every fact.
 
 Before any of it becomes stable, it needs an updated research doc, docs pages, e2e evals for each `next` value and its failure modes, and a changeset.
