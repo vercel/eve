@@ -269,6 +269,7 @@ eve deploy
     "types": ["node"],
     "strict": true,
     "esModuleInterop": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "noEmit": true
   },
