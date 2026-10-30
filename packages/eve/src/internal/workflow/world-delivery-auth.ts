@@ -12,7 +12,7 @@ export const WORKFLOW_DELIVERY_SECRET_ENV = "EVE_WORKFLOW_DELIVERY_SECRET";
 
 const MIN_WORKFLOW_DELIVERY_SECRET_LENGTH = 32;
 const DELIVERY_SECRET_DOCS_URL =
-  "https://eve.dev/docs/guides/deployment/self-hosting#authenticate-workflow-deliveries";
+  "https://eve.dev/docs/guides/deployment/workflow-worlds#use-the-postgres-world";
 
 export type WorkflowDeliverySecrets = readonly [string, ...string[]];
 

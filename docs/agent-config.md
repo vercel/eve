@@ -401,8 +401,8 @@ For Postgres and other custom worlds, set `EVE_WORKFLOW_DELIVERY_SECRET` at
 runtime to the same random value of at least 32 characters on every server
 process. eve then signs queued jobs and rejects unsigned deliveries; without
 it, those deliveries are unauthenticated. See
-[Authenticate workflow deliveries](./guides/deployment/self-hosting#authenticate-workflow-deliveries)
-for setup, rotation, and development defaults.
+[Use the Postgres world](./guides/deployment/workflow-worlds#use-the-postgres-world)
+for setup and rotation.
 
 ## Workflow checkpoint batching
 
