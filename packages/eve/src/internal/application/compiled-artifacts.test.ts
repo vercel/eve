@@ -22,8 +22,8 @@ describe("createWorkflowWorldPluginSource", () => {
     const order = [
       "readWorkflowDeliverySecrets(",
       "await createWorldFromModule(workflowWorldModule)",
-      'validateWorkflowWorld({ packageName: "@acme/eve-world", world: configuredWorkflowWorld })',
-      ": authenticateWorkflowDeliveries(configuredWorkflowWorld, workflowDeliverySecrets)",
+      'validateWorkflowWorld({ packageName: "@acme/eve-world", world: workflowWorld })',
+      "workflowWorld = authenticateWorkflowDeliveries(workflowWorld, workflowDeliverySecrets)",
     ].map((snippet) => source.indexOf(snippet));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));

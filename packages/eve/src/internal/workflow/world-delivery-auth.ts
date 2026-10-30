@@ -21,8 +21,9 @@ const DELIVERY_PROOF_PREFIX = "v1.";
 /**
  * Signs one queued message. Worlds round-trip messages through JSON-like
  * transports, so the MAC covers a canonical JSON form: sorted keys, `toJSON`
- * applied, and byte arrays in base64, which encodes the enqueued and the
- * delivered message identically.
+ * applied, and byte arrays in the same tagged envelope world-local and
+ * world-postgres use, which encodes the enqueued and the delivered message
+ * identically.
  */
 export function signWorkflowDelivery(secret: string, queueName: string, message: unknown): string {
   return signCanonicalMessage(secret, queueName, canonicalMessageJson(message));
@@ -40,7 +41,9 @@ function signCanonicalMessage(secret: string, queueName: string, canonicalMessag
 function canonicalMessageJson(message: unknown): string {
   return (
     JSON.stringify(message, (_key, value: unknown) => {
-      if (value instanceof Uint8Array) return { base64: Buffer.from(value).toString("base64") };
+      if (value instanceof Uint8Array) {
+        return { __type: "Uint8Array", data: Buffer.from(value).toString("base64") };
+      }
       if (typeof value === "bigint") return value.toString();
       if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
       return Object.fromEntries(
@@ -77,7 +80,7 @@ export function readWorkflowDeliverySecrets(
   const [first, ...rest] = secrets;
   if (first === undefined) {
     console.warn(
-      `[eve] ${WORKFLOW_DELIVERY_SECRET_ENV} is not set, so the "${worldPackage}" Workflow world accepts unauthenticated queue deliveries at /.well-known/workflow/v1/flow. Set it to the same random value on every server process, for example the output of \`openssl rand -hex 32\`, or keep that route unreachable from untrusted networks. See ${DELIVERY_SECRET_DOCS_URL}`,
+      `[eve] ${WORKFLOW_DELIVERY_SECRET_ENV} is not set or empty, so the "${worldPackage}" Workflow world accepts unauthenticated queue deliveries at /.well-known/workflow/v1/flow. Set it to the same random value on every server process, for example the output of \`openssl rand -hex 32\`, or keep that route unreachable from untrusted networks. See ${DELIVERY_SECRET_DOCS_URL}`,
     );
     return undefined;
   }

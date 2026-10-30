@@ -392,12 +392,11 @@ applyVercelWorkflowWorldDefaults(workflowWorld);`.trimStart();
   // malformed or incompatible World still fails with the validator's message.
   const createWorldSource = `
 const workflowDeliverySecrets = readWorkflowDeliverySecrets(${JSON.stringify(packageName)});
-const configuredWorkflowWorld = await createWorldFromModule(workflowWorldModule);
-validateWorkflowWorld({ packageName: ${JSON.stringify(packageName)}, world: configuredWorkflowWorld });
-const workflowWorld =
-  workflowDeliverySecrets === undefined
-    ? configuredWorkflowWorld
-    : authenticateWorkflowDeliveries(configuredWorkflowWorld, workflowDeliverySecrets);`.trimStart();
+let workflowWorld = await createWorldFromModule(workflowWorldModule);
+if (workflowDeliverySecrets !== undefined) {
+  validateWorkflowWorld({ packageName: ${JSON.stringify(packageName)}, world: workflowWorld });
+  workflowWorld = authenticateWorkflowDeliveries(workflowWorld, workflowDeliverySecrets);
+}`.trimStart();
   return {
     moduleImportSpecifier: packageName,
     extraImportLines: [
