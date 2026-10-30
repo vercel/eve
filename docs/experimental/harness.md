@@ -7,7 +7,7 @@ An `agent/harness.ts` file replaces parts of eve's own turn loop with your code.
 
 - `agent`: the model, tools, and instructions the next model call gets.
 - `history`: what the model reads about the past, which becomes the session's history.
-- `next`: what the turn does next: call the model, settle, or fail.
+- `next`: what the turn does next: call the model, settle, call tools, or fail.
 
 A field you leave out, or return `undefined` for, is eve's own behavior. A harness that sets only `next` keeps eve's prompt, tools, and compaction. This API is experimental and may change. Import it from `eve/experimental/harness`.
 
@@ -59,6 +59,42 @@ export default defineHarness((ctx) => {
 While the turn's tasks are working, `settle` can't end it. eve waits for the tasks and calls the model with their results. Under an output schema, `settle.output` must match the schema, or the turn fails with `OUTPUT_SCHEMA_NOT_FULFILLED`.
 
 In a turn under a harness, the model's answers are drafts until the harness settles. Each text part's first `content.delta` carries `draft: true`, since it may become one, and its `content.completed` says what it became: phase `"draft"`, or narration or a reply as usual. The turn's reply arrives as its own part. eve's channels, its client, and the ACP server hold flagged text until it completes and skip drafts, so a reply the harness rejects with a note is never posted.
+
+## Call tools from the harness
+
+Return `{ calls: [{ tool, input }] }` to run tools without asking the model. Each call goes through the same gate as a model's call, including its approval and sign-in, and history records it as a call the agent made. eve runs `next` again once the calls settle, and `ctx.calls` shows each call's outcome and output.
+
+```ts title="agent/harness.ts"
+import { defineHarness } from "eve/experimental/harness";
+import { defineTool } from "eve/tools";
+import { always } from "eve/tools/approval";
+import { z } from "zod";
+
+const release = defineTool({
+  description: "Release a version of the product.",
+  approval: { request: always() },
+  inputSchema: z.object({ version: z.string() }),
+  execute: async ({ version }) => ({ released: version }),
+});
+
+export default defineHarness((ctx) => ({
+  agent: { tools: async () => ({ release }) },
+  next: () => {
+    const version = /^\/release (\S+)$/.exec(textOf(ctx.turn?.input))?.[1];
+    if (version === undefined) return undefined;
+    const ran = ctx.calls.find((call) => call.tool === "release");
+    if (ran === undefined) return { calls: [{ tool: "release", input: { version } }] };
+    if (ran.outcome !== "completed") return { fail: { message: `The release ${ran.outcome}.` } };
+    return { settle: { output: `Released ${version}.` } };
+  },
+}));
+
+function textOf(input: readonly { kind: string; text?: string }[] | undefined): string {
+  return (input ?? []).flatMap((part) => (part.kind === "text" ? [part.text ?? ""] : [])).join(" ");
+}
+```
+
+A call the harness makes must name a tool the model is offered at that point, with input its schema accepts; otherwise the turn fails. The tool can be an `agent.tools` entry or, without `agent.tools`, one of the agent's tools. A call that waits for approval parks the turn just as a model's call does. A harness can't call eve's own `eve__` tools, since those only reach other tools: call the tool by its name. It can't call a tool its provider runs, such as a provider's web search, either, since only the model's call gets that tool's answer.
 
 ## Set the model's tools and instructions
 

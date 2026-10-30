@@ -16,11 +16,7 @@ import { activeTurnId } from "#harness/session-machine/view.js";
 import { nextRunId } from "#protocol/session-projection.js";
 import { failBoundaryEvent, failModelSelection, type Step } from "#harness/step/context.js";
 import type { TurnInput } from "#harness/step/intake.js";
-import {
-  projectPrompt,
-  type Prompt,
-  withClientContext,
-} from "#harness/step/prompt.js";
+import { projectPrompt, type Prompt, withClientContext } from "#harness/step/prompt.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { requireSessionModelReference, type StepResult } from "#harness/types.js";
