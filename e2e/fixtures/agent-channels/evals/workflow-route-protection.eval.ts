@@ -3,11 +3,14 @@ import { equals } from "eve/evals/expect";
 
 export default defineEval({
   description:
-    "Alice checks her Postgres-backed deployment: health is public, while workflow queue deliveries require separate authentication.",
+    "Alice checks her deployment: health is public, while workflow queue deliveries require separate authentication.",
   tags: ["regression"],
   async test(t) {
-    if (process.env.EVE_E2E_WORKFLOW_WORLD !== "@workflow/world-postgres") {
-      t.skip("Requires the Postgres world suite.");
+    // Vercel Workflow authenticates deliveries at the platform, before eve sees them.
+    const eveAuthenticatesDeliveries =
+      t.target.kind === "local" || process.env.EVE_E2E_WORKFLOW_WORLD !== undefined;
+    if (!eveAuthenticatesDeliveries) {
+      t.skip("Vercel Workflow authenticates its own deliveries.");
       return;
     }
 

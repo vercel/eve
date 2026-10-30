@@ -29,7 +29,7 @@ On startup, `eve start` queues pending and running local workflow runs again. Ru
 
 The [`@workflow/world-postgres`](https://www.npmjs.com/package/@workflow/world-postgres) package stores runs in PostgreSQL and queues their work with Graphile Worker. Every `eve start` process connected to the same database processes queued work, so you can run several replicas behind a load balancer.
 
-eve authenticates Postgres queue deliveries with `EVE_WORKFLOW_DELIVERY_SECRET`, independently of channel route auth. Use the same secret on every producer and execution server. Deliveries can run in-process or cross HTTP between workers and execution servers; workers must preserve the delivery headers stored with each job. See [Authenticate workflow deliveries](./self-hosting#authenticate-workflow-deliveries) for setup and rotation.
+eve signs every Postgres queue job with `EVE_WORKFLOW_DELIVERY_SECRET` and rejects deliveries without a valid signature, independently of channel route auth. Set the same secret on every replica. See [Authenticate workflow deliveries](./self-hosting#authenticate-workflow-deliveries) for setup and rotation.
 
 1. Install the package in your app:
 
@@ -97,7 +97,7 @@ export default defineAgent({
 
 The package must export a default factory or `createWorld()` function. It reads credentials and host options from runtime environment variables, not `agent.ts`. If the package must stay external in hosted output, list it in `build.externalDependencies`.
 
-Custom worlds also require [`EVE_WORKFLOW_DELIVERY_SECRET`](./self-hosting#authenticate-workflow-deliveries). Their queues must preserve the headers eve supplies with each job. This check is separate from channel route auth and any additional authentication provided by the world.
+Custom worlds also require [`EVE_WORKFLOW_DELIVERY_SECRET`](./self-hosting#authenticate-workflow-deliveries), and their queues must deliver each job with the headers eve queued it with. eve checks the delivery signature in addition to any authentication the world provides. eve rejects a world that enables `invoke()` delivery, because those deliveries skip the signed queue.
 
 Install a world built against the same `@workflow/*` major version as your eve release, currently `5.x`. eve checks the world's `@workflow/core` or `@workflow/world` dependency at startup, and fails with the version to install when the major versions differ.
 
