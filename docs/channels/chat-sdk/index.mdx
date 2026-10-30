@@ -50,15 +50,15 @@ export default channel;
 
 Each adapter serves its webhook at `/eve/v1/{adapterName}`, so this one is `/eve/v1/resend`. Point the provider's webhook there and deploy with `eve deploy`. Use a durable state adapter, such as Redis, in production so thread subscriptions survive restarts.
 
-## Continue a thread
+## Continue threads
 
 `onNewMention` fires on a fresh mention, or a new inbound thread on surfaces like email. Call `thread.subscribe()` there, and `onSubscribedMessage` receives every later message in the thread. The `thread` you pass to `send` keeps the session and replies on that thread. Pass `idempotencyKey: message.id` so a retried webhook doesn't reach the agent twice.
 
-## Stream or post replies
+## Configure streaming
 
 Replies stream by default: eve posts a message and edits it as text arrives. Set `streaming: false` for surfaces that can't edit sent messages, such as email and WhatsApp, so the reply posts once. eve also skips typing indicators and edits an adapter doesn't support.
 
-## Answer approvals
+## Configure approval prompts
 
 Approvals and questions render as a Chat SDK card with buttons, and a click resumes the session. Adapters that can't show cards get numbered options, and a reply with an option's number or label answers. Set `resolveInputAuth` to carry the clicking user's identity into the resumed turn:
 
@@ -82,7 +82,7 @@ export const { bot, channel, send } = chatSdkChannel({
 export default channel;
 ```
 
-## Keep sign-ins private
+## Deliver sign-ins privately
 
 When a tool needs a connection the person hasn't authorized, eve sends the sign-in link only to that person, as an ephemeral message or a direct message. It needs per-person `auth` on each `send` and the handler's `Thread` object, so it knows who wrote the message:
 
@@ -102,7 +102,7 @@ bot.onSubscribedMessage(async (thread, message) => {
 
 Without per-person `auth`, the thread gets a notice to continue in a direct message, and the sign-in isn't shown.
 
-## Start a thread from a schedule
+## Start conversations proactively
 
 Send to the channel from a [schedule](/docs/schedules#handler-form-run) or [another channel](/docs/channels/custom#cross-channel-hand-off). Target a serialized Chat SDK thread, or `{ adapterName, threadId }`:
 

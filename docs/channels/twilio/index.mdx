@@ -30,7 +30,7 @@ TWILIO_AUTH_TOKEN=...
 
 After deploying, point your Twilio number's Messaging webhook at `https://your-agent.example/eve/v1/twilio/messages` and its Voice webhook at `https://your-agent.example/eve/v1/twilio/voice`. eve checks `X-Twilio-Signature` on every request.
 
-## Choose who can text or call
+## Restrict access
 
 `allowFrom` is required. Pass one number, a list, or an async resolver. `"*"` accepts any number, so only use it with your own check in `onText` and `onVoice`:
 
@@ -43,15 +43,15 @@ export default twilioChannel({
 });
 ```
 
-## Answer phone calls
+## Handle phone calls
 
 When someone calls, eve answers, asks the caller to speak, and sends the transcript to the agent. The call ends with "Thanks. I'll follow up by text.", and the reply arrives by SMS. `onVoice` runs when the call comes in: return `null` to reject it, or return an object to change the spoken prompt, language, voice, or speech recognition options.
 
-## Ask for approval by text
+## Configure approval prompts
 
 SMS has no buttons, so eve sends each approval or question as a text with numbered options. Replying `1` or `approve` runs an approval-gated tool, and `2` or `deny` stops it. Callers get these prompts by SMS too.
 
-## Text someone first
+## Start conversations proactively
 
 Start a session from a [schedule](/docs/schedules#handler-form-run) or [another channel](/docs/channels/custom#cross-channel-hand-off) with a `phoneNumber` target. Proactive texts need `messaging.from` or `messaging.messagingServiceSid`:
 

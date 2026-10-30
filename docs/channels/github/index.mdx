@@ -58,11 +58,11 @@ Point the App's webhook URL at `https://your-agent.example/eve/v1/github`, subsc
 </TabContent>
 </TabsWithChildren>
 
-## Answer comments
+## Respond to comments
 
 A new comment that includes `@my-agent` starts a turn. The token is plain text, not a GitHub mention, so GitHub may not autocomplete or link it. The agent reacts with 👀 when it starts, then replies on the issue or PR timeline, or in the review thread. Each later comment in that thread that includes `@my-agent` continues the same session. Long replies split across several comments.
 
-## Wake on new issues, pull requests, and CI
+## Trigger on issues, pull requests, and CI
 
 Issue, pull request, and CI hooks are off by default. Each hook returns `{ auth }` to start a turn, or `null` to ignore the event. This channel triages new issues and failed GitHub Actions check suites on pull requests:
 
@@ -87,17 +87,17 @@ export default githubChannel({
 
 Subscribe the GitHub App to each event you handle, such as `issues` or `check_suite`. A CI turn replies on the first pull request in `pullRequests`, so return `null` when the list is empty.
 
-## Work on the repository
+## Access the repository
 
 Before the first model call, each turn checks out the relevant ref into the sandbox, so file and shell tools run against the real tree. The installation token never enters the sandbox; GitHub auth is added at the network firewall, which needs a firewall-capable sandbox such as Vercel's. On a pull request, the PR metadata and changed-file patch are already in the agent's context.
 
 For any GitHub API the channel doesn't wrap, call `ctx.github.request({ method, path, body })` with the installation token.
 
-## Ask for approval
+## Configure approval prompts
 
 GitHub comments have no buttons, so approvals and questions post as a comment prompt. The person's reply comment answers the pending request.
 
-## Start a conversation on an issue
+## Start conversations proactively
 
 Send to the GitHub channel from a [schedule](/docs/schedules#handler-form-run) or [another channel](/docs/channels/custom#cross-channel-hand-off). The target needs `owner`, `repo`, and either `issueNumber` or `pullRequestNumber`:
 

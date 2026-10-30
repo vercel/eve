@@ -61,7 +61,7 @@ With the generated channel file, the agent answers `@mentions` in any channel it
 
 While a turn runs, the thread status names the agent's latest step, such as `Search useEveAgent` or a tool's progress label. Replies up to 12,000 characters post inline. Longer replies upload as an `eve-response.md` snippet, which needs the `files:write` scope.
 
-## Reply in a thread without a mention
+## Reply without a mention
 
 Return `{ auth }` from `onMessage` to start a turn, or `null` to ignore the message. This hook answers DMs, private channels, and mentions, and keeps answering in any thread the agent already joined:
 
@@ -97,7 +97,7 @@ In [Slack app settings](https://api.slack.com/apps), subscribe to the `message.c
 </TabContent>
 </TabsWithChildren>
 
-## Give the agent the thread so far
+## Load prior thread messages
 
 By default, the agent sees only the message that mentioned it. Set `threadContext` to also load the thread's earlier replies, each attributed to its Slack user. With `since: "last-agent-reply"`, each mention adds only what's new since the agent last replied:
 
@@ -111,7 +111,7 @@ export default slackChannel({
 });
 ```
 
-## Tell the agent who's talking
+## Provide agent with user info
 
 The agent sees each sender's Slack user ID. To also give it their name, and optionally their email, set `messageContext.users`:
 
@@ -127,7 +127,7 @@ export default slackChannel({
 
 This adds the `users:read` scope, plus `users:read.email` with `email: true`, so reinstall the Slack app after enabling it. It's off by default because names and emails then reach model context, session history, and traces. See [Add sender names and emails](/docs/channels/slack/reference#add-sender-names-and-emails) for caching and custom lookups.
 
-## Control who can use the agent
+## Restrict access
 
 A valid Slack signature proves the event came from Slack, not that the sender should reach your agent. Slack Connect can deliver events from people outside your workspace. To allow only certain people, check them in every inbound hook you enable, and in `onAnswers` so nobody else can click an approval:
 
@@ -151,7 +151,7 @@ export default slackChannel({
 
 Keep authorization checks inside sensitive tools too. The [reference](/docs/channels/slack/reference#restrict-who-can-invoke-the-agent) adds per-conversation allowlists.
 
-## Ask for approval
+## Configure approval prompts
 
 [Tool approvals](/docs/human-in-the-loop) and questions from `ctx.ask()` appear in the thread as buttons and selects. Once someone answers, the card shows the answer and who gave it. To send a request only to the person who started the turn, return `"direct-message"` from `approvalChannel`:
 
@@ -165,7 +165,7 @@ export default slackChannel({
 
 When a tool needs a connection the person hasn't authorized, the sign-in link goes to them in an ephemeral message, and the thread shows a status without the link.
 
-## Start a thread from a schedule or webhook
+## Start conversations proactively
 
 Send to the Slack channel from a [schedule](/docs/schedules#handler-form-run), a [tool](/docs/tools#start-channel-sessions-ctxto), or [another channel's route](/docs/channels/custom#cross-channel-hand-off). A `{ channelId }` target starts a new thread, and `initialMessage` posts its root before the agent runs:
 
@@ -209,7 +209,7 @@ export default slackChannel({
 
 Use `onShortcut` for message and global shortcuts, `onInteraction` for your own buttons, and `onEvent` for other Events API events such as `team_join`.
 
-## Work in code channels
+## Enable code channels
 
 A [Slack code channel](https://docs.slack.dev/ai/slack-code) is a channel dedicated to one agent task. With `codeChannels: true`, the agent answers every message in a code channel without a mention, and the whole channel is one session:
 
@@ -260,7 +260,7 @@ With `codeChannels: true`, the generated app manifest includes everything code c
 
 See [How eve serves code channels](/docs/channels/slack/reference#how-eve-serves-code-channels) for replies, status, and hooks in a code channel.
 
-## Change what the agent posts
+## Customize rendering
 
 Renderers change what the agent posts without replacing eve's defaults. Each handler calls `next()` to run eve's default. This one adds a note below each final reply:
 
@@ -282,7 +282,7 @@ export default slackChannel({ renderers: [note] });
 
 Renderers can also restyle the [task card](/docs/channels/slack/reference#task-card) and approval cards. See [Customize rendering](/docs/channels/slack/reference#customize-rendering).
 
-## Send files to the agent
+## Handle file attachments
 
 Images, PDFs, audio, and other files attached to a message reach the agent. When a mention has no files, eve also collects files posted in the thread since the agent's previous mention. Downloads need the `files:read` scope. See [Attachments](/docs/channels/slack/reference#attachments) for limits.
 

@@ -55,7 +55,7 @@ Point the bot's messaging endpoint at `https://your-agent.example/eve/v1/teams`.
 </TabContent>
 </TabsWithChildren>
 
-## Keep answering in a thread
+## Reply without a mention
 
 By default, group chats and channels need a mention on every message. This `onMessage` also answers any conversation the agent is already part of:
 
@@ -77,13 +77,13 @@ export default teamsChannel({
 
 A custom `onMessage` makes eve reject approval and question card submissions until you also set `onAnswers`, so a card can't bypass your message check. If `onMessage` restricts who can reach the agent, apply the same rule in `onAnswers`.
 
-## Ask for approval
+## Configure approval prompts
 
 Tool approvals and questions render as Adaptive Cards with buttons, selects, or a text input. When an approval settles, eve replaces the card with the outcome and who answered.
 
 When a tool needs a connection the person hasn't authorized, a personal chat shows the sign-in link directly. In group chats and channels, the shared card has a **Sign in** button, and only the person who needs to sign in can open the link.
 
-## Send files to the agent
+## Handle file attachments
 
 Images pasted into a message and files uploaded in a personal chat reach the agent as files, up to 25 MB. Personal-chat uploads need `supportsFiles: true` on the bot in your Teams app manifest.
 

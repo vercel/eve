@@ -39,11 +39,11 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 
 eve rejects any request whose `X-Telegram-Bot-Api-Secret-Token` header doesn't match `TELEGRAM_WEBHOOK_SECRET_TOKEN`.
 
-## Answer in groups and topics
+## Respond in groups and forum topics
 
 In a group, a message wakes the agent when it's a command (`/ask` or `/ask@my_bot`), mentions `@my_bot`, or replies to one of the agent's messages. Mentions need `botUsername`. Each forum topic is its own session. Group privacy mode is a BotFather setting, not a channel option.
 
-## Control who can use the agent
+## Restrict access
 
 Return `{ auth }` from `onMessage` to start a turn, or `null` to ignore the message. A custom `onMessage` replaces the default group filter. This one answers only private chats with listed users:
 
@@ -61,11 +61,11 @@ export default telegramChannel({
 });
 ```
 
-## Ask for approval
+## Configure approval prompts
 
 Tool approvals and option questions appear as inline-keyboard buttons. Freeform questions use a reply prompt, and the person's reply becomes the answer. Replies are plain text, so Markdown shows literally, and replies longer than 4,096 characters split across messages.
 
-## Message someone first
+## Start conversations proactively
 
 Start a session from a [schedule](/docs/schedules#handler-form-run) or [another channel](/docs/channels/custom#cross-channel-hand-off) with a `chatId` target. Add `messageThreadId` to post in a forum topic:
 
@@ -83,7 +83,7 @@ export default defineSchedule({
 });
 ```
 
-## Limit photos and documents
+## Handle file attachments
 
 Photos and documents reach the agent as files, up to 25 MB of any type by default. Set `uploadPolicy` to narrow the types or size:
 

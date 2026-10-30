@@ -55,7 +55,7 @@ After deploying, create a Photon webhook for `https://your-agent.example/eve/v1/
 </TabContent>
 </TabsWithChildren>
 
-## Answer messages
+## Respond to messages
 
 Every accepted message continues the conversation's session. A message that arrives while the agent is working steers the current turn. Set `turnPolicy: "queue"` to finish each response before the next message starts. Images, voice notes, and other files reach the agent as files, up to 25 MB.
 
@@ -79,7 +79,7 @@ export default photonIMessageChannel({
 });
 ```
 
-## React with tapbacks
+## Send tapbacks
 
 Export the channel's tapback tool from `agent/tools/`. The agent can then react to the latest message with a standard tapback, such as `love`, or any single emoji:
 
@@ -91,7 +91,7 @@ export default photon.tapbackTool();
 
 To let a tapback be the agent's whole answer, also add the [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
 
-## Approve with a tapback
+## Approve requests with tapbacks
 
 eve ignores tapbacks people send until you add `onTapback`. Return `answer` to answer the approval in the message the tapback is on, so a like approves and a dislike denies:
 

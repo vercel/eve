@@ -121,7 +121,7 @@ The bot answers DMs, mentions of its user, replies to its messages, and messages
 
 Thread follow-ups without a mention need the privileged **Message Content** intent. Setup turns it on when Discord allows it, for bots in fewer than 100 servers.
 
-## Choose who the bot answers
+## Filter messages
 
 `gateway.onMessage` runs for every Gateway message from a person. Return `{ auth }` to start a turn, or `null` to ignore the message. `message.addressed` says whether the default would answer. This one answers messages only in one server:
 
@@ -140,13 +140,13 @@ export default discordChannel({
 
 Slash commands go through `onCommand` instead, so filter them there too. If you set `onCommand`, also set `onAnswers` with the same rule, or eve drops every button press. See [Human-in-the-loop](/docs/channels/discord/reference#human-in-the-loop-hitl).
 
-## Ask for approval
+## Configure approval prompts
 
 Approvals and option questions appear as buttons, `display: "select"` questions as a select, and freeform questions as a button that opens a modal. Approvals are requester-only by default, so only the person who asked can approve.
 
 When a tool needs a connection the person hasn't authorized, a DM shows the sign-in link directly. In a server, the shared message has a **Sign in** button, and only the person who needs to sign in sees the link.
 
-## Message a channel first
+## Start conversations proactively
 
 Start a session from a [schedule](/docs/schedules#handler-form-run) or [another channel](/docs/channels/custom#cross-channel-hand-off) with a `channelId` target. Proactive sends need a bot token, which Connect or `DISCORD_BOT_TOKEN` supplies:
 
@@ -166,7 +166,7 @@ export default defineSchedule({
 });
 ```
 
-## Send files to the agent
+## Handle file attachments
 
 Files attached through a command's attachment option reach the agent as files, up to 25 MB.
 
