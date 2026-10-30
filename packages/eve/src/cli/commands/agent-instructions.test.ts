@@ -1,6 +1,6 @@
 import { readdirSync } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 
@@ -13,6 +13,11 @@ import {
   initExtensionInstructions,
   SETUP_SECTIONS,
 } from "./agent-instructions.js";
+
+const { resolveInstalledPackageInfo } = vi.hoisted(() => ({
+  resolveInstalledPackageInfo: vi.fn(() => ({ name: "eve", version: "1.2.3" })),
+}));
+vi.mock("#internal/application/package.js", () => ({ resolveInstalledPackageInfo }));
 
 describe("initAgentInstructions", () => {
   // This is the single home for the launching-agent instruction contract; the
@@ -41,6 +46,19 @@ describe("initAgentInstructions", () => {
     expect(instructions).not.toContain("starts the dev server");
     // The shared renderer resolves every placeholder, even in the pre-scaffold guide.
     expect(instructions).not.toContain("{{");
+  });
+
+  it("keeps a prerelease CLI's commands on its dist-tag", () => {
+    resolveInstalledPackageInfo.mockReturnValue({ name: "eve", version: "1.0.0-rc.2+git.abc" });
+    try {
+      const setup = initAgentInstructions();
+      expect(setup).toContain("npx eve@rc init <name>");
+      expect(setup).toContain("npm install eve@rc ai zod");
+      expect(setup).not.toContain("eve@latest");
+      expect(initExtensionInstructions()).toContain("npx eve@rc extension init <name>");
+    } finally {
+      resolveInstalledPackageInfo.mockReturnValue({ name: "eve", version: "1.2.3" });
+    }
   });
 
   it("routes both channels and connections through Vercel Connect", () => {
