@@ -13,7 +13,7 @@ import { resolveWorkflowModulePath } from "#internal/application/package.js";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { createHostRouteTable, renderHostRoutes } from "#internal/nitro/host/host-routes.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
-import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/eve-service-route-output.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-route.js";
 
 const routeModules = vi.hoisted(() => ({
   dispatchChannelRequest: vi.fn(

@@ -29,7 +29,7 @@ import {
   hasVercelScheduleCollections,
 } from "#internal/schedules/consumer-route.js";
 import type { WorkflowArtifacts } from "#internal/workflow-bundle/builder.js";
-import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/eve-service-route-output.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-route.js";
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 

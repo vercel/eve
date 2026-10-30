@@ -4,7 +4,7 @@ import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { createEveWorkflowQueueTrigger } from "#internal/workflow/queue-namespace.js";
 import type { HostRouteTable, HostRouteVercelFunction } from "#internal/nitro/host/host-routes.js";
 import { createEveScheduleQueueTrigger } from "#internal/schedules/consumer-route.js";
-import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/eve-service-route-output.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-route.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,

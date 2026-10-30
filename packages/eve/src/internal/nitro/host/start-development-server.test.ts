@@ -189,6 +189,8 @@ vi.mock("./create-host-nitro.js", () => ({
   createHostNitro: mocks.createHostNitro,
 }));
 
+vi.mock("./host-spec.js", () => ({ createHostSpec: () => ({}) }));
+
 vi.mock("./dev-authored-source-watcher.js", () => ({
   startAuthoredSourceWatcher: mocks.startAuthoredSourceWatcher,
 }));

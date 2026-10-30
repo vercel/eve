@@ -41,6 +41,7 @@ vi.mock("#internal/nitro/host/dev-host-fingerprint.js", () => ({
 vi.mock("#internal/nitro/host/create-host-nitro.js", () => ({
   createHostNitro: mocks.createHostNitro,
 }));
+vi.mock("#internal/nitro/host/host-spec.js", () => ({ createHostSpec: () => ({}) }));
 vi.mock("#internal/nitro/host/dev-host-candidate.js", () => ({
   buildDevelopmentHostCandidate: mocks.buildDevelopmentHostCandidate,
 }));

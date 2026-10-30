@@ -25,11 +25,9 @@ import {
 } from "#internal/application/output-publication.js";
 import { stageProductionCompilerArtifacts } from "#internal/application/production-compiler-artifacts.js";
 import { stageBuildDeploymentId } from "#internal/nitro/host/stage-build-deployment-id.js";
-import {
-  materializeVercelWorkflowFunctionOutput,
-  normalizeEveVercelFunctionOutput,
-} from "#internal/workflow-bundle/vercel-workflow-output.js";
 import { createHostNitro } from "#internal/nitro/host/create-host-nitro.js";
+import { createHostSpec } from "#internal/nitro/host/host-spec.js";
+import { normalizeVercelServiceOutput } from "#internal/nitro/host/vercel-output.js";
 import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-summary.js";
 import { emitConnectManifest } from "#internal/external-resources.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
@@ -320,18 +318,17 @@ async function buildApplicationInWorkspace(
   }
   const publicRoutePrefix = options.publicRoutePrefix ?? inferredPublicRoutePrefix;
   const sandboxScope = createProductionNitroArtifactsConfig(workspace.appRoot).sandboxScope;
-  const nitro = await measureBuildPhase(profiler, "nitro.create", () =>
-    createHostNitro(
-      preparedHost,
-      {
-        kind: "production",
-        preset: isVercelBuild ? "vercel" : undefined,
-        publicRoutePrefix,
-        workspaceMember: options.workspaceMember,
-      },
-      { buildDir: workspace.nitro.buildDir, outputDir: workspace.publication.output.stagedDir },
-    ),
+  const spec = createHostSpec(
+    preparedHost,
+    {
+      kind: "production",
+      preset: isVercelBuild ? "vercel" : undefined,
+      publicRoutePrefix,
+      workspaceMember: options.workspaceMember,
+    },
+    { buildDir: workspace.nitro.buildDir, outputDir: workspace.publication.output.stagedDir },
   );
+  const nitro = await measureBuildPhase(profiler, "nitro.create", () => createHostNitro(spec));
 
   try {
     // Complete sandbox preparation before bundling so runtime never needs to
@@ -363,16 +360,9 @@ async function buildApplicationInWorkspace(
       await refreshProductionCompiledArtifacts(preparedHost, workspace.host.artifactsDir);
     }
     await buildNitroOutput(nitro, profiler, "nitro");
-    if (isVercelBuild) {
-      await measureBuildPhase(profiler, "vercel.workflow-function.materialize", () =>
-        materializeVercelWorkflowFunctionOutput(workspace.publication.output.stagedDir),
-      );
-    }
     if (servicePrefix !== undefined) {
       await measureBuildPhase(profiler, "vercel.functions.normalize", () =>
-        normalizeEveVercelFunctionOutput(workspace.publication.output.stagedDir, {
-          servicePrefix,
-        }),
+        normalizeVercelServiceOutput(workspace.publication.output.stagedDir, spec.routes),
       );
     }
     const vercelServiceOutput = options.vercelServiceOutput;

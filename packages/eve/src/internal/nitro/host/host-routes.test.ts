@@ -6,7 +6,7 @@ import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN, EVE_ROUTE_PREFIX } from "#prot
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { createHostRouteTable } from "#internal/nitro/host/host-routes.js";
 import { EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH } from "#internal/schedules/consumer-route.js";
-import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/eve-service-route-output.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-route.js";
 
 type TableInput = Parameters<typeof createHostRouteTable>[0];
 

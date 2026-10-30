@@ -16,20 +16,13 @@ import {
 import { createHostNoExternals } from "#internal/nitro/host/externals-policy.js";
 import { createHostPlugins } from "#internal/nitro/host/host-plugins.js";
 import { type HostNitroRoutes, renderHostRoutes } from "#internal/nitro/host/host-routes.js";
-import {
-  createHostSpec,
-  type HostDirectories,
-  type HostMode,
-  type HostRuntimePlugin,
-  type HostSpec,
-} from "#internal/nitro/host/host-spec.js";
+import type { HostRuntimePlugin, HostSpec } from "#internal/nitro/host/host-spec.js";
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
 import { onNitroBundlerLog } from "#internal/nitro/host/nitro-bundler-config.js";
 import {
   SKILL_FILES_PLUGIN_ID,
   writeSkillFilesPlugin,
 } from "#internal/nitro/host/skill-files-plugin.js";
-import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 import {
   type WorkflowArtifacts,
   WorkflowBundleBuilder,
@@ -66,12 +59,7 @@ function createNitroLoadOptions(buildDir: string): LoadConfigOptions {
  * Creates eve's Nitro host: one isolated candidate for `eve dev`, or one
  * production build. The returned Nitro is configured entirely by its config.
  */
-export async function createHostNitro(
-  preparedHost: PreparedApplicationHost,
-  mode: HostMode,
-  dirs: HostDirectories,
-): Promise<Nitro> {
-  const spec = createHostSpec(preparedHost, mode, dirs);
+export async function createHostNitro(spec: HostSpec): Promise<Nitro> {
   const { locations } = spec;
   const workflowArtifacts = await new WorkflowBundleBuilder({
     agentName: spec.agentName,
