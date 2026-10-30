@@ -1,4 +1,4 @@
-import { builtins, declared, defineHarness } from "eve";
+import { builtins, declared, defineHarness } from "eve/experimental/harness";
 import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
 import { z } from "zod";

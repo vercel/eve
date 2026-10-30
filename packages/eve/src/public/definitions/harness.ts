@@ -230,7 +230,7 @@ export interface HarnessDefinition {
  * approvals, budgets, the turn's tasks, and a bounded number of notes per turn.
  *
  * ```ts
- * import { defineHarness } from "eve";
+ * import { defineHarness } from "eve/experimental/harness";
  *
  * export default defineHarness((ctx) => ({
  *   next: () =>

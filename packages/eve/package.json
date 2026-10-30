@@ -425,6 +425,12 @@
       "import": "./dist/src/public/experimental/schedules/testing.js",
       "default": "./dist/src/public/experimental/schedules/testing.js"
     },
+    "./experimental/harness": {
+      "eve-source": "./src/public/experimental/harness/index.ts",
+      "types": "./dist/src/public/experimental/harness/index.d.ts",
+      "import": "./dist/src/public/experimental/harness/index.js",
+      "default": "./dist/src/public/experimental/harness/index.js"
+    },
     "./experimental/schedules": {
       "eve-source": "./src/public/experimental/schedules/index.ts",
       "types": "./dist/src/public/experimental/schedules/index.d.ts",
