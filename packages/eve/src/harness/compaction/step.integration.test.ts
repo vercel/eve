@@ -116,6 +116,56 @@ async function compactWith(
 }
 
 describe("compaction summary call", () => {
+  it("fails the compaction it opened when its summary model doesn't resolve", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const turnModel = new MockLanguageModelV3({ doStream: async () => summaryStream() });
+    const events: SessionEvent[] = [];
+    const result = await createKernel({
+      handleEvent: async (publication) => void events.push(...eventsOf(publication)),
+      resolveModel: async (reference) => {
+        if (reference.id === "compaction-model") throw new Error("Unknown model: compaction-model");
+        return turnModel;
+      },
+      tools: new Map(),
+    })(
+      {
+        agent: {
+          compactionModelReference: { id: "compaction-model" },
+          modelReference: { id: "turn-model" },
+          system: "You help Alice.",
+          tools: [],
+        },
+        // Small enough that the brief compacts before the turn's first model call.
+        compaction: { recentWindowSize: 1, threshold: 2_000 },
+        continuationToken: "http:unresolved-compaction-model",
+        history: [
+          { content: "Alice's brief. ".repeat(2_000), kind: "user", role: "user" },
+          { content: "Noted.", role: "assistant" },
+        ],
+        sessionId: "unresolved-compaction-model",
+      },
+      { message: "Please continue." },
+    );
+
+    const changes = events.filter((event) => event.type.startsWith("context."));
+    expect(changes).toMatchObject([
+      { type: "context.started", data: { kind: "compaction" } },
+      {
+        type: "context.settled",
+        data: { outcome: "failed", error: { code: "COMPACTION_FAILED" } },
+      },
+    ]);
+    // No summary run started: the only run requested is the turn's own.
+    const owners = events.flatMap((event) =>
+      event.type === "model.requested" ? [event.data.owner] : [],
+    );
+    expect(owners.every((owner) => !("changeId" in owner))).toBe(true);
+    expect(events.find((event) => event.type === "turn.settled")).toMatchObject({
+      data: { outcome: "failed" },
+    });
+    expect(result.next).toBeNull();
+  });
+
   it.each([
     { error: new CompactionOverLimitError("Still over the limit."), terminal: true },
     { error: new Error("Summary validation failed."), terminal: false },

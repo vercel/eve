@@ -8,7 +8,7 @@ function after(lastStep: Partial<ModelStep>, turn: Partial<PolicyTurn> = {}) {
     turn: {
       continuations: 0,
       id: "turn-1",
-      lastStep: { endsTurn: false, text: "Here is the report.", ...lastStep },
+      lastStep: { endsTurn: false, madeCalls: false, text: "Here is the report.", ...lastStep },
       unread: false,
       ...turn,
     },
