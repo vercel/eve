@@ -31,7 +31,7 @@ export default defineChannel({
   routes: [
     POST("/threads/:threadId", async (request, { from, params }) => {
       const session = await from(params.threadId!).send(await request.text(), { auth: null });
-      return Response.json({ sessionId: session.id });
+      return Response.json({ sessionId: session.sessionId });
     }),
     POST("/sessions/:sessionId", async (request, { attachSession, params }) => {
       try {
@@ -46,8 +46,8 @@ export default defineChannel({
       }
     }),
     GET("/sessions/:sessionId/stream", async (_request, { attachSession, params }) => {
-      const events = await attachSession(params.sessionId!).getEventStream();
-      const ndjson = events
+      const events = attachSession(params.sessionId!).stream();
+      const ndjson = ReadableStream.from(events)
         .pipeThrough(
           new TransformStream({
             transform(event, controller) {
@@ -101,7 +101,16 @@ async function waitForTurnCompleted(server: RunningEveStart, sessionId: string):
       const { done, value } = await reader.read();
       if (done) throw new Error(`Stream ended before the turn completed.\n${server.stderr()}`);
       buffered += value;
-      if (buffered.includes('"type":"turn.completed"')) return;
+      let newline: number;
+      while ((newline = buffered.indexOf("\n")) !== -1) {
+        const line = buffered.slice(0, newline);
+        buffered = buffered.slice(newline + 1);
+        if (line.trim() === "") continue;
+        const event = JSON.parse(line) as { type: string; data?: { outcome?: string } };
+        if (event.type !== "turn.settled") continue;
+        expect(event.data?.outcome).toBe("completed");
+        return;
+      }
     }
   } finally {
     await reader.cancel().catch(() => {});

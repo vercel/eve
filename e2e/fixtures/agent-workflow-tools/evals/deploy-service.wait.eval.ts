@@ -14,6 +14,6 @@ export default defineEval({
     });
     turn.messageIncludes("WORKFLOW-DEPLOY-RESULT");
     turn.messageIncludes("deploy api");
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

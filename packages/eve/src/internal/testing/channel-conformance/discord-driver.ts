@@ -238,7 +238,7 @@ export function discordDriver(
     // A reply to the bot's message continues the session that posted it.
     nextAddress: () =>
       gateway && !dm && !threads && lastBotMessage !== undefined
-        ? discordContinuationToken(channelId, lastBotMessage)
+        ? discordContinuationToken({ channelId, conversationId: lastBotMessage })
         : undefined,
     message: (text, person, files = []) => {
       if (gateway) return gatewayMessage(text, person, files);

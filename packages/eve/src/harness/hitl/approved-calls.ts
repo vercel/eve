@@ -1,51 +1,31 @@
-import {
-  asSchema,
-  type ModelMessage,
-  type Telemetry,
-  type TelemetryOptions,
-  type ToolSet,
-  type TypedToolResult,
-} from "ai";
+import type { ApprovalMemory } from "#approval/evaluation.js";
+import type { ModelMessage, TelemetryOptions } from "ai";
 
-import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
-import { toolCallModelOutput } from "#harness/tool-call-io.js";
-import { projectDeltaPresentation, projectResultPresentation } from "#harness/tool-presentation.js";
-import { recheckApprovedCall, wrapToolExecute } from "#harness/tools.js";
+
 import {
+  type CallOutcome,
+  executeToolCall,
+  type CallResult,
+  type ToolSignIn,
+} from "#harness/call-executor.js";
+import {
+  changedSinceOffered,
+  changedToolMessage,
   failedCall,
-  TOOL_EXECUTION_DENIED_MESSAGE,
   unavailableToolMessage,
-} from "#harness/input-request-resolution.js";
-import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import type { HarnessToolLookup } from "#harness/types.js";
+} from "#harness/approval-outcome.js";
+import { isRunnableTool } from "#harness/tools.js";
+import type { HandleEventFn, HarnessToolLookup } from "#harness/types.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
-import {
-  createActionPartialEvent,
-  createActionResultEvent,
-  createAuthorizationCompletedEvent,
-} from "#protocol/message.js";
-import { authorizationEventFields } from "#harness/authorization-event-fields.js";
+import { callSettledFrom } from "#harness/call-facts.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
-import { isAsyncIterable } from "#shared/async-iterable.js";
-import { toError } from "#shared/errors.js";
-import { createLogger, logError } from "#internal/logging.js";
 import type { ApprovedCall } from "#harness/session-machine/state.js";
-import { parseJsonObject } from "#shared/json.js";
-import { toModelSchema } from "#tools/schema.js";
-import type { HandleEventFn } from "#harness/types.js";
+import { callSignInsSettled } from "#harness/session-machine/transitions.js";
+import type { SessionView } from "#harness/session-machine/view.js";
+import { toErrorMessage } from "#shared/errors.js";
 
-type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
-export interface ApprovedCallResult {
-  readonly part: Extract<ToolResponsePart, { type: "tool-result" }>;
-}
-
-const log = createLogger("harness.tool-loop");
-
-/** What the model reads for an approved call the turn's cancellation cut short. */
-export const APPROVED_CALL_INTERRUPTED_MESSAGE =
-  "The turn was cancelled while this approved tool call was running. It may have partially run; it was not retried.";
+export { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/call-executor.js";
 
 /**
  * Runs approved local calls before the model reads their results. Like the calls a model step
@@ -53,231 +33,78 @@ export const APPROVED_CALL_INTERRUPTED_MESSAGE =
  * results in the steps that made the calls.
  */
 export async function runApprovedCalls(input: {
-  readonly requests: readonly ApprovedCall[];
+  readonly approvals: readonly ApprovedCall[];
   /** The entries of the step that asked, which the approved calls run. */
   readonly tools: HarnessToolLookup;
-  readonly approvedTools?: ReadonlySet<string>;
+  readonly approvalMemory?: ApprovalMemory;
   /** The conversation the tools read as `ctx.messages`. */
   readonly messages: readonly ModelMessage[];
-  readonly position: {
-    readonly sequence: number;
-    readonly stepIndex: number;
-    readonly turnId: string;
-  };
   readonly publish: HandleEventFn;
   readonly abortSignal: AbortSignal | undefined;
   /** The step attempt's telemetry, which hears each execution as the AI SDK reports it. */
   readonly telemetry?: TelemetryOptions;
-  /** Who approved each request, which the call reads as `ctx.approval`; it still runs as the requester. */
-  readonly responderOf: (request: ApprovedCall) => SessionAuthContext | undefined;
+  /** Who approved each call, which it reads as `ctx.approval`; it still runs as the requester. */
+  readonly responderOf?: (approval: ApprovedCall) => SessionAuthContext | undefined;
+  /** The session as of the latest publish, which says whether a call's sign-ins are still open. */
+  readonly view: () => Pick<SessionView, "projection">;
 }): Promise<{
-  readonly settled: readonly ApprovedCallResult[];
-  readonly toolResults: readonly TypedToolResult<ToolSet>[];
+  readonly settled: readonly CallResult[];
+  readonly signIns: readonly ToolSignIn[];
 }> {
-  const at = {
-    sequence: input.position.sequence,
-    stepIndex: input.position.stepIndex,
-    turnId: input.position.turnId,
-  };
   /**
-   * The sign-ins a call waited on end with the call: authorized if it returned, failed with the
-   * reason it didn't. Reported before the call's result.
+   * The sign-ins a call waited on end with the call, once `completeAuthorization` has run in it:
+   * accepted if it returned, failed with the reason it didn't. Reported before the call's result.
    */
   const reportSignIns = async (call: ApprovedCall, failure?: Error | string): Promise<void> => {
-    const reason = isConnectionAuthorizationFailedError(failure)
-      ? (failure.reason ?? failure.message)
-      : failure === undefined || typeof failure === "string"
-        ? failure
-        : failure.message;
-    for (const challenge of call.signIns ?? []) {
-      await input.publish(
-        createAuthorizationCompletedEvent({
-          ...authorizationEventFields(challenge),
-          ...at,
-          outcome: reason === undefined ? "authorized" : "failed",
-          ...(reason !== undefined && { reason }),
-          ...(isConnectionAuthorizationFailedError(failure) && { retryable: failure.retryable }),
-        }),
-      );
-    }
-  };
-  /** A call that ends without running: the stream reports it failed, and the model reads why. */
-  const settleFailure = async (
-    request: ApprovedCall,
-    failure: Error | string,
-  ): Promise<ApprovedCallResult> => {
-    const { callId, toolName } = request.action;
-    const failed = failedCall({ callId, failure, toolName });
-    await reportSignIns(request, failure);
-    await input.publish(createActionResultEvent({ ...at, result: failed.result }));
-    return { part: failed.part };
+    if ((call.signIns?.length ?? 0) === 0) return;
+    const refused = isConnectionAuthorizationFailedError(failure) ? failure : undefined;
+    const events = callSignInsSettled(
+      input.view(),
+      call,
+      failure === undefined
+        ? undefined
+        : {
+            reason:
+              refused === undefined ? toErrorMessage(failure) : (refused.reason ?? refused.message),
+            ...(refused !== undefined && { retryable: refused.retryable }),
+          },
+    );
+    if (events.length > 0) await input.publish(events);
   };
   const executed = await Promise.allSettled(
-    input.requests.map(async (request) => {
-      const settled: ApprovedCallResult[] = [];
-      const toolResults: TypedToolResult<ToolSet>[] = [];
-      const { callId, toolName, input: args } = request.action;
+    input.approvals.map(async (approval): Promise<CallOutcome> => {
+      const { call, interactionId } = approval;
+      const { callId, toolName } = call;
       const definition = input.tools.get(toolName);
-      const execute = definition === undefined ? undefined : wrapToolExecute(definition);
-      // Once the tool runs, the call settles even if the turn is cancelled: a result reaches the
-      // session, so it never runs a call with side effects a second time.
-      let started = false;
-      let completed: ApprovedCallResult | undefined;
-      try {
-        throwIfTurnAborted(input.abortSignal);
-        // A connection or dynamic tool can go away while its call waits for approval.
-        if (definition === undefined || execute === undefined) {
-          return {
-            settled: [
-              await settleFailure(
-                request,
-                unavailableToolMessage(toolName, input.tools.get(SEARCH_TOOL_NAME) !== undefined),
-              ),
-            ],
-            toolResults,
-          };
-        }
-        // As in the AI SDK: the stored input revalidates against the tool's own schema and runs
-        // unchanged, so the call that runs is the one the person approved.
-        const validation = await asSchema(
-          toModelSchema(definition.inputSchema, "input"),
-        ).validate?.(args);
-        if (validation?.success === false) {
-          const message = `The approved input is no longer valid for tool "${toolName}". Request a new tool call and approval.`;
-          return { settled: [await settleFailure(request, message)], toolResults };
-        }
-        const recheck = await recheckApprovedCall(definition, {
-          abortSignal: input.abortSignal,
-          callId,
-          input: args,
-          approvedTools: input.approvedTools,
-        });
-        if (recheck.denied) {
-          await reportSignIns(request, recheck.reason ?? TOOL_EXECUTION_DENIED_MESSAGE);
-          settled.push(
-            await rejectApprovedCall({
-              request,
-              reason: recheck.reason,
-              position: at,
-              publish: input.publish,
-            }),
-          );
-          return { settled, toolResults };
-        }
-        let output: unknown;
-        /** The error the tool threw, kept whole so the result records its name. */
-        let failure: Error | undefined;
-        const telemetry = toolTelemetry(input.telemetry, {
-          messages: [...input.messages],
-          toolCall: { input: args, toolCallId: callId, toolName, type: "tool-call" },
-        });
-        await telemetry.started();
-        let executionMs = 0;
-        try {
-          await telemetry.execute(async () => {
-            const startedAt = performance.now();
-            try {
-              started = true;
-              const responder = input.responderOf(request);
-              const executed = execute(args, {
-                ...(responder !== undefined && { approval: { responder } }),
-                abortSignal: input.abortSignal,
-                messages: [...input.messages],
-                toolCallId: callId,
-              });
-              if (isAsyncIterable(executed)) {
-                for await (const partial of executed) {
-                  output = partial;
-                  await input.publish(
-                    createActionPartialEvent({
-                      ...at,
-                      presentation: projectDeltaPresentation(
-                        definition,
-                        callId,
-                        parseJsonObject(args),
-                        partial,
-                      ),
-                      result: createRuntimeToolResultFromValue({
-                        callId,
-                        output: partial,
-                        toolName,
-                      }),
-                    }),
-                  );
-                }
-              } else {
-                output = await executed;
-              }
-            } finally {
-              executionMs = performance.now() - startedAt;
-            }
-          });
-        } catch (error) {
-          await telemetry.ended(
-            { error, input: args, toolCallId: callId, toolName, type: "tool-error" },
-            executionMs,
-          );
-          throwIfTurnAborted(input.abortSignal);
-          logError(log, "tool execution failed", error, { toolName, toolCallId: callId });
-          failure = toError(error);
-          output = failure.message;
-        }
-        if (failure === undefined) {
-          await telemetry.ended(
-            { input: args, output, toolCallId: callId, toolName, type: "tool-result" },
-            executionMs,
-          );
-        }
-        const result = {
-          input: args,
-          output,
-          toolCallId: callId,
-          toolName,
-          type: "tool-result",
-        } as TypedToolResult<ToolSet>;
-        toolResults.push(result);
-        if (isInlineAuthorizationToolResult(result)) return { settled, toolResults };
-        completed = {
-          part: {
-            output:
-              failure !== undefined
-                ? { type: "error-text", value: failure.message }
-                : await toolCallModelOutput(definition, output, callId),
-            toolCallId: callId,
-            toolName,
-            type: "tool-result",
-          },
-        };
-        settled.push(completed);
-        await reportSignIns(request, failure);
-        await input.publish(
-          createActionResultEvent({
-            ...at,
-            presentation:
-              failure !== undefined
-                ? undefined
-                : projectResultPresentation(definition, callId, parseJsonObject(args), output),
-            result: createRuntimeToolResultFromValue({
-              callId,
-              isError: failure !== undefined,
-              output: failure ?? output,
-              toolName,
-            }),
-          }),
-        );
-        return { settled, toolResults };
-      } catch (error) {
-        if (input.abortSignal?.aborted === true) {
-          if (!started) throwIfTurnAborted(input.abortSignal);
-          if (completed !== undefined) return { settled: [completed], toolResults };
-          return { settled: [interruptedResult(callId, toolName)], toolResults };
-        }
-        logError(log, "approved tool failed", error, { toolName, toolCallId: callId });
-        return {
-          settled: [await settleFailure(request, toError(error))],
-          toolResults,
-        };
+      if (changedSinceOffered(call, definition)) {
+        const message = changedToolMessage(toolName);
+        const failed = failedCall({ callId, message, toolName });
+        await reportSignIns(approval, message);
+        await input.publish(callSettledFrom(failed.result));
+        return { settled: [{ part: failed.part }], toolResults: [] };
       }
+      if (isRunnableTool(definition)) {
+        const responder = input.responderOf?.(approval);
+        return await executeToolCall(
+          call,
+          {
+            ...input,
+            // A call only a sign-in stopped was never cleared by a person.
+            ...(interactionId !== undefined && { clearedBy: { interactionId } }),
+            definition,
+            ...(responder !== undefined && { responder }),
+            beforeResult: (failure) => reportSignIns(approval, failure),
+          },
+          "recheck",
+        );
+      }
+      // A connection or dynamic tool can go away while its call waits for approval.
+      const searchable = input.tools.get(SEARCH_TOOL_NAME) !== undefined;
+      const message = unavailableToolMessage(toolName, searchable);
+      const failed = failedCall({ callId, message, toolName });
+      await reportSignIns(approval, message);
+      await input.publish(callSettledFrom(failed.result));
+      return { settled: [{ part: failed.part }], toolResults: [] };
     }),
   );
   const failed = executed.find((call) => call.status === "rejected");
@@ -288,117 +115,6 @@ export async function runApprovedCalls(input: {
   const completed = executed.flatMap((call) => (call.status === "fulfilled" ? [call.value] : []));
   return {
     settled: completed.flatMap((call) => call.settled),
-    toolResults: completed.flatMap((call) => call.toolResults),
-  };
-}
-
-function interruptedResult(callId: string, toolName: string): ApprovedCallResult {
-  return {
-    part: {
-      output: { type: "error-text", value: APPROVED_CALL_INTERRUPTED_MESSAGE },
-      toolCallId: callId,
-      toolName,
-      type: "tool-result",
-    },
-  };
-}
-
-/** Records an approved call refused by its final request-policy check. */
-export async function rejectApprovedCall(input: {
-  readonly request: ApprovedCall;
-  readonly reason?: string;
-  readonly position: {
-    readonly sequence: number;
-    readonly stepIndex: number;
-    readonly turnId: string;
-  };
-  readonly publish: HandleEventFn;
-}): Promise<ApprovedCallResult> {
-  const { callId, toolName } = input.request.action;
-  await input.publish(
-    createActionResultEvent({
-      ...input.position,
-      rejected: true,
-      result: {
-        callId,
-        isError: true,
-        kind: "tool-result",
-        toolName,
-        output: {
-          code: "TOOL_EXECUTION_DENIED",
-          message: input.reason ?? TOOL_EXECUTION_DENIED_MESSAGE,
-          tool: { result: "not_run" },
-        },
-      },
-    }),
-  );
-  return {
-    part: {
-      output: { reason: input.reason, type: "execution-denied" },
-      toolCallId: callId,
-      toolName,
-      type: "tool-result",
-    },
-  };
-}
-
-type ToolExecutionStart = Parameters<NonNullable<Telemetry["onToolExecutionStart"]>>[0];
-type ToolExecutionEnd = Parameters<NonNullable<Telemetry["onToolExecutionEnd"]>>[0];
-
-/**
- * The telemetry around one tool execution, as the AI SDK dispatches it for an approved call it
- * runs: each integration hears the start and the end, and their `executeTool` wrappers nest
- * around the call so work it does is attributed to it. Integration failures don't fail the call.
- */
-function toolTelemetry(
-  telemetry: TelemetryOptions | undefined,
-  execution: Pick<ToolExecutionStart, "messages" | "toolCall">,
-): {
-  readonly started: () => Promise<void>;
-  readonly execute: (execute: () => PromiseLike<void>) => Promise<void>;
-  readonly ended: (
-    toolOutput: ToolExecutionEnd["toolOutput"],
-    toolExecutionMs: number,
-  ) => Promise<void>;
-} {
-  const integrations =
-    telemetry === undefined || telemetry.isEnabled === false
-      ? []
-      : [telemetry.integrations ?? []].flat();
-  const event = {
-    ...execution,
-    callId: `approved:${execution.toolCall.toolCallId}`,
-    functionId: telemetry?.functionId,
-    recordInputs: telemetry?.recordInputs,
-    recordOutputs: telemetry?.recordOutputs,
-    toolContext: undefined,
-  } as ToolExecutionStart;
-  const notify = async (callback: (integration: Telemetry) => unknown) => {
-    await Promise.allSettled(integrations.map(async (integration) => await callback(integration)));
-  };
-  return {
-    started: () => notify((integration) => integration.onToolExecutionStart?.(event)),
-    execute: async (execute) => {
-      let wrapped: () => PromiseLike<void> = execute;
-      for (const integration of integrations) {
-        if (integration.executeTool === undefined) continue;
-        const inner = wrapped;
-        wrapped = () =>
-          integration.executeTool!({
-            ...event,
-            execute: inner,
-            toolCallId: execution.toolCall.toolCallId,
-          });
-      }
-      await wrapped();
-    },
-    ended: (toolOutput, toolExecutionMs) =>
-      notify((integration) =>
-        integration.onToolExecutionEnd?.({
-          ...event,
-          toolExecutionMs,
-          toolOutput,
-        } as ToolExecutionEnd),
-      ),
+    signIns: completed.flatMap((call) => (call.signIn === undefined ? [] : [call.signIn])),
   };
 }

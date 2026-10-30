@@ -1,4 +1,4 @@
-import { decide } from "#ai/decide.js";
+import { decideWithMetadata } from "#ai/decision-adapter.js";
 import { runUntilAborted } from "#evals/abort.js";
 import type { AssertionCollector } from "#evals/assertions/collector.js";
 import { formatDiagnosticValue, toDiagnosticMetadataValue } from "#evals/diagnostics.js";
@@ -69,7 +69,7 @@ export function buildJudgeContext(deps: JudgeDeps): JudgeContext {
             return [id, decisionQuestion];
           }),
         );
-        const result = await decide({
+        const result = await decideWithMetadata({
           model,
           // The AI SDK reads a bare array as state parts, so JSON arrays travel as one JSON part.
           state: isJsonArray(capturedState)
@@ -77,7 +77,7 @@ export function buildJudgeContext(deps: JudgeDeps): JudgeContext {
             : capturedState,
           questions: decisionQuestions,
           providerOptions: modelOptions?.providerOptions,
-          abortSignal: deps.signal,
+          signal: deps.signal,
         });
         return { result, state: capturedState, questions: capturedQuestions };
       })(),
@@ -138,7 +138,7 @@ function formatJudgeDetail(state: JudgeInput, question: JudgeQuestion, answer: u
 
 function judgeScore(
   question: JudgeQuestion,
-  answer: Awaited<ReturnType<typeof decide>>["answers"][string],
+  answer: Awaited<ReturnType<typeof decideWithMetadata>>["answers"][string],
 ): number {
   switch (answer.type) {
     case "boolean":

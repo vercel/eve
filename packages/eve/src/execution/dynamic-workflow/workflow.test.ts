@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { DeliveryResult } from "#shared/delivery.js";
 
 const mocks = vi.hoisted(() => ({
   runWorkflowProgramStep: vi.fn(),
@@ -23,11 +24,19 @@ const continuation = "signed-continuation";
 const reply = vi.fn();
 const agent = (target: string) => ({
   send: async (message: string) => ({
-    result: async () => ({
-      data: undefined,
-      message: await reply(target, message),
-      status: "waiting",
-    }),
+    result: async (): Promise<DeliveryResult> => {
+      const output: unknown = await reply(target, message);
+      return {
+        sessionId: "child",
+        deliveryId: "child-request",
+        outcome: "handled",
+        sessionEnded: false,
+        data: typeof output === "string" ? undefined : output,
+        reply: typeof output === "string" ? output : undefined,
+        interactions: [],
+        status: "completed",
+      };
+    },
   }),
 });
 const ctx = {
@@ -41,8 +50,12 @@ describe("runJsProgram", () => {
   beforeEach(() => vi.resetAllMocks());
 
   it("delegates agent interrupts and resumes the sandbox", async () => {
+    const structured = {
+      ...pending,
+      call: { ...pending.call, input: { message: "one", outputSchema: { type: "object" } } },
+    };
     mocks.runWorkflowProgramStep
-      .mockResolvedValueOnce({ continuation, pending: [pending], status: "interrupted" })
+      .mockResolvedValueOnce({ continuation, pending: [structured], status: "interrupted" })
       .mockResolvedValueOnce({ output: { result: "done" }, status: "completed" });
     reply.mockResolvedValue({ result: "child" });
 

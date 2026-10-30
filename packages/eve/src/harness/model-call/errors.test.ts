@@ -11,6 +11,7 @@ import {
   normalizeModelStreamError,
   extractUpstreamRejectionMessage,
 } from "#harness/model-call/errors.js";
+import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 
 /**
@@ -236,6 +237,21 @@ describe("classifyModelCallError", () => {
     expect(
       classifyModelCallError(Object.assign(new Error("payment required"), { statusCode: 402 })),
     ).toBe("recoverable");
+  });
+
+  // Issue #5427: the gateway reuses `insufficient_funds` when it only throttled the balance check.
+  it("retries an AI Gateway 402 that asks to retry shortly instead of reporting exhausted credits", () => {
+    const err = gatewayModelCallError({
+      gatewayName: "GatewayInternalServerError",
+      gatewayType: "internal_server_error",
+      statusCode: 402,
+      upstreamMessage:
+        "AI Gateway credit balance verification is temporarily throttled. Please retry shortly.",
+      upstreamType: "insufficient_funds",
+    });
+
+    expect(summarizeKnownError(err)?.id).toBe("gateway-credit-check-throttled");
+    expect(classifyModelCallError(err)).toBe("retry");
   });
 
   it.each([

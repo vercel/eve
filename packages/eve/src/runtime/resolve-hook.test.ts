@@ -38,14 +38,14 @@ describe("resolveHookDefinition", () => {
     const moduleMap = buildModuleMap(definition.sourceId, {
       default: {
         events: {
-          "message.completed": () => undefined,
+          "content.completed": () => undefined,
           "*": () => undefined,
         },
       },
     });
 
     const resolved = await resolveHookDefinition(definition, moduleMap, undefined);
-    expect(Object.keys(resolved.events).sort()).toEqual(["*", "message.completed"]);
+    expect(Object.keys(resolved.events).sort()).toEqual(["*", "content.completed"]);
   });
 
   it("accepts a hook with only `events` declared", async () => {
@@ -53,24 +53,47 @@ describe("resolveHookDefinition", () => {
     const moduleMap = buildModuleMap(definition.sourceId, {
       default: {
         events: {
-          "turn.completed": () => undefined,
+          "turn.settled": () => undefined,
           "session.started": () => undefined,
         },
       },
     });
 
     const resolved = await resolveHookDefinition(definition, moduleMap, undefined);
-    expect(Object.keys(resolved.events).sort()).toEqual(["session.started", "turn.completed"]);
+    expect(Object.keys(resolved.events).sort()).toEqual(["session.started", "turn.settled"]);
   });
 
-  it("accepts a hook with an empty export (no events)", async () => {
+  it("refuses a v26 key and names its replacement", async () => {
+    const definition = buildDefinition({ slug: "audit" });
+    const moduleMap = buildModuleMap(definition.sourceId, {
+      default: { events: { "turn.completed": () => undefined } },
+    });
+
+    await expect(resolveHookDefinition(definition, moduleMap, undefined)).rejects.toThrow(
+      "Key on `turn.settled`",
+    );
+  });
+
+  it("rejects a hook without events", async () => {
     const definition = buildDefinition({ slug: "noop" });
     const moduleMap = buildModuleMap(definition.sourceId, {
       default: {},
     });
 
-    const resolved = await resolveHookDefinition(definition, moduleMap, undefined);
-    expect(Object.keys(resolved.events)).toEqual([]);
+    await expect(resolveHookDefinition(definition, moduleMap, undefined)).rejects.toThrow(
+      "requires events: an object of handlers keyed by event type",
+    );
+  });
+
+  it("rejects keys beside events", async () => {
+    const definition = buildDefinition({ slug: "both" });
+    const moduleMap = buildModuleMap(definition.sourceId, {
+      default: { events: {}, run: () => null, select: () => null },
+    });
+
+    await expect(resolveHookDefinition(definition, moduleMap, undefined)).rejects.toThrow(
+      "takes only events handlers; unknown key(s): run, select.",
+    );
   });
 
   it("rejects a non-function event handler with a typed error", async () => {

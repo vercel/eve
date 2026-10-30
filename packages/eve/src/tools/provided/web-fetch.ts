@@ -16,27 +16,34 @@ export interface WebFetchToolOutput {
   url: string;
 }
 
-export const WEB_FETCH_INPUT_SCHEMA = defineJsonSchema<WebFetchToolInput>({
-  type: "object",
-  properties: {
-    format: {
-      type: "string",
-      enum: ["markdown", "text", "html"],
-      description:
-        'The format to return the content in (text, markdown, or html). HTML responses are automatically converted to the requested format. Defaults to "markdown".',
+export const WEB_FETCH_INPUT_SCHEMA = defineJsonSchema<WebFetchToolInput>(
+  {
+    type: "object",
+    properties: {
+      format: {
+        type: "string",
+        enum: ["markdown", "text", "html"],
+        description:
+          'The format to return the content in (text, markdown, or html). HTML responses are automatically converted to the requested format. Defaults to "markdown".',
+      },
+      timeout: {
+        type: "number",
+        description: "Optional timeout in seconds, greater than 0. Defaults to 30, max 120.",
+      },
+      url: {
+        type: "string",
+        description: "The fully-formed URL to fetch content from. Must start with https://.",
+      },
     },
-    timeout: {
-      type: "number",
-      description: "Optional timeout in seconds. Defaults to 30, max 120.",
-    },
-    url: {
-      type: "string",
-      description: "The fully-formed URL to fetch content from. Must start with https://.",
-    },
+    required: ["url"],
+    additionalProperties: false,
   },
-  required: ["url"],
-  additionalProperties: false,
-});
+  // AbortSignal.timeout() throws on a negative delay, and 0 aborts the request at once.
+  (input) =>
+    input.timeout !== undefined && !(input.timeout > 0)
+      ? "timeout must be greater than 0 seconds."
+      : undefined,
+);
 
 export const WEB_FETCH_OUTPUT_SCHEMA = defineJsonSchema<WebFetchToolOutput>({
   type: "object",

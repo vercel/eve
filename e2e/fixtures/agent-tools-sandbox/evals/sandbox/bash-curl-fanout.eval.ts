@@ -1,4 +1,5 @@
-import type { MessageStreamEvent } from "eve/client";
+import { emptySessionView, foldEvents, calls } from "eve/events";
+import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 import { FANOUT_BARRIER_SERVER_URL } from "./shared";
@@ -41,7 +42,7 @@ export default defineEval({
 
     t.log(formatCurlFanoutTrace(turn.events));
     turn.calledTool(BASH_TOOL);
-    turn.noFailedActions();
+    turn.noFailedCalls();
     turn.eventsSatisfy("at least ten Bash curls reach the concurrency barrier", (events) =>
       curlCallsReachBarrier({
         barrierSize: MINIMUM_CURL_CALLS,
@@ -63,7 +64,7 @@ function commandFor(request: (typeof REQUESTS)[number]): string {
 
 function curlCallsReachBarrier(input: {
   readonly barrierSize: number;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly expectedRequests: readonly { readonly label: string; readonly query: string }[];
   readonly minimumCalls: number;
 }): boolean {
@@ -86,12 +87,13 @@ function curlCallsReachBarrier(input: {
   );
 }
 
-function curlBarrierResults(events: readonly MessageStreamEvent[]): readonly CurlBarrierResult[] {
-  return events.flatMap((event) => {
-    if (event.type !== "action.result" || event.data.result.kind !== "tool-result") return [];
-    if (event.data.result.toolName !== BASH_TOOL) return [];
+function curlBarrierResults(events: readonly SessionStreamEvent[]): readonly CurlBarrierResult[] {
+  const view = foldEvents(emptySessionView(), events);
 
-    return parseCurlBarrierResult(event.data.result.output);
+  return calls(view).flatMap((call) => {
+    if (call.name !== BASH_TOOL || call.outcome !== "completed") return [];
+
+    return parseCurlBarrierResult(call.output);
   });
 }
 
@@ -118,7 +120,7 @@ function parseCurlBarrierResult(value: unknown): readonly CurlBarrierResult[] {
   return [];
 }
 
-function formatCurlFanoutTrace(events: readonly MessageStreamEvent[]): string {
+function formatCurlFanoutTrace(events: readonly SessionStreamEvent[]): string {
   return JSON.stringify({
     calls: curlBarrierResults(events),
   });

@@ -1,5 +1,5 @@
 import { defineWorkflowTool } from "eve/tools";
-import { createHook } from "workflow";
+import { createHook } from "eve/workflow";
 import { z } from "zod";
 
 import { type ReplicaResult, startReplica } from "../lib/fanout.ts";

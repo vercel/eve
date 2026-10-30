@@ -51,11 +51,11 @@ describe("createConnectionSession", () => {
     expect(session.resolvePath("notes/todo.txt")).toBe("/workspace/notes/todo.txt");
     expect([...files.keys()]).toEqual(["/workspace/notes/a.txt", "/tmp/b.bin"]);
     expect(connection.spawn.mock.calls).toEqual([
-      [{ abortSignal: undefined, command: "ls", env: {}, workingDirectory: "/workspace/src" }],
-      [{ abortSignal: undefined, command: "pwd", env: {}, workingDirectory: "/workspace" }],
+      [{ signal: undefined, command: "ls", env: {}, workingDirectory: "/workspace/src" }],
+      [{ signal: undefined, command: "pwd", env: {}, workingDirectory: "/workspace" }],
     ]);
     expect(connection.removePath).toHaveBeenCalledWith({
-      abortSignal: undefined,
+      signal: undefined,
       force: true,
       path: "/tmp/x",
       recursive: true,
@@ -88,6 +88,19 @@ describe("createConnectionSession", () => {
       stdout: "hello",
     });
     await expect(session.ping()).resolves.toBe("pong");
+  });
+
+  it("passes stdin to the connection and rejects a process without one", async () => {
+    const { connection } = memoryConnection();
+    const kill = vi.fn(async () => {});
+    connection.spawn.mockResolvedValueOnce({ ...syntheticProcess({}), kill });
+    const session = createConnectionSession(connection);
+
+    await expect(session.spawn({ command: "cat", stdin: true })).rejects.toThrow(
+      "This sandbox provider does not support `stdin` on spawn.",
+    );
+    expect(connection.spawn).toHaveBeenCalledWith(expect.objectContaining({ stdin: true }));
+    expect(kill).toHaveBeenCalledOnce();
   });
 
   it("rejects connection extensions that would replace a session member", () => {

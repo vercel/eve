@@ -1,6 +1,6 @@
 import { diffWriteDetail, type ToolDetailLine } from "./line-diff.js";
 import { stripTerminalControls } from "#cli/ui/terminal-text.js";
-import { displayName, displayTitle } from "#shared/display-name.js";
+import { displayName, displayTitle } from "#protocol/session-projection/display-name.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 
@@ -221,7 +221,7 @@ export function presentTool(
   }
   if (baseName === REPLY_TOOL_NAME) {
     // Structured-output terminal signal: its input is the
-    // structured result itself, kept behind the expanded `--tools full` view.
+    // structured result itself, kept behind the expanded `--show-tools full` view.
     return { title: REPLY_TITLE, subtitle: "", summarizeResult: () => undefined };
   }
 
@@ -234,7 +234,7 @@ export function presentTool(
         doneTitle: `${copy.pastVerb} ${item}`,
         subtitle: "",
         // The salient argument is the story; builtin outputs (page content,
-        // file bodies, stdout) stay behind the expanded `--tools full` view.
+        // file bodies, stdout) stay behind the expanded `--show-tools full` view.
         summarizeResult: () => undefined,
         group: {
           verb: copy.verb,

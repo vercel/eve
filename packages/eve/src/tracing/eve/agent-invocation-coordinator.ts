@@ -1,4 +1,4 @@
-import type { SessionTraceContext } from "#channel/types.js";
+import type { SessionTraceSeed } from "#channel/types.js";
 import { ConversationIdKey } from "#context/keys.js";
 import { readConversationId } from "#shared/conversation-identity.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -15,7 +15,7 @@ import {
 export interface AgentChildTraceDispatch {
   readonly conversationId?: string;
   readonly originAudience: ChannelAudience;
-  readonly parentTraceContext?: SessionTraceContext;
+  readonly parentTraceContext?: SessionTraceSeed;
 }
 
 /**

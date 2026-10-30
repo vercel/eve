@@ -1,4 +1,4 @@
-import { Command, CommanderError } from "#compiled/commander/index.js";
+import { Command, CommanderError, Option } from "#compiled/commander/index.js";
 import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { areSchedulesDisabled } from "#internal/schedules/disabled.js";
@@ -22,10 +22,6 @@ import { waitForShutdownSignal } from "#cli/shutdown.js";
 import type { ProductionCliOptions } from "#cli/dev/command-options.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { EvalCliOptions } from "#evals/cli/eval.js";
-import {
-  registerRuntimeInvokeCommand,
-  type InvokeCliRuntimeDependencies,
-} from "#cli/invoke/command.js";
 import {
   parseAgentNamesOption,
   parsePortOption,
@@ -66,7 +62,6 @@ interface CliRuntimeDependencies {
     options?: { json?: boolean },
   ): Promise<void>;
   runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void>;
-  runInvoke: InvokeCliRuntimeDependencies["runInvoke"];
   runEvalCommand(
     evalIds: readonly string[],
     options: EvalCliOptions,
@@ -173,7 +168,10 @@ export function createCliProgram(
   program
     .command("init [target]")
     .description("Create a new eve agent, or add one to an existing project directory.")
-    .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
+    // Superseded by `eve add channel/web`; still accepted, but no longer advertised.
+    .addOption(
+      new Option("--channel-web-nextjs", "Add the Web Chat application (Next.js)").hideHelp(),
+    )
     .option(
       "--agents <names>",
       "Create an agents/ workspace with comma-separated agent names",
@@ -294,7 +292,6 @@ export function createCliProgram(
 
   const remote = program.command("remote").description("Connect to an existing eve agent.");
   registerRemoteCommands({ applicationContext, logger, program: remote, runtime, telemetry });
-  registerRuntimeInvokeCommand({ applicationContext, logger, program: remote, runtime });
 
   registerAcpCommand({
     applicationContext,
@@ -388,6 +385,10 @@ export function createCliProgram(
     .option("--json", "Output results as JSON")
     .option("--junit <path>", "Write JUnit XML results to a file")
     .option("--skip-report", "Skip eval-defined reporters (e.g. Braintrust)")
+    .option(
+      "--keep-state",
+      "Keep the local eval server's state, including its Workflow data, after the run",
+    )
     .option("--verbose", "Stream per-eval logs and workflow run IDs to stdout")
     .action(async (evalIds: string[], options: EvalCliOptions) => {
       const runEvalCommand = runtime.runEvalCommand ?? (await loadRunEvalCommand());

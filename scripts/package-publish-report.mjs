@@ -1,8 +1,20 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
+import { resolveCatalogReferences } from "./package-catalog.mjs";
 
 const execFile = promisify(execFileCallback);
 
@@ -294,122 +306,6 @@ function parsePackOutput(stdout, stderr, packageRoot) {
 }
 
 /*
- * Walks up from `startDirectory` to find the nearest `pnpm-workspace.yaml`,
- * parses its top-level `catalog:` block, and returns a map of dependency
- * name → version range. Returns an empty map if no workspace file is found
- * or it has no catalog. Uses a minimal line-based parser because we control
- * the file's shape and don't want to add a YAML dependency.
- */
-async function readWorkspaceCatalog(startDirectory) {
-  let currentDirectory = resolve(startDirectory);
-
-  while (true) {
-    const candidate = join(currentDirectory, "pnpm-workspace.yaml");
-
-    if (await pathExists(candidate)) {
-      const source = await readFile(candidate, "utf8");
-      const lines = source.split(/\r?\n/);
-      const catalog = new Map();
-      let inCatalogBlock = false;
-
-      for (const line of lines) {
-        if (/^catalog:\s*$/.test(line)) {
-          inCatalogBlock = true;
-          continue;
-        }
-
-        if (inCatalogBlock) {
-          if (/^\S/.test(line)) {
-            break;
-          }
-
-          const match = line.match(/^\s+"?([^":\s]+)"?:\s*"?([^"\s]+)"?\s*$/);
-
-          if (match) {
-            catalog.set(match[1], match[2]);
-          }
-        }
-      }
-
-      return catalog;
-    }
-
-    const parentDirectory = dirname(currentDirectory);
-
-    if (parentDirectory === currentDirectory) {
-      return new Map();
-    }
-
-    currentDirectory = parentDirectory;
-  }
-}
-
-/*
- * Returns a manifest with all `catalog:` references resolved to concrete
- * versions from the workspace catalog, plus a flag indicating whether any
- * rewrite was needed.
- */
-async function resolveCatalogReferences(packageRoot, manifest) {
-  const depTypes = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
-
-  let hasCatalogReference = false;
-
-  outer: for (const depType of depTypes) {
-    const block = manifest[depType];
-
-    if (!block || typeof block !== "object") {
-      continue;
-    }
-
-    for (const range of Object.values(block)) {
-      if (typeof range === "string" && range.startsWith("catalog:")) {
-        hasCatalogReference = true;
-        break outer;
-      }
-    }
-  }
-
-  if (!hasCatalogReference) {
-    return {
-      manifest,
-      rewrote: false,
-    };
-  }
-
-  const catalog = await readWorkspaceCatalog(packageRoot);
-  const rewritten = JSON.parse(JSON.stringify(manifest));
-
-  for (const depType of depTypes) {
-    const block = rewritten[depType];
-
-    if (!block || typeof block !== "object") {
-      continue;
-    }
-
-    for (const [name, range] of Object.entries(block)) {
-      if (typeof range !== "string" || !range.startsWith("catalog:")) {
-        continue;
-      }
-
-      const resolved = catalog.get(name);
-
-      if (!resolved) {
-        throw new Error(
-          `Dependency "${name}" in "${packageRoot}/package.json" uses "${range}" but is not defined in the workspace catalog.`,
-        );
-      }
-
-      block[name] = resolved;
-    }
-  }
-
-  return {
-    manifest: rewritten,
-    rewrote: true,
-  };
-}
-
-/*
  * Replaces `catalog:` references inside an already-packed npm tarball with
  * concrete versions from the workspace catalog. The tarball is extracted to
  * a temp dir, its `package/package.json` is rewritten, and the tarball is
@@ -452,14 +348,56 @@ async function rewriteCatalogReferencesInTarball(tarballPath, packageRoot) {
 
 export async function runPack(packageRoot, packDirectory) {
   const packagePath = resolve(packageRoot);
-  const { stderr, stdout } = await execFile(
-    "npm",
-    ["pack", "--json", "--pack-destination", packDirectory],
-    {
-      cwd: packagePath,
-      maxBuffer: 16 * 1024 * 1024,
-    },
-  );
+  const manifest = await readJson(join(packagePath, "package.json"));
+  const stagingDirectory = manifest.publishConfig?.directory;
+  const temporary = stagingDirectory
+    ? await mkdtemp(join(tmpdir(), "eve-report-pack-"))
+    : undefined;
+  let output;
+  let pnpmTarball;
+  try {
+    let packRoot = packagePath;
+    if (temporary) {
+      pnpmTarball = join(temporary, "pnpm.tgz");
+      await execFile("pnpm", ["pack", "--out", pnpmTarball, "--silent"], {
+        cwd: packagePath,
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      const extracted = join(temporary, "extracted");
+      await mkdir(extracted);
+      await execFile("tar", ["-xzf", pnpmTarball, "-C", extracted], {
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      packRoot = join(extracted, "package");
+    }
+    output = await execFile(
+      "npm",
+      [
+        "pack",
+        ...(temporary ? ["--ignore-scripts"] : []),
+        "--json",
+        "--pack-destination",
+        packDirectory,
+      ],
+      { cwd: packRoot, maxBuffer: 16 * 1024 * 1024 },
+    );
+    if (pnpmTarball) {
+      const results = parsePackOutput(output.stdout, output.stderr, packagePath);
+      const packed = Array.isArray(results) ? results[0] : null;
+      if (!packed || typeof packed.filename !== "string") {
+        throw new Error(`Expected one pack result for "${packagePath}".`);
+      }
+      const bytes = await readFile(pnpmTarball);
+      await copyFile(pnpmTarball, resolve(packDirectory, packed.filename));
+      packed.size = bytes.length;
+      packed.shasum = createHash("sha1").update(bytes).digest("hex");
+      packed.integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+      return packed;
+    }
+  } finally {
+    if (temporary) await rm(temporary, { recursive: true, force: true });
+  }
+  const { stderr, stdout } = output;
   const results = parsePackOutput(stdout, stderr, packagePath);
   const packResult = Array.isArray(results) ? results[0] : null;
 

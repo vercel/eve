@@ -1,193 +1,224 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Session } from "#channel/session.js";
+import type { InternalSession as Session } from "#channel/session.js";
+import { SessionStrandedError } from "#channel/session-stranded-error.js";
 import { createSessionStreamResponse } from "#eve-channel/request.js";
-import { parseNdjsonStream } from "#execution/ndjson-stream.js";
-import {
-  EVE_STREAM_CONTROL_VERSION,
-  EVE_STREAM_CONTROL_VERSION_QUERY,
-  EVE_STREAM_LEASE_ENDED_CONTROL,
-} from "#protocol/message.js";
+import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/session-http.js";
 
-const encoder = new TextEncoder();
+afterEach(() => vi.useRealTimers());
 
-function stubSession(events: ReadableStream<unknown>, tailIndex = -1): Session {
-  return {
-    id: "session_1",
-    async getEventStream() {
-      return events;
-    },
-    async getStreamTailIndex() {
-      return tailIndex;
-    },
-  } as Session;
-}
-
-/** A durable byte source that never reaches EOF, like a parked run's stream. */
-function openByteSource(lines: number): {
-  readonly source: ReadableStream<Uint8Array>;
-  readonly cancelled: () => boolean;
-} {
-  let cancelled = false;
-  const source = new ReadableStream<Uint8Array>({
-    start(controller) {
-      for (let i = 0; i < lines; i += 1) {
-        controller.enqueue(encoder.encode(`${JSON.stringify({ sequence: i })}\n`));
-      }
-    },
-    cancel() {
-      cancelled = true;
-    },
-  });
-  return { cancelled: () => cancelled, source };
-}
-
-function leasedRequest(): Request {
-  const url = new URL("https://eve.test/eve/v1/session/session_1/stream");
-  url.searchParams.set(EVE_STREAM_CONTROL_VERSION_QUERY, EVE_STREAM_CONTROL_VERSION);
-  return new Request(url);
-}
-
-afterEach(() => {
-  vi.useRealTimers();
+const at = "2026-10-09T00:00:00.000Z";
+const line = (deliveryId: string) => ({
+  at,
+  facts: [{ data: { deliveryId }, type: "delivery.admitted" }],
 });
 
+/** A session whose stored lines are `lines`; `open` keeps the source open after them. */
+function sessionOf(lines: readonly unknown[], options: { readonly open?: boolean } = {}) {
+  const starts: number[] = [];
+  const follows: (boolean | undefined)[] = [];
+  let tailLookups = 0;
+  const session = {
+    id: "session_1",
+    async getLineStream({
+      follow,
+      startIndex,
+    }: {
+      readonly follow?: boolean;
+      readonly startIndex: number;
+    }) {
+      starts.push(startIndex);
+      follows.push(follow);
+      return new ReadableStream<unknown>({
+        start(controller) {
+          for (const stored of lines.slice(startIndex)) controller.enqueue(stored);
+          if (options.open !== true) controller.close();
+        },
+      });
+    },
+    async getStreamTailIndex() {
+      tailLookups += 1;
+      return lines.length - 1;
+    },
+  };
+  return {
+    follows,
+    session: session as Session,
+    starts,
+    tailLookups: () => tailLookups,
+  };
+}
+
+async function records(response: Response): Promise<unknown[]> {
+  return (await response.text())
+    .split("\n")
+    .filter((text) => text.length > 0)
+    .map((text) => JSON.parse(text) as unknown);
+}
+
 describe("createSessionStreamResponse", () => {
-  it("ends a negotiated response after its lease and cancels the source", async () => {
-    vi.useFakeTimers();
-    let cancelled = false;
-    const events = new ReadableStream({
-      cancel() {
-        cancelled = true;
-      },
-    });
-
-    const response = await createSessionStreamResponse(leasedRequest(), stubSession(events));
-    const reader = response.body!.getReader();
-
-    await expect(reader.read()).resolves.toEqual({ done: false, value: encoder.encode("\n") });
-    for (let elapsed = 10_000; elapsed < 60_000; elapsed += 10_000) {
-      const heartbeat = reader.read();
-      await vi.advanceTimersByTimeAsync(10_000);
-      await expect(heartbeat).resolves.toEqual({ done: false, value: encoder.encode("\n") });
-    }
-
-    const control = reader.read();
-    await vi.advanceTimersByTimeAsync(10_000);
-    await expect(control).resolves.toEqual({
-      done: false,
-      value: encoder.encode(`${JSON.stringify(EVE_STREAM_LEASE_ENDED_CONTROL)}\n`),
-    });
-    await expect(reader.read()).resolves.toEqual({ done: true, value: undefined });
-    await vi.waitFor(() => expect(cancelled).toBe(true));
+  it("bounds a historical read at the durable tail and asks for it without following", async () => {
+    const { follows, session } = sessionOf([line("a"), line("b")], { open: true });
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream?follow=false"),
+      session,
+    );
+    expect(response.headers.get(EVE_STREAM_TAIL_INDEX_HEADER)).toBe("1");
+    // The second read is the bounded check of the first line's version.
+    expect(follows).toEqual([false, false]);
+    expect(await records(response)).toEqual([{ $eve: "heartbeat" }, line("a"), line("b")]);
   });
 
-  it("resets heartbeats after events without extending the lease", async () => {
-    vi.useFakeTimers();
-    let eventController: ReadableStreamDefaultController<unknown> | undefined;
-    const events = new ReadableStream({
-      start(controller) {
-        eventController = controller;
-      },
-    });
-
-    const response = await createSessionStreamResponse(leasedRequest(), stubSession(events));
-    const reader = response.body!.getReader();
-    await reader.read();
-
-    await vi.advanceTimersByTimeAsync(9_000);
-    eventController!.enqueue({ type: "test" });
-    await expect(reader.read()).resolves.toEqual({
-      done: false,
-      value: encoder.encode(`${JSON.stringify({ type: "test" })}\n`),
-    });
-
-    const heartbeat = reader.read();
-    await vi.advanceTimersByTimeAsync(9_999);
-    let heartbeatSettled = false;
-    void heartbeat.then(() => {
-      heartbeatSettled = true;
-    });
-    await vi.runAllTicks();
-    expect(heartbeatSettled).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
-    await expect(heartbeat).resolves.toEqual({ done: false, value: encoder.encode("\n") });
-
-    for (let elapsed = 20_000; elapsed < 60_000; elapsed += 10_000) {
-      const nextHeartbeat = reader.read();
-      await vi.advanceTimersByTimeAsync(10_000);
-      await expect(nextHeartbeat).resolves.toEqual({ done: false, value: encoder.encode("\n") });
-    }
-    const control = reader.read();
-    await vi.advanceTimersByTimeAsync(1_000);
-    await expect(control).resolves.toMatchObject({ done: false });
-    await expect(reader.read()).resolves.toEqual({ done: true, value: undefined });
-  });
-
-  it("does not lease a response when the client does not negotiate controls", async () => {
-    vi.useFakeTimers();
+  it("answers a stranded session's follow with a final 409", async () => {
+    const { session } = sessionOf([]);
+    const stranded: Session = {
+      ...session,
+      getLineStream: () =>
+        Promise.reject(new SessionStrandedError({ eveVersion: "0.0.1" }, "Reset it.")),
+    };
     const response = await createSessionStreamResponse(
       new Request("https://eve.test/eve/v1/session/session_1/stream"),
-      stubSession(new ReadableStream()),
+      stranded,
     );
-    const reader = response.body!.getReader();
-    await reader.read();
-
-    let settled = false;
-    const pending = reader.read().then((result) => {
-      settled = true;
-      return result;
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "session_stranded",
+      eveVersion: "0.0.1",
     });
-    await vi.advanceTimersByTimeAsync(120_000);
-    expect(settled).toBe(false);
-    await reader.cancel();
-    await pending;
   });
 
-  it("cancels the durable source once a tail-indexed read reaches the tail", async () => {
-    const { cancelled, source } = openByteSource(3);
-    const url = "https://eve.test/eve/v1/session/session_1/stream?includeTailIndex=1";
-
+  it("serves a stream an earlier eve recorded as v27 lines, keeping stored positions", async () => {
+    const v26 = (type: string, data: object) => ({
+      data: { sequence: 0, turnId: "turn_0", ...data },
+      meta: { at, deliveryIds: ["delivery_1"] },
+      type,
+    });
+    const { session, starts } = sessionOf([
+      { data: {}, meta: { at }, type: "session.started" },
+      v26("turn.started", {}),
+      v26("message.received", { message: "Alice asks." }),
+      v26("message.appended", { messageDelta: "Hi", stepIndex: 0 }),
+    ]);
     const response = await createSessionStreamResponse(
-      new Request(url),
-      stubSession(
-        parseNdjsonStream(() => source),
-        1,
+      new Request("https://eve.test/eve/v1/session/session_1/stream?follow=false&startIndex=2"),
+      session,
+    );
+    expect(response.status).toBe(200);
+    // Each v26 line reads in light of those before it, so the read starts at the first.
+    expect(starts.at(-1)).toBe(0);
+    expect(await records(response)).toEqual([
+      { $eve: "heartbeat" },
+      {
+        at,
+        facts: [
+          {
+            data: {
+              deliveryId: "delivery_1",
+              parts: [{ kind: "text", text: "Alice asks." }],
+              turnId: "turn_0",
+            },
+            scope: { turnId: "turn_0" },
+            type: "delivery.consumed",
+          },
+        ],
+      },
+      // A streamed delta reads as no line; the marker keeps the reader's cursor on stored lines.
+      { $eve: "position", next: 4 },
+    ]);
+  });
+
+  it("ends a follow of an earlier eve's session at the tail once nothing owns it", async () => {
+    const v26 = { data: {}, meta: { at }, type: "session.started" };
+    const followed = async (hasRunnableOwner: boolean) => {
+      // A source read without following closes at the tail; a followed one stays open.
+      const { follows, session } = sessionOf([v26], { open: hasRunnableOwner });
+      const response = await createSessionStreamResponse(
+        new Request("https://eve.test/eve/v1/session/session_1/stream"),
+        { ...session, hasRunnableOwner: async () => hasRunnableOwner } as Session,
+      );
+      return { follows, response };
+    };
+
+    const ended = await followed(false);
+    // Read without following, so the source closes at the tail and readers stop.
+    expect(ended.follows.at(-1)).toBe(false);
+    expect((await records(ended.response)).at(-1)).toEqual({ $eve: "stream.ended" });
+
+    const live = await followed(true);
+    expect(live.follows.at(-1)).toBe(true);
+    await live.response.body?.cancel();
+  });
+
+  it("serves a fresh stream with no lines yet without a version check failing it", async () => {
+    const { session } = sessionOf([]);
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream?follow=false"),
+      session,
+    );
+    expect(response.status).toBe(200);
+    expect(await records(response)).toEqual([{ $eve: "heartbeat" }]);
+  });
+
+  it("opens with a heartbeat, serves the lines, and ends a finished stream with stream.ended", async () => {
+    const { session } = sessionOf([line("a"), line("b")]);
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream"),
+      session,
+    );
+    expect(await records(response)).toEqual([
+      { $eve: "heartbeat" },
+      line("a"),
+      line("b"),
+      { $eve: "stream.ended" },
+    ]);
+  });
+
+  // On the local world the tail lookup opens every chunk file, so a follow
+  // read that does not report the tail must not pay for it.
+  it("follows a session without resolving a tail it does not report", async () => {
+    const { session, tailLookups } = sessionOf([line("a")]);
+    const response = await createSessionStreamResponse(
+      new Request("https://eve.test/eve/v1/session/session_1/stream"),
+      session,
+    );
+    expect(response.headers.get(EVE_STREAM_TAIL_INDEX_HEADER)).toBeNull();
+    expect(tailLookups()).toBe(0);
+    expect(await records(response)).toEqual([
+      { $eve: "heartbeat" },
+      line("a"),
+      { $eve: "stream.ended" },
+    ]);
+  });
+
+  it("reads from a tail-relative cursor, and bounds a read at the tail it reports", async () => {
+    const { session, starts } = sessionOf([line("a"), line("b"), line("c")], { open: true });
+    const response = await createSessionStreamResponse(
+      new Request(
+        "https://eve.test/eve/v1/session/session_1/stream?startIndex=-2&includeTailIndex=1",
       ),
+      session,
     );
-
-    await expect(response.text()).resolves.toBe('\n{"sequence":0}\n{"sequence":1}\n');
-    await vi.waitFor(() => expect(cancelled()).toBe(true));
+    expect(response.headers.get(EVE_STREAM_TAIL_INDEX_HEADER)).toBe("2");
+    expect(starts).toEqual([0, 1]);
+    // The bound ends the response after the tail line, without stream.ended.
+    expect(await records(response)).toEqual([{ $eve: "heartbeat" }, line("b"), line("c")]);
   });
 
-  it("cancels the durable source when the client aborts", async () => {
-    const { cancelled, source } = openByteSource(1);
-    const abort = new AbortController();
-
-    const response = await createSessionStreamResponse(
-      new Request("https://eve.test/eve/v1/session/session_1/stream", { signal: abort.signal }),
-      stubSession(parseNdjsonStream(() => source)),
-    );
-    const reader = response.body!.getReader();
-    await reader.read();
-    await reader.read();
-    abort.abort();
-
-    await vi.waitFor(() => expect(cancelled()).toBe(true));
-  });
-
-  it("cancels the durable source when the response body is cancelled", async () => {
-    const { cancelled, source } = openByteSource(1);
-
+  it("sends heartbeats while quiet, and ends its lease so the reader reconnects", async () => {
+    vi.useFakeTimers();
+    const { session } = sessionOf([line("a")], { open: true });
     const response = await createSessionStreamResponse(
       new Request("https://eve.test/eve/v1/session/session_1/stream"),
-      stubSession(parseNdjsonStream(() => source)),
+      session,
     );
-    const reader = response.body!.getReader();
-    await reader.read();
-    await reader.read();
-    await reader.cancel();
-
-    await vi.waitFor(() => expect(cancelled()).toBe(true));
+    const body = records(response);
+    await vi.advanceTimersByTimeAsync(60_000);
+    const received = await body;
+    expect(received[0]).toEqual({ $eve: "heartbeat" });
+    expect(received[1]).toEqual(line("a"));
+    expect(
+      received.filter((record) => JSON.stringify(record) === '{"$eve":"heartbeat"}').length,
+    ).toBeGreaterThan(1);
+    expect(received.at(-1)).toEqual({ $eve: "stream.lease-ended" });
   });
 });

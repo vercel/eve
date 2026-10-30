@@ -12,7 +12,7 @@ export async function copyCompiledAssets() {
     await stat(sourcePath);
   } catch {
     throw new Error(
-      `Missing compiled vendor assets at "${sourcePath}". Run "pnpm --filter eve build:compiled".`,
+      `Missing compiled vendor assets at "${sourcePath}". Run "pnpm build:compiled" from the workspace root.`,
     );
   }
 

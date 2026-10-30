@@ -4,6 +4,7 @@ import { join, relative, resolve } from "node:path";
 import {
   EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
   EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+  EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
   writeExtensionCompatibilityManifest,
 } from "#compiler/extension-compatibility.js";
 import { discoverAgent } from "#discover/discover-agent.js";
@@ -15,7 +16,6 @@ import {
   tryReadExtensionBuildConfig,
   type ExtensionBuildConfig,
 } from "#internal/nitro/host/extension-build-config.js";
-import { deriveExtensionCapabilityRequirements } from "#internal/nitro/host/extension-capability-requirements.js";
 import {
   emitExtensionDistribution,
   ExtensionOutputRestoreError,
@@ -75,7 +75,7 @@ export async function buildExtensionPackage(
   let preserveTransactionRoot = false;
   try {
     await mkdir(stagedDistRoot, { recursive: true });
-    const runtimeImports = await emitExtensionDistribution({
+    await emitExtensionDistribution({
       appRoot,
       declarationModule,
       declarationsRoot: join(transactionRoot, "declarations"),
@@ -94,19 +94,10 @@ export async function buildExtensionPackage(
       kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
       formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
       builtWithEve: resolveInstalledPackageInfo().version,
+      contractMajor: EXTENSION_DISTRIBUTION_CONTRACT_MAJOR,
       ...(config.externalDependencies.length === 0
         ? {}
         : { build: { externalDependencies: config.externalDependencies } }),
-      requires: await deriveExtensionCapabilityRequirements({
-        runtimeImports,
-        runtimeRoot: stagedOutDir,
-        declarationModule,
-        manifest,
-        packageName: config.packageName,
-        runtimeDependencies: config.runtimeDependencies,
-        shortName: config.shortName,
-        sourceRoot: config.sourceRoot,
-      }),
     });
     await replaceExtensionBuildOutput({ outDir: config.outDir, stagedOutDir, transactionRoot });
     return config.outDir;

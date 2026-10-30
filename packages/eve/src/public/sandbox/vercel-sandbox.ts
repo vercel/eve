@@ -1,16 +1,4 @@
-import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
 import type { SandboxNetworkOptions } from "#shared/sandbox-network-policy.js";
-
-type VercelCreateOptions = NonNullable<Parameters<typeof Vercel.Sandbox.create>[0]>;
-
-type VercelSandboxInternalCreateOptions = {
-  readonly [key: `__${string}`]: unknown;
-};
-
-type VercelSandboxAuthorCreateOptions<T> = T extends unknown
-  ? Omit<T, "mounts" | "name" | "onResume" | "persistent" | "runtime" | "signal"> &
-      VercelSandboxInternalCreateOptions
-  : never;
 
 /**
  * Options accepted by Vercel sandbox environment constructors. Forwarded to Vercel
@@ -28,10 +16,10 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
  * are excluded: the framework owns those and overrides any
  * author-supplied values.
  *
- * `runtime` is excluded: eve defaults to its published
- * `vcr.vercel.com/vercel/eve/base` image tagged with the installed eve version
- * or `EVE_SANDBOX_IMAGE_TAG` when `image` is not supplied. Both are mutually
- * exclusive with a stock runtime.
+ * `runtime` is excluded: when `image` is not supplied, eve defaults to its
+ * published `vcr.vercel.com/vercel/eve/base` image, pinned to the tag the
+ * installed eve release ships with or `EVE_SANDBOX_IMAGE_TAG`. Both are
+ * mutually exclusive with a stock runtime.
  *
  * `image` is honored for fresh templates and template-less sessions. A
  * snapshot `source` takes precedence because the Vercel SDK makes it mutually
@@ -47,7 +35,45 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
  * snapshot, force a template rebuild (e.g. by changing the sandbox
  * definition so its template key changes).
  */
-export type VercelSandboxCreateOptions = VercelSandboxAuthorCreateOptions<VercelCreateOptions>;
+export type VercelSandboxCreateOptions = SandboxNetworkOptions & {
+  readonly [key: `__${string}`]: unknown;
+  readonly token?: string;
+  readonly teamId?: string;
+  readonly projectId?: string;
+  readonly fetch?: typeof fetch;
+  readonly ports?: number[];
+  readonly timeout?: number;
+  readonly resources?: { vcpus: number };
+  readonly env?: Record<string, string>;
+  readonly tags?: Record<string, string>;
+  readonly region?: string;
+  readonly failoverRegions?: string[];
+  readonly snapshotExpiration?: number;
+  readonly keepLastSnapshots?: { count: number; expiration?: number; deleteEvicted?: boolean };
+} & (
+    | {
+        image?: string;
+        source?:
+          | {
+              type: "git";
+              url: string;
+              username?: never;
+              password?: never;
+              depth?: number;
+              revision?: string;
+            }
+          | {
+              type: "git";
+              url: string;
+              username: string;
+              password: string;
+              depth?: number;
+              revision?: string;
+            }
+          | { type: "tarball"; url: string };
+      }
+    | { image?: never; source: { type: "snapshot"; snapshotId: string } }
+  );
 
 /** Access mode for a Drive mounted into a Vercel Sandbox. */
 export type VercelSandboxMountMode = "read-write" | "snapshot";

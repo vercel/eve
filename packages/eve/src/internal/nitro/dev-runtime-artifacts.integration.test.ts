@@ -90,7 +90,10 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
   );
   await writeFile(
     join(agentRoot, "agent.ts"),
-    ['export default { model: "openai/gpt-5.4-mini" };', ""].join("\n"),
+    [
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4-mini" });',
+      "",
+    ].join("\n"),
   );
   await writeFile(
     join(agentRoot, "model-router.ts"),

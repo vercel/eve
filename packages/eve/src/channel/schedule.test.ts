@@ -1,10 +1,10 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { describe, expect, it, vi } from "vitest";
 import {
   CHANNEL_SENTINEL,
   type CompiledChannel,
   isCompiledChannel,
 } from "#channel/compiled-channel.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   SCHEDULE_ADAPTER,
   SCHEDULE_ADAPTER_KIND,
@@ -24,14 +24,15 @@ import { z } from "#compiled/zod/index.js";
 import { defineChannel } from "#public/definitions/channel.js";
 
 function createMockRunHandle(): RunHandle {
-  return { events: new ReadableStream<MessageStreamEvent>(), sessionId: "mock-session-id" };
+  return { events: new ReadableStream<SessionStreamEvent>(), sessionId: "mock-session-id" };
 }
 function createMockRuntime(): Runtime {
   return {
     createSession: vi.fn().mockResolvedValue(createMockRunHandle()),
     dispatchContinuation: vi.fn().mockResolvedValue({ status: "session_not_active" }),
     dispatchSession: vi.fn(),
-    getEventStream: vi.fn().mockResolvedValue(new ReadableStream<MessageStreamEvent>()),
+    getEventStream: vi.fn().mockResolvedValue(new ReadableStream<SessionStreamEvent>()),
+    getLineStream: vi.fn().mockResolvedValue(new ReadableStream()),
     getStreamTailIndex: vi.fn().mockResolvedValue(-1),
     resolveContinuation: vi
       .fn()
@@ -214,7 +215,7 @@ describe("ScheduleDispatcher", () => {
       );
       expect(SCHEDULE_ADAPTER.kind).toBe(SCHEDULE_ADAPTER_KIND);
       expect(result.sessions).toHaveLength(1);
-      expect(result.sessions[0]!.id).toBe("mock-session-id");
+      expect(result.sessions[0]!.sessionId).toBe("mock-session-id");
       expect(result.waitUntilTasks).toHaveLength(0);
     });
     it("propagates runtime.createSession failures", async () => {
@@ -304,6 +305,52 @@ describe("ScheduleDispatcher", () => {
         await Promise.all(result.waitUntilTasks);
         expect(observed).toEqual(["dynamic-tasks"]);
         expect(contextStorage.getStore()?.get(ScheduleIdKey)).toBeUndefined();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+    // https://github.com/vercel/eve/issues/5598
+    it("tags to() sends with the Vercel deployment running the schedule", async () => {
+      vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
+      try {
+        const runtime = createMockRuntime();
+        runtime.dispatchContinuation = vi
+          .fn()
+          .mockResolvedValue({ sessionId: "existing-session", status: "accepted" });
+        const thread: CompiledChannel = {
+          __kind: CHANNEL_SENTINEL,
+          routes: [],
+          adapter: { kind: "channel:thread" },
+          receive: async ({ auth, message, target }, { from }) =>
+            await from(String(target.address)).send(message, { auth }),
+        };
+        const resolved: ResolvedChannelDefinition = {
+          name: "thread",
+          method: "POST",
+          urlPath: "/thread",
+          logicalPath: "channels/thread.ts",
+          sourceId: "channel-thread",
+          sourceKind: "module",
+          adapter: thread.adapter,
+          definition: thread,
+          receive: thread.receive,
+          fetch: async () => new Response("ok"),
+        };
+        await new ScheduleDispatcher({ runtime, channels: [resolved] }).trigger({
+          scheduleId: "daily",
+          async run({ to }) {
+            await to(thread, { address: "C1:1761400000.000100" }).send("daily check", {
+              auth: null,
+            });
+          },
+        });
+        expect(runtime.dispatchContinuation).toHaveBeenCalledWith(
+          expect.objectContaining({
+            command: expect.objectContaining({
+              delivery: expect.objectContaining({ acceptedDeploymentId: "dpl_current" }),
+            }),
+          }),
+        );
       } finally {
         vi.unstubAllEnvs();
       }

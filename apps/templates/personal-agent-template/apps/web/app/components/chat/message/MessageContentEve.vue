@@ -7,7 +7,7 @@ import {
   isToolUIPart,
 } from "ai";
 import type { UIMessage } from "ai";
-import type { EveDynamicToolPart } from "eve/vue";
+import type { EveToolUIPart } from "~/composables/chat/providers/eve/adapter";
 import { isPartStreaming, isToolStreaming } from "@nuxt/ui/utils/ai";
 import type { AgentInputResponse } from "~/components/AgentInputRequest.vue";
 import type { ChatStatus } from "~/composables/chat/types";
@@ -90,27 +90,24 @@ const showThinking = computed(
           v-else-if="getToolName(entry.part) !== 'ask_question'"
           :text="
             isDynamicToolUIPart(entry.part)
-              ? getToolDisplayName(entry.part as EveDynamicToolPart)
+              ? getToolDisplayName(entry.part as EveToolUIPart)
               : getToolName(entry.part)
           "
           :streaming="isToolStreaming(entry.part)"
           chevron="leading"
-          :default-open="
-            entry.part.state === 'approval-requested' || entry.part.state === 'approval-responded'
-          "
+          :default-open="(entry.part as EveToolUIPart).interaction?.status === 'open'"
         >
           <AgentInputRequest
             v-if="isDynamicToolUIPart(entry.part)"
             :can-respond="canRespond ?? true"
-            :part="entry.part as EveDynamicToolPart"
+            :part="entry.part as EveToolUIPart"
             @input-responses="emit('inputResponses', $event)"
           />
 
           <pre
             v-if="
               entry.part.input &&
-              (!isDynamicToolUIPart(entry.part) ||
-                shouldShowToolInput(entry.part as EveDynamicToolPart))
+              (!isDynamicToolUIPart(entry.part) || shouldShowToolInput(entry.part as EveToolUIPart))
             "
             class="overflow-x-auto rounded-md bg-muted p-2 text-xs"
             >{{ JSON.stringify(entry.part.input, null, 2) }}</pre>
@@ -126,7 +123,7 @@ const showThinking = computed(
           v-else-if="isDynamicToolUIPart(entry.part)"
           compact
           :can-respond="canRespond ?? true"
-          :part="entry.part as EveDynamicToolPart"
+          :part="entry.part as EveToolUIPart"
           @input-responses="emit('inputResponses', $event)"
         />
       </template>

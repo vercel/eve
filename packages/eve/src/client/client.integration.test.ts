@@ -27,7 +27,7 @@ describe("Client redirect policy", () => {
 
     try {
       const client = new Client({
-        host: sourceUrl,
+        baseUrl: sourceUrl,
         auth: { bearer: "secret" },
         redirect: "manual",
       });

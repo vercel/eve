@@ -6,8 +6,7 @@ It ships inside the `eve` package. This private `@eve/code` workspace package is
 
 - `eve/extensions/code`: the extension
 - `eve/extensions/code/sandbox`: sandbox bootstrap and credential helpers
-- `eve/extensions/code/tools`: `apply_patch` and `grep` (`gh` is a deprecated re-export)
-- `eve/extensions/code/prwatch`: PR-watch primitives for consumer-owned workflow tools
+- `eve/extensions/code/tools`: `apply_patch` and `grep`
 
 ## Mount
 
@@ -21,9 +20,9 @@ export default code({
 });
 ```
 
-Both connectors are optional; `code({})` mounts without either. The Vercel connector requests an app-subject token. Firewall delivery is the default and keeps tokens outside sandbox processes; without a consumer `broker`, it requires a sandbox provider that exposes `setNetworkPolicy()` and fails otherwise. Use `delivery: "command"` on the Vercel connector for providers without mutable network policy. A top-level `broker(sandbox, rules)` callback lets the consumer merge Vercel credential rules into its own network policy.
+The Vercel connector is optional; `code({})` mounts without it. The Vercel connector requests an app-subject token. Firewall delivery is the default and keeps tokens outside sandbox processes; without a consumer `broker`, it requires a sandbox provider that exposes `setNetworkPolicy()` and fails otherwise. Use `delivery: "command"` on the Vercel connector for providers without mutable network policy. A top-level `broker(sandbox, rules)` callback lets the consumer merge Vercel credential rules into its own network policy.
 
-The `github` option is deprecated; configure it on `eve/extensions/git` instead. While it is set here, this extension still contributes `code__gh`, its GitHub instructions, and the signed-commit `code__pr` skill. Without it, this extension contributes no GitHub tool, instructions, or pull request skill.
+The retired `github` option is rejected. Configure `eve/extensions/git` for GitHub tools, instructions, and the pull request skill.
 
 The read-only worker subagent defaults to `openai/gpt-5.6-terra-fast` with `xhigh` reasoning. Set `worker: { model, reasoning, openaiReasoningEffort? }` to choose another model; `openaiReasoningEffort` is passed to OpenAI models as `reasoningEffort`.
 
@@ -48,7 +47,7 @@ export default defineSandbox(() => environment.open());
 
 eve derives the prepared environment generation from the sandbox file and environment options, not from imported helpers, so upgrading eve alone does not rebuild an existing prepared artifact.
 
-Computer use lives in `eve/computer-use`. Mount it next to this extension when the sandbox has a desktop. `installComputerUse`, `startComputerUse`, and `COMPUTER_USE_REVALIDATION_KEY` are still re-exported from `eve/extensions/code/sandbox`, and `computer_use` from `eve/extensions/code/tools`, but both are deprecated.
+Computer use lives in its own extension. Import its tools and sandbox helpers directly; the deprecated code re-exports are removed.
 
 Preparation ensures `gh`, installs wrappers for `gh`, `vc`, and `gh-signed-commit`, and installs TypeScript diagnostics. With `eve/extensions/git` configured for `github`, repositories requiring verified signatures use `gh-signed-commit` through its `gh` tool.
 
@@ -61,15 +60,16 @@ Consumers with a PAT, benchmark token, or another credential provider can omit t
 Rebuild eve after editing `extension/`; the local agent under `agent/` mounts the built `eve/extensions/code`:
 
 ```sh
-pnpm --filter eve build
-pnpm --filter @eve/code typecheck
-pnpm --filter @eve/code test
-pnpm --filter @eve/code test:scenario
+pnpm build:eve
+pnpm typecheck --filter=@eve/code
+pnpm test:unit --filter=@eve/code
+pnpm test:integration --filter=@eve/code
+pnpm test:scenario --filter=@eve/code
 pnpm exec oxlint packages/eve-code
 pnpm exec oxfmt --check packages/eve-code
 ```
 
-Tests live under `test/`, outside the extension distribution. Unit and integration tests run through the workspace's matching test tasks. The package integration task depends only on eve's build. The root integration command runs the framework suite before the other packages because that suite rebuilds the runtime files they import. Scenario tests exercise temporary files, local Git repositories, and subprocesses; they need Node.js 24 or newer, Git, and Bash, but no model or service credentials.
+Tests live under `test/`, outside the extension distribution. Unit and integration tests run through the workspace's matching test tasks. Turbo builds eve once before the integration tasks that import its runtime files. Scenario tests exercise temporary files, local Git repositories, and subprocesses; they need Node.js 24 or newer, Git, and Bash, but no model or service credentials.
 
 The `typescript-compiler` development alias supplies the JavaScript compiler API used by the diagnostics worker test. The workspace's TypeScript 7 CLI remains the package typechecker. `prepack` builds the extension; installation does not run the extension CLI before the local framework has been built.
 

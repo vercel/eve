@@ -14,7 +14,7 @@ async function execute(_input: Input, ctx: WorkflowToolContext) {
   const response = await ctx
     .agent("survey-worker")
     .send("Please count the tide survey stations for Alice.");
-  const { message } = await response.result();
+  const { reply: message } = await response.result();
   return { survey: message ?? null };
 }
 

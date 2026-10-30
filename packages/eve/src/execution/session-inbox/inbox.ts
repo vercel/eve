@@ -1,5 +1,8 @@
 import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
-import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import {
+  SESSION_INBOX_SESSION_ID_METADATA_KEY,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/core/index.js";
 import { releaseSessionHooksStep } from "#execution/session-inbox/release-step.js";
 
@@ -43,6 +46,14 @@ export interface SessionHandoverPayload {
   readonly payloads: readonly Exclude<SessionInboxPayload, SessionHandoverPayload>[];
 }
 
+/** Replay-stable evidence that every buffered part and the final marker were applied. */
+export interface SessionHandoverObservation {
+  readonly attemptKey: string;
+  readonly payloadCount: number;
+  /** Workflow event time, not the host wall clock when replay reached this point. */
+  readonly appliedAtMs: number;
+}
+
 export type SessionInboxPayload =
   | SessionPrewarmPayload
   | SessionFailurePayload
@@ -67,6 +78,7 @@ interface Source {
  * reads expose nothing; interrupt handlers still fire on arrival.
  */
 export interface SessionInboxReader {
+  readonly handoverObservation?: SessionHandoverObservation;
   /**
    * Waits for and removes the next accepted payload in arrival order, or
    * `undefined` once no hook can deliver any more (released or taken over).
@@ -83,8 +95,8 @@ export interface SessionInboxReader {
   /** Resolves once a payload is ready or the inbox closes, without consuming anything. */
   whenPending(): Promise<void>;
   /**
-   * Called from the pump the moment an interrupt (`cancel`, `reset`,
-   * `session-timeout`) is accepted, ahead of any consumer read. Handlers must
+   * Called from the pump the moment an interrupt (`cancel`, `clear`,
+   * `reset`, `session-timeout`) is accepted, ahead of any consumer read. Handlers must
    * be synchronous and idempotent. The payload stays in the queue so the
    * consumer still processes it in order.
    */
@@ -165,6 +177,7 @@ export interface SessionInboxHandle extends SessionInbox {
 export function isInterrupt(value: SessionInboxPayload): boolean {
   return (
     value.kind === "cancel" ||
+    value.kind === "clear" ||
     value.kind === "reset" ||
     value.kind === "session-timeout" ||
     value.kind === "session-failure"
@@ -201,6 +214,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
         readonly parts: Map<number, SessionHandoverPayload>;
       }
     | undefined;
+  let handoverObservation: SessionHandoverObservation | undefined;
   const blockedWaiters = new Set<() => void>();
   const arrivalWaiters = new Set<() => void>();
   let takenOver = false;
@@ -251,6 +265,11 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       const next = current.parts.get(current.nextPart);
       if (next === undefined) break;
       if (next.final === true) {
+        handoverObservation = {
+          attemptKey: current.attemptKey,
+          payloadCount: current.nextPart,
+          appliedAtMs: Date.now(),
+        };
         observe(interruptHandlers, restored, isInterrupt);
         openHandover();
         return;
@@ -336,7 +355,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       token,
       hook: createHook<SessionInboxPayload | WorkflowToolRunMessageBatch>({
         token: sessionInboxHookToken(token),
-        metadata: { sessionId },
+        metadata: { [SESSION_INBOX_SESSION_ID_METADATA_KEY]: sessionId },
         ...(force && { experimental_force: true }),
       }),
       stopping: false,
@@ -374,6 +393,9 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   };
 
   return {
+    get handoverObservation() {
+      return handoverObservation;
+    },
     get claimedTokens() {
       return sources.map(({ token }) => token);
     },
@@ -494,6 +516,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
 export function isWorkflowMessage(value: SessionInboxPayload): value is WorkflowToolRunMessage {
   return (
     value.kind === "agent-started" ||
+    value.kind === "agent-sent" ||
     value.kind === "started" ||
     value.kind === "report" ||
     value.kind === "reply" ||

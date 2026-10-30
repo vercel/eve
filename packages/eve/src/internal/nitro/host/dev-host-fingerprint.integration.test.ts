@@ -27,7 +27,7 @@ interface HostVariant {
   readonly channel?: { readonly path: string };
   readonly instrumentationSlot?: string;
   readonly instrumentationSource?: string;
-  readonly schedule?: { readonly cron: string; readonly markdown: string };
+  readonly schedule?: { readonly cron: string; readonly content: string };
   readonly tool?: "ordinary" | "workflow" | "workflow-program";
   readonly workflowSourceFingerprint?: string;
   readonly workflowWorld?: "local" | "vercel";
@@ -241,7 +241,7 @@ describe("computeDevelopmentHostFingerprint", () => {
     const base = await computeDevelopmentHostFingerprint(await createHost());
     const withSchedule = await computeDevelopmentHostFingerprint(
       await createHost({
-        schedule: { cron: "0 0 * * 0", markdown: "Report the weather." },
+        schedule: { cron: "0 0 * * 0", content: "Report the weather." },
       }),
     );
 

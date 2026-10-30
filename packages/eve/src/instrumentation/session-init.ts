@@ -7,7 +7,6 @@ import {
   SessionTraceSeedKey,
   type SessionTraceSeed,
 } from "#context/keys.js";
-import type { SessionTraceContext } from "#channel/types.js";
 import { createLogger } from "#internal/logging.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import {
@@ -102,7 +101,7 @@ function allocateSessionTraceSeed(input: {
   readonly conversation: ConversationContext;
   readonly channelType?: string;
   readonly forwardedTracePolicy: ForwardedTraceAssertion | undefined;
-  readonly parentTraceContext?: SessionTraceContext;
+  readonly parentTraceContext?: SessionTraceSeed;
   readonly runtime: InstrumentationRuntime | undefined;
 }): SessionTraceSeed | undefined {
   const localDecision = () =>

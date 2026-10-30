@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
-import { streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import { MAX_OUTPUT_BYTES, truncateTail } from "#execution/sandbox/truncate-output.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 
@@ -95,6 +94,12 @@ interface RawStreams {
   readonly stdout: string;
 }
 
+/** The end of one output stream, after `omittedBytes` bytes that were dropped. */
+interface StreamTail {
+  readonly omittedBytes: number;
+  readonly text: string;
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -154,12 +159,12 @@ async function runCommand(
   signal?.addEventListener("abort", cancel, { once: true });
   try {
     const child = await sandbox.spawn({
-      abortSignal: controller.signal,
+      signal: controller.signal,
       command: launchCommand(command, directory),
     });
     const finished = Promise.all([
-      readText(child.stdout),
-      readText(child.stderr),
+      readTail(child.stdout),
+      readTail(child.stderr),
       child.wait(),
     ]).then(([stdout, stderr, { exitCode }]) => ({ exitCode, stderr, stdout }));
     const done = await waitUpTo(finished, BASH_YIELD_SECONDS * 1000);
@@ -229,8 +234,29 @@ async function claimRunningJob(
   };
 }
 
-async function readText(stream: ReadableStream<Uint8Array>): Promise<string> {
-  return new TextDecoder().decode(await streamToBuffer(stream));
+/**
+ * Drains `stream` keeping only its last {@link MAX_OUTPUT_BYTES}, so memory
+ * stays bounded however much a command prints.
+ */
+async function readTail(stream: ReadableStream<Uint8Array>): Promise<StreamTail> {
+  let chunks: Uint8Array[] = [];
+  let bytes = 0;
+  let omittedBytes = 0;
+  const keepTail = () => {
+    const tail = Buffer.concat(chunks).subarray(-MAX_OUTPUT_BYTES);
+    omittedBytes += bytes - tail.byteLength;
+    chunks = [tail];
+    bytes = tail.byteLength;
+    return tail;
+  };
+  for await (const chunk of stream) {
+    chunks.push(chunk);
+    bytes += chunk.byteLength;
+    // Trimming only once the kept bytes double keeps the copying linear in the output.
+    if (bytes > 2 * MAX_OUTPUT_BYTES) keepTail();
+  }
+  const text = new TextDecoder().decode(keepTail());
+  return { omittedBytes, text };
 }
 
 async function waitUpTo<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
@@ -247,13 +273,20 @@ async function waitUpTo<T>(promise: Promise<T>, ms: number): Promise<T | undefin
   }
 }
 
-function completed(exitCode: number, streams: RawStreams): BashResult {
-  return { ...formatStreams(streams), exitCode, status: "completed" };
+function completed(
+  exitCode: number,
+  { stderr, stdout }: { readonly stderr: StreamTail; readonly stdout: StreamTail },
+): BashResult {
+  const streams = formatStreams(
+    { stderr: stderr.text, stdout: stdout.text },
+    { stderr: stderr.omittedBytes, stdout: stdout.omittedBytes },
+  );
+  return { ...streams, exitCode, status: "completed" };
 }
 
 function formatStreams(
   streams: RawStreams,
-  omittedBytes: { readonly stderr: number; readonly stdout: number } = { stderr: 0, stdout: 0 },
+  omittedBytes: { readonly stderr: number; readonly stdout: number },
 ): BashStreams {
   const stdout = formatStream("stdout", streams.stdout, omittedBytes.stdout);
   const stderr = formatStream("stderr", streams.stderr, omittedBytes.stderr);

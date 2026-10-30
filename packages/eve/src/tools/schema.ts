@@ -448,7 +448,7 @@ function findDefault(root: JsonObject, schema: unknown): unknown {
 }
 
 /** Yields a subschema, then each local `$ref` target it chains through. */
-function* followRefs(root: JsonObject, schema: unknown): Generator<Record<string, unknown>> {
+export function* followRefs(root: JsonObject, schema: unknown): Generator<Record<string, unknown>> {
   const seen = new Set<object>();
   let node = schema;
   while (isObject(node) && !seen.has(node)) {

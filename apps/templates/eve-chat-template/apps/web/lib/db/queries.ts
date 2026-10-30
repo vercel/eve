@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, lt, or, sql } from "drizzle-orm";
-import type { ClientSessionState, MessageStreamEvent } from "eve/client";
+import { and, asc, desc, eq, lt, or, sql } from "drizzle-orm";
+import type { ClientSessionState, SessionStreamEvent } from "eve/client";
 import { isChatTurnSettledEvent } from "../chat/events";
 import type { ActiveChat, ChatListItem, ChatListPage } from "../chat/types";
 import { createFallbackTitle, DEFAULT_CHAT_TITLE } from "../chat/title";
@@ -220,84 +220,6 @@ export async function clearChatPendingMessage({
     .where(and(eq(chat.id, chatId), eq(chat.userId, userId)));
 }
 
-export async function skipChatAuthorization({
-  chatId,
-  events,
-  session,
-  userId,
-}: {
-  readonly chatId: string;
-  readonly events: readonly MessageStreamEvent[];
-  readonly session: ClientSessionState | undefined;
-  readonly userId: string;
-}) {
-  if (events.length === 0) {
-    throw new Error("No authorization events to save.");
-  }
-
-  const [ownedChat] = await db
-    .select({ id: chat.id })
-    .from(chat)
-    .where(and(eq(chat.id, chatId), eq(chat.userId, userId)))
-    .limit(1);
-
-  if (!ownedChat) {
-    throw new Error("Chat not found.");
-  }
-
-  const [lastEvent] = await db
-    .select({ eventIndex: chatEvent.eventIndex })
-    .from(chatEvent)
-    .where(eq(chatEvent.chatId, chatId))
-    .orderBy(desc(chatEvent.eventIndex))
-    .limit(1);
-  const eventIndex = (lastEvent?.eventIndex ?? -1) + 1;
-
-  await db
-    .insert(chatEvent)
-    .values(
-      events.map((event, offset) => ({
-        chatId,
-        event,
-        eventIndex: eventIndex + offset,
-        id: randomUUID(),
-      })),
-    )
-    .onConflictDoUpdate({
-      set: { event: sql`excluded.event` },
-      target: [chatEvent.chatId, chatEvent.eventIndex],
-    });
-
-  const [row] = await db
-    .update(chat)
-    .set({
-      eveSession: session ?? null,
-      pendingUserMessage: null,
-      pendingUserMessageCreatedAt: null,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(chat.id, chatId), eq(chat.userId, userId)))
-    .returning({
-      id: chat.id,
-      title: chat.title,
-      updatedAt: chat.updatedAt,
-    });
-
-  if (!row) {
-    throw new Error("Chat not found.");
-  }
-
-  return {
-    chat: {
-      id: row.id,
-      title: row.title,
-      updatedAt: row.updatedAt.toISOString(),
-    },
-    eventCount: events.length,
-    eventIndex,
-  };
-}
-
 export async function saveChatSessionState({
   chatId,
   session,
@@ -322,7 +244,7 @@ export async function appendChatEvent({
   userId,
 }: {
   readonly chatId: string;
-  readonly event: MessageStreamEvent;
+  readonly event: SessionStreamEvent;
   readonly eventIndex: number;
   readonly userId: string;
 }) {
@@ -357,7 +279,7 @@ export async function saveChatSnapshot({
   userId,
 }: {
   readonly chatId: string;
-  readonly events: readonly MessageStreamEvent[];
+  readonly events: readonly SessionStreamEvent[];
   readonly session: ClientSessionState | undefined;
   readonly userId: string;
 }) {
@@ -387,10 +309,6 @@ export async function saveChatSnapshot({
         target: [chatEvent.chatId, chatEvent.eventIndex],
       });
   }
-
-  await db
-    .delete(chatEvent)
-    .where(and(eq(chatEvent.chatId, chatId), gte(chatEvent.eventIndex, events.length)));
 
   await db
     .update(chat)
