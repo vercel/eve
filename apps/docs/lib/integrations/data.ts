@@ -8,7 +8,7 @@ import {
   instrumentationEntries,
   memoryEntries,
 } from "@eve/catalog";
-import { compareByName } from "./gallery";
+import { compareForGallery } from "./gallery";
 import type { LogoKey } from "./logos";
 
 /**
@@ -3076,27 +3076,27 @@ function buildInstrumentation(entry: IntegrationEntry): Integration {
 const channels: Integration[] = channelEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildChannel)
-  .sort(compareByName);
+  .sort(compareForGallery);
 
 const connections: Integration[] = connectionEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildConnection)
-  .sort(compareByName);
+  .sort(compareForGallery);
 
 const extensions: Integration[] = extensionEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildExtension)
-  .sort(compareByName);
+  .sort(compareForGallery);
 
 const memory: Integration[] = memoryEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildMemory)
-  .sort(compareByName);
+  .sort(compareForGallery);
 
 const instrumentation: Integration[] = instrumentationEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildInstrumentation)
-  .sort(compareByName);
+  .sort(compareForGallery);
 
 /** Display label for each connection protocol. */
 export const protocolLabel: Record<ConnectionProtocol, string> = {
