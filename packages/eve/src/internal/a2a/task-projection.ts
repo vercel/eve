@@ -9,7 +9,6 @@
 import { renderTextInteraction } from "#channel/resolve-text.js";
 import { signInChallengeText, signInOf } from "#channel/sign-in.js";
 import { readSessionStreamTailIndex, streamSessionLines } from "#execution/session-event-stream.js";
-import { interactionJson } from "#protocol/interaction-json.js";
 import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
 import { interaction, openRequests, openSignIns } from "#protocol/session-projection/reader.js";
 import {
@@ -26,14 +25,12 @@ import type {
   TurnRow,
 } from "#protocol/session-projection/tables.js";
 import { isV26Line } from "#protocol/v26-lines.js";
-import type { JsonValue } from "#shared/json.js";
 
 import { encodeTaskId, type TaskRef } from "./ids.js";
 import {
   A2A_JSON_RPC_ERRORS,
   A2aError,
   a2aTimestamp,
-  EVE_INTERACTIONS_EXTENSION,
   type Artifact,
   type Message,
   type Part,
@@ -247,8 +244,8 @@ function openPromptsForTurn(view: SessionView, turnId: string): readonly Interac
 
 /**
  * The status message for an interrupted task: the prompts as text any client can answer by typing
- * (eve's typed-answer intake resolves option IDs, labels, and numbers), plus the structured
- * interactions under eve's extension for clients that answer with a data part.
+ * (eve's typed-answer intake resolves option IDs, labels, and numbers). eve's interaction JSON
+ * stays off the wire: it's an internal format, and text is what every A2A client can answer.
  *
  * A sign-in's link and code are credentials, but an A2A context has one principal, its owner, so
  * they go in the message as they would in a direct message.
@@ -258,28 +255,20 @@ function promptMessage(
   rows: readonly InteractionRow[],
   address: TaskAddress,
 ): Message {
-  const interactions: JsonValue[] = [];
   const text: string[] = [];
   for (const row of rows) {
     const asked = interaction(view, row.interactionId);
     if (asked === undefined) continue;
-    interactions.push(interactionJson(asked) as JsonValue);
     const signIn = signInOf(view, row.interactionId);
     text.push(
       signIn === undefined ? renderTextInteraction(asked.request) : signInChallengeText(signIn),
     );
   }
-  return {
-    ...agentMessage(
-      address,
-      `${address.taskId}:prompt:${rows.map((row) => row.interactionId).join(",")}`,
-      [
-        { mediaType: "text/plain", text: text.join("\n\n") },
-        { data: { interactions }, mediaType: "application/json" },
-      ],
-    ),
-    extensions: [EVE_INTERACTIONS_EXTENSION],
-  };
+  return agentMessage(
+    address,
+    `${address.taskId}:prompt:${rows.map((row) => row.interactionId).join(",")}`,
+    [{ mediaType: "text/plain", text: text.join("\n\n") }],
+  );
 }
 
 function workingLabel(view: SessionView, turnId: string): string | undefined {

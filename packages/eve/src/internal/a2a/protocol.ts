@@ -14,9 +14,6 @@ export const A2A_PROTOCOL_VERSION = "1.0";
 /** The version an empty `A2A-Version` means (spec 3.2.6): 0.3 clients predate the header. */
 export const A2A_ABSENT_VERSION = "0.3";
 
-/** URI of eve's A2A extension carrying structured interaction prompts and answers. */
-export const EVE_INTERACTIONS_EXTENSION = "https://eve.dev/a2a/extensions/interactions/v1";
-
 export const A2A_JSON_RPC_ERRORS = {
   parseError: -32700,
   invalidRequest: -32600,

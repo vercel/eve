@@ -119,9 +119,7 @@ A stream starts with the `task`, then sends a `statusUpdate` for each state chan
 
 ## Answer questions and approvals
 
-When a task is `TASK_STATE_INPUT_REQUIRED`, its status message has two parts: the prompts as plain text with numbered options, and a data part with eve's structured interactions. Answer by sending a message with the task's `taskId`.
-
-The plain-text answer works with any client. eve resolves the text against the first open prompt by option ID, label, or number, as it does on Slack or any other text channel:
+When a task is `TASK_STATE_INPUT_REQUIRED`, its status message is plain text: each open question or approval, with its options numbered. Answer by sending a text message with the task's `taskId`. eve matches the text against the first open prompt by option number or label, or takes it as a free-form answer when the question allows one, as it does on Slack or any other text channel:
 
 ```json
 {
@@ -135,24 +133,7 @@ The plain-text answer works with any client. eve resolves the text against the f
 }
 ```
 
-To answer several prompts at once, or a prompt by its ID, use eve's interactions extension, `https://eve.dev/a2a/extensions/interactions/v1`. Declare it in the `A2A-Extensions` header or in the message's `extensions`, and send a data part with one answer per interaction:
-
-```json
-{
-  "message": {
-    "messageId": "0d7e2c61-3b9f-4c1e-8f25-6a4b9d2e1c70",
-    "role": "ROLE_USER",
-    "contextId": "wrun_01J...",
-    "taskId": "d3J1bl8w...",
-    "extensions": ["https://eve.dev/a2a/extensions/interactions/v1"],
-    "parts": [
-      { "data": { "responses": [{ "interactionId": "wrun_01J...-ask-1", "optionId": "approve" }] } }
-    ]
-  }
-}
-```
-
-Each answer is `{ interactionId, optionId?, text? }`, with the shapes the [MCP channel's `agent_update`](../channels/mcp#invoke-the-agent) accepts. An answer to an interaction that isn't open on the task is refused with `InvalidParams`.
+Each message answers one prompt. When several are open, the task stays `TASK_STATE_INPUT_REQUIRED` with the rest until each has an answer.
 
 ## Authentication
 
