@@ -60,8 +60,9 @@ export async function dispatchChannelRequest(
   routeKey: string,
   config: NitroArtifactsConfig,
 ): Promise<Response> {
-  const params = decodeRouteParams(event);
-  if (params === undefined) return malformedParamsResponse();
+  // Decoded except for encoded `/` and `\`, so a param never gains a path
+  // separator the request path didn't have.
+  const params = getRouterParams(event, { decode: true });
   return await traceChannelRequest({ request: event.req, routeKey }, async (span) => {
     // Correlation does not require an eve-owned request span. Preserve any
     // active platform request or function span before route resolution.
@@ -141,10 +142,7 @@ export async function dispatchChannelWebSocketRequest(
   routeKey: string,
   config: NitroArtifactsConfig,
 ): Promise<WebSocketRouteHooks> {
-  const params = decodeRouteParams(event);
-  if (params === undefined) {
-    return rejectWebSocketUpgrade(MALFORMED_PARAMS_BODY, 400);
-  }
+  const params = getRouterParams(event, { decode: true });
   const bundle = await resolveNitroChannelRuntimeBundle(config);
   const matchedChannel = channelsByRouteKey(bundle.channels).get(routeKey);
 
@@ -234,7 +232,7 @@ async function buildRouteArgs(input: {
   // inbound dispatch) is logged instead of dropped by the platform.
   const waitUntil = (task: Promise<unknown>) => {
     event.waitUntil(
-      task.catch((error: unknown) => {
+      Promise.resolve(task).catch((error: unknown) => {
         logError(log, "channel background task failed", error, {
           routeKey: input.routeKey,
           channel: channelName,
@@ -366,29 +364,6 @@ function rejectWebSocketUpgrade(
       throw Response.json(body, { status });
     },
   };
-}
-
-const MALFORMED_PARAMS_BODY = {
-  error: "The request path has malformed percent-encoding.",
-  ok: false,
-} as const;
-
-function malformedParamsResponse(): Response {
-  return Response.json(MALFORMED_PARAMS_BODY, { status: 400 });
-}
-
-/**
- * The matched route's params, percent-decoded except for encoded `/` and
- * `\`, which stay encoded so a param never gains a path separator. A path
- * with malformed percent-encoding has no params.
- */
-function decodeRouteParams(event: H3Event): Record<string, string> | undefined {
-  try {
-    return getRouterParams(event, { decode: true });
-  } catch (error) {
-    if (error instanceof URIError) return undefined;
-    throw error;
-  }
 }
 
 const routeKeyIndexes = new WeakMap<

@@ -797,6 +797,38 @@ describe("dispatchChannelRequest", () => {
     errorSpy.mockRestore();
   });
 
+  it("accepts a non-promise value passed to waitUntil", async () => {
+    const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [
+        {
+          fetch: async (_req, ctx: { waitUntil: (t: Promise<unknown>) => void }) => {
+            // Untyped authored code can pass any value.
+            ctx.waitUntil("not a promise" as never);
+            return new Response("ok");
+          },
+          logicalPath: "agent/channels/slack.ts",
+          method: "POST",
+          name: "slack",
+          sourceId: "channel-slack",
+          sourceKind: "module",
+          urlPath: "/slack",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ waitUntil }),
+      "POST /slack",
+      {} as never,
+    );
+
+    expect(await response.text()).toBe("ok");
+    await expect(waitUntil.mock.calls[0]?.[0]).resolves.toBe("not a promise");
+  });
+
   it("hands Nitro background work a streamed body registers after the handler returns", async () => {
     const deferred = createDeferred<void>();
     const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
@@ -860,35 +892,6 @@ describe("dispatchChannelRequest", () => {
     );
 
     await expect(response.json()).resolves.toEqual({ file: "notes%2Fcafé.md", user: "a%5Cb" });
-  });
-
-  it("rejects malformed percent-encoding with a 400 before any handler runs", async () => {
-    const handler = vi.fn(async () => new Response("ok"));
-    const websocket = vi.fn(async () => ({}));
-    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
-      agentName: "test-agent",
-      channels: [slackChannel(async () => new Response("unused"), { handler, websocket })],
-      runtime: createRuntime(),
-    });
-
-    const response = await dispatchChannelRequest(
-      createEvent({ params: { id: "%E0%A4%A" }, waitUntil: vi.fn() }),
-      "POST /slack",
-      {} as never,
-    );
-    const hooks = await dispatchChannelWebSocketRequest(
-      createEvent({ params: { id: "100%" }, waitUntil: vi.fn() }),
-      "POST /slack",
-      {} as never,
-    );
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({ ok: false });
-    expect(() => hooks.upgrade?.(new Request("https://eve.test/slack"))).toThrow(
-      expect.objectContaining({ status: 400 }),
-    );
-    expect(handler).not.toHaveBeenCalled();
-    expect(websocket).not.toHaveBeenCalled();
   });
 
   it("does not call waitUntil when no background work is registered", async () => {

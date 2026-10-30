@@ -4,7 +4,7 @@
 
 Background work a channel route registers with `waitUntil` while its streamed response is still being sent now runs to completion on hosted platforms, instead of being dropped.
 
-Channel route `params` keep encoded path separators (`%2F` and `%5C`) encoded, so a param can no longer contain a `/` or `\` that the request path never had. Other percent-encoded characters are still decoded, so `/files/caf%C3%A9` gives `café`; a handler that expected `%2F` decoded to `/` must now decode it itself. Malformed percent-encoding in path params gets `400 Bad Request` before any route handler runs.
+Channel route `params` keep encoded path separators (`%2F` and `%5C`) encoded, so a param can no longer contain a `/` or `\` that the request path never had. Other percent-encoded characters are still decoded, so `/files/caf%C3%A9` gives `café`; a handler that expected `%2F` decoded to `/` must now decode it itself.
 
 Agent text that mentions a Nitro build constant such as `import.meta.dev` now reaches production builds unchanged, instead of being rewritten to its value or failing the build. Skill files are embedded in the server bundle instead of Nitro server assets, so hosted output no longer ships Nitro's storage layer.
 
