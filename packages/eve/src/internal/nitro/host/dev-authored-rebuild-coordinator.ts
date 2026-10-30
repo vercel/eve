@@ -12,6 +12,7 @@ import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/developme
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 import {
   activateDevelopmentGeneration,
+  createDevelopmentGenerationPruner,
   discardDevelopmentGeneration,
 } from "#internal/nitro/development-generation.js";
 
@@ -93,7 +94,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
   readonly #developmentExtensions: DevelopmentExtensionSelection | undefined;
   readonly #devServer: DrainedNitroDevServer;
   readonly #usesParentWorkflowWorld: boolean;
-  readonly #onRuntimePruned: (() => Promise<void>) | undefined;
+  readonly #requestPrune: () => void;
 
   constructor(input: {
     readonly builds: DevelopmentBuilds;
@@ -106,7 +107,12 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
   }) {
     this.#builds = input.builds;
     this.#currentHost = input.initialHost;
-    this.#onRuntimePruned = input.onRuntimePruned;
+    this.#requestPrune = createDevelopmentGenerationPruner({
+      appRoot: input.initialHost.appRoot,
+      onRuntimePruned: input.onRuntimePruned,
+    });
+    // The initial generation was activated before this coordinator existed.
+    this.#requestPrune();
     this.#currentHostFingerprint = input.currentHostFingerprint;
     this.#developmentExtensions = input.developmentExtensions;
     this.#currentRuntimeFingerprint = input.currentRuntimeFingerprint;
@@ -169,8 +175,8 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
         await activateDevelopmentGeneration({
           appRoot: committedHost.appRoot,
           generation: committedHost.generation,
-          onRuntimePruned: this.#onRuntimePruned,
         });
+        this.#requestPrune();
         this.#commitState(committedHost, nextHostFingerprint, nextRuntimeFingerprint);
         nextHost = undefined;
         environmentReload.commit();
@@ -260,8 +266,8 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
         await activateDevelopmentGeneration({
           appRoot: committedHost.appRoot,
           generation: committedHost.generation,
-          onRuntimePruned: this.#onRuntimePruned,
         });
+        this.#requestPrune();
       } catch (error) {
         await discardDevelopmentGeneration(committedHost.generation).catch(() => undefined);
         this.#commitState(

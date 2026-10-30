@@ -4,7 +4,6 @@ import type { DevelopmentGeneration } from "#internal/nitro/development-generati
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 
 const mocks = vi.hoisted(() => ({
-  activate: vi.fn(async () => undefined),
   prune: vi.fn(async (): Promise<boolean> => false),
   prepare: vi.fn(),
   stage: vi.fn(),
@@ -24,12 +23,12 @@ vi.mock("#internal/materialized-authored-modules.js", () => ({
 }));
 
 vi.mock("#internal/nitro/dev-runtime-artifacts.js", () => ({
-  activateDevelopmentRuntimeArtifactsSnapshot: mocks.activate,
+  activateDevelopmentRuntimeArtifactsSnapshot: vi.fn(async () => undefined),
   pruneDevelopmentRuntimeArtifactsSnapshots: mocks.prune,
   stageDevelopmentRuntimeArtifactsSnapshot: mocks.stage,
 }));
 
-const { activateDevelopmentGeneration, stageDevelopmentGeneration } =
+const { createDevelopmentGenerationPruner, stageDevelopmentGeneration } =
   await import("#internal/nitro/development-generation.js");
 
 function createGeneration(id: string): DevelopmentGeneration {
@@ -112,66 +111,61 @@ describe("development generation staging", () => {
   });
 });
 
-describe("development generation activation", () => {
+describe("development generation pruner", () => {
   beforeEach(() => {
-    mocks.activate.mockReset();
-    mocks.activate.mockResolvedValue(undefined);
     mocks.prune.mockReset();
     mocks.prune.mockResolvedValue(false);
   });
 
-  it("requests background storage pruning once activation succeeds", async () => {
-    await activateDevelopmentGeneration({
-      appRoot: "/tmp/app-commit",
-      generation: createGeneration("committed"),
-    });
-
-    expect(mocks.prune).toHaveBeenCalledWith({ appRoot: "/tmp/app-commit" });
-  });
-
   it("skips reconciliation after a no-op prune", async () => {
-    const pruning = Promise.withResolvers<boolean>();
-    mocks.prune.mockReturnValueOnce(pruning.promise);
     const onRuntimePruned = vi.fn(async () => undefined);
-    await activateDevelopmentGeneration({
-      appRoot: "/tmp/app-no-op-prune",
-      generation: createGeneration("retained"),
-      onRuntimePruned,
-    });
-    pruning.resolve(false);
-    await pruning.promise;
+    createDevelopmentGenerationPruner({ appRoot: "/tmp/app-no-op-prune", onRuntimePruned })();
+
+    await vi.waitFor(() => expect(mocks.prune).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.prune).toHaveBeenCalledWith({ appRoot: "/tmp/app-no-op-prune" });
     expect(onRuntimePruned).not.toHaveBeenCalled();
   });
 
-  it("retries failed reconciliation on a later activation even when pruning is a no-op", async () => {
+  it("coalesces requests made during a prune into one more pass", async () => {
     const pruning = Promise.withResolvers<boolean>();
-    const reconciliation = Promise.withResolvers<void>();
     mocks.prune.mockReturnValueOnce(pruning.promise);
+    const requestPrune = createDevelopmentGenerationPruner({ appRoot: "/tmp/app-coalesce" });
+
+    requestPrune();
+    requestPrune();
+    requestPrune();
+    pruning.resolve(false);
+
+    await vi.waitFor(() => expect(mocks.prune).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.prune).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries failed reconciliation on a later request even when pruning is a no-op", async () => {
+    const reconciliation = Promise.withResolvers<void>();
+    mocks.prune.mockResolvedValueOnce(true);
     const onRuntimePruned = vi
       .fn()
       .mockReturnValueOnce(reconciliation.promise)
       .mockResolvedValue(undefined);
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const input = {
+    const requestPrune = createDevelopmentGenerationPruner({
       appRoot: "/tmp/app-reconcile",
-      generation: createGeneration("one"),
       onRuntimePruned,
-    };
+    });
     try {
-      await activateDevelopmentGeneration(input);
-      expect(onRuntimePruned).not.toHaveBeenCalled();
-      pruning.resolve(true);
+      requestPrune();
       await vi.waitFor(() => expect(onRuntimePruned).toHaveBeenCalledOnce());
       reconciliation.reject(new Error("storage unavailable"));
       await vi.waitFor(() => expect(warning).toHaveBeenCalledOnce());
-      await activateDevelopmentGeneration({ ...input, generation: createGeneration("two") });
+      requestPrune();
       await vi.waitFor(() => expect(onRuntimePruned).toHaveBeenCalledTimes(2));
       expect(mocks.prune).toHaveBeenCalledTimes(2);
       expect(warning).toHaveBeenCalledExactlyOnceWith(
         "[eve:dev] failed to reconcile expired Workflow runs: Error: storage unavailable",
       );
     } finally {
-      pruning.resolve(false);
       reconciliation.resolve();
       warning.mockRestore();
     }
@@ -182,14 +176,13 @@ describe("development generation activation", () => {
     mocks.prune.mockReturnValueOnce(pruning.promise).mockResolvedValueOnce(false);
     const onRuntimePruned = vi.fn(async () => undefined);
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const input = {
+    const requestPrune = createDevelopmentGenerationPruner({
       appRoot: "/tmp/app-prune-failure",
-      generation: createGeneration("one"),
       onRuntimePruned,
-    };
+    });
     try {
-      await activateDevelopmentGeneration(input);
-      await activateDevelopmentGeneration(input);
+      requestPrune();
+      requestPrune();
       pruning.reject(new Error("filesystem unavailable"));
       await vi.waitFor(() => expect(onRuntimePruned).toHaveBeenCalledOnce());
       expect(mocks.prune).toHaveBeenCalledTimes(2);
@@ -197,21 +190,7 @@ describe("development generation activation", () => {
         "[eve:dev] failed to prune runtime generations: Error: filesystem unavailable",
       );
     } finally {
-      pruning.resolve(false);
       warning.mockRestore();
     }
-  });
-
-  it("does not request pruning when activation fails", async () => {
-    mocks.activate.mockRejectedValueOnce(new Error("pointer write failed"));
-
-    await expect(
-      activateDevelopmentGeneration({
-        appRoot: "/tmp/app-failed",
-        generation: createGeneration("failed"),
-      }),
-    ).rejects.toThrow("pointer write failed");
-
-    expect(mocks.prune).not.toHaveBeenCalled();
   });
 });

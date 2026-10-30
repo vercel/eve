@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EntityConflictError, RunExpiredError } from "#compiled/@workflow/errors/index.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
-import { activateDevelopmentGeneration } from "#internal/nitro/development-generation.js";
+import {
+  activateDevelopmentGeneration,
+  createDevelopmentGenerationPruner,
+} from "#internal/nitro/development-generation.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { getDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
@@ -532,6 +535,9 @@ describe("parent development Workflow World", () => {
           snapshotSourceRoot: join(snapshotRoot, "source"),
           sourceRoot: appRoot,
         },
+      });
+      createDevelopmentGenerationPruner({
+        appRoot,
         onRuntimePruned: async () => {
           try {
             await world.reconcileExpiredRuns();
@@ -540,7 +546,7 @@ describe("parent development Workflow World", () => {
             reconciled.reject(error);
           }
         },
-      });
+      })();
       await reconciled.promise;
       for (const runId of [old, running]) {
         await expect(callWorld(world, "runs.get", [runId])).resolves.toMatchObject({

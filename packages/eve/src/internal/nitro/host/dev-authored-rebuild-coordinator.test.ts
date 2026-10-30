@@ -18,12 +18,14 @@ const mocks = vi.hoisted(() => ({
     workerData: {},
   })),
   computeDevelopmentHostFingerprint: vi.fn(async () => "host-1"),
+  createDevelopmentGenerationPruner: vi.fn(),
   createHostNitro: vi.fn(async () => ({})),
   discardDevelopmentGeneration: vi.fn(async () => undefined),
   environmentCommit: vi.fn(),
   environmentRollback: vi.fn(),
   prepareDevelopmentApplicationHost: vi.fn(),
   removeDevelopmentHostWorkspace: vi.fn(async () => undefined),
+  requestPrune: vi.fn(),
 }));
 
 vi.mock("#cli/dev/environment.js", () => ({
@@ -50,6 +52,7 @@ vi.mock("#internal/nitro/host/dev-host-workspace.js", () => ({
 }));
 vi.mock("#internal/nitro/development-generation.js", () => ({
   activateDevelopmentGeneration: mocks.activateDevelopmentGeneration,
+  createDevelopmentGenerationPruner: mocks.createDevelopmentGenerationPruner,
   discardDevelopmentGeneration: mocks.discardDevelopmentGeneration,
 }));
 vi.mock("#internal/nitro/host/artifacts-config.js", () => ({
@@ -140,11 +143,12 @@ async function createCoordinatorWithServer(onRuntimePruned?: () => Promise<void>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.createDevelopmentGenerationPruner.mockReturnValue(mocks.requestPrune);
 });
 
 describe("transactional authored rebuild coordinator", () => {
   it.each(["host-1", "host-2"])(
-    "forwards reconciliation on activation with host fingerprint %s",
+    "prunes with reconciliation after the initial and each later activation, host fingerprint %s",
     async (fingerprint) => {
       const onRuntimePruned = vi.fn(async () => undefined);
       const { coordinator, devServer } = await createCoordinatorWithServer(onRuntimePruned);
@@ -152,12 +156,20 @@ describe("transactional authored rebuild coordinator", () => {
       mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce(candidate);
       mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce(fingerprint);
       try {
+        expect(mocks.createDevelopmentGenerationPruner).toHaveBeenCalledWith({
+          appRoot: candidate.appRoot,
+          onRuntimePruned,
+        });
+        expect(mocks.requestPrune).toHaveBeenCalledOnce();
         await coordinator.rebuild({ changedPaths: [] });
         expect(mocks.activateDevelopmentGeneration).toHaveBeenCalledWith({
           appRoot: candidate.appRoot,
           generation: candidate.generation,
-          onRuntimePruned,
         });
+        expect(mocks.requestPrune).toHaveBeenCalledTimes(2);
+        expect(mocks.requestPrune.mock.invocationCallOrder[1]).toBeGreaterThan(
+          mocks.activateDevelopmentGeneration.mock.invocationCallOrder[0] ?? Infinity,
+        );
       } finally {
         await devServer.close();
       }
@@ -212,6 +224,8 @@ describe("transactional authored rebuild coordinator", () => {
     expect(mocks.discardDevelopmentGeneration).toHaveBeenCalledWith(structuralHost.generation);
     expect(mocks.environmentCommit).toHaveBeenCalledOnce();
     expect(mocks.environmentRollback).not.toHaveBeenCalled();
+    // Only the coordinator's initial request: a failed activation prunes nothing.
+    expect(mocks.requestPrune).toHaveBeenCalledOnce();
 
     const retryHost = createHost("retry", "run-2");
     mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce(retryHost);

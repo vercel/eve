@@ -432,7 +432,6 @@ async function startNitroDevelopmentServer(
         await activateDevelopmentGeneration({
           appRoot: preparedHost.appRoot,
           generation: preparedHost.generation,
-          onRuntimePruned,
         });
         initialGenerationPublished = true;
       },
