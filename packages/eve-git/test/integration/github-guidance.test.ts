@@ -4,6 +4,7 @@ import type { SkillDefinition } from "eve/skills";
 
 import extension from "../../extension/extension.ts";
 import instructions from "../../extension/instructions/github.ts";
+import type { defineGhTool } from "../../extension/lib/gh-tool.ts";
 import pr from "../../extension/skills/pr.ts";
 import gh from "../../extension/tools/gh.ts";
 
@@ -27,7 +28,7 @@ async function resolve() {
   return {
     content: guidance.content ?? "",
     skill: await run<SkillDefinition>(pr),
-    tool: await run<object | null>(gh),
+    tool: await run<ReturnType<typeof defineGhTool> | null>(gh),
   };
 }
 
@@ -54,10 +55,9 @@ test("with github config, GitHub goes through the brokered gh tool and signed co
     },
   });
   const { content, skill, tool } = await resolve();
-  assert.ok(tool && "execute" in tool && "label" in tool);
-  const label = tool.label as { start: (input: unknown) => string };
+  assert.ok(tool && "execute" in tool);
   assert.equal(
-    label.start({
+    tool.label?.start({
       command: "gh -R vercel/eve pr view 123 --comments",
       description: "Read review comments on PR 123",
       repository: "vercel/eve",
