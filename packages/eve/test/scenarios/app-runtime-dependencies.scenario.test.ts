@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -271,7 +272,6 @@ describe("hosted Vercel output", () => {
   }, 60_000);
 
   afterEach(() => {
-    delete (globalThis as Record<string, unknown>).__fixtureInstrumentationDep;
     vi.unstubAllEnvs();
   });
 
@@ -333,10 +333,19 @@ describe("hosted Vercel output", () => {
     );
 
     expect(instrumentationModule).toBeDefined();
-    await import(pathToFileURL(instrumentationModule![0]).href);
-    expect((globalThis as Record<string, unknown>).__fixtureInstrumentationDep).toEqual({
-      label: "fixture-instrumentation-helper",
-    });
+    // A fresh process: sibling tests may already have evaluated this chunk in-process.
+    const probe = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `await import(${JSON.stringify(pathToFileURL(instrumentationModule![0]).href)});
+process.stdout.write(JSON.stringify(globalThis.__fixtureInstrumentationDep ?? null));`,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(probe.status, probe.stderr).toBe(0);
+    expect(JSON.parse(probe.stdout)).toEqual({ label: "fixture-instrumentation-helper" });
   });
 });
 
