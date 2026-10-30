@@ -129,7 +129,9 @@ export class SessionLineTooLargeError extends Error {
   constructor(bytes: number) {
     super(
       `Session commit is ${bytes} bytes; the limit is ${MAX_SESSION_LINE_BYTES}. ` +
-        "A commit cannot be split. Reduce inline content or use a supported value reference.",
+        "A commit cannot be split, and its large values were already moved out of line, so " +
+        "the remaining bulk is in fields with no reference slot. Reduce what the facts carry " +
+        "inline.",
     );
     this.name = "SessionLineTooLargeError";
     this.bytes = bytes;

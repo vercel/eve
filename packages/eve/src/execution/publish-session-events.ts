@@ -59,8 +59,11 @@ import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.j
 import {
   encodeLineBytes,
   type FactPosition,
+  SessionLineTooLargeError,
   type StoredLine,
 } from "#protocol/session-events/envelope.js";
+import { prepareLine } from "#protocol/session-events/large-values.js";
+import { createSessionValueStore } from "#execution/session-value-store.js";
 import { FACT_CATALOG, isFactType } from "#protocol/session-events/catalog.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import type { Cause, ErrorInfo } from "#protocol/session-events/envelope.js";
@@ -70,6 +73,13 @@ import type { SessionView } from "#protocol/session-projection/tables.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("execution.publish-session-events");
+
+/** The type of a progress record, for the log line that reports dropping one. */
+function progressTypeOf(line: StoredLine): string {
+  if (!("progress" in line)) return "unknown";
+  const { type } = line.progress as { type?: unknown };
+  return typeof type === "string" ? type : "unknown";
+}
 
 /**
  * Whose event a session publishes. Every event reaches the channel adapter, the
@@ -531,6 +541,8 @@ export function openSessionEventPublisher(input: {
   const { ctx } = input;
   const orphaned = [...(input.orphaned ?? [])];
   const dispatcher = createSessionEventDispatcher(input);
+  // Opened lazily on the first oversized value, so the common publication never touches it.
+  const stageValue = createSessionValueStore(ctx);
   // Opened after the dispatcher, so a context that cannot build one leaves the
   // stream unlocked for the terminal event's fallback write.
   const writer = openSessionEventWriter(input.sessionWritable);
@@ -551,7 +563,23 @@ export function openSessionEventPublisher(input: {
     const written: WrittenEvent[] = [];
     // Preflight every line before the first write: an oversize progress record must not leave
     // an earlier part of the publication durably written.
-    const lines = linesOf(events, at).map((line) => ({ line, bytes: encodeLineBytes(line) }));
+    //
+    // A commit is atomic and cannot be split, so one carrying a large tool result or image moves
+    // that value to the session's store and carries a reference in its place. A progress record
+    // has no reference slot and needs none — the envelope says any progress record may be
+    // missing — so an oversized one is dropped instead, which keeps the facts around it writable.
+    const lines: { line: StoredLine<SessionEvent, SessionEvent>; bytes: Uint8Array }[] = [];
+    for (const original of linesOf(events, at)) {
+      const { bytes, line, oversized } = await prepareLine(original, stageValue);
+      if (oversized) {
+        if ("progress" in line) {
+          log.warn("dropping an oversized progress record", { type: progressTypeOf(line) });
+          continue;
+        }
+        throw new SessionLineTooLargeError(bytes.byteLength);
+      }
+      lines.push({ line, bytes });
+    }
     lines.forEach(({ line }, index) => {
       const violations = checker?.check(line, nextLinePosition(ctx) + index);
       if (violations !== undefined && violations.length > 0) {
