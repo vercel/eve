@@ -46,11 +46,16 @@ function headGuard(allow: readonly string[] | undefined): {
   };
 }
 
-/** A channel HTTP route: optional CORS and HEAD guard, then channel dispatch. */
+/**
+ * A channel HTTP route: optional CORS and HEAD guard, then channel dispatch.
+ * With `websocketRouteKey`, the same GET handler also answers WebSocket
+ * upgrades on its path, since an upgrade arrives as a GET.
+ */
 export function renderChannelHandler(input: {
   readonly allow?: readonly string[];
   readonly cors?: NormalizedChannelCorsOptions;
   readonly routeKey: string;
+  readonly websocketRouteKey?: string;
 }): string {
   const guard = headGuard(input.allow);
   const dispatch = `dispatchChannelRequest(event, ${JSON.stringify(input.routeKey)}, config)`;
@@ -64,6 +69,10 @@ export function renderChannelHandler(input: {
         ]),
     ...guard.statements,
   ];
+  const handler =
+    body.length === 0
+      ? `(event) => ${dispatch}`
+      : [`(event) => {`, ...body, `  return ${dispatch};`, `}`].join("\n");
   return [
     ...guard.imports,
     ...(input.cors === undefined
@@ -72,11 +81,18 @@ export function renderChannelHandler(input: {
           `import { handleCors } from ${importNitroModule("nitro/h3")};`,
           `const cors = ${JSON.stringify(input.cors)};`,
         ]),
-    `import { dispatchChannelRequest } from ${importSourceModule("src/internal/nitro/routes/channel-dispatch.ts")};`,
+    ...(input.websocketRouteKey === undefined
+      ? [
+          `import { dispatchChannelRequest } from ${importSourceModule("src/internal/nitro/routes/channel-dispatch.ts")};`,
+        ]
+      : [
+          `import { defineWebSocketHandler } from ${importNitroModule("nitro")};`,
+          `import { dispatchChannelRequest, dispatchChannelWebSocketRequest } from ${importSourceModule("src/internal/nitro/routes/channel-dispatch.ts")};`,
+        ]),
     importRouteConfig,
-    body.length === 0
-      ? `export default (event) => ${dispatch};`
-      : [`export default (event) => {`, ...body, `  return ${dispatch};`, `};`].join("\n"),
+    input.websocketRouteKey === undefined
+      ? `export default ${handler};`
+      : `export default defineWebSocketHandler((event) => dispatchChannelWebSocketRequest(event, ${JSON.stringify(input.websocketRouteKey)}, config), ${handler});`,
   ].join("\n");
 }
 

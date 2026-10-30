@@ -225,21 +225,45 @@ export async function renderHostRoutes(
     handlers.push({ handler: id, ...registration });
   };
 
+  // A WebSocket upgrade arrives as a GET, so a path with both routes gets one
+  // GET handler that serves HTTP requests and answers upgrades. Paths match
+  // as the router matches them: parameter names don't distinguish them.
+  const channelRoutes = table.routes.filter((route) => route.kind === "channel");
+  const httpGetPatterns = new Set(
+    channelRoutes
+      .filter((route) => route.method === "GET")
+      .map((route) => normalizeRoutePattern(route.path)),
+  );
+  const websocketRouteKeys = new Map(
+    channelRoutes
+      .filter((route) => route.method === "WEBSOCKET")
+      .map((route) => [normalizeRoutePattern(route.path), `WEBSOCKET ${route.path}`]),
+  );
+
   for (const route of table.routes) {
     switch (route.kind) {
       case "channel": {
         const routeKey = `${route.method} ${route.path}`;
         const id = `#eve/channel/${routeKey}`;
+        const pattern = normalizeRoutePattern(route.path);
         if (route.method === "WEBSOCKET") {
-          addVirtualHandler(id, renderChannelWebSocketHandler({ routeKey }), { route: route.path });
+          if (!httpGetPatterns.has(pattern)) {
+            addVirtualHandler(id, renderChannelWebSocketHandler({ routeKey }), {
+              method: "GET",
+              route: route.path,
+            });
+          }
           break;
         }
+        const websocketRouteKey =
+          route.method === "GET" ? websocketRouteKeys.get(pattern) : undefined;
         addVirtualHandler(
           id,
           renderChannelHandler({
             allow: route.allow,
             cors: route.cors,
             routeKey,
+            ...(websocketRouteKey !== undefined && { websocketRouteKey }),
           }),
           { method: route.method, route: route.path },
         );

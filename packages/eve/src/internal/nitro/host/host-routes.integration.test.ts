@@ -19,6 +19,7 @@ const routeModules = vi.hoisted(() => ({
   dispatchChannelRequest: vi.fn(
     async (_event: unknown, routeKey: string) => new Response(`channel ${routeKey}`),
   ),
+  dispatchChannelWebSocketRequest: vi.fn(async () => ({})),
   dispatchScheduleTask: vi.fn(async (name: string) => `ran ${name}`),
   handleConnectionEventRequest: vi.fn(async () => new Response("connection")),
   handleDevScheduleDispatchRequest: vi.fn(async () => new Response("dev schedule")),
@@ -26,7 +27,7 @@ const routeModules = vi.hoisted(() => ({
 
 vi.mock("#internal/nitro/routes/channel-dispatch.js", () => ({
   dispatchChannelRequest: routeModules.dispatchChannelRequest,
-  dispatchChannelWebSocketRequest: vi.fn(),
+  dispatchChannelWebSocketRequest: routeModules.dispatchChannelWebSocketRequest,
 }));
 vi.mock("#internal/nitro/routes/connection-events.js", () => ({
   handleConnectionEventRequest: routeModules.handleConnectionEventRequest,
@@ -75,6 +76,8 @@ function manifest(world?: string): Parameters<typeof createHostRouteTable>[0]["m
       effective: [
         channel("GET", "/stream", {}),
         channel("POST", "/stream", {}),
+        channel("GET", "/rooms/:id"),
+        channel("WEBSOCKET", "/rooms/:room"),
         channel("GET", "/health"),
         channel("HEAD", "/health"),
         channel("WEBSOCKET", "/voice"),
@@ -212,8 +215,25 @@ describe("rendered host routes", () => {
     expect(handlerAt("/stream", "HEAD")).toBe(handlerAt("/stream", "GET"));
     expect(methodsAt("/health")).toEqual(["GET", "HEAD"]);
     expect(handlerAt("/health", "HEAD")).not.toBe(handlerAt("/health", "GET"));
-    // WebSocket upgrades arrive as GET, so the route accepts every method.
-    expect(methodsAt("/voice")).toEqual([undefined]);
+    // WebSocket upgrades arrive as GET.
+    expect(methodsAt("/voice")).toEqual(["GET"]);
+  });
+
+  it("answers upgrades and HTTP requests on a path with both from one GET handler", async () => {
+    // Parameter names don't distinguish paths, as for the router.
+    const host = await serve({ mode: "production" });
+
+    const upgrade = await host.fetch("/rooms/1", { headers: { upgrade: "websocket" } });
+    expect(upgrade.status).toBe(426);
+    expect(routeModules.dispatchChannelWebSocketRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      "WEBSOCKET /rooms/:room",
+      artifactsConfig,
+    );
+    expect(routeModules.dispatchChannelRequest).not.toHaveBeenCalled();
+
+    expect(await (await host.fetch("/rooms/1")).text()).toBe("channel GET /rooms/:id");
+    expect(routeModules.dispatchChannelWebSocketRequest).toHaveBeenCalledTimes(1);
   });
 
   it("answers CORS preflights without dispatching to the channel", async () => {
