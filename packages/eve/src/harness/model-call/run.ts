@@ -1,5 +1,6 @@
 import type { LanguageModel } from "ai";
 import { handleStepResult } from "#harness/step/after-model.js";
+import { decideBeforeModel } from "#harness/policy/kernel.js";
 
 import { HistoryStateKey } from "#context/keys.js";
 import {
@@ -13,17 +14,10 @@ import { enforceBudget, humanInputContext } from "#harness/hitl/index.js";
 import { runRequested, runStarted } from "#harness/facts.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import { nextRunId } from "#protocol/session-projection.js";
-import {
-  failBoundaryEvent,
-  failModelSelection,
-  prepareModelCall,
-  type Step,
-} from "#harness/step/context.js";
+import { failBoundaryEvent, failModelSelection, type Step } from "#harness/step/context.js";
 import type { TurnInput } from "#harness/step/intake.js";
 import {
   buildPrompt,
-  commitTurnInput,
-  previewPrompt,
   projectPrompt,
   type Prompt,
   withClientContext,
@@ -56,8 +50,8 @@ export interface ModelResponse {
  *
  * The session's dynamic values are evaluated first, with the conversation the call reads, which
  * fixes its model, tools, and context. Then the turn's input joins history, so a call that fails
- * keeps it, and the budget gate passes. Then the turn requests a model run, and the run starts as
- * its provider call begins.
+ * keeps it, the session's policy may end the turn instead, and the budget gate passes. Then the
+ * turn requests a model run, and the run starts as its provider call begins.
  */
 export async function runModelStep(
   step: Step,
@@ -67,10 +61,10 @@ export async function runModelStep(
   },
 ): Promise<StepResult> {
   const { generation } = input;
-  const failed = await prepareModelCall(step, previewPrompt(step, input.turn));
-  if (failed !== undefined) return failed;
-  const turn = await commitTurnInput(step, input.turn);
-  const prompt = await buildPrompt(step, turn);
+  const start = await decideBeforeModel(step, input.turn);
+  if ("ended" in start) return start.ended;
+  input = { ...input, turn: start.turn };
+  const prompt = await buildPrompt(step, input.turn);
   // Over budget, the model doesn't run: the step's messages park with the prompt.
   const overBudget = await enforceBudget(step, prompt.messages);
   if (overBudget !== undefined) return overBudget;

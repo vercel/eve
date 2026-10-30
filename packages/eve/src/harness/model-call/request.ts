@@ -1,19 +1,19 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 
 import { HistoryStateKey } from "#context/keys.js";
-import { dynamicInstructionMessages } from "#reactions/kinds/instructions.js";
+import { harnessOffer } from "#reactions/kinds/tool.js";
+import { harnessInstructions } from "#reactions/kinds/instructions.js";
+import { nativeInstructions } from "#harness/policy/agent.js";
 import { memoryRecallContents } from "#reactions/kinds/memory.js";
 import { dynamicSkillManifest } from "#reactions/kinds/skill.js";
 import { catalogAnnouncements } from "#execution/catalog/listing.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { dynamicSkillAnnouncements } from "#execution/skills/instructions.js";
-import { taskSystemMessages } from "#execution/tasks/model-step.js";
 import { createCurrentMessages } from "#harness/current-messages.js";
 import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { applySystemCacheBreakpoint } from "#harness/prompt-cache.js";
 import type { Step } from "#harness/step/context.js";
-import type { HarnessSession } from "#harness/types.js";
 
 export type RequestMessages = ReturnType<typeof createCurrentMessages>;
 
@@ -39,13 +39,14 @@ export function requestMessages(
     currentTurnMessages: input.turnMessages,
     projectedMessages: input.projectedMessages,
   });
-  messages.addSystem(dynamicInstructionMessages(ctx));
-  messages.addSystem(taskSystemMessages(input.catalog.offersTasks, step.finalReplyOnly));
-  const announced = ctx?.get(HistoryStateKey)?.announcements;
-  messages.addAnnouncements({
-    ...catalogAnnouncements(input.catalog, announced),
-    ...dynamicSkillAnnouncements(dynamicSkillManifest(ctx), announced),
-  });
+  // What tools and skills the catalog reaches is eve's own harness's to announce.
+  if (harnessOffer(ctx) === undefined) {
+    const announced = ctx?.get(HistoryStateKey)?.announcements;
+    messages.addAnnouncements({
+      ...catalogAnnouncements(input.catalog, announced),
+      ...dynamicSkillAnnouncements(dynamicSkillManifest(ctx), announced),
+    });
+  }
   if (input.pendingApprovalsNote !== undefined) {
     messages.add(input.pendingApprovalsNote, "context.state", { cacheFriendly: false });
   }
@@ -54,28 +55,41 @@ export function requestMessages(
   return messages;
 }
 
-/** The call's system instructions: a retry's note, the agent's system prompt, then the step's. */
+/**
+ * The call's system prompt: a retry's note, then exactly the instructions. A string alone is sent
+ * as it is; parts join into one system message, empty ones skipped, with the cache breakpoint at
+ * its end.
+ */
 export function modelInstructions(input: {
-  readonly session: HarnessSession;
-  readonly systemMessages: readonly SystemModelMessage[];
+  readonly instructions: string | readonly string[];
   readonly anthropicCache: ModelProfile["anthropicCache"];
   readonly extraSystemNote?: string;
 }): SystemModelMessage | string | undefined {
-  const { session } = input;
-  const extra: SystemModelMessage[] = input.extraSystemNote
-    ? [{ role: "system", content: input.extraSystemNote }]
-    : [];
-  if (input.systemMessages.length === 0 && extra.length === 0) {
-    return session.agent.system ?? undefined;
-  }
-  const base: SystemModelMessage[] = session.agent.system
-    ? [{ role: "system", content: session.agent.system }]
-    : [];
-  const instructions = [...extra, ...base, ...input.systemMessages];
+  const note = input.extraSystemNote ? [input.extraSystemNote] : [];
+  if (typeof input.instructions === "string" && note.length === 0) return input.instructions;
+  const parts = [
+    ...note,
+    ...(typeof input.instructions === "string" ? [input.instructions] : input.instructions),
+  ].filter((part) => part !== "");
+  const instructions = parts.map((content): SystemModelMessage => ({ content, role: "system" }));
   return mergeSystemInstructions(
     input.anthropicCache
       ? applySystemCacheBreakpoint(instructions, input.anthropicCache)
       : instructions,
+  );
+}
+
+/** The step's system prompt: the harness's, where it gives one; otherwise eve's default prompt. */
+export function stepInstructions(
+  step: Step,
+  catalog: Pick<StepCatalog, "offersTasks">,
+): string | readonly string[] {
+  return (
+    harnessInstructions(step.ctx) ??
+    nativeInstructions(step.ctx, {
+      facts: { finalReplyOnly: step.finalReplyOnly, offersTasks: catalog.offersTasks },
+      system: step.session.agent.system,
+    })
   );
 }
 

@@ -12,7 +12,7 @@ import type {
   SessionPreviews,
   SessionView,
 } from "#protocol/session-projection/tables.js";
-import { callPlace, runPlace } from "#protocol/session-projection/reader.js";
+import { callPlace, partPlace, runPlace } from "#protocol/session-projection/reader.js";
 import { displayTitle } from "#protocol/session-projection/display-name.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -81,8 +81,10 @@ export function assistantMessages(
   }
 
   for (const row of Object.values(view.parts)) {
-    const at = runPlace(view, row.runId);
+    const at = partPlace(view, row);
     if (!shows(at?.turnId)) continue;
+    // A draft the harness reviewed isn't the turn's: its reply is a part of its own.
+    if (row.phase === "draft") continue;
     if (row.kind === "result") results.set(at.turnId, row.value);
     const type = textKind(row.kind);
     if (type === undefined || typeof row.value !== "string") continue;

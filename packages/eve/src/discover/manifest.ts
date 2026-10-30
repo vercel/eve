@@ -201,6 +201,8 @@ export interface AgentSourceManifest {
   channels: ChannelSourceRef[];
   connections: ConnectionSourceRef[];
   configModule?: ModuleSourceRef;
+  /** The authored `harness.<ext>` module, which decides how the agent's turns run. */
+  harness?: ModuleSourceRef;
   diagnosticsSummary: DiscoverDiagnosticsSummary;
   /**
    * Mounted extension source references discovered under `agent/extensions/`.
@@ -258,6 +260,7 @@ export interface CreateAgentSourceManifestInput {
   channels?: readonly ChannelSourceRef[];
   connections?: readonly ConnectionSourceRef[];
   configModule?: ModuleSourceRef;
+  harness?: ModuleSourceRef;
   diagnostics?: readonly DiscoverDiagnostic[];
   extensions?: readonly ExtensionSourceRef[];
   resolvedExtensions?: readonly ResolvedExtensionMount[];
@@ -355,6 +358,7 @@ export function createAgentSourceManifest(
   if (input.configModule !== undefined) {
     manifest.configModule = input.configModule;
   }
+  if (input.harness !== undefined) manifest.harness = input.harness;
   return manifest;
 }
 

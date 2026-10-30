@@ -5,16 +5,20 @@ import { connectionReaction, installDynamicConnections } from "./kinds/connectio
 import { hookReaction } from "./kinds/hook.js";
 import { instructionsReaction } from "./kinds/instructions.js";
 import { memoryReactions } from "./kinds/memory.js";
-import { loadModelReaction } from "./kinds/model.js";
+import { harnessChoseModel, loadModelReaction } from "./kinds/model.js";
 import { skillReaction, syncDynamicSkillFiles } from "./kinds/skill.js";
 import { subagentReaction } from "./kinds/subagent.js";
 import { toolReaction } from "./kinds/tool.js";
-import { REACTION_ORDER, type BundleReactions, type Reaction } from "./reaction.js";
+import { harnessValues } from "#harness/policy/authored.js";
+import type { BundleReactions, Reaction, ValueReaction } from "./reaction.js";
 
 const cache = new WeakMap<CompiledBundle, Promise<BundleReactions>>();
 const EMPTY: BundleReactions = { effects: {}, reactions: [] };
 
-/** The reactions the session's agent declares, in run order. */
+/**
+ * The reactions the session's agent declares, in run order: hooks after each commit; then the
+ * model, which every later value can read, and each kind that may read the ones before it.
+ */
 export async function bundleReactions(
   ctx: Pick<ContextReader, "get" | "has">,
 ): Promise<BundleReactions> {
@@ -35,22 +39,40 @@ export async function bundleReactions(
   return { ...all, reactions: all.reactions.filter((reaction) => reaction.kind !== "model") };
 }
 
+/** The agent's model, which waits for the harness's: when the harness chooses, it doesn't run. */
+function unlessHarnessChose(model: ValueReaction): ValueReaction {
+  const skipped = Symbol("skipped");
+  return {
+    ...model,
+    contribute: (result, ctx) =>
+      result === skipped ? { value: null } : model.contribute(result, ctx),
+    evaluate: (ctx) => (harnessChoseModel(ctx.ctx) ? skipped : model.evaluate(ctx)),
+  };
+}
+
 async function buildReactions(bundle: CompiledBundle): Promise<BundleReactions> {
   const agent = bundle.resolvedAgent;
   const model = await loadModelReaction(bundle);
-  const reactions: Reaction[] = [
-    ...agent.hooks.map(hookReaction),
-    ...agent.memories.flatMap(memoryReactions),
-    ...(model === undefined ? [] : [model]),
+  const harness = agent.harness === undefined ? undefined : harnessValues(agent.harness, bundle);
+  const declared: ValueReaction[] = [
+    ...(model === undefined ? [] : [harness === undefined ? model : unlessHarnessChose(model)]),
     ...(agent.dynamicConnectionResolvers ?? []).map(connectionReaction),
     ...bundle.subagentRegistry.dynamicResolvers.map(subagentReaction),
     ...agent.dynamicToolResolvers.map(toolReaction),
     ...agent.dynamicSkillResolvers.map(skillReaction),
     ...agent.dynamicInstructionsResolvers.map(instructionsReaction),
   ];
-  reactions.sort(
-    (left, right) => REACTION_ORDER.indexOf(left.kind) - REACTION_ORDER.indexOf(right.kind),
-  );
+  const reactions: Reaction[] = [
+    ...agent.hooks.map(hookReaction),
+    ...agent.memories.flatMap(memoryReactions),
+    ...(harness === undefined
+      ? declared
+      : [
+          harness.model,
+          ...declared.map((reaction): ValueReaction => ({ ...reaction, declared: true })),
+        ]),
+    ...(harness?.rest ?? []),
+  ];
   return {
     effects: {
       ...((agent.dynamicConnectionResolvers ?? []).length === 0

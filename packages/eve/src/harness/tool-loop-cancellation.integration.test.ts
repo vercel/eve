@@ -299,9 +299,10 @@ describe("tool loop cancellation (real AI SDK)", () => {
     )(createSession(), { message: "Hi" });
 
     const bare = createEventCollector();
-    const bareResult = await createKernel(createConfig(buildModel(), bare.emit))(createSession(), {
-      message: "Hi",
-    });
+    const bareResult = await createKernel(createConfig(buildModel(), bare.emit))(
+      createSession(),
+      { message: "Hi" },
+    );
 
     expect(inertResult.next).toBe(bareResult.next);
     expect(inert.events.map((event) => event.type)).toEqual(bare.events.map((event) => event.type));

@@ -74,6 +74,43 @@ export async function loadModelReaction(
   };
 }
 
+export const HARNESS_MODEL_ID = "model:harness";
+
+/**
+ * The model `agent/harness.ts` chooses, in place of the agent's. `null` or `undefined` leaves the
+ * agent's own.
+ */
+export function harnessModelReaction(
+  bundle: CompiledBundle,
+  input: { readonly evaluate: ValueReaction["evaluate"]; readonly label: string },
+): ValueReaction {
+  return {
+    contribute: async (result) => {
+      // `declared(ctx).model`: the agent's own, which runs as it would without a harness.
+      if (result === null || result === undefined || isDeclaredModel(result)) {
+        return { value: null };
+      }
+      try {
+        return await contributionOf(result, bundle);
+      } catch (error) {
+        throw new DynamicModelSelectionError(error);
+      }
+    },
+    evaluate: input.evaluate,
+    id: HARNESS_MODEL_ID,
+    kind: "model",
+    label: input.label,
+  };
+}
+
+function isDeclaredModel(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as Record<symbol, unknown>)[Symbol.for("eve.harness.declared")] === "model"
+  );
+}
+
 /** Resolves a model result to what the slot records, and the provider the process holds. */
 async function contributionOf(
   result: unknown,
@@ -95,12 +132,20 @@ async function contributionOf(
 }
 
 /** The model the next call uses: the dynamic agent's, or the static one. */
+/** The harness chose this step's model: the agent's own dynamic model doesn't run. */
+export function harnessChoseModel(ctx: Pick<ContextReader, "get">): boolean {
+  const slot = readReactionsState(ctx).slots[HARNESS_MODEL_ID];
+  return slot !== undefined && slot.value !== null;
+}
+
 export function getEffectiveModelSelection(
   ctx: Pick<ContextReader, "get">,
 ): LiveDynamicModelSelection | null {
-  const slot = readReactionsState(ctx).slots[MODEL_REACTION_ID];
-  if (slot !== undefined && slot.value !== null) {
-    const live = readLive(ctx, MODEL_REACTION_ID, slot);
+  const { slots } = readReactionsState(ctx);
+  for (const id of [HARNESS_MODEL_ID, MODEL_REACTION_ID]) {
+    const slot = slots[id];
+    if (slot === undefined || slot.value === null) continue;
+    const live = readLive(ctx, id, slot);
     return (
       (live?.live as LiveDynamicModelSelection | undefined) ?? {
         reference: slotValueOf<ModelSlotValue>(slot.value).reference,

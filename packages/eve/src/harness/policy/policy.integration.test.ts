@@ -7,9 +7,13 @@ import { createKernel } from "#harness/tool-loop.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
+import { recordUsage } from "#harness/usage-sink.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
+import { reactionSession } from "#internal/testing/reaction-session.js";
 import { nativeNext, nativePolicy } from "./native.js";
+import { harnessPolicy } from "./authored.js";
+import type { SessionFrame } from "#dynamic/definition.js";
 import type { Next, Policy, PolicyContext } from "./policy.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
@@ -89,6 +93,8 @@ async function runTurn(
     readonly history?: HarnessSession["history"];
     readonly threshold?: number;
     readonly compactOnly?: boolean;
+    /** The session's context, with the bundle its dynamic values come from. */
+    readonly ctx?: ContextContainer;
   } = {},
 ) {
   const { outputSchema } = options;
@@ -117,7 +123,7 @@ async function runTurn(
   const issues: unknown[] = [];
   let position = 0;
   let stepped: StepResult | undefined;
-  await contextStorage.run(new ContextContainer(), async () => {
+  await contextStorage.run(options.ctx ?? new ContextContainer(), async () => {
     const fold = foldingHandler();
     stepped = await createKernel({
       ...(options.compactOnly === true && { compactOnly: true }),
@@ -140,7 +146,9 @@ async function runTurn(
 }
 
 /** eve's own loop, except that `review` can send a settling output back to the model. */
-function reviewing(review: (output: unknown, continuations: number) => string | undefined): Policy {
+function reviewing(
+  review: (output: unknown, continuations: number) => string | undefined,
+): Policy {
   return (ctx) => ({
     next: (): Next => {
       const next = nativeNext(ctx);
@@ -268,6 +276,203 @@ const older: HarnessSession["history"] = Array.from({ length: 6 }, (_, index) =>
   },
   { content: `Earlier answer ${index}.`, role: "assistant" as const },
 ]).flat();
+
+describe("usage a policy records", () => {
+  it("counts toward the session's usage", async () => {
+    const { events, result } = await runTurn(
+      (ctx) => ({
+        next: async () => {
+          await recordUsage({ inputTokens: 120, outputTokens: 30 });
+          return nativeNext(ctx);
+        },
+      }),
+      ["Two court cases back it."],
+    );
+
+    expect(
+      events.filter((event) => event.type === "usage.recorded" && event.data.kind === "auxiliary"),
+    ).toMatchObject([
+      // At the turn's start, and after the model's answer.
+      { data: { usage: { inputTokens: 120, outputTokens: 30 } } },
+      { data: { usage: { inputTokens: 120, outputTokens: 30 } } },
+    ]);
+    expect(result.settledTurn).toEqual({ output: "Two court cases back it." });
+  });
+});
+
+describe("a harness policy's drafts", () => {
+  it("drafts the model's answers until the policy settles, and replies with what it settles", async () => {
+    const { events, issues } = await runTurn(
+      reviewing((output) =>
+        typeof output === "string" && output.includes("[1]")
+          ? undefined
+          : "Cite a source for the claim, as [1].",
+      ),
+      ["Two court cases back it.", "Two court cases back it [1]."],
+    );
+
+    const texts = events.flatMap((event) =>
+      event.type === "content.completed" && event.data.kind === "text"
+        ? [{ phase: event.data.phase, value: event.data.value }]
+        : [],
+    );
+    expect(texts).toEqual([
+      { phase: "draft", value: "Two court cases back it." },
+      { phase: "draft", value: "Two court cases back it [1]." },
+      { phase: "reply", value: "Two court cases back it [1]." },
+    ]);
+    expect(events.filter((event) => event.type === "turn.settled")).toMatchObject([
+      { data: { reply: ["turn_0.reply"] } },
+    ]);
+    expect(issues).toEqual([]);
+  });
+});
+
+describe("a harness policy at the turn's start", () => {
+  const replyOf = (events: readonly SessionEvent[]) =>
+    events.filter((event) => event.type === "content.completed");
+
+  it("ends the turn without the model, with its output as the reply", async () => {
+    const { events, issues, prompts, result } = await runTurn(
+      (ctx) => ({
+        next: () =>
+          ctx.turn?.lastStep === undefined
+            ? { settle: { output: "Released v1.2 for Alice." } }
+            : nativeNext(ctx),
+      }),
+      ["The model shouldn't answer."],
+    );
+
+    expect(prompts).toEqual([]);
+    expect(events.filter((event) => event.type === "model.requested")).toEqual([]);
+    expect(replyOf(events)).toMatchObject([
+      {
+        data: { kind: "text", phase: "reply", turnId: "turn_0", value: "Released v1.2 for Alice." },
+      },
+    ]);
+    expect(events.filter((event) => event.type === "turn.settled")).toMatchObject([
+      { data: { outcome: "completed", reply: ["turn_0.reply"] } },
+    ]);
+    expect(result.settledTurn).toEqual({ output: "Released v1.2 for Alice." });
+    expect(result.session.history.slice(-2)).toMatchObject([
+      { content: "Which sources back the second claim?", role: "user" },
+      { content: "Released v1.2 for Alice.", role: "assistant" },
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it("shows the model a note after the turn's input", async () => {
+    const { prompts, result } = await runTurn(
+      (ctx) => ({
+        next: () =>
+          ctx.turn?.lastStep === undefined
+            ? { model: { note: "Bob reviewed the sources yesterday." } }
+            : nativeNext(ctx),
+      }),
+      ["Two court cases back it."],
+    );
+
+    expect(prompts).toEqual(["Bob reviewed the sources yesterday."]);
+    expect(result.settledTurn).toEqual({ output: "Two court cases back it." });
+  });
+
+  it("fails the turn with the policy's message", async () => {
+    const { events, prompts, result } = await runTurn(
+      () => ({ next: { fail: { message: "Releases are paused until Monday." } } }),
+      [],
+    );
+
+    expect(prompts).toEqual([]);
+    expect(result.settledTurn).toEqual({
+      isError: true,
+      output: "Releases are paused until Monday.",
+    });
+    expect(events.filter((event) => event.type === "turn.settled")).toMatchObject([
+      { data: { error: { message: "Releases are paused until Monday." }, outcome: "failed" } },
+    ]);
+  });
+
+  it("settles with structured output its schema accepts, and fails on output it rejects", async () => {
+    const outputSchema = {
+      additionalProperties: false,
+      properties: { total: { type: "number" } },
+      required: ["total"],
+      type: "object",
+    };
+    const settling =
+      (output: unknown): Policy =>
+      (ctx) => ({
+        next: () =>
+          ctx.turn?.lastStep === undefined
+            ? { settle: { output: output as never } }
+            : nativeNext(ctx),
+      });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const accepted = await runTurn(settling({ total: 42 }), [], { outputSchema });
+    const rejected = await runTurn(settling({ total: "42" }), [], { outputSchema });
+
+    expect(accepted.result.settledTurn).toEqual({ output: { total: 42 } });
+    expect(replyOf(accepted.events)).toMatchObject([
+      { data: { kind: "result", value: { total: 42 } } },
+    ]);
+    expect(rejected.result.settledTurn).toEqual({
+      isError: true,
+      output: "The agent could not produce a result matching the requested schema.",
+    });
+  });
+
+  it("replaces the model's reply when it settles with output of its own", async () => {
+    const { events, result } = await runTurn(
+      (ctx) => ({
+        next: () =>
+          ctx.turn?.lastStep === undefined
+            ? { model: {} }
+            : { settle: { output: `${ctx.turn.lastStep.text} (Checked by Bob.)` } },
+      }),
+      ["Two court cases back it."],
+    );
+
+    expect(result.settledTurn).toEqual({ output: "Two court cases back it. (Checked by Bob.)" });
+    expect(events.filter((event) => event.type === "turn.settled")).toMatchObject([
+      { data: { reply: ["turn_0.reply"] } },
+    ]);
+  });
+
+  it("keeps the model's answers in history, adding the policy's reply after them", async () => {
+    const settling =
+      (output: (text: string | null) => string): Policy =>
+      (ctx) => ({
+        next: () =>
+          ctx.turn?.lastStep === undefined
+            ? { model: {} }
+            : { settle: { output: output(ctx.turn.lastStep.text) } },
+      });
+    const assistant = (history: HarnessSession["history"]) =>
+      history
+        .filter((message) => message.role === "assistant")
+        .map((message) =>
+          typeof message.content === "string"
+            ? message.content
+            : message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(""),
+        );
+
+    const revised = await runTurn(
+      settling(() => "Two court cases back it [1]."),
+      ["Two court cases back it."],
+    );
+    const accepted = await runTurn(
+      settling((text) => text ?? ""),
+      ["Two court cases back it."],
+    );
+
+    expect(assistant(revised.result.session.history)).toEqual([
+      "Two court cases back it.",
+      "Two court cases back it [1].",
+    ]);
+    expect(assistant(accepted.result.session.history)).toEqual(["Two court cases back it."]);
+  });
+});
 
 /** eve's own loop, with `history` deciding what the model reads about the past. */
 function withHistory(
@@ -408,5 +613,103 @@ describe("a harness policy's history", () => {
     expect(prompts).toEqual([]);
     expect(result.settledTurn).toMatchObject({ isError: true });
     expect(JSON.stringify(events)).not.toContain("10.0.0.7");
+  });
+});
+
+describe("a harness's history", () => {
+  // The kernel decides the same way for a harness; only its context differs.
+  const frame = () => ({ session: { id: "program-session" } }) as SessionFrame;
+
+  it("becomes the session's history", async () => {
+    const { events, fullPrompts, result } = await runTurn(
+      harnessPolicy(
+        (ctx) => ({
+          history: () => (ctx.size!.tokens > 600 ? ctx.history.slice(-1) : ctx.history),
+        }),
+        frame,
+      ),
+      ["Two court cases back it."],
+      { history: older },
+    );
+
+    expect(JSON.stringify(fullPrompts[0])).not.toContain("Earlier question");
+    expect(
+      events.filter((event) => event.type === "model.requested" && "changeId" in event.data.owner),
+    ).toEqual([]);
+    expect(result.settledTurn).toEqual({ output: "Two court cases back it." });
+  });
+
+  it("leaves the history to eve when it returns undefined", async () => {
+    const { events } = await runTurn(
+      harnessPolicy(() => ({ history: () => undefined }), frame),
+      ["A summary of the earlier exchanges.", "Two court cases back it."],
+      { history: older, threshold: 600 },
+    );
+
+    // eve's own compaction writes its summary with a model run the change owns.
+    expect(
+      events.filter((event) => event.type === "model.requested" && "changeId" in event.data.owner),
+    ).toHaveLength(1);
+  });
+
+  it("summarizes with eve's summarizer, and keeps what it adds", async () => {
+    const { events, result } = await runTurn(
+      harnessPolicy(
+        (ctx) => ({
+          history: async () =>
+            ctx.size!.tokens > 600 ? await ctx.summarize(ctx.history) : ctx.history,
+        }),
+        frame,
+      ),
+      ["A summary of the earlier exchanges.", "Two court cases back it."],
+      { history: older, threshold: 600 },
+    );
+
+    expect(
+      events.filter((event) => event.type === "model.requested" && "changeId" in event.data.owner),
+    ).toHaveLength(1);
+    expect(result.settledTurn).toEqual({ output: "Two court cases back it." });
+  });
+});
+
+/** An instructions value a policy declares itself, the way a file under `instructions/` would. */
+describe("a harness policy's memos", () => {
+  it("keep what one decision learned for its next evaluation in the turn", async () => {
+    const { ctx } = reactionSession();
+    let lookups = 0;
+    const policy: Policy = (ctx) => ({
+      ...nativePolicy(ctx),
+      next: async (): Promise<Next> => {
+        const next = nativeNext(ctx);
+        // Alice's citation style, looked up once per turn.
+        const style = await ctx.memo(["citation-style", ctx.turn!.id], () => {
+          lookups += 1;
+          return "[n]";
+        });
+        if (!("settle" in next) || ctx.turn!.continuations > 0) return next;
+        return { model: { note: `Cite your sources as ${style}.` } };
+      },
+    });
+
+    const { prompts, result } = await runTurn(
+      policy,
+      ["Two court cases back it.", "Two court cases back it [1]."],
+      { ctx },
+    );
+
+    expect(prompts).toEqual(["Which sources back the second claim?", "Cite your sources as [n]."]);
+    expect(result.settledTurn).toEqual({ output: "Two court cases back it [1]." });
+    expect(lookups).toBe(1);
+  });
+
+  it("fail the turn generically where the step carries no session state", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { result } = await runTurn(
+      (ctx) => ({ next: () => ctx.memo(["style"], () => ({ settle: { output: "Done." } })) }),
+      ["Two court cases back it."],
+    );
+
+    expect(result.settledTurn).toEqual({ isError: true, output: "The agent's harness failed." });
   });
 });

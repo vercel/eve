@@ -1,4 +1,5 @@
 import type { HarnessModelMessage } from "#harness/messages.js";
+import type { Memo } from "#dynamic/definition.js";
 import type { JsonValue } from "#shared/json.js";
 
 // A harness policy is a function of the session that says what should happen next. eve
@@ -62,6 +63,12 @@ export interface PolicyContext {
   readonly compact?: true;
   /** eve's summarizer. Only where eve asks for the history; elsewhere it throws. */
   readonly summarize: Summarize;
+  /**
+   * Keeps what the policy learns from outside, as a dynamic value's `ctx.memo` does. Each
+   * decision (`history`, `next`) keeps what its latest evaluation used. A cache, not a
+   * record of effects: a deployment change or a crash can run it again.
+   */
+  readonly memo: Memo;
   readonly tasks: { readonly working: readonly string[] };
   readonly signal: AbortSignal | undefined;
 }
@@ -75,7 +82,9 @@ export type Next =
    * calls the model with their results. Under an output schema the turn ends with the value the
    * model delivered.
    */
-  | { readonly settle: { readonly output: JsonValue | null } };
+  | { readonly settle: { readonly output: JsonValue | null } }
+  /** End the turn as failed, with `message` for the person. */
+  | { readonly fail: { readonly message: string } };
 
 /** What a policy says should be true. A field it leaves out is eve's own. */
 export interface Plan {
@@ -90,3 +99,16 @@ export interface Plan {
 
 /** Cheap and synchronous: it says what each field is. Work belongs in the lazy fields. */
 export type Policy = (ctx: PolicyContext) => Plan;
+
+/** Marks the notes a policy adds, with the turn they continued. */
+export const NOTE_KEY = "eve.program";
+
+/** The notes policies added to this turn, which compaction may have summarized away. */
+export function continuationsOf(history: readonly HarnessModelMessage[], turnId: string): number {
+  return history.filter(
+    (message) =>
+      message.role === "user" &&
+      message.kind === "execution.continuation" &&
+      message.metadata?.[NOTE_KEY] === turnId,
+  ).length;
+}

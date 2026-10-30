@@ -73,7 +73,10 @@ function setup(
     history: [],
     sessionId: "approved-call-recheck",
   };
-  const step = (current: HarnessSession, input?: Parameters<ReturnType<typeof createKernel>>[1]) =>
+  const step = (
+    current: HarnessSession,
+    input?: Parameters<ReturnType<typeof createKernel>>[1],
+  ) =>
     contextStorage.run(recorder.enter(createApprovalContext()), () =>
       createKernel(config)(current, input),
     );

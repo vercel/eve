@@ -57,6 +57,8 @@ interface StreamActionEmissionOptions {
   readonly finalReplyOnly?: boolean;
   /** The session's call with this id, as its view holds it now. */
   readonly sessionCall: (callId: string) => CallRow | undefined;
+  /** The agent's harness decides whether the run's last text is the turn's reply. */
+  readonly draft?: boolean;
   readonly tools: HarnessToolLookup;
   /** A deliberate turn cancel or steering interrupt, not a provider failure/retry. */
   readonly interruptSignal?: AbortSignal;
@@ -103,10 +105,10 @@ export async function emitStreamContent(
  * and a held turn's text in a session whose caller reads only the final reply. A person reads a
  * held turn's text as a reply.
  */
-function finalPhase(finishReason: AssistantStepFinishReason, held: boolean) {
+function finalPhase(finishReason: AssistantStepFinishReason, held: boolean, draft: boolean) {
   if (finishReason === "tool-calls") return "narration";
   if (held && finishReason === "stop") return "narration";
-  return "reply";
+  return draft ? "draft" : "reply";
 }
 
 /** A root session's text before `eve__task_wait` is a reply the person reads while the turn waits. */
@@ -143,7 +145,7 @@ async function consumeStreamContent(
     partId: string,
     kind: "text" | "reasoning",
     value: string,
-    phase: "narration" | "reply",
+    phase: "narration" | "reply" | "draft",
   ): Promise<void> => {
     await emitFn({ data: { kind, partId, phase, runId, value }, type: "content.completed" });
   };
@@ -504,7 +506,7 @@ async function consumeStreamContent(
       messagePartId,
       "text",
       currentMessage,
-      finalPhase(finishReason, options?.held === true),
+      finalPhase(finishReason, options?.held === true, options?.draft === true),
     );
   }
 
