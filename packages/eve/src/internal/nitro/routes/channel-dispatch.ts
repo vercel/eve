@@ -93,8 +93,14 @@ export async function dispatchChannelRequest(
       span?.channel({ channelKind });
     }
 
+    const params = decodeRouteParams(event);
+    if (params === undefined) {
+      return Response.json({ error: "Malformed request path.", ok: false }, { status: 400 });
+    }
+
     const routeArgs = await buildRouteArgs(
       event,
+      params,
       bundle,
       matchedChannel.name,
       channelKind ?? "channel",
@@ -170,8 +176,13 @@ export async function dispatchChannelWebSocketRequest(
     getChannelInstrumentationKind(matchedChannel.definition) ??
     matchedChannel.adapter?.kind ??
     "channel";
+  const params = decodeRouteParams(event);
+  if (params === undefined) {
+    return rejectWebSocketUpgrade({ error: "Malformed request path.", ok: false }, 400);
+  }
   const routeArgs = await buildRouteArgs(
     event,
+    params,
     bundle,
     matchedChannel.name,
     channelKind,
@@ -227,8 +238,27 @@ async function withDevelopmentVercelOidcContext<T>(
   );
 }
 
+/**
+ * Decodes Nitro's raw route params once. Returns `undefined` when a param has
+ * a malformed percent escape such as `%ZZ`, so the caller can answer 400.
+ */
+function decodeRouteParams(event: H3Event): Record<string, string> | undefined {
+  const rawParams = (event.context.params as Record<string, string>) ?? {};
+  const params: Record<string, string> = {};
+  try {
+    for (const [key, value] of Object.entries(rawParams)) {
+      params[key] = decodeURIComponent(value);
+    }
+  } catch (error) {
+    if (error instanceof URIError) return undefined;
+    throw error;
+  }
+  return params;
+}
+
 async function buildRouteArgs(
   event: H3Event,
+  params: Record<string, string>,
   bundle: Awaited<ReturnType<typeof resolveNitroChannelRuntimeBundle>>,
   channelName: string,
   channelKind: string,
@@ -238,12 +268,6 @@ async function buildRouteArgs(
   const requestId = readVercelRequestId(event.req.headers);
   const requestIp = extractRequestIp(event, config);
   const backgroundTasks: Promise<unknown>[] = [];
-  const rawParams = (event.context.params as Record<string, string>) ?? {};
-  const params: Record<string, string> = {};
-  for (const [key, value] of Object.entries(rawParams)) {
-    params[key] = decodeURIComponent(value);
-  }
-
   const waitUntil = (task: Promise<unknown>) => {
     backgroundTasks.push(task);
   };
