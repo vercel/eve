@@ -78,11 +78,19 @@ async function assertNuxtHealth(
   const port = await findFreePort();
   let output = "";
   let backendPid: number | undefined;
+  const pendingRequest = new AbortController();
   const clustered = env.NITRO_CLUSTER_WORKERS !== undefined;
   const child = spawn(process.execPath, [join(deployment, ".output/server/index.mjs")], {
     cwd: deployment,
     detached: clustered && process.platform !== "win32",
-    env: { ...env, PORT: String(port), NITRO_PORT: String(port), HOST: "127.0.0.1" },
+    env: {
+      ...env,
+      PORT: String(port),
+      NITRO_PORT: String(port),
+      HOST: "127.0.0.1",
+      NITRO_SHUTDOWN_DISABLED: "",
+      NITRO_SHUTDOWN_SIGNALS: "SIGTERM SIGINT",
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
@@ -115,6 +123,18 @@ async function assertNuxtHealth(
         () => `eve child did not start.\n${output}`,
         5_000,
       );
+      expect(await readFile(join(deployment, "request-probe-installed"), "utf8")).toBe("installed");
+      const markerPath = join(deployment, "request-started");
+      await rm(markerPath, { force: true });
+      const request = fetch(`http://127.0.0.1:${port}/eve/v1/health`, {
+        signal: pendingRequest.signal,
+      });
+      void request.catch(() => undefined);
+      await waitForCondition(
+        async () => (await readFile(markerPath, "utf8").catch(() => "")) === "started",
+        () => `Nuxt did not receive the pending eve request.\n${output}`,
+        5_000,
+      );
       child.kill("SIGTERM");
       await waitForCondition(
         () => {
@@ -128,6 +148,9 @@ async function assertNuxtHealth(
         () => `Nuxt left its pending eve child running.\n${output}`,
         5_000,
       );
+      const response = await request;
+      expect(response.status).toBe(503);
+      await response.body?.cancel();
       return;
     }
     // Do not poll eve: the first transport request must wait for startup.
@@ -150,6 +173,7 @@ async function assertNuxtHealth(
       cause: error,
     });
   } finally {
+    pendingRequest.abort();
     if (clustered && process.platform !== "win32" && child.pid) {
       try {
         process.kill(-child.pid, "SIGTERM");
@@ -257,10 +281,23 @@ describe("framework-nuxt build", () => {
           '{ "private": true, "type": "module", "dependencies": { "eve": "*" } }',
         "backend/agent/agent.mjs": descriptor.files["agent/agent.mjs"]!,
         "backend/agent/instructions.md": "You are a test agent.\n",
+        "server/plugins/request-probe.ts": `import { writeFileSync } from "node:fs";
+export default defineNitroPlugin((nitroApp) => {
+  writeFileSync("request-probe-installed", "installed");
+  // Observe dispatch before the readiness hook can block it.
+  const callHook = nitroApp.hooks.callHook.bind(nitroApp.hooks);
+  nitroApp.hooks.callHook = (name, ...args) => {
+    if (name === "request" && args[0].path === "/eve/v1/health") {
+      writeFileSync("request-started", "started");
+    }
+    return callHook(name, ...args);
+  };
+});`,
         "nuxt.config.ts": `export default defineNuxtConfig({
   compatibilityDate: "2026-05-27",
   eve: { eveRoot: "backend" },
   modules: ["eve/nuxt"],
+  nitro: { plugins: ["./plugins/request-probe.ts"] },
   routeRules: { "/": { prerender: true } },
   telemetry: false,
 });`,

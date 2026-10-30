@@ -25,6 +25,8 @@ const { ensureEveProductionServer, default: createPlugin } = await import("./pro
 const config = { origin: "http://127.0.0.1:5000", relativeRoot: "agent" };
 
 beforeEach(() => {
+  vi.stubEnv("EVE_NUXT_PRODUCTION_ROOT", undefined);
+  vi.stubEnv("NITRO_SHUTDOWN_DISABLED", undefined);
   delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.nuxt.production-server")];
 });
 
@@ -93,7 +95,19 @@ describe("ensureEveProductionServer", () => {
     },
   );
 
-  it("cancels pending startup through Nitro close and waits for termination", async () => {
+  it("requires Nitro graceful shutdown for managed startup", async () => {
+    vi.stubEnv("NITRO_SHUTDOWN_DISABLED", "1");
+    await expect(ensureEveProductionServer(config)).rejects.toThrow(
+      /Unset NITRO_SHUTDOWN_DISABLED/,
+    );
+    expect(startEveProductionServer).not.toHaveBeenCalled();
+  });
+
+  it("cancels startup before Nitro drains requests and awaits termination on close", async () => {
+    vi.stubEnv("NITRO_SHUTDOWN_SIGNALS", " SIGUSR2 ");
+    const originalListeners = process.listenerCount("SIGUSR2");
+    const once = vi.spyOn(process, "once");
+    let close: (() => Promise<void>) | undefined;
     let finish!: () => void;
     const terminated = new Promise<void>((resolve) => {
       finish = resolve;
@@ -109,7 +123,11 @@ describe("ensureEveProductionServer", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       createPlugin(config)({ hooks: { hook } });
-      const close = hook.mock.calls.find(([name]) => name === "close")![1] as () => Promise<void>;
+      close = hook.mock.calls.find(([name]) => name === "close")![1] as () => Promise<void>;
+      const beginShutdown = once.mock.calls.find(([name]) => name === "SIGUSR2")?.[1];
+      expect(beginShutdown).toBeTypeOf("function");
+      beginShutdown!();
+      expect(vi.mocked(startEveProductionServer).mock.calls[0]![0].signal!.aborted).toBe(true);
       let closed = false;
       const closing = close().then(() => {
         closed = true;
@@ -119,8 +137,10 @@ describe("ensureEveProductionServer", () => {
       finish();
       await closing;
       expect(closed).toBe(true);
+      expect(process.listenerCount("SIGUSR2")).toBe(originalListeners);
     } finally {
       finish();
+      await close?.();
       vi.restoreAllMocks();
     }
   });

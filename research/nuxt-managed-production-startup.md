@@ -53,7 +53,11 @@ An existing listener, child exit, and bind failures remain startup errors.
 Failed startup returns a generic `503` on these routes, while diagnostics
 remain in server logs. The frontend may serve unrelated requests independently.
 
-Own the child immediately after spawn. Nitro's close hook aborts pending startup
+Own the child immediately after spawn. Listen for Nitro's configured shutdown
+signals to abort pending startup before Nitro drains HTTP requests; otherwise,
+a request awaiting readiness can delay cleanup past the termination bound.
+Require Nitro graceful shutdown to remain enabled. The close hook removes the
+signal listeners, aborts pending startup
 or closes the running child and awaits termination. Send SIGTERM, allow 20
 seconds for graceful shutdown, then escalate to SIGKILL with a one-second reap
 bound. Clear readiness sockets, timers, and process listeners on completion.

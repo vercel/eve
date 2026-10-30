@@ -72,6 +72,11 @@ export async function ensureEveProductionServer(
       "eve managed Nuxt startup requires a single Node.js process, not cluster or worker deployments. Set EVE_NUXT_PRODUCTION_ORIGIN to an externally managed eve service when building Nuxt.",
     );
   }
+  if (process.env.NITRO_SHUTDOWN_DISABLED) {
+    throw new Error(
+      "eve managed Nuxt startup requires Nitro graceful shutdown. Unset NITRO_SHUTDOWN_DISABLED, or set EVE_NUXT_PRODUCTION_ORIGIN to an externally managed eve service when building Nuxt.",
+    );
+  }
   const configuredRoot = process.env.EVE_NUXT_PRODUCTION_ROOT?.trim();
   const appRoot = resolve(process.cwd(), configuredRoot || config.relativeRoot);
   assertDistinctServerOutput(appRoot);
@@ -101,10 +106,20 @@ export default function createEveProductionServerPlugin(config: EveNuxtProductio
         return false;
       },
     );
+    const state = getGlobalState();
+    const signals = process.env.NITRO_SHUTDOWN_DISABLED
+      ? []
+      : (process.env.NITRO_SHUTDOWN_SIGNALS || "SIGTERM SIGINT")
+          .split(" ")
+          .map((signal) => signal.trim())
+          .filter(Boolean);
+    // Nitro drains HTTP requests before close hooks; release requests awaiting startup first.
+    const beginShutdown = () => state.controller.abort();
+    for (const signal of signals) process.once(signal, beginShutdown);
     nitroApp.hooks.hook("close", async () => {
-      const state = getGlobalState();
+      for (const signal of signals) process.off(signal, beginShutdown);
       const server = state.server;
-      state.controller.abort();
+      beginShutdown();
       const handle = await server?.catch(() => undefined);
       await handle?.close?.();
     });
