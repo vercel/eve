@@ -2723,18 +2723,24 @@
       "type": "registry:item",
       "title": "Telegram",
       "description": "Connect your agent to a Telegram bot for 1:1 and group chats.",
-      "envVars": {
-        "TELEGRAM_BOT_TOKEN": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/telegram.ts",
-          "type": "registry:file",
-          "target": "agent/channels/telegram.ts"
-        }
+      "dependencies": [
+        "@vercel/connect@>=2.6.0"
+      ],
+      "devDependencies": [
+        "vercel@>=58.7.0"
       ],
       "meta": {
         "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "setup",
+              "telegram"
+            ]
+          },
           "docs": "/docs/channels/telegram",
           "implementation": "native"
         }

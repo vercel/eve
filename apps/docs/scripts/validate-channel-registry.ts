@@ -52,6 +52,7 @@ const setupKindsByCatalogSlug: Readonly<Record<string, string>> = {
   linq: "linq",
   photon: "photon",
   teams: "teams",
+  telegram: "telegram",
 };
 
 const adapterDependenciesByCatalogSlug: Readonly<Record<string, string>> = {
