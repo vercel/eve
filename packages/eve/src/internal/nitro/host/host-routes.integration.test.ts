@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -116,6 +116,7 @@ async function serve(input: {
     }),
     {
       artifactsConfig,
+      artifactsConfigPath: join(directory, "route-config.json"),
       workflowArtifacts: {
         stepTargets: [],
         stepsPath: join(directory, "steps.mjs"),
@@ -125,10 +126,23 @@ async function serve(input: {
     },
   );
 
+  // Links the virtual modules as Nitro's bundler does: virtual ids resolve to
+  // earlier virtual modules, and a `text:` import yields the file's text.
   const modules = new Map<string, { default: unknown }>();
+  const urls = new Map<string, string>();
   for (const [index, [id, source]] of Object.entries(routes.virtual).entries()) {
+    let linked = source;
+    for (const [specifier, path] of source.matchAll(/"text:([^"]+)"/g)) {
+      const textFile = join(directory, `text-${index}.mjs`);
+      await writeFile(textFile, `export default ${JSON.stringify(await readFile(path!, "utf8"))};`);
+      linked = linked.replace(specifier, JSON.stringify(pathToFileURL(textFile).href));
+    }
+    for (const [virtualId, url] of urls) {
+      linked = linked.replaceAll(JSON.stringify(virtualId), JSON.stringify(url));
+    }
     const file = join(directory, `virtual-${index}.mjs`);
-    await writeFile(file, source);
+    await writeFile(file, linked);
+    urls.set(id, pathToFileURL(file).href);
     modules.set(id, await import(pathToFileURL(file).href));
   }
   const load = async (handler: string) =>

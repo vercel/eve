@@ -95,6 +95,7 @@ export async function createHostNitro(
           configuredWorld: spec.world,
         })
       : createProductionNitroArtifactsConfig(locations.appRoot),
+    artifactsConfigPath: join(locations.buildDir, "eve-route-config.json"),
     workflowArtifacts,
     workflowWorldPluginPath: locations.compiledArtifacts.workflowWorldPluginPath,
   });

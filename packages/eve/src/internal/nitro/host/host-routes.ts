@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
 import type { NitroEventHandler } from "nitro/types";
@@ -18,8 +18,10 @@ import {
   renderChannelPreflightHandler,
   renderChannelWebSocketHandler,
   renderHostHandler,
+  renderRouteConfigModule,
   renderScheduleTaskModule,
   renderWorkflowFileHandler,
+  ROUTE_CONFIG_ID,
 } from "#internal/nitro/host/route-handlers.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import {
@@ -195,19 +197,25 @@ export interface HostNitroRoutes {
 }
 
 /**
- * Renders the route table into Nitro config. Writes the workflow handler file
+ * Renders the route table into Nitro config. Writes the artifacts config every
+ * route module shares to `artifactsConfigPath` and the workflow handler file
  * beside the workflow bundle; everything else is a virtual module.
  */
 export async function renderHostRoutes(
   table: HostRouteTable,
   input: {
     readonly artifactsConfig: NitroArtifactsConfig;
+    readonly artifactsConfigPath: string;
     readonly workflowArtifacts: WorkflowArtifacts;
     readonly workflowWorldPluginPath?: string;
   },
 ): Promise<HostNitroRoutes> {
+  await mkdir(dirname(input.artifactsConfigPath), { recursive: true });
+  await writeFile(input.artifactsConfigPath, JSON.stringify(input.artifactsConfig));
   const handlers: NitroEventHandler[] = [];
-  const virtual: Record<string, string> = {};
+  const virtual: Record<string, string> = {
+    [ROUTE_CONFIG_ID]: renderRouteConfigModule({ configPath: input.artifactsConfigPath }),
+  };
   const addVirtualHandler = (
     id: string,
     source: string,
@@ -223,18 +231,13 @@ export async function renderHostRoutes(
         const routeKey = `${route.method} ${route.path}`;
         const id = `#eve/channel/${routeKey}`;
         if (route.method === "WEBSOCKET") {
-          addVirtualHandler(
-            id,
-            renderChannelWebSocketHandler({ artifactsConfig: input.artifactsConfig, routeKey }),
-            { route: route.path },
-          );
+          addVirtualHandler(id, renderChannelWebSocketHandler({ routeKey }), { route: route.path });
           break;
         }
         addVirtualHandler(
           id,
           renderChannelHandler({
             allow: route.allow,
-            artifactsConfig: input.artifactsConfig,
             cors: route.cors,
             routeKey,
           }),
@@ -258,7 +261,7 @@ export async function renderHostRoutes(
         addVirtualHandler(
           `#eve/route${route.path}`,
           renderHostHandler({
-            args: { artifactsConfig: input.artifactsConfig, connectionName: route.connectionName },
+            context: { connectionName: route.connectionName },
             handlerExport: "handleConnectionEventRequest",
             modulePath: "src/internal/nitro/routes/connection-events.ts",
           }),
@@ -272,7 +275,6 @@ export async function renderHostRoutes(
         addVirtualHandler(
           `#eve/route${route.path}`,
           renderHostHandler({
-            args: input.artifactsConfig,
             handlerExport: "handleDevScheduleDispatchRequest",
             modulePath: "src/internal/nitro/routes/dev-schedule-dispatch.ts",
           }),
@@ -283,7 +285,6 @@ export async function renderHostRoutes(
         addVirtualHandler(
           `#eve/route${route.path}`,
           renderHostHandler({
-            args: input.artifactsConfig,
             handlerExport: "handleScheduleCollectionConsumer",
             modulePath: "src/internal/nitro/routes/schedule-collection-consumer.ts",
           }),
@@ -303,10 +304,7 @@ export async function renderHostRoutes(
   const scheduledTasks: Record<string, string[]> = {};
   for (const task of table.scheduleTasks) {
     const id = `#eve/schedule-task/${task.taskName}`;
-    virtual[id] = renderScheduleTaskModule({
-      artifactsConfig: input.artifactsConfig,
-      description: task.description,
-    });
+    virtual[id] = renderScheduleTaskModule({ description: task.description });
     tasks[task.taskName] = { description: task.description, handler: id };
     const cronTasks = (scheduledTasks[task.cron] ??= []);
     if (!cronTasks.includes(task.taskName)) cronTasks.push(task.taskName);
