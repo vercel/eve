@@ -346,6 +346,7 @@ describe("createDevelopmentServer", () => {
     delete process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID;
     mocks.files.clear();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("pins local workflow queue callbacks to the active dev server URL", async () => {
@@ -409,6 +410,8 @@ describe("createDevelopmentServer", () => {
   });
 
   it("keeps an explicitly configured Workflow World inside the worker", async () => {
+    // A configured secret keeps the session from writing a generated one to `.eve/`.
+    vi.stubEnv("EVE_WORKFLOW_DELIVERY_SECRET", "configured-delivery-secret-0123456789abcdef");
     const preparedHost = await mocks.prepareDevelopmentApplicationHost();
     mocks.prepareDevelopmentApplicationHost.mockClear();
     mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce({
