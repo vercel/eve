@@ -29,7 +29,12 @@ vi.mock("node:child_process", () => ({
   spawn: spawnMock,
 }));
 
-import { withEve, type EveNextConfig, type EveNextRewriteSections } from "./index.js";
+import { withEve } from "./index.js";
+import type { NextConfig as EveNextConfig } from "next";
+type EveNextRewriteSections = Extract<
+  Awaited<ReturnType<NonNullable<EveNextConfig["rewrites"]>>>,
+  { beforeFiles?: unknown; afterFiles?: unknown; fallback?: unknown }
+>;
 
 interface TestConfig extends EveNextConfig {
   readonly basePath?: string;

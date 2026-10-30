@@ -1,16 +1,16 @@
-import type { Experimental_ConnectionEvents } from "#public/definitions/connections/events.js";
+import type { ConnectionEvents } from "#public/definitions/connections/events.js";
 import type { ConnectionEventsBackend } from "#shared/connection-events.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { CompiledChannel } from "#channel/compiled-channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { HeadersValue } from "#client/types.js";
 import type { DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import type { ChannelRouteMethod, RouteContext } from "#public/definitions/channel.js";
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
-import type { Approval, ToolApproval } from "#approval/definition.js";
+import type { Approval } from "#approval/definition.js";
 import type { ToolModelOutput } from "#tools/definition.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import type {
@@ -107,7 +107,7 @@ export type ResolvedScheduleDefinition = Readonly<
  */
 /** A connection's event watching, checked once when the connection resolves. */
 export interface ResolvedConnectionEvents {
-  readonly callbacks: Experimental_ConnectionEvents;
+  readonly callbacks: ConnectionEvents;
   /** The static Connect authorization every watch subscribes and runs under. */
   readonly authorization: Readonly<AuthorizationDefinition>;
   readonly connector: string;
@@ -191,18 +191,7 @@ export type ResolvedToolDefinition = Readonly<
      * approval is required before executing this tool. See
      * {@link Approval} for the shared callback contract.
      */
-    readonly approval?: ToolApproval;
-    /**
-     * Optional function that derives a compound approval key from the tool
-     * input. When present, the runtime records this key (instead of just
-     * the tool name) in the session's approved-tools set after the user
-     * approves the tool call.
-     *
-     * This enables input-aware approval scoping. For example, a tool
-     * can record `"tool:<scope>"` so approval is per-scope rather
-     * than blanket.
-     */
-    readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
+    readonly approval?: Approval;
     /**
      * Optional projection that controls what the model sees as the tool
      * result. The full `execute` return is still visible to channel event
@@ -231,7 +220,17 @@ export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
    * wildcard if declared. Unknown keys are accepted at resolve time
    * and ignored at dispatch time.
    */
-  readonly events: Readonly<Record<string, StreamEventHook<MessageStreamEvent>>>;
+  readonly events: Readonly<Record<string, StreamEventHook<SessionEvent>>>;
+}
+
+/** A `defineDynamic()` function, loaded from its module. eve's own receive its context. */
+export type DynamicEvaluateFn = (ctx: never) => unknown;
+
+/** A `defineDynamic()` export reattached from its compiled module. */
+export interface ResolvedReactionSource extends Readonly<ModuleSourceRef> {
+  /** eve generated it: its function receives eve's own evaluation context. */
+  readonly framework?: true;
+  readonly evaluate: DynamicEvaluateFn;
 }
 
 /**
@@ -331,12 +330,7 @@ export type ResolvedRuntimeDelegationNode =
   | ResolvedRuntimeRemoteAgentNode
   | ResolvedRuntimeSubagentNode;
 
-export interface ResolvedDynamicSubagentDefinition extends Readonly<ModuleSourceRef> {
-  readonly eventNames: readonly string[];
-  readonly events: Readonly<
-    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
-  >;
-}
+export type ResolvedDynamicSubagentDefinition = ResolvedReactionSource;
 
 /**
  * Runtime-owned additive agent configuration resolved from `agent.ts`.
@@ -373,16 +367,10 @@ interface ResolvedAgentMetadata {
 }
 
 /**
- * Runtime resolver for dynamic tools declared via `defineDynamic({ events })`.
- * Carries the live event handler functions loaded from the compiled module.
+ * Runtime resolver for dynamic tools declared via `defineDynamic(fn)`.
  */
-export interface ResolvedDynamicToolResolver extends Readonly<ModuleSourceRef> {
+export interface ResolvedDynamicToolResolver extends ResolvedReactionSource {
   readonly slug: string;
-  readonly eventNames: readonly string[];
-  readonly events: Readonly<
-    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
-  >;
-  readonly rebindMissingCallbacks?: boolean;
   /**
    * Mount namespace when this resolver comes from an extension. Names of tools
    * the resolver produces are prefixed with `${extensionNamespace}__`.
@@ -391,12 +379,8 @@ export interface ResolvedDynamicToolResolver extends Readonly<ModuleSourceRef> {
 }
 
 /** Runtime resolver for dynamic connections declared in `agent/connections/`. */
-export interface ResolvedDynamicConnectionResolver extends Readonly<ModuleSourceRef> {
+export interface ResolvedDynamicConnectionResolver extends ResolvedReactionSource {
   readonly slug: string;
-  readonly eventNames: readonly string[];
-  readonly events: Readonly<
-    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
-  >;
   /** Map results from extensions receive this mount namespace. */
   readonly extensionNamespace?: string;
 }
@@ -405,21 +389,16 @@ export type ResolvedMemoryDefinition = Readonly<
   MemoryDefinition &
     ModuleSourceRef & {
       readonly slot: string;
-      readonly visibility: "scope" | "session";
     }
 >;
 
 /**
- * Runtime resolver for dynamic skills declared via `defineDynamic({ events })`
+ * Runtime resolver for dynamic skills declared via `defineDynamic()`
  * in `agent/skills/`. Carries the live event handler functions loaded from the
  * compiled module.
  */
-export interface ResolvedDynamicSkillResolver extends Readonly<ModuleSourceRef> {
+export interface ResolvedDynamicSkillResolver extends ResolvedReactionSource {
   readonly slug: string;
-  readonly eventNames: readonly string[];
-  readonly events: Readonly<
-    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
-  >;
   /**
    * Mount namespace when this resolver comes from an extension. Names of skills
    * a map resolver produces are prefixed with `${extensionNamespace}__`.
@@ -429,15 +408,11 @@ export interface ResolvedDynamicSkillResolver extends Readonly<ModuleSourceRef> 
 
 /**
  * Runtime resolver for dynamic instructions declared via
- * `defineDynamic({ events })` in `agent/instructions/`. Carries the live
+ * `defineDynamic()` in `agent/instructions/`. Carries the live
  * event handler functions loaded from the compiled module.
  */
-export interface ResolvedDynamicInstructionsResolver extends Readonly<ModuleSourceRef> {
+export interface ResolvedDynamicInstructionsResolver extends ResolvedReactionSource {
   readonly slug: string;
-  readonly eventNames: readonly string[];
-  readonly events: Readonly<
-    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
-  >;
 }
 
 /**

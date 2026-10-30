@@ -9,6 +9,7 @@ import {
   readDevelopmentEnvironmentHostValues,
   stageDevelopmentEnvironmentFiles,
 } from "#cli/dev/environment.js";
+import { writeProviderSelection } from "#setup/provider-settings.js";
 
 const ENV_KEYS = [
   "EVE_WATCH_ENV_FILE_ONLY",
@@ -17,6 +18,10 @@ const ENV_KEYS = [
   "EVE_WATCH_ENV_SHARED",
   "EVE_WATCH_ENV_SHELL",
   "AI_GATEWAY_API_KEY",
+  "EVE_MODEL_CONNECTION",
+  "EVE_MODEL_TEAM",
+  "EVE_MODEL_TEAM_NAME",
+  "EVE_MODEL_KEY_SOURCE",
 ] as const;
 const temporaryDirectories: string[] = [];
 
@@ -101,6 +106,27 @@ describe("development environment reload transactions", () => {
     stageDevelopmentEnvironmentFiles(appRoot).commit();
     expect(process.env.EVE_WATCH_ENV_ROOT_ONLY).toBe("updated");
     expect(process.env.EVE_WATCH_ENV_SHARED).toBeUndefined();
+  });
+
+  it("loads the workspace-root model connection for a workspace member", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-dev-env-workspace-"));
+    temporaryDirectories.push(workspaceRoot);
+    const appRoot = join(workspaceRoot, "agents", "support");
+    await mkdir(join(appRoot, "agent"), { recursive: true });
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      JSON.stringify({ dependencies: { eve: "*" } }),
+    );
+    await writeProviderSelection(workspaceRoot, "vercel", {
+      teamId: "team_alice",
+      teamName: "Alice",
+    });
+
+    await loadDevelopmentEnvironmentFiles(appRoot);
+
+    expect(process.env.EVE_MODEL_CONNECTION).toBe("vercel");
+    expect(process.env.EVE_MODEL_TEAM).toBe("team_alice");
+    expect(process.env.EVE_MODEL_TEAM_NAME).toBe("Alice");
   });
 
   it("restores the complete prior environment when a candidate is rejected", async () => {

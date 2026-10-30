@@ -7,12 +7,12 @@ export default defineEval({
     const parked = await t.send('Call the guarded-echo tool with note "text-approve".');
     const session = parked.session;
     parked.calledTool("guarded-echo", { status: "pending", count: 1 });
-    const approval = session.requireInputRequest({
+    const approval = session.requireInteraction({
       display: "confirmation",
       toolName: "guarded-echo",
     });
     const cancelled = await session.respond([
-      { optionId: "cancel", requestId: approval.requestId },
+      { optionId: "deny", interactionId: approval.interactionId },
     ]);
     cancelled.expectOk();
     t.succeeded();

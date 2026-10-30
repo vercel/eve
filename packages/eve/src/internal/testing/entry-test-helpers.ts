@@ -1,9 +1,9 @@
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { expect } from "vitest";
 import { getWorld } from "#internal/workflow/runtime.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 
 export function buildSerializedContext(overrides: {
@@ -41,14 +41,13 @@ export function buildSerializedContext(overrides: {
       principalType: "anonymous",
     };
   }
-  if (overrides.acceptedDeploymentId !== undefined) {
-    context["eve.channelDelivery"] = {
-      acceptedDeploymentId: overrides.acceptedDeploymentId,
-      channelKind: overrides.channelKind,
-      channelName: "test",
-      deliveryId: "delivery-initial",
-    };
-  }
+  // Raw workflow fixtures bypass channel dispatch and supply its initial identity here.
+  context["eve.channelDelivery"] = {
+    acceptedDeploymentId: overrides.acceptedDeploymentId,
+    channelKind: overrides.channelKind,
+    channelName: "test",
+    deliveryId: "delivery-initial",
+  };
   if (overrides.continuationToken !== undefined) {
     context["eve.continuationToken"] = overrides.continuationToken;
   }
@@ -58,7 +57,7 @@ export function buildSerializedContext(overrides: {
   return context;
 }
 
-export function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string): void {
+export function expectSingleTurn(events: readonly SessionStreamEvent[], turnId: string): void {
   expect(filterEventsByType(events, "turn.started")).toHaveLength(1);
   const eventTurnIds = events.flatMap((event) => {
     if (!("data" in event) || typeof event.data !== "object" || event.data === null) return [];
@@ -76,7 +75,7 @@ const CONDITIONAL_STEP_NAMES = new Set([
   "cancelDescendantTurnsStep",
   "dispatchCoordinationStep",
   "notifyCancelledTaskCallerStep",
-  "publishTaskStartedStep",
+  "publishDispatchedCallsStep",
   "terminateChildSessionsStep",
 ]);
 
@@ -106,72 +105,17 @@ export interface CapturedEventStream {
   dispose(): void;
   nextUntil(
     label: string,
-    predicate: (event: MessageStreamEvent) => boolean,
-  ): Promise<MessageStreamEvent[]>;
+    predicate: (event: SessionStreamEvent) => boolean,
+  ): Promise<SessionStreamEvent[]>;
 }
 
+/** Reads a run's stream line by line, as {@link captureTurnEvents} does, failing a wait by name. */
 export function captureEvents(run: Parameters<typeof captureTurnEvents>[0]): CapturedEventStream {
-  const reader = run.readable.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let disposed = false;
-
+  const stream = captureTurnEvents(run);
   return {
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      reader.releaseLock();
-    },
-    nextUntil(label, predicate) {
-      if (disposed) {
-        return Promise.reject(new Error("CapturedEventStream: stream already disposed."));
-      }
-      return withTimeout(readUntil(reader, decoder, buffer, predicate), label).then((result) => {
-        buffer = result.buffer;
-        return result.events;
-      });
-    },
+    dispose: () => stream.dispose(),
+    nextUntil: (label, predicate) => withTimeout(stream.nextUntil(predicate), label),
   };
-}
-
-async function readUntil(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  decoder: InstanceType<typeof TextDecoder>,
-  initialBuffer: string,
-  predicate: (event: MessageStreamEvent) => boolean,
-): Promise<{ buffer: string; events: MessageStreamEvent[] }> {
-  const events: MessageStreamEvent[] = [];
-  let buffer = initialBuffer;
-
-  while (true) {
-    const { done, value } = await reader.read();
-
-    if (done) {
-      throw new Error("Workflow stream closed before reaching the expected event.");
-    }
-
-    buffer += decoder.decode(value, { stream: true });
-
-    for (
-      let newlineIndex = buffer.indexOf("\n");
-      newlineIndex !== -1;
-      newlineIndex = buffer.indexOf("\n")
-    ) {
-      const line = buffer.slice(0, newlineIndex).trim();
-      buffer = buffer.slice(newlineIndex + 1);
-
-      if (line.length === 0) {
-        continue;
-      }
-
-      const event = JSON.parse(line) as MessageStreamEvent;
-      events.push(event);
-
-      if (predicate(event)) {
-        return { buffer, events };
-      }
-    }
-  }
 }
 
 export async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {

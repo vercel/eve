@@ -1,3 +1,4 @@
+import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { takeLeadingAppliedRunMessages } from "#execution/session-workflow-tool-run.js";
@@ -33,7 +34,8 @@ vi.mock("#execution/session-inbox/release-step.js", () => ({
   releaseSessionHooksStep: vi.fn(async () => {}),
 }));
 
-vi.mock("#compiled/@workflow/core/index.js", () => ({
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
   createHook: (...args: unknown[]) => createHookMock(...args),
   getWritable: vi.fn(),
   getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
@@ -65,7 +67,7 @@ describe("createSessionInbox", () => {
     installHooks(
       createMockHook({ reads: [Promise.resolve(resolved(send("by id")))], token: "stable" }),
       createMockHook({
-        reads: [Promise.resolve(resolved({ kind: "clear" }))],
+        reads: [Promise.resolve(resolved({ deliveryId: "clear-delivery", kind: "clear" }))],
         token: "channel",
       }),
     );
@@ -75,7 +77,9 @@ describe("createSessionInbox", () => {
     await inbox.claimSessionHook("channel");
 
     await expect(readResult(inbox)).resolves.toEqual(resolved(send("by id")));
-    await expect(readResult(inbox)).resolves.toEqual(resolved({ kind: "clear" }));
+    await expect(readResult(inbox)).resolves.toEqual(
+      resolved({ deliveryId: "clear-delivery", kind: "clear" }),
+    );
     await inbox.dispose();
   });
 
@@ -85,15 +89,24 @@ describe("createSessionInbox", () => {
         token: "stable",
         reads: [
           Promise.resolve(resolved(send("steer me"))),
-          Promise.resolve(resolved({ kind: "cancel", turnId: "turn-1" })),
+          Promise.resolve(
+            resolved({ deliveryId: "cancel-delivery", kind: "cancel", turnId: "turn-1" }),
+          ),
         ],
       }),
     );
     const inbox = createSessionInbox("session-1");
     const interrupt = nextInterrupt(inbox);
     await inbox.claimSessionHook("stable");
-    await expect(interrupt).resolves.toEqual({ kind: "cancel", turnId: "turn-1" });
-    expect(inbox.drain()).toEqual([send("steer me"), { kind: "cancel", turnId: "turn-1" }]);
+    await expect(interrupt).resolves.toEqual({
+      deliveryId: "cancel-delivery",
+      kind: "cancel",
+      turnId: "turn-1",
+    });
+    expect(inbox.drain()).toEqual([
+      send("steer me"),
+      { deliveryId: "cancel-delivery", kind: "cancel", turnId: "turn-1" },
+    ]);
     await inbox.dispose();
   });
 
@@ -142,6 +155,7 @@ describe("createSessionInbox", () => {
       turnId: "turn-1",
     };
     const opened: SessionInboxPayload = {
+      context: { parent: { sessionId: "parent" } } as AgentSessionContext,
       from,
       kind: "agent-started",
       session: {
@@ -190,9 +204,21 @@ describe("createSessionInbox", () => {
     const inbox = createSessionInbox("session-1");
     await inbox.claimSessionHook("stable");
     const interrupt = nextInterrupt(inbox);
-    input.resolve(resolved({ kind: "cancel" }));
-    await expect(interrupt).resolves.toEqual({ kind: "cancel" });
-    expect(inbox.drain()).toEqual([{ kind: "cancel" }]);
+    input.resolve(resolved({ deliveryId: "cancel-delivery", kind: "cancel" }));
+    await expect(interrupt).resolves.toEqual({ deliveryId: "cancel-delivery", kind: "cancel" });
+    expect(inbox.drain()).toEqual([{ deliveryId: "cancel-delivery", kind: "cancel" }]);
+    expect(await inbox.release()).toEqual([]);
+  });
+
+  it("pushes a clear to interrupt handlers, so it stops the running turn", async () => {
+    const input = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(createMockHook({ token: "stable", reads: [input.promise] }));
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    const interrupt = nextInterrupt(inbox);
+    input.resolve(resolved({ deliveryId: "clear-delivery", kind: "clear" }));
+    await expect(interrupt).resolves.toEqual({ deliveryId: "clear-delivery", kind: "clear" });
+    expect(inbox.drain()).toEqual([{ deliveryId: "clear-delivery", kind: "clear" }]);
     expect(await inbox.release()).toEqual([]);
   });
 
@@ -204,13 +230,20 @@ describe("createSessionInbox", () => {
     await inbox.claimSessionHook("stable");
     const handler = vi.fn();
     const unsubscribe = inbox.onInterrupt(handler);
-    first.resolve(resolved({ kind: "cancel", turnId: "turn-1" }));
+    first.resolve(resolved({ deliveryId: "cancel-delivery", kind: "cancel", turnId: "turn-1" }));
     await first.promise;
     unsubscribe();
-    second.resolve(resolved({ kind: "reset" }));
+    second.resolve(resolved({ deliveryId: "reset-delivery", kind: "reset" }));
     await second.promise;
-    expect(handler).toHaveBeenCalledExactlyOnceWith({ kind: "cancel", turnId: "turn-1" });
-    expect(inbox.drain()).toEqual([{ kind: "cancel", turnId: "turn-1" }, { kind: "reset" }]);
+    expect(handler).toHaveBeenCalledExactlyOnceWith({
+      deliveryId: "cancel-delivery",
+      kind: "cancel",
+      turnId: "turn-1",
+    });
+    expect(inbox.drain()).toEqual([
+      { deliveryId: "cancel-delivery", kind: "cancel", turnId: "turn-1" },
+      { deliveryId: "reset-delivery", kind: "reset" },
+    ]);
     await inbox.dispose();
   });
 
@@ -243,14 +276,17 @@ describe("createSessionInbox", () => {
     installHooks(
       createMockHook({
         token: "stable",
-        reads: [...burst, Promise.resolve(resolved({ kind: "cancel" }))],
+        reads: [
+          ...burst,
+          Promise.resolve(resolved({ deliveryId: "cancel-delivery", kind: "cancel" })),
+        ],
       }),
     );
     const inbox = createSessionInbox("session-1");
     const interrupt = nextInterrupt(inbox);
     await inbox.claimSessionHook("stable");
 
-    await expect(interrupt).resolves.toEqual({ kind: "cancel" });
+    await expect(interrupt).resolves.toEqual({ deliveryId: "cancel-delivery", kind: "cancel" });
     expect(inbox.drain()).toHaveLength(1501);
     await inbox.dispose();
   });
@@ -388,11 +424,17 @@ describe("createSessionInbox", () => {
     await pumped;
     // The final part has arrived, but part 0 has not.
     expect(inbox.awaitingHandover).toBe(true);
+    expect(inbox.handoverObservation).toBeUndefined();
     expect(inbox.drain()).toEqual([]);
 
     first.resolve(resolved(part("owner-a:1", 0, send("a"))));
 
     await vi.waitFor(() => expect(inbox.awaitingHandover).toBe(false));
+    expect(inbox.handoverObservation).toEqual({
+      attemptKey: "owner-a:1",
+      payloadCount: 2,
+      appliedAtMs: expect.any(Number),
+    });
     expect(inbox.drain()).toEqual([send("a"), send("b"), send("direct"), cancel]);
     await inbox.dispose();
   });
@@ -415,6 +457,7 @@ describe("createSessionInbox", () => {
     inbox.abandonHandover("owner-a:1");
 
     await settled;
+    expect(inbox.handoverObservation).toBeUndefined();
     expect(inbox.drain()).toEqual([send("direct"), cancel]);
     await inbox.dispose();
   });
@@ -741,7 +784,7 @@ function installHooks(...hooks: readonly MockHook[]): void {
   });
 }
 
-const cancel: SessionInboxPayload = { kind: "cancel" };
+const cancel: SessionInboxPayload = { deliveryId: "cancel-delivery", kind: "cancel" };
 const runtimeResult: SessionInboxPayload = { kind: "runtime-action-result", results: [] };
 
 function part(attemptKey: string, index: number, ...payloads: SessionInboxPayload[]) {

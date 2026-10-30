@@ -1,3 +1,5 @@
+import { normalizeAgentMessage } from "#execution/agent-sessions/message.js";
+import type { MessageContent } from "#shared/message-content.js";
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
@@ -10,7 +12,9 @@ import {
   endAgentSessionsStep,
   openAgentSessionStep,
   sendAgentSessionMessageStep,
+  stopLateAgentSessionStep,
   type AgentSessionMessage,
+  type AgentSessionReceipt,
   type OpenedAgentSession,
 } from "#execution/agent-sessions/steps.js";
 import type { RunUsageTally } from "#execution/agent-sessions/usage.js";
@@ -18,6 +22,7 @@ import { disposeHook } from "#execution/hook-ownership.js";
 import type { WorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { parseJsonValue } from "#shared/json.js";
 import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
 import { serializeOutputSchema } from "#tools/schema-emission.js";
 import type {
@@ -84,8 +89,15 @@ class RunAgentSession implements AgentSession {
   /** What the run's sessions spent, which the run reports to its calling session. */
   readonly #usage: RunUsageTally;
   #opened: Promise<OpenedAgentSession> | undefined;
-  /** Oldest first. */
+  #opener: WorkflowToolRunContext["from"] | undefined;
+  /** Oldest first: the order the messages were sent, which is the order the agent admits them. */
   readonly #awaited: AwaitedReply[] = [];
+  /**
+   * The handle's last delivery, settled or not. Each message is delivered only after the one
+   * sent before it was accepted, so the agent admits messages in the order `#awaited` lists
+   * their replies. A turn's end settles a prefix of `#awaited`, which is correct only then.
+   */
+  #delivered: Promise<void> = Promise.resolve();
 
   constructor(input: {
     readonly key: string;
@@ -104,12 +116,10 @@ class RunAgentSession implements AgentSession {
   }
 
   async send<TOutput = unknown>(
-    message: string,
+    message: MessageContent<string | URL>,
     options: AgentSendOptions<TOutput> = {},
   ): Promise<AgentResponse<TOutput>> {
-    if (typeof message !== "string" || message.trim() === "") {
-      throw new TypeError(`ctx.agent("${this.#name}").send() requires a non-empty message.`);
-    }
+    message = normalizeAgentMessage(message);
     // The reply's shape and the child's output mode must agree on whether a
     // schema was requested, and an empty one requests none.
     const outputSchema = normalizeRequestedOutputSchema(
@@ -119,13 +129,20 @@ class RunAgentSession implements AgentSession {
     // before its token goes out: the child resumes it only after booting and
     // finishing a turn, long after this suspension writes the hook.
     const reply = this.#awaitReply(outputSchema !== undefined);
+    // The run's auth, call, and context follow the call it serves now; a queued message keeps
+    // those of the call it was sent for.
+    const sender: AgentSessionSender = { context: this.#run.agentContext, from: this.#run.from };
+    const sending: AgentSessionMessage = {
+      auth: this.#run.auth,
+      message,
+      outputSchema,
+      replyTo: reply.hook.token,
+    };
+    const delivery = this.#delivered.then(() => this.#deliver(sending, sender));
+    // A failed delivery fails only its own send; the next message is still delivered.
+    this.#delivered = delivery.catch(() => undefined);
     try {
-      await this.#deliver({
-        auth: this.#run.auth,
-        message,
-        outputSchema,
-        replyTo: reply.hook.token,
-      });
+      await delivery;
     } catch (error) {
       this.#awaited.splice(this.#awaited.indexOf(reply), 1);
       await releaseHook(reply.hook);
@@ -173,6 +190,15 @@ class RunAgentSession implements AgentSession {
                           resolverId: address.resolverId,
                           url: address.url,
                           sessionId: address.sessionId,
+                          // Answers go back in the protocol the child speaks.
+                          ...(address.earlierProtocol !== undefined && {
+                            earlierProtocol: address.earlierProtocol,
+                          }),
+                          ...(address.dynamicBinding !== undefined && {
+                            dynamicBinding: parseJsonValue(
+                              JSON.parse(JSON.stringify(address.dynamicBinding)),
+                            ),
+                          }),
                         }
                       : undefined,
                   ),
@@ -211,37 +237,76 @@ class RunAgentSession implements AgentSession {
     }
   }
 
-  async #deliver(message: AgentSessionMessage): Promise<void> {
+  /**
+   * Delivers one message after every message sent before it, and records the accepted
+   * delivery for the call it was sent for. Serialized sends behave as sequential ones: a send
+   * queued behind a failed open opens the session itself.
+   */
+  async #deliver(message: AgentSessionMessage, sender: AgentSessionSender): Promise<void> {
+    const { from } = sender;
+    let receipt: AgentSessionReceipt;
     if (this.#opened === undefined) {
-      this.#opened = this.#open(message);
-      await this.#opened;
-      return;
+      const opening = this.#open(message, sender);
+      this.#opened = opening.then(({ opened }) => opened);
+      // `opening` reports a failed open to this send.
+      this.#opened.catch(() => undefined);
+      ({ receipt } = await opening);
+    } else {
+      const opened = await this.#opened;
+      receipt = await sendAgentSessionMessageStep({ ...message, ...opened });
+      if (receipt.sessionId !== opened.address.sessionId) {
+        // The replacement is announced once, before any delivery is linked to it; later
+        // messages are delivered to it.
+        const redirected = {
+          ...opened,
+          address: { ...opened.address, sessionId: receipt.sessionId },
+        };
+        this.#sessions.push(redirected);
+        this.#opened = Promise.resolve(redirected);
+        await this.#run.owner.send({
+          context: opened.context,
+          from: this.#opener!,
+          kind: "agent-started",
+          session: redirected.address,
+        });
+      }
     }
-    const opened = await this.#opened;
-    await sendAgentSessionMessageStep({ ...message, ...opened });
+    if (receipt.deliveryId === undefined) return;
+    await this.#run.owner.send({
+      deliveryId: receipt.deliveryId,
+      from,
+      kind: "agent-sent",
+      sessionId: receipt.sessionId,
+    });
   }
 
   /**
-   * Opens the session as a child of the call the run serves now. Its lineage
-   * and trace come from that call, and its later messages keep them even when
-   * the run serves another call by then; each message carries its own auth.
+   * Opens the session as a child of the call the opening message was sent for.
+   * Its lineage and trace come from that call, and its later messages keep them
+   * even when the run serves another call by then; each message carries its own auth.
    */
-  async #open(message: AgentSessionMessage): Promise<OpenedAgentSession> {
-    const { agentContext: context, from } = this.#run;
+  async #open(
+    message: AgentSessionMessage,
+    { context, from }: AgentSessionSender,
+  ): Promise<{ readonly opened: OpenedAgentSession; readonly receipt: AgentSessionReceipt }> {
+    this.#opener = from;
+    let opened: OpenedAgentSession | undefined;
     try {
-      const address = await openAgentSessionStep({
+      const { address, deliveryId } = await openAgentSessionStep({
         ...message,
         context,
         key: this.#key,
         model: this.#options.model,
         name: this.#name,
       });
-      const opened = { address, context, key: this.#key };
+      opened = { address, context, key: this.#key };
       this.#sessions.push(opened);
-      await this.#run.owner.send({ from, kind: "agent-started", session: address });
-      return opened;
+      await this.#run.owner.send({ context, from, kind: "agent-started", session: address });
+      return { opened, receipt: { deliveryId, sessionId: address.sessionId } };
     } catch (error) {
       this.#opened = undefined;
+      this.#opener = undefined;
+      if (opened !== undefined) await stopLateAgentSessionStep(opened).catch(() => undefined);
       throw error;
     }
   }
@@ -260,6 +325,12 @@ class RunAgentSession implements AgentSession {
   }
 }
 
+/** The call a message was sent for: the lineage a session it opens binds, and its delivery record. */
+interface AgentSessionSender {
+  readonly context: WorkflowToolRunContext["agentContext"];
+  readonly from: WorkflowToolRunContext["from"];
+}
+
 async function releaseHook(hook: Hook<AgentTurnReply>): Promise<void> {
   try {
     await disposeHook(hook);
@@ -273,10 +344,10 @@ function unwrapTurnEnd(end: AgentTurnEnd): AgentMessageResult<unknown> {
   return end.result;
 }
 
-const NO_REPLY = { data: undefined, message: undefined } as const;
+const NO_REPLY = { data: undefined, reply: undefined } as const;
 
-function failedTurn(error: unknown): AgentMessageResult<unknown> {
-  return { ...NO_REPLY, error: { message: toErrorMessage(error) }, status: "failed" };
+function failedTurn(error: unknown, sessionEnded = false): AgentMessageResult<unknown> {
+  return { ...NO_REPLY, sessionEnded, error: { message: toErrorMessage(error) }, status: "failed" };
 }
 
 function toAgentMessageResult(
@@ -287,14 +358,14 @@ function toAgentMessageResult(
   const { outcome } = result;
   switch (outcome.result.kind) {
     case "failed":
-      return failedTurn(outcome.result.error);
+      return failedTurn(outcome.result.error, outcome.kind === "terminal");
     case "cancelled":
-      return { ...NO_REPLY, status: "waiting" };
+      return { ...NO_REPLY, sessionEnded: outcome.kind === "terminal", status: "cancelled" };
     case "succeeded": {
       const { output } = outcome.result;
-      const status = outcome.kind === "terminal" ? "completed" : "waiting";
-      if (expectsData) return { data: output, message: undefined, status };
-      return { data: undefined, message: typeof output === "string" ? output : undefined, status };
+      const common = { status: "completed" as const, sessionEnded: outcome.kind === "terminal" };
+      if (expectsData) return { data: output, reply: undefined, ...common };
+      return { data: undefined, reply: typeof output === "string" ? output : undefined, ...common };
     }
   }
 }

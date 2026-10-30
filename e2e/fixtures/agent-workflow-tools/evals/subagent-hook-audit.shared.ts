@@ -1,4 +1,4 @@
-import type { MessageStreamEvent } from "eve/client";
+import type { SessionStreamEvent } from "eve/client";
 import type { EveEvalTurn } from "eve/evals";
 
 import type { SubagentHookObservation } from "../subagent-hook-audit";
@@ -15,34 +15,51 @@ export function readHookAudit(turn: EveEvalTurn): readonly AuditedHookObservatio
   return output as AuditedHookObservation[];
 }
 
+/** An event's position as the hooks record it. */
+export function positionOf(event: SessionStreamEvent): string {
+  return `${event.meta.position.line}:${event.meta.position.index}`;
+}
+
+/** The call that owns a `child.opened`, directly or through the task it opened in. */
+function ownerCallId(
+  events: readonly SessionStreamEvent[],
+  owner: { readonly callId: string } | { readonly taskId: string },
+): string | undefined {
+  if ("callId" in owner) return owner.callId;
+  const started = events.find(
+    (event) => event.type === "task.started" && event.data.taskId === owner.taskId,
+  );
+  return started?.type === "task.started" ? started.data.startedBy.callId : undefined;
+}
+
 /**
- * Whether the typed and `*` hooks each recorded every `agent.started` in
- * `events` exactly once, in the parent session's state and sandbox, under the
- * event's published ID.
+ * Whether the typed and `*` hooks each recorded every `child.opened` in `events` exactly once,
+ * in the parent session's state and sandbox, at the event's position.
  */
 export function recordsEveryAgentStart(
   records: readonly AuditedHookObservation[],
-  events: readonly MessageStreamEvent[],
+  events: readonly SessionStreamEvent[],
   parentSessionId: string,
 ): boolean {
-  const starts = events.flatMap((event) => (event.type === "agent.started" ? [event] : []));
-  const recorded = records.filter((record) => record.type === "agent.started");
+  const opens = events.flatMap((event) => (event.type === "child.opened" ? [event] : []));
+  const recorded = records.filter((record) => record.type === "child.opened");
   return (
-    starts.length > 0 &&
-    recorded.length === starts.length * 2 &&
-    starts.every((start) =>
-      (["typed", "wildcard"] as const).every(
+    opens.length > 0 &&
+    recorded.length === opens.length * 2 &&
+    opens.every((open) => {
+      const callId = ownerCallId(events, open.data.owner);
+      return (["typed", "wildcard"] as const).every(
         (subscriber) =>
           recorded.filter(
             (record) =>
               record.subscriber === subscriber &&
-              record.eventId === start.meta.id &&
-              record.childSessionId === start.data.sessionId &&
-              record.callId === start.data.callId &&
-              record.sandboxCallId === start.data.callId &&
+              record.position === positionOf(open) &&
+              record.childSessionId === open.data.sessionId &&
+              record.callId === callId &&
+              record.sandboxCallId === callId &&
               record.sessionId === parentSessionId,
           ).length === 1,
-      ),
-    )
+      );
+    })
   );
 }

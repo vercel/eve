@@ -1,9 +1,7 @@
 import type { ModelMessage, ToolSet, TypedToolError, TypedToolResult } from "ai";
 
-import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
-import type { RuntimeActionResult, RuntimeToolResultActionResult } from "#shared/action-types.js";
+import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { toError } from "#shared/errors.js";
-import { skillTarget } from "#shared/action-request-name.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import {
   authorizationPendingAsJsonObject,
@@ -40,7 +38,7 @@ function toJsonValue(value: unknown): JsonValue {
 /**
  * Builds a `RuntimeToolResultActionResult` from a raw tool output value.
  *
- * This is the single coercion point for `action.result` projection. Both
+ * This is the single coercion point for `call.settled` projection. Both
  * native tool execution (via {@link createRuntimeToolResultFromStepResult} /
  * {@link createRuntimeToolResultFromMessagePart}) and Workflow child calls
  * funnel through here, so the raw-output-vs-`toModelOutput` decision —
@@ -103,26 +101,6 @@ export function createRuntimeToolResultFromToolError(
     output: toError(toolError.error),
     toolName: toolError.toolName,
   });
-}
-
-/**
- * The action result a call's tool result reports. A skill load reports the
- * `load-skill-result` of the skill its `input` names, as its call reports a
- * `load-skill` action.
- */
-export function toActionResult(
-  result: RuntimeToolResultActionResult,
-  input: unknown,
-): RuntimeActionResult {
-  const skill = result.toolName === SKILL_ENTRY_NAME ? skillTarget(input) : undefined;
-  if (skill === undefined) return result;
-  return {
-    callId: result.callId,
-    isError: result.isError,
-    kind: "load-skill-result",
-    name: skill,
-    output: result.output,
-  };
 }
 
 /**

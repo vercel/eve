@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import { extractToolResultCallIds } from "#harness/model-call/response.js";
-import { withResult } from "#harness/session-machine/transitions.js";
+import { withResult } from "#harness/session-machine/suspended-steps.js";
 
 /** Answer orphaned historical calls without executing them. */
 export function repairToolHistory(input: {

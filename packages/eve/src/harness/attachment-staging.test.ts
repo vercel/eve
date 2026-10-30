@@ -31,7 +31,6 @@ const STUB_ADAPTER_CTX: ChannelAdapterContext = {
   session: {
     id: "",
     auth: { current: null, initiator: null },
-    continuation: { token: "", alias: () => {} },
   },
 };
 
@@ -387,10 +386,89 @@ describe("stageAttachmentsToSandbox", () => {
 });
 
 describe("stageToolResultMedia", () => {
+  it("preserves a remote tool-result file without resuming a sandbox", async () => {
+    const messages: ModelMessage[] = [
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-1",
+            toolName: "report",
+            output: {
+              type: "content",
+              value: [
+                {
+                  type: "file",
+                  data: { type: "url", url: new URL("https://files.example/report.pdf") },
+                  mediaType: "application/pdf",
+                  filename: "report.pdf",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ];
+
+    const staged = await contextStorage.run(unresumableSandboxContext(), () =>
+      stageToolResultMedia(messages),
+    );
+
+    expect(staged).toEqual(messages);
+  });
+
   // #4839: a throw here escapes the step after its model call and tools ran,
   // so the step retries and replays them.
   it("replaces a returned file with a note when the sandbox cannot be resumed", async () => {
     const ctx = unresumableSandboxContext();
+    const toolResult = (value: unknown) =>
+      ({
+        content: [
+          {
+            output: { type: "content", value },
+            toolCallId: "call-1",
+            toolName: "inspect",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      }) as ModelMessage;
+
+    const staged = await contextStorage.run(ctx, () =>
+      stageToolResultMedia([
+        toolResult([
+          {
+            data: { data: "iVBORw0KGgo=", type: "data" },
+            filename: "chart.png",
+            mediaType: "image/png",
+            type: "file",
+          },
+        ]),
+      ]),
+    );
+
+    expect(staged).toEqual([
+      toolResult([
+        { text: "Returned file chart.png (image/png) could not be stored.", type: "text" },
+      ]),
+    ]);
+  });
+
+  // #4839: a sandbox that opens but rejects the write (a cached handle to a
+  // dead VM, a sandbox past its timeout) throws out of the step the same way.
+  it("replaces a returned file with a note when the sandbox rejects the write", async () => {
+    const sandbox = mockSandbox();
+    const ctx = new ContextContainer();
+    ctx.set(SandboxKey, {
+      ...sandbox.access,
+      open: async () => ({
+        ...sandbox.session,
+        writeBinaryFile: async () => {
+          throw new Error("sandbox is past its timeout");
+        },
+      }),
+    });
     const toolResult = (value: unknown) =>
       ({
         content: [

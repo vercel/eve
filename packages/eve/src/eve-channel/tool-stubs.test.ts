@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eveChannel } from "#eve-channel/index.js";
-import type { EveChannelInput } from "#eve-channel/types.js";
+import type { EveChannelConfig } from "#eve-channel/types.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
+import { withAuthChallenges } from "#public/channels/auth.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
@@ -43,9 +44,12 @@ const alice = {
 const bob = { ...alice, principalId: "bob", subject: "eval-b", attributes: { role: "user" } };
 
 describe("tool stub authorization", () => {
-  it("rejects authenticated callers without explicit override permission before session creation", async () => {
+  it.each([
+    ["omitted", alice],
+    ["false", { ...alice, allowToolStubs: false }],
+  ] as const)("rejects %s stub permission before session creation", async (_case, identity) => {
     const response = await request(
-      { auth: () => alice },
+      { auth: () => identity },
       "POST",
       "/eve/v1/session",
       {},
@@ -54,11 +58,33 @@ describe("tool stub authorization", () => {
     expect(response.status).toBe(403);
   });
 
+  it.each([
+    ["accepts an identity without a grant", alice, 403, 0],
+    ["declines authentication", null, 200, 1],
+  ] as const)(
+    "uses the first auth result when the earlier strategy %s",
+    async (_case, identity, status, calls) => {
+      const grant = vi.fn(() => ({ ...alice, allowToolStubs: true }));
+      const response = await request(
+        { auth: [() => identity, grant] },
+        "GET",
+        "/eve/v1/session/:sessionId/stubs",
+        { sessionId: "session" },
+      );
+
+      expect(response.status).toBe(status);
+      expect(grant).toHaveBeenCalledTimes(calls);
+    },
+  );
+
   it("binds the grant to route authentication before onMessage projects the session principal", async () => {
     let scope: unknown;
     const response = await request(
       {
-        auth: () => ({ ...alice, allowToolStubs: true }),
+        auth: withAuthChallenges(
+          () => ({ ...alice, allowToolStubs: true }),
+          [{ scheme: "Basic", parameters: { realm: "evals" } }],
+        ),
         onMessage: (ctx) => {
           expect(ctx.eve.caller).not.toHaveProperty("allowToolStubs");
           return { auth: bob };
@@ -99,27 +125,34 @@ describe("tool stub authorization", () => {
   });
 
   it.each([
+    ["POST", "/eve/v1/session"],
     ["POST", "/eve/v1/session/:sessionId"],
     ["POST", "/eve/v1/session/:sessionId/compact"],
     ["POST", "/eve/v1/session/:sessionId/clear"],
     ["GET", "/eve/v1/session/:sessionId/stream"],
     ["GET", "/eve/v1/session/:sessionId/stubs"],
-  ])("requires channel authentication for %s %s", async (method, path) => {
+  ])("preserves authentication challenges for %s %s", async (method, path) => {
     const response = await request(
-      { auth: () => null },
+      {
+        auth: withAuthChallenges(() => null, [{ scheme: "Basic", parameters: { realm: "evals" } }]),
+      },
       method,
       path,
       { sessionId: "session", parentSessionId: "parent", childSessionId: "child", callId: "call" },
       { message: "Hello" },
     );
     expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe('Basic realm="evals"');
   });
 });
 
 describe("tool stub verification", () => {
-  it("requires the stub grant before reading any workflow", async () => {
+  it.each([
+    ["omitted", alice],
+    ["false", { ...alice, allowToolStubs: false }],
+  ] as const)("rejects %s stub permission before reading any workflow", async (_case, identity) => {
     const response = await request(
-      { auth: () => alice },
+      { auth: () => identity },
       "GET",
       "/eve/v1/session/:sessionId/stubs",
       { sessionId: "arbitrary-run" },
@@ -178,7 +211,7 @@ describe("tool stub verification", () => {
 });
 
 async function request(
-  config: EveChannelInput,
+  config: EveChannelConfig,
   method: string,
   path: string,
   params: Record<string, string>,

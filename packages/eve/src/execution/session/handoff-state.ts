@@ -1,5 +1,6 @@
+import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { queuedInput, storedProjection } from "#harness/session-machine/view.js";
-import { openInputs, openSignIns } from "#protocol/session-projection.js";
+import { openRequests, openSignIns } from "#protocol/session-projection/reader.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { holdsHitlRequests } from "#harness/hitl/view.js";
 import { readDurableSession } from "#execution/durable-session-read.js";
@@ -16,21 +17,12 @@ export function isSessionStateIdleForHandoff(input: {
   // These registries are deleted when work settles. Their ordinary readers
   // tolerate malformed values as absent; that must not authorize a handoff.
   if (holdsHitlRequests(state)) return false;
-  const pendingKeys = [
-    "eve.runtime.pendingInputBatch",
-    "eve.runtime.pendingCoordinationBatch",
-    "eve.runtime.deferredStepInput",
-    "eve.harness.pendingWorkflowInterrupt",
-  ];
-  if (pendingKeys.some((key) => state?.[key] !== undefined)) return false;
-  const batches = state?.["eve.runtime.pendingInputBatches"];
-  if (batches !== undefined && (!Array.isArray(batches) || batches.length > 0)) return false;
   const projection = storedProjection(state);
   return (
     workflowToolRuns.length === 0 &&
-    projection.activeTurnId === undefined &&
-    openInputs(projection).length === 0 &&
-    openSignIns(projection).length === 0 &&
+    activeTurnIdOf(projection) === undefined &&
+    openRequests(projection.view).length === 0 &&
+    openSignIns(projection.view).length === 0 &&
     queuedInput(state) === undefined
   );
 }

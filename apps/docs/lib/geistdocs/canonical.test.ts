@@ -4,7 +4,6 @@ import {
   canonicalPathname,
   canonicalRoutes,
   integrationPath,
-  templatePath,
 } from "./canonical";
 
 describe("canonical routes", () => {
@@ -13,10 +12,8 @@ describe("canonical routes", () => {
       home: "/",
       benchmarks: "/benchmarks",
       integrations: "/integrations",
-      templates: "/templates",
     });
     expect(integrationPath("slack")).toBe("/integrations/slack");
-    expect(templatePath("eve-chat-template")).toBe("/templates/eve-chat-template");
   });
 
   it("removes query and fragment variants from canonical paths", () => {

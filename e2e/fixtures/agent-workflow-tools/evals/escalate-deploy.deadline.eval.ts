@@ -11,7 +11,7 @@ export default defineEval({
   async test(t) {
     const parked = await t.send("WORKFLOW-ESCALATE-START");
     const session = parked.session;
-    session.requireInputRequest({
+    session.requireInteraction({
       display: "confirmation",
       optionIds: ["approve", "cancel"],
       toolName: "escalate_deploy",
@@ -22,6 +22,6 @@ export default defineEval({
     answered.expectOk();
     answered.calledTool("escalate_deploy", { output: /"decided":"approved"/u });
     answered.messageIncludes("WORKFLOW-ESCALATE-RESULT");
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

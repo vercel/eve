@@ -1,11 +1,10 @@
 "use client";
 
-import { SiDocker, SiPostgresql, SiSnowflake } from "@icons-pack/react-simple-icons";
+import { SiAnthropic, SiDocker, SiPostgresql, SiSnowflake } from "@icons-pack/react-simple-icons";
 import {
   IconArrowUpRightSmall,
   IconLinked,
   IconMessage,
-  IconOpenai,
   IconSandbox,
   IconSparkles,
   IconWorkflow,
@@ -19,6 +18,7 @@ import Link from "next/link";
 import { type ComponentType, type JSX, type ReactNode, useState } from "react";
 import { cn } from "@/lib/utils";
 import { GradientBorder } from "./gradient-border";
+import { HomeSection } from "./section";
 
 type Mode = "managed" | "self-hosted";
 
@@ -60,7 +60,7 @@ const RUNTIME_ITEMS: Primitive[] = [
     href: "https://ai-sdk.dev/",
     backend: {
       managed: { label: "AI Gateway", Logo: VercelLogo },
-      "self-hosted": { label: "GPT-5.4 API", Logo: IconOpenai },
+      "self-hosted": { label: "Claude Opus 5.5 API", Logo: SiAnthropic },
     },
   },
   {
@@ -118,6 +118,23 @@ const CHANNELS = [
   "Linear",
   "GitHub",
   "Telegram",
+];
+
+// More surfaces from eve's channel docs (Linq, Photon, Twilio) and the Chat SDK adapter
+// catalog, shown only on desktop, where the channel card has room for them.
+const MORE_CHANNELS = [
+  "iMessage",
+  "SMS",
+  "Email",
+  "Gmail",
+  "Instagram",
+  "Messenger",
+  "X",
+  "Notion",
+  "GitLab",
+  "Webex",
+  "Mattermost",
+  "LINE",
 ];
 
 const CAPTIONS: Record<Mode, string> = {
@@ -187,64 +204,24 @@ function PrimitiveCard({
 }
 
 export function ArchitectureDiagram() {
-  const [mode, setMode] = useState<Mode>("self-hosted");
+  const [mode, setMode] = useState<Mode>("managed");
   const selfHosted = mode === "self-hosted";
 
   return (
-    <section className="py-24 px-4">
-      <div className="mx-auto max-w-5xl">
-        <h2 className="text-center text-heading-32 text-gray-1000 sm:text-heading-40 text-balance">
-          Built on open-source SDKs, yours to self-host
-        </h2>
-        <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900 text-balance">
-          Swap any backend and self-host the whole runtime, with zero managed-infrastructure
-          dependencies.
-        </p>
-
-        {/* Managed vs. self-hosted toggle drives the backend shown inside each card. */}
-        <div className="mt-12 flex items-center justify-center gap-4 text-copy-14">
-          <button
-            type="button"
-            onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
-            aria-pressed={!selfHosted}
-            className={cn(
-              "cursor-pointer transition-colors",
-              selfHosted ? "text-gray-900 hover:text-gray-1000" : "text-gray-1000",
-            )}
-          >
-            Managed
-          </button>
-          <Toggle
-            checked={selfHosted}
-            onChange={(checked) => setMode(checked ? "self-hosted" : "managed")}
-            className="cursor-pointer gap-0"
-            size="medium"
-          >
-            <span className="sr-only">Toggle deployment target</span>
-          </Toggle>
-          <span className="text-copy-14">
-            <button
-              type="button"
-              onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
-              aria-pressed={selfHosted}
-              className={cn(
-                "cursor-pointer transition-colors",
-                selfHosted ? "text-gray-1000" : "text-gray-900 hover:text-gray-1000",
-              )}
-            >
-              Self-hosted
-            </button>{" "}
-            <Link
-              href="https://github.com/vercel-labs/steve"
-              className="text-gray-900 underline decoration-gray-400 underline-offset-2 transition-colors hover:text-gray-1000"
-            >
-              (example)
-            </Link>
-          </span>
-        </div>
-
-        <LogoEveSvg className="mt-10 ml-5 text-gray-1000" height={13} />
-        <div className="mt-3 flex flex-col gap-4 lg:flex-row">
+    <HomeSection
+      id="self-host"
+      lede="Swap any backend and self-host the whole runtime with no managed infrastructure, or deploy on Vercel for fully native support."
+      title={
+        <>
+          Built on open-source SDKs,
+          <br />
+          yours to self-host
+        </>
+      }
+    >
+      <div className="flex flex-col">
+        <LogoEveSvg className="ml-5 self-start text-gray-1000" height={13} />
+        <div className="mt-4 flex flex-col gap-4 lg:flex-row">
           {/* Runtime */}
           <div className="relative flex flex-1 flex-col gap-4 rounded-xl p-5">
             <GradientBorder />
@@ -278,7 +255,7 @@ export function ArchitectureDiagram() {
           </div>
 
           {/* Channel */}
-          <div className="relative flex flex-col gap-4 rounded-xl p-5 lg:w-[240px] lg:shrink-0">
+          <div className="relative flex flex-col gap-4 rounded-xl p-5 lg:w-[360px] lg:shrink-0">
             <GradientBorder />
             <div className="flex flex-col gap-1">
               <SectionLabel>Channel</SectionLabel>
@@ -292,9 +269,14 @@ export function ArchitectureDiagram() {
               <IconMessage className="mt-0.5 shrink-0 text-gray-1000" size={18} />
               <div className="flex flex-1 flex-col gap-2">
                 <span className="font-medium text-gray-1000 text-copy-14">Chat SDK</span>
-                <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 lg:grid-cols-1">
+                <div className="grid grid-cols-2 gap-x-6 gap-y-0.5">
                   {CHANNELS.map((channel) => (
                     <span key={channel} className="text-gray-1000 text-copy-14">
+                      {channel}
+                    </span>
+                  ))}
+                  {MORE_CHANNELS.map((channel) => (
+                    <span key={channel} className="hidden text-gray-1000 text-copy-14 lg:block">
                       {channel}
                     </span>
                   ))}
@@ -311,23 +293,62 @@ export function ArchitectureDiagram() {
             </Link>
           </div>
         </div>
-
-        <p className="mx-auto mt-6 max-w-2xl text-center text-gray-900 text-copy-14 text-balance">
-          {CAPTIONS[mode]}
-          {selfHosted ? (
-            <>
-              {" "}
-              <Link
-                href="https://github.com/vercel-labs/steve"
-                className="inline-flex items-center gap-0 text-gray-1000 underline decoration-gray-400 underline-offset-2"
+        {/* The managed vs. self-hosted toggle drives the backend shown in each card, and its
+            caption explains the selected mode. Below the diagram, or above it below md, so the
+            choice comes before the cards it changes. */}
+        <div className="order-first mb-10 md:order-none md:mt-10 md:mb-0">
+          <div className="flex items-center gap-4 text-copy-14 md:justify-center">
+            <button
+              type="button"
+              onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
+              aria-pressed={!selfHosted}
+              className={cn(
+                "cursor-pointer transition-colors",
+                selfHosted ? "text-gray-900 hover:text-gray-1000" : "text-gray-1000",
+              )}
+            >
+              Vercel Managed
+            </button>
+            <Toggle
+              checked={selfHosted}
+              onChange={(checked) => setMode(checked ? "self-hosted" : "managed")}
+              className="cursor-pointer gap-0"
+              size="medium"
+            >
+              <span className="sr-only">Toggle deployment target</span>
+            </Toggle>
+            <span className="text-copy-14">
+              <button
+                type="button"
+                onClick={() => setMode(selfHosted ? "managed" : "self-hosted")}
+                aria-pressed={selfHosted}
+                className={cn(
+                  "cursor-pointer transition-colors",
+                  selfHosted ? "text-gray-1000" : "text-gray-900 hover:text-gray-1000",
+                )}
               >
-                See the example
-                <IconArrowUpRightSmall className="text-gray-900" size={16} />
-              </Link>
-            </>
-          ) : null}
-        </p>
+                Self-hosted
+              </button>
+            </span>
+          </div>
+
+          <p className="mt-3 max-w-xl text-pretty text-gray-900 text-copy-14 md:mx-auto md:text-balance md:text-center">
+            {CAPTIONS[mode]}
+            {selfHosted ? (
+              <>
+                {" "}
+                <Link
+                  href="https://github.com/vercel-labs/steve"
+                  className="inline-flex items-center gap-0 text-gray-1000 underline decoration-gray-400 underline-offset-2"
+                >
+                  See the example
+                  <IconArrowUpRightSmall className="text-gray-900" size={16} />
+                </Link>
+              </>
+            ) : null}
+          </p>
+        </div>
       </div>
-    </section>
+    </HomeSection>
   );
 }

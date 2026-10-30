@@ -1,3 +1,4 @@
+import { instrumentationScope } from "#instrumentation/scope.js";
 import { APICallError, generateText } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
@@ -5,19 +6,21 @@ import { describe, expect, it } from "vitest";
 import {
   createInstrumentationHooks as createUnboundInstrumentationHooks,
   modelCallIdempotencyKey,
-  type InstrumentationAttemptScope,
+  type InstrumentationScope,
   type InstrumentationModelCallStartedEvent,
   type InstrumentationModelCallTerminalEvent,
 } from "#instrumentation/lifecycle.js";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 
-const scope: InstrumentationAttemptScope = {
-  attemptId: "turn-1:step-0:attempt-0",
-  attemptIndex: 0,
-  sessionId: "session-1",
-  stepIndex: 0,
-  turnId: "turn-1",
-};
+const scope: InstrumentationScope = instrumentationScope(
+  {
+    runId: "turn-1:step-0:attempt-0",
+    attempt: 0,
+    sessionId: "session-1",
+    turnId: "turn-1",
+  },
+  0,
+);
 
 describe("AI SDK model-call retry telemetry", () => {
   it("restarts instrumentation when generateText retries without another call-start callback", async () => {
@@ -26,8 +29,8 @@ describe("AI SDK model-call retry telemetry", () => {
     const hooks = createUnboundInstrumentationHooks([
       {
         events: {
-          "model.call.completed": (event) => void terminal.push(event),
-          "model.call.failed": (event) => void terminal.push(event),
+          "model.call.settled": (event) => void terminal.push(event),
+
           "model.call.started": (event) => void started.push(event),
         },
         name: "retry",
@@ -61,6 +64,7 @@ describe("AI SDK model-call retry telemetry", () => {
             outputTokens: { reasoning: 0, text: 1, total: 1 },
           },
           warnings: [],
+          providerMetadata: { gateway: { cost: "0.01", generationId: "generation-1" } },
         };
       },
     });
@@ -89,14 +93,17 @@ describe("AI SDK model-call retry telemetry", () => {
     ]);
     expect(terminal).toMatchObject([
       {
+        outcome: "failed",
         error: expect.any(APICallError),
         idempotencyKey: modelCallIdempotencyKey(scope, 0, 0),
-        type: "model.call.failed",
+        type: "model.call.settled",
       },
       {
+        outcome: "completed",
         finishReason: "stop",
+        providerMetadata: { gateway: { cost: "0.01", generationId: "generation-1" } },
         idempotencyKey: modelCallIdempotencyKey(scope, 0, 1),
-        type: "model.call.completed",
+        type: "model.call.settled",
         usage: { inputTokens: 1, outputTokens: 1 },
       },
     ]);

@@ -316,26 +316,26 @@ async function streamReply(template: LoadedTemplate, deltas: readonly string[]) 
     };
     const channelAdapter = { ...template.channel.adapter, state } as ChannelAdapter<any>;
     const ctx = buildAdapterContext(channelAdapter, stubSessionAccessor());
-    for (const [sequence, messageDelta] of deltas.entries()) {
+    for (const [index, delta] of deltas.entries()) {
       await callChannelEvent(
         channelAdapter,
-        channelEvent("message.appended", {
-          messageDelta,
-          sequence,
-          stepIndex: 0,
-          turnId: "turn-1",
+        // The first delta announces the part's kind.
+        channelEvent("content.delta", {
+          delta,
+          partId: "part-1",
+          ...(index === 0 && { kind: "text" }),
         }),
         ctx,
       );
     }
     await callChannelEvent(
       channelAdapter,
-      channelEvent("message.completed", {
-        finishReason: "stop",
-        message: deltas.join(""),
-        sequence: deltas.length,
-        stepIndex: 0,
-        turnId: "turn-1",
+      channelEvent("content.completed", {
+        kind: "text",
+        partId: "part-1",
+        phase: "reply",
+        runId: "run-1",
+        value: deltas.join(""),
       }),
       ctx,
     );

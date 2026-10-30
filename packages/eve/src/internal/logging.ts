@@ -174,22 +174,6 @@ function extractErrorMessage(error: unknown): string {
 }
 
 /**
- * Pulls the correlated `errorId` off a `step.failed` / `turn.failed`
- * / `session.failed` event's `details` payload (or any other shape
- * produced by {@link formatError}). Returns `undefined` when the
- * sender did not attach one (older cascades, non-model-call error
- * paths that predate the shared format).
- *
- * The inverse-reader of {@link formatError}. Channels that surface
- * user-visible error text use it to embed a correlation id so a
- * support ticket quoting the id can be grepped back to one incident.
- */
-export function extractErrorId(details: unknown): string | undefined {
-  if (!isObject(details)) return undefined;
-  return isNonEmptyString(details.errorId) ? details.errorId : undefined;
-}
-
-/**
  * Formats an "in parentheses" hint summarizing a failed-event payload
  * for user-visible display. Returns an empty string when neither the
  * structured error name nor message is useful.

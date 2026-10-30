@@ -8,4 +8,4 @@ export const HealthResultSchema = z
   })
   .strict();
 
-export type HealthResult = z.infer<typeof HealthResultSchema>;
+export type { HealthResult } from "./health-types.js";

@@ -1,13 +1,15 @@
-import { defineAgent } from "eve";
+import { defineAgent, type DefinedAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 const STEPS = ["prepare_note", "read_note"] as const;
 
-export default defineAgent({
+const agent: DefinedAgent = defineAgent({
   description: "Prepares a note in its sandbox from a workflow step and reads it back.",
   // Always scripted: the eval checks the sandbox the step shares, not model planning.
   model: mockModel(respond),
 });
+
+export default agent;
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   for (const name of STEPS) {

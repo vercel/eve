@@ -1,6 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
+import { formatSubagentInput, normalizeRequestedOutputSchema } from "#subagents/invocation.js";
+
+it("keeps delegated attachment parts after the child instructions", () => {
+  const result = formatSubagentInput({
+    type: "local",
+    name: "reviewer",
+    description: "Review reports",
+    message: [
+      { type: "text", text: "Review Alice's report." },
+      { type: "file", data: "https://files.example/report.pdf", mediaType: "application/pdf" },
+    ],
+  });
+  expect(result.message).toEqual([
+    { type: "text", text: expect.stringContaining('You are the subagent "reviewer".') },
+    { type: "text", text: "Review Alice's report." },
+    { type: "file", data: "https://files.example/report.pdf", mediaType: "application/pdf" },
+  ]);
+});
 
 describe("normalizeRequestedOutputSchema", () => {
   it("passes a non-empty object schema through", () => {

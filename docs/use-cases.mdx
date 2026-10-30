@@ -3,7 +3,7 @@ title: "Use Cases"
 description: "The two most common use cases for eve are business agents that work for your own company and agents you ship to customers as a product."
 ---
 
-eve gives you everything you need for production agents. The two most common use cases for eve are business agents that work for your own company and agents you ship to customers as a product.
+eve's two most common use cases are business agents for your own company and agents you ship to customers as a product.
 
 <UseCaseSummaries>
   <UseCaseSummary
@@ -103,8 +103,8 @@ An eve agent lives in [your repository](/docs/concepts/project-structure), so it
     href="/docs/evals/overview"
     link="Evals"
   >
-    Evals are automated tests that run the agent through real turns and score the result with code
-    checks or a model judge, so you catch regressions when a prompt, tool, or model changes.
+    Evals run the agent through real turns and score the result with code checks or a model judge.
+    They catch regressions when a prompt, tool, or model changes.
   </Capability>
   <Capability
     icon="tools"
@@ -114,7 +114,8 @@ An eve agent lives in [your repository](/docs/concepts/project-structure), so it
   >
     Tools are typed TypeScript functions the model chooses when to call. When a process must run the
     same way every time, use a workflow tool instead. Its code fixes the order of steps, calls
-    subagents exactly where you say, and waits durably for approvals or webhooks between steps.
+    subagents exactly where you say, and waits for approvals or webhooks between steps, even across
+    restarts.
   </Capability>
   <Capability
     icon="sandbox"
@@ -131,14 +132,15 @@ An eve agent lives in [your repository](/docs/concepts/project-structure), so it
     href="/docs/human-in-the-loop"
     link="Human-in-the-loop"
   >
-    Sessions pause while an approval is pending and resume durably when it resolves. A decision
-    model can auto-approve routine tool calls.
+    Sessions pause while an approval is pending and resume when it resolves, even after a redeploy.
+    A decision model can auto-approve routine tool calls.
   </Capability>
 </Capabilities>
 
 ## Agent as a Service (AaaS)
 
-In AaaS, the agent is the product. One multi-tenant deployment serves many customers, and each of them trusts it with their work over long stretches of time. It has to serve every user durably and keep each tenant's data and identity separate from the next.
+In AaaS, the agent is the product. One multi-tenant deployment serves many customers over long stretches of time. It must keep every user's sessions running over time and keep each tenant's data and identity
+separate.
 
 <TemplateCards>
   <TemplateCard title="Web chat" template="eve-chat-template">
@@ -149,8 +151,8 @@ In AaaS, the agent is the product. One multi-tenant deployment serves many custo
     browser automation.
   </TemplateCard>
   <TemplateCard title="Voice agent" template="eve-voice-template">
-    Users talk to the agent in the browser while it runs tools, asks for approvals, and keeps
-    durable state.
+    Users talk to the agent in the browser while it runs tools, asks for approvals, and keeps state
+    that survives restarts.
   </TemplateCard>
 </TemplateCards>
 
@@ -200,8 +202,8 @@ Each end user gets their own [sessions](/docs/concepts/sessions-runs-and-streami
     href="/docs/guides/decide"
     link="Model selection"
   >
-    Pick models per user, tenant, or feature, or let a decision model choose from your allowlist
-    automatically, to balance cost, latency, and quality.
+    Pick models per user, tenant, or feature to balance cost, latency, and quality. A decision model
+    can also choose from your allowlist.
   </Capability>
   <Capability
     icon="durability"

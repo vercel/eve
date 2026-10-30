@@ -1,12 +1,14 @@
 import type { Context, SpanContext } from "#compiled/@opentelemetry/api/index.js";
+import { enteredView } from "#harness/session-machine/current.js";
+import { contextStorage } from "#context/container.js";
 
 import {
   type InstrumentationSessionStartedEvent,
   type InstrumentationTraceContext,
   type InstrumentationTraceSeed,
   type InstrumentationTurnStartedEvent,
-  type InstrumentationTurnTerminalEvent,
-  type InstrumentationSessionTransitionEvent,
+  type InstrumentationTurnSettledEvent,
+  type InstrumentationSessionEndedEvent,
 } from "#instrumentation/lifecycle.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -62,8 +64,9 @@ interface EveSessionTracing {
   turnFor(sessionId: string, turnId: string, context?: Context): Promise<TurnOperation | undefined>;
   /** Whether the trace policy dropped this turn, so its work must not record spans. */
   dropped(sessionId: string, turnId: string): Promise<boolean>;
-  turnTerminal(event: InstrumentationTurnTerminalEvent): Promise<void>;
-  sessionTransition(event: InstrumentationSessionTransitionEvent): Promise<void>;
+  turnSettled(event: InstrumentationTurnSettledEvent): Promise<void>;
+  /** Ends a turn the session's end left open, failed when the session failed. */
+  sessionEnded(event: InstrumentationSessionEndedEvent): Promise<void>;
 }
 
 export function createEveSessionTracing(input: EveSessionTracingInput): EveSessionTracing {
@@ -183,23 +186,32 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
     return portableSpanContext(turn.context, session.decision);
   };
 
-  async function recordTerminal(
+  /** Ends the turn's span with how the turn ended, or with no outcome when nothing said. */
+  async function endTurn(
     sessionId: string,
     turnId: string,
-    terminal: NonNullable<AgentTurnTraceState["terminal"]>,
-    error?: unknown,
+    ending?: { readonly outcome: "cancelled" | "completed" | "failed"; readonly error?: unknown },
   ) {
-    await input.stateStore.update("turn", turnKey(sessionId, turnId), (turn) => ({
-      ...turn,
-      terminal:
-        terminal.outcome !== "failed"
-          ? terminal
-          : {
-              outcome: "failed",
-              errorName: error instanceof Error ? error.name : undefined,
-              errorMessage: error instanceof Error ? error.message : undefined,
-            },
-    }));
+    const turn = await input.stateStore.get("turn", turnKey(sessionId, turnId));
+    if (turn === undefined) return;
+    const session = await input.stateStore.get("session", sessionId);
+    const operation = await turnFor(sessionId, turnId);
+    if (operation !== undefined) {
+      const metadata = eveActivationMetadata({ session, turn, sessionId });
+      operation.attributes(metadata.attributes ?? {});
+      operation.links(activationLinks(turn) ?? []);
+      if (ending === undefined) await operation.complete({ outcomeUnknown: true });
+      else if (ending.outcome === "failed") {
+        const error = ending.error;
+        await operation.complete({
+          outcome: "failed",
+          failed: true,
+          error,
+          errorType: error instanceof Error ? error.name : undefined,
+        });
+      } else await operation.complete({ outcome: ending.outcome });
+    }
+    await input.stateStore.delete("turn", turnKey(sessionId, turnId));
   }
 
   return {
@@ -208,48 +220,25 @@ export function createEveSessionTracing(input: EveSessionTracingInput): EveSessi
     prepareTurnTrace,
     turnFor,
     dropped,
-    async turnTerminal(event) {
-      await recordTerminal(
+    async turnSettled(event) {
+      const ctx = contextStorage.getStore();
+      const view = ctx === undefined ? undefined : enteredView(ctx);
+      // The same commit's session end carries the provider-filtered failure after its cascade.
+      if (
+        view?.session.status === "ended" &&
+        view.session.outcome === "failed" &&
+        view.session.closedAt === view.turns[event.turnId]?.closedAt
+      )
+        return;
+      await endTurn(event.sessionId, event.turnId, { outcome: event.outcome, error: event.error });
+    },
+    async sessionEnded(event) {
+      if (event.turnId === undefined) return;
+      await endTurn(
         event.sessionId,
         event.turnId,
-        {
-          outcome:
-            event.type === "turn.failed"
-              ? "failed"
-              : event.type === "turn.cancelled"
-                ? "cancelled"
-                : "completed",
-        },
-        event.type === "turn.failed" ? event.error : undefined,
+        event.outcome === "failed" ? { outcome: "failed", error: event.error } : undefined,
       );
-    },
-    async sessionTransition(event) {
-      if (event.turnId === undefined) return;
-      if (event.type === "session.failed")
-        await recordTerminal(event.sessionId, event.turnId, { outcome: "failed" }, event.error);
-      const turn = await input.stateStore.get("turn", turnKey(event.sessionId, event.turnId));
-      if (turn === undefined) return;
-      const session = await input.stateStore.get("session", event.sessionId);
-      const operation = await turnFor(event.sessionId, event.turnId);
-      if (operation !== undefined) {
-        const metadata = eveActivationMetadata({ session, turn, sessionId: event.sessionId });
-        operation.attributes(metadata.attributes ?? {});
-        operation.links(activationLinks(turn) ?? []);
-        const terminal = turn.terminal;
-        // A turn the session left without a terminal event ends with no outcome, as on main.
-        if (terminal === undefined) await operation.complete({ outcomeUnknown: true });
-        else if (terminal.outcome === "failed") {
-          const error = new Error(terminal.errorMessage);
-          error.name = terminal.errorName ?? "Error";
-          await operation.complete({
-            outcome: "failed",
-            failed: true,
-            error,
-            errorType: terminal.errorName,
-          });
-        } else await operation.complete({ outcome: terminal.outcome });
-      }
-      await input.stateStore.delete("turn", turnKey(event.sessionId, event.turnId));
     },
   };
 }

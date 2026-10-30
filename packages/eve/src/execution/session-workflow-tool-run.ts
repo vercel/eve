@@ -1,6 +1,7 @@
-import { deliverWorkflowAuthorization } from "#execution/tools/workflow/owner.js";
+import { deliverWorkflowRelay } from "#execution/tools/workflow/owner.js";
 import type { AppliedRunMessage } from "#execution/tools/workflow/apply-run-messages-step.js";
 import {
+  isAgentSessionMessage,
   runMessageBatchBudget,
   type WorkflowToolAskRequest,
   type WorkflowToolRunMessage,
@@ -15,9 +16,11 @@ import {
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { isWorkflowMessage, type SessionInboxReader } from "#execution/session-inbox/inbox.js";
 import { isTaskRunMessage } from "#execution/tasks/session.js";
+import { isActiveTaskRun, readTaskTable } from "#execution/tasks/table.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import {
   workflowToolRunOutcomeToToolResult,
-  workflowToolRunRequestToInputRequestPayload,
+  workflowAskPayload,
 } from "#execution/tools/workflow/owner-inbox.js";
 import {
   findBlockingWorkflowToolRun,
@@ -33,7 +36,7 @@ interface HandlerInput<T> {
 }
 
 export function isAppliedRunMessage(message: WorkflowToolRunMessage): message is AppliedRunMessage {
-  return message.kind === "agent-started" || message.kind === "report" || isTaskRunMessage(message);
+  return isAgentSessionMessage(message) || message.kind === "report" || isTaskRunMessage(message);
 }
 
 /**
@@ -103,22 +106,28 @@ async function handleWorkflowToolRunRequest(
   input: HandlerInput<WorkflowToolRunRequestMessage>,
 ): Promise<void> {
   const { cursor, message } = input;
-  if (message.request.kind === "authorization-request") {
-    const request = message.request;
-    await deliverWorkflowAuthorization({ ...message, request }, async () => {
+  const { runId, taskId } = message.from;
+  const state = cursor.sessionState.snapshot.session.state;
+  if (
+    taskId !== undefined &&
+    (!isActiveTaskRun(readTaskTable(state), taskId, runId) ||
+      storedProjection(state).view?.tasks[taskId]?.status === "ended")
+  )
+    return;
+  const { request } = message;
+  if (request.kind === "relay") {
+    await deliverWorkflowRelay({ ...message, request }, async () => {
       await cursor.advance((state) =>
-        runProxySubagentEventStep({ hookPayload: request.event, ...state }),
+        runProxySubagentEventStep({ hookPayload: request.event, runId, ...state }),
       );
     });
     return;
   }
   await cursor.advance((state) =>
     runProxySubagentEventStep({
-      ...(message.request.kind === "ask" && {
-        workflowAsk: createWorkflowAskRoute(message.request),
-      }),
-      hookPayload: workflowToolRunRequestToInputRequestPayload(message),
-      runId: message.from.runId,
+      hookPayload: workflowAskPayload({ ...message, request }),
+      runId,
+      workflowAsk: createWorkflowAskRoute(request),
       ...state,
     }),
   );

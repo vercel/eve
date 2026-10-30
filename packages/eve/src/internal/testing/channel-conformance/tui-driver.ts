@@ -39,7 +39,11 @@ export function tuiDriver(): ClientDriver {
         output: screen,
         unicode: true,
       });
-      const run = new EveTUIRunner({ client: new Client({ host }), name: "tui", renderer }).run();
+      const run = new EveTUIRunner({
+        client: new Client({ baseUrl: host }),
+        name: "tui",
+        renderer,
+      }).run();
       const describe = () => `Screen:\n${screen.snapshot()}`;
       try {
         // Surfaces a runner that fails during startup instead of waiting out the timeout.

@@ -17,7 +17,7 @@ export default defineEval({
     );
     turn.expectOk();
 
-    t.calledSubagent("reviewer", { count: 1, status: "completed" });
+    t.calledAgent("reviewer", { count: 1, status: "completed" });
     turn.calledTool("publish_summary", { count: 1 });
     turn.eventsSatisfy("publishing waits for the review's result", (events) => {
       const reviewCallIds = taskStarts(events, "reviewer").map((call) => call.callId);
@@ -25,6 +25,6 @@ export default defineEval({
       const published = firstRequestOf(events, "publish_summary");
       return reviewed >= 0 && published > reviewed;
     });
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

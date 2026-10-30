@@ -28,15 +28,16 @@ export default defineEval({
     );
     turn.expectOk();
 
-    const received = turn.events.find(
-      (event): event is Extract<typeof event, { type: "message.received" }> =>
-        event.type === "message.received",
+    const consumed = turn.events.find(
+      (event): event is Extract<typeof event, { type: "delivery.consumed" }> =>
+        event.type === "delivery.consumed",
     );
-    const fileParts = received?.data.parts?.filter((part) => part.type === "file") ?? [];
-    if (fileParts.length === 0 || fileParts[0]?.mediaType !== "image/png") {
+    const fileParts = consumed?.data.parts.filter((part) => part.kind === "file") ?? [];
+    const first = fileParts[0];
+    if (first?.kind !== "file" || first.mediaType !== "image/png") {
       throw new Error(
-        "message.received did not project a structured image/png file part. " +
-          `Saw parts: ${JSON.stringify(received?.data.parts)}`,
+        "delivery.consumed did not carry a structured image/png file part. " +
+          `Saw parts: ${JSON.stringify(consumed?.data.parts)}`,
       );
     }
 

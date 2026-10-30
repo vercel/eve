@@ -45,6 +45,45 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 describe("legacy session preparation", () => {
+  it("removes retired pre-0.57 framework context without dropping current or app context", async () => {
+    mocks.hydrate.mockResolvedValue([{ sessionTimeoutMs: false }]);
+    const retired = {
+      "eve.activityObserver": {},
+      "eve.activityPendingBlockers": [],
+      "eve.activityRootTurnId": "turn_1",
+      "eve.connectionSearchResults": {},
+      "eve.internal.backgroundToolExecution": true,
+      "eve.mode": "conversation",
+      "eve.pendingSkillAnnouncement": [],
+      "eve.pendingTurnSleepDuration": 1000,
+      "eve.subagentDepth": 1,
+      "eve.tasksEnabled": true,
+      "eve.todo": [],
+      "eve.turnTaskDelivery": {},
+      "eve.turnTaskState": {},
+    };
+    const retained = {
+      "app.identity": "Alice",
+      "app.mode": "research",
+      "eve.auth": null,
+      "eve.channel": { kind: "http", state: { threadId: "thread_1" } },
+      "eve.bundle": { source: { kind: "bundled" } },
+    };
+    const serializedContext = { ...retained, ...retired };
+    const result = await prepareLegacySessionStep({
+      ...input,
+      stepInput: { ...input.stepInput, serializedContext },
+    });
+
+    expect(result.serializedContext).toEqual({
+      ...retained,
+      "eve.sessionId": "original",
+      "eve.sessionInbox": { sessionId: "original" },
+    });
+    expect(result.input.serializedContext).toEqual({ ...retained, ...retired });
+    expect(serializedContext).toEqual({ ...retained, ...retired });
+  });
+
   it.each([false, 5000, undefined])(
     "retains the configured timeout duration (%s)",
     async (sessionTimeoutMs) => {

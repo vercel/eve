@@ -11,19 +11,20 @@ test("accepts no connectors", () => {
 });
 
 test("applies firewall defaults independently", () => {
-  const broker = async () => {};
   extension({
-    github: { connector: "github/acme-bot", org: "acme", broker },
     vercel: { connector: "vercel/acme-bot" },
   });
-  assert.deepEqual(extension.config.github, { connector: "github/acme-bot", org: "acme", broker });
   assert.equal(extension.config.vercel?.delivery, "firewall");
 });
 
-test("rejects empty connector names and organizations", () => {
+test("rejects empty connector names", () => {
+  assert.throws(() => extension({ vercel: { connector: "" } }), /Invalid extension config/u);
+});
+
+test("rejects retired github config instead of silently ignoring credentials", () => {
   assert.throws(
-    () => extension({ github: { connector: "", org: "", broker: async () => {} } }),
+    // @ts-expect-error GitHub belongs to the git extension.
+    () => extension({ github: { connector: "github/acme", org: "acme" } }),
     /Invalid extension config/u,
   );
-  assert.throws(() => extension({ vercel: { connector: "" } }), /Invalid extension config/u);
 });

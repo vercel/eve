@@ -12,7 +12,7 @@ import {
   CommandPromptTriggerDivider,
   CommandPromptViewport,
 } from "@vercel/geistdocs/components/command-prompt";
-import type { JSX } from "react";
+import { type JSX, useState } from "react";
 import { analyticsEvents } from "@/lib/analytics/events";
 import { cn } from "@/lib/utils";
 
@@ -22,56 +22,60 @@ const AGENT_COMMAND = "npx skills add vercel/eve";
 export type InstallAudience = "humans" | "agents";
 
 /**
- * Hero install prompt that toggles between the human-facing `eve init` command
- * and the agent-facing skills command, with a copy-to-clipboard pill.
+ * Install prompt that toggles between the human-facing `eve init` command and
+ * the agent-facing skills command, with a copy-to-clipboard pill.
  */
 export const InstallSwitcher = ({
   className,
-  value,
-  onValueChange,
+  source,
+  onAudienceChange,
 }: {
   className?: string;
-  value?: InstallAudience;
-  onValueChange?: (value: InstallAudience) => void;
-}): JSX.Element => (
-  <CommandPromptRoot
-    className={cn("w-auto items-start", className)}
-    value={value}
-    defaultValue="humans"
-    onValueChange={(nextValue) => {
-      const audience = nextValue === "agents" ? "agents" : "humans";
-      track(analyticsEvents.installerCommandSelected, { target: audience });
-      onValueChange?.(audience);
-    }}
-  >
-    <CommandPromptList>
-      <CommandPromptTrigger value="humans" onClickCapture={() => onValueChange?.("humans")}>
-        For you
-      </CommandPromptTrigger>
-      <CommandPromptTriggerDivider />
-      <CommandPromptTrigger value="agents" onClickCapture={() => onValueChange?.("agents")}>
-        For your agent
-      </CommandPromptTrigger>
-    </CommandPromptList>
+  source: "home_hero" | "home_footer";
+  onAudienceChange?: (audience: InstallAudience) => void;
+}): JSX.Element => {
+  const [audience, setAudienceState] = useState<InstallAudience>("humans");
+  const setAudience = (next: InstallAudience) => {
+    setAudienceState(next);
+    onAudienceChange?.(next);
+  };
 
-    <CommandPromptSurface className="py-2.5">
-      <CommandPromptPrefix>$</CommandPromptPrefix>
-      <CommandPromptViewport>
-        <CommandPromptContent className="py-1" copyValue={HUMAN_COMMAND} value="humans">
-          {HUMAN_COMMAND}
-        </CommandPromptContent>
-        <CommandPromptContent className="py-1" copyValue={AGENT_COMMAND} value="agents">
-          {AGENT_COMMAND}
-        </CommandPromptContent>
-      </CommandPromptViewport>
-      <CommandPromptCopy
-        onClick={() =>
-          track(analyticsEvents.installerCommandCopyClicked, {
-            source: "home_hero",
-            target: value ?? "humans",
-          })
-        }
-      />
-    </CommandPromptSurface>
-  </CommandPromptRoot>
-);
+  return (
+    <CommandPromptRoot
+      className={cn("w-auto items-start", className)}
+      value={audience}
+      onValueChange={(nextValue) => {
+        const next = nextValue === "agents" ? "agents" : "humans";
+        track(analyticsEvents.installerCommandSelected, { target: next });
+        setAudience(next);
+      }}
+    >
+      <CommandPromptList>
+        <CommandPromptTrigger value="humans" onClickCapture={() => setAudience("humans")}>
+          For you
+        </CommandPromptTrigger>
+        <CommandPromptTriggerDivider />
+        <CommandPromptTrigger value="agents" onClickCapture={() => setAudience("agents")}>
+          For your agent
+        </CommandPromptTrigger>
+      </CommandPromptList>
+
+      <CommandPromptSurface className="py-2.5">
+        <CommandPromptPrefix>$</CommandPromptPrefix>
+        <CommandPromptViewport>
+          <CommandPromptContent className="py-1" copyValue={HUMAN_COMMAND} value="humans">
+            {HUMAN_COMMAND}
+          </CommandPromptContent>
+          <CommandPromptContent className="py-1" copyValue={AGENT_COMMAND} value="agents">
+            {AGENT_COMMAND}
+          </CommandPromptContent>
+        </CommandPromptViewport>
+        <CommandPromptCopy
+          onClick={() =>
+            track(analyticsEvents.installerCommandCopyClicked, { source, target: audience })
+          }
+        />
+      </CommandPromptSurface>
+    </CommandPromptRoot>
+  );
+};
