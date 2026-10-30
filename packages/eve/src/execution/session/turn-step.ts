@@ -647,7 +647,11 @@ async function runSessionStepBody(
         },
         node: effectiveNode,
         sessionUsageLimit,
-        titleAttributeWrite: pendingAttributes.title,
+        // The title's write finishes first.
+        setAttributes: async (attributes) => {
+          await pendingAttributes.title;
+          await setEveAttributes(attributes);
+        },
       });
       return step(modelSession, stepInput);
     };

@@ -18,8 +18,6 @@ import { eventsOf } from "#harness/publication.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { always, once } from "#tools/approval/policies.js";
 
-vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
-
 function workflow(
   name: string,
   approval: HarnessToolDefinition["approval"],

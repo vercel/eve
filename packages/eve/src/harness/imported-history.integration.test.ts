@@ -1,5 +1,5 @@
 import { MockLanguageModelV3 } from "ai/test";
-import { expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 
 import { createKernel } from "#harness/tool-loop.js";
 import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
@@ -8,7 +8,6 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import type { ImportedMessage } from "#protocol/session-events/families/delivery.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot be written.
-vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 const usage = {
   inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 10, total: 10 },

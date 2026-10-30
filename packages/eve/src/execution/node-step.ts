@@ -70,7 +70,7 @@ interface CreateExecutionNodeStepInput {
   readonly signInCompletions?: KernelConfig["signInCompletions"];
   readonly typedAnswers?: KernelConfig["typedAnswers"];
   readonly instrumentation: ExecutionInstrumentation | undefined;
-  readonly titleAttributeWrite?: KernelConfig["titleAttributeWrite"];
+  readonly setAttributes?: KernelConfig["setAttributes"];
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
   readonly sessionUsageLimit?: KernelConfig["sessionUsageLimit"];
@@ -100,7 +100,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     runtimeIdentity: buildRuntimeIdentity(input.node),
     sessionUsageLimit: input.sessionUsageLimit,
     tools,
-    titleAttributeWrite: input.titleAttributeWrite,
+    setAttributes: input.setAttributes,
   });
   if (instrumentation === undefined) return step;
   return async (session, stepInput) => {

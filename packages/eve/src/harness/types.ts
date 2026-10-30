@@ -1,3 +1,4 @@
+import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
@@ -325,8 +326,11 @@ export interface KernelConfig {
    * Omitted in production until an instrumentation runtime opts in.
    */
   readonly instrumentation?: SessionInstrumentation;
-  /** Attribute work that must finish before cumulative model usage is persisted. */
-  readonly titleAttributeWrite?: Promise<void>;
+  /**
+   * Tags the turn's run with what its model steps spent. The workflow wrapper provides it, inside
+   * a workflow step; absent, nothing is tagged.
+   */
+  readonly setAttributes?: (attributes: Record<string, EveAttributeValue>) => Promise<void>;
   /**
    * Sign-in callbacks the step's delivery carried. Each completes before anything else runs, and
    * a connection's sign-in resumes the turn that asked for it.

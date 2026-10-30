@@ -168,6 +168,12 @@
  *             (`harness/session-machine/history.ts`) or a transition's `history`.
  *             Writing `{ ...session, history }` elsewhere skips the checks and the
  *             resets a rewrite needs.
+ *   rule 58 — The kernel (`harness/`) doesn't reach the Workflow runtime:
+ *             no `#compiled/@workflow/*`, `#internal/workflow/*`, or
+ *             `#runtime/attributes/emit.js` import. The workflow wrapper in
+ *             `execution/` reads Workflow metadata and passes what the kernel
+ *             needs (its callback URL, attribute sink) in, so the kernel can run
+ *             under another driver.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -290,6 +296,7 @@ function isTsLike(relPath) {
  *   rule50: Violation[];
  *   rule51: Violation[];
  *   rule57: Violation[];
+ *   rule58: Violation[];
  *   rule52: Violation[];
  *   rule53: Violation[];
  *   symlinks: string[];
@@ -328,6 +335,7 @@ async function scanRepo(state) {
     checkRule50(posix, lines, state.rule50);
     checkRule51(posix, lines, state.rule51);
     checkRule57(posix, content, state.rule57);
+    checkRule58(posix, lines, state.rule58);
     if (posix.startsWith("packages/tracing/src/")) {
       for (const [index, line] of lines.entries()) {
         const imports = [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)];
@@ -818,6 +826,26 @@ function checkRule57(posix, content, violations) {
       line: content.slice(0, match.index).split("\n").length,
       message:
         "writes session history directly. Change it with `changeHistory(session, { append | extend | repaired | rewrite })` from `#harness/session-machine/history.js`, or return `history` from a transition.",
+    });
+  }
+}
+
+// ---------- Rule 58: the kernel doesn't reach the Workflow runtime ----------
+
+const WORKFLOW_RUNTIME_IMPORT_RE =
+  /["'](?:#compiled\/@workflow\/[^"']*|#internal\/workflow\/[^"']*|#runtime\/attributes\/emit\.js)["']/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule58(posix, lines, violations) {
+  if (!posix.startsWith("packages/eve/src/harness/") || posix.endsWith(".test.ts")) return;
+  for (const [index, line] of lines.entries()) {
+    if (!WORKFLOW_RUNTIME_IMPORT_RE.test(line)) continue;
+    violations.push({
+      rule: 58,
+      file: posix,
+      line: index + 1,
+      message:
+        "imports the Workflow runtime into the kernel. Read it in the workflow wrapper under `execution/` and pass what the kernel needs through `KernelConfig` or the step's context.",
     });
   }
 }
@@ -1880,6 +1908,7 @@ async function main() {
     rule50: /** @type {Violation[]} */ ([]),
     rule51: /** @type {Violation[]} */ ([]),
     rule57: /** @type {Violation[]} */ ([]),
+    rule58: /** @type {Violation[]} */ ([]),
     rule52: /** @type {Violation[]} */ ([]),
     rule53: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
@@ -1991,6 +2020,7 @@ async function main() {
   violations.push(...state.rule50);
   violations.push(...state.rule51);
   violations.push(...state.rule57);
+  violations.push(...state.rule58);
   violations.push(...state.rule52);
   violations.push(...state.rule53);
 

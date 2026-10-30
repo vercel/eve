@@ -18,8 +18,6 @@ import { createProjectionRecorder } from "#internal/testing/session-projection-r
 import { eachEvent, parkedSteps } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
-vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
-
 function gated(name: string, response?: ApprovalResponsePolicy): HarnessToolDefinition {
   return {
     approval:
