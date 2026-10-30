@@ -217,7 +217,11 @@ describe("A2A channel", () => {
 
       // History holds the task's user messages.
       const read = requiredRecord((await rpc("alice", "GetTask", { id: taskId })).result, "task");
-      expect((read.history as unknown[]).length).toBe(2);
+      // History echoes the client's message IDs.
+      expect((read.history as { messageId: string }[]).map((m) => m.messageId)).toEqual([
+        "ask-1",
+        "ask-2",
+      ]);
     },
     TEST_TIMEOUT_MS,
   );

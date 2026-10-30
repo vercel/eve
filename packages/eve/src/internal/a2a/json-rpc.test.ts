@@ -72,11 +72,18 @@ describe("handleA2aJsonRpc", () => {
     ];
     for (const headers of versions) {
       const { body } = await call(message, headers);
-      expect(body).toMatchObject({ error: { code: -32009 }, id: 2 });
+      expect(body).toMatchObject({
+        error: {
+          code: -32009,
+          data: [{ metadata: { supportedVersions: "1.0" }, reason: "VERSION_NOT_SUPPORTED" }],
+        },
+        id: 2,
+      });
     }
     const viaQuery = await handleA2aJsonRpc(
       new Request("http://127.0.0.1/eve/v1/a2a?A2A-Version=1.0", {
         body: JSON.stringify(message),
+        headers: { "content-type": "application/json" },
         method: "POST",
       }),
       null,
@@ -95,7 +102,80 @@ describe("handleA2aJsonRpc", () => {
     });
     expect(
       (await call({ id: 4, jsonrpc: "2.0", method: "GetTask", params: {} })).body,
-    ).toMatchObject({ error: { code: -32602, data: expect.any(Array) }, id: 4 });
+    ).toMatchObject({
+      error: {
+        code: -32602,
+        data: [
+          {
+            "@type": "type.googleapis.com/google.rpc.BadRequest",
+            fieldViolations: [{ description: expect.any(String), field: "id" }],
+          },
+        ],
+      },
+      id: 4,
+    });
+  });
+
+  it("reads proto field names as well as JSON names, leaving free-form values alone", async () => {
+    const exec = execution();
+    await call(
+      {
+        id: 8,
+        jsonrpc: "2.0",
+        method: "GetTask",
+        params: { history_length: 0, id: "task" },
+      },
+      undefined,
+      exec,
+    );
+    expect(vi.mocked(exec.getTask).mock.calls[0]![0]).toEqual({ historyLength: 0, id: "task" });
+
+    await call(
+      {
+        id: 9,
+        jsonrpc: "2.0",
+        method: "SendMessage",
+        params: {
+          configuration: { return_immediately: true },
+          message: {
+            message_id: "m",
+            metadata: { trace_id: "t" },
+            parts: [{ data: { snake_key: 1 } }],
+            role: "ROLE_USER",
+          },
+        },
+      },
+      undefined,
+      exec,
+    );
+    expect(vi.mocked(exec.sendMessage).mock.calls[0]![0]).toMatchObject({
+      configuration: { returnImmediately: true },
+      message: { messageId: "m", metadata: { trace_id: "t" }, parts: [{ data: { snake_key: 1 } }] },
+    });
+  });
+
+  it("refuses a declared non-JSON body, accepting JSON media types and an absent header", async () => {
+    const message = { id: 10, jsonrpc: "2.0", method: "GetTask", params: { id: "task" } };
+    const send = (contentType?: string) =>
+      handleA2aJsonRpc(
+        new Request("http://127.0.0.1/eve/v1/a2a", {
+          // Bytes, so an absent header stays absent (a string body implies text/plain).
+          body: new TextEncoder().encode(JSON.stringify(message)),
+          headers: {
+            "a2a-version": "1.0",
+            ...(contentType !== undefined && { "content-type": contentType }),
+          },
+          method: "POST",
+        }),
+        null,
+        execution(),
+      ).then((response) => response.json());
+    expect(await send("text/plain")).toMatchObject({
+      error: { code: -32005, data: [{ reason: "CONTENT_TYPE_NOT_SUPPORTED" }] },
+    });
+    for (const accepted of [undefined, "application/json; charset=utf-8", "application/a2a+json"]) {
+      expect(await send(accepted)).toMatchObject({ result: task });
+    }
   });
 
   it("refuses unadvertised capabilities with their spec errors", async () => {
@@ -119,6 +199,7 @@ describe("handleA2aJsonRpc", () => {
         headers: {
           "a2a-version": "1.0",
           "content-length": String(A2A_REQUEST_BODY_MAX_BYTES + 1),
+          "content-type": "application/json",
         },
         method: "POST",
       }),
@@ -128,16 +209,28 @@ describe("handleA2aJsonRpc", () => {
     expect(await response.json()).toMatchObject({ error: { code: -32600 } });
   });
 
-  it("renders A2A errors as given and hides internal ones behind an error id", async () => {
+  it("details A2A errors with ErrorInfo and hides internal ones behind a request id", async () => {
     const notFound = execution({ getTask: vi.fn().mockRejectedValue(A2aError.taskNotFound()) });
     const internal = execution({ getTask: vi.fn().mockRejectedValue(new Error("db password=x")) });
     const message = { id: 6, jsonrpc: "2.0", method: "GetTask", params: { id: "task" } };
     expect((await call(message, undefined, notFound)).body.error).toEqual({
       code: -32001,
+      data: [
+        {
+          "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+          domain: "a2a-protocol.org",
+          reason: "TASK_NOT_FOUND",
+        },
+      ],
       message: "Task not found.",
     });
     const hidden = (await call(message, undefined, internal)).body.error;
-    expect(hidden).toMatchObject({ code: -32603, data: { errorId: expect.any(String) } });
+    expect(hidden).toMatchObject({
+      code: -32603,
+      data: [
+        { "@type": "type.googleapis.com/google.rpc.RequestInfo", requestId: expect.any(String) },
+      ],
+    });
     expect(JSON.stringify(hidden)).not.toContain("password");
   });
 
@@ -175,7 +268,11 @@ describe("handleA2aJsonRpc", () => {
         result: { statusUpdate: { contextId: "ctx", status: task.status, taskId: "task" } },
       },
       {
-        error: { code: -32603, data: { errorId: expect.any(String) }, message: "Internal error." },
+        error: {
+          code: -32603,
+          data: [expect.objectContaining({ requestId: expect.any(String) })],
+          message: "Internal error.",
+        },
         id: 8,
         jsonrpc: "2.0",
       },

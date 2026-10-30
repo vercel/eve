@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildAgentCard, type BuildAgentCardInput } from "./agent-card.js";
+import { agentCardResponse, buildAgentCard, type BuildAgentCardInput } from "./agent-card.js";
 
 const base: BuildAgentCardInput = {
   described: { description: "Plans trips.", name: "travel", skills: [], tools: [] },
@@ -89,5 +89,42 @@ describe("buildAgentCard", () => {
     });
     expect(card).not.toHaveProperty("securityRequirements");
     expect(card).not.toHaveProperty("iconUrl");
+  });
+});
+
+describe("agentCardResponse", () => {
+  const card = { name: "agent" };
+  const get = (headers: Record<string, string> = {}) =>
+    agentCardResponse(
+      new Request("http://127.0.0.1/.well-known/agent-card.json", { headers }),
+      card,
+      {
+        "cache-control": "public, max-age=300",
+      },
+    );
+
+  it("serves the card with validators, and 304 when a client's copy is current", async () => {
+    const first = await get();
+    const etag = first.headers.get("etag")!;
+    const lastModified = first.headers.get("last-modified")!;
+    expect(await first.json()).toEqual(card);
+    expect(etag).toMatch(/^"[\w-]{27}"$/u);
+    expect((await get()).headers.get("etag")).toBe(etag);
+
+    const notModified = await get({ "if-none-match": `"other", W/${etag}` });
+    expect(notModified.status).toBe(304);
+    expect(notModified.headers.get("etag")).toBe(etag);
+    expect(notModified.headers.get("cache-control")).toBe("public, max-age=300");
+    expect((await get({ "if-modified-since": lastModified })).status).toBe(304);
+  });
+
+  it("serves the card when the client's copy is stale, preferring If-None-Match", async () => {
+    expect((await get({ "if-none-match": '"stale"' })).status).toBe(200);
+    expect((await get({ "if-modified-since": "Thu, 01 Jan 2015 00:00:00 GMT" })).status).toBe(200);
+    // A non-matching ETag wins over a current date.
+    const future = new Date(Date.now() + 60_000).toUTCString();
+    expect((await get({ "if-modified-since": future, "if-none-match": '"stale"' })).status).toBe(
+      200,
+    );
   });
 });

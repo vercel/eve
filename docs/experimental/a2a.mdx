@@ -79,7 +79,7 @@ A task returns to `TASK_STATE_WORKING` once its prompt is answered or its sign-i
 
 ## Call the agent
 
-Any A2A v1.0 client can call the agent. Clients must send `A2A-Version: 1.0`; eve treats a request without the header as an A2A 0.3 request and refuses it with `VersionNotSupportedError`.
+Any A2A v1.0 client can call the agent. Requests must be `Content-Type: application/json` and carry `A2A-Version: 1.0`; eve treats a request without the version header as an A2A 0.3 request and refuses it with `VersionNotSupportedError`.
 
 ```sh
 curl https://agent.example.com/eve/v1/a2a \
@@ -168,7 +168,7 @@ The JSON-RPC endpoint validates each request before authentication, as the MCP c
 
 Request bodies are limited to 32 MB. File parts accept only `https` and `http` URLs or inline `raw` bytes, held to `uploadPolicy`; a disallowed media type is refused with `ContentTypeNotSupportedError`.
 
-The Agent Card is CORS-readable. The JSON-RPC endpoint is not; put a same-origin backend in front of it when a browser application needs to call the agent.
+The Agent Card is CORS-readable and cacheable: responses carry `Cache-Control`, an `ETag`, and `Last-Modified`, and a matching conditional request gets `304 Not Modified`. The JSON-RPC endpoint is not; put a same-origin backend in front of it when a browser application needs to call the agent.
 
 ## Limitations
 

@@ -93,6 +93,25 @@ issuer and scopes. Applications override with `card.securitySchemes`.
   `returnImmediately`, streaming, and subscription.
 - Interop was checked manually against the official clients `@a2a-js/sdk` 1.3.0 and `a2a-sdk`
   (Python) 1.3.0: every method, streaming and non-streaming, typed error mapping, and answers.
+- The official [A2A TCK](https://github.com/a2aproject/a2a-tck) (`main` at `d4d6fae`, JSON-RPC)
+  passed 63 of 64 applicable MUST requirements, every SHOULD, and 3 of 4 MAY. The harness ran
+  `none()` auth behind a proxy that copied each `messageId` into the message text, because the
+  TCK scripts agent behavior by `messageId` prefix and the model never sees IDs. The proxy also
+  made each send's `messageId` unique: the TCK reuses one per scenario for distinct messages, and
+  eve reads a repeated one as a retry (spec 3.3.1).
+  - CORE-MULTI-002a fails because of a TCK bug
+    ([a2a-tck#202](https://github.com/a2aproject/a2a-tck/issues/202)): the test asserts success
+    for the MUST-reject case it cites. eve rejects unknown `contextId`s, as the MUST requires.
+  - CORE-MULTI-002 (MAY accept client-chosen `contextId`s): not supported; a context is a session.
+  - Four scripted agent behaviors aren't ones an eve agent produces: file and file-URL
+    artifacts, a data artifact (eve structured output needs a per-message schema), and a
+    direct `Message` reply (eve always answers with a task, which the spec allows).
+  - Push notification, extended card, gRPC, and HTTP+JSON requirements skip, as the card
+    declares none of them.
+  - The TCK confirmed the typed-detail `error.data` fix and found two more bugs, now fixed:
+    snake_case proto field names (`history_length`, `context_id`) were silently dropped, and a
+    non-JSON `Content-Type` was accepted. It also prompted the card's `ETag` and
+    `Last-Modified`.
 
 ## Not supported
 

@@ -11,6 +11,7 @@ import {
 import { sessionAuthFromResult } from "#channel/auth/result.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import {
+  agentCardResponse,
   buildAgentCard,
   type A2aAgentCardOptions,
   type CardSecurity,
@@ -105,8 +106,10 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
       options: input.card,
       security,
     });
-    return Response.json(body, {
-      headers: { ...CARD_CORS, "cache-control": "public, max-age=300" },
+    return await agentCardResponse(request, body, {
+      ...CARD_CORS,
+      "access-control-expose-headers": "ETag, Last-Modified",
+      "cache-control": "public, max-age=300",
     });
   };
 
