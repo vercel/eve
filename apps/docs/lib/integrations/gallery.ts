@@ -3,18 +3,21 @@ import type { Integration, IntegrationType } from "./data";
 export type GalleryFilter = "all" | IntegrationType;
 
 /**
- * Most-used integrations by slug, in display order. They lead their gallery
- * tab and type group; everything else follows alphabetically. Ranked by
- * observed usage as of October 2026; revisit as usage shifts.
+ * Favorite integrations by slug, in display order: the first-party channels
+ * shipped in the `eve` package. They lead their gallery tab and type group;
+ * everything else follows alphabetically.
  */
 export const FEATURED_SLUGS: readonly string[] = [
+  "eve",
+  "linear-agent",
+  "telegram",
+  "twilio",
   "slack",
   "github",
-  "linear-agent",
-  "linq",
   "photon",
-  "linear",
-  "notion",
+  "linq",
+  "discord",
+  "teams",
 ];
 
 const featuredRank = (integration: Integration): number => {

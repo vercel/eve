@@ -29,9 +29,20 @@ describe("integrations gallery order", () => {
     }
   });
 
-  it("leads the Channels tab with the most-used channels", () => {
+  it("leads the Channels tab with the first-party channels", () => {
     const slugs = filterIntegrations(integrations, "channel", "").map(({ slug }) => slug);
-    expect(slugs.slice(0, 5)).toEqual(["slack", "github", "linear-agent", "linq", "photon"]);
+    expect(slugs.slice(0, 10)).toEqual([
+      "eve",
+      "linear-agent",
+      "telegram",
+      "twilio",
+      "slack",
+      "github",
+      "photon",
+      "linq",
+      "discord",
+      "teams",
+    ]);
   });
 
   it.each<GalleryFilter>(["channel", "connection", "extension", "memory", "instrumentation"])(
