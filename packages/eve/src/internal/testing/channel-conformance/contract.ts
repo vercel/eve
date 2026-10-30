@@ -933,7 +933,7 @@ const signInRules = [
   {
     rule: "only the person signing in sees the sign-in link and code",
     source:
-      "docs/channels/slack.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
+      "docs/channels/slack/reference.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
     requires: [],
     variesByConversation: true,
     surfaces: ["public", "shared"],
@@ -952,7 +952,7 @@ const signInRules = [
   {
     rule: "someone else pressing a sign-in isn't shown its link or code",
     source:
-      "docs/channels/slack.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
+      "docs/channels/slack/reference.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
     requires: ["another-person", "buttons"],
     variesByConversation: true,
     surfaces: ["shared"],

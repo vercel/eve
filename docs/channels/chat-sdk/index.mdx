@@ -1,0 +1,140 @@
+---
+title: "Chat SDK"
+description: "Bridge any Vercel Chat SDK adapter, such as email, WhatsApp, or Google Chat, to your agent with your own credentials and state store."
+type: integration
+---
+
+The Chat SDK channel connects your agent to any [Vercel Chat SDK](https://chat-sdk.dev) adapter. Use it for a surface eve has no first-class channel for, such as email or WhatsApp, or when you want to manage credentials and state with Chat SDK primitives instead of Vercel Connect. The adapter owns provider auth, webhook verification, and delivery. eve owns sessions, streaming replies, typing indicators, and approvals.
+
+Every option and default is in the [Chat SDK reference](/docs/channels/chat-sdk/reference).
+
+## Set up
+
+Install the Chat SDK core, an adapter, and a state adapter. This page uses the Resend email adapter:
+
+```bash
+npm install eve@latest chat @resend/chat-sdk-adapter @chat-adapter/state-memory
+```
+
+`chatSdkChannel` returns `{ bot, channel, send }`. Register Chat SDK handlers on `bot`, call `send` from them to hand each message to the agent, and export `channel`:
+
+```ts title="agent/channels/resend.ts"
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { createResendAdapter } from "@resend/chat-sdk-adapter";
+import type { Message, Thread } from "chat";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "Resend Bot",
+  adapters: {
+    resend: createResendAdapter({
+      fromAddress: "hello@example.com",
+      fromName: "Resend Bot",
+    }),
+  },
+  state: createMemoryState(),
+  streaming: false,
+});
+
+bot.onNewMention(async (thread: Thread, message: Message) => {
+  await thread.subscribe();
+  await send(message.text, { thread, idempotencyKey: message.id });
+});
+
+bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
+  await send(message.text, { thread, idempotencyKey: message.id });
+});
+
+export default channel;
+```
+
+Each adapter serves its webhook at `/eve/v1/{adapterName}`, so this one is `/eve/v1/resend`. Point the provider's webhook there and deploy with `eve deploy`. Use a durable state adapter, such as Redis, in production so thread subscriptions survive restarts.
+
+## Continue a thread
+
+`onNewMention` fires on a fresh mention, or a new inbound thread on surfaces like email. Call `thread.subscribe()` there, and `onSubscribedMessage` receives every later message in the thread. The `thread` you pass to `send` keeps the session and replies on that thread. Pass `idempotencyKey: message.id` so a retried webhook doesn't reach the agent twice.
+
+## Stream or post replies
+
+Replies stream by default: eve posts a message and edits it as text arrives. Set `streaming: false` for surfaces that can't edit sent messages, such as email and WhatsApp, so the reply posts once. eve also skips typing indicators and edits an adapter doesn't support.
+
+## Answer approvals
+
+Approvals and questions render as a Chat SDK card with buttons, and a click resumes the session. Adapters that can't show cards get numbered options, and a reply with an option's number or label answers. Set `resolveInputAuth` to carry the clicking user's identity into the resumed turn:
+
+```ts title="agent/channels/slack.ts"
+import { createSlackAdapter } from "@chat-adapter/slack";
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { chatSdkChannel } from "eve/channels/chat-sdk";
+
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "Support Bot",
+  adapters: { slack: createSlackAdapter() },
+  state: createMemoryState(),
+  resolveInputAuth: (event) => ({
+    authenticator: "slack",
+    principalType: "user",
+    principalId: event.user?.userId ?? "unknown",
+    attributes: {},
+  }),
+});
+
+export default channel;
+```
+
+## Keep sign-ins private
+
+When a tool needs a connection the person hasn't authorized, eve sends the sign-in link only to that person, as an ephemeral message or a direct message. It needs per-person `auth` on each `send` and the handler's `Thread` object, so it knows who wrote the message:
+
+```ts
+bot.onSubscribedMessage(async (thread, message) => {
+  await send(message.text, {
+    thread,
+    auth: {
+      authenticator: "slack",
+      principalType: "user",
+      principalId: message.author.userId,
+      attributes: {},
+    },
+  });
+});
+```
+
+Without per-person `auth`, the thread gets a notice to continue in a direct message, and the sign-in isn't shown.
+
+## Start a thread from a schedule
+
+Send to the channel from a [schedule](/docs/schedules#handler-form-run) or [another channel](/docs/channels/custom#cross-channel-hand-off). Target a serialized Chat SDK thread, or `{ adapterName, threadId }`:
+
+```ts title="agent/schedules/weekly-digest.ts"
+import { defineSchedule } from "eve/schedules";
+import { channel } from "../channels/resend";
+
+export default defineSchedule({
+  cron: "0 9 * * 1",
+  async run({ to, waitUntil }) {
+    waitUntil(
+      to(channel, { adapterName: "resend", threadId: "resend:user@example.com" }).send(
+        "Your weekly digest is ready.",
+        { auth: null },
+      ),
+    );
+  },
+});
+```
+
+## Forward attachments
+
+Convert a message with `messageContentOf` to send its attachments along with the text. eve downloads each file with the adapter's credentials when the turn runs:
+
+```ts
+import { messageContentOf } from "eve/channels/chat-sdk";
+
+bot.onNewMention(async (thread, message) => {
+  await send(messageContentOf(message), { thread });
+});
+```
+
+## Reference
+
+The [Chat SDK reference](/docs/channels/chat-sdk/reference) covers every option, webhook routes, `send` and `respond` options, steering, delivery, custom event handlers, sign-in rules, attachment downloads, and audience.

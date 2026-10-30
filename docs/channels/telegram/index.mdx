@@ -1,0 +1,101 @@
+---
+title: "Telegram"
+description: "Reach your agent from a Telegram bot in private chats, groups, and forum topics."
+type: integration
+---
+
+A Telegram agent answers every message in a private chat. In a group, it answers commands, `@mentions`, and replies to its own messages, and ignores the rest. Approvals and questions appear as inline-keyboard buttons. [Set up](#set-up) connects a bot you create with BotFather.
+
+Every option, hook, and default is in the [Telegram reference](/docs/channels/telegram/reference).
+
+## Set up
+
+Create a bot with [@BotFather](https://t.me/botfather), then add the channel file:
+
+```ts title="agent/channels/telegram.ts"
+import { telegramChannel } from "eve/channels/telegram";
+
+export default telegramChannel({
+  botUsername: "my_bot",
+});
+```
+
+Set the bot token and a webhook secret you choose:
+
+```bash
+TELEGRAM_BOT_TOKEN=123456:...
+TELEGRAM_WEBHOOK_SECRET_TOKEN=...
+```
+
+After deploying, register the webhook. eve doesn't call `setWebhook` for you:
+
+```bash
+curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://your-app.example.com/eve/v1/telegram",
+       "secret_token":"'"$TELEGRAM_WEBHOOK_SECRET_TOKEN"'",
+       "allowed_updates":["message","callback_query"]}'
+```
+
+eve rejects any request whose `X-Telegram-Bot-Api-Secret-Token` header doesn't match `TELEGRAM_WEBHOOK_SECRET_TOKEN`.
+
+## Answer in groups and topics
+
+In a group, a message wakes the agent when it's a command (`/ask` or `/ask@my_bot`), mentions `@my_bot`, or replies to one of the agent's messages. Mentions need `botUsername`. Each forum topic is its own session. Group privacy mode is a BotFather setting, not a channel option.
+
+## Control who can use the agent
+
+Return `{ auth }` from `onMessage` to start a turn, or `null` to ignore the message. A custom `onMessage` replaces the default group filter. This one answers only private chats with listed users:
+
+```ts title="agent/channels/telegram.ts"
+import { defaultTelegramAuth, telegramChannel } from "eve/channels/telegram";
+
+const allowedUsers = new Set(["123456789"]);
+
+export default telegramChannel({
+  botUsername: "my_bot",
+  onMessage(_ctx, message) {
+    if (message.chat.type !== "private" || !allowedUsers.has(message.from?.id ?? "")) return null;
+    return { auth: defaultTelegramAuth(message) };
+  },
+});
+```
+
+## Ask for approval
+
+Tool approvals and option questions appear as inline-keyboard buttons. Freeform questions use a reply prompt, and the person's reply becomes the answer. Replies are plain text, so Markdown shows literally, and replies longer than 4,096 characters split across messages.
+
+## Message someone first
+
+Start a session from a [schedule](/docs/schedules#handler-form-run) or [another channel](/docs/channels/custom#cross-channel-hand-off) with a `chatId` target. Add `messageThreadId` to post in a forum topic:
+
+```ts title="agent/schedules/daily-digest.ts"
+import { defineSchedule } from "eve/schedules";
+import telegram from "../channels/telegram";
+
+export default defineSchedule({
+  cron: "0 9 * * *",
+  async run({ to, waitUntil, appAuth }) {
+    waitUntil(
+      to(telegram, { chatId: "123456789" }).send("Send today's digest.", { auth: appAuth }),
+    );
+  },
+});
+```
+
+## Limit photos and documents
+
+Photos and documents reach the agent as files, up to 25 MB of any type by default. Set `uploadPolicy` to narrow the types or size:
+
+```ts title="agent/channels/telegram.ts"
+import { telegramChannel } from "eve/channels/telegram";
+
+export default telegramChannel({
+  botUsername: "my_bot",
+  uploadPolicy: { allowedMediaTypes: ["image/*", "application/pdf"], maxBytes: 10 * 1024 * 1024 },
+});
+```
+
+## Reference
+
+The [Telegram reference](/docs/channels/telegram/reference) covers options, credentials, dispatch rules, model context, delivery, human-in-the-loop, proactive session anchoring, and attachments.

@@ -399,7 +399,7 @@ Before sending:
 
 The supplied `auth` identifies who started the session, and tools and event handlers read it as `session.auth.initiator`.
 
-The destination's `receive` hook defines the target fields and how they map to a session; see [Slack proactive sessions](./slack#proactive-sessions) for Slack's. To let people continue the conversation, configure the destination's inbound handlers to accept follow-ups.
+The destination's `receive` hook defines the target fields and how they map to a session; see [Slack proactive sessions](./slack/reference#proactive-sessions) for Slack's. To let people continue the conversation, configure the destination's inbound handlers to accept follow-ups.
 
 `send` takes the same options as `from(address).send()` and `Session.send()`: `auth`, `context`, `history`, `idempotencyKey`, `outputSchema`, `title`, and `turnPolicy`. The destination's `receive` hook gets them with the message and target, and every built-in channel passes them on to the session.
 

@@ -1,9 +1,14 @@
 ---
-title: Linq
-description: Connect an eve agent to iMessage and SMS through Linq.
+title: "Linq Reference"
+description: "Linq channel options, credentials, webhook verification, steering, attachments, inbound hooks, and tapbacks."
+type: reference
 ---
 
+This page documents every part of `linqChannel` from `eve/channels/linq`. For setup and common tasks, start with [Linq](/docs/channels/linq).
+
 The Linq channel connects your agent to iMessage and SMS conversations through `agent/channels/linq.ts`.
+
+## Setup and credentials
 
 Run `eve add channel/linq` and choose Vercel Connect or portable credentials. With Vercel Connect, eve signs you in and links a Vercel project. It then asks whether to create a managed Linq account and line, or connect an existing account with its partner API token. You select the account's phone numbers for the agent, and eve configures the connector and webhook through Connect:
 
@@ -16,11 +21,41 @@ export default linqChannel({
 });
 ```
 
+### Other hosts
+
+On a host without Vercel Connect, choose **Use portable credentials** during `eve add channel/linq`. eve writes `LINQ_API_KEY` and `LINQ_WEBHOOK_SECRET` to `.env.local`.
+
+After deploying the agent:
+
+1. Create a Linq webhook for your public `https://…/eve/v1/linq` URL with `message.received`, `reaction.added`, and `reaction.removed` events.
+2. Set `LINQ_API_KEY` and `LINQ_WEBHOOK_SECRET` in the host's encrypted environment variables.
+
+To configure the channel by hand, pass the API key and webhook signing secret:
+
+```ts title="agent/channels/linq.ts"
+import { linqChannel } from "eve/channels/linq";
+
+export default linqChannel({
+  credentials: {
+    apiKey: process.env.LINQ_API_KEY!,
+    signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
+  },
+});
+```
+
+A supplied `webhookVerifier` takes precedence over `signingSecret`.
+
+## Inbound messages
+
 The channel receives webhooks at `/eve/v1/linq` and, by default, verifies them with Vercel OIDC from the same project and environment. It builds auth from the person who sent each message, marks accepted messages as read, and keeps one eve session per Linq conversation.
 
-A message that arrives during a turn joins that turn, so the agent can take the correction into account. Set `turnPolicy: "queue"` to let every reply finish before the next message starts. See [Overlapping messages](./overview#overlapping-messages) for when a new message can interrupt the model.
+A message that arrives during a turn joins that turn, so the agent can take the correction into account. Set `turnPolicy: "queue"` to let every reply finish before the next message starts. See [Overlapping messages](/docs/channels/overview#overlapping-messages) for when a new message can interrupt the model.
+
+## Attachments
 
 Images and other files people send reach the agent as file parts. eve downloads each one over HTTPS. Downloads and redirects must resolve to public network addresses and time out after 30 seconds. A failed download, or a file over 25 MB, reaches the agent as a short note instead.
+
+## Message hook
 
 Customize inbound handling with `onMessage`. Return `null` to ignore a message, or return `title` alongside `auth` to set the run title when the message starts a run:
 
@@ -38,6 +73,23 @@ export default linqChannel({
 ```
 
 Set `route` to change the webhook path, or `webhookVerifier` (typed `LinqWebhookVerifier` from `eve/channels/linq`) to use a different trusted-forwarder verifier. A verifier receives the request and its raw body bytes. It rejects a webhook by throwing or returning a falsy value such as `null` or `false`.
+
+## Options
+
+`linqChannel(config)` takes these options. All are optional.
+
+| Option        | Default                               | Description                                                                                                                  |
+| ------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `credentials` | Same-project Vercel OIDC verification | From `connectLinqCredentials(...)`, or `{ apiKey, signingSecret, webhookVerifier }`. Each secret also takes a lazy resolver. |
+| `route`       | `/eve/v1/linq`                        | Webhook path.                                                                                                                |
+| `baseURL`     | Linq's API                            | Linq API endpoint, such as a sandbox.                                                                                        |
+| `userName`    | `"eve"`                               | Bot display name.                                                                                                            |
+| `turnPolicy`  | `"steer"`                             | `"steer"` or `"queue"` for messages that arrive during a turn.                                                               |
+| `onMessage`   | Dispatch with the author's auth       | `(ctx, message)` hook. See [Message hook](#message-hook).                                                                    |
+| `onTapback`   | None, so tapbacks are ignored         | `(ctx, tapback)` hook. See [Tapbacks](#tapbacks).                                                                            |
+| `events`      | eve's default handlers                | Per-event handler overrides.                                                                                                 |
+
+The channel mounts `GET` and `POST` on `/eve/v1/linq`.
 
 ## Tapbacks
 
@@ -80,7 +132,7 @@ export default linq.tapbackTool();
 
 The model calls it with a standard tapback, such as `{ "tapback": "love" }`, or any single emoji, such as `{ "tapback": "🎉" }`. eve reacts to the latest message someone sent in the conversation. A standard tapback's own emoji, such as `👍`, sends that tapback.
 
-The model can send a tapback alongside a reply; to let a tapback be the whole answer, also add [`no_reply`](../concepts/built-in-tools#no_reply). Subagents don't receive the tool. In a session from another channel, such as web chat, or before anyone has sent a message, the call returns an error to the model.
+The model can send a tapback alongside a reply; to let a tapback be the whole answer, also add [`no_reply`](/docs/concepts/built-in-tools#no_reply). Subagents don't receive the tool. In a session from another channel, such as web chat, or before anyone has sent a message, the call returns an error to the model.
 
 ### Answer approvals with a tapback
 
@@ -106,31 +158,7 @@ export default linqChannel({
 
 Return `message` to replace the text the agent receives for a tapback. Don't set `message` to an option's id, label, or number, because eve reads that text like a typed reply. A typed reply answers the first waiting approval, no matter which message the tapback is on.
 
-## Other hosts
-
-On a host without Vercel Connect, choose **Use portable credentials** during `eve add channel/linq`. eve writes `LINQ_API_KEY` and `LINQ_WEBHOOK_SECRET` to `.env.local`.
-
-After deploying the agent:
-
-1. Create a Linq webhook for your public `https://…/eve/v1/linq` URL with `message.received`, `reaction.added`, and `reaction.removed` events.
-2. Set `LINQ_API_KEY` and `LINQ_WEBHOOK_SECRET` in the host's encrypted environment variables.
-
-To configure the channel by hand, pass the API key and webhook signing secret:
-
-```ts title="agent/channels/linq.ts"
-import { linqChannel } from "eve/channels/linq";
-
-export default linqChannel({
-  credentials: {
-    apiKey: process.env.LINQ_API_KEY!,
-    signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
-  },
-});
-```
-
-A supplied `webhookVerifier` takes precedence over `signingSecret`.
-
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
-- [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic
+- [Channels overview](/docs/channels/overview): the channel contract and every built-in channel
+- [Auth & route protection](/docs/guides/auth-and-route-protection): authenticating inbound traffic

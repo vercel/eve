@@ -1,0 +1,123 @@
+---
+title: "GitHub"
+description: "Reach your agent from GitHub issue, pull request, and review comments, and from CI events, with the repository checked out in the sandbox."
+type: integration
+---
+
+A GitHub agent works directly on a repository. Write its invocation token, such as `@my-agent`, in a new issue, pull request, or review comment, and the agent answers in that thread. On a pull request it already has the diff in context, and every turn checks out the repository into the sandbox. It can also wake on its own when an issue opens or CI fails. [Set up](#set-up) creates the GitHub App through Vercel Connect.
+
+Every option, hook, and default is in the [GitHub reference](/docs/channels/github/reference).
+
+## Set up
+
+<TabsWithChildren ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
+<TabContent order={1}>
+
+Run the guided setup from your agent project, then deploy:
+
+```bash
+eve add channel/github
+eve deploy
+```
+
+Setup signs you in to Vercel, links a project, creates a GitHub App through Vercel Connect, routes its webhooks to `/eve/v1/github`, and writes the channel file:
+
+```ts title="agent/channels/github.ts"
+import { connectGitHubCredentials } from "@vercel/connect/eve";
+import { githubChannel } from "eve/channels/github";
+
+export default githubChannel({
+  botName: "my-agent",
+  credentials: connectGitHubCredentials("github/my-agent"),
+});
+```
+
+After deploying, open the GitHub App in the Connect dashboard and install it on the organization or account you want the agent to work in.
+
+</TabContent>
+<TabContent order={2}>
+
+Create a GitHub App and set its credentials. The channel reads them by default:
+
+```bash
+GITHUB_APP_ID=...
+GITHUB_APP_PRIVATE_KEY=...   # PEM
+GITHUB_WEBHOOK_SECRET=...
+```
+
+```ts title="agent/channels/github.ts"
+import { githubChannel } from "eve/channels/github";
+
+export default githubChannel({
+  botName: "my-agent",
+});
+```
+
+Point the App's webhook URL at `https://your-agent.example/eve/v1/github`, subscribe to `issue_comment` and `pull_request_review_comment`, and install the App on your repositories. Your own GitHub App also works on Vercel. See [Bring your own GitHub App](/docs/channels/github/reference#bring-your-own-github-app) for the other events and lazy credentials.
+
+</TabContent>
+</TabsWithChildren>
+
+## Answer comments
+
+A new comment that includes `@my-agent` starts a turn. The token is plain text, not a GitHub mention, so GitHub may not autocomplete or link it. The agent reacts with 👀 when it starts, then replies on the issue or PR timeline, or in the review thread. Each later comment in that thread that includes `@my-agent` continues the same session. Long replies split across several comments.
+
+## Wake on new issues, pull requests, and CI
+
+Issue, pull request, and CI hooks are off by default. Each hook returns `{ auth }` to start a turn, or `null` to ignore the event. This channel triages new issues and failed GitHub Actions check suites on pull requests:
+
+```ts title="agent/channels/github.ts"
+import { defaultGitHubAuth, githubChannel } from "eve/channels/github";
+
+export default githubChannel({
+  botName: "my-agent",
+  onIssue: (ctx, issue) => (issue.action === "opened" ? { auth: defaultGitHubAuth(ctx) } : null),
+  onCheckSuite: (ctx, suite) =>
+    suite.action === "completed" &&
+    suite.conclusion === "failure" &&
+    suite.app.slug === "github-actions" &&
+    suite.pullRequests.length > 0
+      ? {
+          auth: defaultGitHubAuth(ctx),
+          context: [`Triage failed check suite ${suite.checkSuiteId} at ${suite.headSha}.`],
+        }
+      : null,
+});
+```
+
+Subscribe the GitHub App to each event you handle, such as `issues` or `check_suite`. A CI turn replies on the first pull request in `pullRequests`, so return `null` when the list is empty.
+
+## Work on the repository
+
+Before the first model call, each turn checks out the relevant ref into the sandbox, so file and shell tools run against the real tree. The installation token never enters the sandbox; GitHub auth is added at the network firewall, which needs a firewall-capable sandbox such as Vercel's. On a pull request, the PR metadata and changed-file patch are already in the agent's context.
+
+For any GitHub API the channel doesn't wrap, call `ctx.github.request({ method, path, body })` with the installation token.
+
+## Ask for approval
+
+GitHub comments have no buttons, so approvals and questions post as a comment prompt. The person's reply comment answers the pending request.
+
+## Start a conversation on an issue
+
+Send to the GitHub channel from a [schedule](/docs/schedules#handler-form-run) or [another channel](/docs/channels/custom#cross-channel-hand-off). The target needs `owner`, `repo`, and either `issueNumber` or `pullRequestNumber`:
+
+```ts title="agent/schedules/weekly-triage.ts"
+import { defineSchedule } from "eve/schedules";
+import github from "../channels/github";
+
+export default defineSchedule({
+  cron: "0 14 * * 1",
+  async run({ to, waitUntil, appAuth }) {
+    waitUntil(
+      to(github, { owner: "acme", repo: "web", issueNumber: 42 }).send(
+        "Post this week's triage summary.",
+        { auth: appAuth },
+      ),
+    );
+  },
+});
+```
+
+## Reference
+
+The [GitHub reference](/docs/channels/github/reference) covers options, credentials, every inbound hook, CI event fields, delivery, PR context, sandbox checkout, and proactive sessions.

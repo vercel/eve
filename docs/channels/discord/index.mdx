@@ -1,0 +1,136 @@
+---
+title: "Discord"
+description: "Reach your agent from Discord slash commands, DMs, mentions, and threads, with button approvals."
+type: integration
+---
+
+A Discord agent answers slash commands such as `/ask`. With the experimental Gateway relay, it also answers DMs, mentions, and replies, and starts a thread for each new conversation in a text channel. Approvals and questions appear as buttons and selects. [Set up](#set-up) creates the bot and connects it through Vercel Connect.
+
+Every option, hook, and default is in the [Discord reference](/docs/channels/discord/reference).
+
+## Set up
+
+<TabsWithChildren ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
+<TabContent order={1}>
+
+Run the guided setup from your agent project, then deploy:
+
+```bash
+eve add channel/discord
+eve deploy
+```
+
+Setup asks whether people reach the agent through **DMs, mentions, and threads**, or through **a slash command**. It guides you through creating the Discord application and bot, connects it through Vercel Connect, sets the Interactions Endpoint URL to `/eve/v1/discord`, prints the bot install URL, and writes the channel file:
+
+```ts title="agent/channels/discord.ts"
+import { connectDiscordCredentials } from "@vercel/connect/eve";
+import { discordChannel } from "eve/channels/discord";
+
+export default discordChannel({
+  credentials: connectDiscordCredentials("discord/my-agent"),
+});
+```
+
+For a slash command, setup registers `/ask` with a `message` option and an optional `file` option. Global commands can take up to an hour to appear.
+
+</TabContent>
+<TabContent order={2}>
+
+Create the application and bot in the [Discord Developer Portal](https://discord.com/developers/applications), then set its credentials. The channel reads them by default:
+
+```bash
+DISCORD_APPLICATION_ID=...
+DISCORD_BOT_TOKEN=...
+DISCORD_PUBLIC_KEY=...
+```
+
+```ts title="agent/channels/discord.ts"
+import { discordChannel } from "eve/channels/discord";
+
+export default discordChannel();
+```
+
+Set the application's Interactions Endpoint URL to `https://your-agent.example/eve/v1/discord`, and register a command. A string option named `message` becomes the prompt:
+
+```bash
+curl -X PUT "https://discord.com/api/v10/applications/$DISCORD_APPLICATION_ID/commands" \
+  -H "Authorization: Bot $DISCORD_BOT_TOKEN" -H "Content-Type: application/json" \
+  -d '[{"name":"ask","description":"Ask the eve agent","type":1,
+    "options":[{"name":"message","description":"What should the agent do?","type":3,"required":true}]}]'
+```
+
+To answer DMs and mentions from another host, see [Run the relay outside Vercel](/docs/channels/discord/reference#run-the-relay-outside-vercel).
+
+</TabContent>
+</TabsWithChildren>
+
+## Answer DMs and mentions
+
+Discord sends ordinary messages only over its Gateway WebSocket, so eve runs a relay that stays connected and forwards them to the agent. Gateway support is experimental. When you choose DMs, mentions, and threads, setup adds `gateway: {}` to the channel and writes the relay as a [Vercel Daemon](/docs/channels/discord/reference#run-the-relay-as-a-vercel-daemon) in `daemon/`:
+
+```ts title="agent/channels/discord.ts"
+import { connectDiscordCredentials } from "@vercel/connect/eve";
+import { discordChannel } from "eve/channels/discord";
+
+export default discordChannel({
+  credentials: connectDiscordCredentials("discord/my-agent"),
+  gateway: {},
+});
+```
+
+The bot answers DMs, mentions of its user, replies to its messages, and messages in threads where it's already talking. A mention in a text channel starts a public thread, and the thread is one session. Set `gateway: { startThread: false }` to answer in the channel instead.
+
+Thread follow-ups without a mention need the privileged **Message Content** intent. Setup turns it on when Discord allows it, for bots in fewer than 100 servers.
+
+## Choose who the bot answers
+
+`gateway.onMessage` runs for every Gateway message from a person. Return `{ auth }` to start a turn, or `null` to ignore the message. `message.addressed` says whether the default would answer. This one answers messages only in one server:
+
+```ts title="agent/channels/discord.ts"
+import { defaultDiscordMessageAuth, discordChannel } from "eve/channels/discord";
+
+export default discordChannel({
+  gateway: {
+    onMessage: (_ctx, message) =>
+      message.addressed && message.guildId === "123456789012345678"
+        ? { auth: defaultDiscordMessageAuth(message) }
+        : null,
+  },
+});
+```
+
+Slash commands go through `onCommand` instead, so filter them there too. If you set `onCommand`, also set `onAnswers` with the same rule, or eve drops every button press. See [Human-in-the-loop](/docs/channels/discord/reference#human-in-the-loop-hitl).
+
+## Ask for approval
+
+Approvals and option questions appear as buttons, `display: "select"` questions as a select, and freeform questions as a button that opens a modal. Approvals are requester-only by default, so only the person who asked can approve.
+
+When a tool needs a connection the person hasn't authorized, a DM shows the sign-in link directly. In a server, the shared message has a **Sign in** button, and only the person who needs to sign in sees the link.
+
+## Message a channel first
+
+Start a session from a [schedule](/docs/schedules#handler-form-run) or [another channel](/docs/channels/custom#cross-channel-hand-off) with a `channelId` target. Proactive sends need a bot token, which Connect or `DISCORD_BOT_TOKEN` supplies:
+
+```ts title="agent/schedules/standup.ts"
+import { defineSchedule } from "eve/schedules";
+import discord from "../channels/discord";
+
+export default defineSchedule({
+  cron: "0 16 * * 1-5",
+  async run({ to, waitUntil, appAuth }) {
+    waitUntil(
+      to(discord, { channelId: "123456789012345678" }).send("Post the standup prompt.", {
+        auth: appAuth,
+      }),
+    );
+  },
+});
+```
+
+## Send files to the agent
+
+Files attached through a command's attachment option reach the agent as files, up to 25 MB.
+
+## Reference
+
+The [Discord reference](/docs/channels/discord/reference) covers options, manual setup, the Gateway relay inside and outside of Vercel, session grouping, thread options, your own relay, command hooks, delivery, human-in-the-loop, sign-ins, and proactive sessions.

@@ -1,0 +1,113 @@
+---
+title: "Linear"
+description: "Delegate Linear issues to your agent through Agent Sessions, with native progress, questions, and responses."
+type: integration
+---
+
+A Linear agent appears in your workspace as an assignee. Delegate an issue to it, or mention it, and Linear opens an Agent Session. The agent posts its progress, questions, and final response there as native Agent Activities, and people continue the session by replying. [Set up](#set-up) creates the Linear app through Vercel Connect.
+
+Every option, hook, and default is in the [Linear reference](/docs/channels/linear/reference).
+
+## Set up
+
+<TabsWithChildren ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
+<TabContent order={1}>
+
+Run the guided setup from your agent project, then deploy:
+
+```bash
+eve add channel/linear
+eve deploy
+```
+
+Setup signs you in to Vercel, links a project, creates a Linear app through Vercel Connect with the scopes Agent Sessions need, routes its webhooks to `/eve/v1/linear`, and writes the channel file:
+
+```ts title="agent/channels/linear.ts"
+import { connectLinearCredentials } from "@vercel/connect/eve";
+import { linearChannel } from "eve/channels/linear";
+
+export default linearChannel({
+  credentials: connectLinearCredentials("linear/my-agent"),
+});
+```
+
+After deploying, open the Linear app in the Connect dashboard and install it in your workspace.
+
+</TabContent>
+<TabContent order={2}>
+
+Create a Linear OAuth app with the `app:assignable` and `app:mentionable` scopes and `actor=app` in its authorize URL, then set its credentials. The channel reads them by default:
+
+```bash
+LINEAR_AGENT_ACCESS_TOKEN=lin_api_...
+LINEAR_WEBHOOK_SECRET=...
+```
+
+```ts title="agent/channels/linear.ts"
+import { linearChannel } from "eve/channels/linear";
+
+export default linearChannel();
+```
+
+Enable Agent Session events, subscribe to the `AgentSessionEvent` webhook category, and point the webhook URL at `https://your-agent.example/eve/v1/linear`. See [Bring your own Linear app](/docs/channels/linear/reference#bring-your-own-linear-app) for timestamp checks and custom verifiers.
+
+</TabContent>
+</TabsWithChildren>
+
+The channel only receives Agent Sessions. To let the agent search and edit Linear data, also add the Linear connection with `eve add connection/linear`.
+
+## See what the agent is doing
+
+When a turn starts, the session shows a `thought`. Each tool call shows an `action`, the final reply posts as a `response`, and failures post as an `error`. Questions and approvals post as an `elicitation`, and the person's reply answers them.
+
+## Choose which issues the agent takes
+
+Return `{ auth }` from `onAgentSession` to start a turn, or `null` to acknowledge the event without waking the agent. This one takes only `OPS-` issues and adds a standing instruction:
+
+```ts title="agent/channels/linear.ts"
+import { connectLinearCredentials } from "@vercel/connect/eve";
+import { defaultLinearAuth, linearChannel } from "eve/channels/linear";
+
+export default linearChannel({
+  credentials: connectLinearCredentials("linear/my-agent"),
+  onAgentSession: (_ctx, event) => {
+    if (event.action !== "created" && event.action !== "prompted") return null;
+    if (event.agentSession.issue?.identifier?.startsWith("OPS-") !== true) return null;
+    return {
+      auth: defaultLinearAuth(event),
+      context: ["Only make reversible changes unless the issue says otherwise."],
+    };
+  },
+});
+```
+
+## Start a session from a schedule
+
+Target an `issueId` or root `commentId` to create a new Agent Session, or an `agentSessionId` to continue one:
+
+```ts title="agent/schedules/status-update.ts"
+import { defineSchedule } from "eve/schedules";
+import linear from "../channels/linear";
+
+export default defineSchedule({
+  cron: "0 14 * * 1",
+  async run({ to, waitUntil, appAuth }) {
+    waitUntil(
+      to(linear, {
+        issueId: "EVE-123",
+        initialActivity: "Preparing the status update.",
+      }).send("Post a concise status update with blockers and next actions.", {
+        auth: appAuth,
+      }),
+    );
+  },
+});
+```
+
+## Send files to the agent
+
+Images and file links in a prompt that point to `https://uploads.linear.app` reach the agent as files. Links to other hosts stay as text.
+
+## Reference
+
+The [Linear reference](/docs/channels/linear/reference) covers options, credentials and webhook verification, Agent Activity delivery, sign-ins, custom event handlers, session links, and low-level API helpers.

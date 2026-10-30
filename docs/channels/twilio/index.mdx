@@ -1,0 +1,82 @@
+---
+title: "Twilio"
+description: "Reach your agent over SMS and speech-transcribed phone calls with Twilio."
+type: integration
+---
+
+A Twilio agent lives on a phone number. People can text it, or call it and talk: eve transcribes the caller's speech, and the transcript joins the same session as their texts. Replies go out as SMS, and approvals arrive as numbered options. [Set up](#set-up) connects a Twilio number.
+
+Every option, hook, and default is in the [Twilio reference](/docs/channels/twilio/reference).
+
+## Set up
+
+Add the channel file. `allowFrom` lists the numbers that can reach the agent, and `messaging.from` is the number it texts from:
+
+```ts title="agent/channels/twilio.ts"
+import { twilioChannel } from "eve/channels/twilio";
+
+export default twilioChannel({
+  allowFrom: "+15551234567",
+  messaging: { from: "+15557654321" },
+});
+```
+
+Set your Twilio credentials:
+
+```bash
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+```
+
+After deploying, point your Twilio number's Messaging webhook at `https://your-agent.example/eve/v1/twilio/messages` and its Voice webhook at `https://your-agent.example/eve/v1/twilio/voice`. eve checks `X-Twilio-Signature` on every request.
+
+## Choose who can text or call
+
+`allowFrom` is required. Pass one number, a list, or an async resolver. `"*"` accepts any number, so only use it with your own check in `onText` and `onVoice`:
+
+```ts title="agent/channels/twilio.ts"
+import { twilioChannel } from "eve/channels/twilio";
+
+export default twilioChannel({
+  allowFrom: ["+15551234567", "+15557654321"],
+  messaging: { from: "+15557654321" },
+});
+```
+
+## Answer phone calls
+
+When someone calls, eve answers, asks the caller to speak, and sends the transcript to the agent. The call ends with "Thanks. I'll follow up by text.", and the reply arrives by SMS. `onVoice` runs when the call comes in: return `null` to reject it, or return an object to change the spoken prompt, language, voice, or speech recognition options.
+
+## Ask for approval by text
+
+SMS has no buttons, so eve sends each approval or question as a text with numbered options. Replying `1` or `approve` runs an approval-gated tool, and `2` or `deny` stops it. Callers get these prompts by SMS too.
+
+## Text someone first
+
+Start a session from a [schedule](/docs/schedules#handler-form-run) or [another channel](/docs/channels/custom#cross-channel-hand-off) with a `phoneNumber` target. Proactive texts need `messaging.from` or `messaging.messagingServiceSid`:
+
+```ts title="agent/schedules/reminder.ts"
+import { defineSchedule } from "eve/schedules";
+import twilio from "../channels/twilio";
+
+export default defineSchedule({
+  cron: "0 17 * * 5",
+  async run({ to, waitUntil, appAuth }) {
+    waitUntil(
+      to(twilio, { phoneNumber: "+15551234567" }).send("Send the weekly reminder.", {
+        auth: appAuth,
+      }),
+    );
+  },
+});
+```
+
+MMS photos and files reach the agent as files.
+
+## Disclosure and consent
+
+As the deployer, you're responsible for complying with applicable laws. You may need to tell callers and texters that an automated AI system processes and transcribes their messages, and get consent where required, including two-party-consent jurisdictions. For outbound texts and calls, you may need prior express consent, STOP and quiet-hour handling, and carrier registration.
+
+## Reference
+
+The [Twilio reference](/docs/channels/twilio/reference) covers options, credentials, routes, inbound hooks, proxies, delivery, human-in-the-loop, proactive sessions, and media downloads.

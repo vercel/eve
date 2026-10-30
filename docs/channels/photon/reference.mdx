@@ -1,9 +1,14 @@
 ---
-title: Photon
-description: Connect an eve agent to iMessage through Photon.
+title: "Photon Reference"
+description: "Photon iMessage channel options, credentials, webhook verification, steering, retries, attachments, inbound hooks, and tapbacks."
+type: reference
 ---
 
+This page documents every part of `photonIMessageChannel` from `eve/channels/photon`. For setup and common tasks, start with [Photon](/docs/channels/photon).
+
 The Photon channel connects your agent to iMessage through a Photon project and `agent/channels/photon.ts`.
+
+## Setup and credentials
 
 Run `eve add channel/photon-imessage` to create or use a Photon project and register your phone number, then choose Vercel Connect or portable credentials. With Vercel Connect, eve signs you in, creates or links a Vercel project, creates the connector, and configures Photon's webhook through Connect:
 
@@ -16,13 +21,47 @@ export default photonIMessageChannel({
 });
 ```
 
+### Other hosts
+
+On a host without Vercel Connect, choose **Use portable credentials** during `eve add channel/photon-imessage`. eve scaffolds the channel and writes `IMESSAGE_PROJECT_ID` and `IMESSAGE_PROJECT_SECRET` to `.env.local`.
+
+After deploying the agent:
+
+1. Create a Photon webhook for your public `https://…/eve/v1/photon` URL.
+2. Copy its signing secret into `IMESSAGE_WEBHOOK_SECRET`.
+3. Set `IMESSAGE_PROJECT_ID`, `IMESSAGE_PROJECT_SECRET`, and `IMESSAGE_WEBHOOK_SECRET` in the host’s encrypted environment variables.
+
+To configure the channel by hand, resolve credentials from the environment:
+
+```ts title="agent/channels/photon.ts"
+import { photonIMessageChannel } from "eve/channels/photon";
+
+export default photonIMessageChannel({
+  async credentials() {
+    const projectId = process.env.IMESSAGE_PROJECT_ID;
+    const projectSecret = process.env.IMESSAGE_PROJECT_SECRET;
+    if (!projectId || !projectSecret) throw new Error("Photon project credentials are required.");
+    return { projectId, projectSecret };
+  },
+  webhookSecret: process.env.IMESSAGE_WEBHOOK_SECRET,
+});
+```
+
+For direct Photon webhooks, pass `webhookSecret` or set `IMESSAGE_WEBHOOK_SECRET`. The signing secret takes precedence over the default OIDC verifier.
+
+## Inbound messages
+
 The channel resolves credentials on first use. It receives webhooks at `/eve/v1/photon` and, by default, verifies them with Vercel OIDC from the same project and environment. It builds auth from the person who sent each message, marks accepted messages as read, and keeps one eve session per iMessage conversation.
 
-A message that arrives during a turn joins that turn, so the agent can take the correction into account. Set `turnPolicy: "queue"` to let every reply finish before the next message starts. See [Overlapping messages](./overview#overlapping-messages) for when a new message can interrupt the model.
+A message that arrives during a turn joins that turn, so the agent can take the correction into account. Set `turnPolicy: "queue"` to let every reply finish before the next message starts. See [Overlapping messages](/docs/channels/overview#overlapping-messages) for when a new message can interrupt the model.
 
-When Photon retries a webhook, eve accepts the message once, even across replicas that share a Workflow World. See [retried deliveries](./custom#retried-deliveries).
+When Photon retries a webhook, eve accepts the message once, even across replicas that share a Workflow World. See [retried deliveries](/docs/channels/custom#retried-deliveries).
+
+## Attachments
 
 Images and other files people send reach the agent as file parts. A failed download, a file over 25 MB, or a file without an attachment id reaches the agent as a short note instead.
+
+## Message hook
 
 Customize inbound handling with `onMessage`. Return `null` to ignore a message, or return `title` alongside `auth` to set the run title when the message starts a run:
 
@@ -40,6 +79,24 @@ export default photonIMessageChannel({
 ```
 
 Set `route` to change the webhook path, or `webhookVerifier` to use a different trusted-forwarder verifier. `eve/channels/photon` exports the `PhotonIMessageWebhookVerifier`, `PhotonIMessageChannelCredentials`, and `PhotonProjectCredentials` types for these options.
+
+## Options
+
+`photonIMessageChannel(config)` requires `credentials`. Every other option is optional.
+
+| Option            | Default                                                      | Description                                                                                  |
+| ----------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `credentials`     | Required                                                     | `connectPhotonCredentials(...)`, or a function that returns `{ projectId, projectSecret }`.  |
+| `webhookSecret`   | `IMESSAGE_WEBHOOK_SECRET`                                    | Signing secret for direct Photon webhooks.                                                   |
+| `webhookVerifier` | Same-project Vercel OIDC verification when there's no secret | `(request, rawBody)` verifier for forwarded webhooks. Takes precedence over `webhookSecret`. |
+| `route`           | `/eve/v1/photon`                                             | Webhook path.                                                                                |
+| `userName`        | `"eve"`                                                      | Bot display name.                                                                            |
+| `turnPolicy`      | `"steer"`                                                    | `"steer"` or `"queue"` for messages that arrive during a turn.                               |
+| `onMessage`       | Dispatch with the author's auth                              | `(ctx, message)` hook. See [Message hook](#message-hook).                                    |
+| `onTapback`       | None, so tapbacks are ignored                                | `(ctx, tapback)` hook. See [Tapbacks](#tapbacks).                                            |
+| `events`          | eve's default handlers                                       | Per-event handler overrides.                                                                 |
+
+The channel mounts `GET` and `POST` on `/eve/v1/photon`.
 
 ## Tapbacks
 
@@ -81,7 +138,7 @@ export default photon.tapbackTool();
 
 The model calls it with a standard tapback, such as `{ "tapback": "love" }`, or any single emoji, such as `{ "tapback": "🎉" }`. eve reacts to the latest message someone sent in the conversation. A standard tapback's own emoji, such as `👍`, sends that tapback.
 
-The model can send a tapback alongside a reply; to let a tapback be the whole answer, also add [`no_reply`](../concepts/built-in-tools#no_reply). Subagents don't receive the tool. In a session from another channel, such as web chat, or before anyone has sent a message, the call returns an error to the model.
+The model can send a tapback alongside a reply; to let a tapback be the whole answer, also add [`no_reply`](/docs/concepts/built-in-tools#no_reply). Subagents don't receive the tool. In a session from another channel, such as web chat, or before anyone has sent a message, the call returns an error to the model.
 
 ### Answer approvals with a tapback
 
@@ -107,30 +164,7 @@ export default photonIMessageChannel({
 
 Return `message` to replace the text the agent receives for a tapback. Don't set `message` to an option's id, label, or number, because eve reads that text like a typed reply. A typed reply answers the first waiting approval, no matter which message the tapback is on.
 
-## Other hosts
+## What to read next
 
-On a host without Vercel Connect, choose **Use portable credentials** during `eve add channel/photon-imessage`. eve scaffolds the channel and writes `IMESSAGE_PROJECT_ID` and `IMESSAGE_PROJECT_SECRET` to `.env.local`.
-
-After deploying the agent:
-
-1. Create a Photon webhook for your public `https://…/eve/v1/photon` URL.
-2. Copy its signing secret into `IMESSAGE_WEBHOOK_SECRET`.
-3. Set `IMESSAGE_PROJECT_ID`, `IMESSAGE_PROJECT_SECRET`, and `IMESSAGE_WEBHOOK_SECRET` in the host’s encrypted environment variables.
-
-To configure the channel by hand, resolve credentials from the environment:
-
-```ts title="agent/channels/photon.ts"
-import { photonIMessageChannel } from "eve/channels/photon";
-
-export default photonIMessageChannel({
-  async credentials() {
-    const projectId = process.env.IMESSAGE_PROJECT_ID;
-    const projectSecret = process.env.IMESSAGE_PROJECT_SECRET;
-    if (!projectId || !projectSecret) throw new Error("Photon project credentials are required.");
-    return { projectId, projectSecret };
-  },
-  webhookSecret: process.env.IMESSAGE_WEBHOOK_SECRET,
-});
-```
-
-For direct Photon webhooks, pass `webhookSecret` or set `IMESSAGE_WEBHOOK_SECRET`. The signing secret takes precedence over the default OIDC verifier.
+- [Channels overview](/docs/channels/overview): the channel contract and every built-in channel
+- [Linq](/docs/channels/linq): iMessage and SMS through Linq

@@ -1,0 +1,118 @@
+---
+title: "Photon"
+description: "Reach your agent over iMessage through Photon, with tapbacks."
+type: integration
+---
+
+A Photon agent answers iMessage conversations on your Photon project's phone number. Each conversation is one session. The agent marks messages as read, can react with tapbacks, and can let people approve a request with a tapback. [Set up](#set-up) creates or connects a Photon project and registers your number.
+
+Every option, hook, and default is in the [Photon reference](/docs/channels/photon/reference).
+
+## Set up
+
+<TabsWithChildren ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
+<TabContent order={1}>
+
+Run the guided setup from your agent project, then deploy:
+
+```bash
+eve add channel/photon-imessage
+eve deploy
+```
+
+Setup creates or uses a Photon project and registers your phone number. Choose Vercel Connect, and it signs you in to Vercel, links a project, configures Photon's webhook through Connect, and writes the channel file:
+
+```ts title="agent/channels/photon.ts"
+import { connectPhotonCredentials } from "@vercel/connect/eve";
+import { photonIMessageChannel } from "eve/channels/photon";
+
+export default photonIMessageChannel({
+  credentials: connectPhotonCredentials("photon/my-agent"),
+});
+```
+
+</TabContent>
+<TabContent order={2}>
+
+Run `eve add channel/photon-imessage` and choose portable credentials. eve writes `IMESSAGE_PROJECT_ID` and `IMESSAGE_PROJECT_SECRET` to `.env.local`. The channel reads them lazily:
+
+```ts title="agent/channels/photon.ts"
+import { photonIMessageChannel } from "eve/channels/photon";
+
+export default photonIMessageChannel({
+  async credentials() {
+    const projectId = process.env.IMESSAGE_PROJECT_ID;
+    const projectSecret = process.env.IMESSAGE_PROJECT_SECRET;
+    if (!projectId || !projectSecret) throw new Error("Photon project credentials are required.");
+    return { projectId, projectSecret };
+  },
+  webhookSecret: process.env.IMESSAGE_WEBHOOK_SECRET,
+});
+```
+
+After deploying, create a Photon webhook for `https://your-agent.example/eve/v1/photon`, copy its signing secret into `IMESSAGE_WEBHOOK_SECRET`, and set all three variables in your host's environment.
+
+</TabContent>
+</TabsWithChildren>
+
+## Answer messages
+
+Every accepted message continues the conversation's session. A message that arrives while the agent is working steers the current turn. Set `turnPolicy: "queue"` to finish each response before the next message starts. Images, voice notes, and other files reach the agent as files, up to 25 MB.
+
+## Filter messages
+
+Return `null` from `onMessage` to ignore a message. Return `{ auth }` to start a turn, with optional `context` the agent sees alongside the message:
+
+```ts title="agent/channels/photon.ts"
+import { connectPhotonCredentials } from "@vercel/connect/eve";
+import { photonIMessageChannel } from "eve/channels/photon";
+
+export default photonIMessageChannel({
+  credentials: connectPhotonCredentials("photon/my-agent"),
+  onMessage(_ctx, message) {
+    if (message.author.isBot) return null;
+    return {
+      auth: null,
+      context: [`The sender is ${message.author.fullName}.`],
+    };
+  },
+});
+```
+
+## React with tapbacks
+
+Export the channel's tapback tool from `agent/tools/`. The agent can then react to the latest message with a standard tapback, such as `love`, or any single emoji:
+
+```ts title="agent/tools/tapback.ts"
+import photon from "../channels/photon";
+
+export default photon.tapbackTool();
+```
+
+To let a tapback be the agent's whole answer, also add the [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
+
+## Approve with a tapback
+
+eve ignores tapbacks people send until you add `onTapback`. Return `answer` to answer the approval in the message the tapback is on, so a like approves and a dislike denies:
+
+```ts title="agent/channels/photon.ts"
+import { connectPhotonCredentials } from "@vercel/connect/eve";
+import { defaultPhotonAuth, photonIMessageChannel } from "eve/channels/photon";
+
+export default photonIMessageChannel({
+  credentials: connectPhotonCredentials("photon/my-agent"),
+  onTapback(_ctx, tapback) {
+    if (!tapback.added) return null;
+    const auth = defaultPhotonAuth(tapback);
+    if (tapback.tapback === "like") return { auth, answer: "approve" };
+    if (tapback.tapback === "dislike") return { auth, answer: "deny" };
+    return { auth };
+  },
+});
+```
+
+Any other tapback reaches the agent as text, such as `Tapback: Loved “See you at 7”`. Photon reports only added tapbacks. `onTapback` runs instead of `onMessage`, so repeat any sender checks there.
+
+## Reference
+
+The [Photon reference](/docs/channels/photon/reference) covers options, webhook verification, retried deliveries, attachments, tapback fields, approval answers, and portable credentials.

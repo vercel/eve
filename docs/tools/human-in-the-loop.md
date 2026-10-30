@@ -379,7 +379,7 @@ The message answers that request when it matches one of its options or the reque
 
 When one step calls both a workflow tool, such as `ask_question`, and an approval-gated tool, the question comes first. eve asks for the approval after the workflow tool call finishes.
 
-Text-only channels show one request at a time, in this order, so a reply answers the request the person sees. These are Twilio, GitHub, Linear, and all Chat SDK channels. Chat SDK can't tell whether an adapter shows buttons, so this includes Linq, Photon, and adapters with buttons. Native channels with buttons, such as Slack, show every open request, and a typed reply still answers the first. A Slack app that sets `onAnswers` or `approvalChannel` accepts answers only through its controls; see [Restrict who can invoke the agent](/docs/channels/slack#restrict-who-can-invoke-the-agent).
+Text-only channels show one request at a time, in this order, so a reply answers the request the person sees. These are Twilio, GitHub, Linear, and all Chat SDK channels. Chat SDK can't tell whether an adapter shows buttons, so this includes Linq, Photon, and adapters with buttons. Native channels with buttons, such as Slack, show every open request, and a typed reply still answers the first. A Slack app that sets `onAnswers` or `approvalChannel` accepts answers only through its controls; see [Restrict who can invoke the agent](/docs/channels/slack/reference#restrict-who-can-invoke-the-agent).
 
 ## What to read next
 

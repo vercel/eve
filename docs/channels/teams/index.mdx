@@ -1,0 +1,92 @@
+---
+title: "Microsoft Teams"
+description: "Reach your agent from Microsoft Teams personal chats, group chats, and channels, with Adaptive Card approvals."
+type: integration
+---
+
+A Teams agent answers personal chats, and messages that mention it in group chats and channels. Replies post as Markdown in the conversation, and approvals and questions appear as Adaptive Cards. [Set up](#set-up) creates and installs the Teams app through Vercel Connect.
+
+Every option, hook, and default is in the [Teams reference](/docs/channels/teams/reference).
+
+## Set up
+
+<TabsWithChildren ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
+<TabContent order={1}>
+
+Run the guided setup from your agent project, then deploy:
+
+```bash
+eve add channel/teams
+eve deploy
+```
+
+Setup runs the Vercel Connect CLI, which creates and installs a managed Microsoft Teams app, including administrator consent, routes verified activities to `/eve/v1/teams`, and writes the channel file:
+
+```ts title="agent/channels/teams.ts"
+import { connectTeamsCredentials } from "@vercel/connect/eve";
+import { teamsChannel } from "eve/channels/teams";
+
+export default teamsChannel({
+  credentials: connectTeamsCredentials("microsoft-teams/my-agent"),
+});
+```
+
+After deploying, mention the bot in a channel or send it a personal message.
+
+</TabContent>
+<TabContent order={2}>
+
+Register an Azure Bot or Teams app yourself, then set its credentials. The channel reads them by default:
+
+```bash
+MICROSOFT_APP_ID=...
+MICROSOFT_APP_PASSWORD=...
+MICROSOFT_TENANT_ID=...   # optional, single-tenant bots
+```
+
+```ts title="agent/channels/teams.ts"
+import { teamsChannel } from "eve/channels/teams";
+
+export default teamsChannel();
+```
+
+Point the bot's messaging endpoint at `https://your-agent.example/eve/v1/teams`.
+
+</TabContent>
+</TabsWithChildren>
+
+## Keep answering in a thread
+
+By default, group chats and channels need a mention on every message. This `onMessage` also answers any conversation the agent is already part of:
+
+```ts title="agent/channels/teams.ts"
+import { defaultTeamsAuth, teamsChannel } from "eve/channels/teams";
+
+export default teamsChannel({
+  async onMessage(ctx, message) {
+    if (message.from.role === "bot" || message.from.id === message.recipient.id) return null;
+    const isDirectMessage = message.scope === "personal";
+    return isDirectMessage || message.isBotMentioned || (await ctx.isSubscribed())
+      ? { auth: defaultTeamsAuth(message) }
+      : null;
+  },
+  // A custom onMessage turns off the default card-submission auth.
+  onAnswers: (_ctx, activity) => ({ auth: defaultTeamsAuth(activity) }),
+});
+```
+
+A custom `onMessage` makes eve reject approval and question card submissions until you also set `onAnswers`, so a card can't bypass your message check. If `onMessage` restricts who can reach the agent, apply the same rule in `onAnswers`.
+
+## Ask for approval
+
+Tool approvals and questions render as Adaptive Cards with buttons, selects, or a text input. When an approval settles, eve replaces the card with the outcome and who answered.
+
+When a tool needs a connection the person hasn't authorized, a personal chat shows the sign-in link directly. In group chats and channels, the shared card has a **Sign in** button, and only the person who needs to sign in can open the link.
+
+## Send files to the agent
+
+Images pasted into a message and files uploaded in a personal chat reach the agent as files, up to 25 MB. Personal-chat uploads need `supportsFiles: true` on the bot in your Teams app manifest.
+
+## Reference
+
+The [Teams reference](/docs/channels/teams/reference) covers options, portable credentials, dispatch, Connector security, delivery, human-in-the-loop, sign-ins, proactive sessions, and file hosts.

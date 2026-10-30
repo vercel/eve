@@ -1,12 +1,14 @@
 ---
-title: "Linear"
-description: "Reach your agent through Linear Agent Sessions, with native Agent Activities for progress, questions, and responses, and Vercel Connect credentials."
-type: integration
+title: "Linear Reference"
+description: "Linear channel options, credentials, webhook verification, Agent Activity delivery, human-in-the-loop, custom hooks, proactive sessions, and API helpers."
+type: reference
 ---
+
+This page documents every part of `linearChannel` from `eve/channels/linear`. For setup and common tasks, start with [Linear](/docs/channels/linear).
 
 The Linear channel lets people delegate issues to your agent, or mention it, in Linear. It lives in `agent/channels/linear.ts` and uses Linear Agent Sessions. The agent shows its progress and answers as native Agent Activities: `thought`, `action`, `elicitation`, `response`, and `error`.
 
-[Vercel Connect](../guides/auth-and-route-protection) can manage the Linear app, its token, and webhook checks, so you hold no API key or webhook secret. See [Channels](./overview) for what all channels share.
+[Vercel Connect](/docs/guides/auth-and-route-protection) can manage the Linear app, its token, and webhook checks, so you hold no API key or webhook secret. See [Channels](/docs/channels/overview) for what all channels share.
 
 ## Guided Connect setup
 
@@ -69,13 +71,28 @@ eve checks the `Linear-Signature` HMAC over the raw body. It rejects a `webhookT
 
 If a trusted gateway verifies Linear webhooks first, pass `credentials.webhookVerifier` instead of a webhook secret. `maxSkewMs` doesn't apply to a verifier, so the verifier must check timestamps itself.
 
-## How the channel handles messages
+## Options
 
-### Dispatch
+`linearChannel(config)` takes these options. All are optional.
+
+| Option           | Default                                                 | Description                                                                                     |
+| ---------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `credentials`    | `LINEAR_AGENT_ACCESS_TOKEN` and `LINEAR_WEBHOOK_SECRET` | From `connectLinearCredentials(...)`, or `{ accessToken, webhookSecret, webhookVerifier }`.     |
+| `route`          | `/eve/v1/linear`                                        | Webhook path.                                                                                   |
+| `maxSkewMs`      | `60000`                                                 | Allowed webhook timestamp age for the built-in verifier. A custom `webhookVerifier` ignores it. |
+| `api`            | `https://api.linear.app/graphql` and the global `fetch` | `{ apiBaseUrl, fetch }` for GraphQL calls.                                                      |
+| `turnPolicy`     | `"steer"`                                               | `"steer"` or `"queue"` for prompts that arrive during a turn.                                   |
+| `onAgentSession` | Dispatch `created` and `prompted` events                | `(ctx, event)` hook. See [Custom hooks](#custom-hooks).                                         |
+| `onDataWebhook`  | None                                                    | `(event)` handler for other Linear data webhooks delivered to the same route.                   |
+| `events`         | eve's default handlers                                  | Per-event handler overrides. See [Custom hooks](#custom-hooks).                                 |
+
+The channel mounts `POST /eve/v1/linear`.
+
+## Dispatch
 
 By default, `created` and `prompted` Agent Session events start a turn. The model sees the agent session, issue, comment, and organization ids, plus `app_user_id` when known. Each Linear Agent Session maps to one eve session, keyed `agent-session:<id>`.
 
-### Delivery
+## Delivery
 
 | Turn event              | Agent Activity                                     |
 | ----------------------- | -------------------------------------------------- |
@@ -85,25 +102,25 @@ By default, `created` and `prompted` Agent Session events start a turn. The mode
 | Final assistant text    | `response`, not ephemeral                          |
 | Failure                 | `error`                                            |
 
-### Human-in-the-loop (HITL)
+## Human-in-the-loop (HITL)
 
 Approvals and questions post as `elicitation` activities. The user's reply in the Agent Session answers the open one, and the turn continues.
 
-### Connection authorization
+## Connection authorization
 
 When a connection needs the user to sign in, the channel posts Linear's native `auth` elicitation with the provider's sign-in URL. It goes to the user who started the session. A device flow without a URL posts its instructions and user code as a plain elicitation. When sign-in ends, the channel posts a `thought` with the result, and a successful sign-in continues the turn.
 
-### Attachments
+## Attachments
 
 Markdown images (`![name](url)`) and file links (`[name](url)`) in an Agent Session prompt reach the model as files. This works only for links to `https://uploads.linear.app`, which eve downloads with the Linear access token. eve sends the token only to that exact HTTPS origin, and links to other hosts stay Markdown text.
 
 A file fails when the download fails, an image link returns non-image content, or a file link returns an HTML page. The link then becomes its label, and the agent gets a note that the file couldn't be retrieved. The turn continues.
 
-### API handle
+## API handle
 
 Event handlers receive `channel.linear`. Use its `createActivity`, `listActivities`, and `updateSession` methods to post your own Agent Activities and update the Agent Session.
 
-### Low-level API helpers
+## Low-level API helpers
 
 Import `callLinearGraphQL` and `createLinearAgentActivity` from
 `eve/channels/linear` when a custom integration needs a direct API call.
@@ -203,5 +220,5 @@ export default defineSchedule({
 
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
-- [MCP connections](../connections/mcp): use the Linear MCP connection when the agent needs to inspect or edit Linear data from another channel
+- [Channels overview](/docs/channels/overview): the channel contract and every built-in channel
+- [MCP connections](/docs/connections/mcp): use the Linear MCP connection when the agent needs to inspect or edit Linear data from another channel

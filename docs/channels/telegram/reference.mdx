@@ -1,10 +1,12 @@
 ---
-title: "Telegram"
-description: "Reach your agent from Telegram bot webhooks, with inline-keyboard human-in-the-loop prompts and attachments."
-type: integration
+title: "Telegram Reference"
+description: "Telegram channel options, credentials, dispatch rules, delivery, human-in-the-loop, proactive sessions, and attachments."
+type: reference
 ---
 
-The Telegram channel runs your agent as a Telegram bot. It lives in `agent/channels/telegram.ts`. It checks the `X-Telegram-Bot-Api-Secret-Token` header on each Bot API webhook, and replies with `sendMessage`. See [Channels](./overview) for what every channel shares.
+This page documents every part of `telegramChannel` from `eve/channels/telegram`. For setup and common tasks, start with [Telegram](/docs/channels/telegram).
+
+The Telegram channel runs your agent as a Telegram bot. It lives in `agent/channels/telegram.ts`. It checks the `X-Telegram-Bot-Api-Secret-Token` header on each Bot API webhook, and replies with `sendMessage`. See [Channels](/docs/channels/overview) for what every channel shares.
 
 ## Add the channel
 
@@ -31,9 +33,25 @@ curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
        "allowed_updates":["message","callback_query"]}'
 ```
 
-## How the channel handles messages
+## Options
 
-### Dispatch
+`telegramChannel(config)` takes these options. All are optional.
+
+| Option            | Default                                                  | Description                                                                                |
+| ----------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `botUsername`     | None                                                     | The bot's username, without `@`. Needed to recognize group mentions and targeted commands. |
+| `credentials`     | `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET_TOKEN` | `{ botToken, webhookSecretToken, webhookVerifier }`.                                       |
+| `route`           | `/eve/v1/telegram`                                       | Webhook path.                                                                              |
+| `api`             | `https://api.telegram.org` and the global `fetch`        | `{ apiBaseUrl, fileBaseUrl, fetch }` for Bot API calls and file downloads.                 |
+| `turnPolicy`      | `"steer"`                                                | `"steer"` or `"queue"` for messages that arrive during a turn.                             |
+| `uploadPolicy`    | Any media type, up to 25 MB                              | `"disabled"` or `{ maxBytes, allowedMediaTypes }` for inbound photos and documents.        |
+| `onMessage`       | Group filter and `defaultTelegramAuth`                   | `(ctx, message)` hook. Return `{ auth }` to dispatch or `null` to ignore.                  |
+| `onCallbackQuery` | Answer with `Unsupported action.`                        | `(ctx, query)` hook for callback queries that aren't eve's HITL buttons.                   |
+| `events`          | eve's default handlers                                   | Per-event handler overrides, such as `content.completed`.                                  |
+
+The channel mounts `POST /eve/v1/telegram`.
+
+## Dispatch
 
 In a private chat, text, captions, photos, and documents all reach the agent. In a group, only a command (`/ask`, `/ask@my_bot`), an `@my_bot` mention (when `botUsername` is set), or a reply to one of the bot's messages does.
 
@@ -49,23 +67,23 @@ keep the default actor identity. The helper uses the message's `from` user,
 scopes group identities to the chat, and returns `null` when no user is present.
 For a button press, pass the button presser as `from`, not the message's author.
 
-### Delivery
+## Delivery
 
 By default, the bot sends each reply as plain text with `sendMessage` and no `parse_mode`, so Markdown shows as typed. Replies over Telegram's 4096-character limit are split across messages. Custom handlers use `ctx.channel.telegram`.
 
-### Human-in-the-loop (HITL)
+## Human-in-the-loop (HITL)
 
 Approvals and questions with options render as inline-keyboard buttons, and free-text questions as `ForceReply`. eve acknowledges its own callbacks with `answerCallbackQuery` and passes others to `onCallbackQuery`. A press on a prompt whose session has ended replaces the keyboard with `No longer active` and tells the person to send a new message.
 
 A text reply to a pending `ForceReply` prompt answers it. A reply to any other bot message reaches the agent as a new message. It starts a new session when no session answers in that thread.
 
-### Proactive sessions
+## Proactive sessions
 
 To start a session without an incoming message, call `to(telegram, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(telegram, target).send(message, { auth })` from another channel. `target.chatId` is required; add `messageThreadId` to post in a forum topic.
 
 A private-chat session is keyed to the chat, or the chat and topic. A group or supergroup session is keyed to the bot message Telegram returns. Replies to different bot messages can resume different sessions in one chat. If Telegram returns no recognized chat type, the session stays unanchored.
 
-### Attachments
+## Attachments
 
 Inbound photos and documents reach the agent when `uploadPolicy` allows their type. eve downloads them with `getFile`. Omit `uploadPolicy` to accept any type up to 25 MB:
 
@@ -78,5 +96,5 @@ export default telegramChannel({
 
 ## What to read next
 
-- [Channels overview](./overview): what every channel shares, and every built-in channel
-- [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic
+- [Channels overview](/docs/channels/overview): what every channel shares, and every built-in channel
+- [Auth & route protection](/docs/guides/auth-and-route-protection): authenticating inbound traffic

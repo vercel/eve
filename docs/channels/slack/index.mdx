@@ -1,0 +1,270 @@
+---
+title: "Slack"
+description: "Reach your agent from Slack mentions, DMs, threads, slash commands, and buttons."
+type: integration
+---
+
+A Slack agent answers when someone mentions it or sends it a DM. It replies in a thread, and every follow-up in that thread continues the same session. While it works, the thread status shows what it's doing, and approvals and questions appear as buttons. [Set up](#set-up) creates the Slack app and connects it through Vercel Connect.
+
+Every option, hook, and default is in the [Slack reference](/docs/channels/slack/reference).
+
+## Set up
+
+<TabsWithChildren ariaLabel="Where the agent runs" tabs={["Vercel", "Outside of Vercel"]}>
+<TabContent order={1}>
+
+Run the guided setup from your agent project, then deploy:
+
+```bash
+eve add channel/slack
+eve deploy
+```
+
+Setup signs you in to Vercel, links a project, creates or reuses a Slack app through [Vercel Connect](https://vercel.com/kb/guide/vercel-connect), asks you to install it in a workspace, and writes the channel file:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+});
+```
+
+Connect keeps the bot token, token rotation, workspace installations, and request verification out of your project. If setup stops partway, run `eve add channel/slack` again; it runs only the missing steps. To route a preview branch to its own Slack app, see [Test a preview branch](/docs/channels/slack/reference#test-a-preview-branch).
+
+</TabContent>
+<TabContent order={2}>
+
+Run `eve add channel/slack` and choose **Use portable credentials**. eve writes a channel file that reads `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET`, but doesn't create the Slack app:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel();
+```
+
+In [Slack app settings](https://api.slack.com/apps):
+
+1. Add the `app_mentions:read` and `chat:write` bot scopes, plus `im:history` for DMs, `files:read` for inbound files, and `files:write` for long replies.
+2. Install the app. Set `SLACK_BOT_TOKEN` to its Bot User OAuth Token and `SLACK_SIGNING_SECRET` to the signing secret from **Basic Information**, in `.env.local` and in your host's environment.
+3. Set `https://your-agent.example/eve/v1/slack` as the Request URL under **Event Subscriptions** (subscribe to `app_mention`, plus `message.im` for DMs), **Interactivity & Shortcuts**, and each **Slash Command**.
+
+Portable credentials also work on Vercel when you manage the Slack app yourself.
+
+</TabContent>
+</TabsWithChildren>
+
+## Answer mentions and DMs
+
+With the generated channel file, the agent answers `@mentions` in any channel it has joined and every DM. It replies in a thread under the message. Each thread is one session, so people continue the conversation by mentioning the agent again in that thread.
+
+While a turn runs, the thread status names the agent's latest step, such as `Search useEveAgent` or a tool's progress label. Replies up to 12,000 characters post inline. Longer replies upload as an `eve-response.md` snippet, which needs the `files:write` scope.
+
+## Reply in a thread without a mention
+
+Return `{ auth }` from `onMessage` to start a turn, or `null` to ignore the message. This hook answers DMs, private channels, and mentions, and keeps answering in any thread the agent already joined:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  async onMessage(ctx, message) {
+    if (message.author?.isBot) return null;
+    return (await ctx.isDMOrPrivateChannel()) || ctx.isBotMentioned() || (await ctx.isSubscribed())
+      ? { auth: null }
+      : null;
+  },
+});
+```
+
+To answer only the thread replies that expect the agent, ask a decision model from the hook. See [Classify ambient replies with a decision model](/docs/channels/slack/reference#classify-ambient-replies-with-a-decision-model).
+
+Slack sends un-mentioned channel messages only when the app subscribes to them. In the Connect connector's **Advanced** settings, add the `message.channels` event and `channels:history` scope, plus `message.groups` and `groups:history` for private channels.
+
+## Give the agent the thread so far
+
+By default, the agent sees only the message that mentioned it. Set `threadContext` to also load the thread's earlier replies, each attributed to its Slack user. With `since: "last-agent-reply"`, each mention adds only what's new since the agent last replied:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  threadContext: { since: "last-agent-reply" },
+});
+```
+
+## Tell the agent who's talking
+
+The agent sees each sender's Slack user ID. To also give it their name, and optionally their email, set `messageContext.users`:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  messageContext: { users: { email: true } },
+});
+```
+
+This adds the `users:read` scope, plus `users:read.email` with `email: true`, so reinstall the Slack app after enabling it. It's off by default because names and emails then reach model context, session history, and traces. See [Add sender names and emails](/docs/channels/slack/reference#add-sender-names-and-emails) for caching and custom lookups.
+
+## Control who can use the agent
+
+A valid Slack signature proves the event came from Slack, not that the sender should reach your agent. Slack Connect can deliver events from people outside your workspace. To allow only certain people, check them in every inbound hook you enable, and in `onAnswers` so nobody else can click an approval:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { defaultSlackAuth, slackChannel, type SlackMessage } from "eve/channels/slack";
+
+const allowedUsers = new Set(["U01234567"]);
+const isAllowed = (message: SlackMessage) => allowedUsers.has(message.author?.userId ?? "");
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  onAppMention: (ctx, message) =>
+    isAllowed(message) ? { auth: defaultSlackAuth(message, ctx) } : null,
+  onDirectMessage: (ctx, message) =>
+    isAllowed(message) ? { auth: defaultSlackAuth(message, ctx) } : null,
+  onAnswers: (ctx, submission) =>
+    allowedUsers.has(submission.user.id) ? { auth: ctx.defaultAuth } : null,
+});
+```
+
+Keep authorization checks inside sensitive tools too. The [reference](/docs/channels/slack/reference#restrict-who-can-invoke-the-agent) adds per-conversation allowlists.
+
+## Ask for approval
+
+[Tool approvals](/docs/human-in-the-loop) and questions from `ctx.ask()` appear in the thread as buttons and selects. Once someone answers, the card shows the answer and who gave it. To send a request only to the person who started the turn, return `"direct-message"` from `approvalChannel`:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  approvalChannel: (request) => (request.request.kind === "question" ? "direct-message" : "thread"),
+});
+```
+
+When a tool needs a connection the person hasn't authorized, the sign-in link goes to them in an ephemeral message, and the thread shows a status without the link.
+
+## Start a thread from a schedule or webhook
+
+Send to the Slack channel from a [schedule](/docs/schedules#handler-form-run), a [tool](/docs/tools#start-channel-sessions-ctxto), or [another channel's route](/docs/channels/custom#cross-channel-hand-off). A `{ channelId }` target starts a new thread, and `initialMessage` posts its root before the agent runs:
+
+```ts title="agent/schedules/weekly-summary.ts"
+import { defineSchedule } from "eve/schedules";
+import slack from "../channels/slack";
+
+export default defineSchedule({
+  cron: "0 15 * * 1",
+  async run({ to, waitUntil, appAuth }) {
+    waitUntil(
+      to(slack, {
+        channelId: "C0123ABC",
+        initialMessage: { markdown: "Weekly summary" },
+      }).send("Post this week's metrics summary.", { auth: appAuth }),
+    );
+  },
+});
+```
+
+Teammates continue the session by mentioning the agent in that thread. Add `threadTs` to the target to continue an existing thread instead.
+
+## Handle slash commands
+
+`onSlashCommand` receives commands configured under **Slash Commands** in your Slack app. eve acknowledges the command right away and keeps your handler running:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  async onSlashCommand(command, ctx) {
+    if (command.command !== "/ask") return;
+    await ctx.slack.request("chat.postEphemeral", {
+      channel: command.channelId,
+      user: command.user.id,
+      text: `Received: ${command.text}`,
+    });
+  },
+});
+```
+
+Use `onShortcut` for message and global shortcuts, `onInteraction` for your own buttons, and `onEvent` for other Events API events such as `team_join`.
+
+## Work in code channels
+
+A [Slack code channel](https://docs.slack.dev/ai/slack-code) is a channel dedicated to one agent task. With `codeChannels: true`, the agent answers every message in a code channel without a mention, and the whole channel is one session:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  codeChannels: true,
+});
+```
+
+To let the agent move multi-step work out of a thread, give it a tool that calls `openCodeChannel()`. The new channel starts with the conversation so far:
+
+```ts title="agent/tools/open_code_channel.ts"
+import { openCodeChannel } from "eve/channels/slack";
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+import slack from "../channels/slack";
+
+export default defineTool({
+  description: "Move this Slack conversation into a new code channel for multi-step work.",
+  inputSchema: z.object({
+    message: z.string().describe("The task and where to start."),
+    name: z.string().max(80).describe("A short channel title."),
+  }),
+  async execute({ message, name }, ctx) {
+    return await openCodeChannel(ctx, slack, message, { name });
+  },
+});
+```
+
+Code channels need extra scopes and events. See [Serve Slack code channels](/docs/channels/slack/reference#serve-slack-code-channels).
+
+## Change what the agent posts
+
+Renderers change what the agent posts without replacing eve's defaults. Each handler calls `next()` to run eve's default. This one adds a note below each final reply:
+
+```ts title="agent/channels/slack.ts"
+import { defineSlackRenderer, slackChannel } from "eve/channels/slack";
+
+const note = defineSlackRenderer({
+  events: {
+    async "content.completed"(event, ctx, next) {
+      await next();
+      if (event.data.phase !== "reply" || event.data.kind !== "text") return;
+      await ctx.channel.thread.post("Reply with feedback anytime.");
+    },
+  },
+});
+
+export default slackChannel({ renderers: [note] });
+```
+
+Renderers can also restyle the [task card](/docs/channels/slack/reference#task-card) and approval cards. See [Customize rendering](/docs/channels/slack/reference#customize-rendering).
+
+## Send files to the agent
+
+Images, PDFs, audio, and other files attached to a message reach the agent. When a mention has no files, eve also collects files posted in the thread since the agent's previous mention. Downloads need the `files:read` scope. See [Attachments](/docs/channels/slack/reference#attachments) for limits.
+
+## Reference
+
+The [Slack reference](/docs/channels/slack/reference) covers:
+
+- Setup: portable credentials, preview branches, a different Slack API host, and troubleshooting
+- Inbound hooks: handler order, sender profiles, decision-model replies, session operations on `ctx`, ending a conversation, and Events API callbacks
+- Code channels: detection, privacy, and building your own code channel tool
+- Delivery: the thread status, task card, renderers, and reply fallbacks
+- Human-in-the-loop: approval cards, sign-ins, and HITL helpers
+- Cards, proactive targets, attachments, and audience

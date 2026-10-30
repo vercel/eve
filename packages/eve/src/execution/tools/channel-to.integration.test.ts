@@ -232,7 +232,7 @@ describe("ctx.to() in tools", () => {
       credentials: { botToken: "xoxb-test", signingSecret },
     });
     const { modelInputs, recordModelInputs } = modelInputRecorder();
-    // The tool an app writes around openCodeChannel(), as docs/channels/slack.mdx shows.
+    // The tool an app writes around openCodeChannel(), as docs/channels/slack/index.mdx shows.
     const runtime = await createToolRuntime<{ message: string; name: string }>({
       agentName: "tool-slack-code-channel",
       execute: async ({ message, name }, ctx) =>

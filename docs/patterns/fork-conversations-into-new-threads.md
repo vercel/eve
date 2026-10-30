@@ -79,7 +79,7 @@ different channel, pass that channel's id instead; the app must be a member of i
 
 People continue the fork under the channel's usual rules. By default, a reply in a channel thread
 reaches the agent only when it mentions the app. See
-[Continue conversations without repeated mentions](../channels/slack#continue-conversations-without-repeated-mentions)
+[Continue conversations without repeated mentions](../channels/slack/reference#continue-conversations-without-repeated-mentions)
 to answer every reply in an active thread.
 
 ### Fork into direct messages
@@ -117,7 +117,7 @@ channel uses Vercel Connect, pass the connector's `botToken` resolver to `callSl
 In the DM, the agent's first reply becomes a thread root, and replies in that thread continue the
 fork. A new top-level DM starts a separate session. The built-in Slack DM handler answers without
 a mention, and needs the `message.im` event and the `im:history` scope; see
-[Message hooks](../channels/slack#message-hooks).
+[Message hooks](../channels/slack/reference#message-hooks).
 
 ## What the new session sees
 

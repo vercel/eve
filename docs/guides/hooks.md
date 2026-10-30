@@ -240,7 +240,7 @@ export default githubChannel({
 });
 ```
 
-On a built-in channel, your handler replaces the channel's default handler for the same event key. Check the channel page before you override events that send replies, progress, errors, or prompts for human input. The [Slack channel](/docs/channels/slack#customize-rendering) takes renderers instead: a renderer keeps Slack's default by calling `next()` and replaces it by skipping `next`.
+On a built-in channel, your handler replaces the channel's default handler for the same event key. Check the channel page before you override events that send replies, progress, errors, or prompts for human input. The [Slack channel](/docs/channels/slack/reference#customize-rendering) takes renderers instead: a renderer keeps Slack's default by calling `next()` and replaces it by skipping `next`.
 
 To check the channel inside a global hook, use `isChannel` from `eve/channels`, not `ctx.channel.kind`. The kind comes from the file path: `agent/channels/github.ts` reports `channel:github`, so `ctx.channel.kind === "github"` never matches. `isChannel` works for every channel, including route-only channels without event handlers:
 
