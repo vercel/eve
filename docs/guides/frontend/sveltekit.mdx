@@ -127,7 +127,9 @@ When `vercel.json` declares [`services`](https://vercel.com/docs/services), the 
 }
 ```
 
-For a workspace, declare a service keyed `eve-<name>` for each member and route `/eve/<name>/v1/*` to that service. Names that contain digits or exceed Vercel's service-name limit use an encoded key; prefer generated services for those workspaces. A standalone service can use any key when its framework is `"eve"`.
+For a workspace, prefer generated services. To author the full service graph instead, use [`withEve` from `eve/vercel`](../deployment/vercel#compose-agents-with-other-vercel-services) in a root `vercel.ts`. That composition configures named routes, service-scoped path transforms, and public callback prefixes together. Changing only the service names and rewrites in the single-agent example is not sufficient.
+
+A standalone service can use any key when its framework is `"eve"`.
 
 ### Remove `experimentalServices`
 
