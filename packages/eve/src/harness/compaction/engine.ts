@@ -34,7 +34,7 @@ type ModelMessageContentPart = Exclude<ModelMessage["content"], string>[number];
 // Static envelope estimate stays valid because createCompactionPrompt bounds
 // its transcript to the caller's threshold budget, so the summarization call
 // itself never grows past threshold + envelope + checkpoint.
-const COMPACTION_PROMPT_OVERHEAD_TOKENS = estimateTokens([
+export const COMPACTION_PROMPT_OVERHEAD_TOKENS = estimateTokens([
   { content: COMPACTION_PROMPT_ENVELOPE.system, role: "system" },
   createFrameworkUserMessage("context.compaction", COMPACTION_PROMPT_ENVELOPE.prompt),
 ] satisfies ModelMessage[]);
@@ -101,24 +101,6 @@ export function withPromptMeasurement(
   };
 }
 
-/**
- * Returns true when the message history and fixed compaction-prompt envelope
- * exceed the compaction threshold.
- */
-export function shouldCompact(
-  messages: readonly ModelMessage[],
-  config: CompactionConfig,
-  requestEnvelopeTokens = 0,
-  previousEnvelopeTokens = 0,
-): boolean {
-  return (
-    messages.length > 0 &&
-    getInputTokenCount(messages, config, requestEnvelopeTokens, previousEnvelopeTokens) +
-      COMPACTION_PROMPT_OVERHEAD_TOKENS >
-      config.threshold
-  );
-}
-
 /** Summarizes one compaction prompt with the compaction model, returning the summary text. */
 export type CompactionSummarizer = (prompt: {
   readonly messages: ModelMessage[];
@@ -174,9 +156,9 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
     input.config.threshold,
   );
 
-  // Evaluate on the same ruler shouldCompact uses (envelope included):
+  // Evaluate on the same ruler eve's own history uses (envelope included):
   // capping can be a near no-op when the older region holds few large
-  // results, and accepting one on a looser ruler would let shouldCompact
+  // results, and accepting one on a looser ruler would let eve's own history
   // re-fire every step without compaction ever making progress.
   const evaluation = evaluateThreshold(
     capped,
@@ -192,7 +174,7 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
 /**
  * Measures a candidate history against the compaction threshold.
  * The "should-compact" ruler includes the fixed prompt-envelope overhead that
- * {@link shouldCompact} adds, so a history accepted on it cannot immediately
+ * eve's own history adds, so a history accepted on it cannot immediately
  * re-trigger compaction; "estimate" is the bare history size.
  */
 function evaluateThreshold(

@@ -8,13 +8,22 @@ import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { StepResult } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
 import type { JsonValue } from "#shared/json.js";
-import { nativeNext, nativePolicy } from "./native.js";
-import { force, type ModelStep, type Next, type PolicyContext } from "./policy.js";
+import { activeTurnIdOf } from "#protocol/session-projection.js";
+import { nativeHistory, nativeNext, nativePolicy } from "./native.js";
+import {
+  force,
+  type HistorySize,
+  type ModelStep,
+  type Next,
+  type Policy,
+  type PolicyContext,
+  type Summarize,
+} from "./policy.js";
 
 // The kernel side of a policy: eve asks it where it decides, then applies the answer through
 // the rules no policy can change. A turn doesn't end while its tasks work, a note needs to say
-// something, a turn gets a bounded number of notes, and a failing policy fails the turn with a
-// message that doesn't reveal why.
+// something, a turn gets a bounded number of notes, a history passes eve's checks, and a failing
+// policy fails with a message that doesn't reveal why. A field the policy leaves out is eve's.
 
 const log = createLogger("harness.policy");
 
@@ -34,35 +43,55 @@ export type Settle = (step: Step, output: JsonValue | null) => Promise<StepResul
 
 /** What eve knows where it decides, beyond the session itself. */
 interface Decision {
-  readonly lastStep: ModelStep;
-  readonly unread: boolean;
+  readonly lastStep?: ModelStep;
+  /** The history the decision is about, where it isn't the session's: a request's. */
+  readonly history?: readonly HarnessModelMessage[];
+  readonly size?: HistorySize;
+  readonly compact?: true;
+  readonly summarize?: Summarize;
 }
 
+const NO_SUMMARIZER: Summarize = () => {
+  throw new Error("eve summarizes the history only where it asks for the history.");
+};
+
 function policyContext(step: Step, decision: Decision): PolicyContext {
-  const turnId = step.position().turnId;
+  const turnId = activeTurnIdOf(step.view().projection);
+  const history = decision.history ?? step.session.history;
   return {
+    ...(decision.compact !== undefined && { compact: decision.compact }),
+    history,
+    ...(decision.size !== undefined && { size: decision.size }),
+    summarize: decision.summarize ?? NO_SUMMARIZER,
     signal: step.config.abortSignal,
     tasks: { working: workingTaskIds(step.session) },
-    turn: {
-      continuations: continuationsOf(step.session.history, turnId),
-      id: turnId,
-      lastStep: decision.lastStep,
-      unread: decision.unread,
-    },
+    turn:
+      turnId === undefined
+        ? null
+        : {
+            continuations: continuationsOf(step.session.history, turnId),
+            id: turnId,
+            ...(decision.lastStep !== undefined && { lastStep: decision.lastStep }),
+            // A step that made no calls read the results before it; a delivered reply replaced them.
+            unread: history.at(-1)?.role === "tool" && (decision.lastStep?.madeCalls ?? true),
+          },
   };
+}
+
+function policyOf(step: Step): Policy {
+  return step.config.policy ?? nativePolicy;
 }
 
 /** Asks the session's policy what the turn does after a model step, and does it. */
 export async function decideAfterModel(
   step: Step,
-  decision: Decision,
+  lastStep: ModelStep,
   settle: Settle,
 ): Promise<StepResult> {
-  const ctx = policyContext(step, decision);
+  const ctx = policyContext(step, { lastStep });
   let next: Next;
   try {
-    // A policy that leaves `next` out, or answers nothing, leaves the decision to eve.
-    next = (await force((step.config.policy ?? nativePolicy)(ctx).next)) ?? nativeNext(ctx);
+    next = (await force(policyOf(step)(ctx).next)) ?? nativeNext(ctx);
   } catch (error) {
     throwIfTurnAborted(step.config.abortSignal);
     log.error("the harness policy threw; failing the turn", { error, turnId: ctx.turn?.id });
@@ -111,6 +140,52 @@ async function applyNext(
     return await settle(step, next.settle.output);
   }
   return await invalid(step, "returned a next step eve doesn't know");
+}
+
+/**
+ * The history the session's policy says the model reads about the past, or eve's own when it
+ * leaves that out. A policy that throws fails with a message that doesn't reveal why; a failure of
+ * eve's summarizer is its own.
+ */
+export async function policyHistory(
+  step: Step,
+  input: {
+    readonly messages: readonly HarnessModelMessage[];
+    readonly size: HistorySize;
+    readonly compact?: true;
+    readonly summarize: Summarize;
+  },
+): Promise<readonly HarnessModelMessage[]> {
+  const failures = new WeakSet<object>();
+  const summarize: Summarize = async (history, options) => {
+    try {
+      return await input.summarize(history, options);
+    } catch (error) {
+      if (typeof error === "object" && error !== null) failures.add(error);
+      throw error;
+    }
+  };
+  const { compaction } = step.session;
+  const options = {
+    threshold: compaction.threshold,
+    ...(compaction.thresholdPercent !== undefined && {
+      thresholdPercent: compaction.thresholdPercent,
+    }),
+  };
+  const ctx = policyContext(step, {
+    ...(input.compact !== undefined && { compact: input.compact }),
+    history: input.messages,
+    size: input.size,
+    summarize,
+  });
+  try {
+    return (await force(policyOf(step)(ctx).history)) ?? (await nativeHistory(ctx, options));
+  } catch (error) {
+    throwIfTurnAborted(step.config.abortSignal);
+    if (typeof error === "object" && error !== null && failures.has(error)) throw error;
+    log.error("the harness policy's history threw", { error, turnId: ctx.turn?.id });
+    throw new Error(HARNESS_FAILED.message, { cause: error });
+  }
 }
 
 async function invalid(step: Step, reason: string): Promise<StepResult> {
