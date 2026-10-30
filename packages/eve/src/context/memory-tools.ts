@@ -1,160 +1,47 @@
-import type { MemoryDefinition, MemoryToolSet, MemoryToolsContext } from "#public/memory/index.js";
-import { resolveApprovalPolicy } from "#approval/definition.js";
-import { loadContext } from "#context/container.js";
-import { TurnMemoryLocksKey } from "#context/keys.js";
-import { defineDynamic } from "#dynamic/definition.js";
-import { markDynamicCallbackRebind } from "#internal/dynamic-tool-rebind.js";
-import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import { stampDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
+import type { MemoryDefinition, MemoryToolsContext } from "#public/memory/index.js";
+import { asFrameworkDefinition, defineDynamic } from "#dynamic/definition.js";
+import { principalOf, resolveMemoryScope } from "#reactions/kinds/memory.js";
+import type { InternalContext } from "#reactions/reaction.js";
+import { readReactionsState } from "#reactions/state.js";
 import { isBrandedToolEntry } from "#tools/dynamic.js";
 
+/** A memory slot's provider tools, as a dynamic tool resolver named `<slot>__<key>`. */
 export function createMemoryToolDynamicDefinition(definition: MemoryDefinition, slot: string) {
-  return markDynamicCallbackRebind(
-    defineDynamic({
-      events: {
-        "turn.started": async (_event, resolveContext) => {
-          const lock = loadContext().get(TurnMemoryLocksKey)?.[slot];
-          if (lock === undefined || definition.provider.tools === undefined) {
-            return null;
+  return asFrameworkDefinition(
+    defineDynamic(async (ctx: InternalContext) => {
+      if (definition.provider.tools === undefined) return null;
+      // The scope is the data the tools are made from: resolved once per turn and principal, as
+      // recall resolves it, so both read the channel of the same turn.
+      const turn = readReactionsState(ctx.ctx).latest["turn.started"] ?? null;
+      const scope = await ctx.memo({ principal: principalOf(ctx), turn }, () =>
+        resolveMemoryScope({ ...definition, slot }, ctx),
+      );
+      if (scope === null) return null;
+      const context = {
+        abortSignal: ctx.abortSignal,
+        channel: ctx.channel,
+        memory: { scope, slot },
+        session: ctx.session,
+      } as { -readonly [K in keyof MemoryToolsContext]: MemoryToolsContext[K] };
+      if (ctx.conversation !== undefined) context.conversation = ctx.conversation;
+      const result = await definition.provider.tools(context);
+      if (result === null) return null;
+      if (typeof result !== "object" || Array.isArray(result)) {
+        throw new Error(`Memory slot "${slot}" provider.tools() must return a tool map or null.`);
+      }
+      return Object.fromEntries(
+        Object.entries(result).map(([key, tool]) => {
+          const name = `${slot}__${key}`;
+          if (!isBrandedToolEntry(tool)) {
+            throw new Error(`Memory provider tool "${name}" must be created with defineTool().`);
           }
-          const context: MemoryToolsContext = {
-            ...resolveContext,
-            memory: { scope: lock.scope, slot },
-            turn: lock.turn,
-          };
-          const result = await definition.provider.tools(context);
-          if (result === null) return null;
-          if (typeof result !== "object" || Array.isArray(result)) {
-            throw new Error(
-              `Memory slot "${slot}" provider.tools() must return a tool map or null.`,
-            );
-          }
-          return Object.fromEntries(
-            Object.entries(result).map(([key, tool]) => {
-              const name = `${slot}__${key}`;
-              if (!isBrandedToolEntry(tool)) {
-                throw new Error(
-                  `Memory provider tool "${name}" must be created with defineTool().`,
-                );
-              }
-              const description =
-                definition.description === undefined
-                  ? tool.description
-                  : `${definition.description}\n\n${tool.description}`;
-              const qualified = { ...tool, description };
-              stampDurableDynamicToolCallbacks(
-                qualified,
-                createProviderToolCallbacks({ context, definition, key, tool }),
-              );
-              return [name, qualified];
-            }),
-          );
-        },
-      },
+          const description =
+            definition.description === undefined
+              ? tool.description
+              : `${definition.description}\n\n${tool.description}`;
+          return [name, { ...tool, description }];
+        }),
+      );
     }),
   );
-}
-
-function createProviderToolCallbacks(input: {
-  readonly context: MemoryToolsContext;
-  readonly definition: MemoryDefinition;
-  readonly key: string;
-  readonly tool: MemoryToolSet[string];
-}) {
-  // History and turn input stay out of the durable closure: both are already
-  // durable session state and can hold non-JSON values (dates, bytes, staged
-  // attachment URLs). Replay reuses the values this process resolved with.
-  const {
-    messages,
-    turn: { input: turnInput, ...turn },
-    ...durableContext
-  } = input.context;
-  const closure = parseJsonObject({ context: { ...durableContext, turn }, key: input.key });
-  const loadTool = async (rawClosure: JsonObject) => {
-    const key = rawClosure.key;
-    const context = rawClosure.context;
-    if (typeof key !== "string" || typeof context !== "object" || context === null) {
-      throw new Error("Memory provider tool callback has an invalid durable closure.");
-    }
-    const durable = readMemoryToolsContext({ ...context, messages });
-    const tools = await input.definition.provider.tools?.({
-      ...durable,
-      turn: { ...durable.turn, input: turnInput },
-    });
-    const tool = tools?.[key];
-    if (tool === undefined || !isBrandedToolEntry(tool)) {
-      throw new Error(`Memory provider tool "${key}" was removed or renamed.`);
-    }
-    return tool;
-  };
-  const callbacks: Parameters<typeof stampDurableDynamicToolCallbacks>[1] = {
-    execute: {
-      callback: async (rawClosure, toolInput, context) =>
-        await (await loadTool(rawClosure)).execute(toolInput, context),
-      closure,
-    },
-  };
-  for (const phase of ["inputSchema", "outputSchema"] as const) {
-    if (input.tool[phase] !== undefined) {
-      callbacks[phase] = {
-        callback: async (rawClosure) => (await loadTool(rawClosure))[phase],
-        closure,
-      };
-    }
-  }
-  if (input.tool.approval !== undefined) {
-    callbacks.approvalRequest = {
-      callback: async (rawClosure, context) =>
-        await resolveApprovalPolicy((await loadTool(rawClosure)).approval!)(context),
-      closure,
-    };
-    if (typeof input.tool.approval !== "function" && input.tool.approval.response !== undefined) {
-      callbacks.approvalResponse = {
-        callback: async (rawClosure, context) => {
-          const approval = (await loadTool(rawClosure)).approval;
-          if (
-            approval === undefined ||
-            typeof approval === "function" ||
-            approval.response === undefined
-          ) {
-            throw new Error(`Memory provider tool "${input.key}" approval response was removed.`);
-          }
-          return await approval.response(context);
-        },
-        closure,
-      };
-    }
-  }
-  if (input.tool.toModelOutput !== undefined) {
-    callbacks.toModelOutput = {
-      callback: async (rawClosure, output) =>
-        await (
-          await loadTool(rawClosure)
-        ).toModelOutput!(output),
-      closure,
-    };
-  }
-  return callbacks;
-}
-
-function readMemoryToolsContext(value: unknown): MemoryToolsContext {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("Memory provider tool callback has an invalid durable context.");
-  }
-  const candidate: unknown = value;
-  const context = candidate as MemoryToolsContext;
-  if (
-    typeof context.channel !== "object" ||
-    context.channel === null ||
-    typeof context.memory !== "object" ||
-    context.memory === null ||
-    !Array.isArray(context.messages) ||
-    typeof context.session !== "object" ||
-    context.session === null ||
-    typeof context.turn !== "object" ||
-    context.turn === null
-  ) {
-    throw new Error("Memory provider tool callback has an invalid durable context.");
-  }
-  return context;
 }

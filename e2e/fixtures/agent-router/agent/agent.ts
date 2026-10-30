@@ -1,8 +1,8 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineAgent, type DefinedAgent } from "eve";
 import { mockModel } from "eve/evals";
 
-export default defineAgent({
+const agent: DefinedAgent = defineAgent({
   ...e2eAgentConfig(),
   description: "Handle general tasks that do not belong to a specialist.",
   model: mockModel({
@@ -38,3 +38,5 @@ export default defineAgent({
   modelContextWindowTokens: 1_000_000,
   tool: false,
 });
+
+export default agent;

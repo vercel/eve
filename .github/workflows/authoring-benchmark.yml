@@ -1,0 +1,324 @@
+name: Authoring Benchmark
+
+# Runs the apps/benchmarks authoring cases against a branch's own code and eve
+# package. Both triggers use the workflow, runner, and cases from the branch.
+#
+# - Add the `run-authoring-benchmark` label to a same-repository PR whose body
+#   has a line naming what to run. Nothing runs without that line.
+#     authoring-benchmark: models=kimi-k3,gpt-6-sol-high cases=author-008-restock-agent runs=3
+#   `models` is required (`all` selects every supported model); `cases`
+#   defaults to the published cases (`all` selects every single-prompt case)
+#   and `runs` to 1. Remove and re-add the label to run again after a push or
+#   a body edit.
+# - Or dispatch this workflow from the Actions tab on any branch with the same
+#   options as inputs.
+# - Nightly, main runs Haiku 5.5 on every single-prompt case three times,
+#   skipped when main has not moved since the last successful nightly run.
+#
+# Nightly runs and dispatches on main also publish their results to the
+# private benchmark Blob store, the same way the nightly Eval Benchmark does.
+# Labeled PR runs publish too, but they benchmark unmerged branch code, so they
+# publish under authoring/pull-requests/<number>/, apart from main's
+# authoring/runs/. Dispatches on other branches keep their results in workflow
+# artifacts only.
+on:
+  schedule:
+    - cron: "41 8 * * *"
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      models:
+        description: Comma-separated model ids, or "all"
+        type: string
+        required: true
+      cases:
+        description: Comma-separated case names, or "all" (default the published cases)
+        type: string
+      runs:
+        description: Runs per case, 1-5
+        type: string
+        default: "1"
+
+# Every label creates a run, so key the group on the label too; otherwise
+# adding an unrelated label would cancel a benchmark in progress. Each dispatch
+# gets its own group, so a dispatch never cancels another benchmark, and the
+# nightly run keys on its event name, so a dispatch on main never cancels it.
+concurrency:
+  group: authoring-benchmark-${{ github.event.pull_request.number || github.ref }}-${{ github.event.label.name || (github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id)) || github.event_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  statuses: read
+  # Lets the nightly run find the last successful nightly run's commit.
+  actions: read
+
+env:
+  HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  TREATMENT: guided
+
+jobs:
+  request:
+    name: Resolve benchmark request
+    if: >-
+      github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' ||
+      (github.event.label.name == 'run-authoring-benchmark' &&
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    outputs:
+      run: ${{ steps.selection.outputs.run }}
+      models: ${{ steps.selection.outputs.models }}
+      cases: ${{ steps.selection.outputs.cases }}
+      runs: ${{ steps.selection.outputs.runs }}
+      canary: ${{ steps.canary.outputs.ref }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # pull_request checks out the merge commit by default; pin the runner
+          # and cases to the same commit as the eve package under test.
+          ref: ${{ env.HEAD_SHA }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Skip an unchanged nightly run
+        id: skip
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last_sha="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow authoring-benchmark.yml \
+            --branch main --event schedule --status success --limit 1 --json headSha --jq '.[0].headSha // ""')"
+          if [ "$last_sha" = "$HEAD_SHA" ]; then
+            echo "main is still at the last benchmarked commit ${HEAD_SHA}; skipping."
+            echo "unchanged=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # `cases=all` loads each case to drop the multi-turn ones the native
+      # runner cannot run.
+      - name: Install dependencies
+        if: steps.skip.outputs.unchanged != 'true'
+        run: pnpm install --frozen-lockfile --filter @eve-internal/benchmarks...
+
+      - name: Resolve models and cases
+        id: selection
+        if: steps.skip.outputs.unchanged != 'true'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          INPUT_MODELS: ${{ inputs.models }}
+          INPUT_CASES: ${{ inputs.cases }}
+          INPUT_RUNS: ${{ inputs.runs }}
+        run: node .github/scripts/resolve-authoring-benchmark.mjs
+
+      # The benchmark runner only accepts published canaries. The Vercel eve-pkg
+      # preview deployment publishes PR heads by SHA, or skips when a change
+      # does not affect the eve package, in which case main's package applies.
+      - name: Resolve the eve package
+        id: canary
+        if: steps.selection.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          url="https://pkg.eve.dev/${HEAD_SHA}/eve.tgz"
+          for _ in $(seq 1 60); do
+            if curl -fsIL -o /dev/null "$url"; then
+              echo "ref=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            status=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/statuses" \
+              --jq '[.[] | select(.context == "Vercel – eve-pkg")][0] | "\(.state) \(.description)"')
+            case "$status" in
+              "success Skipped"*)
+                # Pin main's moving alias once so every model runs, and
+                # publishes, the same package.
+                main_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://pkg.eve.dev/main/eve.tgz")
+                ref=$(sed -nE 's#^https://pkg\.eve\.dev/([0-9a-f]{40})/eve\.tgz$#\1#p' <<<"$main_url")
+                if [ -z "$ref" ]; then
+                  echo "::error::main's eve package did not resolve to an immutable revision: $main_url"
+                  exit 1
+                fi
+                echo "This change does not affect the eve package; benchmarking main's package at ${ref}."
+                echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+              failure* | error*)
+                echo "::error::The Vercel – eve-pkg deployment failed: ${status}"
+                exit 1
+                ;;
+            esac
+            sleep 30
+          done
+          echo "::error::$url was not published within 30 minutes. eve-pkg only publishes main and same-repository PR heads."
+          exit 1
+
+  benchmark:
+    name: Benchmark ${{ matrix.model }}
+    needs: request
+    if: needs.request.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    # Each case can take up to its agent time limit (15 minutes by default, longer
+    # for cases that set timeoutSeconds) plus sandbox setup.
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ${{ fromJSON(needs.request.outputs.models) }}
+    env:
+      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_TEAM_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      MODEL: ${{ matrix.model }}
+      CASES: ${{ needs.request.outputs.cases }}
+      RUNS: ${{ needs.request.outputs.runs }}
+      CANARY_REF: ${{ needs.request.outputs.canary }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # pull_request checks out the merge commit by default; pin the runner
+          # and cases to the same commit as the eve package under test.
+          ref: ${{ env.HEAD_SHA }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter @eve-internal/benchmarks...
+
+      # agent-eval exits 1 when any case fails. Like Eval Benchmark, nightly
+      # runs record those failures as data, so a successful nightly run means
+      # main was benchmarked and the next unchanged night can skip. A run that
+      # produced no case results failed before benchmarking anything, so it
+      # still fails the job and the next night retries.
+      - name: Run benchmark
+        working-directory: apps/benchmarks
+        run: |
+          if ! pnpm benchmark "$CASES" --canary "$CANARY_REF" --model "$MODEL" --runs "$RUNS" \
+            --treatment "$TREATMENT"; then
+            if [ "$GITHUB_EVENT_NAME" != "schedule" ]; then exit 1; fi
+            if ! compgen -G "results/current/*/*/summary.json" > /dev/null; then
+              echo "::error::The benchmark failed before producing any case results."
+              exit 1
+            fi
+            echo "::warning::Some cases failed; failures are recorded as benchmark data."
+          fi
+
+      - name: Summarize results
+        if: ${{ !cancelled() }}
+        working-directory: apps/benchmarks
+        run: |
+          {
+            echo "### Authoring benchmark: ${MODEL}"
+            echo
+            echo "eve canary \`${CANARY_REF:0:12}\`, ${RUNS} run(s) per case"
+            echo
+            echo "| Case | Passed | Pass rate | Mean checks |"
+            echo "| --- | --- | --- | --- |"
+            for summary in results/current/*/*/summary.json; do
+              [ -f "$summary" ] || continue
+              case_dir=$(dirname "$summary")
+              case_id=$(basename "$case_dir")
+              # Share of grader tests passed, averaged over runs: partial credit for runs that fail.
+              checks=$(cat "$case_dir"/run-*/result.json 2>/dev/null | jq -rs \
+                '[.[].analysis.checks.score | numbers] | if length == 0 then "n/a" else "\((add / length * 100 | round))%" end')
+              jq -r --arg case "$case_id" --arg checks "${checks:-n/a}" \
+                '"| \($case) | \(.passedRuns)/\(.totalRuns) | \(.passRate) | \($checks) |"' "$summary"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # scripts/publish-results.mjs reads this to match the artifact to the plan.
+      - name: Stage run metadata
+        if: ${{ !cancelled() }}
+        working-directory: apps/benchmarks
+        env:
+          RUNNER_OS_NAME: ${{ runner.os }}
+        run: |
+          mkdir -p results
+          jq -n --arg model_id "$MODEL" --arg sha "$HEAD_SHA" --arg eve_revision "$CANARY_REF" \
+            --arg treatment "$TREATMENT" --arg runner_os "$RUNNER_OS_NAME" \
+            '{model_id: $model_id, sha: $sha, eve_revision: $eve_revision, treatment: $treatment, runner_os: $runner_os}' \
+            > results/meta.json
+
+      - name: Upload results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: authoring-benchmark-${{ matrix.model }}-${{ env.HEAD_SHA }}
+          path: apps/benchmarks/results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Mirrors eval-benchmark.yml's publish job: only this job holds the Blob
+  # token, and models whose job uploaded nothing become `missing` records.
+  publish:
+    name: Publish results
+    needs: [request, benchmark]
+    if: >-
+      always() && needs.request.result == 'success' && needs.request.outputs.run == 'true' &&
+      (github.event_name == 'pull_request' ||
+      ((github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') &&
+      github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.HEAD_SHA }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      # The publisher needs the root workspace's @vercel/blob, and the benchmarks
+      # app's jiti to read each case's category from its CASE.ts.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter eve-monorepo --filter @eve-internal/benchmarks
+
+      - name: Prepare artifact directory
+        run: mkdir -p "$RUNNER_TEMP/artifacts"
+
+      - name: Download results
+        # No match is valid (every model failed to upload); records mark those models missing.
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: authoring-benchmark-*
+          path: ${{ runner.temp }}/artifacts
+
+      - name: Publish to Blob
+        working-directory: apps/benchmarks
+        env:
+          EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN: ${{ secrets.EVE_BENCHMARK_BLOB_READ_WRITE_TOKEN }}
+          BENCHMARK_SHA: ${{ env.HEAD_SHA }}
+          BENCHMARK_EVE_REVISION: ${{ needs.request.outputs.canary }}
+          BENCHMARK_TREATMENT: ${{ env.TREATMENT }}
+          BENCHMARK_MODELS: ${{ needs.request.outputs.models }}
+          BENCHMARK_CASES: ${{ needs.request.outputs.cases }}
+          BENCHMARK_RUNS: ${{ needs.request.outputs.runs }}
+          BENCHMARK_PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: node scripts/publish-results.mjs "$RUNNER_TEMP/artifacts"

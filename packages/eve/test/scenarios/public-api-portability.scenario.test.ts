@@ -69,7 +69,7 @@ export default withEve(config);
 import { defineSandboxProvider } from "eve/sandbox/provider";
 import { DockerSandbox } from "eve/sandbox/docker";
 import { JustBashSandbox } from "eve/sandbox/just-bash";
-import { Drive, VercelSandbox } from "eve/sandbox/vercel";
+import { VercelSandbox } from "eve/sandbox/vercel";
 
 const custom = defineSandboxProvider({
   name: "custom",
@@ -87,7 +87,6 @@ void custom.environment();
 export const environment = process.env.VERCEL === "1"
   ? VercelSandbox.environment({ resources: { vcpus: 2 } })
   : DefaultSandbox.environment({ docker: { image: "ghcr.io/vercel/eve:latest" } });
-void Drive;
 async function verifyMutableNetworkCapability() {
   const sandbox = await DockerSandbox.dockerfile().open({ networkPolicy: "deny-all" });
   await sandbox.setNetworkPolicy("allow-all");
@@ -362,11 +361,12 @@ async function expectPortableFixtureToTypecheck(testCase: PortabilityCase): Prom
       cwd: appRoot,
     });
   } catch (error) {
+    const stdout =
+      typeof error === "object" && error !== null && "stdout" in error ? String(error.stdout) : "";
     const stderr =
-      typeof error === "object" && error !== null && "stderr" in error
-        ? String(error.stderr)
-        : String(error);
-    throw new Error(`Portable consumer typecheck failed:\n${stderr}`, { cause: error });
+      typeof error === "object" && error !== null && "stderr" in error ? String(error.stderr) : "";
+    const diagnostics = [stdout, stderr].filter(Boolean).join("\n") || String(error);
+    throw new Error(`Portable consumer typecheck failed:\n${diagnostics}`, { cause: error });
   }
 }
 

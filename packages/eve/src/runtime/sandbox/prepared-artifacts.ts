@@ -51,8 +51,8 @@ export async function loadSandboxPreparedArtifact(input: {
   if (entry !== undefined && entry.providerName !== input.providerName) {
     throw new Error(
       `The prepared sandbox artifact for agent node "${input.nodeId}" was created with provider "${entry.providerName}", but this process selects provider "${input.providerName}". ` +
-        "DefaultSandbox selects a provider separately in each process, so processes on hosts with different Docker availability can disagree. " +
-        "Prepare the sandbox where this process's provider is available (run `eve build` on that host, or restart `eve dev`), or select a provider explicitly in the sandbox file.",
+        "The sandbox file must select the same provider during the build and at runtime, so a selection that reads the host, such as `process.env` or Docker availability, can disagree. " +
+        "Select one provider explicitly, or use DefaultSandbox, which records its choice when the sandbox is prepared. Then rebuild with `eve build`, or restart `eve dev`.",
     );
   }
   return entry?.artifact;

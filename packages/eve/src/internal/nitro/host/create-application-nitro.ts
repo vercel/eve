@@ -3,6 +3,8 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { resolveAuthoredTsConfigPath } from "#internal/authored-module-build-options.js";
+import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
+import { findAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import {
@@ -16,6 +18,7 @@ import {
   resolvePackageSourceDirectoryPath,
   resolvePackageSourceFilePath,
   resolveWorkflowModulePath,
+  WORKFLOW_MODULE_SPECIFIERS,
 } from "#internal/application/package.js";
 import {
   prepareEveVersionedCacheDirectory,
@@ -28,6 +31,7 @@ import { prepareSkillServerAssets } from "#internal/nitro/host/skill-server-asse
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
 import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
+import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import {
   createExtensionExternalDependencyPlugin,
   resolveExtensionExternalDependencyPaths,
@@ -53,20 +57,6 @@ import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 
-/**
- * Bare `workflow/*` specifiers that appear in pre-built workflow bundles.
- * Nitro's alias system resolves these at Rollup build time for production,
- * replacing the import-rewriting post-processing that previously ran after
- * each builder invocation.
- */
-const WORKFLOW_ALIAS_SPECIFIERS = [
-  "workflow",
-  "workflow/api",
-  "workflow/errors",
-  "workflow/internal/builtins",
-  "workflow/internal/private",
-  "workflow/runtime",
-] as const;
 const INSTRUMENTATION_ALIAS_PATHS = {
   "eve/instrumentation": "src/public/instrumentation/index.ts",
   "eve/instrumentation/otel": "src/public/instrumentation/otel.ts",
@@ -86,7 +76,7 @@ const LOCAL_SANDBOX_BACKEND_NAMES = new Set([
 
 function resolveWorkflowAliases(): Record<string, string> {
   const aliases: Record<string, string> = {};
-  for (const specifier of WORKFLOW_ALIAS_SPECIFIERS) {
+  for (const specifier of WORKFLOW_MODULE_SPECIFIERS) {
     aliases[specifier] = resolveWorkflowModulePath(specifier);
   }
   return aliases;
@@ -142,7 +132,7 @@ function collectConfiguredExternalDependencies(manifest: CompiledAgentManifest):
     ...manifest.subagents.flatMap((subagent) =>
       subagent.configResolver === undefined
         ? (subagent.agent.config.build?.externalDependencies ?? [])
-        : (subagent.configResolver.build?.externalDependencies ?? []),
+        : [],
     ),
   ];
 }
@@ -169,9 +159,8 @@ function collectConfiguredSandboxProviderNames(manifest: CompiledAgentManifest):
 
 /**
  * Hosted Vercel builds can prune local sandbox providers only when the
- * app did not explicitly configure one. Omitted backends resolve through
- * `DefaultSandbox.environment()`, which selects Vercel on hosted Vercel and never
- * needs local runtime code there.
+ * app did not explicitly configure one. `DefaultSandbox.environment()` records
+ * Vercel Sandbox when built on Vercel, so it never needs local runtime code there.
  */
 export function shouldPruneLocalSandboxProviders(input: {
   readonly configuredBackendNames: ReadonlySet<string>;
@@ -256,7 +245,7 @@ function resolveNitroImportPath(
   importSpecifier: string,
   importer?: string,
 ): string | null {
-  if (importSpecifier.startsWith("workflow")) {
+  if (WORKFLOW_MODULE_SPECIFIERS.includes(importSpecifier)) {
     return resolveWorkflowModulePath(importSpecifier);
   }
 
@@ -612,7 +601,10 @@ function createApplicationNitroBundlerConfiguration(
     preparedHost.compileResult.manifest,
     ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
   ].flatMap((node) => node.extensionMounts);
+  // eve's plugins run before Nitro's externals and tracing plugins, so a
+  // pseudo-package never reaches the output as a live import.
   const nitroBundlerPlugins = [
+    createPseudoPackagePlugin(),
     options.development ? null : createDevelopmentRuntimePrunePlugin(),
     compiledSandboxProviderPrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
@@ -630,6 +622,12 @@ function createApplicationNitroBundlerConfiguration(
       extensionOverridePaths(preparedHost.compileResult.manifest),
     ),
     extensionScopePlugin,
+    // Workflow step modules reach Nitro as authored source, not prebundled.
+    // A workspace member without its own package.json shares the enclosing package.
+    createAuthoredAssetImportPlugin({
+      authoredSourceOnly: true,
+      packageRoot: findAuthoredPackageRoot(preparedHost.appRoot) ?? preparedHost.appRoot,
+    }),
   ].filter((plugin) => plugin !== null);
   const nitroRolldownConfig = {
     // Keep dependency filtering out of Rolldown's JS callback bridge.

@@ -5,10 +5,8 @@ import { describe, expect, it } from "vitest";
 
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { materializeWorkspaceDirectory } from "#runtime/workspace/seed-files.js";
-import {
-  createSandboxProviderResources,
-  providerResourceTargetFiles,
-} from "#shared/sandbox-provider.js";
+import { createSandboxPrepareContext } from "#execution/sandbox/prewarm.js";
+import { populatedPaths } from "#internal/testing/sandbox-provider-harness.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -29,45 +27,39 @@ describe("compiled resource root materialization", () => {
       await writeFile(join(resourceRoot, path), content);
     }
 
-    const resources = createSandboxProviderResources({
-      key: "resources-hash",
-      path: resourceRoot,
-      ...(await materializeWorkspaceDirectory(resourceRoot)),
-    });
+    const trees = await materializeWorkspaceDirectory(resourceRoot);
 
     // Each tree is ordered by locale-aware relative path, not raw bytes.
-    expect(resources).toEqual({
-      skills: {
-        files: [
-          { content: Buffer.from("sources"), relativePath: "research/refs/sources.md" },
-          { content: Buffer.from("research skill"), relativePath: "research/SKILL.md" },
-          { content: Buffer.from("weather skill"), relativePath: "weather/SKILL.md" },
-        ],
-        key: "resources-hash:skills",
-        mountPath: "/eve/resources/skills",
-        targetPath: "$HOME/.agents/skills",
-      },
-      source: { key: "resources-hash", kind: "materialized", path: resourceRoot },
-      workspace: {
-        files: [
-          { content: Buffer.from("a"), relativePath: "data/a.csv" },
-          { content: Buffer.from("b"), relativePath: "data/b.csv" },
-          { content: Buffer.from("notes"), relativePath: "notes.md" },
-          { content: Buffer.from("readme"), relativePath: "README.md" },
-        ],
-        key: "resources-hash:workspace",
-        mountPath: "/eve/resources/workspace",
-        targetPath: "/workspace",
-      },
+    expect(trees).toEqual({
+      skills: [
+        { content: Buffer.from("sources"), relativePath: "research/refs/sources.md" },
+        { content: Buffer.from("research skill"), relativePath: "research/SKILL.md" },
+        { content: Buffer.from("weather skill"), relativePath: "weather/SKILL.md" },
+      ],
+      workspace: [
+        { content: Buffer.from("a"), relativePath: "data/a.csv" },
+        { content: Buffer.from("b"), relativePath: "data/b.csv" },
+        { content: Buffer.from("notes"), relativePath: "notes.md" },
+        { content: Buffer.from("readme"), relativePath: "README.md" },
+      ],
     });
-    expect(providerResourceTargetFiles(resources).map((file) => file.path)).toEqual([
+    const context = createSandboxPrepareContext({
+      appRoot: resourceRoot,
+      files: { list: async () => [], read: async () => new Uint8Array(), readText: async () => "" },
+      log: () => {},
+      provider: { prepare: undefined, providerName: "test" },
+      resources: { key: "resources-hash", path: resourceRoot, ...trees },
+      sourceRevision: "revision",
+      storagePath: resourceRoot,
+    });
+    expect(await populatedPaths(context)).toEqual([
       "/workspace/data/a.csv",
       "/workspace/data/b.csv",
       "/workspace/notes.md",
       "/workspace/README.md",
-      "$HOME/.agents/skills/research/refs/sources.md",
-      "$HOME/.agents/skills/research/SKILL.md",
-      "$HOME/.agents/skills/weather/SKILL.md",
+      "/home/agent/.agents/skills/research/refs/sources.md",
+      "/home/agent/.agents/skills/research/SKILL.md",
+      "/home/agent/.agents/skills/weather/SKILL.md",
     ]);
   });
 });

@@ -1,34 +1,25 @@
-import { createActionsRequestedEvent } from "#protocol/message.js";
-import {
-  collectActionPresentation,
-  type RuntimeActionRequestProjection,
-} from "#harness/action-presentation.js";
+import type { RuntimeActionRequestProjection } from "#harness/action-presentation.js";
+import { callRequested, callStarted } from "#harness/call-facts.js";
 import type { HarnessEmitFn } from "#harness/types.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 
 interface ActionEventCoordinates {
-  readonly sequence: number;
-  readonly stepIndex: number;
+  readonly runId?: string;
   readonly turnId: string;
-}
-
-interface EmittedProviderAction {
-  readonly request: RuntimeActionRequestProjection;
-  readonly toolName: string;
 }
 
 interface ProviderStreamActionBatch {
   cancel(): Promise<void>;
   flush(): Promise<void>;
-  observe(action: RuntimeActionRequestProjection, toolName: string): void;
+  observe(action: RuntimeActionRequestProjection): void;
 }
 
 /** Batches provider-managed calls that arrive in one streamed model response. */
 export function createProviderStreamActionBatch(input: {
   readonly emitFn: HarnessEmitFn;
-  readonly onActionsEmitted?: (actions: readonly EmittedProviderAction[]) => void;
   readonly state: ActionEventCoordinates;
 }): ProviderStreamActionBatch {
-  const pendingActions = new Map<string, EmittedProviderAction>();
+  const pendingActions = new Map<string, RuntimeActionRequestProjection>();
   let actionFlush: Promise<void> = Promise.resolve();
   let actionFlushError: unknown;
   let actionFlushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -43,18 +34,14 @@ export function createProviderStreamActionBatch(input: {
     if (pendingActions.size === 0) return;
 
     const actions = [...pendingActions.values()];
-    const projections = actions.map(({ request }) => request);
     pendingActions.clear();
-    await input.emitFn(
-      createActionsRequestedEvent({
-        actions: projections.map(({ action }) => action),
-        presentation: collectActionPresentation(projections),
-        sequence: input.state.sequence,
-        stepIndex: input.state.stepIndex,
-        turnId: input.state.turnId,
-      }),
-    );
-    input.onActionsEmitted?.(actions);
+    // The provider runs these as it streams: each is requested and started in one commit.
+    const runId = input.state.runId ?? `${input.state.turnId}.run`;
+    const commit: SessionEvent[] = actions.flatMap(({ action, presentationLabel }) => [
+      callRequested({ action, owner: { runId }, label: presentationLabel }),
+      callStarted(action.callId, { clearedBy: { policy: "provider" } }),
+    ]);
+    await input.emitFn(commit);
   };
 
   const scheduleFlush = (): void => {
@@ -96,9 +83,9 @@ export function createProviderStreamActionBatch(input: {
       releaseFlushTimer();
       await actionFlush;
     },
-    observe(action, toolName) {
+    observe(action) {
       if (cancelled) return;
-      pendingActions.set(action.action.callId, { request: action, toolName });
+      pendingActions.set(action.action.callId, action);
       scheduleFlush();
     },
     async flush() {

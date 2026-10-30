@@ -1,17 +1,14 @@
 import { createJustBashSandboxProvider } from "#execution/sandbox/bindings/local.js";
 import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
-import { defineSandboxProvider } from "#shared/sandbox-provider.js";
-import type { SandboxSession } from "#shared/sandbox-session.js";
+import { defineSandboxProvider, type WithPrepareOption } from "#public/sandbox/provider.js";
+import type { SandboxSession } from "#public/sandbox/index.js";
 
-export type JustBashEnvironmentOptions = JustBashSandboxCreateOptions;
-
-export const JustBashSandbox = defineSandboxProvider<
-  JustBashEnvironmentOptions,
-  undefined,
-  { readonly templateKey: string },
-  { readonly rootPath: string; readonly version: 2 },
+export type JustBashEnvironmentOptions = WithPrepareOption<
+  JustBashSandboxCreateOptions,
   SandboxSession
->({
+>;
+
+export const JustBashSandbox = defineSandboxProvider({
   name: "just-bash",
-  environment: (options) => createJustBashSandboxProvider(options),
+  environment: (options: JustBashSandboxCreateOptions) => createJustBashSandboxProvider(options),
 });

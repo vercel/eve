@@ -1,10 +1,14 @@
 import type { LanguageModel, ProviderMetadata } from "ai";
 
 import type { HarnessStepResult } from "#harness/step-hooks.js";
-import { addTurnUsage, getTurnUsageState, type TokenUsageDelta } from "#harness/turn-tag-state.js";
+import { turnUsage } from "#harness/session-usage.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import type { Step } from "#harness/step/context.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
+import type { TokenUsage } from "#shared/token-usage.js";
+
+/** What one model call reported spending; a field it didn't report is absent. */
+export type TokenUsageDelta = Partial<TokenUsage>;
 /**
  * The model's gateway id, or `undefined` for a model without a string `provider`, such as a
  * test double, so a missing field never throws into the tool loop.
@@ -58,30 +62,23 @@ function readGatewayMetadata(
 }
 
 /**
- * Tags the turn's workflow run with the model and the turn's running token totals. Each model
- * step is its own workflow step and attributes are last-write-wins, so the running total, kept in
- * session state, is what reaches the dashboard. Best-effort: tagging never breaks the loop.
+ * Tags the turn's workflow run with the model and what the turn's runs have spent, which their
+ * `usage.recorded` facts record. Each model step is its own workflow step and attributes are
+ * last-write-wins, so the latest total is what reaches the dashboard. Best-effort: tagging never
+ * breaks the loop.
  */
 export async function recordModelUsage(
   step: Step,
-  input: { readonly model: LanguageModel; readonly result: HarnessStepResult },
+  input: { readonly model: LanguageModel },
 ): Promise<void> {
-  step.session = addTurnUsage(
-    step.session,
-    step.position().turnId,
-    extractTokenUsageDelta({
-      costUsd: extractGatewayCostUsd(input.result.providerMetadata),
-      usage: input.result.usage,
-    }),
-  );
-  const usage = getTurnUsageState(step.session.state);
+  const usage = turnUsage(step.view().projection.view, step.position().turnId);
   const attributes = {
     "$eve.model": gatewayModelId(input.model),
-    "$eve.input_tokens": usage?.inputTokens,
-    "$eve.output_tokens": usage?.outputTokens,
-    "$eve.cache_read_tokens": usage?.cacheReadTokens,
-    "$eve.cache_write_tokens": usage?.cacheWriteTokens,
-    "$eve.cost_usd": usage?.sawCost ? usage.costUsd : undefined,
+    "$eve.input_tokens": usage.inputTokens,
+    "$eve.output_tokens": usage.outputTokens,
+    "$eve.cache_read_tokens": usage.cacheReadTokens,
+    "$eve.cache_write_tokens": usage.cacheWriteTokens,
+    "$eve.cost_usd": usage.costUsd,
     "$eve.tool_count": step.config.tools.size,
   };
   await step.config.titleAttributeWrite;

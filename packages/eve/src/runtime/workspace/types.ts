@@ -1,10 +1,6 @@
 /**
- * Stable root directory for every workspace eve exposes to agents and
- * sandbox providers.
- *
- * This is both the model-facing logical path and the live `bash` cwd
- * for every backend. Backends must initialize their filesystems so
- * commands run at this path; there is no per-backend translation.
+ * The default sandbox workspace root, used by every built-in provider and by
+ * a connection that does not declare its own `workspaceRoot`.
  */
 export const WORKSPACE_ROOT = "/workspace";
 

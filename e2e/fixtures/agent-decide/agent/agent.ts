@@ -1,13 +1,13 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 
-import { fixtureModel, routing } from "./testing";
+import { fixtureModel } from "./testing";
 
 const { experimental } = e2eAgentConfig();
 
 export default defineAgent({
   experimental,
-  model: fixtureModel(async (request) => {
+  model: fixtureModel(async (request, routing) => {
     if (request.userMessages.some((text) => text.includes("auto-resume-question"))) {
       const result = request.toolResults.find((entry) => entry.name === "ask_question");
       if (result) return `Question answered: ${JSON.stringify(result.output)}`;
@@ -82,6 +82,6 @@ export default defineAgent({
         ],
       };
     }
-    return JSON.stringify(routing.get());
+    return JSON.stringify(routing);
   }),
 });

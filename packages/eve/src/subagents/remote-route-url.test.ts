@@ -5,10 +5,7 @@ import { createRemoteAgentRouteUrl } from "#subagents/remote-route-url.js";
 describe("createRemoteAgentRouteUrl", () => {
   it("preserves a mounted remote agent base path", () => {
     expect(
-      createRemoteAgentRouteUrl(
-        "https://remote.example/eve/researcher",
-        "/eve/v1/task-input/capability",
-      ),
-    ).toBe("https://remote.example/eve/researcher/v1/task-input/capability");
+      createRemoteAgentRouteUrl("https://remote.example/eve/researcher", "/eve/v1/session"),
+    ).toBe("https://remote.example/eve/researcher/v1/session");
   });
 });

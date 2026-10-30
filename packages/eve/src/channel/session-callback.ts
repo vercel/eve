@@ -3,7 +3,8 @@ import { z } from "#compiled/zod/index.js";
 import type { SessionCallback } from "#channel/types.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { normalizePublicEveRoutePath } from "#shared/eve-route-path.js";
-import { isReservedIpAddress } from "#shared/network-address.js";
+import { isLocalDevelopmentServer } from "#internal/application/dev-environment.js";
+import { isBlockedDestinationHost } from "#shared/network-address.js";
 
 type SessionCallbackParseResult =
   | {
@@ -45,13 +46,22 @@ const sessionCallbackSchema = z
       });
     }
 
-    // SSRF guard: the framework POSTs to this URL when delegated work settles,
-    // so a caller-supplied private/link-local host (e.g. cloud metadata) must
-    // be rejected. The path/token check above does not constrain the host.
-    if (isReservedIpAddress(url.hostname)) {
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
       ctx.addIssue({
         code: "custom",
-        message: "Callback url host must not be a private or reserved address.",
+        message: "Callback url must use http or https.",
+        path: ["url"],
+      });
+    }
+
+    // SSRF guard: the framework POSTs to this URL when delegated work settles,
+    // so reject blocked IP-literal and localhost hosts up front. The callback
+    // transport also checks every resolved address at connect time.
+    if (isBlockedDestinationHost(url.hostname, { allowLoopback: isLocalDevelopmentServer() })) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Callback url host must not be a loopback, private, link-local, or reserved address. Loopback is allowed only on local development servers.",
         path: ["url"],
       });
     }

@@ -38,8 +38,8 @@ describe("createGenerationPackageBoundaryPlugin", () => {
     ).resolves.toEqual({ external: true, id: "eve/tools" });
     for (const specifier of [
       "eve/self-modification",
-      "eve/self-modification/local",
-      "eve/self-modification/remote",
+      "eve/extensions/self-modification/local",
+      "eve/extensions/self-modification/remote",
     ]) {
       await expect(
         resolveId.call(context, specifier, join(PACKAGE_ROOT, "agent/extensions/edit.ts"), {
@@ -70,7 +70,7 @@ describe("createGenerationPackageBoundaryPlugin", () => {
       resolveId.call(
         context,
         "#shared/git.js",
-        join(PACKAGE_ROOT, "dist/src/self-modification/agent.js"),
+        join(PACKAGE_ROOT, "dist/src/self-modification/extension/subagents/agent/agent.js"),
         { kind: "import-statement" },
       ),
     ).resolves.toEqual({
@@ -134,7 +134,7 @@ describe("createRuntimeLoaderPackageBoundaryPlugin", () => {
       resolveId.call(
         context,
         "#shared/git.js",
-        join(PACKAGE_ROOT, "dist/src/self-modification/agent.js"),
+        join(PACKAGE_ROOT, "dist/src/self-modification/extension/subagents/agent/agent.js"),
         { kind: "import-statement" },
       ),
     ).resolves.toEqual({

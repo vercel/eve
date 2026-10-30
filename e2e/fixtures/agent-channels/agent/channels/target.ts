@@ -20,14 +20,11 @@ export default defineChannel({
         idempotencyKey: body.idempotencyKey,
         turnPolicy: "queue",
       });
-      return Response.json({ sessionId: session.id });
+      return Response.json({ sessionId: session.sessionId });
     }),
   ],
-  async receive(input, { from }) {
-    const sessionRef =
-      typeof input.target.sessionRef === "string" ? input.target.sessionRef : "default";
-    return from(`target:${sessionRef}`).send(input.message, {
-      auth: input.auth,
-    });
+  async receive({ message, target, ...send }, { from }) {
+    const sessionRef = typeof target.sessionRef === "string" ? target.sessionRef : "default";
+    return from(`target:${sessionRef}`).send(message, send);
   },
 });

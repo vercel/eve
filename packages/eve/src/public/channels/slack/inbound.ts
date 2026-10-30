@@ -30,7 +30,12 @@ import { isObject } from "#shared/guards.js";
 export interface SlackAuthor {
   readonly userId: string;
   readonly userName: string | undefined;
+  /** Slack real name; set by `messageContext.users`. */
   readonly fullName: string | undefined;
+  /** Slack display name; set by `messageContext.users`. */
+  readonly displayName?: string;
+  /** Slack email; set by `messageContext.users` with `email: true`. */
+  readonly email?: string;
   readonly isBot: boolean;
   readonly isMe: boolean;
 }
@@ -443,6 +448,8 @@ export interface SlackInboundContext {
   readonly userId: string;
   readonly userName?: string;
   readonly fullName?: string;
+  readonly displayName?: string;
+  readonly email?: string;
   readonly channelId: string;
   readonly isMentioned?: boolean;
   readonly threadTs: string;

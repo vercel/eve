@@ -28,7 +28,7 @@ import { createCodexSubscriptionModel } from "./chatgpt/model.js";
  * });
  * ```
  */
-export function chatgpt(model: string = DEFAULT_CHATGPT_MODEL_ID): LanguageModel {
+export function chatgpt(model: string = DEFAULT_CHATGPT_MODEL_ID): Exclude<LanguageModel, string> {
   const slug = normalizeChatGptModelId(model);
   if (slug === undefined && model.trim().replace(/^openai\//u, "").length === 0) {
     throw new Error('Expected chatgpt "model" to name an OpenAI model, for example "gpt-5.6-sol".');
@@ -43,11 +43,10 @@ export function chatgpt(model: string = DEFAULT_CHATGPT_MODEL_ID): LanguageModel
   return createCodexSubscriptionModel({ model: slug });
 }
 
-/** @deprecated Use {@link chatgpt}. */
-export const experimental_chatgpt = chatgpt;
-
 /** Creates a direct OpenAI model. Uses OPENAI_API_KEY, or /login credentials in local development. */
-export function openai(model: string = MODEL_HELPERS.openai.defaultModel): LanguageModel {
+export function openai(
+  model: string = MODEL_HELPERS.openai.defaultModel,
+): Exclude<LanguageModel, string> {
   const id = model.trim().replace(/^openai\//u, "");
   if (!id || id.includes("/")) throw new Error("Expected an OpenAI model ID.");
   return createOpenAI({

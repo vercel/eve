@@ -6,7 +6,6 @@ import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 import {
   createEvePackageImportsPlugin,
   createWorkflowImport,
-  createWorkflowPseudoPackagePlugin,
   createWorkflowTransformPlugin,
   createWorkflowVirtualEntryPlugin,
   WORKFLOW_SOURCE_EXTENSIONS,
@@ -53,7 +52,6 @@ export async function bundleWorkflowStepRegistrations(input: {
     platform: "node",
     plugins: [
       createWorkflowVirtualEntryPlugin(virtualEntrySource),
-      createWorkflowPseudoPackagePlugin(),
       {
         name: "eve-workflow-runtime-aliases",
         resolveId(source: string) {

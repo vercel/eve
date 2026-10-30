@@ -14,7 +14,7 @@ export default defineEval({
     const turn = await t.send("PETSTORE_EXECUTE_E2E");
 
     turn.expectOk();
-    turn.noFailedActions();
+    turn.noFailedCalls();
     t.toolOrder([SEARCH_TOOL, INVENTORY_TOOL]);
     turn.calledTool(SEARCH_TOOL, {
       count: 1,
@@ -23,7 +23,7 @@ export default defineEval({
     });
     // The call is reported under the entry's name, never as a nested eve__tool action.
     turn.calledTool(INVENTORY_TOOL, { count: 1, output: hasInventoryCounts });
-    turn.notEvent("actions.requested", { data: { actions: [{ toolName: CALL_TOOL }] } });
+    turn.notEvent("call.requested", { data: { capability: { name: CALL_TOOL } } });
     t.messageIncludes("inventory received");
   },
 });

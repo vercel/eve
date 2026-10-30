@@ -10,6 +10,12 @@ export type DockerSandboxPullPolicy = "if-not-present" | "always" | "never";
 /** Coarse-grained egress policy for one live Docker sandbox. */
 export type DockerSandboxNetworkPolicy = Extract<SandboxNetworkPolicy, "allow-all" | "deny-all">;
 
+/** Live sandbox capabilities exposed by a Docker environment. */
+export interface DockerSandboxSession extends SandboxSession {
+  /** Applies a coarse egress policy to the live container. */
+  setNetworkPolicy(policy: DockerSandboxNetworkPolicy): Promise<void>;
+}
+
 /** Options shared by every sandbox created from one Docker environment. */
 export interface DockerSandboxEnvironmentOptions {
   /** Base container image. Defaults to eve's published sandbox image. */
@@ -19,7 +25,7 @@ export interface DockerSandboxEnvironmentOptions {
   /** Base image pull behavior. @default "if-not-present" */
   readonly pullPolicy?: DockerSandboxPullPolicy;
   /** Idempotent setup captured in the prepared image. */
-  readonly prepare?: (sandbox: SandboxSession) => Promise<void> | void;
+  readonly prepare?: (sandbox: DockerSandboxSession) => Promise<void> | void;
 }
 
 /** Options applied when eve creates one live Docker sandbox. */

@@ -72,7 +72,7 @@ const RELEASE = 'release "v2.4"';
 const DEPLOY = `Use ${GATED_TOOL} to ship ${RELEASE}.`;
 // Channels word the two approval choices differently; the TUI asks Yes or No.
 const APPROVE_LABELS = ["Approve", "Yes"];
-const CANCEL_LABELS = ["Cancel", "No"];
+const DENY_LABELS = ["Deny", "No"];
 const APPROVAL_PROMPT = deployPrompt("v2.4");
 
 async function askToDeploy(conversation: ChannelConversation) {
@@ -228,7 +228,7 @@ async function expectButtonsKept(conversation: ChannelConversation, prompt: stri
     message,
   ).toBe(true);
   expect(
-    labels.some((label) => CANCEL_LABELS.includes(label)),
+    labels.some((label) => DENY_LABELS.includes(label)),
     message,
   ).toBe(true);
 }
@@ -511,7 +511,7 @@ const questionRules = [
 
 const approvalRules = [
   {
-    rule: "a tool approval shows the tool's prompt with a choice to approve and one to cancel",
+    rule: "a tool approval shows the tool's prompt with a choice to approve and one to deny",
     source: "docs/tools/human-in-the-loop.md#approvals",
     requires: [],
     async run(conversation) {
@@ -524,7 +524,7 @@ const approvalRules = [
         message,
       ).toHaveLength(1);
       expect(
-        labels.filter((label) => CANCEL_LABELS.includes(label)),
+        labels.filter((label) => DENY_LABELS.includes(label)),
         message,
       ).toHaveLength(1);
     },
@@ -543,14 +543,14 @@ const approvalRules = [
     },
   },
   {
-    rule: "pressing Cancel stops the gated tool without running it",
+    rule: "pressing Deny stops the gated tool without running it",
     source: "docs/tools/human-in-the-loop.md#approvals",
     requires: ["buttons"],
     async run(conversation) {
       const options = await askToDeploy(conversation);
-      const cancel = options.find((option) => CANCEL_LABELS.includes(option.label));
-      expect(cancel, "a Cancel option to press").toBeDefined();
-      await conversation.press(cancel!);
+      const deny = options.find((option) => DENY_LABELS.includes(option.label));
+      expect(deny, "a Deny option to press").toBeDefined();
+      await conversation.press(deny!);
       await expectNotDeployed(conversation);
     },
   },
@@ -566,13 +566,13 @@ const approvalRules = [
     },
   },
   {
-    rule: "a text reply of cancel stops the gated tool without running it",
+    rule: "a text reply of deny stops the gated tool without running it",
     source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
       await askToDeploy(conversation);
-      await conversation.say("cancel");
+      await conversation.say("deny");
       await expectNotDeployed(conversation);
     },
   },
@@ -599,7 +599,7 @@ const approvalRules = [
       await conversation.say(DEPLOY_AND_PUBLISH);
       await answerEach(conversation, {
         [APPROVAL_PROMPT]: APPROVE_LABELS,
-        [PUBLISH_PROMPT]: CANCEL_LABELS,
+        [PUBLISH_PROMPT]: DENY_LABELS,
       });
       // Results reach the model in the order they settle, so the reply names the approved call.
       await expectDeployed(conversation);
@@ -613,7 +613,7 @@ const approvalRules = [
     variesByConversation: true,
     async run(conversation) {
       await conversation.say(DEPLOY_AND_PUBLISH);
-      await conversation.replyToEach({ [APPROVAL_PROMPT]: "approve", [PUBLISH_PROMPT]: "cancel" });
+      await conversation.replyToEach({ [APPROVAL_PROMPT]: "approve", [PUBLISH_PROMPT]: "deny" });
       await expectDeployed(conversation);
       expect(conversation.runsOf(SECOND_GATED_TOOL)).toBe(0);
     },
@@ -1049,32 +1049,32 @@ const approvalPermissionRules = [
     },
   },
   {
-    rule: "another person pressing Cancel or Approve on a requester-only approval leaves it pending",
+    rule: "another person pressing Deny or Approve on a requester-only approval leaves it pending",
     source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
     requires: ["another-person", "buttons"],
     async run(conversation) {
       const options = await askToReleaseHotfix(conversation);
       const approve = option(options, APPROVE_LABELS);
-      await conversation.press(option(options, CANCEL_LABELS), "bob");
+      await conversation.press(option(options, DENY_LABELS), "bob");
       await conversation.press(approve, "bob");
       await expectStillPending(conversation);
-      // A cancel that got through would settle the call as denied before this approval.
+      // A denial that got through would settle the call as denied before this approval.
       await conversation.press(approve);
       await expectReleased(conversation);
     },
   },
   {
-    rule: "another person typing cancel or approve doesn't settle a requester-only approval",
+    rule: "another person typing deny or approve doesn't settle a requester-only approval",
     source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
     requires: ["another-person", "text-replies"],
     async run(conversation) {
       await askToReleaseHotfix(conversation);
       // Today another person's message waits for the turn to end, so it never reaches the
       // response policy; the approval stays pending either way.
-      await conversation.say("cancel", "bob");
+      await conversation.say("deny", "bob");
       await conversation.say("approve", "bob");
       await expectStillPending(conversation);
-      // A cancel taken as Alice's would settle the call as denied before this approval.
+      // A denial taken as Alice's would settle the call as denied before this approval.
       await conversation.say("approve");
       await expectReleased(conversation);
     },

@@ -6,9 +6,7 @@ import type {
   SandboxCommandResult,
   SandboxProcess,
   SandboxSession,
-  SandboxWriteFilesOptions,
 } from "#shared/sandbox-session.js";
-import { SANDBOX_WRITE_FILES, writeSandboxFiles } from "#shared/sandbox-write-files.js";
 import { bindSandboxAbortSignal } from "#execution/sandbox/abort-bound-session.js";
 
 interface RecordedCall {
@@ -25,36 +23,39 @@ function createRecordingSession(calls: RecordedCall[]): SandboxSession {
   return {
     resolvePath: (path: string) => `/workspace/${path}`,
     run: async (options) => {
-      record("run", options.abortSignal);
+      record("run", options.signal);
       return commandResult;
     },
     spawn: (options): Promise<SandboxProcess> => {
-      record("spawn", options.abortSignal);
+      record("spawn", options.signal);
       return Promise.reject(new Error("spawn is unused in this test"));
     },
     readFile: async (options) => {
-      record("readFile", options.abortSignal);
+      record("readFile", options.signal);
       return null;
     },
     readBinaryFile: async (options) => {
-      record("readBinaryFile", options.abortSignal);
+      record("readBinaryFile", options.signal);
       return null;
     },
     readTextFile: async (options) => {
-      record("readTextFile", options.abortSignal);
+      record("readTextFile", options.signal);
       return null;
     },
     writeFile: async (options) => {
-      record("writeFile", options.abortSignal);
+      record("writeFile", options.signal);
     },
     writeBinaryFile: async (options) => {
-      record("writeBinaryFile", options.abortSignal);
+      record("writeBinaryFile", options.signal);
     },
     writeTextFile: async (options) => {
-      record("writeTextFile", options.abortSignal);
+      record("writeTextFile", options.signal);
+    },
+    writeFiles: async (options) => {
+      record("writeFiles", options.signal);
     },
     removePath: async (options) => {
-      record("removePath", options.abortSignal);
+      record("removePath", options.signal);
     },
   };
 }
@@ -73,6 +74,7 @@ describe("bindSandboxAbortSignal", () => {
     await bound.writeFile({ content: new ReadableStream<Uint8Array>(), path: "a.txt" });
     await bound.writeBinaryFile({ content: new Uint8Array(), path: "a.bin" });
     await bound.writeTextFile({ content: "hello", path: "a.txt" });
+    await bound.writeFiles({ files: [{ content: new Uint8Array(), path: "a.bin" }] });
     await bound.removePath({ path: "a.txt" });
 
     expect(calls.map((call) => call.method)).toEqual([
@@ -84,6 +86,7 @@ describe("bindSandboxAbortSignal", () => {
       "writeFile",
       "writeBinaryFile",
       "writeTextFile",
+      "writeFiles",
       "removePath",
     ]);
     for (const call of calls) {
@@ -93,30 +96,13 @@ describe("bindSandboxAbortSignal", () => {
     expect(new Set(calls.map((call) => call.abortSignal)).size).toBe(calls.length);
   });
 
-  it("injects the bound signal into a provider's batch write", async () => {
-    const calls: RecordedCall[] = [];
-    const session = Object.assign(createRecordingSession(calls), {
-      [SANDBOX_WRITE_FILES]: async (options: SandboxWriteFilesOptions) => {
-        calls.push({ abortSignal: options.abortSignal, method: "writeFiles" });
-      },
-    });
-    const controller = new AbortController();
-    const bound = bindSandboxAbortSignal(session, controller.signal);
-
-    await writeSandboxFiles(bound, { files: [{ content: new Uint8Array(), path: "a.bin" }] });
-    controller.abort();
-
-    expect(calls.map((call) => call.method)).toEqual(["writeFiles"]);
-    expect(calls[0]?.abortSignal?.aborted).toBe(true);
-  });
-
   it("does not accumulate provider listeners on the bound signal", async () => {
     const calls: RecordedCall[] = [];
     const recordingSession = createRecordingSession(calls);
     const listenerSession: SandboxSession = {
       ...recordingSession,
       run: async (options) => {
-        options.abortSignal?.addEventListener("abort", () => {}, { once: true });
+        options.signal?.addEventListener("abort", () => {}, { once: true });
         return recordingSession.run(options);
       },
     };
@@ -150,7 +136,7 @@ describe("bindSandboxAbortSignal", () => {
     const bound = bindSandboxAbortSignal(createRecordingSession(calls), boundController.signal);
 
     const callController = new AbortController();
-    await bound.run({ abortSignal: callController.signal, command: "echo hi" });
+    await bound.run({ signal: callController.signal, command: "echo hi" });
 
     const composed = calls[0]?.abortSignal;
     expect(composed).toBeDefined();
@@ -161,7 +147,7 @@ describe("bindSandboxAbortSignal", () => {
     callController.abort(new Error("call-level abort"));
     expect(composed?.aborted).toBe(true);
 
-    await bound.run({ abortSignal: new AbortController().signal, command: "echo again" });
+    await bound.run({ signal: new AbortController().signal, command: "echo again" });
     const second = calls[1]?.abortSignal;
     expect(second?.aborted).toBe(false);
     boundController.abort(new Error("turn cancelled"));

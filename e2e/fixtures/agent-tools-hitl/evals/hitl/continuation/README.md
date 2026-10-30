@@ -2,9 +2,9 @@
 
 Every accepted user message must reach its own answer, required input request, or explicit failure/cancellation. An unanswered request cannot silently stop that message's work.
 
-A sign-in or tool approval holds its turn open until it is answered. A message from the same person steers the held turn: it cancels the requests still waiting (they resolve as `ignored` and their calls never run) and the turn carries on with the message. Answers already given, as in a partial approval, keep their effect. This holds whatever `turnPolicy` the client sends, because a queued message would wait on a turn that waits on that person.
+A sign-in or tool approval holds its turn open until it is answered. A message from the same person steers the held turn: it cancels the requests still waiting (they settle `withdrawn` and their calls never run) and the turn carries on with the message. Answers already given, as in a partial approval, keep their effect. This holds whatever `turnPolicy` the client sends, because a queued message would wait on a turn that waits on that person.
 
-This directory contains **37 scripted evals: 23 regressions and 14 controls**. They exercise the HTTP session, approval, tool, workflow, and event-stream paths. A deterministic model chooses calls and constructs answers from the results it receives. There is no model judge and no manually seeded pending state.
+This directory contains **32 scripted evals: 18 regressions, 12 controls, and 2 pause checks**. They exercise the HTTP session, approval, tool, workflow, and event-stream paths. A deterministic model chooses calls and constructs answers from the results it receives. There is no model judge and no manually seeded pending state.
 
 These sessions select the scripted model through a fixture-only header in **every** CI world, including Local. The sibling [`pending-approval-tool-followup.eval.ts`](../pending-approval-tool-followup.eval.ts) adds two cases using the CI-selected model: real models in Local, the fixture mock in Postgres and Vercel. Passing scripted cases does not establish live-model coverage of the whole matrix.
 
@@ -18,9 +18,9 @@ The tags are filters, not expected verdicts: every case must pass. `eve eval --t
 
 ## What makes a passing answer
 
-[`expectReply`](./helpers.ts) requires exactly one matching `message.completed`, followed by exactly one `turn.completed`, both attributed to the same turn. A tool result, unrelated reply, or completion without an answer cannot pass. New messages use their own `message.received` turn ID. Approval responses require successful resolution of the saved request before its matching reply and completion in the held turn, with no new `turn.started`. A message that steers a held turn joins that turn, so its `message.received` carries the held turn's ID.
+[`expectReply`](./helpers.ts) requires exactly one matching reply `content.completed`, followed by exactly one completed `turn.settled`, both attributed to the same turn. A tool result, unrelated reply, or completion without an answer cannot pass. New messages use the turn ID of their own `delivery.consumed`. Approval responses require successful resolution of the saved request before its matching reply and completion in the held turn, with no new `turn.started`. A message that steers a held turn joins that turn, so its `delivery.consumed` carries the held turn's ID.
 
-Each approval ID is saved when emitted. The driver's latest-turn request list is not treated as durable pending state. Tests check that a steering message cancels the saved request (`ignored`, with a not-run result) and that the change never executes. Budget cases require the next budget request instead of an answer beyond the granted limit.
+Each approval ID is saved when emitted. The driver's latest-turn request list is not treated as durable pending state. Tests check that a steering message cancels the saved request (`withdrawn`, with a rejected, not-run call) and that the change never executes. Budget cases require the next budget request instead of an answer beyond the granted limit.
 
 ## Regressions
 

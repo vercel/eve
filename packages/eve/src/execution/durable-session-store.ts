@@ -1,6 +1,11 @@
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { readHitlState } from "#harness/hitl/index.js";
-import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
+import type {
+  CompactionState,
+  HarnessSession,
+  HarnessSessionBase,
+  SessionStateMap,
+} from "#harness/types.js";
 import { projectToDurableSession } from "#execution/session.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
@@ -59,10 +64,7 @@ export interface DurableSession {
   readonly agent: {
     readonly system: string;
   };
-  readonly compaction?: {
-    readonly lastKnownInputTokens?: number;
-    readonly lastKnownPromptMessageCount?: number;
-  };
+  readonly compaction?: CompactionState;
 }
 
 /** Session program memory persisted atomically with Workflow step results. */

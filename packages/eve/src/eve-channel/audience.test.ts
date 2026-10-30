@@ -5,14 +5,6 @@ import type { AudienceContext } from "#shared/conversation-context.js";
 
 function input(principalType: string | null): Omit<AudienceContext<undefined>, "state"> {
   return {
-    auth:
-      principalType === null
-        ? null
-        : {
-            attributes: {},
-            authenticator: "test",
-            principalType,
-          },
     caller:
       principalType === null || principalType === "anonymous"
         ? { type: "anonymous" }

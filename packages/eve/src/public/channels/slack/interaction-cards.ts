@@ -1,3 +1,4 @@
+import { escapeSlackText } from "#compiled/@chat-adapter/slack/format.js";
 import { callSlackApi } from "#public/channels/slack/api.js";
 import { buildAnsweredBlocks, isHitlAction } from "#public/channels/slack/hitl.js";
 import {
@@ -8,6 +9,7 @@ import type {
   InteractionHandlerDeps,
   ParsedBlockActionsPayload,
 } from "#public/channels/slack/interactions.js";
+import { truncate as truncateWithEllipsis } from "#public/channels/text.js";
 
 /**
  * What a settled card shows in place of its controls: the line that replaces
@@ -114,17 +116,10 @@ function formatAnsweredCardSubtext(input: {
     ANSWERED_CARD_SUBTEXT_PREFIX.length -
     ANSWERED_CARD_SUBTEXT_SUFFIX.length -
     attribution.length;
-  const label = truncateWithEllipsis(input.answerLabel, labelBudget);
+  const label = truncateWithEllipsis(escapeSlackText(input.answerLabel), labelBudget);
   return truncateCardSubtext(
     `${ANSWERED_CARD_SUBTEXT_PREFIX}${label}${ANSWERED_CARD_SUBTEXT_SUFFIX}${attribution}`,
   );
-}
-
-function truncateWithEllipsis(value: string, maxLength: number): string {
-  if (maxLength <= 0) return "";
-  if (value.length <= maxLength) return value;
-  const sliceLength = Math.max(0, maxLength - 3);
-  return `${value.slice(0, sliceLength).trimEnd()}...`;
 }
 
 function promptBlocksFromActionBlock(block: unknown): unknown[] {
@@ -140,21 +135,6 @@ function hasCardContent(block: Record<string, unknown>): boolean {
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-/** Settles a pressed HITL card as answered by the presser with the choice they pressed. */
-export async function updateAnsweredHitlCard(
-  interaction: ParsedBlockActionsPayload,
-  deps: InteractionHandlerDeps,
-): Promise<void> {
-  const hitlAction = interaction.actions.find((action) => isHitlAction(action.actionId));
-  const label = hitlAction?.label ?? hitlAction?.selectedOptionValue ?? hitlAction?.value;
-  if (!hitlAction || !label) return;
-  await settleHitlCard(interaction, deps, {
-    label,
-    text: `Answered: ${label}`,
-    userId: hitlAction.user.id,
-  });
 }
 
 /** Replaces a pressed HITL card's controls with `card`. */

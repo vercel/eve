@@ -22,14 +22,4 @@ describe("createTurnControl", () => {
     expect(construct).toHaveBeenCalledTimes(2);
     expect(control.cancellation).not.toBe(control.steering);
   });
-
-  it("retires both unused controls", () => {
-    const control = createTurnControl();
-
-    control.dispose();
-    control.dispose();
-
-    expect(control.cancellation.signal.aborted).toBe(true);
-    expect(control.steering.signal.aborted).toBe(true);
-  });
 });

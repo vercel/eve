@@ -114,7 +114,12 @@ type SpanAttributeDecision =
   | {
       readonly replace: true;
       readonly value:
-        string | number | boolean | readonly string[] | readonly number[] | readonly boolean[];
+        | string
+        | number
+        | boolean
+        | readonly string[]
+        | readonly number[]
+        | readonly boolean[];
     };
 
 interface SpanExportPolicy {

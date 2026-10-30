@@ -1,10 +1,9 @@
-import type { CallSettings, LanguageModel } from "ai";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import {
   isDynamicSentinel,
-  type DynamicResolveContext,
+  type DynamicModelContext,
   type DynamicSentinel,
 } from "#dynamic/definition.js";
 
@@ -48,7 +47,14 @@ export const ANTHROPIC_PROMPT_CACHE_TTLS: readonly AnthropicPromptCacheTtl[] = [
  * Provider-agnostic reasoning effort forwarded to the AI SDK model call.
  * The AI SDK's `max` level is not supported yet: eve's manifest and agent info list the levels.
  */
-export type AgentReasoningDefinition = Exclude<NonNullable<CallSettings["reasoning"]>, "max">;
+export type AgentReasoningDefinition =
+  | "provider-default"
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh";
 
 /**
  * How an agent's model is reached at runtime, decided at compile time from the
@@ -75,7 +81,6 @@ export type ModelRouting =
 export type InternalAgentModelDefinition = {
   id: string;
   contextWindowTokens?: number;
-  maxOutputTokens?: number;
   source?: ModuleSourceRef;
   /** Field of the `source` agent config export that holds this model; absent means `model`. */
   sourceField?: "compaction.model";
@@ -84,13 +89,21 @@ export type InternalAgentModelDefinition = {
 };
 
 /**
- * A concrete model handle: an AI Gateway model id string or an AI SDK
- * `LanguageModel` instance.
+ * A language model instance eve calls directly, such as one returned by `anthropic()` or
+ * `openai()` from `eve/models/*`, or by an AI SDK provider. Any AI SDK language model
+ * (specification `v2`, `v3`, or `v4`) is assignable. eve invokes `doGenerate` and `doStream`
+ * itself, so their call options and results stay opaque here.
  */
-export type PublicAgentStaticModelDefinition = string | LanguageModel;
+export interface EveLanguageModel {
+  readonly specificationVersion: "v2" | "v3" | "v4";
+  readonly provider: string;
+  readonly modelId: string;
+  doGenerate(options: never): PromiseLike<unknown>;
+  doStream(options: never): PromiseLike<unknown>;
+}
 
-/** Context passed to dynamic model event handlers; the shared dynamic resolver context. */
-export type AgentModelResolveContext = DynamicResolveContext;
+/** A concrete model handle: an AI Gateway model id string or an {@link EveLanguageModel}. */
+export type PublicAgentStaticModelDefinition = string | EveLanguageModel;
 
 export interface PublicAgentModelSelectionDefinition {
   readonly model: PublicAgentStaticModelDefinition;
@@ -106,12 +119,14 @@ export type PublicAgentDynamicModelResult =
   | PublicAgentStaticModelDefinition
   | PublicAgentModelSelectionDefinition;
 
-export type AgentModelResolver = (
-  event: unknown,
-  ctx: AgentModelResolveContext,
-) => PublicAgentDynamicModelResult | Promise<PublicAgentDynamicModelResult>;
-
-export type PublicAgentDynamicModelDefinition = DynamicSentinel<PublicAgentDynamicModelResult>;
+/**
+ * A `model` chosen per model call: `defineDynamic()` from `eve` or `eve/models`, or `auto()`. Its
+ * function runs before the model is chosen, so its context has no `model`.
+ */
+export type PublicAgentDynamicModelDefinition = DynamicSentinel<
+  PublicAgentDynamicModelResult,
+  DynamicModelContext
+>;
 
 export function isDynamicModelDefinition(
   value: unknown,
@@ -120,7 +135,8 @@ export function isDynamicModelDefinition(
 }
 
 /**
- * The model handle you assign to an agent's `model` field.
+ * The model handle you assign to an agent's `model` field: a static model, or one chosen per
+ * session with `defineDynamic()` from `eve/models` or `auto()`.
  */
 export type PublicAgentModelDefinition =
   | PublicAgentStaticModelDefinition
@@ -143,7 +159,7 @@ export interface InternalAgentCompactionDefinition {
 
 /**
  * Configures conversation compaction: when the model context window fills past
- * `thresholdPercent`, eve summarizes earlier turns to reclaim space. Every
+ * `threshold`, eve summarizes earlier turns to reclaim space. Every
  * field is optional; omit the block to use eve's defaults.
  */
 export interface PublicAgentCompactionDefinition {
@@ -167,7 +183,7 @@ export interface PublicAgentCompactionDefinition {
    *
    * eve defaults to `0.9` when this is omitted.
    */
-  readonly thresholdPercent?: number;
+  readonly threshold?: number;
 }
 
 /**
@@ -192,11 +208,11 @@ export interface AgentLimitsDefinition {
    * or fails it when nobody can answer. Approving starts a new window.
    *
    * Subagent sessions without their own `sessionUsage` use the root agent's.
-   * Set `sessionUsage: () => false` to leave sessions uncapped.
+   * Set `sessionUsage: false` to leave sessions uncapped.
    *
    * @default ({ window }) => window.inputTokens - window.cacheReadTokens >= 40_000_000
    */
-  readonly sessionUsage?: SessionUsageLimit;
+  readonly sessionUsage?: SessionUsageLimit | false;
 }
 
 /**
@@ -348,7 +364,7 @@ export type InternalAgentDefinition = {
  */
 export interface CompiledAgentLimitsDefinition {
   readonly sessionTimeoutMs?: number | false;
-  readonly sessionUsage?: true;
+  readonly sessionUsage?: boolean;
 }
 
 /**
@@ -413,7 +429,10 @@ export type PublicAgentDefinition = PublicAgentDefinitionBase &
         readonly modelOptions?: AgentModelOptionsDefinition;
       }
     | {
-        /** Resolver that must select a concrete model before model-dependent work. */
+        /**
+         * The model chosen per session. `render` returns the model with its context window,
+         * options, and reasoning, so those fields don't sit beside it.
+         */
         readonly model: PublicAgentDynamicModelDefinition;
         readonly modelContextWindowTokens?: never;
         readonly modelOptions?: never;

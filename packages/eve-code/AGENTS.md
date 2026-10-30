@@ -7,13 +7,13 @@ Before writing code, read the installed eve package docs for extensions, hooks, 
 ## Boundaries
 
 - Connector UIDs enter through extension config. The authentication hook resolves Vercel app tokens before each turn.
-- GitHub instructions, the `pr` skill, and the `gh` tool belong to `@eve/git` (`eve/extensions/git`). The deprecated `github` config keeps `code__gh`, `code__pr`, and the GitHub instructions through `extension/lib/github-compat.ts`, which imports `eve/extensions/git/sandbox`; add no other GitHub or pull request content here.
+- GitHub instructions, the `pr` skill, and the `gh` tool belong to `@eve/git` (`eve/extensions/git`). The removed `github` config is rejected; do not add GitHub or pull request contributions here.
 - Consumers with non-Connect credentials may call `authenticateGitHub` or `authenticateVercel` directly from their sandbox lifecycle.
 - Broker credentials without placing them in model-authored URLs or arguments.
 - Use real `git`, `gh`, and `vc` CLIs rather than bespoke repository lifecycle tools.
 - Keep `apply_patch` as the only extension-owned file editing primitive.
 - Keep shared implementation under `extension/lib/`; filesystem paths define contribution names.
-- Computer use lives in `@eve/computer-use` (`eve/computer-use`). Keep the deprecated computer-use re-exports in `extension/lib/sandbox.ts` until they are removed; do not add computer-use code here.
+- Computer use lives in `@eve/computer-use` (`eve/extensions/computer-use`). Import its public helpers directly; do not add computer-use code or re-exports here.
 
 ## Build and publish
 

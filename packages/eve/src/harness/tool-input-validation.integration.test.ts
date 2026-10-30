@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import { eachEvent } from "#internal/testing/session-machine.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot
 // be written; the attribute contract is covered by emit.test.ts.
@@ -221,15 +222,15 @@ describe("framework tool input validation (real AI SDK)", () => {
     });
     const events: string[] = [];
     const runStep = createToolLoopHarness({
-      handleEvent: async (event) => {
-        if (event.type === "action.result") {
-          events.push(
-            `action.result:${event.data.result.callId}:${String(event.data.result.isError)}`,
-          );
-        } else {
+      handleEvent: eachEvent((event) => {
+        if (event.type === "call.requested") events.push(`call.requested:${event.data.callId}`);
+        if (event.type === "call.settled") {
+          events.push(`call.settled:${event.data.callId}:${event.data.outcome}`);
+        }
+        if (event.type === "model.started" || event.type === "model.settled") {
           events.push(event.type);
         }
-      },
+      }),
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map([
         [
@@ -259,12 +260,11 @@ describe("framework tool input validation (real AI SDK)", () => {
       { message: "Read Alice's note." },
     );
 
-    const stepEvents = events.slice(events.indexOf("step.started"));
-    expect(stepEvents.slice(0, 4)).toEqual([
-      "step.started",
-      "actions.requested",
-      "action.result:read-skipped:true",
-      "step.completed",
+    expect(events).toEqual([
+      "model.started",
+      "call.requested:read-skipped",
+      "call.settled:read-skipped:failed",
+      "model.settled",
     ]);
   });
 });

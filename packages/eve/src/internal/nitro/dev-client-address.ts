@@ -1,5 +1,9 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingHttpHeaders } from "node:http";
+import { networkInterfaces } from "node:os";
+
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
+import { isLoopbackHostname } from "#shared/network-address.js";
 
 export const DEVELOPMENT_CLIENT_ADDRESS_HEADER = "x-eve-dev-client-address";
 export const DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER = "x-eve-dev-client-address-signature";
@@ -50,6 +54,36 @@ export function readTrustedDevelopmentClientAddress(
     isTrustedDevelopmentClientAddress(address, signature, secret)
     ? address
     : undefined;
+}
+
+/**
+ * Where the dev listener saw a request come from: `"local"` for this machine,
+ * `"remote"` for another one, or `undefined` when the request carries no
+ * verified stamp, as outside `eve dev`.
+ */
+export function readTrustedDevelopmentPeer(headers: Headers): "local" | "remote" | undefined {
+  const address = readTrustedDevelopmentClientAddress(
+    headers,
+    process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV],
+  );
+  if (address === undefined) return undefined;
+  return isLocalMachineAddress(address) ? "local" : "remote";
+}
+
+/**
+ * Whether a socket peer address or URL host name belongs to this machine. With `--host` bound
+ * to a LAN address, the developer's own clients connect from that address
+ * rather than loopback.
+ */
+export function isLocalMachineAddress(address: string): boolean {
+  if (isLoopbackHostname(address)) return true;
+  const unmapped = address
+    .toLowerCase()
+    .replace(/^\[(.*)\]$/u, "$1")
+    .replace(/^::ffff:/u, "");
+  return Object.values(networkInterfaces()).some((entries) =>
+    entries?.some((entry) => entry.address.toLowerCase() === unmapped),
+  );
 }
 
 /** Verifies parent-stamped client provenance carried beyond the original request. */

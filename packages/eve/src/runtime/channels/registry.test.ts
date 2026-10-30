@@ -93,51 +93,6 @@ describe("createRuntimeAdapterRegistry", () => {
       expect(registry.adaptersByKind.get("http")).toEqual({ kind: "http" });
     });
 
-    it("rejects a route-declared subagent adapter that carries an input.requested handler", () => {
-      const offendingAdapter: ChannelAdapter = {
-        kind: SUBAGENT_ADAPTER_KIND,
-        "input.requested": async () => undefined,
-      };
-
-      expect(() =>
-        createRuntimeAdapterRegistry({
-          channels: [
-            makeChannelDefinition(offendingAdapter, {
-              logicalPath: "channels/sneaky.ts",
-              sourceId: "channels/sneaky",
-            }),
-          ],
-        }),
-      ).toThrow(RuntimeRegistryError);
-    });
-
-    it("surfaces the offending route's source location on the rejection", () => {
-      const offendingAdapter: ChannelAdapter = {
-        kind: SUBAGENT_ADAPTER_KIND,
-        "input.requested": async () => undefined,
-      };
-
-      try {
-        createRuntimeAdapterRegistry({
-          channels: [
-            makeChannelDefinition(offendingAdapter, {
-              logicalPath: "channels/sneaky.ts",
-              sourceId: "channels/sneaky",
-            }),
-          ],
-        });
-        throw new Error("expected createRuntimeAdapterRegistry to throw");
-      } catch (error) {
-        expect(error).toBeInstanceOf(RuntimeRegistryError);
-        const registryError = error as RuntimeRegistryError;
-        expect(registryError.registry).toBe("adapter");
-        expect(registryError.entryName).toBe(SUBAGENT_ADAPTER_KIND);
-        expect(registryError.logicalPath).toBe("channels/sneaky.ts");
-        expect(registryError.sourceId).toBe("channels/sneaky");
-        expect(registryError.message).toMatch(/framework|reserved|pass-through/);
-      }
-    });
-
     it("rejects a route-declared http adapter that adds a deliver hook", () => {
       const offendingAdapter: ChannelAdapter = {
         kind: "http",
@@ -204,5 +159,74 @@ describe("createRuntimeAdapterRegistry", () => {
         }),
       ).toThrow(RuntimeRegistryError);
     });
+  });
+});
+
+describe("deserializeRuntimeAdapter", () => {
+  // A session serialized under an older seed lacks fields a later deploy added
+  // to the channel's `state`; `context(state)` still promises them.
+  it("fills seed fields missing from stored state while stored values win", () => {
+    const registry = createRuntimeAdapterRegistry({
+      channels: [
+        makeChannelDefinition({
+          kind: "channel:test",
+          state: { addedLater: "seed-default", mode: "seed", nested: { items: [] } },
+        }),
+      ],
+    });
+
+    const rehydrated = deserializeRuntimeAdapter(registry, {
+      kind: "channel:test",
+      state: { mode: "stored", threadId: null },
+    });
+
+    expect(rehydrated.state).toEqual({
+      addedLater: "seed-default",
+      mode: "stored",
+      nested: { items: [] },
+      threadId: null,
+    });
+  });
+
+  // Rehydration runs at every step boundary: an explicit `undefined` is a
+  // stored value, but a deleted key looks like a field added to the seed later.
+  it("keeps a stored undefined field and restores a deleted one", () => {
+    const registry = createRuntimeAdapterRegistry({
+      channels: [
+        makeChannelDefinition({ kind: "channel:test", state: { cursor: "seed", mode: "seed" } }),
+      ],
+    });
+
+    const rehydrated = deserializeRuntimeAdapter(registry, {
+      kind: "channel:test",
+      state: { mode: undefined },
+    });
+
+    expect(rehydrated.state).toStrictEqual({ cursor: "seed", mode: undefined });
+  });
+
+  it("restores stored state unchanged for an adapter without a seed", () => {
+    const registry = createRuntimeAdapterRegistry({
+      channels: [makeChannelDefinition({ kind: "channel:test" })],
+    });
+
+    const rehydrated = deserializeRuntimeAdapter(registry, {
+      kind: "channel:test",
+      state: { mode: "stored" },
+    });
+
+    expect(rehydrated.state).toStrictEqual({ mode: "stored" });
+  });
+
+  it("does not share nested seed values with the registry entry", () => {
+    const registry = createRuntimeAdapterRegistry({
+      channels: [makeChannelDefinition({ kind: "channel:test", state: { items: [] } })],
+    });
+
+    const first = deserializeRuntimeAdapter(registry, { kind: "channel:test", state: {} });
+    (first.state as { items: string[] }).items.push("leaked");
+    const second = deserializeRuntimeAdapter(registry, { kind: "channel:test", state: {} });
+
+    expect(second.state).toEqual({ items: [] });
   });
 });

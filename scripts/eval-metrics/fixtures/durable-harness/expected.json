@@ -1,0 +1,191 @@
+{
+  "source": "vercel-labs/durable-harness",
+  "commit": "ea8aa4060cf4fb8cd39737ce8ab21c4e0f40c741",
+  "fixtures": {
+    "eve-tool-turn": {
+      "clock": {
+        "receivedAt": [
+          1790885852178, 1790885852187, 1790885852183, 1790885852190, 1790885853648, 1790885853645,
+          1790885853715, 1790885853732, 1790885853733, 1790885853748, 1790885853752, 1790885853769,
+          1790885854657, 1790885854654, 1790885854662, 1790885854664, 1790885854661
+        ],
+        "sends": [
+          {
+            "kind": "prewarm",
+            "startedAt": 1790885851735,
+            "notReadyMs": 0,
+            "acceptedAt": 1790885851755
+          },
+          {
+            "kind": "message",
+            "deliveryId": "caf05a36-261c-4bf7-ab53-12ebf80243de",
+            "startedAt": 1790885852135,
+            "notReadyMs": 0,
+            "acceptedAt": 1790885852147
+          }
+        ]
+      },
+      "marks": [
+        {
+          "name": "model.request",
+          "key": "turn_0:0",
+          "t": 1790885852175
+        },
+        {
+          "name": "model.first_token",
+          "key": "turn_0:0",
+          "t": 1790885853637
+        },
+        {
+          "name": "model.done",
+          "key": "turn_0:0",
+          "t": 1790885853727
+        },
+        {
+          "name": "tool.start",
+          "key": "toolu_012AYjFYy67YDmsN8SaU7H4g",
+          "t": 1790885853727
+        },
+        {
+          "name": "tool.end",
+          "key": "toolu_012AYjFYy67YDmsN8SaU7H4g",
+          "t": 1790885853735
+        },
+        {
+          "name": "model.request",
+          "key": "turn_0:1",
+          "t": 1790885853764
+        },
+        {
+          "name": "model.first_token",
+          "key": "turn_0:1",
+          "t": 1790885854645
+        },
+        {
+          "name": "model.done",
+          "key": "turn_0:1",
+          "t": 1790885854646
+        },
+        {
+          "name": "idle",
+          "key": null,
+          "t": 1790885854653
+        }
+      ],
+      "turn": {
+        "firstOutputMs": 1598,
+        "firstOutputModelMs": 1552,
+        "firstOutputOverheadMs": 46,
+        "turnMs": 2529,
+        "turnModelMs": 2434,
+        "turnToolMs": 8,
+        "turnOverheadMs": 87,
+        "tools": [
+          {
+            "execMs": 8,
+            "oursMs": 29,
+            "overheadMs": 36,
+            "nextModelMs": 881,
+            "from": "model.done"
+          }
+        ]
+      }
+    },
+    "eve-steer": {
+      "clock": {
+        "receivedAt": [
+          1790885886116, 1790885886123, 1790885886119, 1790885886126, 1790885887436, 1790885887433,
+          1790885887453, 1790885887450, 1790885889463, 1790885889472, 1790885889508, 1790885889505,
+          1790885890414, 1790885890411, 1790885890419, 1790885890424, 1790885890420
+        ],
+        "sends": [
+          {
+            "kind": "prewarm",
+            "startedAt": 1790885885521,
+            "notReadyMs": 0,
+            "acceptedAt": 1790885885541
+          },
+          {
+            "kind": "message",
+            "deliveryId": "b59400e2-94c1-4041-a9d5-e05ebb6d8939",
+            "startedAt": 1790885885921,
+            "notReadyMs": 150,
+            "acceptedAt": 1790885886083
+          },
+          {
+            "kind": "message",
+            "deliveryId": "47831cfb-8adc-462f-bbf6-c9f0ce02b1ac",
+            "startedAt": 1790885889469,
+            "notReadyMs": 0,
+            "acceptedAt": 1790885889481
+          }
+        ]
+      },
+      "marks": [
+        {
+          "name": "model.request",
+          "key": "turn_0:0",
+          "t": 1790885886111
+        },
+        {
+          "name": "model.first_token",
+          "key": "turn_0:0",
+          "t": 1790885887425
+        },
+        {
+          "name": "model.done",
+          "key": "turn_0:0",
+          "t": 1790885887440
+        },
+        {
+          "name": "tool.start",
+          "key": "toolu_01SoXZMSRKUjUAy6WhHtoDMN",
+          "t": 1790885887440
+        },
+        {
+          "name": "tool.end",
+          "key": "toolu_01SoXZMSRKUjUAy6WhHtoDMN",
+          "t": 1790885889457
+        },
+        {
+          "name": "model.request",
+          "key": "turn_0:1",
+          "t": 1790885889500
+        },
+        {
+          "name": "model.first_token",
+          "key": "turn_0:1",
+          "t": 1790885890402
+        },
+        {
+          "name": "model.done",
+          "key": "turn_0:1",
+          "t": 1790885890403
+        },
+        {
+          "name": "idle",
+          "key": null,
+          "t": 1790885890413
+        }
+      ],
+      "turn": {
+        "firstOutputMs": 1379,
+        "firstOutputModelMs": 1329,
+        "firstOutputOverheadMs": 50,
+        "turnMs": 4353,
+        "turnModelMs": 2232,
+        "turnToolMs": 2017,
+        "turnOverheadMs": 104,
+        "tools": [
+          {
+            "execMs": 2017,
+            "oursMs": 43,
+            "overheadMs": 50,
+            "nextModelMs": 902,
+            "from": "model.done"
+          }
+        ]
+      }
+    }
+  }
+}

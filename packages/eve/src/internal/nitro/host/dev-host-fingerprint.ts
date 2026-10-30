@@ -20,7 +20,7 @@ export async function computeDevelopmentHostFingerprint(
           ...manifest.subagents.flatMap((subagent) =>
             subagent.configResolver === undefined
               ? (subagent.agent.config.build?.externalDependencies ?? [])
-              : (subagent.configResolver.build?.externalDependencies ?? []),
+              : [],
           ),
         ]),
       ].sort((left, right) => left.localeCompare(right)),

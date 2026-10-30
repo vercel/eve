@@ -1,14 +1,21 @@
 import { join, relative, resolve } from "node:path";
 
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
+import { copyDirectoryAtomically } from "#execution/sandbox/bindings/local-provider-utils.js";
+import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
+import { createSandboxProviderIdentity } from "#execution/sandbox/provider-identity.js";
+import { createConnectionSession } from "#execution/sandbox/session.js";
+import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
-import {
-  createSandboxProviderResources,
-  type SandboxPreparedArtifact,
-  type SandboxProviderPrepareContext,
-  type SandboxProviderResources,
-  type SandboxProviderRuntime,
+import type {
+  SandboxJson,
+  SandboxPrepareContext,
+  SandboxProviderRuntime,
+} from "#sandbox/provider.js";
+import type {
+  SandboxProviderFiles,
+  SandboxProviderResourceFile,
 } from "#shared/sandbox-provider.js";
 import {
   getRuntimeCompiledArtifactsSandboxAppRoot,
@@ -24,7 +31,6 @@ import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { createSandboxProviderFiles } from "#execution/sandbox/provider-files.js";
-import { createDevelopmentSandboxProviderHost } from "#execution/sandbox/provider-host-development.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
 import type { RuntimeRegisteredSandbox } from "#runtime/sandbox/registry.js";
 import type { SandboxPreparedArtifactEntry } from "#shared/sandbox-prepared-artifacts.js";
@@ -32,6 +38,8 @@ import { writeSandboxPreparedArtifactsManifest } from "#runtime/sandbox/prepared
 import { materializeWorkspaceDirectory } from "#runtime/workspace/seed-files.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
+import { MODEL_SKILL_ROOT, resolveSandboxModelPath } from "#shared/skill-paths.js";
 
 export interface SandboxPreparedArtifactStore {
   write(input: {
@@ -47,10 +55,12 @@ const diskPreparedArtifactStore: SandboxPreparedArtifactStore = {
 };
 
 interface PrewarmTarget {
-  readonly context: SandboxProviderPrepareContext;
+  readonly files: SandboxProviderFiles;
   readonly label: string;
   readonly nodeId: string;
   readonly provider: SandboxProviderRuntime;
+  readonly resources: SandboxTemplateResources;
+  readonly sourceRevision: string;
 }
 
 interface NodeSandbox extends RuntimeRegisteredSandbox {
@@ -69,9 +79,9 @@ interface NodeSandbox extends RuntimeRegisteredSandbox {
  * them.
  */
 type SandboxProviderPrepareDispatch = (input: {
-  readonly context: SandboxProviderPrepareContext;
+  readonly context: SandboxPrepareContext;
   readonly provider: SandboxProviderRuntime;
-}) => Promise<SandboxPreparedArtifact>;
+}) => Promise<SandboxJson>;
 
 interface PrewarmSandboxesInput {
   readonly appRoot: string;
@@ -105,17 +115,20 @@ async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<void> {
   input.log?.(`eve: initializing ${formatSandboxTemplateCount(targets.length)}...`);
 
   const results = await Promise.allSettled(
-    targets.map(async ({ context, label, nodeId, provider }) => {
+    targets.map(async ({ label, nodeId, provider, ...target }) => {
       const logProviderProgress = (message: string) => {
         if (!shouldLogSandboxPrewarmProgress(message)) return;
         input.log?.(`eve: sandbox template "${label}" (${provider.providerName}): ${message}`);
       };
       try {
         const result = await dispatch({
-          context: {
-            ...context,
-            log: input.log === undefined ? undefined : logProviderProgress,
-          },
+          context: createSandboxPrepareContext({
+            ...target,
+            appRoot: input.appRoot,
+            log: logProviderProgress,
+            provider,
+            storagePath: resolveSandboxCacheDirectory(input.appRoot),
+          }),
           provider,
         });
         return { nodeId, provider, result };
@@ -213,16 +226,12 @@ async function collectPrewarmTargets(input: {
         workspaceResourceRoot,
       });
       targets.push({
-        context: {
-          files: createSandboxProviderFiles(sandboxRoot),
-          host: createDevelopmentSandboxProviderHost(input.appRoot),
-          resources,
-          sourceRevision: definition.revisionHash,
-          storagePath: resolveSandboxCacheDirectory(input.appRoot),
-        },
+        files: createSandboxProviderFiles(sandboxRoot),
         label: formatLabel(nodeId),
         nodeId,
         provider,
+        resources,
+        sourceRevision: definition.revisionHash,
       });
     }),
   );
@@ -239,15 +248,154 @@ async function collectPrewarmTargets(input: {
 async function loadSandboxProviderResources(input: {
   readonly compileDirectoryPath: string;
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
-}): Promise<SandboxProviderResources> {
+}): Promise<SandboxTemplateResources> {
   const { contentHash, logicalPath } = input.workspaceResourceRoot;
-  if (contentHash === undefined) return createSandboxProviderResources({});
+  if (contentHash === undefined) return {};
   const path = `${input.compileDirectoryPath}/${logicalPath}`;
-  return createSandboxProviderResources({
-    key: contentHash,
-    path,
-    ...(await materializeWorkspaceDirectory(path)),
+  return { key: contentHash, path, ...(await materializeWorkspaceDirectory(path)) };
+}
+
+/** The compiled workspace and skill files one sandbox template seeds. */
+export interface SandboxTemplateResources {
+  /** The compiled resource tree's content hash; absent when the agent has none. */
+  readonly key?: string;
+  /** The compiled resource directory on the host, holding `workspace/` and `skills/`. */
+  readonly path?: string;
+  readonly skills?: readonly SandboxProviderResourceFile[];
+  readonly workspace?: readonly SandboxProviderResourceFile[];
+}
+
+/** The context eve passes to a provider's `prepare()` for one template. */
+export function createSandboxPrepareContext(input: {
+  readonly appRoot: string;
+  readonly files: SandboxProviderFiles;
+  readonly log: (message: string) => void;
+  readonly provider: Pick<SandboxProviderRuntime, "prepare" | "providerName">;
+  readonly resources: SandboxTemplateResources;
+  readonly sourceRevision: string;
+  readonly storagePath: string;
+}): SandboxPrepareContext {
+  const { log, resources, storagePath } = input;
+  const { prepare } = input.provider;
+  const workspace = resources.workspace ?? [];
+  const skills = resources.skills ?? [];
+  const resourcesPath = resources.key === undefined ? undefined : resources.path;
+  return {
+    files: input.files,
+    isEmpty: workspace.length === 0 && skills.length === 0 && prepare === undefined,
+    log,
+    async populate(connection, options) {
+      const session = createConnectionSession(connection);
+      // Without a resource directory there is nothing mounted to copy from.
+      if (options?.mountedAt !== undefined && resourcesPath !== undefined) {
+        log("copying workspace and skills from mounted resources");
+        await copyMountedResources(session, shellQuote(options.mountedAt));
+      } else if (workspace.length > 0 || skills.length > 0) {
+        log("writing workspace and skills");
+        const bytes = (file: SandboxProviderResourceFile) =>
+          typeof file.content === "string" ? Buffer.from(file.content) : file.content;
+        await session.writeFiles({
+          files: [
+            // A workspace file named like `$HOME/...` still lands under the workspace root.
+            ...workspace.map((file) => ({
+              content: bytes(file),
+              path: session.resolvePath(file.relativePath),
+            })),
+            ...(await Promise.all(
+              skills.map(async (file) => ({
+                content: bytes(file),
+                path: await resolveSandboxModelPath({
+                  path: `${MODEL_SKILL_ROOT}/${file.relativePath}`,
+                  sandbox: session,
+                }),
+              })),
+            )),
+          ],
+        });
+      }
+      if (prepare === undefined) return;
+      log("running sandbox preparation");
+      await prepare(createLoggingSandboxSession({ log, session }));
+    },
+    resolveProjectPath: (path) => resolve(input.appRoot, path),
+    async resourcesDirectory() {
+      if (resources.key === undefined || resourcesPath === undefined) return undefined;
+      const directory = join(storagePath, input.provider.providerName, "resources", resources.key);
+      await copyDirectoryAtomically(resourcesPath, directory);
+      return directory;
+    },
+    storagePath,
+    templateKey(identity) {
+      assertSandboxIdentity(identity, "identity", new WeakSet());
+      for (const reserved of ["resources", "sourceRevision"]) {
+        if (Object.hasOwn(identity, reserved)) {
+          throw new Error(
+            `ctx.templateKey() reserves "${reserved}": eve adds the workspace and skill files and the sandbox source revision itself. Rename that identity field.`,
+          );
+        }
+      }
+      const key = resources.key;
+      return createSandboxProviderIdentity({
+        ...identity,
+        resources: {
+          skills: key === undefined ? undefined : `${key}:skills`,
+          workspace: key === undefined ? undefined : `${key}:workspace`,
+        },
+        sourceRevision: input.sourceRevision,
+      });
+    },
+  };
+}
+
+/** `quotedRoot` is interpolated into the shell script, so callers pass it shell-quoted. */
+async function copyMountedResources(session: SandboxSession, quotedRoot: string): Promise<void> {
+  const workspace = shellQuote(session.resolvePath("."));
+  const result = await session.run({
+    command: [
+      "set -e",
+      `if [ -d ${quotedRoot}/workspace ]; then cp -a ${quotedRoot}/workspace/. ${workspace}/; fi`,
+      `if [ -d ${quotedRoot}/skills ]; then`,
+      '  mkdir -p "$HOME/.agents"',
+      '  rm -rf "$HOME/.agents/skills"',
+      '  mkdir -p "$HOME/.agents/skills"',
+      `  cp -a ${quotedRoot}/skills/. "$HOME/.agents/skills/"`,
+      "fi",
+    ].join("\n"),
   });
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to hydrate sandbox resources: ${result.stderr || result.stdout}`);
+  }
+}
+
+/**
+ * Rejects what the template-key hasher cannot tell apart, such as a `Date` or
+ * `Map` that would hash as `{}`, and circular values, before hashing.
+ */
+function assertSandboxIdentity(value: unknown, path: string, seen: WeakSet<object>): void {
+  if (value === null || value === undefined || typeof value === "function") return;
+  if (typeof value === "string" || typeof value === "boolean") return;
+  if (typeof value === "number" && Number.isFinite(value)) return;
+  const prototype = typeof value === "object" ? Object.getPrototypeOf(value) : undefined;
+  const plain = Array.isArray(value) || prototype === Object.prototype || prototype === null;
+  if (typeof value !== "object" || !plain) {
+    throw new Error(
+      `ctx.templateKey() accepts only JSON values, plain objects, arrays, and functions, but ${path} is ${describeIdentityValue(value)}. Pass a JSON form, such as a string.`,
+    );
+  }
+  if (seen.has(value))
+    throw new Error(`ctx.templateKey() cannot hash a circular value at ${path}.`);
+  seen.add(value);
+  for (const [key, entry] of Object.entries(value)) {
+    assertSandboxIdentity(entry, Array.isArray(value) ? `${path}[${key}]` : `${path}.${key}`, seen);
+  }
+  seen.delete(value);
+}
+
+function describeIdentityValue(value: unknown): string {
+  if (typeof value === "object" && value !== null) {
+    return `a ${value.constructor?.name ?? "non-plain object"}`;
+  }
+  return typeof value === "number" ? String(value) : `a ${typeof value}`;
 }
 
 async function loadGraphFromArtifacts(input: {

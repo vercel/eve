@@ -31,10 +31,10 @@ export function resolveEffectiveAgentRuntime(
 export function resolveSessionUsageLimit(
   bundle: Pick<CompiledBundle, "graph" | "resolvedAgent">,
 ): SessionUsageLimit | undefined {
-  return (
+  const limit =
     bundle.resolvedAgent.config?.limits?.sessionUsage ??
-    bundle.graph.nodesByNodeId.get(ROOT_RUNTIME_AGENT_NODE_ID)?.agent.config?.limits?.sessionUsage
-  );
+    bundle.graph.nodesByNodeId.get(ROOT_RUNTIME_AGENT_NODE_ID)?.agent.config?.limits?.sessionUsage;
+  return limit === false ? () => false : limit;
 }
 
 export function resolveEffectiveAgentRuntimeFromConfig(

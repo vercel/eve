@@ -48,5 +48,14 @@ describe("inMemory file-memory backend", () => {
     await expect(backend.read({ key: "a", signal: controller.signal })).rejects.toThrow(
       "cancelled",
     );
+    await expect(
+      backend.write({
+        key: "a",
+        content: "cancelled write",
+        expectedVersion: null,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("cancelled");
+    expect(await backend.read({ key: "a", signal })).toBeNull();
   });
 });

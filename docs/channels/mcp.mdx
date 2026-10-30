@@ -3,28 +3,28 @@ title: "MCP Channel"
 description: "Publish an eve agent as an MCP server with auth support."
 ---
 
-The MCP channel lets clients such as Claude Code delegate durable work to an eve agent through four tools: `agent_start`, `agent_get`, `agent_update`, and `agent_cancel`. It can also publish the agent's own tools, so a client calls them directly, and its skills, so a client reads them; see [Publish the agent's tools](#publish-the-agents-tools) and [Publish the agent's skills](#publish-the-agents-skills).
+The MCP channel publishes your agent as an MCP server, so clients such as Claude Code can hand it long-running work. It lives in `agent/channels/mcp.ts`. Clients start and follow that work with four tools: `agent_start`, `agent_get`, `agent_update`, and `agent_cancel`. The channel can also [publish the agent's tools](#publish-the-agents-tools) for clients to call directly, and [its skills](#publish-the-agents-skills) for clients to read.
 
 Use an [MCP connection](../connections/mcp) instead when your eve agent needs to call someone else's MCP server.
 
 ## Configure the channel
 
-Create `agent/channels/mcp.ts`. Authentication is required explicitly, even during development.
+Create `agent/channels/mcp.ts`. `auth` is required, even during development.
 
 ```ts title="agent/channels/mcp.ts"
 import { localDev } from "eve/channels/auth";
 import { mcpChannel } from "eve/channels/mcp";
 
 export default mcpChannel({
-  auth: localDev(),
+  auth: localDev(), // required; replace before you deploy
 });
 ```
 
-This accepts a synthetic local principal under `eve dev` or `vercel dev` and rejects all requests in production. Before deploying, replace it with one of the production authentication modes below. `localDev()` checks the running environment, not the request hostname: accessing an `eve start` production process through localhost does not activate it.
+`localDev()` accepts a stand-in local user under `eve dev` or `vercel dev`, and rejects every request in production. It checks the running environment, not the hostname, so an `eve start` production process rejects requests from localhost too. Replace it with one of the [production auth modes](#interactive-oauth) before you deploy.
 
 ### Routes
 
-The default Streamable HTTP endpoint is `/eve/v1/mcp`. Set `route` when the application should publish it somewhere else:
+The Streamable HTTP endpoint serves `GET`, `POST`, and `DELETE` at `/eve/v1/mcp`. Set `route` to publish it elsewhere:
 
 ```ts title="agent/channels/mcp.ts"
 import { localDev } from "eve/channels/auth";
@@ -36,11 +36,70 @@ export default mcpChannel({
 });
 ```
 
-The channel registers `GET`, `POST`, and `DELETE` at the selected route.
+## Invoke the agent
+
+MCP clients receive four tools:
+
+| Tool           | Input                         | Purpose                                                            |
+| -------------- | ----------------------------- | ------------------------------------------------------------------ |
+| `agent_start`  | `{ message }`                 | Start work and immediately return an invocation ID.                |
+| `agent_get`    | `{ invocationId }`            | Read the invocation's complete current state.                      |
+| `agent_update` | `{ invocationId, responses }` | Answer every open question or approval in the invocation together. |
+| `agent_cancel` | `{ invocationId }`            | Ask unfinished work to stop.                                       |
+
+`initialize` and `server/discover` also return `instructions` that describe these tools to the connecting model.
+
+`agent_start` creates one eve session and returns once eve has saved the request. Keep its `invocationId`, and call `agent_get` until the invocation finishes. While the status is `working`, wait at least `pollAfterMs` between calls.
+
+The invocation's `status` is one of:
+
+| `status`                 | What to do                                                                                                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `working`                | Keep polling. The optional `statusMessage` says what the agent is doing, such as a running tool's [activity label](/docs/tools#label-tool-activity) or its name.                            |
+| `input_required`         | Show each entry in `interactions`, keyed by `interactionId`. Send all the answers in one `agent_update`, one `{ interactionId, optionId?, text? }` per entry. It returns the current state. |
+| `authorization_required` | Show each sign-in in `interactions`: its `signIn` URL, user code, or instructions. The invocation resumes on its own after the sign-in; keep polling.                                       |
+| `completed`              | Read the optional `result`, the final assistant message. The turn and any [tasks](/docs/tools/workflows#run-calls-as-tasks-task) it started have finished.                                  |
+| `failed`                 | Read the structured `error`.                                                                                                                                                                |
+| `cancelled`              | The work stopped.                                                                                                                                                                           |
+
+A tool result with `isError: true` means eve rejected the call, so fix the call. A `failed` status means the call succeeded and the work failed, so report it. Rejected calls carry `structuredContent.error` with a stable `code`, a short `message`, and `retryable`:
+
+| `code`          | Meaning                                                                      | `retryable` |
+| --------------- | ---------------------------------------------------------------------------- | ----------- |
+| `invalid_input` | An argument was rejected, for example an oversized `message`.                | `false`     |
+| `not_found`     | The invocation does not exist, has expired, or belongs to another caller.    | `false`     |
+| `conflict`      | The invocation is not in the expected state; read it with `agent_get` first. | `true`      |
+| `internal`      | eve failed; `errorId` correlates with server logs. No details are exposed.   | `false`     |
+
+Limits: the MCP request body is 1 MiB, `message` 64 KiB, each response `text` 16 KiB (both in UTF-8 bytes), and one `agent_update` 64 responses. Oversized bodies get a JSON-RPC `413`, and oversized fields fail input validation before any work starts.
+
+### Durability guarantees
+
+- Once `agent_start` returns, the work survives restarts and redeploys. Only `agent_cancel` stops it. A dropped connection, client restart, or closed MCP session doesn't.
+- `agent_start` isn't idempotent. If its response is lost, a second call starts a second invocation, so ask the user before you start again.
+- `agent_update` answers one set of open requests. Re-sending accepted answers returns the current state. Different answers for a set that was already answered return `conflict`.
+- `agent_cancel` asks the work to stop, so it can race with completion. Poll `agent_get` until the status is `cancelled`, `completed`, or `failed`, not only `cancelled`.
+
+## Invocation ownership
+
+Every MCP operation checks `auth` again. With an authenticated policy, an invocation belongs to the caller who started it, and knowing its ID isn't enough. Bearer tokens aren't stored with the invocation or forwarded to the agent's tools.
+
+With `none()`, every caller is the same anonymous user, so the random invocation ID works like a password. Anyone who has it can read, answer, or cancel the invocation until workflow retention expires. Keep it out of logs and URLs. Responses include `expiresAt` when the workflow backend reports a retention deadline.
+
+## Options
+
+| Option              | Default                       | What it does                                                                        |
+| ------------------- | ----------------------------- | ----------------------------------------------------------------------------------- |
+| `auth`              | Required                      | One auth strategy or an ordered array. Use `none()` for public access.              |
+| `route`             | `/eve/v1/mcp`                 | Path of the MCP endpoint.                                                           |
+| `agent`             | `true`                        | Serves the `agent_*` tools and their instructions.                                  |
+| `tools`             | `false`                       | Also [publishes the agent's tools](#publish-the-agents-tools).                      |
+| `skills`            | `false`                       | Also [publishes the agent's skills](#publish-the-agents-skills).                    |
+| `trustedForwarders` | Refuses the header with `403` | Lets a [router name the user](#forwarded-principals) that a published tool runs as. |
 
 ## Interactive OAuth
 
-For an MCP client that should open a sign-in flow, configure eve as an OAuth protected resource. Wrap the access-token verifier in `oauthResource()`:
+To have an MCP client open a sign-in flow, configure eve as an OAuth protected resource. Wrap the access-token verifier in `oauthResource()`:
 
 ```ts title="agent/channels/mcp.ts"
 import { oauthResource, oidc } from "eve/channels/auth";
@@ -63,11 +122,11 @@ export default mcpChannel({
 });
 ```
 
-The authorization server identified by `issuer` must issue tokens accepted by the wrapped verifier. `scopes` advertises what clients should request; the verifier remains responsible for signature, expiration, audience/resource, and scope enforcement.
+The `issuer` must issue tokens the wrapped verifier accepts. `scopes` tells clients what to request. The verifier still checks the signature, expiration, audience, and scopes.
 
-`oauthResource()` does not issue tokens or run an authorization server. It decorates an ordinary inbound `AuthFn` with OAuth protected-resource metadata so `mcpChannel()` can publish discovery and add `resource_metadata` to Bearer challenges. Client registration, consent, token issuance, and authorization-server metadata remain the identity provider's responsibility.
+`oauthResource()` adds protected-resource metadata to an `AuthFn`. `mcpChannel()` then publishes discovery and adds `resource_metadata` to Bearer challenges. eve doesn't run an authorization server: client registration, consent, token issuance, and authorization-server metadata belong to the identity provider.
 
-Most hosted MCP clients (Claude, ChatGPT, Grok, and similar) register themselves with the authorization server through Dynamic Client Registration ([RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)) the first time a user connects. Choose an issuer that supports it, or pre-register each client with the issuer before the demo. If registration fails, the client stops before it ever reaches eve.
+Most hosted MCP clients, such as Claude, ChatGPT, and Grok, register themselves through Dynamic Client Registration ([RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)) the first time a user connects. Choose an issuer that supports it, or pre-register each client. If registration fails, the client stops before it reaches eve.
 
 ### Verify the bearer token yourself
 
@@ -99,20 +158,20 @@ export default mcpChannel({
 });
 ```
 
-`verifyOidc()` uses the issuer's discovery document to validate the token signature and claims. Returning `sessionAuth` accepts the request and binds invocation ownership to that verified principal. Returning `null` lets the auth walk continue; when no strategy accepts the request, eve returns `401`.
+`verifyOidc()` checks the token signature and claims against the issuer's discovery document. Return `sessionAuth` to accept the request; that caller then owns the invocation. Return `null` to pass to the next strategy. When no strategy accepts, eve returns `401`.
 
-You can wrap any strategy in `oauthResource()`, including `vercelOidc()`, but the advertised authorization server must issue tokens that strategy accepts. `vercelOidc()` by itself is preconfigured Vercel workload identity and does not advertise an interactive login.
+You can wrap any strategy in `oauthResource()`, including `vercelOidc()`, as long as the advertised authorization server issues tokens it accepts. `vercelOidc()` alone is Vercel workload identity and offers no interactive login.
 
 ### Protected-resource metadata
 
-By default, eve derives the metadata path from the complete MCP resource identifier according to RFC 9728:
+eve derives the metadata path from the full MCP resource identifier, per RFC 9728:
 
 | MCP resource                           | Protected-resource metadata                                                 |
 | -------------------------------------- | --------------------------------------------------------------------------- |
 | `https://agent.example.com/eve/v1/mcp` | `https://agent.example.com/.well-known/oauth-protected-resource/eve/v1/mcp` |
 | `https://agent.example.com/mcp`        | `https://agent.example.com/.well-known/oauth-protected-resource/mcp`        |
 
-Set `resource` when the public resource identifier cannot be derived from the incoming request. Set `metadataPath` only when discovery must live at a non-derived location:
+Set `resource` when the request doesn't show the public resource identifier, as behind a gateway or proxy that changes the origin or path. Set `metadataPath` to serve discovery at another path:
 
 ```ts
 oauthResource(verifyToken, {
@@ -123,19 +182,19 @@ oauthResource(verifyToken, {
 });
 ```
 
-The metadata endpoint serves cross-origin `GET`, `HEAD`, and `OPTIONS` requests so browser-hosted clients can discover the authorization server. MCP protocol requests remain same-origin.
+The metadata endpoint serves cross-origin `GET`, `HEAD`, and `OPTIONS` requests, so browser-hosted clients can find the authorization server.
 
 ## Other authentication modes
 
-`mcpChannel()` accepts the same inbound auth strategies as other eve channels: Basic auth, HMAC or ECDSA JWTs, generic OIDC, Vercel OIDC, custom `AuthFn` policies, or an ordered array of them. These modes do not automatically produce an interactive login unless wrapped in `oauthResource()`; configure credentials in the MCP client out of band.
+`mcpChannel()` accepts the same auth strategies as other eve channels: Basic auth, HMAC or ECDSA JWTs, generic OIDC, Vercel OIDC, and custom `AuthFn` policies. Pass one, or an ordered array. Without `oauthResource()`, they offer no interactive login, so configure credentials in the MCP client directly.
 
-When a protected request has no accepted credentials, eve returns a Bearer challenge. A supplied Bearer token rejected by every strategy gets `error="invalid_token"`. To report a verified caller that lacks the necessary scopes, throw `ForbiddenError` with an `error="insufficient_scope"` Bearer challenge. The MCP channel preserves that challenge and adds the protected-resource metadata URL.
+A request without accepted credentials gets a Bearer challenge. The challenge has `error="invalid_token"` when the request sent a Bearer token that every strategy rejected. For a verified caller without the needed scopes, throw `ForbiddenError` with an `error="insufficient_scope"` Bearer challenge. The channel keeps that challenge and adds the protected-resource metadata URL.
 
-For the complete strategy and auth-walk model, see [Authentication](../guides/auth-and-route-protection).
+For how strategies are tried in order, see [Authentication](../guides/auth-and-route-protection).
 
 ### Public access
 
-To intentionally expose the MCP endpoint without authentication, use `none()`:
+Use `none()` to expose the MCP endpoint without authentication:
 
 ```ts title="agent/channels/mcp.ts"
 import { none } from "eve/channels/auth";
@@ -146,74 +205,23 @@ export default mcpChannel({
 });
 ```
 
-This allows anyone to invoke the agent. Every caller shares the anonymous principal, so invocation IDs become bearer capabilities until workflow retention expires: anyone holding an ID can read, answer, or cancel that invocation. Use public access only when anonymous invocation is intentional. For a public demo, prefer [Interactive OAuth](#interactive-oauth) so each caller owns their own invocations.
+Anyone can then invoke the agent. See [Invocation ownership](#invocation-ownership) for what an invocation ID then allows. For a public demo, prefer [Interactive OAuth](#interactive-oauth) so each caller owns their invocations.
 
 ## HTTP security
 
-The MCP transport validates the request before authentication:
+The MCP endpoint checks each request before authentication:
 
-- Remote endpoints require HTTPS; HTTP is accepted only on loopback.
+- Remote endpoints require HTTPS. HTTP is accepted only on loopback.
 - `Host` must match the request URL.
 - Browser protocol requests must have an exact same-origin `Origin`.
 
-When a gateway or reverse proxy changes the public origin or path, set `resource` explicitly so metadata and authentication challenges advertise the client-facing MCP resource.
+Only the metadata endpoint allows cross-origin requests. For a browser application, put a same-origin backend or authenticated server-side proxy in front of the MCP endpoint.
 
-The protected-resource metadata endpoint is intentionally CORS-readable. The MCP transport itself does not enable cross-origin browser access; place a same-origin backend or authenticated server-side proxy in front of it when a browser application needs to connect.
-
-The endpoint serves MCP `2026-07-28` directly and retains stateless `2025-11-25` Streamable HTTP compatibility. eve does not keep an MCP transport session in either mode.
-
-## Invoke the agent
-
-MCP clients receive four tools:
-
-| Tool           | Input                         | Purpose                                                     |
-| -------------- | ----------------------------- | ----------------------------------------------------------- |
-| `agent_start`  | `{ message }`                 | Start durable work and immediately return an invocation ID. |
-| `agent_get`    | `{ invocationId }`            | Read the invocation's complete current state.               |
-| `agent_update` | `{ invocationId, responses }` | Answer the complete pending human-input batch.              |
-| `agent_cancel` | `{ invocationId }`            | Request cooperative cancellation of non-terminal work.      |
-
-The server also returns `instructions` from `initialize` and `server/discover` that summarize this
-protocol for the connecting model, so a hosted client does not have to infer it from the tool
-schemas alone.
-
-`agent_start` creates one eve session and returns after durable acceptance without
-waiting for the session continuation hook to become readable. Keep its `invocationId`, then call
-`agent_get` until the invocation reaches a terminal state. While the status is `working`, wait at
-least `pollAfterMs` before polling again.
-
-The invocation response is discriminated by `status`:
-
-- `working`: work is active; continue polling according to `pollAfterMs`.
-- `input_required`: present `inputRequests`, then send the complete answer batch through `agent_update`. A successful update returns the current invocation state.
-- `authorization_required`: present the returned sign-in URL, user code, or instructions. The connection callback resumes the invocation automatically; continue polling.
-- `completed`: the agent's turn settled, after any [tasks](/docs/tools/workflows#run-calls-as-tasks-task) it started finished. Consume the optional `result`: the final assistant message.
-- `failed`: inspect the structured `error`.
-- `cancelled`: cancellation reached a terminal state.
-
-A tool result with `isError: true` means the call itself was rejected. A `failed` status means the call succeeded and the task itself failed. Handle them differently: correct the call in the first case, report the task failure in the second. Rejected calls carry `structuredContent.error` with a stable `code`, a short `message`, and `retryable`:
-
-| `code`          | Meaning                                                                      | `retryable` |
-| --------------- | ---------------------------------------------------------------------------- | ----------- |
-| `invalid_input` | An argument was rejected, for example an oversized `message`.                | `false`     |
-| `not_found`     | The invocation does not exist, has expired, or belongs to another caller.    | `false`     |
-| `conflict`      | The invocation is not in the expected state; read it with `agent_get` first. | `true`      |
-| `internal`      | eve failed; `errorId` correlates with server logs. No details are exposed.   | `false`     |
-
-Cancellation is cooperative, so call `agent_get` after `agent_cancel` until the state becomes terminal.
-
-Requests are bounded: the whole MCP request body is limited to 1 MiB, `message` to 64 KiB, each input-response `text` to 16 KiB (both measured as UTF-8 bytes, not characters), and one `agent_update` to 64 responses. Oversized bodies receive a JSON-RPC `413`; oversized fields fail input validation before any work starts.
-
-### Durability guarantees
-
-- Once `agent_start` returns, the work is durable. A dropped HTTP connection, a client restart, or a closed MCP session does not cancel it. Only `agent_cancel` stops work.
-- `agent_start` is not idempotent. If its response is lost, the client has no `invocationId` to check, and a second call starts a second task. Ask the user before starting again rather than retrying blindly.
-- `agent_update` answers one pending batch. Re-sending the same answers after eve has accepted them returns the current invocation state; sending different answers for an already-answered batch is a conflict.
-- `agent_cancel` is cooperative and can race with completion. Poll `agent_get` until the status is terminal (`cancelled`, `completed`, or `failed`), not specifically `cancelled`.
+The endpoint serves MCP `2026-07-28` and stateless `2025-11-25` Streamable HTTP, with no MCP transport session in either.
 
 ## Publish the agent's tools
 
-By default the channel serves only the `agent_*` tools. Set `tools: true` to also publish every tool the agent can run outside a conversation, and `agent: false` to stop serving the `agent_*` tools:
+Set `tools: true` to also publish every tool the agent can run outside a conversation. Set `agent: false` to stop serving the `agent_*` tools:
 
 ```ts title="agent/channels/mcp.ts"
 import { localDev } from "eve/channels/auth";
@@ -221,19 +229,28 @@ import { mcpChannel } from "eve/channels/mcp";
 
 export default mcpChannel({
   auth: localDev(),
-  tools: true,
+  tools: true, // omit to serve only the agent_* tools
 });
 ```
 
-`tools/list` returns the `agent_*` tools first, then the agent's tools in name order with their input and output JSON schemas. Framework tools, workflow and provider tools, tools without `execute`, and tools added by dynamic resolvers or subagents are not published. While `agent` is on, an agent tool named `agent_start`, `agent_get`, `agent_update`, or `agent_cancel` is not published, and eve logs a warning. With `agent: false`, the channel sends no `agent_*` instructions. Turning off `agent`, `tools`, and `skills` all at once throws, since the channel would publish nothing.
+`tools/list` returns the `agent_*` tools first, then the agent's tools in name order with their input and output JSON schemas. eve doesn't publish these tools:
 
-Each `tools/call` checks the arguments against the tool's input schema, then runs the tool as the route-authenticated caller, or as a [forwarded user](#forwarded-principals), with no model, turn, or workflow run. Every caller the channel's `auth` admits can call these tools, outside the agent's instructions, so review what becomes callable before you turn this on. Unless the call joins a [tool session](#tool-sessions), it gets its own session:
+- framework tools, workflow tools, and provider tools;
+- tools without `execute`;
+- tools from dynamic resolvers or subagents; and
+- while `agent` is on, an agent tool named like an `agent_*` tool. eve logs a warning.
 
-- Authored state starts from its initial value, and updates are not kept.
+With `agent: false`, the channel sends no `agent_*` instructions.
+
+Each `tools/call` checks the arguments against the tool's input schema. It then runs the tool as the authenticated caller, or a [forwarded user](#forwarded-principals), with no model, turn, or workflow run. Every caller that the channel's `auth` accepts can call these tools, outside the agent's instructions, so review what becomes callable.
+
+Unless the call joins a [tool session](#tool-sessions), it gets its own session:
+
+- Authored state starts from its initial value, and updates aren't kept.
 - A sandbox the tool opens is deleted when the call ends.
 - Calls may run in parallel, and a call retried after a lost response runs again.
 
-A tool that cannot finish over MCP returns an error result with `isError: true` and a `structuredContent.error.code`:
+A tool that can't finish over MCP returns an error result with `isError: true` and a `structuredContent.error.code`:
 
 | Code                     | When                                                                                             |
 | ------------------------ | ------------------------------------------------------------------------------------------------ |
@@ -245,13 +262,13 @@ A tool that cannot finish over MCP returns an error result with `isError: true` 
 
 ### Trace context
 
-MCP clients send W3C trace context in each request's `params._meta`, not in HTTP headers. When a request carries a valid `_meta.traceparent`, that span becomes the parent of everything the request runs, including a published tool's `execute_tool` span. It takes precedence over any parent your platform extracted from the HTTP request's headers. A missing, malformed, or all-zero `traceparent` leaves that parent in place. `_meta.tracestate` is kept only alongside a valid `_meta.traceparent` and only up to 512 characters; a longer value is dropped.
+MCP clients send W3C trace context in each request's `params._meta`. A valid `_meta.traceparent` becomes the parent of everything the request runs, including a published tool's `execute_tool` span. It takes precedence over a parent from the HTTP headers. A missing, malformed, or all-zero `traceparent` leaves the header parent in place. eve keeps `_meta.tracestate` only with a valid `traceparent`, and only up to 512 characters.
 
-`_meta.baggage` is never read. A caller cannot choose the trace audience, session lineage, or content capture: those come from the channel and your `tracePolicy`, as they do for conversations. The `execute_tool` span records the call's arguments and result only when that content decision allows it, and never records exception text.
+eve ignores `_meta.baggage`, so callers can't set trace audience, session lineage, or content capture. Those come from the channel and your `tracePolicy`. The `execute_tool` span records arguments and result only when that policy allows content capture, and never records exception text.
 
 ### Forwarded principals
 
-A router that calls the channel on behalf of its own users, such as another eve agent's [`forwardPrincipal` connection](../connections/mcp#forward-the-caller-to-an-eve-agent), can name the user in the `eve-forwarded-principal` header: unpadded base64url of UTF-8 JSON `{ current, initiator? }`, at most 16 KiB. eve accepts the header only when `trustedForwarders` is set, and only from a route-authenticated forwarder the predicate accepts:
+A router can call the channel on behalf of its own users, such as another eve agent's [`forwardPrincipal` connection](../connections/mcp#forward-the-caller-to-an-eve-agent). It names the user in the `eve-forwarded-principal` header: unpadded base64url of UTF-8 JSON `{ current, initiator? }`, at most 16 KiB. eve accepts the header only when `trustedForwarders` is set, and only from an authenticated router that the predicate accepts:
 
 ```ts title="agent/channels/mcp.ts"
 import { vercelOidc, vercelSubject } from "eve/channels/auth";
@@ -266,20 +283,28 @@ export default mcpChannel({
 });
 ```
 
-The predicate receives the verified forwarder and the principals it asserts, as the [eve channel](./eve)'s `trustedForwarders` does, so match the forwarder precisely; see [Accepting forwarded identity](../guides/auth-and-route-protection#accepting-forwarded-identity-from-another-deployment). A published tool called with an accepted header runs as the forwarded user: `ctx.session.auth.current` is that user, `ctx.session.auth.initiator` is the asserted initiator or that user, and both carry the forwarder's `principalId` in the `eve:forwarded-by` attribute. The `agent_*` tools still act as the route-authenticated caller.
+The predicate receives the verified router and the users it names, as in the [eve channel](./eve)'s `trustedForwarders`. Match the router precisely; see [Accepting forwarded identity](../guides/auth-and-route-protection#accepting-forwarded-identity-from-another-deployment).
 
-| Request                                                | Response                 |
-| ------------------------------------------------------ | ------------------------ |
-| No header                                              | Runs as the route caller |
-| Malformed or over 16 KiB                               | `400`                    |
-| The predicate refuses the forwarder or what it asserts | `403`                    |
-| The forwarder is anonymous (`none()`)                  | `403`                    |
-| The channel has no `trustedForwarders`                 | `403`                    |
-| The predicate throws                                   | `500`                    |
+A published tool called with an accepted header runs as the forwarded user:
+
+- `ctx.session.auth.current` is that user.
+- `ctx.session.auth.initiator` is the named initiator, or that user.
+- Both carry the router's `principalId` in the `eve:forwarded-by` attribute.
+
+The `agent_*` tools act as the authenticated caller, not the forwarded user.
+
+| Request                                                | Response                         |
+| ------------------------------------------------------ | -------------------------------- |
+| No header                                              | Runs as the authenticated caller |
+| Malformed or over 16 KiB                               | `400`                            |
+| The predicate refuses the router or the users it names | `403`                            |
+| The router is anonymous (`none()`)                     | `403`                            |
+| The channel has no `trustedForwarders`                 | `403`                            |
+| The predicate throws                                   | `500`                            |
 
 ### Tool sessions
 
-A tool session lets several `tools/call` requests share one sandbox, so a file one call writes is there for the next. With `tools: true`, the channel advertises the `dev.eve/tool-sessions` extension in `capabilities.extensions` of `server/discover`. A client joins a session by declaring the same extension in the request's `io.modelcontextprotocol/clientCapabilities` and sending a key of 1 to 512 characters in `_meta["dev.eve/tool-session"]`:
+A tool session lets several `tools/call` requests share one sandbox, so a file one call writes is there for the next. With `tools: true`, `server/discover` advertises the `dev.eve/tool-sessions` extension in `capabilities.extensions`. To join a session, a client declares the extension in the request's `io.modelcontextprotocol/clientCapabilities`. It also sends a 1–512 character key in `_meta["dev.eve/tool-session"]`:
 
 ```json
 {
@@ -301,28 +326,29 @@ A tool session lets several `tools/call` requests share one sandbox, so a file o
 }
 ```
 
-eve derives the session id from the principal the call runs as (the route-authenticated caller, or a [forwarded user](#forwarded-principals) together with the verified router that forwarded them) and the key, so calls from the same principal with the same key share the session, and another caller who sends the same key gets a different one. That holds for forwarded users too: two users forwarded with the same key, or one user forwarded by two routers, get separate sessions. The router counted is the one the channel's `auth` verified, never one named in the forwarded principal. A key from a client that did not declare the extension is ignored, and the call gets its own session. Clients on the 2025-11-25 protocol send no per-request capabilities, so they always get their own session.
+Calls share a session only when they have the same key and run as the same caller. That caller is the authenticated caller, or a [forwarded user](#forwarded-principals) together with the router that the channel's `auth` verified. Two forwarded users with one key, or one user forwarded by two routers, get separate sessions. eve ignores a key from a client that didn't declare the extension. Clients on the 2025-11-25 protocol send no per-request capabilities, so each call gets its own session.
 
-Tool sessions need an authenticated caller. With `auth: none()` every request is the same anonymous principal, so a key alone would name the session and anyone who knew it could read what another client left in the sandbox. A keyed call from an anonymous caller is therefore denied with the `denied` error code before anything runs; unkeyed anonymous calls still get a one-off session.
+Tool sessions need an authenticated caller. With `auth: none()`, the key alone would name the session, so anyone who knew it could read another client's sandbox. eve denies a keyed anonymous call with the `denied` code before anything runs. Unkeyed anonymous calls get a one-off session.
 
 In a tool session:
 
-- The sandbox opens on the first `ctx.getSandbox()` and is kept for later calls with the same key. Concurrent first calls share one sandbox.
-- The sandbox is found from the session id alone. A deploy that changes the sandbox definition (the template, its snapshot, the open options in `sandbox.ts`, or its resources) keeps using the existing sandbox for the key; the current definition applies only when a sandbox is created, such as after the old one expires as below. Deployments that share a sandbox namespace, such as preview and production deployments of one Vercel project, also share the sandbox for the same principal and key.
+- The sandbox opens on the first `ctx.getSandbox()`, and eve keeps it for later calls with the key. Concurrent first calls share one sandbox.
+- A deploy that changes the sandbox definition (template, snapshot, open options in `sandbox.ts`, or resources) keeps the existing sandbox. The new definition applies only to a new sandbox, such as after expiry.
+- Deployments that share a sandbox namespace, such as preview and production of one Vercel project, share the sandbox for the same caller and key.
 - `ctx.session.id` is the same for every call with the key.
-- Traces still show each call as its own run. Its `agent.run.id` and `gen_ai.conversation.id` are a fresh id for that call, not `ctx.session.id`, so traces do not link calls that share a key.
-- Authored state still starts from its initial value on every call, and updates are not kept. Keep data that must outlive a call in the sandbox.
-- Calls may still run in parallel, and nothing orders them.
+- Traces show each call as its own run, with a fresh `agent.run.id` and `gen_ai.conversation.id`, so traces don't link calls that share a key.
+- Authored state starts from its initial value on every call, and updates aren't kept. Keep data that must outlive a call in the sandbox.
+- Calls may run in parallel, in any order.
 
-Tool sessions need a sandbox provider whose kept sandboxes stay bounded: Vercel Sandbox or just-bash. On another provider, a call with a key fails with a `Sandbox provider "<name>" cannot keep a sandbox between invokeTool calls` error when the tool opens its sandbox. Tools that never open a sandbox still run. just-bash keeps its sandboxes on the local disk, so on Vercel Functions a just-bash tool session lasts only as long as the function instance.
+Tool sessions need Vercel Sandbox, just-bash, or a [custom provider](/docs/sandbox/custom-providers#keep-sandboxes-for-keyed-tool-calls) that sets `toolSessions: true`. On another provider, a keyed call fails with `Sandbox provider "<name>" cannot keep a sandbox between invokeTool calls` when the tool opens its sandbox. Tools that never open one still run.
 
-A tool session has no end, so eve bounds how long its sandbox is kept. On Vercel Sandbox, a tool-session sandbox's saved filesystem expires a day after its last use, and each call that resumes it restarts that day. The next call with the key after that replaces it with a fresh, empty sandbox. If two calls with the key find the expired filesystem at the same time, each can replace the sandbox, and files the first one writes can be lost. Vercel only keeps the latest snapshot of the sandbox. Tool sessions use this one-day expiry whatever `snapshotExpiration` `sandbox.ts` sets; sessions that conversations start keep the authored setting.
+On Vercel Sandbox, a tool-session sandbox's saved filesystem expires a day after its last use, whatever `snapshotExpiration` `sandbox.ts` sets. The next call with the key then gets a fresh, empty sandbox. If two calls find the expired filesystem at once, both can replace the sandbox, and the first one's files can be lost. Conversation sessions keep the authored `snapshotExpiration`.
 
-just-bash keeps tool-session sandboxes on the local disk, and nothing removes them.
+just-bash keeps tool-session sandboxes on the local disk and never removes them. On Vercel Functions, a just-bash tool session lasts only as long as the function instance.
 
 ## Publish the agent's skills
 
-Set `skills: true` to serve the agent's skills as [SEP-2640](https://modelcontextprotocol.io/seps/2640) skills under `skill://`, so a client that calls the agent's tools can also read the workflow knowledge behind them:
+Set `skills: true` to serve the agent's skills as [SEP-2640](https://modelcontextprotocol.io/seps/2640) skills under `skill://`. A client can then read the workflow knowledge behind the agent's tools:
 
 ```ts title="agent/channels/mcp.ts"
 import { localDev } from "eve/channels/auth";
@@ -335,26 +361,38 @@ export default mcpChannel({
 });
 ```
 
-The channel declares the `io.modelcontextprotocol/skills` extension and serves `skills/list`, `skills/get`, `resources/list`, `resources/templates/list`, `resources/read`, and `resources/directory/read`. Every caller the channel's `auth` admits can read every served skill. Each skill's entry is `skill://<name>/SKILL.md`, and its `resources` list every file with its `size` in bytes and a `sha256:` digest. `resources/list` returns one resource per served skill, its `SKILL.md`; the other files of a skill are reachable through `resources/directory/read` and the entry's `resources`, not listed there. `resources/directory/read` lists every directory of a skill, including empty ones, which return no children. `resources/templates/list` is always empty. `resources/read` returns UTF-8 text as `text` and anything else, such as images or Latin-1 files, as a base64 `blob`, byte for byte. Every skill and resource method carries the same cache hint as `tools/list`: private, for 5 minutes. The server's `resources` capability declares `listChanged: false`; eve never sends `notifications/resources/list_changed`, so a client re-reads after the hint expires. For each compiled artifact version, eve builds each skill's catalog snapshot once, listing its files and reading them to compute their sizes and digests. Only the served `SKILL.md` is kept in memory; `resources/read` reads other files from storage again, and a file removed since the snapshot is an unknown resource (`-32602`).
+The channel declares the `io.modelcontextprotocol/skills` extension and serves the methods below. Every caller that the channel's `auth` accepts can read every served skill.
 
-A skill is served whole or not at all. eve leaves a skill out of every method, and logs one warning naming the reason, when:
+| Method                      | Returns                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `skills/list`, `skills/get` | Each skill's entry, `skill://<name>/SKILL.md`, with `resources` listing every file's `size` in bytes and `sha256:` digest |
+| `resources/list`            | One resource per skill, its `SKILL.md`                                                                                    |
+| `resources/directory/read`  | Every directory of a skill, including empty ones                                                                          |
+| `resources/templates/list`  | Always empty                                                                                                              |
+| `resources/read`            | UTF-8 text as `text`, anything else, such as images or Latin-1 files, as a base64 `blob`                                  |
 
-- its `SKILL.md` frontmatter does not meet the Agent Skills format: a `name` of up to 64 lowercase letters, digits, and single hyphens, and a `description` of 1 to 1024 characters;
-- it has more than 512 files or more than 16 MiB in total;
-- any of its files is over 512 KiB, unreadable, or has a path that cannot be a `skill://` URI.
+Every skill and resource method carries the same private, 5-minute cache hint as `tools/list`. The `resources` capability declares `listChanged: false`, so clients re-read after the hint expires. A file removed after eve indexed the skill is an unknown resource (`-32602`).
 
-A `SKILL.md` whose frontmatter already names the skill and has a `description` is served as authored. Otherwise, as for flat `.md` and module skills, eve serves it with frontmatter that carries the skill's name and description, and the digest describes that served document. Skills added by dynamic resolvers or subagents are not served.
+eve serves a skill whole or not at all. It leaves out a skill, and logs a warning with the reason, when:
 
-Production builds ship skill files as eve-owned server assets, so they count toward the deployed function's size. `eve build` also drops Nitro's default `server` server-asset entry, the one that would bundle the app's `assets/` directory; eve reads only its own asset bases, and a route that reads `assets:server` storage finds it empty in production.
+- Its `SKILL.md` frontmatter doesn't meet the Agent Skills format. The `name` must be up to 64 lowercase letters, digits, and single hyphens, and the `description` 1 to 1024 characters.
+- It has more than 512 files or more than 16 MiB in total.
+- Any of its files is over 512 KiB, unreadable, or has a path that can't be a `skill://` URI.
 
-## Invocation ownership
+A `SKILL.md` whose frontmatter names the skill and has a `description` is served as written. Otherwise, eve serves it with generated frontmatter that carries the name and description, as for flat `.md` and module skills. The digest covers the served document. eve doesn't serve skills from dynamic resolvers or subagents.
 
-Every MCP operation reruns the configured auth policy. With authenticated policies, an invocation belongs to the principal that started it; knowing its ID is not sufficient. Bearer tokens are not stored with the invocation or forwarded to the agent's tools.
+Production builds ship skill files as server assets, so they count toward the deployed function's size. `eve build` drops Nitro's default `server` server-asset entry, so a route that reads `assets:server` storage finds it empty in production.
 
-With `none()`, every caller shares the anonymous principal, so the random invocation ID becomes a bearer capability. Keep it out of logs and URLs and treat it as usable until workflow retention expires. Responses include `expiresAt` when the workflow backend reports a retention deadline.
+## Troubleshooting
+
+| What you see                                                                                    | What to do                                                                                                         |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `mcpChannel requires auth. Use none() for explicit public access.`                              | Set `auth`. Use `none()` only when the endpoint should be public.                                                  |
+| `mcpChannel publishes nothing with agent, tools, and skills all false. Enable one.`             | Turn on at least one of `agent`, `tools`, or `skills`.                                                             |
+| `Sandbox provider "<name>" cannot keep a sandbox between invokeTool calls` on a keyed tool call | Use Vercel Sandbox, just-bash, or a custom provider with `toolSessions: true` for [tool sessions](#tool-sessions). |
 
 ## What to read next
 
 - [Authentication](../guides/auth-and-route-protection): configure inbound route authentication
 - [MCP connections](../connections/mcp): let an eve agent call another MCP server
-- [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming): understand the durable sessions behind invocations
+- [Sessions, runs & streaming](../concepts/sessions-runs-and-streaming): the sessions behind invocations

@@ -5,7 +5,10 @@ import type { SessionContext } from "#context/session-context.js";
 import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
-import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import {
+  type CompiledRuntimeAgentBundle,
+  getCompiledRuntimeAgentBundle,
+} from "#runtime/sessions/compiled-agent-cache.js";
 import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
@@ -17,6 +20,7 @@ import {
 } from "#harness/authorization.js";
 import { createAuthorizationContext } from "#runtime/authorization-context.js";
 import { buildBaseToolContext } from "#context/build-base-tool-context.js";
+import { createToolChannelTo } from "#execution/tools/channel-to.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { completeWorkflowStepAuthorization } from "#execution/tools/workflow/authorization-completion.js";
 import {
@@ -44,7 +48,8 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
     context.setVirtualContext(AuthorizationHookKey, input.token);
     context.setVirtualContext(PendingAuthorizationResultKey, input.authorizationResults);
 
-    const sandbox = openStepSandbox(input);
+    const loadAgent = stepAgentLoader(input);
+    const sandbox = openStepSandbox(input, loadAgent);
     return contextStorage.run(context, async (): Promise<WorkflowStepResult> => {
       const auth = createAuthorizationContext({
         scope: input.toolName,
@@ -75,6 +80,11 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
         }) as SessionContext["getSandbox"],
         getToken: auth.getToken,
         requireAuth: auth.requireAuth,
+        channel: input.channel,
+        to: createToolChannelTo({
+          delegated: input.delegated,
+          loadBundle: loadAgent,
+        }),
       };
       Object.defineProperty(ctx, "agents", {
         get: () =>
@@ -115,30 +125,41 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
   return wrapped;
 }
 
-/**
- * The calling session's sandbox, opened on the step's first `ctx.getSandbox()`
- * under the key of the session that owns it, and let go of when the step
- * ends. Recorded state, when the call captured it, resumes the sandbox;
- * without it, or when that sandbox is gone, the provider's `start` upserts
- * it by that key with the owner's sandbox definition, so the session finds
- * the same sandbox and its session-end cleanup removes it. The step never owns the sandbox: the
- * session's turns may be using it, so the step can neither stop nor delete it.
- * A step that never asks for it loads nothing.
- */
-function openStepSandbox(input: WorkflowStepContext) {
-  const { bundle, sessionId, state } = input.sandbox;
+/** Loads the compiled agent that owns the tool, the first time a step needs it. */
+function stepAgentLoader(input: WorkflowStepContext): () => Promise<CompiledRuntimeAgentBundle> {
+  const { bundle } = input.sandbox;
   // The step's own context replaces the delivery's, which carries the
   // development generation a development source resolves to.
   const delivery = contextStorage.getStore();
   const resolveSource = () => resolveDurableCompiledArtifactsSource(bundle.source);
-  let opening: Promise<EnsuredSandboxAccess> | undefined;
-  let released = false;
-  const open = async (): Promise<EnsuredSandboxAccess> => {
-    const compiled = await getCompiledRuntimeAgentBundle({
+  return async () =>
+    await getCompiledRuntimeAgentBundle({
       compiledArtifactsSource:
         delivery === undefined ? resolveSource() : contextStorage.run(delivery, resolveSource),
       nodeId: bundle.nodeId,
     });
+}
+
+/**
+ * The calling session's sandbox, opened on the step's first `ctx.getSandbox()`
+ * under the key of the session that owns it, and closed when the step ends.
+ * Recorded state, when the call captured it, resumes the sandbox; without
+ * it, or when that sandbox is gone, the provider's `start` upserts it by that
+ * key with the owner's sandbox definition, so the session finds the same
+ * sandbox and its session-end cleanup removes it. The step never owns the
+ * sandbox: the session's turns may be using it, so the step can neither stop
+ * nor delete it.
+ * A step that never asks for it loads nothing.
+ */
+function openStepSandbox(
+  input: WorkflowStepContext,
+  loadAgent: () => Promise<CompiledRuntimeAgentBundle>,
+) {
+  const { sessionId, state } = input.sandbox;
+  let opening: Promise<EnsuredSandboxAccess> | undefined;
+  let released = false;
+  const open = async (): Promise<EnsuredSandboxAccess> => {
+    const compiled = await loadAgent();
     const node = compiled.graph.root;
     return await ensureSandboxAccess({
       compiledArtifactsSource: compiled.compiledArtifactsSource,
@@ -147,7 +168,7 @@ function openStepSandbox(input: WorkflowStepContext) {
       registry: node.sandboxRegistry,
       sessionId,
       state: state ?? null,
-      borrowed: true,
+      shutdownTracking: "none",
     });
   };
   const openOnce = (): Promise<EnsuredSandboxAccess> => {
@@ -176,7 +197,7 @@ function openStepSandbox(input: WorkflowStepContext) {
         stop: () =>
           unavailableInStep(
             "sandbox.stop()",
-            "The session's turns may be using the sandbox; eve lets go of the step's handle when the step ends.",
+            "The session's turns may be using the sandbox; eve closes the step's connection when the step ends.",
           ),
       };
     },
@@ -184,7 +205,7 @@ function openStepSandbox(input: WorkflowStepContext) {
       released = true;
       const access = await opening?.catch(() => undefined);
       try {
-        await access?.detach();
+        await access?.release();
       } catch (error) {
         logError(log, "failed to release a workflow step's sandbox", error, {
           sessionId,

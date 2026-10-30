@@ -1,4 +1,4 @@
-import type { FilePart, TextPart, UserContent } from "ai";
+import type { MessageContent, MessageFilePart, MessageTextPart } from "#shared/message-content.js";
 
 import type { FetchFileResult } from "#channel/adapter.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
@@ -23,14 +23,14 @@ const log = createLogger("telegram.attachments");
 /** URL protocol used by the channel to defer Telegram file downloads to `fetchFile`. */
 export const TELEGRAM_FILE_URL_PROTOCOL = "telegram-file:";
 
-/** Emits one {@link FilePart} per supported Telegram attachment. */
+/** Emits one {@link MessageFilePart} per supported Telegram attachment. */
 export function collectTelegramFileParts(
   attachments: readonly TelegramAttachment[],
   policy: UploadPolicy,
-): FilePart[] {
+): MessageFilePart[] {
   if (isUploadsDisabled(policy)) return [];
 
-  const parts: FilePart[] = [];
+  const parts: MessageFilePart[] = [];
   for (const attachment of attachments) {
     const part = toTelegramFilePart(attachment, parts.length);
     if (part === null) continue;
@@ -48,15 +48,15 @@ export function collectTelegramFileParts(
   return parts;
 }
 
-/** Combines text/caption + file parts into the {@link UserContent} shape the harness expects. */
+/** Combines text/caption + file parts into the {@link MessageContent} shape the harness expects. */
 export function buildTelegramTurnMessage(
   message: Pick<TelegramMessage, "caption" | "text">,
-  fileParts: readonly FilePart[],
-): string | UserContent {
+  fileParts: readonly MessageFilePart[],
+): MessageContent {
   const text = message.text || message.caption;
   if (fileParts.length === 0) return text;
   if (text.trim().length === 0) return [...fileParts];
-  const textPart: TextPart = { type: "text", text };
+  const textPart: MessageTextPart = { type: "text", text };
   return [textPart, ...fileParts];
 }
 
@@ -143,7 +143,7 @@ export function createTelegramFileUrl(input: {
   return new URL(`${TELEGRAM_FILE_URL_PROTOCOL}${encodeURIComponent(input.fileId)}${suffix}`);
 }
 
-function toTelegramFilePart(attachment: TelegramAttachment, index: number): FilePart | null {
+function toTelegramFilePart(attachment: TelegramAttachment, index: number): MessageFilePart | null {
   const mediaType =
     attachment.mediaType ??
     (attachment.kind === "photo" ? "image/jpeg" : "application/octet-stream");
@@ -182,7 +182,7 @@ function parseTelegramFileUrl(
 }
 
 function evaluateTelegramFilePart(
-  part: FilePart,
+  part: MessageFilePart,
   size: number | undefined,
   policy: UploadPolicy,
 ): ReturnType<typeof evaluateFilePart> {

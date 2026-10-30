@@ -61,7 +61,7 @@ describe("development extensions", () => {
       moduleMapPath: "/virtual/source-test/.eve/compile/module-map.mjs",
     });
     expect(generated).toContain(
-      "eve/self-modification/local?eve-mount=extensions%2Fself-modification",
+      "eve/extensions/self-modification/local?eve-mount=extensions%2Fself-modification",
     );
   });
 
