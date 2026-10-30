@@ -128,22 +128,17 @@ When setup asks what the GitHub App should respond to, select **New issues** alo
 import { connectGitHubCredentials } from "@vercel/connect/eve";
 import { defaultGitHubAuth, githubChannel } from "eve/channels/github";
 
-const trusted = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
-
 export default githubChannel({
   botName: "triage-agent",
   credentials: connectGitHubCredentials("github/triage-agent"),
   onIssue(ctx, issue) {
     if (issue.action !== "opened") return null;
-    if (!trusted.has(String(issue.raw.author_association))) return null;
     return { auth: defaultGitHubAuth(ctx) };
   },
 });
 ```
 
 Your `botName` and connection name come from the GitHub App that setup creates. `onIssue` starts a turn when someone opens an issue. The agent also answers comments that include `@<botName>`.
-
-Add the `trusted` check yourself. It limits the agent to issues from people with a role in the repository, because the agent runs commands based on what the issue says.
 
 ## Deploy
 
@@ -153,11 +148,12 @@ npm run deploy
 
 Open the GitHub App in the Vercel Connect dashboard and install it on your repository. Then open a new issue.
 
-On Vercel, the GitHub channel checks out the repository into the sandbox before each turn, so the agent works on the real files. The agent replies on the issue with its label and what it found.
+On Vercel, the GitHub channel checks out the repository into the sandbox before each turn, so the agent works on the real files. The App's token is used only for the checkout, so commands the agent runs afterward have no GitHub credentials. The agent replies on the issue with its label and what it found.
+
+Anyone who can open an issue on your repository can start a turn, and each turn uses model tokens. On a busy repository, filter in `onIssue`, for example by label or by `issue.raw.author_association`.
 
 ## Where to go next
 
 - Turn the issues you tried into regression tests with [Evals](/docs/evals).
-- To triage issues from anyone, drop the `trusted` check and remove the checkout's GitHub token from the sandbox with a `turn.started` hook, as the [coding agent template](https://github.com/vercel/eve/tree/main/apps/templates/eve-coding-agent-template) does in `agent/hooks/reset-github-egress.ts`.
 - Let the agent open fix pull requests with the [code and git extensions](/docs/code-extension), which add investigation skills and an authenticated `gh` tool.
 - See every GitHub channel option in [GitHub](/docs/channels/github).
