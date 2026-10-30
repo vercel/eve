@@ -147,7 +147,7 @@ export default defineTool({
 
 The label is presentation only. It does not replace the path-derived tool name, enter model input, or change execution. eve records the bounded label on the corresponding public action event so activity renderers and other authorized stream consumers can use it without interpreting raw tool data. Built-in channel activity can show `Deploy storefront to production` instead of `Deploy`; if the callback throws or returns an empty label, activity falls back to a readable form of the tool name, such as `Sync accounts` for `sync_accounts`.
 
-Provided tools define labels for `bash`, `glob`, `grep`, `read_file`, `web_fetch`, `web_search`, and `write_file`. The git extension's `gh` tool uses the call's `description` as its activity label.
+Provided tools define labels for `bash`, `glob`, `grep`, `read_file`, `web_fetch`, `web_search`, and `write_file`.
 
 Calls the model makes through the [catalog](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) read the same way. A deferred tool, agent, or connection tool called through `eve__tool` shows its own label, exactly as a direct call would. An `eve__search` call shows `Search tools for “linear issues”`, then `Searched tools for “linear issues”, found 5` when it returns. A skill load shows `Load skill release-notes`, then `Loaded skill release-notes`, and a connection's sign-in entry shows `Sign in to Linear`.
 
