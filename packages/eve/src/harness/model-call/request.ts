@@ -1,7 +1,7 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 
 import { HistoryStateKey } from "#context/keys.js";
-import { harnessOffer } from "#reactions/kinds/tool.js";
+import { CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { harnessInstructions } from "#reactions/kinds/instructions.js";
 import { nativeInstructions } from "#harness/policy/agent.js";
 import { memoryRecallContents } from "#reactions/kinds/memory.js";
@@ -39,14 +39,15 @@ export function requestMessages(
     currentTurnMessages: input.turnMessages,
     projectedMessages: input.projectedMessages,
   });
-  // What tools and skills the catalog reaches is eve's own harness's to announce.
-  if (harnessOffer(ctx) === undefined) {
-    const announced = ctx?.get(HistoryStateKey)?.announcements;
-    messages.addAnnouncements({
-      ...catalogAnnouncements(input.catalog, announced),
-      ...dynamicSkillAnnouncements(dynamicSkillManifest(ctx), announced),
-    });
-  }
+  // eve announces what its catalog tools reach, wherever the step offers them.
+  const { catalog } = input;
+  const announced = ctx?.get(HistoryStateKey)?.announcements;
+  const reachesCatalog = [CALL_TOOL_NAME, SEARCH_TOOL_NAME, SKILL_TOOL_NAME].some(catalog.allows);
+  messages.addAnnouncements({
+    ...(reachesCatalog && catalogAnnouncements(catalog, announced)),
+    ...(catalog.allows(SKILL_TOOL_NAME) &&
+      dynamicSkillAnnouncements(dynamicSkillManifest(ctx), announced)),
+  });
   if (input.pendingApprovalsNote !== undefined) {
     messages.add(input.pendingApprovalsNote, "context.state", { cacheFriendly: false });
   }

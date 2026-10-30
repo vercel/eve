@@ -148,7 +148,7 @@ export default defineHarness((ctx) => {
 
 A declared tool you offer keeps its name and approval. A copy may change its `description`.
 
-Leaving out one of eve's `eve__` tools turns off what it serves. Without `eve__skill`, skills don't load. Without `eve__task_wait`, the model can't wait on tasks, though the turn still waits for them. Without `eve__reply`, the model can't deliver a structured result, so the harness settles the turn itself. eve offers each `eve__` tool you return only when it serves something: a skill, a deferred tool or connection, a task, or an output schema.
+Leaving out one of eve's `eve__` tools turns off what it serves. Without `eve__skill`, skills don't load. Without `eve__task_wait`, the model can't wait on tasks, though the turn still waits for them. Without `eve__reply`, the model can't deliver a structured result, so the harness settles the turn itself. eve offers each `eve__` tool you return only when it serves something: a skill, a deferred tool or connection, a task, or an output schema. When the harness offers `eve__search`, `eve__tool`, or `eve__skill`, eve tells the model what they reach in history messages, as it does without a harness. That includes deferred tools, connections, and skills added during the session.
 
 When eve retries a model call after the provider rejected a tool, eve puts a note about it before your instructions. That note is the only system text eve adds to `agent.instructions`.
 

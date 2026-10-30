@@ -602,9 +602,11 @@ describe.each([
   });
 
   it("reproduces eve's prompt and tools when it composes what eve composes", async () => {
-    const calls: { system: string; tools: unknown }[] = [];
+    const calls: { system: string; tools: unknown; messages: unknown }[] = [];
     const scripted = model("gpt-5.5", (options) => {
       calls.push({
+        // The rest of the prompt, with eve's announcement of the catalog.
+        messages: options.prompt.filter((message) => message.role !== "system"),
         system: systemOf(options),
         tools: (options.tools ?? []).map((entry) => ({
           description: "description" in entry ? entry.description : undefined,
@@ -654,6 +656,7 @@ describe.each([
 
     expect(calls).toHaveLength(2);
     expect(calls[0]!.system).toContain("Write in house style.");
+    expect(JSON.stringify(calls[0]!.messages)).toContain("eve__search");
     expect(calls[1]).toEqual(calls[0]);
   });
 
