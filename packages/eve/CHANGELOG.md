@@ -1,5 +1,48 @@
 # eve
 
+## 0.91.0
+
+Released 2026-10-30 · [Compare with 0.90.0](https://github.com/vercel/eve/compare/eve%400.90.0...eve%400.91.0)
+
+### Breaking Changes
+
+- `session.clear()` now cancels a running turn and every working task before it clears history, instead of waiting for the turn to finish.
+  Previously a clear sent while a turn waited on tasks didn't run until the tasks finished, and never ran if one hung. Tasks a clear stops end with `task.ended` `outcome: "cancelled"`, and no task result the cleared conversation hadn't read reaches the next turn. ([#5619](https://github.com/vercel/eve/pull/5619))
+
+### Features
+
+- Hooks can start a session's next turn with `ctx.continue()` from `turn.settled` and `*` handlers.
+  Other handlers don't receive it. It continues a completed turn, or a turn the same hook cancelled, and hooks that continue one turn share its next turn. It takes `MessageContent` with `session.send()`'s `context` and an optional `auth`, returns `{ queued }` synchronously, and yields to any other turn, cancel, clear, or reset that comes first. `delivery.admitted` records `source: { channel, hook }`. ([#5555](https://github.com/vercel/eve/pull/5555))
+
+### Bug Fixes
+
+- The `bash` tool now keeps only the last 50 KiB of each output stream while a command runs, so a verbose command no longer holds its whole stdout and stderr in memory.
+  Very large output no longer fails with `Cannot create a string longer than 0x1fffffe8 characters`. Output past the limit is noted as `earlier output omitted`, as it already was for commands left running.
+  Thanks @mrud for reporting this in #5651. ([#5653](https://github.com/vercel/eve/pull/5653))
+- HTTP Basic auth now compares the username and password in constant time on every request, so response timing no longer reveals whether the username matched. ([#5521](https://github.com/vercel/eve/pull/5521))
+- Anthropic agents no longer fail with a 400 when the model calls a server tool, such as `web_search` or programmatic `code_execution`, beside a local tool.
+  Anthropic runs that server tool after the local results arrive and returns its result at the start of the next response, so the next request must end on those local results. Until that result arrives, eve now holds a message that steers the turn for one model step, holds changed catalog or skill announcements, sends an empty-response retry's note as a system instruction, and keeps compaction from separating the deferred result from its call or adding a resumption message after the local results. When the result can no longer arrive, because the turn was cancelled, failed, or retried, or a new turn starts, eve answers the server call as one whose outcome is unknown, so the model reads the new message right away.
+  Thanks @jam3gw for reporting this in #4890. ([#4891](https://github.com/vercel/eve/pull/4891))
+- A Discord `display: "select"` request with an option `id` longer than 100 characters now fails with a clear error instead of posting a select whose truncated value came back as an id the request never offered, which dropped or mismatched the user's choice. ([#5533](https://github.com/vercel/eve/pull/5533))
+- Sessions now fail controls their eve version does not support, so the control's delivery settles `failed` instead of never settling. ([#5622](https://github.com/vercel/eve/pull/5622))
+- A provider tool result that arrives in the response after its call, such as an Anthropic tool search the model started beside a local tool, now settles the call the earlier step introduced.
+  Previously eve published that call a second time, so with the session-event checker on (`eve dev`, `eve eval`, or `EVE_CHECK_SESSION_EVENTS=1`) the step failed with `introduced-twice`, and without it the session log recorded one call introduced twice. ([#5648](https://github.com/vercel/eve/pull/5648))
+- A turn cancellation raised while the model is being resolved now cancels the turn instead of failing the session with `MODEL_SELECTION_FAILED`, even when it arrives before the turn's abort signal fires.
+  Thanks @burn2delete for reporting this and proposing the fix in #4273. ([#4274](https://github.com/vercel/eve/pull/4274))
+- Session steps now return only the session projection rows they changed, instead of every row of each changed table, so a step's stored output no longer grows with the calls and parts the turn already settled.
+  Thanks @mrud for reporting this in #5635. ([#5642](https://github.com/vercel/eve/pull/5642))
+- Slack approval and question cards now show their prompt, tool input, and answer as literal text.
+  A model-written `<!channel>` or `<url|label>` in a prompt or tool input no longer notifies the channel or hides a link's real destination from the approver. `Card(...)` rendering is unchanged. ([#5517](https://github.com/vercel/eve/pull/5517))
+- A connection in `agent/connections/*.ts` now keeps an `approval` written as `{ request, response, prompt }`, so its tools ask for approval and run its `response` policy.
+  Previously only the function form was kept and the object form was dropped, so the connection's tools ran without asking anyone. A malformed `approval` now fails resolution instead of being ignored. ([#5632](https://github.com/vercel/eve/pull/5632))
+- Teams approval and question cards now show the prompt, tool input, and answer as literal text.
+  A model-written `[docs](https://evil.example)` no longer renders as a link whose label hides its destination. The cards use `RichTextBlock` text runs, and the message text is sent as plain text. ([#5529](https://github.com/vercel/eve/pull/5529))
+- Teams inbound verification now accepts only RS256-signed Bot Connector tokens, as Microsoft documents, instead of using the algorithm named in the token header. ([#5530](https://github.com/vercel/eve/pull/5530))
+- `ctx.turn.input` keeps the turn's input after the turn pauses for an approval, a question, a sign-in, or a budget answer.
+  Dynamic values no longer see empty input after the pause, including `auto()` if its per-turn memo was invalidated. ([#5628](https://github.com/vercel/eve/pull/5628))
+- `web_fetch` now rejects a `timeout` of zero or less as invalid tool input, instead of throwing an opaque `RangeError` or aborting the request immediately. ([#5532](https://github.com/vercel/eve/pull/5532))
+- `eve` setup now opens browser URLs on Windows through `rundll32` instead of `cmd /c start`, so `&` or `|` in a URL is no longer interpreted by the shell. ([#5522](https://github.com/vercel/eve/pull/5522))
+
 ## 0.90.0
 
 Released 2026-10-29 · [Compare with 0.89.0](https://github.com/vercel/eve/compare/eve%400.89.0...eve%400.90.0)
