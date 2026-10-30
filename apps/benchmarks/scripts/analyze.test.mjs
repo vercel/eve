@@ -131,7 +131,7 @@ test("aggregates docs reads across harnesses and lists unread pages", () => {
     );
     assert.ok(!usage.unread.includes("README.md"));
     assert.ok(!usage.unread.includes("tools/overview.mdx"));
-    assert.ok(usage.unread.includes("getting-started.mdx"));
+    assert.ok(usage.unread.includes("getting-started/index.mdx"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
