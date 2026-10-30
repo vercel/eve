@@ -1,3 +1,4 @@
+import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
@@ -17,6 +18,7 @@ import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentReasoningDefinition, SessionUsageLimit } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
+import type { Policy } from "#harness/policy/policy.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
@@ -297,9 +299,9 @@ export type HandleEventFn = (
 ) => Promise<void>;
 
 /**
- * Dependencies injected into the tool-loop harness at construction time.
+ * Dependencies injected into the kernel at construction time.
  */
-export interface ToolLoopHarnessConfig {
+export interface KernelConfig {
   readonly steeringSignal?: AbortSignal;
   /** Cancellation signal for the active turn. */
   readonly abortSignal?: AbortSignal;
@@ -317,13 +319,18 @@ export interface ToolLoopHarnessConfig {
   /** The delivery a clear or compact control arrived as; its facts name it. */
   readonly controlDelivery?: ControlDelivery;
   readonly handleEvent?: HandleEventFn;
+  /** What decides the turn's next step. Absent, eve's own loop: production installs no other. */
+  readonly policy?: Policy;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.
    */
   readonly instrumentation?: SessionInstrumentation;
-  /** Attribute work that must finish before cumulative model usage is persisted. */
-  readonly titleAttributeWrite?: Promise<void>;
+  /**
+   * Tags the turn's run with what its model steps spent. The workflow wrapper provides it, inside
+   * a workflow step; absent, nothing is tagged.
+   */
+  readonly setAttributes?: (attributes: Record<string, EveAttributeValue>) => Promise<void>;
   /**
    * Sign-in callbacks the step's delivery carried. Each completes before anything else runs, and
    * a connection's sign-in resumes the turn that asked for it.
