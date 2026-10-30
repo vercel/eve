@@ -16,13 +16,16 @@ import {
   EVE_OBSERVATION_KEY_HEADER,
   localObservationKey,
 } from "#protocol/descendant-observation.js";
-import { useEveAgent as useReactAgent, type UseEveAgentReturn } from "#react/use-eve-agent.js";
+import {
+  useEveAgent as useReactAgent,
+  type UseEveAgentOptions,
+  type UseEveAgentReturn,
+} from "#react/use-eve-agent.js";
 import { useEveAgent as useSvelteAgent } from "#svelte/use-eve-agent.js";
 import { useEveAgent as useVueAgent } from "#vue/use-eve-agent.js";
 
-// Each binding is a thin adapter over the shared agent store, which its own suite covers. What a
-// binding owns is its framework's lifecycle: it shows the store's changes, and stops reading the
-// session once the framework disposes it.
+// The store owns projection and command semantics. These tests cover adapter option/callback
+// wiring and framework lifecycle: showing store changes and detaching when disposed.
 
 const mounts: Array<() => void> = [];
 vi.mock("svelte", () => ({
@@ -43,7 +46,10 @@ function agent() {
   const encoder = new TextEncoder();
   let deliveries = 0;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
-    const url = new URL(String(request instanceof Request ? request.url : request));
+    const url = new URL(
+      String(request instanceof Request ? request.url : request),
+      "https://eve.test",
+    );
     if ((init?.method ?? "GET") === "POST")
       return Response.json(
         { deliveryId: `d_${deliveries++}`, sessionId: "session_1", status: "accepted" },
@@ -86,19 +92,19 @@ function agent() {
 
 interface Mounted {
   /** What the binding shows; `undefined` when the framework renders nothing reactive. */
-  readonly data: () => Pick<ConversationState, "messages"> | undefined;
+  readonly data: () => (Pick<ConversationState, "messages"> & { error?: Error }) | undefined;
   readonly send: (message: string) => Promise<unknown>;
   readonly finished: ReturnType<typeof vi.fn>;
   readonly dispose: () => void;
 }
 
-const bindings: Record<string, () => Mounted> = {
-  react() {
+const bindings: Record<string, (options?: UseEveAgentOptions) => Mounted> = {
+  react(options = { baseUrl: "https://eve.test" }) {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const finished = vi.fn();
     let helpers: UseEveAgentReturn | undefined;
     function Probe() {
-      helpers = useReactAgent({ baseUrl: "https://eve.test", onFinish: finished });
+      helpers = useReactAgent({ ...options, onFinish: finished });
       return null;
     }
     let renderer: ReturnType<typeof createRenderer> | undefined;
@@ -109,32 +115,37 @@ const bindings: Record<string, () => Mounted> = {
       data: () => helpers,
       dispose: () => void act(() => renderer?.unmount()),
       finished,
-      send: (message) =>
-        act(async () => {
-          await helpers!.send(message);
-        }),
+      send: async (message) => {
+        let failure: unknown;
+        await act(async () => {
+          try {
+            await helpers!.send(message);
+          } catch (error) {
+            failure = error;
+          }
+        });
+        if (failure !== undefined) throw failure;
+      },
     };
   },
-  vue() {
+  vue(options = { baseUrl: "https://eve.test" }) {
     vi.stubGlobal("window", {});
     const finished = vi.fn();
     const scope = effectScope();
-    const binding = scope.run(() =>
-      useVueAgent({ baseUrl: "https://eve.test", onFinish: finished }),
-    )!;
+    const binding = scope.run(() => useVueAgent({ ...options, onFinish: finished }))!;
     return {
-      data: () => ({ messages: binding.messages.value }),
+      data: () => ({ messages: binding.messages.value, error: binding.error.value }),
       dispose: () => scope.stop(),
       finished,
       send: (message) => binding.send(message),
     };
   },
-  svelte() {
+  svelte(options = { baseUrl: "https://eve.test" }) {
     vi.stubGlobal("window", {});
     const finished = vi.fn();
-    const binding = useSvelteAgent({ baseUrl: "https://eve.test", onFinish: finished });
+    const binding = useSvelteAgent({ ...options, onFinish: finished });
     // Svelte shows the store's changes only inside a component's effects, which a unit test has
-    // none of; its lifecycle is what's left to check.
+    // none of; requests, callbacks, and lifecycle remain observable here.
     return {
       data: () => undefined,
       dispose: () => mounts.forEach((cleanup) => cleanup()),
@@ -144,24 +155,158 @@ const bindings: Record<string, () => Mounted> = {
   },
 };
 
+async function flushMount() {
+  // Mount effects use zero-delay timers; drain those and the client's async header resolution.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
+
 describe("the framework bindings", () => {
+  it.each(Object.keys(bindings))(
+    "%s routes prepared sends and their stream to the named agent",
+    async (name) => {
+      agent();
+      let selected = "amber";
+      const binding = bindings[name]!({
+        agent: "support",
+        prepareSend: (input) => ({ ...input, clientContext: { selected } }),
+      });
+      try {
+        selected = "violet";
+        await binding.send("Which color?");
+        await vi.waitFor(() => expect(vi.mocked(fetch).mock.calls).toHaveLength(2));
+        const [post, stream] = vi.mocked(fetch).mock.calls;
+        expect(String(post![0])).toBe("/eve/support/v1/session");
+        expect(JSON.parse(String(post![1]?.body))).toMatchObject({
+          message: "Which color?",
+          clientContext: { selected: "violet" },
+        });
+        expect(String(stream![0])).toMatch(/^\/eve\/support\/v1\/session\/session_1\/stream\?/);
+      } finally {
+        binding.dispose();
+      }
+    },
+  );
+
+  describe.each(Object.keys(bindings))("%s mount prewarm", (name) => {
+    it.each([undefined, false, true])("honors prewarm=%s before any send", async (prewarm) => {
+      vi.useFakeTimers();
+      agent();
+      const binding = bindings[name]!({ baseUrl: "https://eve.test", prewarm });
+      try {
+        await flushMount();
+        expect(fetch).toHaveBeenCalledTimes(prewarm === true ? 2 : 0);
+        if (prewarm) {
+          const [post] = vi.mocked(fetch).mock.calls;
+          expect(post![1]?.method).toBe("POST");
+          expect(post![1]?.body).toBeUndefined();
+        }
+      } finally {
+        binding.dispose();
+      }
+    });
+
+    it("passes followWhile to prewarm and receipt following", async () => {
+      vi.useFakeTimers();
+      const server = agent();
+      const binding = bindings[name]!({
+        baseUrl: "https://eve.test",
+        prewarm: true,
+        followWhile: () => false,
+      });
+      try {
+        await flushMount();
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(server.reading).toBe(0);
+        await binding.send("Weather?");
+        await flushMount();
+        expect(server.reading).toBe(1);
+        server.append(testTurnFacts(0, "Sunny.", ["d_1"]));
+        await flushMount();
+        expect(binding.finished).toHaveBeenCalledTimes(1);
+        expect(server.reading).toBe(0);
+      } finally {
+        binding.dispose();
+      }
+    });
+  });
+
+  it.each(Object.keys(bindings))("%s forwards send failures to onError", async (name) => {
+    agent();
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ error: "offline" }, { status: 500 }));
+    const onError = vi.fn();
+    const binding = bindings[name]!({ baseUrl: "https://eve.test", onError });
+    try {
+      await expect(binding.send("Weather?")).rejects.toThrow();
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError.mock.calls[0]![0]).toBeInstanceOf(Error);
+      const data = binding.data();
+      if (data) {
+        expect(data.error).toBeInstanceOf(Error);
+        expect(data.messages[0]?.metadata).toMatchObject({ optimistic: true, status: "failed" });
+      }
+    } finally {
+      binding.dispose();
+    }
+  });
+
+  it.each(["react", "vue"])("%s can disable optimistic projection", async (name) => {
+    agent();
+    const binding = bindings[name]!({ baseUrl: "https://eve.test", optimistic: false });
+    try {
+      await binding.send("Weather?");
+      expect(binding.data()?.messages).toEqual([]);
+    } finally {
+      binding.dispose();
+    }
+  });
+
   it.each(Object.keys(bindings))(
     "%s shows a sent message's reply, and stops reading the session once disposed",
     async (name) => {
+      vi.useFakeTimers();
       const server = agent();
       const binding = bindings[name]!();
+      try {
+        await flushMount();
+        await binding.send("Weather?");
+        await flushMount();
+        expect(server.reading).toBe(1);
+        server.append(testTurnFacts(0, "Sunny.", ["d_0"]));
+        await flushMount();
+        expect(binding.finished).toHaveBeenCalledTimes(1);
+        const data = binding.data();
+        if (data !== undefined)
+          expect(data.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
 
-      await binding.send("Weather?");
-      await vi.waitFor(() => expect(server.reading).toBe(1));
-      server.append(testTurnFacts(0, "Sunny.", ["d_0"]));
-      await vi.waitFor(() => expect(binding.finished).toHaveBeenCalledTimes(1));
-      const data = binding.data();
-      if (data !== undefined)
-        expect(data.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
-      expect(server.reading).toBe(1);
-
-      binding.dispose();
-      await vi.waitFor(() => expect(server.reading).toBe(0));
+        await binding.send("And tomorrow?");
+        server.append(testTurnFacts(1, "Rainy.", ["d_1"]).slice(0, 4));
+        await flushMount();
+        expect(server.reading).toBe(1);
+      } finally {
+        binding.dispose();
+      }
+      await flushMount();
+      expect(server.reading).toBe(0);
+      server.append(testTurnFacts(1, "Rainy.", ["d_1"]).slice(4));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(binding.finished).toHaveBeenCalledTimes(1);
+      // Disposal is local: no durable cancellation POST and no reconnect after teardown.
+      expect(
+        vi
+          .mocked(fetch)
+          .mock.calls.map(([request, init]) => [
+            String(request).split("?")[0],
+            init?.method ?? "GET",
+          ]),
+      ).toEqual([
+        ["https://eve.test/eve/v1/session", "POST"],
+        ["https://eve.test/eve/v1/session/session_1/stream", "GET"],
+        ["https://eve.test/eve/v1/session/session_1", "POST"],
+      ]);
     },
   );
 });
