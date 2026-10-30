@@ -148,6 +148,23 @@ describe("createChannelAddress", () => {
     );
   });
 
+  it("delivers under the delivery ID a framework channel names, so a retry has the same receipt", async () => {
+    const runtime = createRuntime();
+    const address = createChannelAddress({
+      adapter: { kind: "http" },
+      channelName: "a2a",
+      continuationToken: "context-1",
+      runtime,
+    });
+    const options = { auth: null, deliveryId: "delivery-1", idempotencyKey: "message-1" };
+
+    const delivery = await address.send("Alice asks again.", options);
+
+    const command = vi.mocked(runtime.dispatchContinuation).mock.calls[0]?.[0].command;
+    expect(command?.kind === "send" ? command.delivery?.deliveryId : undefined).toBe("delivery-1");
+    expect(delivery.deliveryId).toBe("delivery-1");
+  });
+
   it("binds every control directly to the namespaced continuation token", async () => {
     const runtime = createRuntime();
     const address = createChannelAddress({

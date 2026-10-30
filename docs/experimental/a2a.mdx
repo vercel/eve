@@ -1,0 +1,182 @@
+---
+title: "A2A Channel"
+description: "Publish an eve agent as an Agent2Agent (A2A) v1.0 server that other agents delegate durable tasks to."
+---
+
+The A2A channel publishes an eve agent as an [A2A](https://a2a-protocol.org/) v1.0 server. An orchestrator or another agent that speaks A2A discovers the agent from its Agent Card, sends it messages, and follows the resulting tasks through questions, approvals, and sign-ins to a result. Each A2A context is a durable eve session that belongs to the caller who started it.
+
+This API is experimental and may change with the A2A specification. Import it from `eve/experimental/channels/a2a`. To let MCP clients such as Claude Code delegate work instead, use the [MCP channel](../channels/mcp).
+
+## Configure the channel
+
+Create a channel file, such as `agent/channels/a2a.ts`. Authentication is required explicitly, even during development.
+
+```ts title="agent/channels/a2a.ts"
+import { localDev } from "eve/channels/auth";
+import { a2aChannel } from "eve/experimental/channels/a2a";
+
+export default a2aChannel({
+  auth: localDev(),
+});
+```
+
+`localDev()` accepts a synthetic local principal under `eve dev` or `vercel dev` and rejects every request in production. Before deploying, replace it with a production strategy; see [Authentication](#authentication).
+
+The channel serves two routes:
+
+| Route                              | Purpose                                                               |
+| ---------------------------------- | --------------------------------------------------------------------- |
+| `GET /.well-known/agent-card.json` | The public Agent Card clients discover the agent from.                |
+| `POST /eve/v1/a2a`                 | The JSON-RPC endpoint. Set `route` to publish it at a different path. |
+
+The Agent Card path is fixed by the A2A specification, so an application can have one A2A channel.
+
+### Options
+
+| Option          | Default         | Purpose                                                                                                                                                                     |
+| --------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth`          | Required        | An eve route-auth policy, or an ordered array of them.                                                                                                                      |
+| `route`         | `"/eve/v1/a2a"` | The JSON-RPC endpoint path.                                                                                                                                                 |
+| `url`           | Request origin  | The public origin the Agent Card advertises, when a proxy changes it.                                                                                                       |
+| `card`          | Derived         | Agent Card fields to set or override: `name`, `description`, `skills`, `provider`, `version`, `documentationUrl`, `iconUrl`, `securitySchemes`, and `securityRequirements`. |
+| `maxBlockingMs` | `25_000`        | The longest a blocking `SendMessage` waits before returning a working task. Keep it under the host's request timeout.                                                       |
+| `uploadPolicy`  | 25 MB, any type | Limits on inbound file parts, as for the [eve HTTP channel](../channels/eve).                                                                                               |
+
+By default, the Agent Card takes its name and description from the agent, lists the agent's [skills](../skills) as A2A skills, and reports the installed eve version as the agent version.
+
+## How tasks map to eve sessions
+
+| A2A        | eve                                                                                                           |
+| ---------- | ------------------------------------------------------------------------------------------------------------- |
+| Context    | One durable eve session, owned by the principal that started it. The `contextId` is the session ID.           |
+| Task       | One turn of that session: the turn the task's first message started.                                          |
+| Message ID | The delivery's idempotency key, scoped to the caller. A retried message is the same task, never a second one. |
+
+How the agent handles a `SendMessage` depends on the IDs the message carries:
+
+- **Neither `contextId` nor `taskId`**: eve starts a new context and its first task.
+- **`contextId` only**: eve starts a new task in that context. It waits for any running task to finish first, including one waiting on input, and never merges into it or into another queued task.
+- **`taskId` of a submitted task**: eve refuses the message with `UnsupportedOperationError`: the task is queued behind another and has no turn to join yet.
+- **`taskId` of a working task**: the message joins the task's turn, as a follow-up message does in eve. If the task finishes before the message arrives, the message starts a new task instead, and the response names that task.
+- **`taskId` of an input-required task**: the message answers the task's open question. See [Answer questions and approvals](#answer-questions-and-approvals).
+- **`taskId` of a terminal task**: eve refuses the message with `UnsupportedOperationError`. Send it with only the `contextId` to start a new task.
+
+A context another caller owns, or one that doesn't exist, is refused with `InvalidParams`. eve never starts a new context in its place.
+
+### Task states
+
+| State                       | Meaning                                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `TASK_STATE_SUBMITTED`      | The session accepted the message and hasn't started it yet.                                                         |
+| `TASK_STATE_WORKING`        | The turn is running. The status message names the running tool call, when there is one.                             |
+| `TASK_STATE_INPUT_REQUIRED` | The turn waits on a question or approval.                                                                           |
+| `TASK_STATE_AUTH_REQUIRED`  | The turn waits only on a [connection sign-in](../connections). The status message carries the sign-in link or code. |
+| `TASK_STATE_COMPLETED`      | The turn finished. The reply is the task's artifact: structured output as a data part, otherwise text.              |
+| `TASK_STATE_FAILED`         | The turn failed. The status message carries the error message, without stack traces.                                |
+| `TASK_STATE_CANCELED`       | The turn was cancelled.                                                                                             |
+| `TASK_STATE_REJECTED`       | The session refused the message without starting a turn.                                                            |
+
+A task returns to `TASK_STATE_WORKING` once its prompt is answered or its sign-in completes.
+
+## Call the agent
+
+Any A2A v1.0 client can call the agent. Requests must be `Content-Type: application/json` and carry `A2A-Version: 1.0`; eve treats a request without the version header as an A2A 0.3 request and refuses it with `VersionNotSupportedError`.
+
+```sh
+curl https://agent.example.com/eve/v1/a2a \
+  -H "content-type: application/json" \
+  -H "a2a-version: 1.0" \
+  -H "authorization: Bearer $TOKEN" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "SendMessage",
+    "params": {
+      "message": {
+        "messageId": "4f0c9f0e-9e3b-4d6f-a2f1-1d8a2c7f6b10",
+        "role": "ROLE_USER",
+        "parts": [{ "text": "Summarize yesterday's failed deploys." }]
+      }
+    }
+  }'
+```
+
+The response's `result.task` carries the `id` and `contextId` to use in later calls. With the official SDKs, create a client from the agent's origin, for example `new ClientFactory().createFromUrl("https://agent.example.com")` with `@a2a-js/sdk`.
+
+### Methods
+
+| Method                 | Behavior                                                                                                                                      |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SendMessage`          | Delivers a message and, by default, waits until the task is terminal or interrupted. Set `configuration.returnImmediately` to return at once. |
+| `SendStreamingMessage` | Delivers a message and streams the task over Server-Sent Events until it is terminal or interrupted.                                          |
+| `GetTask`              | Reads a task. `historyLength` limits the user messages in `history`.                                                                          |
+| `ListTasks`            | Lists one context's tasks, newest status first, with cursor pagination. `contextId` is required.                                              |
+| `CancelTask`           | Cancels a working or interrupted task, then waits up to five seconds for it to reach `TASK_STATE_CANCELED`.                                   |
+| `SubscribeToTask`      | Streams a non-terminal task from its current state until it is terminal.                                                                      |
+
+A blocking `SendMessage` can't wait longer than one request. When `maxBlockingMs` passes first, eve returns the task as it is, usually `TASK_STATE_WORKING`; call `GetTask` or `SubscribeToTask` to follow it. For long tasks, prefer `SendStreamingMessage`.
+
+A stream starts with the `task`, then sends a `statusUpdate` for each state change. When the task completes, an `artifactUpdate` with the reply comes before the final `statusUpdate`. Reply text arrives whole, not as token deltas. If a stream drops, call `SubscribeToTask` to resume from the task's current state.
+
+## Answer questions and approvals
+
+When a task is `TASK_STATE_INPUT_REQUIRED`, its status message is plain text: each open question or approval, with its options numbered. Answer by sending a text message with the task's `taskId`. eve matches the text against the task's first open question by option number or label, or takes it as a free-form answer when the question allows one, as it does on Slack or any other text channel. A message that matches none of the options of a question without free-form answers, such as an approval, is refused with `InvalidParams` naming the options, and the task keeps waiting:
+
+```json
+{
+  "message": {
+    "messageId": "b8a4b1d2-6d73-4d0a-9e48-2f1f0b3e4a55",
+    "role": "ROLE_USER",
+    "contextId": "wrun_01J...",
+    "taskId": "d3J1bl8w...",
+    "parts": [{ "text": "1" }]
+  }
+}
+```
+
+Each message answers one prompt and carries only text parts. When several are open, the task stays `TASK_STATE_INPUT_REQUIRED` with the rest until each has an answer.
+
+## Authentication
+
+The JSON-RPC endpoint runs the ordinary eve auth walk: Basic auth, HMAC or ECDSA JWTs, OIDC, Vercel OIDC, custom `AuthFn` policies, or an ordered array of them. A request no strategy accepts gets `401` with the strategies' challenges. Tasks and contexts belong to the principal that created them; unknown, expired, and other callers' tasks all read as `TaskNotFoundError`.
+
+The Agent Card is public, because clients read it before they have credentials. Its `securitySchemes` come from the auth policy: an HTTP `Basic` or `Bearer` scheme for each challenge the policy's strategies declare, or `Bearer` when they declare none. With [`oauthResource()`](../channels/mcp#interactive-oauth), the Bearer scheme names the authorization server, and its `securityRequirements` list the configured scopes. Set `card.securitySchemes` and `card.securityRequirements` to advertise anything else, such as an API key header that a custom `AuthFn` checks.
+
+For the complete strategy model, see [Authentication](../guides/auth-and-route-protection).
+
+### Public access
+
+To expose the agent without authentication, use `none()`:
+
+```ts title="agent/channels/a2a.ts"
+import { none } from "eve/channels/auth";
+import { a2aChannel } from "eve/experimental/channels/a2a";
+
+export default a2aChannel({
+  auth: none(),
+});
+```
+
+The Agent Card then advertises no security schemes. Every caller shares the anonymous principal, so context and task IDs become bearer capabilities: anyone holding one can read, answer, or cancel that task. Use public access only when anonymous delegation is intentional.
+
+## HTTP security
+
+The JSON-RPC endpoint validates each request before authentication, as the MCP channel does:
+
+- Remote endpoints require HTTPS; HTTP is accepted only on loopback.
+- `Host` must match the request URL.
+- Browser requests must have an exact same-origin `Origin`.
+
+Request bodies are limited to 32 MB. File parts accept only `https` and `http` URLs or inline `raw` bytes, held to `uploadPolicy`; a disallowed media type is refused with `ContentTypeNotSupportedError`.
+
+The Agent Card is CORS-readable and cacheable: responses carry `Cache-Control`, an `ETag`, and `Last-Modified`, and a matching conditional request gets `304 Not Modified`. The JSON-RPC endpoint is not; put a same-origin backend in front of it when a browser application needs to call the agent.
+
+## Limitations
+
+- Only the JSON-RPC binding is served. The gRPC and HTTP+JSON bindings aren't.
+- A2A 0.3 clients aren't supported. Several frameworks still bundle 0.3 SDKs; check that the caller speaks 1.0.
+- Push notifications aren't supported. The Agent Card says `pushNotifications: false`, and the push-notification methods return `PushNotificationNotSupportedError`.
+- There is no extended Agent Card. `GetExtendedAgentCard` returns `UnsupportedOperationError`.
+- `ListTasks` lists one context at a time; it requires `contextId`.
+- A `TASK_STATE_SUBMITTED` task queued behind another task can't be cancelled until it starts; `CancelTask` returns `TaskNotCancelableError`.
+- A task is one eve turn. A [task](../tools/workflows#run-calls-as-tasks-task) the agent starts in the background, and any prompt it opens after the turn ends, isn't part of the A2A task.

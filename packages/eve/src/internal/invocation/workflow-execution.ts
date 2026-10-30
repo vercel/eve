@@ -15,13 +15,9 @@ import type {
   AgentInvocationMutationResult,
   AgentInvocationStatus,
 } from "#internal/invocation/agent-invocation.js";
-import {
-  INVOCATION_OWNER_ATTRIBUTE,
-  INVOCATION_TOKEN_ATTRIBUTE,
-  invocationOwnerKey,
-} from "#internal/invocation/metadata.js";
+import { INVOCATION_TOKEN_ATTRIBUTE, invocationOwnerKey } from "#internal/invocation/metadata.js";
+import { readOwnedInvocationRun } from "#internal/invocation/owned-run.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
-import { getWorld } from "#internal/workflow/runtime.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { openRequests, openSignIns, interaction } from "#protocol/session-projection/reader.js";
 import {
@@ -172,17 +168,7 @@ export class WorkflowAgentInvocationExecution {
   }
 
   async #readInvocationRun(invocationId: string, auth: SessionAuthContext | null) {
-    const world = await getWorld();
-    try {
-      const run = await world.runs.get(invocationId);
-      if (run.attributes[INVOCATION_TOKEN_ATTRIBUTE] === undefined) return undefined;
-      return run.attributes[INVOCATION_OWNER_ATTRIBUTE] === invocationOwnerKey(auth)
-        ? run
-        : undefined;
-    } catch (error) {
-      if (WorkflowRunNotFoundError.is(error) || RunExpiredError.is(error)) return undefined;
-      throw error;
-    }
+    return await readOwnedInvocationRun(invocationId, auth);
   }
 }
 

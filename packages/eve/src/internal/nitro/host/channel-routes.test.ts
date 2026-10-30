@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
-import { registerChannelVirtualHandlers } from "#internal/nitro/host/channel-routes.js";
+import {
+  channelVirtualId,
+  registerChannelVirtualHandlers,
+} from "#internal/nitro/host/channel-routes.js";
 
 describe("registerChannelVirtualHandlers", () => {
   it("wraps CORS-enabled HTTP routes and registers preflight handlers", () => {
@@ -121,6 +124,15 @@ describe("registerChannelVirtualHandlers", () => {
     );
     expect(nitro.options.virtual["#nitro/virtual/eve-channel/WEBSOCKET /voice"]).toContain(
       "dispatchChannelWebSocketRequest",
+    );
+  });
+
+  it("keeps a route path's file extension out of its virtual module type", () => {
+    expect(channelVirtualId("GET /.well-known/agent-card.json")).toBe(
+      "#nitro/virtual/eve-channel/GET /.well-known/agent-card.json.mjs",
+    );
+    expect(channelVirtualId("POST /eve/v1/session")).toBe(
+      "#nitro/virtual/eve-channel/POST /eve/v1/session",
     );
   });
 });
