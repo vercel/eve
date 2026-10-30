@@ -118,13 +118,23 @@ describe("postSessionCallbackRequest", () => {
     ["https://parent.example.com", true],
     ["https://parent.example.com:8443", false],
     ["https://other.example.com", false],
+    ["https://parent-abc123-team.preview.example.com", true],
+    ["https://preview.example.com", false],
+    ["https://a.parent-abc123-team.preview.example.com", false],
+    ["https://parent-abc123-team.preview.example.com:8443", false],
+    ["https://parent-abc123-team.evilpreview.example.com", false],
+    ["https://parent-abc123-team.preview.example.com.", false],
+    ["https://parent.example.org", true],
   ] as const)(
-    "scopes configured callback credentials to exact origin %s",
+    "scopes configured callback credentials to trusted origin %s",
     async (origin, attached) => {
       vi.stubEnv("VERCEL", "1");
       vi.stubEnv("VERCEL_URL", "child.example.com");
       vi.stubEnv("VERCEL_OIDC_TOKEN", "test-only-child-oidc");
-      vi.stubEnv("EVE_CALLBACK_TRUSTED_ORIGINS", "https://parent.example.com");
+      vi.stubEnv(
+        "EVE_CALLBACK_TRUSTED_ORIGINS",
+        "https://parent.example.com, https://*.preview.example.com, https://*.example.org",
+      );
       const fetchMock = stubFetch();
 
       await postSessionCallbackRequest({
@@ -138,11 +148,19 @@ describe("postSessionCallbackRequest", () => {
     },
   );
 
-  it("rejects invalid trusted-origin configuration before fetching", async () => {
+  it.each([
+    "https://parent.example.com/path",
+    "https://*.com",
+    "https://*.vercel.app",
+    "https://*.vercel.app.",
+    "https://*.preview.example.com.",
+    "https://parent*.example.com",
+    "https://*.*.example.com",
+  ])("rejects invalid trusted-origin configuration %s before fetching", async (entry) => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_URL", "child.example.com");
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "child.example.com");
-    vi.stubEnv("EVE_CALLBACK_TRUSTED_ORIGINS", "https://parent.example.com/path");
+    vi.stubEnv("EVE_CALLBACK_TRUSTED_ORIGINS", entry);
     const fetchMock = stubFetch();
 
     await expect(postSessionCallbackRequest({ body: {}, url: callbackUrl })).rejects.toThrow(

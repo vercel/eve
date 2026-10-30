@@ -5,6 +5,8 @@ description: "The define* helpers, the runtime ctx, and where each one is import
 
 The `eve` package's public surface is the `define*` helpers you author with, the `ctx` they receive at runtime, and the import path for each. The package's export map defines the full contract; anything not reachable through an exported subpath is internal.
 
+For changes to an existing application, follow [Prepare for 1.0](../guides/prepare-for-1-0).
+
 Identity comes from the filesystem, not a field you set. A tool at `agent/tools/get_weather.ts` is `get_weather`, and a connection at `agent/connections/linear.ts` is `linear`, so no definition carries a `name` or `id`.
 
 Most files import a helper and default-export the result:
@@ -32,18 +34,18 @@ export default defineTool({
 
 Install the packages for each integration entry you import. They are optional peers of eve, so other entries don't need them.
 
-| Entry                                      | Required integration packages                         |
-| ------------------------------------------ | ----------------------------------------------------- |
-| `eve/react`                                | `react` 19 (and its React typings in TypeScript apps) |
-| `eve/vue`                                  | `vue` 3.5 or later in v3                              |
-| `eve/svelte`                               | `svelte` 5                                            |
-| `eve/next`                                 | `next` 16 and `react` 19                              |
-| `eve/sveltekit`, `eve/tanstack`            | `vite` 8.3.1 or later in v8                           |
-| `eve/nuxt`                                 | `@nuxt/kit` 4 and `@nuxt/schema` 4                    |
-| Chat SDK, Linq, and Photon channels        | `chat` 4.42 or later in v4                            |
-| `eve/channels/linq`                        | Also `@linqapp/sdk` 0.47.1 or later in v0.47          |
-| `eve/sandbox/just-bash`                    | `just-bash` 3.6 or later in v3                        |
-| `@vercel/connect/eve` with eve connections | `@vercel/connect` 2.5.2 or later in v2                |
+| Entry                                                         | Required integration packages                         |
+| ------------------------------------------------------------- | ----------------------------------------------------- |
+| `eve/react`                                                   | `react` 19 (and its React typings in TypeScript apps) |
+| `eve/vue`                                                     | `vue` 3.5 or later in v3                              |
+| `eve/svelte`                                                  | `svelte` 5                                            |
+| `eve/next`                                                    | `next` 16 and `react` 19                              |
+| `eve/sveltekit`, `eve/tanstack`                               | `vite` 8.3.1 or later in v8                           |
+| `eve/nuxt`                                                    | `@nuxt/kit` 4 and `@nuxt/schema` 4                    |
+| Chat SDK, Linq, and Photon channels                           | `chat` 4.42 or later in v4                            |
+| `eve/channels/linq`                                           | Also `@linqapp/sdk` 0.47.1 or later in v0.47          |
+| `eve/sandbox/just-bash`, `eve/experimental/sandbox/just-bash` | `just-bash` 3.6 or later in v3                        |
+| `@vercel/connect/eve` with eve connections                    | `@vercel/connect` 2.5.2 or later in v2                |
 
 Connections with `experimental.events` require a static Connect auth provider with its events bridge.
 SDK-backed handles use the SDK classes installed in your app, not copies bundled with eve.
@@ -151,7 +153,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 
 | Import                                                                            | Holds                                                                                                             |
 | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `eve`                                                                             | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types                                           |
+| `eve`                                                                             | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types, `TokenUsage`                             |
 | `eve/tools`                                                                       | `defineTool`, `defineWorkflowTool`, `defineDynamic`, `disableTool`, tool types                                    |
 | `eve/tools/{bash,read_file,write_file,web_fetch,glob,grep}`                       | Individual reusable tool definitions                                                                              |
 | `eve/tools/approval`                                                              | Approval types and `auto`, `always`, `once`, `never`                                                              |
@@ -160,6 +162,8 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/tools/workflow`                                                              | Runtime-generated `workflow` tool factory                                                                         |
 | `eve/tools/sleep`                                                                 | Opt-in durable `sleep` tool                                                                                       |
 | `eve/tools/no_reply`                                                              | Opt-in `noReply` tool definition                                                                                  |
+| [`eve/workflow`](../tools/workflows#workflow-imports)                             | Durable `createHook`, `createWebhook`, `sleep`, `FatalError`, `RetryableError`, `getWorkflowMetadata`, hook types |
+| [`eve/workflow/api`](../tools/workflows#workflow-imports)                         | `start`, `getRun`, `resumeHook`, `WorkflowRun`, and `WorkflowRunStatus` for routes and steps                      |
 | `eve/connections`                                                                 | `defineMcpClientConnection`, `defineOpenAPIConnection`, `defineDynamic`                                           |
 | `eve/channels`                                                                    | `defineChannel`, `disableRoute`, route verbs, `isChannel`, channel metadata types                                 |
 | `eve/channels/eve`                                                                | `eveChannel`                                                                                                      |
@@ -180,9 +184,9 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | [`eve/sandbox/vercel`](../sandbox/vercel)                                         | `VercelSandbox` and Vercel environment, session, and mount types                                                  |
 | [`eve/sandbox/just-bash`](../sandbox/just-bash)                                   | `JustBashSandbox` and just-bash environment types                                                                 |
 | `eve/instrumentation`                                                             | `defineInstrumentation`, `disableInstrumentation`, `InstrumentationEvent<K>`, lifecycle provider types            |
-| `eve/instrumentation/otel`                                                        | `otel`, `otelIntegration`, `localTraces`, `agentRuns`, OpenTelemetry policy types                                 |
+| `eve/instrumentation/otel`                                                        | `otel`, `otelIntegration`, `localTraces`, `agentRuns`, OpenTelemetry policy, span processor, and exporter types   |
 | `eve/local-dev`                                                                   | `getLocalDevCapability`, `LocalDevCapability`                                                                     |
-| [`eve/models`](../guides/decide)                                                  | Automatic model selection with `auto`                                                                             |
+| [`eve/models`](../guides/decide)                                                  | Automatic model selection with `auto`, `EveLanguageModel`                                                         |
 | `eve/models/openai`                                                               | `openai`, `chatgpt`                                                                                               |
 | `eve/models/anthropic`                                                            | `anthropic`                                                                                                       |
 | [`eve/ai`](../guides/decide#decide-inside-a-tool)                                 | Standalone `decide`                                                                                               |
@@ -192,8 +196,8 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/evals/loaders`                                                               | `loadJson`, `loadYaml`                                                                                            |
 | `eve/react`, `eve/vue`, `eve/svelte`                                              | `useEveAgent`                                                                                                     |
 | `eve/next`, `eve/nuxt`, `eve/sveltekit`, `eve/tanstack`                           | framework bundler plugins                                                                                         |
-| [`eve/client`](../guides/client/overview)                                         | `Client`, `ClientSession`, health and agent-info schemas, response errors                                         |
-| [`eve/sessions`](../guides/client/messages#reusable-delivery-reads)               | `Delivery`, `DeliveryResult`, read options, `SessionReader`, authenticated `Session`, and `SessionNotActiveError` |
+| [`eve/client`](../guides/client/overview)                                         | `Client`, `ClientSession`, health and agent-info schemas, `EveError` and the typed client errors                  |
+| [`eve/sessions`](../guides/client/messages#reusable-delivery-reads)               | `Delivery`, `DeliveryResult`, read options, `SessionReader`, `Session`, `EveError`, and `SessionNotActiveError`   |
 | [`eve/events`](../concepts/sessions-runs-and-streaming#query-session-state)       | Event types, opaque `SessionView`, immutable observations, and query/fold functions                               |
 | [`eve/server`](../concepts/sessions-runs-and-streaming#read-a-session-in-process) | `sessions`, for reading session streams in process                                                                |
 
@@ -201,13 +205,23 @@ Exported types ship from the entry point that owns them, such as `ToolDefinition
 
 Types for reading sent messages and sessions live in `eve/sessions`; client factories and transport-specific types stay in `eve/client`. `SessionInfo` from `eve/context` is callback metadata, not a reader or an operable session. `ChannelContext` from `eve/channels` holds the session's `id` and `auth`, plus an optional `continuation` routing token that `alias()` can extend.
 
-`HistoryMessage` and the sandbox session, process, result, and method-option types are eve-owned, so their declarations don't change with your app's AI SDK peer version. Named judge, mock-model, approval, and disabled-marker types are public for reusable helpers and declaration emission.
+`HistoryMessage`, `EveLanguageModel`, `TokenUsage`, and the sandbox session, process, result, and method-option types are eve-owned. So are the `SpanProcessor`, `SpanProcessorOrName`, and `SpanExporter` types from `eve/instrumentation/otel`, and the Linq and Photon credential and webhook-verifier types. Their declarations don't change with your app's AI SDK, OpenTelemetry, or channel-adapter versions. Named judge, mock-model, approval, and disabled-marker types are public for reusable helpers and declaration emission.
 
-The `exports` field in eve's `package.json` lists every entry point. `eve/experimental/*` and `eve/internal/*` have no compatibility promise. The CLI setup wizard is not a public authoring API.
+## Stability policy
+
+The `exports` field in eve's `package.json` lists every entry point. `eve/experimental/*` and `eve/internal/*` have no compatibility promise. Neither do `experimental` fields in stable definitions, such as `defineAgent({ experimental })`, connection `experimental.events`, and `JustBashSandbox.environment({ experimental })`. The CLI setup wizard is not a public authoring API.
+
+Event union types name today's values. A release can add event types, outcomes, and request kinds under the [stream evolution rules](../concepts/sessions-runs-and-streaming#what-a-later-release-can-add) without a breaking change, so keep a default branch when you switch on them.
+
+Values eve passes into code you implement can also gain members in a minor release. Examples are a sandbox provider's `onSessionEnd()` `reason`, the provider context's `kind`, and `SandboxNetworkRule` variants. Handle unknown values with a default branch instead of switching exhaustively.
+
+`eve/channels/chat-sdk`, `eve/channels/linq`, and `eve/channels/photon` expose types from the `chat` package (Chat SDK v4) as part of their contract. A future breaking `chat` major can require a matching eve change.
 
 ## Direct provider models
 
-`openai(model?)` from `eve/models/openai` and `anthropic(model?)` from `eve/models/anthropic` return eve-owned model instances. They accept only an optional model ID; omit it for `gpt-6-luna-fast` and `claude-sonnet-5`, respectively.
+`openai(model?)` from `eve/models/openai` and `anthropic(model?)` from `eve/models/anthropic` return AI SDK language models that use eve's credentials, so you can also pass them to AI SDK functions such as `generateText`. They accept only an optional model ID; omit it for `gpt-6-luna-fast` and `claude-sonnet-5`, respectively.
+
+`EveLanguageModel`, exported from `eve` and `eve/models`, is the model type `agent.ts` accepts. Every AI SDK language model satisfies it.
 
 Use `/login` for local credentials, or set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. Local secret-store discovery is disabled in deployments; provision server credentials explicitly. See [Set the model](../agent-config#set-the-model) for an example.
 

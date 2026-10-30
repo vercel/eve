@@ -27,6 +27,8 @@ interface ClientSessionState {
   inbox?: string; // opaque; save and restore it unchanged
   sessionId: string;
   streamIndex: number;
+  /** Opaque; persist it and pass it back unchanged. eve may extend it. */
+  inbox?: string;
 }
 ```
 
@@ -41,16 +43,14 @@ Attach a fixed handle to the saved ID and restore its cursor:
 import type { ClientSessionState } from "eve/client";
 
 const saved = (await loadSessionState()) as ClientSessionState;
-const session = client.sessions.attach(saved.sessionId, {
-  streamIndex: saved.streamIndex,
-  inbox: saved.inbox,
-});
+const session = client.sessions.attach(saved.sessionId, saved);
 
 const response = await session.send("Now shorten it.");
 console.log((await response.result()).reply);
 ```
 
-`attach()` performs no request. Every later operation targets exactly
+Pass the whole saved state so its optional [`inbox`](./overview#faster-sends-with-inbox) value
+reaches later sends. `attach()` performs no request. Every later operation targets exactly
 `saved.sessionId` and never creates a replacement.
 
 `send()` returns the response to the message the server accepted. If the saved
@@ -62,14 +62,17 @@ the client.
 If a reconnect limit you set ends the stream before the turn finishes or pauses,
 `result()` throws instead of returning a partial result.
 
-## Waiting, completed, and reset sessions
+<a id="waiting-completed-and-reset-sessions" />
+
+## Waiting, completed, and ended sessions
 
 A session that hasn't ended (`session.ended`) accepts more messages through the
-same handle. An ended or reset session does not. Start a fresh conversation
+same handle. An ended session does not. Start a fresh conversation
 with another `client.sessions.create(firstTurn)` call.
 
 ```ts
-const reset = await session.reset({ reason: "Start over" });
+const ended = await session.end({ reason: "Start over" });
+await ended.result();
 const { session: fresh, delivery } = await client.sessions.create({ message: "Begin again." });
 ```
 
@@ -100,10 +103,7 @@ The shared `Client` holds the base URL, auth, headers, and redirect policy. Each
 `stream()` starts from the handle's cursor and advances it as you read:
 
 ```ts
-const session = client.sessions.attach(saved.sessionId, {
-  streamIndex: saved.streamIndex,
-  inbox: saved.inbox,
-});
+const session = client.sessions.attach(saved.sessionId, saved);
 
 for await (const event of session.stream()) {
   console.log(event.type);

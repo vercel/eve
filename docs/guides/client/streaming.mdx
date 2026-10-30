@@ -24,7 +24,7 @@ for await (const event of delivery.stream()) {
 
 The cancellation's `result()` resolves once eve applies the cancel, even as a no-op for a turn that already ended. An idle session that hasn't ended also accepts cancellation instead of returning `no_active_turn`. Keep reading the original message's `Delivery` to see its outcome.
 
-Between turns, `session.compact()` queues context compaction without sending model input. `session.clear()` removes the model's message history but keeps the session and its other saved resources. Await their results before you send another turn:
+Between turns, `session.compact()` queues context compaction without sending model input. `session.clear()` cancels a running turn and every working task, then removes the model's message history. It keeps the session and its other saved resources. Client `messages` and `transcriptOf()` then leave out everything before the clear. Await their results before you send another turn:
 
 ```ts
 const compaction = await session.compact();
@@ -37,7 +37,7 @@ const cleared = await session.clear();
 await cleared.result();
 ```
 
-`context.settled` reports whether summarization succeeded; a failed or empty summary keeps the previous history. `session.reset()` instead retires the session, and its `result()` resolves after the session is retired.
+`context.settled` reports whether summarization succeeded; a failed or empty summary keeps the previous history. `session.end()` instead retires the session, and its `result()` resolves after the session is retired.
 
 ## Aggregate a turn
 
@@ -168,11 +168,11 @@ Browser network failures also reconnect, both when opening a stream (`TypeError:
 
 If your consumer persists events, key on `event.meta.position`. It is stable across reconnects and rewinds, so an overlapping replay is safe to ingest twice. See [Positions](../../concepts/sessions-runs-and-streaming#positions).
 
-Set `streamReconnectPolicy: { reconnect: false }` when a relay or proxy owns the cursor and reconnection. The client makes one stream GET and returns when that connection ends, without stopping the server-side turn:
+Set `reconnect: false` when a relay or proxy owns the cursor and reconnection. The client makes one stream GET and returns when that connection ends, without stopping the server-side turn:
 
 ```ts
 const response = await session.send("Run the long operation.", {
-  streamReconnectPolicy: { reconnect: false },
+  reconnect: false,
 });
 
 for await (const event of response.stream()) {
@@ -180,7 +180,24 @@ for await (const event of response.stream()) {
 }
 ```
 
-The same option is available on manual attachments as `session.stream({ streamReconnectPolicy: { reconnect: false } })`.
+The same option is available on manual attachments as `session.stream({ reconnect: false })`.
+
+To tune connection-open retries, pass a `ReconnectOptions` object from `eve/client`:
+
+```ts
+const response = await session.send("Run the long operation.", {
+  reconnect: {
+    maxAttempts: 6,
+    baseDelayMs: 250,
+    maxDelayMs: 5_000,
+    retryableStatuses: [404, 409, 425, 500, 502, 503, 504],
+  },
+});
+```
+
+`maxAttempts` defaults to `12` for each connection open. It also bounds consecutive transport failures during a bounded read (`follow: false`). Following reads continue reconnecting until stopped. `baseDelayMs` and `maxDelayMs` tune retries when opening a connection; reconnects after an interrupted response body retain their default backoff.
+
+`retryableStatuses` replaces the default list (`404`, `409`, `425`, `500`, `502`, `503`, `504`) rather than extending it, so include any defaults you still want retried.
 
 ## Open a stream manually
 
@@ -246,6 +263,8 @@ Like `stream({ follow: false })`, the read fixes the stream's end when it opens,
 and `snapshot.session.streamIndex` is the line a live reader continues from.
 `snapshot()` always reads from line `0` and doesn't advance the originating
 `ClientSession`; use a bounded stream when you need only the unread suffix.
+The returned `session` is the handle's full `ClientSessionState`, including the
+opaque `inbox` value. Save it as is to restore the conversation later.
 
 ## Follow a subagent
 
@@ -308,7 +327,7 @@ try {
 
 Creating a store doesn't start any reads. `observe()` starts observation and returns a cleanup function that is safe to call more than once. Observation is reference-counted, so it stops after every caller cleans up. Streaming the root also starts following children, and framework bindings start observation on mount. While observation is active, admitted children keep refreshing even after `followWhile` closes the root stream. No call waits for the whole tree to catch up.
 
-`followAgents: true` recursively follows all eligible recorded children within fixed depth, admission, and request limits. A predicate such as `({ depth }) => depth === 1` selects only immediate children. See [child observations](../frontend/overview#returned-state) for limits, states, and cursor semantics. Each child conversation shows the child's whole session. Use the parent's call results, not the child's messages, as the outcome of a call.
+`followAgents: true` recursively follows all eligible recorded children within fixed depth, admission, and request limits. A predicate such as `({ depth }) => depth === 1` selects only immediate children. See [child agents](../frontend/use-eve-agent#child-agents) for limits, states, and cursor semantics. Each child conversation shows the child's whole session. Use the parent's call results, not the child's messages, as the outcome of a call.
 
 When the signed-in user or tenant changes, stop the old observation and create a new store. Token callbacks run again for each request without changing the observation key. For a cross-origin browser connection, expose `x-eve-observation-key` in the channel's CORS configuration alongside the stream version and tail headers.
 

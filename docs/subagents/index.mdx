@@ -65,10 +65,10 @@ Local `eve dev` also adds the bundled `self-modification__agent` subagent. Produ
 
 ### Vercel workspace peers
 
-In a Vercel agent workspace, `defineWorkspaceAgent` lets one member call another as a subagent. Add a file under the caller's `agent/subagents/`. The filename is the tool name, and `name` is the peer's directory under `agents/`:
+In a Vercel agent workspace, `defineWorkspaceAgent` from `eve/experimental/workspace` lets one member call another as a subagent. Add a file under the caller's `agent/subagents/`. The filename is the tool name, and `name` is the peer's directory under `agents/`:
 
 ```ts title="agents/foreman/agent/subagents/research.ts"
-import { defineWorkspaceAgent } from "eve";
+import { defineWorkspaceAgent } from "eve/experimental/workspace";
 
 export default defineWorkspaceAgent({
   name: "research", // must match a workspace member exactly
@@ -79,7 +79,7 @@ export default defineWorkspaceAgent({
 Omit `transport` to use the built-in one. Local `vercel dev` routes calls without credentials, and on Vercel, calls reach the peer's `/eve/<name>` mount authenticated with the caller's Vercel OIDC token. Elsewhere, set a transport:
 
 ```ts title="agents/foreman/agent/subagents/research.ts"
-import { defineWorkspaceAgent } from "eve";
+import { defineWorkspaceAgent } from "eve/experimental/workspace";
 import { bearer } from "eve/agents/auth";
 
 export default defineWorkspaceAgent({
@@ -92,6 +92,8 @@ export default defineWorkspaceAgent({
 ```
 
 An explicit transport replaces the default completely, and the peer's channel authentication must accept its credentials. Set `forwardPrincipal: true` only when the peer trusts the caller to pass along the user's identity; see [Remote agents](./guides/remote-agents#forward-the-callers-identity).
+
+`defineWorkspaceAgent` and its `WorkspaceAgentDefinition` and `WorkspaceAgentTransport` types are experimental and have no compatibility promise. The `agents/<name>/` workspace layout and the `eve/vercel` integration are stable.
 
 To start every member locally, run `vercel dev --local` with a root `vercel.ts` composed by `withEve`. `eve dev` starts only the selected agent, so use an explicit transport to reach a peer you run separately.
 

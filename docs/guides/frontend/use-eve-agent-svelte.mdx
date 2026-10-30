@@ -45,21 +45,21 @@ Call the binding once for a conversation and read its reactive getters directly.
 
 The state fields are reactive getters; the commands are ordinary methods:
 
-| Property                                                                                              | Svelte shape                             |
-| ----------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `messages`, `agents`                                                                                  | Reactive getters for the snapshot fields |
-| `view`                                                                                                | `SessionView`                            |
-| `status`                                                                                              | `UseEveAgentStatus`                      |
-| `error`                                                                                               | `Error \| undefined`                     |
-| `events`                                                                                              | `readonly SessionStreamEvent[]`          |
-| `session`                                                                                             | `ClientSessionState \| undefined`        |
-| `send`, `respond`, `prewarm`, `resume`, `follow`, `cancel`, `clear`, `compact`, `reset`, `newSession` | Methods                                  |
+| Property                                                                                            | Svelte shape                             |
+| --------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `messages`, `agents`                                                                                | Reactive getters for the snapshot fields |
+| `view`                                                                                              | `SessionView`                            |
+| `status`                                                                                            | `UseEveAgentStatus`                      |
+| `error`                                                                                             | `Error \| undefined`                     |
+| `events`                                                                                            | `readonly SessionStreamEvent[]`          |
+| `session`                                                                                           | `ClientSessionState \| undefined`        |
+| `send`, `respond`, `prewarm`, `resume`, `follow`, `cancel`, `clear`, `compact`, `end`, `newSession` | Methods                                  |
 
-Read the getters directly in templates, `$derived`, or `$effect`. The [shared returned-state reference](./overview#returned-state) describes what each value and command does.
+Read the getters directly in templates, `$derived`, or `$effect`. The [`useEveAgent` reference](./use-eve-agent#returned-state) describes what each value and command does.
 
 ## Send a message
 
-Call `agent.send(text)` for text or pass content parts for attachments. The API and streaming behavior match the [shared sending guide](./overview#sending-and-streaming). `send()` and `respond()` resolve with a `Delivery` receipt when the server accepts the request, before the agent finishes. Read the receipt's `sessionId` and `deliveryId`, or use its [`stream()` and `result()` reads](../client/messages#reusable-delivery-reads).
+Call `agent.send(text)` for text or pass content parts for attachments. The API and streaming behavior match the [sending reference](./use-eve-agent#sending). `send()` and `respond()` resolve with a `Delivery` receipt when the server accepts the request, before the agent finishes. Read the receipt's `sessionId` and `deliveryId`, or use its [`stream()` and `result()` reads](../client/messages#reusable-delivery-reads).
 
 ## Human-in-the-loop prompts
 
@@ -90,15 +90,17 @@ Read requests from the shared `view` and answer them with `respond()`. A request
 
 See [Human-in-the-loop prompts](./overview#human-in-the-loop-prompts) for request semantics and rendering guidance.
 
-## Cancel, reset, and resume
+<a id="cancel-reset-and-resume" />
 
-Pass `prewarm: true` to create the session on mount and after `newSession()`. Omit it to create the session on the first send. The binding keeps the session stream open across turns. See [Prewarm the session](./overview#prewarm-the-session) for creation and failure behavior, and [Keep the stream open](./overview#keep-the-stream-open) for connection behavior.
+## Cancel, end, and resume
+
+Pass `prewarm: true` to create the session on mount and after `newSession()`. Omit it to create the session on the first send. The binding keeps the session stream open across turns. See [Prewarming](./use-eve-agent#prewarming) for creation and failure behavior, and [Stream lifetime](./use-eve-agent#stream-lifetime) for connection behavior.
 
 Call `agent.cancel()` to stop the turn on the server; the binding stays attached until the turn ends. Offer it while `activeTurn(agent.view)` from `eve/events` returns a turn, because `agent.status` reports outstanding work and is `"idle"` while a turn waits only on a person. Destroying the component only disconnects its local stream, and the turn keeps running on the server.
 
-Call `agent.newSession()` to clear local state and start a new session; `agent.reset()` instead ends the session on the server.
+Call `agent.newSession()` to clear local state and start a new session; `agent.end()` instead ends the session on the server.
 
-Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow a turn that is still running. During catch-up, `agent.status` is `"resuming"`. Keep the restored conversation visible, and disable submission until it changes to `"idle"` or `"busy"`. Failures appear in the separate `error` field. Call `agent.resume()` directly to control restoration imperatively. See [Resumable sessions](./overview#resumable-sessions) for the persistence contract and [Sending and streaming](./overview#sending-and-streaming) for cancellation behavior.
+Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow a turn that is still running. During catch-up, `agent.status` is `"resuming"`. Keep the restored conversation visible, and disable submission until it changes to `"idle"` or `"busy"`. Failures appear in the separate `error` field. Call `agent.resume()` directly to control restoration imperatively. See [Resume a saved session](./use-eve-agent#resume-a-saved-session) for the persistence contract and [Cancelling](./use-eve-agent#cancelling) for cancellation behavior.
 
 ## Custom host and credentials
 
@@ -110,7 +112,7 @@ Pass `clientContext` to `send()` or `respond()`, or use `prepareSend` to add con
 
 ## Lifecycle callbacks
 
-Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` to react to events, errors, finished turns, and session changes. See [Lifecycle callbacks](./overview#lifecycle-callbacks) for when each one fires and how optimistic messages behave.
+Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` to react to events, errors, finished turns, and session changes. See [Lifecycle callbacks](./use-eve-agent#lifecycle-callbacks) for when each one fires and how optimistic messages behave.
 
 ## Derive your own state
 

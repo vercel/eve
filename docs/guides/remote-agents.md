@@ -18,15 +18,15 @@ export default defineRemoteAgent({
 
 `defineRemoteAgent` accepts:
 
-| Parameter          | Type                    | Required | Default           | Description                                                                                                                                                                         |
-| ------------------ | ----------------------- | -------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `url`              | `string`                | Yes      | n/a               | Base URL of the remote eve deployment. To read it at runtime, see [Runtime URLs](#runtime-urls).                                                                                    |
-| `description`      | `string`                | Yes      | n/a               | What the parent model reads to decide when to delegate.                                                                                                                             |
-| `auth`             | `OutboundAuthFn`        | No       | none              | Outbound auth from `eve/agents/auth`.                                                                                                                                               |
-| `forwardPrincipal` | `boolean`               | No       | `false`           | Send the calling turn's user identity to the remote deployment. See [Forwarding the caller identity](#forwarding-the-caller-identity).                                              |
-| `headers`          | `HeadersValue`          | No       | none              | Request headers, static or resolved for each request.                                                                                                                               |
-| `path`             | `string`                | No       | `/eve/v1/session` | Route appended to `url` to create the remote session.                                                                                                                               |
-| `tool`             | `boolean \| "deferred"` | No       | `true`            | `false` lets only authored workflow tools call it, through `ctx.agent()`. `"deferred"` keeps it out of the tool list but findable with `eve__search` and callable with `eve__tool`. |
+| Parameter          | Type                                          | Required | Default           | Description                                                                                                                                                                         |
+| ------------------ | --------------------------------------------- | -------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`              | `string \| (() => string \| Promise<string>)` | Yes      | n/a               | Base URL of the remote eve deployment. Pass a function to [read it at runtime](#runtime-urls).                                                                                      |
+| `description`      | `string`                                      | Yes      | n/a               | What the parent model reads to decide when to delegate.                                                                                                                             |
+| `auth`             | `OutboundAuthFn`                              | No       | none              | Outbound auth from `eve/agents/auth`.                                                                                                                                               |
+| `forwardPrincipal` | `boolean`                                     | No       | `false`           | Send the calling turn's user identity to the remote deployment. See [Forwarding the caller identity](#forwarding-the-caller-identity).                                              |
+| `headers`          | `HeadersValue`                                | No       | none              | Request headers, static or resolved for each request.                                                                                                                               |
+| `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` to create the remote session.                                                                                                                               |
+| `tool`             | `boolean \| "deferred"`                       | No       | `true`            | `false` lets only authored workflow tools call it, through `ctx.agent()`. `"deferred"` keeps it out of the tool list but findable with `eve__search` and callable with `eve__tool`. |
 
 ## Calling a remote agent
 
@@ -128,7 +128,7 @@ export default defineDynamic((ctx) => {
 
 A child keeps the parent context and memo results that chose its configuration:
 
-- Later messages, answers, cancellation, reset, and stream reads rebuild the credentials from that original context, not from a newer caller.
+- Later messages, answers, cancellation, ending the session, and stream reads rebuild the credentials from that original context, not from a newer caller.
 - If a memo result is missing, or the child's name or URL changed, the request fails before eve sends credentials.
 - `ctx.messages()` is unavailable during this rebuild, including when eve opens the child, so keep decisions based on the conversation inside a memo.
 
@@ -136,20 +136,18 @@ Each message still runs as its own caller, as described in [Forwarding the calle
 
 ## Runtime URLs
 
-eve reads a static `url` at build time. When an environment variable supplies the URL only at runtime, compute it inside `defineDynamic`:
+eve reads a string `url` at build time. When an environment variable supplies the URL only at runtime, pass a function. It returns a string or a promise, and eve calls it when it resolves the runtime agent graph:
 
 ```ts title="agent/subagents/weather.ts"
-import { defineDynamic, defineRemoteAgent } from "eve";
+import { defineRemoteAgent } from "eve";
 
-export default defineDynamic(() =>
-  defineRemoteAgent({
-    url: process.env.WEATHER_AGENT_URL ?? "https://weather-agent.example.com",
-    description: "Answers weather, temperature, forecast, wind, rain, and snow questions.",
-  }),
-);
+export default defineRemoteAgent({
+  url: () => process.env.WEATHER_AGENT_URL ?? "https://weather-agent.example.com",
+  description: "Answers weather, temperature, forecast, wind, rain, and snow questions.",
+});
 ```
 
-`url` must be a non-empty string.
+The resolved `url` must be a non-empty string. To choose which agent to offer, or whether to offer one, from the current session, use [`defineDynamic`](#dynamic-remote-agents).
 
 ## Trace propagation
 
@@ -194,9 +192,16 @@ The callback URL must use `http` or `https` and reach the parent at a public add
 
 A callback URL carries only the message's callback capability, never the parent's deployment protection bypass secret. To let callbacks reach a parent behind Vercel Deployment Protection, configure Trusted Sources on the parent to admit the remote's project and environment.
 
-On the remote deployment, set `EVE_CALLBACK_TRUSTED_ORIGINS` to a comma-separated list of exact parent HTTPS origins, such as `https://parent.example.com`. The remote attaches its own short-lived Vercel OIDC token only to those origins and to its own deployment origins. Other ports and subdomains aren't trusted. Keep the remote's Vercel OIDC token available at runtime. Callbacks don't follow redirects.
+On the remote deployment, set `EVE_CALLBACK_TRUSTED_ORIGINS` to a comma-separated list of parent HTTPS origins, such as `https://parent.example.com`. Each entry is an exact origin, or starts with a `*.` label as described below. The remote attaches its own short-lived Vercel OIDC token only to those origins and to its own deployment origins. An exact entry doesn't trust other ports or subdomains. Keep the remote's Vercel OIDC token available at runtime. Callbacks don't follow redirects.
 
-Each origin you add receives a bearer credential for the remote project's identity, not a token scoped to the callback. Until the token expires, that parent can replay it against any service, deployment protection rule, or federated cloud role that accepts the identity. List only parents you trust to act as the remote project.
+Outside production, a parent's callback URL uses its generated deployment URL, which changes with every deployment. If you serve those deployments under a domain you control, trust them with a leading `*.` label, such as `https://*.preview.example.com`:
+
+- The wildcard matches exactly one label: `parent-abc123.preview.example.com`, but not `preview.example.com` or `a.b.preview.example.com`.
+- The port must still match.
+- At least two labels must follow the wildcard, and an entry with a trailing dot is rejected.
+- eve rejects `https://*.vercel.app`, because every Vercel deployment shares that domain. It doesn't detect other shared domains, such as `*.github.io`.
+
+Each origin you add receives a bearer credential for the remote project's identity, not a token scoped to the callback. Until the token expires, that parent can replay it against any service, deployment protection rule, or federated cloud role that accepts the identity. List only parents you trust to act as the remote project, and use a wildcard only when you control every host under it.
 
 When either side isn't on Vercel, make the parent's callback route reachable through your hosting policy. eve never forwards a deployment-wide credential to the remote.
 
@@ -204,7 +209,7 @@ Clients follow a remote child through the parent. [`session.agent(opened).stream
 
 Cancelling the parent turn, or the task with `eve__task_cancel`, cancels the remote child's current turn. The child reports `turn.settled` with `outcome: "cancelled"` on its own stream. Each cancel resolves `headers` and `auth` again and uses the standard eve cancel route on `url`, even when `path` is customized. If the remote is older or unreachable, eve logs it, and the parent's cancel still succeeds.
 
-When the workflow run that opened a remote child finishes, eve sends an authenticated `POST /eve/v1/session/:childSessionId/reset`, which ends the remote session and its descendants. An agent task's run finishes when the parent session ends. The request uses freshly resolved `headers` and `auth`. eve logs failures, so an unreachable remote can't block the parent from finishing.
+When the workflow run that opened a remote child finishes, eve sends an authenticated request that ends the remote session and its descendants. An agent task's run finishes when the parent session ends. The request uses freshly resolved `headers` and `auth`. eve logs failures, so an unreachable remote can't block the parent from finishing.
 
 The parent names its remote agent protocol version when it creates the child, and the remote answers with the version it serves. eve serves protocols 2 and 3:
 

@@ -575,7 +575,13 @@ function prune(view: MutableView, keep: FoldOptions["keep"]): void {
     pinned.add(`parts:${partId}`);
   const retained = (family: Family, id: string) => {
     if (pinned.has(`${tableOf(family)}:${id}`) || keep?.(tableOf(family), id) === true) return true;
-    const turnId = family === "part" ? undefined : turnOf(view, { family, id });
+    // A settled delivery no longer belongs to its turn, but it's still the turn's input.
+    const turnId =
+      family === "part"
+        ? undefined
+        : family === "delivery"
+          ? view.deliveries[id]?.turnId
+          : turnOf(view, { family, id });
     return turnId !== undefined && turns.has(turnId);
   };
   const dropWhere = <TRow>(

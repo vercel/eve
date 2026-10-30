@@ -55,7 +55,7 @@ The invocation's `status` is one of:
 
 | `status`                 | What to do                                                                                                                                                                                  |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `working`                | Keep polling.                                                                                                                                                                               |
+| `working`                | Keep polling. The optional `statusMessage` says what the agent is doing, such as a running tool's [activity label](/docs/tools#label-tool-activity) or its name.                            |
 | `input_required`         | Show each entry in `interactions`, keyed by `interactionId`. Send all the answers in one `agent_update`, one `{ interactionId, optionId?, text? }` per entry. It returns the current state. |
 | `authorization_required` | Show each sign-in in `interactions`: its `signIn` URL, user code, or instructions. The invocation resumes on its own after the sign-in; keep polling.                                       |
 | `completed`              | Read the optional `result`, the final assistant message. The turn and any [tasks](/docs/tools/workflows#run-calls-as-tasks-task) it started have finished.                                  |

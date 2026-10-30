@@ -83,9 +83,10 @@ continues, deploys, and returns one tool result.
   step. The workflow body replays and must stay deterministic, so put side effects, clocks,
   randomness, `process.env`, and Node.js APIs in steps. Keep values you need after a wait in local
   variables in the body.
-- Import `createHook`, `createWebhook`, `sleep`, and `FatalError` from `workflow` in the body. Call
-  `start`, `getRun`, and `resumeHook` from `workflow/api` in steps. Your app does not install the
-  SDK; for types, new projects list `eve/workflow-modules` in the tsconfig `types`.
+- Import durable primitives such as `createHook`, `sleep`, and `FatalError` from `eve/workflow` in
+  the body. Call `start`, `getRun`, and `resumeHook` from `eve/workflow/api` in routes or steps, not
+  in the body. Both use eve's bundled Workflow SDK, so your app needs no `workflow` dependency. See
+  [Workflow imports](#workflow-imports).
 - The tool's input must be a JSON object.
 - Workflow bodies are for static tools under `agent/tools/`, not tools a `defineDynamic` function
   returns. `"use workflow"` in `defineTool`, a bare tool object, a channel handler, or a schedule
@@ -110,6 +111,32 @@ serializable values it needs. Call `getSandbox`, `getToken`, `requireAuth`, and 
 the workflow body throws when it calls them. Ordinary tools, channel handlers, and schedule handlers
 don't receive `agent`, `agents`, or `ask`. Import `WorkflowStepToolContext` from `eve/tools` to type
 step helpers.
+
+### Workflow imports
+
+Import durable primitives from `eve/workflow`, and run and hook operations from `eve/workflow/api`:
+
+```ts
+import { createHook, sleep } from "eve/workflow";
+import { resumeHook } from "eve/workflow/api";
+```
+
+| Export                                 | Entry              | What it does                                                                                                                                                                             |
+| -------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createHook<T>({ token?, metadata? })` | `eve/workflow`     | Returns a `WorkflowHook<T>`. Await it for the next payload, or iterate it with `for await`. `metadata` is JSON stored with the hook.                                                     |
+| `createWebhook({ respondWith? })`      | `eve/workflow`     | Returns a `WorkflowWebhook` whose `url` resumes it with the incoming `Request`. With `respondWith: "manual"`, answer each `WorkflowWebhookRequest` with `request.respondWith(response)`. |
+| `sleep(duration)`                      | `eve/workflow`     | Waits for a duration such as `"1h"` or a number of milliseconds, or until a `Date`.                                                                                                      |
+| `getWorkflowMetadata()`                | `eve/workflow`     | Returns the run's `workflowName`, `workflowRunId`, `workflowStartedAt`, and `url`.                                                                                                       |
+| `FatalError`, `RetryableError`         | `eve/workflow`     | Throw `FatalError` to fail without a retry. Throw `RetryableError`, with an optional `{ retryAfter }`, to retry a step.                                                                  |
+| `start(workflow, args)`                | `eve/workflow/api` | Starts a `"use workflow"` function on the agent's own workflow queue and deployment. It takes no options; omit `args` when the function takes none.                                      |
+| `getRun(runId)`                        | `eve/workflow/api` | Returns a `WorkflowRun<T>` with `runId`, `status`, `returnValue`, and `cancel()`. `start` returns the same type.                                                                         |
+| `resumeHook(token, payload)`           | `eve/workflow/api` | Sends a payload to the hook with that token.                                                                                                                                             |
+
+A hook's `token` resumes it. Pass a fixed `token` to `createHook` when a route must find the hook later. `await hook.getConflict()` registers the hook before you hand out its token, and resolves to the run that already holds the token, or `null`. Call `dispose()`, or declare the hook with `using`, to release the token.
+
+Import `WorkflowHook`, `WorkflowHookOptions`, `WorkflowWebhook`, `WorkflowWebhookOptions`, `WorkflowWebhookRequest`, and `WorkflowMetadata` from `eve/workflow` for explicit types.
+
+Only these exports are public. A bare `workflow` or `workflow/*` import in an application module fails the build with an error that names these entries.
 
 ## Wait for the result
 
@@ -676,7 +703,7 @@ stays out of the model's history, unless it becomes the final output.
 
 ```ts title="agent/tools/remind_with_progress.ts"
 import { defineWorkflowTool } from "eve/tools";
-import { sleep } from "workflow";
+import { sleep } from "eve/workflow";
 import { z } from "zod";
 
 export default defineWorkflowTool({
@@ -742,7 +769,7 @@ After a cancel, eve discards the result. The provided `sleep` tool races its tim
 signal:
 
 ```ts
-import { sleep } from "workflow";
+import { sleep } from "eve/workflow";
 
 async execute(input, ctx) {
   "use workflow";
@@ -885,7 +912,7 @@ withdraws the question.
 
 ```ts title="agent/tools/render_video.ts"
 import { defineWorkflowTool } from "eve/tools";
-import { createWebhook, FatalError } from "workflow";
+import { createWebhook, FatalError } from "eve/workflow";
 import { z } from "zod";
 import { submitRender } from "../lib/render";
 

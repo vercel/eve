@@ -27,14 +27,21 @@ The hook's name is its path without the extension: `agent/hooks/audit.ts` is `"a
 
 The `events` map keys each handler by event type, and `*` matches every event. Any event in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming) works, such as `session.started`, `turn.settled`, `content.completed`, and `call.settled`. Progress events (`content.delta`, `call.input`, and `call.progress`) reach only handlers keyed on their exact type, never `*`.
 
-Handlers can call external services and cancel the running turn, but can't add text to the model's context. To add model context at runtime, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+Handlers can call external services, cancel the running turn, and [continue a finished turn](#continue-a-turn-from-a-hook) with a new message. They can't add text to the model's context. To add model context at runtime, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
 ## Hook structure and context
 
-Every handler receives a `HookContext`, which includes the shared [session context](./session-context) helpers:
+Every handler receives a `HookContext`, which includes the shared [session context](./session-context) helpers. `HookContext<K>` is keyed by the handler's event key. Only `turn.settled` and `*` handlers get `continue`, so type a helper that calls it as `HookContext<"turn.settled">`:
 
 ```ts
-interface HookContext extends SessionContext {
+type HookContext<K extends HookEventKey = HookEventKey> = HookBaseContext &
+  (K extends "turn.settled" | "*" ? HookContinue : {});
+
+interface HookContinue {
+  continue(message: MessageContent, options?: HookContinueOptions): HookContinueResult;
+}
+
+interface HookBaseContext extends SessionContext {
   readonly agent: { readonly name: string; readonly nodeId?: string };
   readonly channel: { readonly kind?: string; readonly continuationToken?: string };
   /** Where the event sits on the stream: its line, and its index in that line. */
@@ -210,7 +217,7 @@ Rules for `ctx.cancel()`:
 - Repeated calls cancel that turn once and never a later turn.
 - `ctx.compact` and `ctx.once` aren't available in hooks.
 
-A plain-text answer to a pending question, such as one from `ask_question`, is recorded as `delivery.consumed` before the question receives it. Calling `ctx.cancel()` from that event's hook cancels the turn: the question ends as `interrupted`, and the waiting tool call never gets the text. In the same way, `ctx.cancel()` from a hook for a workflow tool's `call.progress` cancels the turn, and the run's result never reaches the model.
+A plain-text answer to a pending question, such as one from `ask_question`, is recorded as `delivery.consumed` before the question receives it. Only the turn's own sender can answer by text; anyone else's text waits and runs as its own turn. The answer updates the claims on `ctx.session.auth.current` for that event's hooks and the rest of the turn, as a follow-up message does. Calling `ctx.cancel()` from that event's hook cancels the turn: the question ends as `interrupted`, and the waiting tool call never gets the text. In the same way, `ctx.cancel()` from a hook for a workflow tool's `call.progress` cancels the turn, and the run's result never reaches the model.
 
 ## Scope side effects to a channel
 
@@ -255,6 +262,43 @@ export default defineHook({
 
 Use `isChannel` the same way to get typed channel metadata in dynamic functions or instrumentation; see [OpenTelemetry runtime context](../observability/otel#add-runtime-context).
 
+## Continue a turn from a hook
+
+Call `ctx.continue(message, options?)` from a `turn.settled` handler to start the session's next turn. This hook keeps the agent working until the tests pass, for at most ten more turns:
+
+```ts title="agent/hooks/until-green.ts"
+import { defineState } from "eve/context";
+import { defineHook } from "eve/hooks";
+
+const attempts = defineState("until-green.attempts", () => 0);
+
+export default defineHook({
+  events: {
+    async "turn.settled"(event, ctx) {
+      if (event.data.outcome !== "completed") return;
+      const sandbox = await ctx.getSandbox();
+      const test = await sandbox.run({ command: "pnpm test --reporter=dot" });
+      if (test.exitCode === 0 || attempts.get() >= 10) {
+        attempts.update(() => 0);
+        return;
+      }
+      attempts.update((n) => n + 1);
+      ctx.continue(
+        `Tests still fail. Fix them without editing test files.\n\n${test.stdout.slice(-2000)}`,
+      );
+    },
+  },
+});
+```
+
+Only `turn.settled` and `*` handlers receive `ctx.continue`. The message is [`MessageContent`](./client/messages), and `options` takes `context` and `auth`, as `session.send()` does. Without `auth`, the continuation names no sender and the turn runs as the session's current identity.
+
+The continuation waits until the session is idle, then starts an ordinary turn. It's dropped if anything else starts a turn first, such as a person's message, or if the session is cancelled, cleared, or ended, so a person can always stop a loop. Its `delivery.admitted` records `source: { channel, hook }`, and a note in the turn's history tells the model no person wrote it. Like other hook effects, a continuation is lost if the step that settled the turn is interrupted before it's saved. Bound loops yourself, as the example does.
+
+A turn can be continued when it completed, or when the same hook cancelled it, so a hook can `ctx.cancel()` the agent mid-turn and continue with a correction. When several hooks continue the same turn, their messages share the next turn.
+
+`ctx.continue()` returns `{ queued: true }`, or `{ queued: false, reason }` when it can't continue the turn: `not-completed`, `already-queued`, `auth-conflict` (another hook's continuation acts for a different sender), or `not-settled` (a `*` handler on another event).
+
 ## Subagent isolation
 
 A subagent can have its own `agent/hooks/` directory. Its hooks run only for the subagent's turns and see only its context. Parent hooks don't run for subagent turns.
@@ -268,12 +312,13 @@ While the parent's turn waits on that child, the relayed request makes it wait f
 
 ## Hook vs tool vs provider
 
-| Need                                            | Use                                       |
-| ----------------------------------------------- | ----------------------------------------- |
-| Watch runtime events (audit, metrics, alerting) | `events.<type>` (or a channel handler)    |
-| Give the model structured input on demand       | a tool                                    |
-| Add model context at runtime                    | `defineDynamic` with `defineInstructions` |
-| Subscribe to platform-specific events           | a channel handler                         |
+| Need                                            | Use                                            |
+| ----------------------------------------------- | ---------------------------------------------- |
+| Watch runtime events (audit, metrics, alerting) | `events.<type>` (or a channel handler)         |
+| Start the next turn after one finishes          | `ctx.continue()` from `events["turn.settled"]` |
+| Give the model structured input on demand       | a tool                                         |
+| Add model context at runtime                    | `defineDynamic` with `defineInstructions`      |
+| Subscribe to platform-specific events           | a channel handler                              |
 
 Hooks and channel event handlers have the same shape. When both handle an event, both run.
 

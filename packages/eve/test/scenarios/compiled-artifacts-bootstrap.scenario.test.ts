@@ -44,7 +44,10 @@ describe("writeCompiledArtifactsFiles", () => {
     });
     const outDir = join(appRoot, ".workflow-build");
 
-    await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
 
     const compileResult = await compileAgent({
@@ -90,7 +93,10 @@ describe("writeCompiledArtifactsFiles", () => {
     });
     const outDir = join(appRoot, ".workflow-build");
 
-    await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     await mkdir(join(agentRoot, "instrumentation"), { recursive: true });
     await writeFile(
@@ -152,7 +158,12 @@ describe("writeCompiledArtifactsFiles", () => {
 
     await writeFile(
       join(agentRoot, "agent.ts"),
-      ["export default {", '  model: "openai/gpt-5.4",', "};", ""].join("\n"),
+      [
+        "import { defineAgent } from 'eve';\nexport default defineAgent({",
+        '  model: "openai/gpt-5.4",',
+        "});",
+        "",
+      ].join("\n"),
     );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     await mkdir(join(agentRoot, "instrumentation"), { recursive: true });
@@ -248,7 +259,12 @@ describe("writeCompiledArtifactsFiles", () => {
     const outDir = join(appRoot, ".workflow-build");
     await writeFile(
       join(agentRoot, "agent.ts"),
-      ["export default {", '  model: "openai/gpt-5.4",', "};", ""].join("\n"),
+      [
+        "import { defineAgent } from 'eve';\nexport default defineAgent({",
+        '  model: "openai/gpt-5.4",',
+        "});",
+        "",
+      ].join("\n"),
     );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
 
@@ -276,7 +292,10 @@ describe("writeCompiledArtifactsFiles", () => {
     );
     const outDir = join(appRoot, ".workflow-build");
 
-    await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     await mkdir(join(agentRoot, "instrumentation"), { recursive: true });
     await writeFile(
@@ -313,7 +332,10 @@ describe("writeCompiledArtifactsFiles", () => {
     await mkdir(join(agentRoot, "skills", "research", "references"), {
       recursive: true,
     });
-    await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     await writeFile(
       join(agentRoot, "skills", "research", "SKILL.md"),

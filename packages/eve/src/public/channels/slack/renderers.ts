@@ -1,9 +1,13 @@
+import type { Interaction } from "#channel/interaction-prompts.js";
 import type { TaskCard } from "#channel/task-card.js";
+import type { SessionView } from "#protocol/session-projection/session-view.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 import { removedEventKeyMessage } from "#public/definitions/removed-event-keys.js";
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
 import type {
+  SlackApprovalChannel,
   SlackAuthorizationEventContext,
   SlackChannelInternalEvents,
   SlackContext,
@@ -23,6 +27,7 @@ const SLACK_RENDERED_EVENTS = [
   "interaction.settled",
   "model.settled",
   "model.started",
+  "response.admitted",
   "response.settled",
   "session.ended",
   "task.ended",
@@ -67,10 +72,48 @@ export type SlackRendererEvents = {
   ) => void | Promise<void>;
 };
 
-/** The message eve posts for a turn's tasks: Block Kit blocks and notification text. */
-export interface SlackTaskCard {
+/**
+ * One Slack message a renderer hook returns, such as a task card or an input request's controls:
+ * Block Kit blocks and notification text.
+ */
+export interface SlackCardMessage {
   readonly blocks: readonly BlockKitBlock[];
   readonly text: string;
+}
+
+/** One input request as eve is about to post or update it. */
+export interface SlackInteractionCard {
+  /**
+   * The request, read from the session: `status`, `outcome`, `call` (with `input`), and `answer`.
+   * Once settled, `answer` is the answer that decided it. While open, it is the latest admitted
+   * answer, if any; an answer still being checked, or one that was refused, doesn't count.
+   */
+  readonly interaction: Interaction;
+  /**
+   * Where eve posts it, as `approvalChannel` decided. In a code channel, `"thread"` means the code
+   * channel itself.
+   */
+  readonly destination: SlackApprovalChannel;
+  /**
+   * Who reads the message. A direct message is always `private`; a thread request has the
+   * thread's audience. Same meaning as `TaskCard.audience`.
+   */
+  readonly audience: ChannelAudience;
+  /** The Slack user whose answer stands or decided the request, when known. */
+  readonly answeredBy?: string;
+  /** Session snapshot, for the `eve/events` selectors. */
+  readonly view: SessionView;
+}
+
+/** The messages of one input request. */
+export interface SlackInteractionCardParts {
+  /** The message holding eve's controls. Slack echoes it back on every click, so keep it small. */
+  readonly controls: SlackCardMessage;
+  /**
+   * Posted as a separate message before the controls, for any kind of request. Requests asked
+   * together share one details message, which eve deletes once its last open request settles.
+   */
+  readonly details?: SlackCardMessage;
 }
 
 /**
@@ -101,8 +144,21 @@ export interface SlackRenderer {
    */
   readonly taskCard?: (
     card: TaskCard,
-    next: (card: TaskCard) => SlackTaskCard | null,
-  ) => SlackTaskCard | null;
+    next: (card: TaskCard) => SlackCardMessage | null,
+  ) => SlackCardMessage | null;
+  /**
+   * Returns the messages for one approval, question, or budget prompt. Runs when the request
+   * opens, and again when an answer is admitted or refused and when it settles. Pure and
+   * synchronous: eve keeps routing, batching, action IDs, and posting. While the request is open
+   * and unanswered, `controls` must hold exactly the `eve_input:` controls `next` renders, each
+   * once; once it is answered or settled, it must hold none. `details` never holds them, and each
+   * message holds at most 50 blocks. A result that breaks these rules, or a hook that throws,
+   * falls back to eve's default for that request.
+   */
+  readonly interactionCard?: (
+    card: SlackInteractionCard,
+    next: (card: SlackInteractionCard) => SlackInteractionCardParts,
+  ) => SlackInteractionCardParts;
 }
 
 /** Types a Slack renderer. */
@@ -121,7 +177,7 @@ export function defineSlackRenderer(renderer: SlackRenderer): SlackRenderer {
 export interface SlackRenderChain {
   readonly events: SlackChannelInternalEvents;
   readonly received: (message: SlackMessage, channel: SlackContext) => Promise<void>;
-  readonly taskCard: (card: TaskCard) => SlackTaskCard | null;
+  readonly taskCard: (card: TaskCard) => SlackCardMessage | null;
 }
 
 type AnyHandler = (...args: unknown[]) => void | Promise<void>;
@@ -239,12 +295,29 @@ async function composeReceived(
   });
 }
 
+/** Renderers' `interactionCard` hooks, first outermost, around `last`: eve's default. */
+export type SlackInteractionCardChain = (
+  card: SlackInteractionCard,
+  last: (card: SlackInteractionCard) => SlackInteractionCardParts,
+) => SlackInteractionCardParts;
+
+export function composeInteractionCards(
+  renderers: readonly SlackRenderer[],
+): SlackInteractionCardChain {
+  const hooks = renderers.flatMap((renderer) => renderer.interactionCard ?? []);
+  return (card, last) => {
+    const run = (index: number, value: SlackInteractionCard): SlackInteractionCardParts =>
+      index === hooks.length ? last(value) : hooks[index]!(value, (next) => run(index + 1, next));
+    return run(0, card);
+  };
+}
+
 function composeTaskCard(
   renderers: readonly SlackRenderer[],
   defaults: SlackRenderChain,
   view: TaskCard,
   index: number,
-): SlackTaskCard | null {
+): SlackCardMessage | null {
   if (index === renderers.length) return defaults.taskCard(view);
   const taskCard = renderers[index]!.taskCard;
   if (taskCard === undefined) return composeTaskCard(renderers, defaults, view, index + 1);

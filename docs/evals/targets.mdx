@@ -48,6 +48,8 @@ After verification, eve sends the available Vercel credentials:
 
 Set `EVE_EVAL_AUTH_TOKEN` to send that bearer token instead, for targets that don't use Vercel OIDC. Requests that carry credentials don't follow redirects, so the credentials never reach another origin.
 
+`/eve/v1/info` serves only operator callers, so the credential must authenticate with `principalType: "service"`. Vercel OIDC, `jwtHmac()`, `jwtEcdsa()`, or a custom `AuthFn` can provide it. When the target answers `403`, the run fails before any eval starts and names the credential it needs.
+
 `t.target.fetch(path, init)` sends these same credentials.
 
 ## What to read next

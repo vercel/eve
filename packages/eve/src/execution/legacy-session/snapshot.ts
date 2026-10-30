@@ -1,14 +1,11 @@
 import type { ModelMessage } from "ai";
-import { usageOf } from "#harness/facts.js";
 import { withModelUsage } from "#harness/session-usage.js";
 import { SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
-import { isUserMessageKind, validateHarnessModelMessages } from "#harness/messages.js";
-import {
-  DURABLE_SESSION_VERSION,
-  type DurableSession,
-  type DurableSessionState,
-} from "#execution/durable-session-store.js";
+import { normalizeHistory } from "#execution/session/imported-conversation.js";
+import { usageOf } from "#harness/facts.js";
+import { DURABLE_SESSION_VERSION } from "#execution/durable-session-read.js";
+import type { DurableSession, DurableSessionState } from "#execution/durable-session-store.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { isObject } from "#shared/guards.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -122,57 +119,4 @@ function legacyUsage(raw: unknown): TokenUsage | undefined {
     inputTokens: count("inputTokens"),
     outputTokens: count("outputTokens"),
   });
-}
-
-export function normalizeHistory(messages: readonly ModelMessage[]) {
-  const history: ModelMessage[] = [];
-  const pending = new Map<string, string>();
-  const settle = () => {
-    if (pending.size === 0) return;
-    history.push({
-      role: "tool",
-      content: [...pending].map(([toolCallId, toolName]) => ({
-        type: "tool-result" as const,
-        toolCallId,
-        toolName,
-        output: {
-          type: "error-text" as const,
-          value: "Interrupted by the session upgrade. Start this work again if it is still needed.",
-        },
-      })),
-    });
-    pending.clear();
-  };
-  for (const original of messages) {
-    let message = original;
-    if (message.role === "assistant" && Array.isArray(message.content)) {
-      message = {
-        ...message,
-        content: message.content.filter((part) => part.type !== "tool-approval-request"),
-      };
-    } else if (message.role === "tool") {
-      message = {
-        ...message,
-        content: message.content.filter((part) => part.type !== "tool-approval-response"),
-      };
-      if (message.content.length === 0) continue;
-    }
-    if (message.role !== "tool") settle();
-    if (message.role === "assistant" && Array.isArray(message.content)) {
-      for (const part of message.content)
-        if (part.type === "tool-call") pending.set(part.toolCallId, part.toolName);
-    }
-    if (message.role === "tool") {
-      for (const part of message.content)
-        if (part.type === "tool-result") pending.delete(part.toolCallId);
-    }
-    const kind = (message as { kind?: unknown }).kind;
-    history.push(
-      message.role === "user" && !isUserMessageKind(kind)
-        ? ({ ...message, kind: "user" } as ModelMessage)
-        : message,
-    );
-  }
-  settle();
-  return validateHarnessModelMessages(history);
 }

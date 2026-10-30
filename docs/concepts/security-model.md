@@ -22,7 +22,7 @@ Only shell commands execute in the sandbox. The built-in `bash`, `read_file`, an
 
 The model sees only tool definitions and results. When the model calls a custom `charge_card` tool, its `execute` runs in the app runtime, reads `process.env.STRIPE_KEY`, calls Stripe, and returns `{ ok: true }`. The model sees only `{ ok: true }`, and the call never touches the sandbox.
 
-The [just-bash provider](../sandbox/just-bash) has a weaker boundary. Its shell is a JavaScript interpreter with a virtual filesystem inside the app runtime process, with no network isolation. Any `customCommands` you register run as host application code outside the virtual filesystem. Use a Vercel or Docker sandbox when the model runs commands you would not run in the app runtime.
+The [just-bash provider](../sandbox/just-bash) has a weaker boundary. Its shell is a JavaScript interpreter with a virtual filesystem inside the app runtime process, with no network isolation. Any `experimental.customCommands` you register run as host application code outside the virtual filesystem. Use a Vercel or Docker sandbox when the model runs commands you would not run in the app runtime.
 
 See [Agent loop and sandbox](./execution-model-and-durability#agent-loop-and-sandbox) for how eve connects these contexts while keeping their state and lifetimes separate.
 
@@ -43,7 +43,7 @@ flowchart LR
 eve sends data only where your agent configuration sends it:
 
 - Inbound channel data flows through the channel provider you configure, then into the eve app runtime.
-- Model inputs and outputs flow to the model selected in `agent.ts`, such as a Vercel AI Gateway model id or a provider-authored `LanguageModel`.
+- Model inputs and outputs flow to the model selected in `agent.ts`, such as a Vercel AI Gateway model id or a provider model instance (`EveLanguageModel`).
 - Tool and connection calls flow to the external services, MCP servers, OpenAPI endpoints, and channels you configure.
 - Sandbox commands can reach network destinations allowed by the sandbox network policy.
 - Telemetry flows to destinations configured under `agent/instrumentation/`.
@@ -74,6 +74,10 @@ A [channel](../channels/overview) authenticates its own inbound traffic. The bui
 - **Don't trust body-supplied identity.** Derive the caller from a _verified_
   signature or token. Never use a `principalId` (or similar) from the request
   body, because a body field is attacker-controlled.
+
+## A turn runs as one principal
+
+A turn's principal (its authenticator, issuer, principal type and id) never changes while the turn runs; only its claims may update. Only that principal's messages steer the turn or answer its pending questions by text. In a shared thread, another person's message waits for the turn to end and then runs as their own turn, so their text never drives the turn's credentials and the turn never continues under their identity. Another person can still settle a pending request with a button or structured answer; they are recorded as its responder, and the turn keeps its caller. See [What reaches `ctx.session.auth`](../guides/auth-and-route-protection#what-reaches-ctxsessionauth).
 
 ## Authored markdown is data
 

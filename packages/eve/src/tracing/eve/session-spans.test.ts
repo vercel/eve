@@ -24,6 +24,7 @@ import {
 } from "#instrumentation/native-events.js";
 import { InMemoryAgentTraceStateStore } from "#internal/testing/in-memory-agent-trace-state-store.js";
 import type { SessionEvent } from "#protocol/session-event.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 import { createAgentOtelInstrumentation } from "#tracing/eve/agent-otel-provider.js";
 import type { TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
@@ -39,6 +40,7 @@ function session(
     CreateInstrumentationHandleEventInput,
     "parentLineage" | "parentTraceContext" | "rootSessionId"
   >,
+  audience: ChannelAudience = "public",
 ) {
   const exporter = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
@@ -64,7 +66,7 @@ function session(
   });
   const hooks = createInstrumentationHooks([otel.hook]).forTrace!({
     agentName: "weather",
-    audience: "public",
+    audience,
     channel: { kind: "http" },
     environment: "production",
     principalType: "anonymous",
@@ -74,8 +76,9 @@ function session(
   const handle = createInstrumentationHandleEvent({
     deliveryInput,
     agentName: "weather",
-    channelAudience: "public",
+    channelAudience: audience,
     channelKind: "http",
+    environment: "production",
     functionId: "weather",
     handleEvent: async (publication) => {
       const facts = cascade(currentView(ctx), eventsOf(publication));
@@ -284,6 +287,60 @@ describe("a session's spans, from its committed lines", () => {
       expect(span?.attributes["agent.approval.outcome"]).toBe(reported);
     },
   );
+
+  it("records who approved a call on its approval and tool spans, the id only as the turn's principal", async () => {
+    for (const { audience, records, id, outcome = "accepted" } of [
+      { audience: "public", records: true, id: "slack:T1:U2" },
+      { audience: "public", records: false, id: undefined },
+      // An explicit policy records a private conversation's content, but never principal ids.
+      { audience: "private", records: true, id: undefined },
+      // A denied call never runs, so only its approval names who denied it.
+      { audience: "public", records: true, id: "slack:T1:U2", outcome: "declined" },
+    ] as const) {
+      const { commit, spans } = session(
+        () => ({ emit: true, recordInputs: records, recordOutputs: records }),
+        undefined,
+        undefined,
+        audience,
+      );
+      await commit(...opening);
+      await commit(requested("call_deploy", "deploy"));
+      await commit(approval("call_deploy"));
+      await commit(
+        {
+          data: { deliveryId: "d_approver", principal: { id: "slack:T1:U2", type: "user" } },
+          type: "delivery.admitted",
+        },
+        {
+          data: {
+            deliveryId: "d_approver",
+            interactionId: "i_call_deploy",
+            responseId: "r_0",
+            value: { optionId: "approve" },
+          },
+          type: "response.submitted",
+        } as SessionEvent,
+      );
+      await commit({
+        data: { cause: { responseId: "r_0" }, interactionId: "i_call_deploy", outcome },
+        scope: turn,
+        type: "interaction.settled",
+      } as SessionEvent);
+      await commit(turnSettled({ outcome: "completed" }));
+
+      const exported = await spans();
+      const span = exported.find((each) => each.name === "agent.approval");
+      expect(span?.attributes["agent.approval.responder.type"]).toBe("user");
+      expect(span?.attributes["agent.approval.responder.id"]).toBe(id);
+      const tool = exported.find((each) => each.name === "execute_tool deploy");
+      expect(tool?.attributes["agent.tool.approver.type"]).toBe(
+        outcome === "accepted" ? "user" : undefined,
+      );
+      expect(tool?.attributes["agent.tool.approver.id"]).toBe(
+        outcome === "accepted" ? id : undefined,
+      );
+    }
+  });
 
   it("ends what a cancelled turn leaves running as cancelled, and a failed call with its code", async () => {
     const { commit, spans } = session();

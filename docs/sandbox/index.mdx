@@ -22,7 +22,7 @@ export const environment = DefaultSandbox.environment();
 export default defineSandbox(() => environment.open());
 ```
 
-- Put the file at `agent/sandbox/sandbox.ts` when the agent also has [workspace seeds](#managed-workspace-and-skills) or a Docker `Dockerfile` in `agent/sandbox/`. When the `agent/sandbox/` folder exists, eve reads the definition only from there.
+- Put the file at `agent/sandbox/sandbox.ts` when the agent also has [workspace seeds](#managed-workspace-and-skills) or a Docker `Dockerfile` in `agent/sandbox/`. When the `agent/sandbox/` folder exists, put the definition there. A root `agent/sandbox.ts` beside that folder is a build error.
 - `environment.open()` starts the sandbox for the current session.
 - The selector runs until it succeeds once. After that, later workflow steps and process restarts resume the same sandbox without running the selector again.
 - Commands start and relative paths resolve from the workspace root, `/workspace` on every built-in provider.
@@ -73,7 +73,7 @@ The environment you pass must match the one configured for the current sandbox.
 | [Docker](/docs/sandbox/docker)       | Local containers from the default image, an existing OCI image, or a Dockerfile.            |
 | [just-bash](/docs/sandbox/just-bash) | A pure-JavaScript shell and virtual filesystem without native process isolation.            |
 
-`DefaultSandbox` accepts only `autoInstall` and `prepare` for just-bash. Use `JustBashSandbox.environment()` from `eve/sandbox/just-bash` for custom commands or filesystems.
+`DefaultSandbox` accepts only `autoInstall` and `prepare` for just-bash. Use the [experimental options](/docs/sandbox/just-bash#experimental-options) of `JustBashSandbox.environment()` from `eve/sandbox/just-bash` for custom commands or filesystems.
 
 ## Initialize a session's sandbox
 
@@ -99,7 +99,7 @@ Make initialization safe to repeat, because it can run more than once against th
 - The first turn of a prewarmed session opens it while prewarming is still starting it.
 - A previous initialization failed.
 
-A [prewarmed session](/docs/guides/frontend/overview#returned-state), for example from `useEveAgent({ prewarm: true })`, runs the selector before the first message. The selector sees `session.auth` from the request that created the session. eve keeps the sandbox options and `defineState()` values from that run, even when the first message's `onMessage` hook returns a different identity. In an agent whose clients prewarm, don't derive either from `session.auth`.
+A [prewarmed session](/docs/guides/frontend/use-eve-agent#prewarming), for example from `useEveAgent({ prewarm: true })`, runs the selector before the first message. The selector sees `session.auth` from the request that created the session. eve keeps the sandbox options and `defineState()` values from that run, even when the first message's `onMessage` hook returns a different identity. In an agent whose clients prewarm, don't derive either from `session.auth`.
 
 ## Prepare a reusable environment
 

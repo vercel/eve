@@ -55,7 +55,6 @@ export {
   type ChannelCommitHandler,
   type ChannelEventContext,
   type CommittedLine,
-  isDisabledRouteSentinel,
 } from "#public/definitions/channel.js";
 export { attachmentError } from "#public/channels/attachment-error.js";
 export type {
@@ -108,7 +107,5 @@ export function isChannel(
 ): boolean {
   return channel.kind === getChannelInstrumentationKind(target);
 }
-
-export { answerFromText } from "#channel/resolve-text.js";
 
 export type { UploadPolicyInput } from "#public/channels/upload-policy.js";

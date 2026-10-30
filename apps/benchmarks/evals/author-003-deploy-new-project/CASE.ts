@@ -2,6 +2,7 @@ import { defineAuthoringCase, simpleProject } from "../../lib/authoring-case.js"
 import { vercelSetup } from "../../lib/setups/vercel.js";
 
 export default defineAuthoringCase({
+  category: "projects",
   startingPoint: simpleProject,
   setup: vercelSetup,
   async interact({ send }) {

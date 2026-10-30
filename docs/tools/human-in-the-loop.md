@@ -235,6 +235,8 @@ A `defineTool` tool can act for the approver explicitly. While an approved `defi
 
 `ctx.approval.responder.getToken(provider)` never starts a sign-in. When the approver has no token, it throws a `ConnectionAuthorizationFailedError` with `reason: "approver_authorization_required"`.
 
+A connection's `headers` and `toolCall.providedArguments` callbacks receive the same `ctx.approval.responder` while an approved connection call runs. See [Send the approver to the server](/docs/connections#send-the-approver-to-the-server).
+
 ```ts
 export default defineTool({
   description: "Grant the requester access to a repository.",
@@ -253,6 +255,16 @@ export default defineTool({
   },
 });
 ```
+
+Traces record both people:
+
+| Span     | Attributes                                                     | Names                            |
+| -------- | -------------------------------------------------------------- | -------------------------------- |
+| Turn     | `agent.principal.current.*`                                    | The requester                    |
+| Approval | `agent.approval.responder.type`, `agent.approval.responder.id` | The person who answered          |
+| Tool     | `agent.tool.approver.type`, `agent.tool.approver.id`           | The approver of an approved call |
+
+The ids are recorded only when the trace policy records both inputs and outputs, and the conversation is public or runs in development. Otherwise, only the type is recorded.
 
 ### Skipping approval for schedule-dispatched turns
 

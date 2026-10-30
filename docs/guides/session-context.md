@@ -46,7 +46,7 @@ Public fields include:
 - `auth.current`: the caller for the active inbound turn.
 - `auth.initiator`: the caller that started the session.
 - `parent`: the parent call, session, root session, and turn for a child subagent session.
-- `predecessor`: present only when this session replaced a stranded one; `sessionId` names that earlier session. See [Recover a stranded session](./deployment/self-hosting#recover-a-stranded-session) to read its earlier conversation.
+- `predecessor`: present only when this session replaced a stranded one; `sessionId` names that earlier session. See [Recover a stranded session](./deployment/self-hosted-operations#recover-a-stranded-session) to read its earlier conversation.
 
 Unprotected agents expose `auth.current` and `auth.initiator` as `null`. Sessions that a top-level schedule starts use eve's app identity (`principalId: "eve:app"`, `principalType: "runtime"`). See [Authentication](./auth-and-route-protection#what-reaches-ctxsessionauth) for how inbound identity becomes session auth.
 

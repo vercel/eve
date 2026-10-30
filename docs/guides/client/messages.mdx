@@ -55,10 +55,33 @@ control methods, and raw HTTP requests are not retried.
 
 `ClientSessionStrandedError` is a `ClientError` with `code: "session_stranded"` and, when recorded,
 the `eveVersion` that built the session. It is never retried, and the client never creates a
-replacement: call `session.reset()` and create a new session. Following the stranded session's
+replacement: call `session.end()` and create a new session. Following the stranded session's
 stream, `send()`, and `session.clear()` throw the same error, and a message accepted before the
 session stranded is not redelivered. `session.stream({ follow: false })` and `session.snapshot()`
 still read the recorded history.
+
+The typed errors `eve/client` throws (`ClientError` and its subclasses, `SessionNotActiveError`,
+`HealthResponseError`, and `AgentInfoResponseError`) extend `EveError` and have a stable snake_case
+`code`: `SessionNotActiveError` uses `session_not_active` or `session_not_ready`; `ClientError` carries
+the response's code (such as `session_stranded` or `session_expired`), or `http_error` when the
+response had none. Narrow with the static `is()` of the class you expect instead of `instanceof`,
+so errors from a separately bundled copy of eve still match:
+
+```ts
+import { ClientError, SessionNotActiveError } from "eve/client";
+
+try {
+  await session.send("Continue.");
+} catch (error) {
+  if (SessionNotActiveError.is(error) && !error.retryable) {
+    // Start a new session.
+  } else if (ClientError.is(error) && error.code === "unauthorized") {
+    // Sign in again.
+  } else {
+    throw error;
+  }
+}
+```
 
 ## Send a full turn payload
 

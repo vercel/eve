@@ -2,7 +2,7 @@ import type { MessageContent } from "#shared/message-content.js";
 import type { Delivery } from "#shared/delivery.js";
 import { commandDelivery } from "#channel/delivery.js";
 
-import type { ChannelAdapter } from "#channel/adapter.js";
+import { type ChannelAdapter, seedChannelState } from "#channel/adapter.js";
 import { validateDeliveryIdempotencyKey } from "#channel/delivery-idempotency.js";
 import {
   createChannelDeliveryMetadata,
@@ -79,7 +79,7 @@ interface ChannelAddress<TState = undefined> {
   cancel(options?: { readonly turnId?: string | null } & SessionControlOptions): Promise<Delivery>;
   compact(options?: SessionControlOptions): Promise<Delivery>;
   clear(options?: SessionControlOptions): Promise<Delivery>;
-  reset(options?: { readonly reason?: string } & SessionControlOptions): Promise<Delivery>;
+  end(options?: { readonly reason?: string } & SessionControlOptions): Promise<Delivery>;
   resolveSession(): Promise<Session | undefined>;
 }
 
@@ -130,13 +130,10 @@ export function createChannelAddress<TState = undefined>(input: {
       const command: Extract<SessionCommand, { readonly kind: "send" }> =
         caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller };
       const state = (options as { readonly state?: TState }).state;
-      const adapter =
-        state === undefined
-          ? input.adapter
-          : {
-              ...input.adapter,
-              state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
-            };
+      const adapter = {
+        ...input.adapter,
+        state: seedChannelState(input.adapter.state, state as Record<string, unknown> | undefined),
+      };
       const runInput: RunInput = {
         idempotencyKey: options.idempotencyKey,
         adapter,
@@ -190,20 +187,20 @@ export function createChannelAddress<TState = undefined>(input: {
           error.owner,
           describeStrandedSession(
             error.owner,
-            "Call reset() on the address, then create() again to start a session from your history.",
+            "Call end() on the address, then create() again to start a session from your history.",
           ),
         );
       }
       if (owner !== undefined) return { created: false, session: toSession(owner.sessionId) };
       const state = (options as { readonly state?: TState }).state;
       const started = await input.runtime.createSession({
-        adapter:
-          state === undefined
-            ? input.adapter
-            : {
-                ...input.adapter,
-                state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
-              },
+        adapter: {
+          ...input.adapter,
+          state: seedChannelState(
+            input.adapter.state,
+            state as Record<string, unknown> | undefined,
+          ),
+        },
         auth: options.auth,
         capabilities: { requestInput: true },
         channelName: input.channelName,
@@ -259,7 +256,7 @@ export function createChannelAddress<TState = undefined>(input: {
       });
       return commandDelivery(input.runtime, result, command.deliveryId);
     },
-    async reset(options) {
+    async end(options) {
       const command = controlCommand({ kind: "reset" as const, reason: options?.reason }, options);
       const result = await input.runtime.dispatchContinuation({
         command,

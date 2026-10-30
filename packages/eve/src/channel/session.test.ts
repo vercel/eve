@@ -152,7 +152,7 @@ describe("fixed session operations", () => {
     await session.respond([{ optionId: "approve", interactionId: "request_1" }], { auth: null });
     await session.compact();
     await session.clear();
-    await session.reset({ reason: "fresh start" });
+    await session.end({ reason: "fresh start" });
 
     expect(runtime.dispatchSession).toHaveBeenNthCalledWith(1, {
       command: {

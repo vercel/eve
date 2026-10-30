@@ -38,7 +38,7 @@ const followSession = Symbol("followClientSession");
 interface FollowSessionOptions extends SessionStreamOptions {
   readonly headers?: Readonly<Record<string, string>>;
   readonly onCaughtUp?: () => void;
-  readonly resolveReconnectPolicy?: () => SessionStreamOptions["streamReconnectPolicy"];
+  readonly resolveReconnectPolicy?: () => SessionStreamOptions["reconnect"];
   readonly resolveHeaders?: () => Readonly<Record<string, string>> | undefined;
 }
 
@@ -57,7 +57,7 @@ export class ClientSession {
   readonly #context: ClientSessionContext;
   #state: ClientSessionState;
 
-  /** @internal */
+  /** Built by the eve client, which supplies the session's transport context. */
   constructor(context: ClientSessionContext, state: ClientSessionState) {
     this.#context = context;
     this.#state = state;
@@ -117,7 +117,7 @@ export class ClientSession {
     }
 
     throwIfAborted(options?.signal);
-    return { events, session: { sessionId: this.#state.sessionId, streamIndex } };
+    return { events, session: { ...this.#state, streamIndex } };
   }
 
   /** Sends a message to this exact session ID. */
@@ -189,7 +189,7 @@ export class ClientSession {
     return this.#control("cancel", options);
   }
 
-  /** Queues removal of this session's durable model-message history. */
+  /** Cancels a running turn and every working task, then removes this session's model history. */
   async clear(options?: { readonly signal?: AbortSignal }): Promise<Delivery> {
     return this.#control("clear", options);
   }
@@ -200,15 +200,15 @@ export class ClientSession {
   }
 
   /** Terminally retires this exact session ID. The handle remains pinned to it. */
-  async reset(options?: {
+  async end(options?: {
     readonly reason?: string;
     readonly signal?: AbortSignal;
   }): Promise<Delivery> {
-    return this.#control("reset", options);
+    return this.#control("end", options);
   }
 
   async #control(
-    kind: "cancel" | "clear" | "compact" | "reset",
+    kind: "cancel" | "clear" | "compact" | "end",
     options?: {
       readonly signal?: AbortSignal;
       readonly turnId?: string | null;
@@ -229,7 +229,7 @@ export class ClientSession {
           startIndex,
           { signal: read?.signal },
           receipt.deliveryId,
-          kind !== "reset",
+          kind !== "end",
         ),
     });
   }
@@ -283,7 +283,7 @@ export class ClientSession {
         headers: input.headers,
         signal: input.signal,
         startIndex: initialStreamIndex,
-        streamReconnectPolicy: input.streamReconnectPolicy,
+        reconnect: input.reconnect,
       }),
       deliveryId,
       input.signal,
@@ -300,7 +300,7 @@ export class ClientSession {
       resolveReconnectPolicy: options?.resolveReconnectPolicy,
       signal: options?.signal,
       startIndex,
-      streamReconnectPolicy: options?.streamReconnectPolicy,
+      reconnect: options?.reconnect,
     })) {
       this.#advanceStreamIndex(cursor);
       yield event;
@@ -316,12 +316,12 @@ export class ClientSession {
 
   #readStream(input: {
     readonly onCaughtUp?: () => void;
-    readonly resolveReconnectPolicy?: () => SessionStreamOptions["streamReconnectPolicy"];
+    readonly resolveReconnectPolicy?: () => SessionStreamOptions["reconnect"];
     readonly follow?: boolean;
     readonly headers?: Readonly<Record<string, string>>;
     readonly signal?: AbortSignal;
     readonly startIndex: number;
-    readonly streamReconnectPolicy?: SessionStreamOptions["streamReconnectPolicy"];
+    readonly reconnect?: SessionStreamOptions["reconnect"];
     readonly resolveHeaders?: () => Readonly<Record<string, string>> | undefined;
   }): AsyncIterable<FollowedEvent> {
     return followStreamIterable({
@@ -333,7 +333,7 @@ export class ClientSession {
       redirect: this.#context.redirect,
       signal: input.signal,
       startIndex: input.startIndex,
-      streamReconnectPolicy: input.streamReconnectPolicy,
+      reconnect: input.reconnect,
       resolveReconnectPolicy: input.resolveReconnectPolicy,
     });
   }

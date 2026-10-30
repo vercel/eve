@@ -50,7 +50,15 @@ The response contains:
 - local and remote agents, listed separately
 - the compiled channel route order
 
-A non-success response throws `ClientError`. Invalid JSON, a different schema version, duplicate identities, inconsistent totals, or mismatched source provenance throws `AgentInfoResponseError`.
+The response includes authored instructions, skill and schedule Markdown, and server paths. So the server answers only operator callers, with `principalType` `service`, `runtime`, or `local-dev`, unless the channel's auth grants `allowAgentInfo`. Authenticate the client with an operator credential, such as Vercel OIDC, `jwtHmac()`, `jwtEcdsa()`, or a custom `AuthFn` that returns `principalType: "service"`. Any other caller gets a `ClientError` with `status` `403` and `code` `"info_forbidden"`.
+
+The version changes only when the response shape breaks. Within a version, a server can add fields and enum values:
+
+- The client ignores fields it doesn't know.
+- An enum-like field with a string the client can't interpret, such as `mode`, `sourceKind`, or a channel `method`, reads as `"unrecognized"`. Handle that value when you switch on these fields.
+- `kind` discriminants are closed. A new variant comes with a version change, and an unknown one throws `AgentInfoResponseError`.
+
+A non-success response throws `ClientError`. Invalid JSON, a missing or non-string enum value, a different agent-info version, duplicate identities, inconsistent totals, or mismatched source provenance throws `AgentInfoResponseError`. For a version mismatch, its `issues` say which side to upgrade: eve in the agent, or the eve package the client runs from.
 
 ## Authentication
 
@@ -126,9 +134,9 @@ await response.result();
 
 Per-request headers override client-level headers with the same name. For example, a turn can set its application user's `Authorization` header while `vercelOidc` still sends the deployment-protection credential in `x-vercel-trusted-oidc-idp-token`.
 
-## Reusing a session inbox
+## Faster sends with `inbox`
 
-`session.state` can include an opaque `inbox` handle from the server, so save the complete state. Later messages that carry the handle skip a server-side session lookup. Don't inspect or edit it.
+`session.state` can include an opaque `inbox` value from the server, so save the complete state and pass it back unchanged. Later messages that carry it skip a server-side session lookup. Don't inspect, edit, or construct it, because its contents can change in any release. A missing, stale, or rejected value only costs a slower lookup.
 
 Set `EVE_INBOX_HANDLE_SECRET` to the same server-only random secret, at least 32 characters, on every deployment that shares sessions. Omit it to disable handles. The server verifies a handle's signature before using it. After a secret rotation, the server ignores old handles and looks the session up as usual.
 
@@ -182,10 +190,10 @@ for await (const event of session.stream({ follow: false })) {
   console.log(event.type);
 }
 
-await session.reset({ reason: "User requested a fresh session" });
+await session.end({ reason: "User requested a fresh session" });
 ```
 
-Each handle stores the session ID, stream cursor, and optional inbox handle. Every method calls a `/eve/v1/session/:sessionId/...` route for that ID. Sending to an unknown or ended session fails instead of creating a new one. After a reset, the handle keeps pointing at the retired ID.
+Each handle stores the session ID, stream cursor, and optional `inbox` value. Every method calls a `/eve/v1/session/:sessionId/...` route for that ID. Sending to an unknown or ended session fails instead of creating a new one. After `end()`, the handle keeps pointing at the retired ID; call `client.sessions.create()` to start a different session. A server must serve `/end` before a client can call `end()` on it.
 
 One client can run many independent sessions at once:
 

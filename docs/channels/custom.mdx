@@ -35,7 +35,7 @@ A route's `path` is its app URL, without a channel-name prefix. The route above 
 
 Each route handler receives:
 
-- `from(address)` binds `send`, `respond`, `cancel`, `compact`, `clear`, and `reset` to an address: your channel's ID for one conversation, such as a thread ID. See [Continuation tokens](#continuation-tokens).
+- `from(address)` binds `send`, `respond`, `cancel`, `compact`, `clear`, and `end` to an address: your channel's ID for one conversation, such as a thread ID. See [Continuation tokens](#continuation-tokens).
 - `resolveSession(address)` returns the session that currently uses an address.
 - `attachSession(sessionId)` returns a handle for one session ID, without a lookup.
 - `to(channel, target).send(message, options)` hands work to another authored channel.
@@ -54,7 +54,7 @@ export default defineChannel({
       const source = from(params.threadId);
 
       if (body.message === "/new") {
-        return Response.json(await source.reset({ reason: "User requested /new" }));
+        return Response.json(await source.end({ reason: "User requested /new" }));
       }
 
       const delivery = await source.send(body.message, { auth: null });
@@ -149,12 +149,12 @@ await source.respond(answers, { auth });
 await source.cancel({ turnId });
 await source.compact();
 await source.clear();
-await source.reset({ reason: "Start over" });
+await source.end({ reason: "Start over" });
 
 const currentSession = await resolveSession(threadId);
 ```
 
-When another eve version built the session at an address, the session is [stranded](../guides/deployment/self-hosting#recover-a-stranded-session). `send()` ends it and starts one fresh session, even for concurrent sends. The message becomes the fresh session's first turn, which can read recent text from the earlier conversation. A `respond()` call, or a `deliver()` with input responses, throws `SessionStrandedError` because a fresh session has no request to answer. The stranded session stays in place.
+When another eve version built the session at an address, the session is [stranded](../guides/deployment/self-hosted-operations#recover-a-stranded-session). `send()` ends it and starts one fresh session, even for concurrent sends. The message becomes the fresh session's first turn, which can read recent text from the earlier conversation. A `respond()` call, or a `deliver()` with input responses, throws `SessionStrandedError` because a fresh session has no request to answer. The stranded session stays in place.
 
 `Session` from `eve/sessions` is fixed to one session ID and never creates, follows, or finds a replacement. `Delivery`, `DeliveryResult`, `SessionReader`, stream and read options, and `SessionNotActiveError` also come from `eve/sessions`, not `eve/channels`.
 
@@ -168,13 +168,13 @@ await session.respond(answers, { auth });
 await session.cancel({ turnId });
 await session.compact();
 await session.clear();
-await session.reset({ reason: "Retire this session" });
+await session.end({ reason: "Retire this session" });
 for await (const event of session.stream({ startIndex: 12 })) render(event);
 ```
 
 Attaching does no lookup; the first operation reports whether the ID is active. A following `stream()` rejects on its first read when the session doesn't exist or its history has expired. A route can read once before sending headers, as the example above does, to answer with an error status.
 
-For a stranded session, `Session.send()`, `Session.respond()`, and a following `Session.stream()` throw `SessionStrandedError` from `eve/channels` and send nothing. `stream({ follow: false })` still reads the recorded history up to the current tail. `error.owner.eveVersion` names the eve release that built the session, when recorded. Call `reset()` to end the stranded session, then start a new one:
+For a stranded session, `Session.send()`, `Session.respond()`, and a following `Session.stream()` throw `SessionStrandedError` from `eve/channels` and send nothing. `stream({ follow: false })` still reads the recorded history up to the current tail. `error.owner.eveVersion` names the eve release that built the session, when recorded. Call `end()` to retire the stranded session, then start a new one:
 
 ```ts
 import { SessionStrandedError } from "eve/channels";
@@ -183,7 +183,7 @@ try {
   await attachSession(sessionId).send(text, { auth });
 } catch (error) {
   if (!SessionStrandedError.is(error)) throw error;
-  await attachSession(sessionId).reset({ reason: "Session was stranded by an upgrade" });
+  await attachSession(sessionId).end({ reason: "Session was stranded by an upgrade" });
 }
 ```
 
@@ -205,6 +205,8 @@ The payload is `ChannelDelivery<TState>` from `eve/channels`: `message`, `answer
 - Return nothing to keep it unchanged.
 - Return a replacement with `message`, `answers`, `context`, or `outputSchema` to change it. Other fields, including `state`, are not accepted; change saved state through `channel.state`.
 - Return `{}` to ignore it.
+
+The `state` you pass to `defineChannel(...)` is the starting value of every session's `channel.state`, and must be plain JSON-like data. eve restores any top-level field from it that a session's state is missing, so a field you add in a later deploy also appears in existing sessions, including in `context(state)` and event handlers. A field you `delete` comes back the same way; to clear one, set it to `null` or `undefined`. eve doesn't merge nested objects: a saved object replaces the starting object whole.
 
 ```ts
 import { defineChannel } from "eve/channels";
@@ -247,14 +249,15 @@ The same override works on fixed `Session.send(...)` and cross-channel `to(...).
   `outcome: "cancelled"`; the session accepts another message afterward.
 - `compact` summarizes model context without adding a user message. The stream
   shows `context.started`, then `context.settled` with `kind: "compaction"`.
-- `clear` removes model-message history in place. It keeps the system prompt,
-  skills, tools, state, limits, addresses, and session sandbox.
-- `reset` ends the current session for good. A later `send()` to the address creates
+- `clear` cancels the running turn and every working task, then removes
+  model-message history in place. It keeps the system prompt, skills, tools,
+  state, limits, addresses, and session sandbox.
+- `end` ends the current session for good. A later `send()` to the address creates
   a new session; a fixed `Session` handle still points at the ended ID.
 
 Control operations never create a session. Unknown or inactive targets throw
 `SessionNotActiveError`. A cancel with nothing to stop ends with `outcome: "ignored"`. Authenticate and deduplicate command webhooks before
-calling `reset`, because a delayed duplicate can end a newer session at the same address.
+calling `end`, because a delayed duplicate can end a newer session at the same address.
 
 ## Retried deliveries
 
@@ -551,9 +554,22 @@ slackContinuationToken({ channelId: "C0123ABC", threadTs: "1800000000.001234" })
 twilioContinuationToken({ from: "+15551234567", to: "+15557654321" }); // "+15551234567:+15557654321"
 ```
 
+Each built-in channel exports a token builder from its `eve/channels/<platform>` entry. Pass the token to that channel's `from(...)` helper. A token is a routing address, not a credential, and doesn't replace authorization.
+
+| Builder                             | Address fields                                                                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `slackContinuationToken`            | `channelId`, `threadTs`                                                                                                 |
+| `slackCodeChannelContinuationToken` | `channelId` (positional argument)                                                                                       |
+| `twilioContinuationToken`           | `from`, optional `to`                                                                                                   |
+| `githubContinuationToken`           | `repositoryId`, `conversationKind`, and the matching `issueNumber`, `pullRequestNumber`, or `reviewThreadRootCommentId` |
+| `discordContinuationToken`          | `channelId`, optional `conversationId`                                                                                  |
+| `teamsContinuationToken`            | `conversationId`, optional `tenantId` and `replyToActivityId`                                                           |
+| `telegramContinuationToken`         | `chatId`, optional `messageThreadId` and `conversationId`                                                               |
+| `linearContinuationToken`           | `agentSessionId`                                                                                                        |
+
 A custom channel owns its token format; write a function that joins the platform's identity fields.
 
-To let another identity address a session, call `channel.continuation?.alias(rawToken)`. The new token belongs to the same channel and becomes `channel.continuation.token` for later handlers. Earlier addresses still reach the same session and accept the same payloads. `reset` ends the session and frees all its addresses for later `send()` calls. `cancel` stops only the running turn and keeps the session, history, and addresses.
+To let another identity address a session, call `channel.continuation?.alias(rawToken)`. The new token belongs to the same channel and becomes `channel.continuation.token` for later handlers. Earlier addresses still reach the same session and accept the same payloads. `end` ends the session and frees all its addresses for later `send()` calls. `cancel` stops only the running turn and keeps the session, history, and addresses.
 
 The `context(state, channel)` config option builds the per-step `ctx.channel` that event handlers read. Its second argument is `ChannelContext` from `eve/channels`: the current `session.id` and `session.auth`, plus `continuation`, without session commands. Keep a reference to `channel.continuation` for callbacks that run later, or call `ctx.channel.continuation?.alias(token)` from an event handler. eve adds `ChannelContinuationOps` to the returned context and saves changes you make to `state`.
 
@@ -582,7 +598,7 @@ defineChannel<{ ref: string | null }>({
 });
 ```
 
-The new address joins the session at the next workflow boundary. If another active session already uses the token, the session that called `alias()` fails instead of taking it over. Every address stays active until the session ends or resets. Sessions with continuation addresses stay on their current deployment.
+The new address joins the session at the next workflow boundary. If another active session already uses the token, the session that called `alias()` fails instead of taking it over. Every address stays active until the session ends. Sessions with continuation addresses stay on their current deployment.
 
 Tokens must be nonempty. A session supports up to 256 addresses, including its stable inbox; repeating an existing alias doesn't use another address.
 

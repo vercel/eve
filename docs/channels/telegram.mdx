@@ -43,6 +43,12 @@ Each forum topic gets its own session, keyed by `message_thread_id`.
 
 Override `onMessage` to choose which messages run the agent, and as whom. Return `{ auth }` to run it, optionally with `title` to set the run title. Set group privacy mode in BotFather.
 
+Custom `onMessage` hooks can import `defaultTelegramAuth` from
+`eve/channels/telegram` and return `{ auth: defaultTelegramAuth(message) }` to
+keep the default actor identity. The helper uses the message's `from` user,
+scopes group identities to the chat, and returns `null` when no user is present.
+For a button press, pass the button presser as `from`, not the message's author.
+
 ### Delivery
 
 By default, the bot sends each reply as plain text with `sendMessage` and no `parse_mode`, so Markdown shows as typed. Replies over Telegram's 4096-character limit are split across messages. Custom handlers use `ctx.channel.telegram`.

@@ -6,6 +6,10 @@ You author an agent as a directory on disk. The directory is the contract — ma
 
 The framework is called eve. The published npm package is `eve`. The CLI binary is `eve`.
 
+## Release notes
+
+The installed package contains its release notes in `CHANGELOG.md`, with a link to the full changelog through that version. For an upgrade across releases, review the target version's history at `https://raw.githubusercontent.com/vercel/eve/refs/tags/eve%40<version>/packages/eve/CHANGELOG.md`.
+
 ## Preview Terms and Safeguards
 
 eve is currently a preview and subject to the Vercel beta terms; the framework, APIs, documentation, and behavior may change before general availability.
@@ -119,9 +123,8 @@ npx eve@latest init my-agent
 ```
 
 `eve init` writes a new agent with eve's default model. Pass `--model
-openai/gpt-5.5` to choose another AI Gateway model, `--reasoning high` to set a
-reasoning effort, or `--channel-web-nextjs` to add the Web Chat application. It
-installs dependencies, initializes Git, and opens the terminal UI in an interactive
+openai/gpt-5.5` to choose another AI Gateway model, or `--reasoning high` to set a
+reasoning effort. It installs dependencies, initializes Git, and opens the terminal UI in an interactive
 human terminal. Coding-agent invocations return setup instructions instead.
 Targeting an existing project directory (`eve init .`) adds the agent files and
 missing dependencies instead. Initialization does not create a Vercel project,
@@ -191,4 +194,4 @@ and inspection. Channel-local addresses remain behind authored channel APIs.
 
 ## Changelog
 
-See [`./CHANGELOG.md`](./CHANGELOG.md) for the release history. The changelog ships inside the published package so agents can read it directly from `node_modules/eve/CHANGELOG.md` to evaluate upgrades.
+The repository's `CHANGELOG.md` contains the full release history. For the installed package, see [Release notes](#release-notes).

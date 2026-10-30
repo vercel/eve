@@ -81,9 +81,9 @@ export default await withEve({
 
 `withEve` adds the root agent, or every direct workspace member, as an independently built service and returns a plain Vercel configuration. Named workspace agents mount at `/eve/<name>/v1/*`; a root agent mounts at `/eve/v1/*`. Vercel builds the frontend and each agent separately, so the frontend needs neither `withEve` in its framework configuration nor a script that builds the agents.
 
-The Web Chat installer can generate this composition for a standalone agent or a selected workspace agent. Configure authentication for every exposed agent. To self-host the same source layout, replace Vercel composition with your own [process and proxy configuration](./self-hosting#run-workspace-members).
+The Web Chat installer can generate this composition for a standalone agent or a selected workspace agent. Configure authentication for every exposed agent. To self-host the same source layout, replace Vercel composition with your own [process and proxy configuration](./self-hosted-operations#run-workspace-members).
 
-Run `vercel dev --local` with Vercel CLI 59.16.0 or newer to start the whole service graph locally without linking a project. A linked directory also loads its development environment and settings. A generated Vercel Web Chat project exposes the scripts below. Named agents use the same `/eve/<name>/v1/*` routes in development, and default `defineWorkspaceAgent` transports can call peers without deployment credentials.
+Run `vercel dev --local` with Vercel CLI 59.16.0 or newer to start the whole service graph locally without linking a project. A linked directory also loads its development environment and settings. A generated Vercel Web Chat project exposes the scripts below. Named agents use the same `/eve/<name>/v1/*` routes in development, and default `defineWorkspaceAgent` transports can call peers without deployment credentials. Import that helper from `eve/experimental/workspace`; see [Vercel workspace peers](../../subagents#vercel-workspace-peers). The workspace layout and `eve/vercel` integration are not experimental.
 
 | Script                       | Starts                                            |
 | ---------------------------- | ------------------------------------------------- |

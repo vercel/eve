@@ -13,6 +13,8 @@ import { AuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import { isSteeringDelivery } from "#execution/session/input-queue.js";
+import { continueTurnAuth, resolveTurnPrincipal } from "#execution/session/principal.js";
 import {
   type PublishedSessionEvents,
   type SessionStepState,
@@ -82,9 +84,18 @@ async function routeProxiedDeliver(
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
   let parentAction: RoutedDeliverPayload["parentAction"];
-  // Only a person's own message may answer a pending prompt by text.
+  // A typed answer joins the open turn, so only the turn's own principal may
+  // send one, as only they steer it, and never a hook's continuation. Anyone
+  // else's text waits for the turn to end; their button answers still settle a
+  // request as its responder.
   const resolveMessage =
-    !hasDelegatedSessionContext(serializedContext) && sourceDelivery.caller === undefined;
+    !hasDelegatedSessionContext(serializedContext) &&
+    !(sourceDelivery.deliveryMetadata ?? []).some((metadata) => metadata.hook !== undefined) &&
+    isSteeringDelivery(
+      sourceDelivery,
+      { callerCallId: undefined, principal: resolveTurnPrincipal(undefined, serializedContext) },
+      { heldOnPerson: true },
+    );
   // Every payload routes against the same state, so a request a `ctx.ask()`
   // answer or typed reply resolved in an earlier payload is hidden from later
   // ones; it takes one answer, and later messages must reach the parent instead.
@@ -92,6 +103,7 @@ async function routeProxiedDeliver(
   // A message that answers a question is still the person's turn in the
   // conversation, so the stream records it with its delivery ids.
   const answerDeliveryIds: string[] = [];
+  let typedAnswer = false;
   // Relayed answers belong to the asking turn's resumed work, even without message text.
   const tables = storedProjection(durableSession.state).view;
   const currentTurn = activeTurn(tables);
@@ -131,6 +143,8 @@ async function routeProxiedDeliver(
           return askedTurn(row) !== undefined;
         });
       const turnId = askedIn === undefined ? undefined : askedTurn(askedIn);
+      // The text joins the asking turn even when the payload leaves fields for this session.
+      if (message !== undefined && turnId !== undefined) typedAnswer = true;
       if (routed.forSelf === undefined && turnId !== undefined) {
         answerDeliveryIds.push(...payloadMetadata.map((metadata) => metadata.deliveryId));
       }
@@ -202,8 +216,12 @@ async function routeProxiedDeliver(
   }
 
   // Answers that resume a turn own its later events, whether they came from text or buttons.
+  // A typed answer also runs as the turn's caller, so it updates the turn's claims.
   const published: PublishedSessionEvents = {
-    serializedContext: joinTurnDeliveryIds(serializedContext, answerDeliveryIds),
+    serializedContext: joinAnswerToTurn(serializedContext, {
+      auth: typedAnswer ? sourceDelivery.auth : undefined,
+      deliveryIds: answerDeliveryIds,
+    }),
     sessionState: input.sessionState,
   };
   // The typed answer's hooks run before it reaches the waiting tool. A hook cancel stops the
@@ -348,17 +366,22 @@ export async function answersIdempotencyKey(
   return `eve-answers:${hex.join("")}`;
 }
 
-function joinTurnDeliveryIds(
+function joinAnswerToTurn(
   serializedContext: Record<string, unknown>,
-  deliveryIds: readonly string[],
+  answer: { readonly auth: DeliverHookPayload["auth"]; readonly deliveryIds: readonly string[] },
 ): Record<string, unknown> {
-  if (deliveryIds.length === 0) return serializedContext;
-  const current =
-    (serializedContext[TurnDeliveryIdsKey.name] as readonly string[] | undefined) ?? [];
-  return {
-    ...serializedContext,
-    [TurnDeliveryIdsKey.name]: [...new Set([...current, ...deliveryIds])],
-  };
+  const joined = { ...serializedContext };
+  if (answer.auth !== undefined) {
+    joined[AuthKey.name] = continueTurnAuth(
+      serializedContext[AuthKey.name] as DeliverHookPayload["auth"],
+      answer.auth,
+    );
+  }
+  if (answer.deliveryIds.length > 0) {
+    const current = (joined[TurnDeliveryIdsKey.name] as readonly string[] | undefined) ?? [];
+    joined[TurnDeliveryIdsKey.name] = [...new Set([...current, ...answer.deliveryIds])];
+  }
+  return joined;
 }
 
 /**

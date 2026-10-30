@@ -67,7 +67,7 @@ async function createEvalApp(appRoot: string): Promise<void> {
   );
   await writeFile(
     join(appRoot, "agent", "agent.js"),
-    'export default { model: "openai/gpt-5.4" };\n',
+    'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
   );
   await writeFile(
     join(appRoot, "evals", "large-report.eval.ts"),

@@ -7,13 +7,13 @@ The default harness is eve's built-in agent loop. It manages model calls, compac
 
 ## Compaction
 
-Compaction keeps a long session from overflowing the model's context window. The harness compacts when the conversation, plus the compaction prompt's estimated size, reaches `thresholdPercent` of the window. It then summarizes the older turns into a checkpoint and keeps going. Omit `thresholdPercent` to compact at `0.9`. Tune it under [`compaction`](../agent-config#compaction) in `agent.ts`:
+Compaction keeps a long session from overflowing the model's context window. The harness compacts when the conversation, plus the compaction prompt's estimated size, reaches `compaction.threshold` of the window. It then summarizes the older turns into a checkpoint and keeps going. Omit `compaction.threshold` to compact at `0.9`. Tune it under [`compaction`](../agent-config#compaction) in `agent.ts`:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
   model: "anthropic/claude-opus-5.5",
   compaction: {
-    thresholdPercent: 0.75,
+    threshold: 0.75,
   },
 });
 ```

@@ -23,9 +23,11 @@ For a static AI Gateway model ID, make the same change with
 
 Omit the root `agent.ts` to use `openai/gpt-6-luna-fast` with `reasoning: "high"`. When `agent.ts` is present, `model` is required.
 
-A gateway model ID string routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.
+Every local `agent.ts`, root or subagent, must export the value `defineAgent` returns, and so must a dynamic subagent resolver that selects a local agent. The build rejects a plain object with `Export defineAgent({...}) from "<path>".`
 
-With a static Gateway model, `agent.ts` needs no code at runtime. A dynamic model or direct-provider `LanguageModel` keeps `agent.ts` loaded at runtime, because eve resolves it while the agent runs. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
+A gateway model ID string routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a model instance. eve types it as `EveLanguageModel`, exported from `eve` and `eve/models`, and every AI SDK language model satisfies it.
+
+With a static Gateway model, `agent.ts` needs no code at runtime. A dynamic model or a model instance keeps `agent.ts` loaded at runtime, because eve resolves it while the agent runs. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
 Use eve's helpers for direct OpenAI or Anthropic access without installing another provider package:
 
@@ -42,9 +44,9 @@ export default defineAgent({
 
 For a local ChatGPT subscription, use `chatgpt()` from `eve/models/openai` and sign in with `/login`. It defaults to `gpt-6-luna-fast` and can't run in a deployment.
 
-`/login` can switch a static Gateway string to an eve helper and manage its import, and `/model` changes the selected model and settings immediately. Edit custom provider SDK calls and dynamic expressions by hand. For provider-specific configuration, install an AI SDK provider package and pass its `LanguageModel`.
+`/login` can switch a static Gateway string to an eve helper and manage its import, and `/model` changes the selected model and settings immediately. Edit custom provider SDK calls and dynamic expressions by hand. For provider-specific configuration, install an AI SDK provider package and pass its language model.
 
-Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct `LanguageModel`.
+Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct model instance.
 
 eve fills some provider options by default. A value you set at the same path
 wins and is sent unchanged.
@@ -149,7 +151,7 @@ export default defineAgent({
 });
 ```
 
-The function returns a Gateway model ID, an AI SDK `LanguageModel`, or a selection object. See
+The function returns a Gateway model ID, a model instance such as an AI SDK language model, or a selection object. See
 [Dynamic capabilities](./guides/dynamic-capabilities) for the context and memo rules.
 
 - **When it changes.** eve runs the function before each ordinary model call. A memo keyed by
@@ -215,13 +217,13 @@ Gateway models; use `providerOptions.gateway.caching` instead.
 
 ## Compaction
 
-Compaction summarizes older turns as the conversation approaches the context window, and is on by default. The token count includes the fixed checkpoint prompt, so compaction starts before the conversation alone reaches the threshold. Lower `thresholdPercent` to compact sooner:
+Compaction summarizes older turns as the conversation approaches the context window, and is on by default. The token count includes the fixed checkpoint prompt, so compaction starts before the conversation alone reaches the threshold. Lower `compaction.threshold`, a fraction from `0` to `1`, to compact sooner:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
   model: "anthropic/claude-opus-5.5",
   compaction: {
-    thresholdPercent: 0.75, // default 0.9
+    threshold: 0.75, // default 0.9
   },
 });
 ```
@@ -260,7 +262,7 @@ to the session. The next message at that address starts a new session. To carry 
 [prior history](./channels/eve#start-from-prior-history). A session with
 [zero retention](#run-data-retention) loses its stored payloads when it ends.
 
-`sessionUsage` gets two usage records. `total` is everything the session has
+`sessionUsage` gets two `TokenUsage` records, a type exported from `eve`. `total` is everything the session has
 spent, and `window` is what it spent since the last approved continuation. Each
 record has these fields:
 
@@ -305,9 +307,9 @@ export default defineAgent({
 });
 ```
 
-Set `sessionUsage: () => false` to leave sessions uncapped; `sessionUsage:
-false` is not accepted. eve calls `sessionUsage` before each model call once
-the window has usage. The model call that crosses a limit finishes, because
+Set `sessionUsage: false`, or a callback that always returns `false`, to leave
+sessions uncapped. eve calls a `sessionUsage` callback before each model call
+once the window has usage. The model call that crosses a limit finishes, because
 exact usage arrives after the call completes. Before the next model call, eve
 pauses the turn (`turn.paused`) and sends a continuation prompt:
 
@@ -379,19 +381,21 @@ export default defineAgent({
 ```
 
 Install the package in your app; it must export a default factory or a
-`createWorld()` function. Pin a version built against the same `@workflow/*`
-line as your eve release (currently `5.0.0-beta`). The npm `latest` tag can lag
-behind, and the Workflow SDK rejects an incompatible protocol version at
-initialization:
+`createWorld()` function. Install a version built against the same
+`@workflow/*` major version as your eve release, currently `5.x`:
 
 ```bash
-pnpm add @workflow/world-postgres@5.0.0-beta.x
+pnpm add @workflow/world-postgres
 ```
+
+eve fails at startup, naming the version to install, when the world targets a
+different major version.
 
 Put credentials, such as the Postgres connection string, and host-specific
 options in the environment variables the world package reads, not in
 `agent.ts`. If the package must stay external in hosted output, list it in
-`build.externalDependencies`.
+`build.externalDependencies`. See [Workflow worlds](./guides/deployment/workflow-worlds)
+to choose a world and set up the Postgres world's database.
 
 ## Workflow checkpoint batching
 
@@ -444,7 +448,8 @@ request `0`, even with no OpenTelemetry destination installed. Destination
 export filters and lifecycle-provider policies don't change the decision.
 
 Set `experimental.workflow.retention` to `0` to always request deletion, or to
-`"default"` to always keep run data for the World's default period:
+`"default"` to always keep run data for the World's default period. This
+override is experimental and has no compatibility promise:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";

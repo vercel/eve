@@ -103,6 +103,17 @@ A file fails when the download fails, an image link returns non-image content, o
 
 Event handlers receive `channel.linear`. Use its `createActivity`, `listActivities`, and `updateSession` methods to post your own Agent Activities and update the Agent Session.
 
+### Low-level API helpers
+
+Import `callLinearGraphQL` and `createLinearAgentActivity` from
+`eve/channels/linear` when a custom integration needs a direct API call.
+`callLinearGraphQL<T>({ query, queryName, variables?, credentials?, api? })`
+returns the response's `data` as `T` and throws `LinearApiError` for HTTP or
+GraphQL errors. `createLinearAgentActivity({ activity, credentials?, api? })`
+posts an activity to a Linear Agent Session and returns `{ id, success }`.
+Both accept `credentials.accessToken` and optional API overrides; prefer the
+channel context's API handle when it already has the configured credentials.
+
 ## Custom hooks
 
 Return `{ auth }` to start a turn, or `null` to accept the webhook without waking the agent. Add `title` to set the run title when the event starts a run.

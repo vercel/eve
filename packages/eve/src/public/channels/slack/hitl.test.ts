@@ -332,6 +332,37 @@ describe("renderInteractionBlocks", () => {
     expect(text?.endsWith("...\n```")).toBe(true);
   });
 
+  it("escapes Slack control sequences in model-supplied prompts and tool input", () => {
+    const request = makeRequest({
+      call: { callId: "call_post", name: "post", input: { text: "<!here>" } },
+      display: "confirmation",
+      kind: "approval",
+      prompt: "<!channel> open <https://evil.example|https://trusted.example> & approve",
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "deny", label: "Deny" },
+      ],
+    });
+    const prompt =
+      "&lt;!channel&gt; open &lt;https://evil.example|https://trusted.example&gt; &amp; approve";
+
+    const [card, details] = renderInteractionBlocks(request) as [
+      { body: { text: string } },
+      { child_blocks: Array<{ text: { text: string } }> },
+    ];
+    expect(card.body.text).toBe(`*${prompt}*`);
+    expect(details.child_blocks[0]?.text.text).toContain('"text": "&lt;!here&gt;"');
+    const fallback = formatInteractionFallbackText(request);
+    expect(fallback.startsWith(`${prompt}\n`)).toBe(true);
+    expect(fallback).toContain('"text": "&lt;!here&gt;"');
+
+    const [section] = renderInteractionBlocks({
+      ...request,
+      request: { kind: "question", prompt: request.request.prompt },
+    }) as [{ text: { text: string } }];
+    expect(section.text.text).toBe(prompt);
+  });
+
   it("renders a radio_buttons widget for select-display requests with ≤6 options", () => {
     const blocks = renderInteractionBlocks(
       makeRequest({
@@ -552,6 +583,24 @@ describe("buildFreeformModalView", () => {
     expect(inputBlock?.element?.action_id).toBe(HITL_FREEFORM_MODAL_ACTION_ID);
   });
 
+  it("shows an escaped card prompt literally in the modal title and section", () => {
+    const view = buildFreeformModalView({
+      metadata: {
+        continuationToken: "slack:C01:1.0",
+        channelId: "C01",
+        threadTs: "1.0",
+        messageTs: "1.1",
+        requestId: "call_abc",
+      },
+      prompt: "Ship A &amp; B &lt;now&gt;?",
+    });
+
+    expect(view.title).toEqual({ type: "plain_text", text: "Ship A & B <now>?" });
+    expect((view.blocks as Array<{ text?: { text?: string } }>)[0]?.text?.text).toBe(
+      "Ship A &amp; B &lt;now&gt;?",
+    );
+  });
+
   it("truncates a long modal prompt to fit the section-text limit", () => {
     const longPrompt = "y".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 200);
     const view = buildFreeformModalView({
@@ -638,6 +687,13 @@ describe("buildAnsweredBlocks", () => {
     expect(blocks[0]).toMatchObject({
       text: { text: ":white_check_mark: *Cancel*" },
     });
+  });
+
+  it("escapes Slack control sequences in a typed answer", () => {
+    const [answer] = buildAnsweredBlocks({ promptBlocks: [], answerLabel: "<!channel>" }) as [
+      { text: { text: string } },
+    ];
+    expect(answer.text.text).toBe(":white_check_mark: *&lt;!channel&gt;*");
   });
 
   it("caps long freeform answer labels at the section limit", () => {

@@ -37,7 +37,11 @@ export {
   type TracePolicyDecision,
 } from "#tracing/eve/otel-declaration.js";
 
-export type { SpanExporter, SpanProcessor } from "#compiled/@vercel/otel/index.js";
+export type {
+  SpanExporter,
+  SpanProcessor,
+  SpanProcessorOrName,
+} from "#tracing/eve/otel-configuration.js";
 
 /**
  * Vercel Agent Runs, enabled by default in preview and production deployments.

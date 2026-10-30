@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
-import { defineDynamic } from "#dynamic/definition.js";
+import { defineDynamic, dynamicEvaluate } from "#dynamic/definition.js";
 import { createModelMetadata, type ModelMetadata } from "#internal/model-catalog.js";
 import {
   InvalidRuntimeModelSelectionError,
@@ -147,7 +147,7 @@ describe("dynamic runtime model resolution", () => {
       dynamicModel: DYNAMIC_MODEL_SOURCE,
       scope: { moduleMap, nodeId: undefined },
     });
-    const result = await definition.evaluate({
+    const result = await dynamicEvaluate(definition)({
       channel: { kind: "channel:slack", metadata: {} },
     } as never);
     const modelMetadata = metadataSource();

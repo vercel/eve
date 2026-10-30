@@ -510,9 +510,9 @@ describe("buildStepCatalog", () => {
       return { linear, ...catalogContext({ connections: [linear], tools: [inlineTool("add")] }) };
     }
 
-    it("resolves a name under a connection's prefix to that connection's tool, filling schema defaults", async () => {
+    it("resolves a name under a connection's prefix to that connection's tool, which fills schema defaults when it runs", async () => {
       const { catalog, linear, run } = linearCatalog();
-      const validated = { input: { limit: 20, team: "core" }, name: "linear__list_issues" };
+      const validated = { input: { team: "core" }, name: "linear__list_issues" };
 
       expect(
         await validateTool(catalog, { input: { team: "core" }, name: "linear__list_issues" }),

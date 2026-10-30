@@ -165,12 +165,14 @@ import { MemoryDocumentConflictError, type MemoryDocumentBackend } from "eve/mem
 
 export function kvBackend(store: KvStore): MemoryDocumentBackend {
   return {
-    async read({ key }) {
+    async read({ key, signal }) {
+      signal.throwIfAborted();
       const row = await store.get(key);
       // null means the document doesn't exist yet
       return row ? { content: row.content, version: row.version } : null;
     },
-    async write({ key, content, expectedVersion }) {
+    async write({ key, content, expectedVersion, signal }) {
+      signal.throwIfAborted();
       // write the complete document only if the stored version still matches
       const ok = await store.compareAndSet(key, content, expectedVersion);
       if (!ok) throw new MemoryDocumentConflictError(key);
@@ -184,6 +186,10 @@ export function kvBackend(store: KvStore): MemoryDocumentBackend {
 `MemoryDocumentConflictError` when the stored version doesn't match
 `expectedVersion`. An `expectedVersion` of `null` means the document must not
 exist yet.
+
+Both methods receive a `signal: AbortSignal`. Check it before starting work, and
+pass it to storage calls that support cancellation. Memory and tool contexts
+expose the same signal as `ctx.abortSignal`.
 
 ## Troubleshooting
 

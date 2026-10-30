@@ -111,15 +111,15 @@ export interface DiscordChannelState {
   channelType?: number;
   /** Discord application id from the inbound interaction. */
   applicationId: string | null;
-  /** Latest interaction token available to the channel. */
-  interactionToken: string | null;
-  /** Whether the channel has already edited the deferred original interaction response. */
-  initialResponseSent: boolean;
-  /** Whether `conversationId` is a real Discord message id. */
-  hasMessageAnchor: boolean;
-  /** Posted prompts with components, keyed by requestId, until eve resolves them. */
+  /** @internal Latest interaction token; read it from the Discord handle. Absent means none. */
+  interactionToken?: string | null;
+  /** @internal Whether the deferred original interaction response was edited. Absent means no. */
+  initialResponseSent?: boolean;
+  /** @internal Whether `conversationId` is a real Discord message id. Absent means no. */
+  hasMessageAnchor?: boolean;
+  /** @internal Posted prompts with components, keyed by requestId, until eve resolves them. */
   hitlPrompts?: Record<string, DiscordHitlPrompt>;
-  /** The sign-ins the default flow posted for, by connection name. */
+  /** @internal The sign-ins the default flow posted for, by connection name. */
   pendingSignIns?: Record<string, string>;
 }
 
@@ -218,8 +218,9 @@ export interface DiscordChannelConfig {
 
   /**
    * Accepts ordinary messages (DMs, mentions, and thread follow-ups) that a
-   * relay forwards from the Discord Gateway, such as `experimental_runDiscordGatewayRelay`
-   * from `eve/channels/discord/gateway`. Mounts `POST /eve/v1/discord/gateway`.
+   * relay forwards from the Discord Gateway, such as `runDiscordGatewayRelay`
+   * from `eve/experimental/channels/discord/gateway`. Mounts
+   * `POST /eve/v1/discord/gateway`.
    */
   readonly gateway?: DiscordGatewayConfig;
 

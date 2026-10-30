@@ -7,11 +7,7 @@ import { defineAgent, defineDynamic as defineDynamicAgent } from "#public/defini
 import { defineHook } from "#public/definitions/hook.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
 import { defineDynamic as defineDynamicTools, defineTool } from "#public/tools/index.js";
-import {
-  assertDynamicSentinelKeys,
-  DYNAMIC_SENTINEL_KIND,
-  isDynamicSentinel,
-} from "./definition.js";
+import { assertDynamicSentinelKeys, dynamicEvaluate, isDynamicSentinel } from "./definition.js";
 
 const tool = defineTool({ description: "Echo.", execute: async () => null, inputSchema: {} });
 
@@ -20,8 +16,14 @@ describe("defineDynamic", () => {
     const fn = () => tool;
     const dynamic = defineDynamicTools(fn);
 
-    expect(dynamic).toMatchObject({ evaluate: fn, kind: DYNAMIC_SENTINEL_KIND });
     expect(isDynamicSentinel(dynamic)).toBe(true);
+    expect(dynamicEvaluate(dynamic)).toBe(fn);
+    // Opaque: no public members for authors to read or imitate.
+    expect(Object.keys(dynamic)).toEqual([]);
+  });
+
+  it("does not accept a hand-written sentinel shape", () => {
+    expect(isDynamicSentinel({ evaluate: () => tool, kind: "eve:dynamic" })).toBe(false);
   });
 
   it("rejects today's events map with the function form in the error", () => {

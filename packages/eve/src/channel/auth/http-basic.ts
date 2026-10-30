@@ -20,18 +20,18 @@ export function authenticateHttpBasicStrategy(input: {
     };
   }
 
-  if (normalizeCredential(credentials.username) !== normalizeCredential(input.strategy.username)) {
-    return {
-      kind: "not-authenticated",
-    };
-  }
+  // Compare both fields every time so response timing does not reveal
+  // whether the username matched.
+  const usernameMatches = timingSafeStringEquals(
+    normalizeCredential(credentials.username),
+    normalizeCredential(input.strategy.username),
+  );
+  const passwordMatches = timingSafeStringEquals(
+    normalizeCredential(credentials.password),
+    normalizeCredential(input.strategy.password),
+  );
 
-  if (
-    !timingSafeStringEquals(
-      normalizeCredential(credentials.password),
-      normalizeCredential(input.strategy.password),
-    )
-  ) {
+  if (!usernameMatches || !passwordMatches) {
     return {
       kind: "not-authenticated",
     };

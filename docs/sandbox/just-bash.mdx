@@ -21,13 +21,18 @@ During `eve dev`, eve installs the `just-bash` package into your application whe
 
 With pnpm, automatic installation skips the optional native codecs `@mongodb-js/zstd` and `node-liblzma` unless they have an explicit package policy. It adds them to `ignoredOptionalDependencies` in the `pnpm-workspace.yaml` of the workspace that contains your app. Basic shell and filesystem operations don't need them, but commands that do may be unavailable. eve keeps your existing per-package build settings and doesn't approve build scripts.
 
-## Custom commands
+## Experimental options
 
-`customCommands` adds your own functions as commands in each live shell. They work in pipelines and redirections. Write each one as a `JustBashCommand` from `eve/sandbox/just-bash`:
+`experimental.customCommands` and `experimental.filesystem` follow just-bash's own command and filesystem contracts, so they have no compatibility promise. Import their types, such as `JustBashCommand` and `JustBashFilesystem`, from `eve/experimental/sandbox/just-bash`. `autoInstall` and `prepare` are stable.
+
+### Custom commands
+
+`experimental.customCommands` adds your own functions as commands in each live shell. They work in pipelines and redirections:
 
 ```ts
 import { defineSandbox } from "eve/sandbox";
-import { JustBashSandbox, type JustBashCommand } from "eve/sandbox/just-bash";
+import type { JustBashCommand } from "eve/experimental/sandbox/just-bash";
+import { JustBashSandbox } from "eve/sandbox/just-bash";
 
 const today: JustBashCommand = {
   name: "today",
@@ -36,17 +41,19 @@ const today: JustBashCommand = {
   },
 };
 
-export const environment = JustBashSandbox.environment({ customCommands: [today] });
+export const environment = JustBashSandbox.environment({
+  experimental: { customCommands: [today] },
+});
 export default defineSandbox(() => environment.open());
 ```
 
-A `JustBashCommand` receives `cwd`, `env`, `fs`, and `signal` in its context. When a command needs standard input or the rest of just-bash's command context, create it with `defineCommand()` from `just-bash`. `customCommands` accepts the result.
+A `JustBashCommand` receives `cwd`, `env`, `fs`, and `signal` in its context. When a command needs standard input or the rest of just-bash's command context, create it with `defineCommand()` from `just-bash`. `experimental.customCommands` accepts the result.
 
 Custom commands run as app code in the app runtime process, outside the virtual filesystem. They aren't available while eve prepares the template.
 
-## Custom filesystem
+### Custom filesystem
 
-`filesystem` builds the filesystem of each live sandbox. eve calls it with:
+`experimental.filesystem` builds the filesystem of each live sandbox. eve calls it with:
 
 - `defaultFilesystem`: the session's saved filesystem that holds `/workspace`.
 - `justBash`: the loaded `just-bash` module.
@@ -59,26 +66,28 @@ import { defineSandbox } from "eve/sandbox";
 import { JustBashSandbox } from "eve/sandbox/just-bash";
 
 export const environment = JustBashSandbox.environment({
-  async filesystem({ defaultFilesystem, justBash, resolveProjectPath }) {
-    await defaultFilesystem.mkdir("/reference", { recursive: true });
-    return new justBash.MountableFs({
-      base: defaultFilesystem,
-      mounts: [
-        {
-          filesystem: new justBash.OverlayFs({
-            mountPoint: "/",
-            readOnly: true,
-            root: resolveProjectPath("reference"),
-          }),
-          mountPoint: "/reference",
-        },
-      ],
-    });
+  experimental: {
+    async filesystem({ defaultFilesystem, justBash, resolveProjectPath }) {
+      await defaultFilesystem.mkdir("/reference", { recursive: true });
+      return new justBash.MountableFs({
+        base: defaultFilesystem,
+        mounts: [
+          {
+            filesystem: new justBash.OverlayFs({
+              mountPoint: "/",
+              readOnly: true,
+              root: resolveProjectPath("reference"),
+            }),
+            mountPoint: "/reference",
+          },
+        ],
+      });
+    },
   },
 });
 export default defineSandbox(() => environment.open());
 ```
 
-eve does not call `filesystem` while it prepares the template, so files under a mount are not part of the template.
+eve does not call `experimental.filesystem` while it prepares the template, so files under a mount are not part of the template.
 
 See the [sandbox overview](/docs/sandbox) for managed workspace, skills, parent inheritance, and custom providers.

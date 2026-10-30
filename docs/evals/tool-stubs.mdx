@@ -69,15 +69,15 @@ Responses are a fixed sequence, not a simulated database: the second `list_tasks
 
 ## Permit tool replacement
 
-eve rejects stubs by default, including in development. With [Vercel OIDC](../guides/auth-and-route-protection#verceloidc), grant the permission to the eval runner's verified subject:
+eve rejects stubs by default, including in development. With [Vercel OIDC](../guides/auth-and-route-protection#verceloidc), use `eveVercelOidc` and grant the permission to the eval runner's verified subject:
 
 ```ts title="agent/channels/eve.ts"
-import { vercelOidc, vercelSubject } from "eve/channels/auth";
-import { eveChannel } from "eve/channels/eve";
+import { vercelSubject } from "eve/channels/auth";
+import { eveChannel, eveVercelOidc } from "eve/channels/eve";
 
 export default eveChannel({
   auth: [
-    vercelOidc({
+    eveVercelOidc({
       subjects: [
         vercelSubject({ teamSlug: "acme", projectName: "app" }),
         {

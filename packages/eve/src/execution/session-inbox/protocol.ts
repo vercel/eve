@@ -83,7 +83,7 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
       return value as DecodedSessionInbox;
     default:
       throw new SessionInboxPayloadError(
-        `Unsupported session inbox payload kind ${JSON.stringify(payload.kind)}.`,
+        `This session does not support the ${JSON.stringify(payload.kind)} command.`,
       );
   }
 }

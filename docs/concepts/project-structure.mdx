@@ -64,7 +64,7 @@ npx eve dev --agent support
 
 Run agent commands such as `dev`, `info`, and `eval` from `agents/<name>/`, or pass `--agent <name>` from the workspace root. `eve dev --agent support` runs only that agent, not other agents or peer applications; local [workspace-peer calls](/docs/subagents#vercel-workspace-peers) require an explicit transport.
 
-On Vercel, run `eve link` and `eve deploy` from the root; deployment includes all members. No frontend is required. For self-hosting, [build and run each member separately](/docs/guides/deployment/self-hosting#run-workspace-members).
+On Vercel, run `eve link` and `eve deploy` from the root; deployment includes all members. No frontend is required. For self-hosting, [build and run each member separately](/docs/guides/deployment/self-hosted-operations#run-workspace-members).
 
 ## Independent releases
 
@@ -75,7 +75,7 @@ Use separate packages or projects when agents need independent dependencies or r
 Either setup works with one agent or a workspace:
 
 - **Add agents to a Next.js application:** use [`eve/next`](/docs/guides/frontend/nextjs) in `next.config.ts`. Next.js runs the application. Locally, the integration starts the agents and forwards requests to them. On Vercel, it adds the agents as separate services. A root Next.js app can sit beside either `agent/` or `agents/`; workspace members are discovered automatically. A peer app such as `apps/web/` can select its eve project with `eveRoot: "../.."`.
-- **Add a frontend to an agent workspace:** keep the frontend as a peer application, for example under `apps/web/`. On Vercel, use [`eve/vercel` in root `vercel.ts`](/docs/guides/deployment/vercel#compose-agents-with-other-vercel-services) to contribute the agents alongside the frontend service. For [self-hosting](/docs/guides/deployment/self-hosting#run-workspace-members), run the services with your process manager and configure a reverse proxy. The frontend does not need `eve/next`.
+- **Add a frontend to an agent workspace:** keep the frontend as a peer application, for example under `apps/web/`. On Vercel, use [`eve/vercel` in root `vercel.ts`](/docs/guides/deployment/vercel#compose-agents-with-other-vercel-services) to contribute the agents alongside the frontend service. For [self-hosting](/docs/guides/deployment/self-hosted-operations#run-workspace-members), run the services with your process manager and configure a reverse proxy. The frontend does not need `eve/next`.
 
 `apps/web/` is a convention, not a directory eve reads. Your deployment configuration defines peer services, and eve finds only the agents. Both Vercel integrations deploy the services together, not as independent releases.
 
@@ -102,7 +102,7 @@ Move its `evals/` directory, if present, to `agents/support/evals/`. Keep `packa
 Before adding the next agent:
 
 - Update `tsconfig.json` to include `agents/**/*.ts`, preserving any application includes. Update moved-file imports and path aliases, including scaffolded `package.json#imports` entries that point at `./agent/*` or `./evals/*`.
-- Update scripts that assume one agent. Use `--agent support` for agent-scoped commands; build an agent-only Vercel workspace with root `eve build`. For a Next.js app, keep the framework scripts and follow its [build instructions](/docs/guides/frontend/nextjs#dev-vs-deploy-topology).
+- Update scripts that assume one agent. Use `--agent support` for agent-scoped commands; build an agent-only Vercel workspace with root `eve build`. For a Next.js app, keep the framework scripts and follow its [build instructions](/docs/guides/frontend/nextjs#run-build-and-deploy).
 - Update HTTP clients and webhook registrations for the named agent's public routes. In a root Next.js app, remove a single-agent `eveRoot` override to enable workspace discovery, and select `support` in the client hook. Store the agent name with any saved session links.
 
 Then add the second agent and check discovery:

@@ -1,4 +1,4 @@
-import { Command, CommanderError } from "#compiled/commander/index.js";
+import { Command, CommanderError, Option } from "#compiled/commander/index.js";
 import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { areSchedulesDisabled } from "#internal/schedules/disabled.js";
@@ -168,7 +168,10 @@ export function createCliProgram(
   program
     .command("init [target]")
     .description("Create a new eve agent, or add one to an existing project directory.")
-    .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
+    // Superseded by `eve add channel/web`; still accepted, but no longer advertised.
+    .addOption(
+      new Option("--channel-web-nextjs", "Add the Web Chat application (Next.js)").hideHelp(),
+    )
     .option(
       "--agents <names>",
       "Create an agents/ workspace with comma-separated agent names",

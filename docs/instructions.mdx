@@ -63,7 +63,7 @@ A session that replaced a [stranded session](./concepts/execution-model-and-dura
 
 ## History controls and prompt caching
 
-[Compaction](./concepts/sessions-runs-and-streaming#compact-clear-and-reset) treats user-role instructions like any other history, so a summary can replace their text. Clear removes them with the rest of the conversation history and doesn't run static or dynamic instructions again. System-role instructions remain, because they are outside history.
+[Compaction](./concepts/sessions-runs-and-streaming#compact-clear-and-end) treats user-role instructions like any other history, so a summary can replace their text. Clear removes them with the rest of the conversation history and doesn't run static or dynamic instructions again. System-role instructions remain, because they are outside history.
 
 Keep system-role content stable and ahead of frequently changing context when you can, so providers can reuse the prompt prefix. Cache behavior and billing depend on the provider, and eve doesn't promise a cache hit.
 

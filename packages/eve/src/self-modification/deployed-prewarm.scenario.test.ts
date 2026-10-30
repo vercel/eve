@@ -22,7 +22,8 @@ describe("deployed self-modification prewarm", () => {
     }
     const { appRoot } = await createAppRoot("eve-deployed-self-modification-prewarm-", {
       files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
         "agent/instructions.md": "You are a test agent.\n",
         [DEPLOYED_SELF_MODIFICATION_CONFIG_PATH]: [
           'import selfModification from "eve/extensions/self-modification/remote";',

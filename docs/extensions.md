@@ -323,6 +323,18 @@ Hooks and instruction fragments add to the agent's own, so you can't replace the
 
 You can also override from the agent root with the prefixed name. `agent/tools/crm__search.ts` replaces the extension's `tools/search.ts`, and wins over a directory-mount override.
 
+### Computer-use overrides
+
+The bundled `eve/extensions/computer-use` extension exports `computer_use` from
+`eve/extensions/computer-use/tools`. Reuse that tool definition in a same-named
+override, as with the [code extension's tools](/docs/code-extension#override-bundled-tools).
+
+For a custom sandbox, `eve/extensions/computer-use/sandbox` exports
+`installComputerUse(sandbox)` and `startComputerUse(sandbox)`. Run the installer
+in the environment's preparation callback to install desktop packages and the
+driver; it requires an apt-based image with root or passwordless sudo. Start
+the managed display and driver after opening each session sandbox.
+
 ### Use an extension tool result in a hook
 
 To keep an extension tool's result type in your hook, import its definition from `./tools` and pass it to [`toolResultFrom`](/docs/guides/hooks#narrowing-tool-results):

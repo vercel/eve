@@ -69,6 +69,8 @@ export interface SessionBoot {
   readonly anchor: SessionAnchor;
   readonly caller: TurnCaller | undefined;
   readonly capabilities?: SessionCapabilities;
+  /** Compacts the history before the first action, for a session an earlier build recorded. */
+  readonly compactFirst?: boolean;
   readonly deploymentId: string;
   readonly history: HarnessModelMessage[];
   readonly initialTurnControl?: TurnControl;
@@ -417,6 +419,12 @@ async function runSessionLoop(
     }
   };
   const runInitialAction = async (): Promise<SessionActionResult> => {
+    if (boot.compactFirst === true) {
+      // A failed compaction keeps the history; the session continues either way. This run already
+      // starts fresh, so the compaction moves it nowhere.
+      await runTurn({ control: "compact" });
+      compactionHandoffDue = false;
+    }
     switch (boot.start.kind) {
       case "first-message":
         // Beside the wait, so a first message starts its turn without waiting
@@ -508,6 +516,9 @@ async function runSessionLoop(
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "clear":
         case "compact":
+          // A clear that waited behind a compaction found no turn to cancel; its tasks stop here.
+          if (next.kind === "clear")
+            await cancelWorkingTasks(cursor, "turn-cancelled", { turnCalls: true });
           action = await runTurn(
             next.origin === undefined
               ? { control: next.kind }

@@ -92,19 +92,26 @@ export default git({});
 
 Configure `github` to get GitHub tokens through Vercel Connect instead. The extension then adds the authenticated `git__gh` tool and tells the agent to use it for every authenticated GitHub operation. `git__pr` switches to `gh-signed-commit` for repositories that require verified signatures.
 
-| Option               | Required      | Effect                                                                                            |
-| -------------------- | ------------- | ------------------------------------------------------------------------------------------------- |
-| `github.connector`   | With `github` | Connector that mints a GitHub token                                                               |
-| `github.org`         | With `github` | Organization whose repositories the `gh` tool can access                                          |
-| `github.broker`      | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules        |
-| `github.authorize`   | No            | `authorize({ auth, repository, token })` callback that allows or denies each `gh` tool invocation |
-| `github.attribution` | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`              |
+| Option                 | Required      | Effect                                                                                     |
+| ---------------------- | ------------- | ------------------------------------------------------------------------------------------ |
+| `github.connector`     | With `github` | Connector that mints a GitHub token                                                        |
+| `github.broker`        | With `github` | `broker(sandbox, rules)` callback that installs, then removes, the GitHub credential rules |
+| `github.principalType` | With `github` | `"app"` for GitHub App installation tokens, or `"user"` for the caller's own token         |
+| `github.authorize`     | With `github` | `authorize(request)` returns `true` to let a `gh` call run                                 |
+| `github.attribution`   | No            | `attribution(ctx)` returns the current turn's `{ name, email }` co-author, or `null`       |
 
-For each call, the `gh` tool gets a new token limited to one repository in `github.org`. Processes in the sandbox see only a placeholder `GH_TOKEN`. The sandbox firewall replaces it with the real token on GitHub requests. Your `github.broker` callback receives the header rules before the command runs, then `null` after it to remove them. The callback must keep your other network rules. GitHub authentication has no `"command"` delivery option.
+Each `gh` call runs one `gh`, `git`, or `gh-signed-commit` command. Processes in the sandbox see only a placeholder `GH_TOKEN`. The sandbox firewall replaces it with the real token on GitHub requests. Your `github.broker` callback receives the header rules before the command runs, then `null` after it to remove them. The callback must keep your other network rules. GitHub authentication has no `"command"` delivery option.
 
-`github.authorize` runs on each `gh` tool call, after eve validates the command and repository. `token` is the token for that repository, and `auth` is the session's current caller, or `null`. Return `false` to stop the call before the credential reaches the sandbox firewall or the command runs. eve doesn't cache the decision for the session or repeat it for each GitHub API request.
+### Control access with `authorize`
 
-For example, use the token to check collaborator status (allowed commands still use the app token's permissions, not the collaborator's):
+`github.authorize` is the agent's only access control. A command runs only when it returns `true`; otherwise the token never reaches the sandbox. It runs before every `gh` call and receives the parsed `argv`, the caller's `auth`, the declared `repository` (or `null`), and the minted `token`. What the token can reach depends on `principalType`:
+
+| `principalType` | Token                                                                                                                                                          | `authorize` also receives |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| `"app"`         | A GitHub App installation token for the declared repository, or for the whole installation when the call declares only an owner.                               | `owner`                   |
+| `"user"`        | The caller's own token, which reaches everything the caller can reach on GitHub. eve asks the caller to sign in when needed and when GitHub rejects the token. | No `owner`                |
+
+With `"user"`, `repository` is only what the model declared, and nothing ties it to the command. Treat it as a hint, not a boundary, and check `auth` instead, for example `({ auth }) => auth !== null`.
 
 ```ts title="agent/extensions/git.ts"
 import git from "eve/extensions/git";
@@ -114,17 +121,9 @@ import { brokerGitHubLease } from "../lib/github";
 export default git({
   github: {
     connector: "github/my-agent",
-    org: "acme",
     broker: brokerGitHubLease,
-    // GitHub channel sessions carry the commenter's login as `auth.subject`.
-    async authorize({ auth, repository, token }) {
-      if (auth?.authenticator !== "github-webhook" || !auth.subject) return false;
-      const response = await fetch(
-        `https://api.github.com/repos/${repository}/collaborators/${auth.subject}`,
-        { headers: { authorization: `Bearer ${token}` } },
-      );
-      return response.status === 204;
-    },
+    principalType: "app",
+    authorize: ({ owner }) => owner.toLowerCase() === "acme",
   },
 });
 ```
@@ -147,12 +146,29 @@ import { brokerGitHubLease, coAuthorFor } from "../lib/github";
 export default git({
   github: {
     connector: "github/my-agent",
-    org: "acme",
     broker: brokerGitHubLease,
+    principalType: "app",
+    authorize: ({ owner }) => owner.toLowerCase() === "acme",
     attribution: (ctx) => coAuthorFor(ctx.session.auth.current),
   },
 });
 ```
+
+## Override bundled tools
+
+`eve/extensions/code/tools` exports the `apply_patch` and `grep` tool definitions. Import one in an override to change its approval or other options without copying the implementation. With the file mount above, name the override after the qualified tool, `code__apply_patch`:
+
+```ts title="agent/tools/code__apply_patch.ts"
+import { apply_patch } from "eve/extensions/code/tools";
+import { defineTool } from "eve/tools";
+import { always } from "eve/tools/approval";
+
+export default defineTool({ ...apply_patch, approval: always() });
+```
+
+`agent/extensions/code/tools/apply_patch.ts` works only when the mount is a directory, `agent/extensions/code/extension.ts`.
+
+For a custom GitHub command tool, `eve/extensions/git/sandbox` exports `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`. `executeGitHubShell` parses the command, calls `authorize`, and installs the credential rules. `dependencies` supply the session ID and sandbox access. Use `githubShellApproval` as the tool's approval policy so invalid commands are still rejected.
 
 ## Prepare the sandbox
 

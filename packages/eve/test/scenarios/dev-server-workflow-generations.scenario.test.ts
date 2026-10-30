@@ -160,7 +160,7 @@ describe("eve dev server workflow generations", () => {
   );
 
   it.each(["tool", "workflow"] as const)(
-    "makes a newly added %s available to the next turn and allows session reset",
+    "makes a newly added %s available to the next turn and allows session retirement",
     async (kind) => {
       const app = await scenarioApp(WORKFLOW_GENERATION_DESCRIPTOR);
       const server = await startEveDev(app.appRoot);
@@ -201,13 +201,13 @@ describe("eve dev server workflow generations", () => {
 
         expect(secondResult.sessionId).toBe(firstSessionId);
         expect(readCompletedMessages(secondResult.events)).toContain("added-tool");
-        const reset = await fetch(new URL(`/eve/v1/session/${firstSessionId}/reset`, server.url), {
+        const ended = await fetch(new URL(`/eve/v1/session/${firstSessionId}/end`, server.url), {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ reason: "Start a new conversation after rebuilding" }),
           signal: AbortSignal.timeout(10_000),
         });
-        expect(reset.status, await reset.text()).toBe(202);
+        expect(ended.status, await ended.text()).toBe(202);
       } finally {
         await server.stop();
       }

@@ -32,7 +32,7 @@ eve collects CLI telemetry by default. Run `eve telemetry disable` to turn it of
 ## `eve init`
 
 ```bash
-eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channel-web-nextjs] [--non-interactive]
+eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--non-interactive]
 ```
 
 Creates a new agent app or adds an agent to an existing app. It always installs dependencies, and initializes Git in new directories.
@@ -51,12 +51,13 @@ In an interactive terminal, eve opens the TUI after scaffolding. Pass `-n` or `-
 
 New projects use the parent workspace's package manager, or the one that launched `eve init` when there is no workspace.
 
-| Flag                    | Type   | Default                                              | Description                                                                                                              |
-| ----------------------- | ------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--model <model>`       | string | `openai/gpt-6-luna-fast`                             | Set the root agent's AI Gateway model ID.                                                                                |
-| `--reasoning <effort>`  | enum   | `high` without `--model`; otherwise provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
-| `--channel-web-nextjs`  | flag   | off                                                  | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
-| `-n, --non-interactive` | flag   | off                                                  | Scaffold and install dependencies without starting development.                                                          |
+| Flag                    | Type   | Default                                              | Description                                                                                                                   |
+| ----------------------- | ------ | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--model <model>`       | string | `openai/gpt-6-luna-fast`                             | Set the root agent's AI Gateway model ID.                                                                                     |
+| `--reasoning <effort>`  | enum   | `high` without `--model`; otherwise provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored.      |
+| `--agents <names>`      | string | unset                                                | Create a new workspace with comma-separated agent names, such as `support,research`, or add members to an existing workspace. |
+| `-y, --yes`             | flag   | off                                                  | Has no effect and prints a warning.                                                                                           |
+| `-n, --non-interactive` | flag   | off                                                  | Scaffold and install dependencies without starting development.                                                               |
 
 ## `eve extension`
 
@@ -76,7 +77,7 @@ Creates a new extension package, installs dependencies, and initializes Git. Pri
 | `eve extension init .`      | Scaffold in the current empty directory                       |
 | No target                   | Same as `.` for humans; coding agents get a short setup guide |
 
-It cannot target a directory that already has a `package.json`.
+It cannot target a directory that already has a `package.json`. `-y` and `--yes` have no effect and print a warning.
 
 See [Extensions](/docs/extensions) for authoring and mount details.
 
@@ -252,7 +253,7 @@ Serves the built output and prints the listening URL.
 
 Set `EVE_SCHEDULES_DISABLED=1` or `true` (case-insensitive) to disable authored cron schedules at runtime. This also applies when you run `node .output/server/index.mjs` directly. Other values leave schedules on. HTTP requests and workflow jobs still run, and eve prints a `schedules disabled` line. `--no-schedules` sets the variable to `1` for the spawned server only; omit it to keep any value you set.
 
-Use this setting when [scaling self-hosted replicas](../guides/deployment/self-hosting#run-schedules). It also disables authored cron dispatch on Vercel if set there, but not explicit schedule dispatch in `eve dev`.
+Use this setting when [scaling self-hosted replicas](../guides/deployment/self-hosted-operations#run-schedules). It also disables authored cron dispatch on Vercel if set there, but not explicit schedule dispatch in `eve dev`.
 
 For self-hosted deployments, copy the app source, `.output/`, and installed dependencies together. Preserve the relative layout of workspace packages, because startup loads sandbox modules from the deployed source. The deployment directory can differ from the build directory.
 
@@ -273,10 +274,10 @@ Starts a local development server and terminal UI. To connect the UI to an exist
 | `--no-default-extensions`           | flag   | extensions on      | Do not mount bundled development extensions                     |
 | `--name <name>`                     | string | app folder name    | Title shown in the terminal UI                                  |
 | `--input <text>`                    | string | none               | Pre-fill the prompt input                                       |
-| `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering                                             |
-| `--reasoning <mode>`                | enum   | `full`             | Reasoning rendering                                             |
-| `--subagents <mode>`                | enum   | `collapsed`        | Subagent task rendering: `full`, `collapsed`, or `hidden`       |
-| `--connection-auth <mode>`          | enum   | `full`             | Connection-authorization rendering                              |
+| `--show-tools <mode>`               | enum   | `auto-collapsed`   | Tool-call rendering                                             |
+| `--show-reasoning <mode>`           | enum   | `auto-collapsed`   | Reasoning rendering                                             |
+| `--show-subagents <mode>`           | enum   | `collapsed`        | Subagent task rendering: `full`, `collapsed`, or `hidden`       |
+| `--show-connection-auth <mode>`     | enum   | `full`             | Connection-authorization rendering                              |
 | `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic                                      |
 | `--context-size <tokens>`           | number | none               | Model context window size                                       |
 | `--logs <mode>`                     | enum   | `error`            | Display `none`, `error`, `warn`, `debug`, or `all` logs         |
@@ -337,6 +338,8 @@ eve remote connect --url <url> --print <prompt> [-H "Name: value"]
 ```
 
 Without `--print`, `connect` opens the interactive UI and requires a terminal. With `--print <prompt>`, it sends one message, writes only the final assistant text to stdout, and exits. It exits nonzero with an error on stderr if the turn fails, is cancelled, or needs input or authorization. It also fails if the stream ends before the turn finishes. The error includes the session ID once the server accepted the message. Each `--print` starts a new conversation and can't answer pending requests; use the `eve/client` API for that or for multi-turn scripts. `--input` pre-fills the interactive UI and can't be combined with `--print`.
+
+Interactive `connect` accepts the same display flags as [`eve dev`](#eve-dev): `--show-tools`, `--show-reasoning`, `--show-subagents`, `--show-connection-auth`, `--assistant-response-stats`, `--context-size`, and `--logs`. The `--show-*` flags control rendering, not model reasoning effort. Set effort with `eve set model --reasoning <effort>` or `eve init --reasoning <effort>`.
 
 Use `-H, --header <header>` for a bearer token or another request header; repeat it for multiple headers. For HTTP Basic authentication, put credentials in the URL; eve sends them as a Basic `Authorization` header and removes them from the target URL.
 

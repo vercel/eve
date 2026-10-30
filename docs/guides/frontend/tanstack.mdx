@@ -36,7 +36,7 @@ To switch hosting modes, rerun `eve add channel/web --skip-install` with the oth
 
 Sign in with Vercel setup is available only for the Next.js Web Chat app, so the TanStack Start installer doesn't ask about authentication.
 
-The chat uses the same routes as the [Next.js Web Chat](./nextjs#use-the-generated-web-chat-routes): `/`, `/s`, and `/s/$sessionId`, one URL per session. Before accepting production browser traffic, replace the generated placeholder authorization policy. See [Authenticate browser requests](./overview#authenticate-browser-requests).
+The chat uses the same routes as the [Next.js Web Chat](./nextjs#give-each-conversation-a-url): `/`, `/s`, and `/s/$sessionId`, one URL per session. Before accepting production browser traffic, replace the generated placeholder authorization policy. See [Authenticate browser requests](./overview#authenticate-browser-requests).
 
 A workspace agent always deploys as a separate Vercel service, because the installer doesn't support single-app hosting for it. If you already have a TanStack Start app, skip the installer and follow the steps below.
 

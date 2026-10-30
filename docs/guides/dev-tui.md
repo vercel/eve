@@ -19,7 +19,7 @@ The transcript stays in your terminal scrollback after you exit. Before your fir
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `/model`    | Choose the model, speed, and reasoning. Pass a model ID to set it directly: `/model provider/model-id`.                                                      |
 | `/new`      | Start a fresh session and clear the screen. `/reset` is an alias.                                                                                            |
-| `/clear`    | Clear the session's model-message history and keep the session.                                                                                              |
+| `/clear`    | Cancel the running turn and every working task, then clear the session's model-message history and keep the session.                                         |
 | `/compact`  | Compact the current session's context.                                                                                                                       |
 | `/cancel`   | Cancel the current turn and keep the context from work that already finished.                                                                                |
 | `/login`    | Connect a ChatGPT subscription, Vercel account, or provider API key.                                                                                         |
@@ -33,7 +33,7 @@ The transcript stays in your terminal scrollback after you exit. Before your fir
 
 `/login`, `/model`, `/add`, `/deploy`, `/info`, and `/traces` work only in local `eve dev`, not through `eve remote connect`.
 
-A [stranded session](./deployment/self-hosting#recover-a-stranded-session) accepts no new messages or approvals. When a message or a stream reconnect reaches one, the TUI says why and, when known, which eve version built it. Run `/new` to end it; your next message starts a fresh session. `/clear` is refused because it would keep the stranded session. A message accepted before the upgrade is not redelivered. A session from an earlier `eve dev` process built by the same eve version is not stranded; see [local workflow recovery](../reference/cli#local-workflow-recovery).
+A [stranded session](./deployment/self-hosted-operations#recover-a-stranded-session) accepts no new messages or approvals. When a message or a stream reconnect reaches one, the TUI says why and, when known, which eve version built it. Run `/new` to end it; your next message starts a fresh session. `/clear` is refused because it would keep the stranded session. A message accepted before the upgrade is not redelivered. A session from an earlier `eve dev` process built by the same eve version is not stranded; see [local workflow recovery](../reference/cli#local-workflow-recovery).
 
 ## Set up a new agent
 
@@ -140,10 +140,10 @@ Use `/traces` to inspect traces recorded during local development. See [Local tr
 `eve dev` flags control how tool calls, reasoning, subagents, connection authorization, response statistics, context usage, and logs display:
 
 ```bash
-eve dev --tools full --reasoning collapsed --logs all
+eve dev --show-tools full --show-reasoning collapsed --logs all
 ```
 
-`--subagents` accepts `collapsed` (default), `full`, or `hidden`. `full` also writes each subagent message and tool call to the transcript, and `hidden` leaves subagent tasks out of the transcript and the drawer.
+`--show-subagents` accepts `collapsed` (default), `full`, or `hidden`. `full` also writes each subagent message and tool call to the transcript, and `hidden` leaves subagent tasks out of the transcript and the drawer.
 
 Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. Set `EVE_TUI_RENDER_MARKDOWN=0` to show responses as plain text instead of rendered Markdown. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
 

@@ -137,7 +137,7 @@ The choice above is typed as `"billing" | "support"`. Each answer appears under 
 
 `decide` accepts `model`, `state`, `questions`, `maxRetries`, and `signal`; pass `signal: ctx.abortSignal` to cancel with the tool call. Import `DecisionModel`, `DecisionState`, `DecisionStatePart`, `DecisionInput`, `DecisionQuestion`, `DecisionAnswer`, `DecisionOptions`, and `DecisionResult` from `eve/ai` to type reusable configs and handlers.
 
-A model instance must implement a decision model specification the installed AI SDK supports; a matching `provider`, `modelId`, and `specificationVersion` alone is not enough. A newer specification can typecheck but still be rejected by an older SDK at runtime. Validation, retries, and provider errors follow AI SDK semantics.
+A model instance must implement decision model specification `v4`, the version AI SDK 7 supports. A matching `provider`, `modelId`, and `specificationVersion` alone is not enough. If the installed `ai` package does not export a decision API, `decide` throws an error that names the missing export. Validation, retries, and provider errors follow AI SDK semantics.
 
 `decide` also works outside a tool and doesn't need an active eve session.
 

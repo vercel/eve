@@ -90,6 +90,12 @@ eve dev --no-default-extensions
 
 This disables every bundled default extension for that server, including self-modification. Extensions you mount under `agent/extensions/` still load.
 
+## Troubleshooting
+
+| What you see                                                                             | What to do                                                                                                                                                                                    |
+| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `The legacy agent/subagents/self-modification layout is no longer supported.` from setup | Keep any authored changes, remove `agent/subagents/self-modification/`, then run `eve add eve/self-modification` to mount the extension at `agent/extensions/self-modification/extension.ts`. |
+
 ## What to read next
 
 - [Terminal UI](./dev-tui): work with your agent locally.

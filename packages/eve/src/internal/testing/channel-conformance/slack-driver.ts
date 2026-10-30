@@ -67,7 +67,7 @@ interface SlackMessageBody {
  */
 export function slackDriver(
   conversation: Exclude<Surface, "public"> | "code-channel" = "shared",
-  config: Pick<SlackChannelConfig, "onAnswers"> = {},
+  config: Pick<SlackChannelConfig, "onAnswers" | "renderers"> = {},
 ): ChannelDriver {
   const dm = conversation === "private";
   const codeChannel = conversation === "code-channel";
@@ -297,16 +297,18 @@ function hitlOptions(
   messageTs: string,
   messageBlocks: readonly unknown[] = blocks,
 ): RenderedOption[] {
-  return blocks.flatMap((block) =>
-    // Questions use `actions` blocks (`elements`); approval cards keep buttons in `actions`.
-    (
-      (block as { readonly elements?: readonly SlackElement[] }).elements ??
-      (block as { readonly actions?: readonly SlackElement[] }).actions ??
-      []
-    )
-      .filter((element) => element.action_id?.startsWith(ANSWER_ACTION_PREFIX) === true)
-      .flatMap((element) => renderedOptions(element, messageBlocks, messageTs)),
+  return hitlElements(blocks).flatMap((element) =>
+    renderedOptions(element, messageBlocks, messageTs),
   );
+}
+
+/** HITL widgets wherever a block nests them, as a renderer can. */
+function hitlElements(value: unknown): SlackElement[] {
+  if (Array.isArray(value)) return value.flatMap(hitlElements);
+  if (typeof value !== "object" || value === null) return [];
+  const element = value as SlackElement;
+  if (element.action_id?.startsWith(ANSWER_ACTION_PREFIX) === true) return [element];
+  return Object.values(value).flatMap(hitlElements);
 }
 
 /** Every `text` string in Block Kit, wherever a block nests it. */

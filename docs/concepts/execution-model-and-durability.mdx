@@ -19,7 +19,7 @@ The experimental [`workflow.modelCallsPerStep`](../agent-config#workflow-checkpo
 
 In local development and a self-deployed `eve start` process, eve uses the SDK's local world by default. It persists workflow runs under `.eve/.workflow-data`. On Vercel, the same workflow code runs on Vercel Workflow, which adds deployment-aware routing and dashboard run metadata.
 
-Nitro hosts eve's HTTP routes and workflow entrypoints, but not the workflow store or the sandbox runtime. Workflow state lives in the active world, and the sandbox comes from `agent/sandbox` or the default sandbox. To choose a world for a self-hosted deployment, see [Self-host eve](../guides/deployment/self-hosting#persist-workflow-state) and [agent.ts](../agent-config#workflow-world).
+Nitro hosts eve's HTTP routes and workflow entrypoints, but not the workflow store or the sandbox runtime. Workflow state lives in the active world, and the sandbox comes from `agent/sandbox` or the default sandbox. To choose a world for a self-hosted deployment, see [Workflow worlds](../guides/deployment/workflow-worlds) and [agent.ts](../agent-config#workflow-world).
 
 When a Vercel production deployment changes, the next delivery to an idle session moves the session to the deployment that accepted it. A delivery is anything sent to the session: a message, an answer, or a control. It can arrive by session ID or by any channel address the session claimed. The session keeps its ID and event stream. Its next model turn uses the new deployment's system-role instructions, model, and tools. Static user-role instructions stay in the session history and aren't added again. The delivery restarts the [`sessionTimeoutMs`](../agent-config#runtime-limits) idle window whether or not the move succeeds; disabled timeouts stay disabled.
 
@@ -61,26 +61,26 @@ eve treats every world other than Vercel Workflow as running one eve version at 
 
 eve ends a stranded session without running any of its code. When it ends depends on the kind of run:
 
-- **A root session**, one that a channel or client started, keeps its address and executes nothing. It ends when a new channel message replaces it, a reset ends it, or its session timeout elapses.
+- **A root session**, one that a channel or client started, keeps its address and executes nothing. It ends when a new channel message replaces it, `end()` ends it, or its session timeout elapses.
 - **A subagent session or workflow tool run**, including a task, is cancelled the next time the world delivers work to it. One example is the local world or Postgres recovering active runs at startup. No later message could resume its interrupted work, so eve doesn't wait.
 
 See [How a stranded session ends](#how-a-stranded-session-ends) for details.
 
 For a root session, what happens next depends on how the message is addressed:
 
-- **A channel address**, such as a Slack thread or any `from(address).send(...)`, resets the stranded session and starts one fresh session at the same address. Concurrent messages also get one fresh session. The message becomes its first turn. The fresh session names the session it replaced, and your instructions can read its recorded conversation; see [What a replacement session receives](#what-a-replacement-session-receives). A send that carries answers to pending requests throws `SessionStrandedError` and leaves the stranded session in place. A fresh session has no request for those answers. See [custom channels](../channels/custom#channel-operations-and-session-handles).
-- **`create()` on a channel address** throws `SessionStrandedError` and leaves the stranded session in place. Call `reset()` on the address, then `create()` again; see [Start from prior history](../channels/eve#start-from-prior-history).
-- **A session ID** is never reset implicitly. The eve HTTP channel returns `409` with `code: "session_stranded"` and the `eveVersion` that built the session when it recorded one. `Session.send()` and `Session.respond()` throw `SessionStrandedError` from `eve/channels`, and the TypeScript client's `ClientSession.send()` and `respond()` throw `ClientSessionStrandedError` from `eve/client`. Nothing is delivered, and the stranded run keeps its status and event log. See [Start and continue a session](../channels/eve#start-and-continue-a-session).
+- **A channel address**, such as a Slack thread or any `from(address).send(...)`, ends the stranded session and starts one fresh session at the same address. Concurrent messages also get one fresh session. The message becomes its first turn. The fresh session names the session it replaced, and your instructions can read its recorded conversation; see [What a replacement session receives](#what-a-replacement-session-receives). A send that carries answers to pending requests throws `SessionStrandedError` and leaves the stranded session in place. A fresh session has no request for those answers. See [custom channels](../channels/custom#channel-operations-and-session-handles).
+- **`create()` on a channel address** throws `SessionStrandedError` and leaves the stranded session in place. Call `end()` on the address, then `create()` again; see [Start from prior history](../channels/eve#start-from-prior-history).
+- **A session ID** is never ended implicitly. The eve HTTP channel returns `409` with `code: "session_stranded"` and the `eveVersion` that built the session when it recorded one. `Session.send()` and `Session.respond()` throw `SessionStrandedError` from `eve/channels`, and the TypeScript client's `ClientSession.send()` and `respond()` throw `ClientSessionStrandedError` from `eve/client`. Nothing is delivered, and the stranded run keeps its status and event log. See [Start and continue a session](../channels/eve#start-and-continue-a-session).
 - **Following a stream** of a stranded session returns the same `409 session_stranded`. The TypeScript client stops reconnecting and reports `ClientSessionStrandedError`, and the TUI explains how to recover. An existing connection learns this when it reconnects. Messages accepted before the upgrade are not redelivered.
-- **Reading recorded history** still works. A bounded read (`stream({ follow: false })`, or `follow=false` on the stream route) returns the recorded events without changing the session. Read a stranded conversation this way before you decide to reset it.
-- **Reset** works through a channel address or a session ID. **Clear** is refused because it would keep a session that can't run: `Session.clear()` throws `SessionStrandedError`, the eve HTTP channel returns `409 session_stranded`, and nothing changes.
-- **Session timeouts** end a stranded session the same way a reset does; see [How a stranded session ends](#how-a-stranded-session-ends).
+- **Reading recorded history** still works. A bounded read (`stream({ follow: false })`, or `follow=false` on the stream route) returns the recorded events without changing the session. Read a stranded conversation this way before you decide to end it.
+- **End** works through a channel address or a session ID. **Clear** is refused because it would keep a session that can't run: `Session.clear()` throws `SessionStrandedError`, the eve HTTP channel returns `409 session_stranded`, and nothing changes.
+- **Session timeouts** end a stranded session the same way `end()` does; see [How a stranded session ends](#how-a-stranded-session-ends).
 
-A reset ends the stranded session without running any of its code and releases its channel addresses. If another run took over the session in the meantime, the reset fails and leaves that run alone. The stranded session's `session.ended` hooks don't run; a replacement session runs `session.started` as usual. eve tries to record the reset and a `session.ended` event with `outcome: "failed"` and error code `session_stranded`, then close the old stream. This is best effort: unavailable storage doesn't prevent retirement, so the final event may be missing. You can retry a reset that fails partway.
+`end()` ends the stranded session without running any of its code and releases its channel addresses. If another run took over the session in the meantime, ending fails and leaves that run alone. The stranded session's `session.ended` hooks don't run; a replacement session runs `session.started` as usual. eve tries to record the end and a `session.ended` event with `outcome: "failed"` and error code `session_stranded`, then close the old stream. This is best effort: unavailable storage doesn't prevent retirement, so the final event may be missing. You can retry an end that fails partway.
 
-Each reset logs a `warn` record, `Reset stranded session`, with the previous session ID, both eve versions, and the `trigger`: `message`, `reset`, or `timeout`.
+Each retirement logs a `warn` record, `Reset stranded session`, with the previous session ID, both eve versions, and the `trigger`: `message`, `reset`, or `timeout`. The `trigger` for an explicit `end()` is `reset`.
 
-A reset can't be undone. A fresh session started by a message can read at most the stranded conversation's text. After an explicit reset, the next session has no link to the stranded one. Rolling back to the eve version that built a session helps only before the reset. On a world other than Vercel Workflow, pin the exact eve version in `package.json` so upgrades happen only when you choose.
+Ending a session can't be undone. A fresh session started by a message can read at most the stranded conversation's text. After an explicit end, the next session has no link to the stranded one. Rolling back to the eve version that built a session helps only before the session ends. On a world other than Vercel Workflow, pin the exact eve version in `package.json` so upgrades happen only when you choose.
 
 #### What a replacement session receives
 
@@ -124,7 +124,7 @@ export default defineDynamic(async (ctx) => {
 
 The memo runs before the replacement's first model call, and the instruction enters the replacement's history once, ahead of the new message. In a session that replaced no other, `ctx.session.predecessor` is undefined and the instruction contributes nothing.
 
-`transcriptOf()` returns `{ role, text }` messages, oldest first: the history each received message imported, the text of each received message, and each completed reply part. It leaves out reasoning, narration, tool calls and results, attachments, approvals and questions, and interrupted output. A clear in the stranded session starts the transcript over, so text the user cleared is never returned. `maxMessages` keeps only the newest messages.
+`transcriptOf()` returns `{ role, text }` messages, oldest first: the history each received message imported, the text of each received message, and each completed reply part. It leaves out reasoning, narration, tool calls and results, attachments, approvals and questions, and interrupted output. It keeps only the session's current conversation: a clear in the stranded session starts the transcript over, so text the user cleared is never returned. `maxMessages` keeps only the newest messages.
 
 For a session recorded before stream version 27, `sessions.attach()` reads from the beginning, even when `startIndex` requests a later position.
 
@@ -140,9 +140,9 @@ The transcript is context only: tools, approvals, files, sandbox contents, autho
 
 #### How a stranded session ends
 
-A stranded root session ends on its next channel message, a reset, or its [session timeout](../agent-config#runtime-limits), whichever comes first, and executes nothing while it waits. When the local world or Postgres recovers active runs at startup, eve skips the root session without replaying it. It logs a warning naming the run and both eve versions. The run keeps its `pending` or `running` status and its addresses, and a later restart skips it the same way.
+A stranded root session ends on its next channel message, an explicit end, or its [session timeout](../agent-config#runtime-limits), whichever comes first, and executes nothing while it waits. When the local world or Postgres recovers active runs at startup, eve skips the root session without replaying it. It logs a warning naming the run and both eve versions. The run keeps its `pending` or `running` status and its addresses, and a later restart skips it the same way.
 
-The timeout is the session's own timer, which keeps running after the upgrade. A stranded session ends at most `sessionTimeoutMs` after its last turn ended (30 days by default), and possibly sooner. The timeout retires the stranded session without starting a fresh one. The next message to the address starts an ordinary session. With `sessionTimeoutMs: false`, a stranded session stays until a message or a reset.
+The timeout is the session's own timer, which keeps running after the upgrade. A stranded session ends at most `sessionTimeoutMs` after its last turn ended (30 days by default), and possibly sooner. The timeout retires the stranded session without starting a fresh one. The next message to the address starts an ordinary session. With `sessionTimeoutMs: false`, a stranded session stays until a message or `end()`.
 
 Ending a root session doesn't immediately cancel its subagent sessions and workflow tool runs. Each is retired when a delivery for it reaches the current deployment, and the runtime logs identify the stranded run. A run that never receives a delivery, such as one in a dormant `eve dev` generation, can stay active. Cancel it in your Workflow world if needed. Cancellation doesn't run authored cleanup or hooks, undo side effects, or stop independent external jobs. Results and approvals don't carry over to a replacement session.
 
@@ -215,7 +215,7 @@ An awaited workflow operation provides the wait, and a generator's `yield` repor
 
 A delivery is a message, answer, or control sent to a session by its session ID or a channel address.
 
-Only one active session can hold a channel address. A channel-created session claims its first address before the first turn. Creation fails if another session already holds the address. Aliasing adds another address to the same session, and every claimed address stays active until the session ends or resets. An ID-only HTTP session has no channel address. When first messages race for the same address, one session wins and receives every message.
+Only one active session can hold a channel address. A channel-created session claims its first address before the first turn. Creation fails if another session already holds the address. Aliasing adds another address to the same session, and every claimed address stays active until the session ends. An ID-only HTTP session has no channel address. When first messages race for the same address, one session wins and receives every message.
 
 A channel send continues the address's session before creating one. A send that fails ambiguously never creates a session.
 
