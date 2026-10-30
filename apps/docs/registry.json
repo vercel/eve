@@ -1921,6 +1921,41 @@
       ]
     },
     {
+      "name": "connection/tavily",
+      "type": "registry:item",
+      "title": "Tavily",
+      "description": "Search the web, extract page content, crawl sites, and map URLs.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "tavily",
+              "tavily",
+              "tavily",
+              "--connection-method",
+              "mcp"
+            ]
+          },
+          "requires": ">=0.55.0"
+        }
+      },
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "files": [
+        {
+          "path": "registry/connections/tavily.ts",
+          "type": "registry:file",
+          "target": "agent/connections/tavily.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/ticket-tailor",
       "type": "registry:item",
       "title": "Ticket Tailor",

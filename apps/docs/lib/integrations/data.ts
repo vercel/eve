@@ -2622,6 +2622,21 @@ See Shopify's [agent profile documentation](https://shopify.dev/docs/agents/prof
     keywords: ["mcp", "postgres", "auth", "storage", "oauth", "connect"],
     authModes: ["user"],
   },
+  tavily: {
+    logo: "tavily",
+    docsHref: "https://docs.tavily.com/documentation/mcp",
+    keywords: ["mcp", "web search", "extract", "crawl", "map", "research", "oauth", "connect"],
+    authModes: ["user"],
+    configure: `Link your project, register the MCP connector, and pull OIDC locally:
+
+\`\`\`bash
+vercel link
+vercel connect create tavily --name tavily --connection-method mcp
+vercel env pull
+\`\`\`
+
+The MCP method signs each user in to their own Tavily account. Tool calls use that account's API credits.`,
+  },
   "ticket-tailor": {
     logo: "ticket-tailor",
     docsHref: "/docs/connections/mcp",

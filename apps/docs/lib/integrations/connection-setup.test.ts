@@ -165,6 +165,20 @@ describe("Sanity connection setup", () => {
   });
 });
 
+describe("Tavily connection setup", () => {
+  it("pins the MCP connection method for Tavily", () => {
+    const integration = getIntegration("tavily")!;
+    const setup = buildConnectionSetup(integration);
+
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/tavily");
+    expect(setup.variants["mcp:user"]).toContain('url: "https://mcp.tavily.com/mcp"');
+    expect(setup.variants["mcp:user"]).toContain('auth: connect("tavily")');
+    expect(integrationMarkdown(integration)).toContain(
+      "vercel connect create tavily --name tavily --connection-method mcp",
+    );
+  });
+});
+
 describe("Shopify connection setup", () => {
   it("uses hand-authored sections without generating authentication variants", () => {
     const integration = getIntegration("shopify")!;

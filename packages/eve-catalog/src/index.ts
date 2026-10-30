@@ -875,6 +875,17 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "tavily",
+    name: "Tavily",
+    kind: "connection",
+    tagline: "Search the web, extract page content, crawl sites, and map URLs.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description: "Tavily: search the web, extract page content, crawl sites, and map URLs.",
+      mcp: { url: "https://mcp.tavily.com/mcp" },
+    },
+  },
+  {
     slug: "ticket-tailor",
     name: "Ticket Tailor",
     kind: "connection",
