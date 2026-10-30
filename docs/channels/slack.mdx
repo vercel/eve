@@ -122,7 +122,7 @@ Message hooks only decide whether and how a message starts a turn. They don't re
 
 Use `onShortcut(shortcut, ctx)` for message shortcuts and global shortcuts configured under **Interactivity & Shortcuts** in your Slack app. The handler receives the shortcut callback ID, user, workspace, and trigger ID. Message shortcuts also include the selected message and channel. The context exposes workspace-scoped Slack API access because global shortcuts have no channel or message. eve acknowledges shortcut requests immediately and keeps their handlers alive in the background.
 
-Use `onSlashCommand(command, ctx)` for commands configured under **Slash Commands** in your Slack app. The handler receives the command name, argument text, invoking user, channel, workspace, trigger ID, and response URL. It also receives workspace-scoped Slack API access. eve acknowledges slash commands immediately with an empty `200 OK` response and keeps the handler alive in the background:
+Use `onSlashCommand(command, ctx)` for commands configured under **Slash Commands** in your Slack app. The handler receives the command name, argument text, invoking user, channel, workspace, trigger ID, and response URL. It also receives workspace-scoped Slack API access, `ctx.defaultAuth` for the invoking user, and `ctx.send` to start a conversation; see [Add commands](#add-commands). eve acknowledges slash commands immediately with an empty `200 OK` response and keeps the handler alive in the background:
 
 ```ts title="agent/channels/slack.ts"
 import { slackChannel } from "eve/channels/slack";
@@ -373,6 +373,54 @@ export default slackChannel({
 ```
 
 End returns a `Delivery` for the retiring session; `await delivery.result()` waits for retirement and address release. An already unowned thread throws `SessionNotActiveError`. Returning `null` after end consumes the triggering message as a command; return `{ auth }` instead to deliver that message as the first turn of the fresh session. Custom `onInteraction` handlers receive the same flat operations, which is useful for a New conversation button.
+
+#### Add commands
+
+Slack has two places for commands, and both are ordinary handler code.
+
+A Slack slash command, such as `/standup the release`, comes to `onSlashCommand` without a thread. To start a conversation from one, call `ctx.send` with an `initialMessage`: eve posts it as the thread root and runs the first turn under it. `ctx.defaultAuth` is the principal a message from the same user would have:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  async onSlashCommand(command, ctx) {
+    if (command.command !== "/standup") return;
+    await ctx.send(`Draft a standup about ${command.text || "this week"}.`, {
+      auth: ctx.defaultAuth,
+      target: {
+        channelId: command.channelId,
+        initialMessage: { text: `<@${command.user.id}> asked for a standup` },
+      },
+    });
+  },
+});
+```
+
+`ctx.send` takes the same options as `onEvent`'s [`ctx.send`](#other-events-api-callbacks). Register each command under **Slash Commands** in the Slack app's settings, with the same request URL as its interactivity, and add the `commands` bot scope.
+
+A command inside a thread, such as `@bot !clear`, is a message. Read it in the message hook, run it with the thread's session operations, and return `null` so the text doesn't reach the model:
+
+```ts title="agent/channels/slack.ts"
+import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
+
+const COMMAND = /^(?:<@\w+>\s*)*!([a-z-]+)\s*$/u;
+
+export default slackChannel({
+  async onAppMention(ctx, message) {
+    const name = COMMAND.exec(message.text.trim())?.[1];
+    if (name === "clear") {
+      // A thread with no session yet has nothing to clear.
+      if (await ctx.isSubscribed()) await ctx.clear();
+      await ctx.thread.post("Cleared the conversation.");
+      return null;
+    }
+    return { auth: defaultSlackAuth(message, ctx) };
+  },
+});
+```
+
+`ctx.compact()` and `ctx.end()` work the same way. The prefix is up to you; `!` keeps thread commands apart from Slack's own, since Slack treats a message that starts with `/` as a slash command. Anything that doesn't match, such as `@bot !clear the cache`, still reaches the model. The hook decides who can run a command, so check `message.author` before running one that only some people should.
 
 #### Serve Slack code channels
 

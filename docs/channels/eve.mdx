@@ -396,7 +396,7 @@ export default eveChannel({
 
 ### Slash commands
 
-`commands` offers slash commands to clients of this channel. The terminal UI lists them in its command typeahead and `/help`, next to its built-in commands. The [Web Chat](../guides/frontend/nextjs) template can show them in a typeahead when you type `/`, once you opt in with `<AgentChat commands />`, and [`useEveAgent`](../guides/frontend/use-eve-agent#slash-commands) can list and run them in your own UI. The channel always offers `sessionCommands` unless you remove them: `/new` (alias `/reset`), `/clear`, and `/compact`. Cancelling stays with each client, which knows the turn it's showing, such as the terminal UI's `/cancel` or Web Chat's Stop button.
+`commands` offers slash commands to clients of this channel. The terminal UI lists them in its command typeahead and `/help`, next to its built-in commands. The [Web Chat](../guides/frontend/nextjs) template can show them in a typeahead when you type `/`, once you opt in with `<AgentChat commands />`, and [`useEveAgent`](../guides/frontend/use-eve-agent#slash-commands) can list and run them in your own UI. The channel always offers `sessionCommands` unless you remove them: `/new` (alias `/reset`), `/clear`, and `/compact`. Cancelling stays with each client, which knows the turn it's showing, such as the terminal UI's `/cancel` or Web Chat's Stop button. The Slack channel doesn't read `commands`; see [Add commands](./slack#add-commands) for Slack's own.
 
 Declare your own commands with `defineCommand` from `eve/channels`; a `commands` record adds them to the defaults. This one hands the conversation to a person on the support team:
 

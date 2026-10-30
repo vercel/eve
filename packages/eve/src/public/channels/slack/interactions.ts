@@ -61,7 +61,7 @@ import {
   bindSlackSessionOperations,
   withSlackResponder,
 } from "#public/channels/slack/session-operations.js";
-import { dispatchSlashCommand } from "#public/channels/slack/slash-command.js";
+import { dispatchSlashCommand, type ReceiveOnSlack } from "#public/channels/slack/slash-command.js";
 import { parseAnswer } from "#shared/input.js";
 
 const log = createLogger("slack.interactions");
@@ -245,6 +245,8 @@ export interface InteractionHandlerDeps {
   readonly api: SlackTransportOptions | undefined;
   readonly config: SlackChannelConfig;
   readonly onAnswers: NonNullable<SlackChannelConfig["onAnswers"]>;
+  /** Starts a session through the channel's proactive receive, for `onSlashCommand`'s `send`. */
+  readonly receive: ReceiveOnSlack;
 }
 
 /**
