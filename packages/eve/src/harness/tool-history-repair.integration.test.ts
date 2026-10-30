@@ -79,7 +79,7 @@ describe("saved tool history", () => {
       const initial = setTurnClientContextState(
         withOpenTurn(
           {
-            agent: { modelReference: { id: "repair-test" }, system: "Test assistant", tools: [] },
+            agent: { modelReference: { id: "repair-test" }, tools: [] },
             compaction: { recentWindowSize: 10, threshold: 100_000 },
             continuationToken: "http:repair-test",
             sessionId: "repair-test",

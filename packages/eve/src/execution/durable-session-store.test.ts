@@ -25,7 +25,7 @@ describe("durable session checkpoints", () => {
       snapshot: { session: projectToDurableSession(session) },
     });
     expect(readDurableSession(state)).toBe(state.snapshot.session);
-    expect(state.snapshot.session.agent).toEqual({ system: "test system" });
+    expect(state.snapshot.session).not.toHaveProperty("agent");
     expect(state.snapshot.session).not.toHaveProperty("history");
   });
 
@@ -61,7 +61,6 @@ function buildSession(input: {
         ? { id: "compaction-model", contextWindowTokens: 200_000 }
         : undefined,
       modelReference: { id: "test-model", contextWindowTokens: 200_000 },
-      system: "test system",
       tools: input.withRefreshableAgent
         ? [{ description: "", inputSchema: { type: "object" }, name: "test" }]
         : [],

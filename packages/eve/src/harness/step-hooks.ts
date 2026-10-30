@@ -210,6 +210,7 @@ export async function emitStepActions(
   state: TurnPosition,
   step: HarnessStepResult,
   notRun: readonly ToolResultPart[],
+  options: { readonly draft?: boolean } = {},
 ): Promise<void> {
   const { runId } = state;
   for (const part of notRun) {
@@ -220,7 +221,14 @@ export async function emitStepActions(
   const result = finalOutputOf(step);
   if (result !== undefined) {
     commit.push({
-      data: { kind: "result", partId: `${runId}.result`, phase: "reply", runId, value: result },
+      data: {
+        kind: "result",
+        partId: `${runId}.result`,
+        // The harness settles the turn with its own reply, which may be this.
+        phase: options.draft === true ? "draft" : "reply",
+        runId,
+        value: result,
+      },
       type: "content.completed",
     });
   }

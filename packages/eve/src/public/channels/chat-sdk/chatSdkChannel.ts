@@ -110,6 +110,8 @@ export interface ChatSdkChannelState
   pendingInputCards?: Record<string, ChatSdkPendingInputCard>;
   /** @internal Id of the content part streaming into the anchor. */
   streamPartId?: string | null;
+  /** @internal Id of a part held back because it may be a draft the harness replaces. */
+  heldPartId?: string | null;
   /** Id of the latest message someone other than the bot sent in the thread. */
   latestMessageId?: string;
 }
@@ -507,6 +509,12 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     },
     async "content.delta"({ data }, { channel }) {
       if (!channel.thread || !canStream(channel)) return;
+      // A part that may be a draft waits for its phase: later deltas of a part that never started
+      // streaming are skipped, and its completion posts it if it's narration.
+      if (data.draft === true) {
+        channel.state.heldPartId = data.partId;
+        return;
+      }
       // Only text streams: a part announces its kind with its first delta.
       const streaming = channel.state.streamPartId === data.partId;
       if (data.kind === undefined ? !streaming : data.kind !== "text") return;
@@ -558,6 +566,9 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     async "content.completed"({ data }, { channel, session }) {
       if (data.kind !== "text") return;
       const text = typeof data.value === "string" ? data.value : "";
+      const held = channel.state.heldPartId === data.partId;
+      if (held) channel.state.heldPartId = null;
+      if (data.phase === "draft") return;
       if (contentPhase(data.phase) === "narration") {
         channel.state.pendingToolCallMessage = text ? (firstNonEmptyLine(text) ?? null) : null;
         // Finalize the streamed anchor so it shows the complete pre-tool-call
@@ -566,7 +577,8 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         // must not become a standalone message on non-streaming surfaces.
         if (text) {
           try {
-            await finalizeStreamedMessage(channel, text, false);
+            // Held narration would have streamed: it posts now, whole.
+            await finalizeStreamedMessage(channel, text, held);
           } catch (error) {
             if (!isNotImplemented(error)) throw error;
           }

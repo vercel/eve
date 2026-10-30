@@ -454,11 +454,21 @@ function foldSpecifics(
       if (previews !== undefined) delete previews.parts[partId];
       // A reply part joins its turn's reply as it completes. A later step's reply replaces an
       // earlier step's, such as a held turn's text while its tasks work: the turn's answer is the
-      // reply its last replying step writes, and a step that writes none leaves it standing.
-      const owner = view.runs[runId]?.owner;
-      const turn = owner !== undefined && "turnId" in owner ? view.turns[owner.turnId] : undefined;
+      // reply its last replying step writes, and a step that writes none leaves it standing. A
+      // part no run wrote replaces the reply too.
+      const owner = runId === undefined ? undefined : view.runs[runId]?.owner;
+      const turnId =
+        runId === undefined
+          ? fact.data.turnId
+          : owner !== undefined && "turnId" in owner
+            ? owner.turnId
+            : undefined;
+      const turn = turnId === undefined ? undefined : view.turns[turnId];
       if (phase === "reply" && turn !== undefined && turn.status !== "settled") {
-        const sameStep = (turn.reply ?? []).filter((id) => view.parts[id]?.runId === runId);
+        const sameStep =
+          runId === undefined
+            ? []
+            : (turn.reply ?? []).filter((id) => view.parts[id]?.runId === runId);
         view.turns[turn.turnId] = { ...turn, reply: [...sameStep, partId] };
       }
       return;
@@ -485,13 +495,19 @@ function foldProgress(view: SessionView, previews: MutablePreviews, raw: unknown
   if (view.session.status === "ended") return;
   switch (progress.type) {
     case "content.delta": {
-      const { delta, kind, partId } = progress.data;
+      const { delta, draft, kind, partId } = progress.data;
       if (view.parts[partId] !== undefined || typeof delta !== "string") return;
       const preview: PartPreview | undefined = previews.parts[partId];
       if (preview !== undefined) {
         previews.parts[partId] = { ...preview, text: preview.text + delta };
       } else if (kind !== undefined) {
-        previews.parts[partId] = { kind, partId, runId: progress.scope?.runId, text: delta };
+        previews.parts[partId] = {
+          kind,
+          partId,
+          runId: progress.scope?.runId,
+          text: delta,
+          ...(draft === true && { draft: true }),
+        };
       }
       return;
     }

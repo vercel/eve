@@ -45,14 +45,32 @@ export function instructionsReaction(resolver: ResolvedDynamicInstructionsResolv
   };
 }
 
-/** The system instructions the session's slots hold, in run order. */
+/** The system instructions the agent's dynamic definitions hold, in run order. */
 export function dynamicInstructionMessages(
   ctx: Pick<ContextReader, "get"> | undefined,
 ): SystemModelMessage[] {
-  return slotsOf(ctx, "instructions").flatMap(({ slot }) => {
+  return slotsOf(ctx, "instructions").flatMap(({ id, slot }) => {
     const instruction = slot.value as Instruction | null;
-    return instruction?.role === "system" ? [{ content: instruction.content, role: "system" }] : [];
+    return id !== HARNESS_INSTRUCTIONS &&
+      instruction?.role === "system" &&
+      instruction.content !== ""
+      ? [{ content: instruction.content, role: "system" }]
+      : [];
   });
+}
+
+/** The harness's system prompt: a string, or parts. */
+export const HARNESS_INSTRUCTIONS = "instructions:@harness";
+
+/** The system prompt the harness gives, where it gives one. */
+export function harnessInstructions(
+  ctx: Pick<ContextReader, "get"> | undefined,
+): string | readonly string[] | undefined {
+  const slot = slotsOf(ctx, "instructions").find(({ id }) => id === HARNESS_INSTRUCTIONS)?.slot;
+  const parts = (slot?.value as { parts?: unknown } | null | undefined)?.parts;
+  if (typeof parts === "string") return parts;
+  if (!Array.isArray(parts)) return undefined;
+  return parts.filter((part): part is string => typeof part === "string");
 }
 
 /**
@@ -67,7 +85,7 @@ export function takeUserInstructionMessages(ctx: AlsContext): UserModelMessage[]
   const messages: UserModelMessage[] = [];
   let changed = false;
   for (const { id, slot } of slotsOf(ctx, "instructions")) {
-    const instruction = slot.value as Instruction | null;
+    const instruction = id === HARNESS_INSTRUCTIONS ? null : (slot.value as Instruction | null);
     if (instruction?.role !== "user") {
       if (appended[id] !== undefined) {
         delete appended[id];

@@ -64,6 +64,7 @@ import {
 } from "./recovery.js";
 import {
   modelInstructions,
+  stepInstructions,
   requestMessages,
   type RequestMessages,
   withTrailingUserNote,
@@ -78,6 +79,7 @@ import {
   type InlineCallResults,
   NO_INLINE_CALLS,
 } from "#harness/call-executor.js";
+import { policyDecides } from "#harness/policy/apply.js";
 import { extractGatewayCostUsd, extractTokenUsageDelta, type TokenUsageDelta } from "./usage.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
@@ -287,8 +289,7 @@ export class ModelCaller {
       instructions: modelInstructions({
         anthropicCache: this.profile.anthropicCache,
         extraSystemNote,
-        session: this.step.session,
-        systemMessages: this.request.systemMessages,
+        instructions: stepInstructions(this.step, this.input.catalog),
       }),
       messages: asSystem ? [...messages] : withTrailingUserNote(messages, note),
     };
@@ -466,6 +467,7 @@ export class ModelCaller {
       {
         excludedActionToolNames,
         held: step.finalReplyOnly && workingTaskIds(step.session).length > 0,
+        draft: policyDecides(step),
         finalReplyOnly: step.finalReplyOnly,
         sessionCall: (callId) => step.view().projection.view.calls[callId],
         tools: catalog,
@@ -487,7 +489,9 @@ export class ModelCaller {
       telemetry,
     });
     const notRun = answerSkippedToolCalls(stepResult, catalog, invalidInputToolCallIds);
-    await emitStepActions(step.publish, step.position(), stepResult, notRun);
+    await emitStepActions(step.publish, step.position(), stepResult, notRun, {
+      draft: policyDecides(step),
+    });
     return withCallResults({
       answers: [...trailingInlineToolResultParts, ...notRun],
       calls,

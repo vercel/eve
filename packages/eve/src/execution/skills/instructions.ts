@@ -22,9 +22,9 @@ const ANNOUNCEMENT_KEY = "skills";
  * canonical symbolic skill root so supporting files remain discoverable
  * without provisioning a sandbox.
  *
- * Authored skills call this at graph resolution time so the section is part of
- * the turn agent's static instructions. Dynamic skills reuse it for their
- * announcement.
+ * eve's default prompt renders it for the agent's static skills on every model
+ * call (`renderSkills` in `harness/policy/agent.ts`). Dynamic skills reuse it
+ * for their announcement.
  */
 export function formatAvailableSkillsSection(
   skills: readonly AvailableSkillDescription[],

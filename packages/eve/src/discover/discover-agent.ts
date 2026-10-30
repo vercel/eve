@@ -11,6 +11,7 @@ import {
   DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
   DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
   DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED,
+  DISCOVER_EXTENSION_HARNESS_UNSUPPORTED,
   locateExtensionMount,
   mountNamespace,
 } from "#discover/extensions.js";
@@ -120,6 +121,13 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
   });
   diagnostics.push(...configModuleResult.diagnostics);
 
+  const harnessResult = discoverFlatModuleSource({
+    rootEntries,
+    rootPath: agentRoot,
+    slotName: "harness",
+  });
+  diagnostics.push(...harnessResult.diagnostics);
+
   const channelsResult = await discoverNamedSourceDirectory({
     directoryName: "channels",
     invalidDirectoryCode: DISCOVER_CHANNELS_DIRECTORY_INVALID,
@@ -199,6 +207,16 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
           message:
             "An extension may not declare memory — scope and lifecycle state belong to the consuming application.",
           sourcePath: join(agentRoot, firstMemory.logicalPath),
+        }),
+      );
+    }
+    if (harnessResult.module !== undefined) {
+      diagnostics.push(
+        createDiscoverErrorDiagnostic({
+          code: DISCOVER_EXTENSION_HARNESS_UNSUPPORTED,
+          message:
+            "An extension may not declare a harness — how turns run is the consuming agent's to own.",
+          sourcePath: join(agentRoot, harnessResult.module.logicalPath),
         }),
       );
     }
@@ -322,6 +340,9 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
 
   if (role !== "extension" && configModuleResult.module !== undefined) {
     manifestInput.configModule = configModuleResult.module;
+  }
+  if (role !== "extension" && harnessResult.module !== undefined) {
+    manifestInput.harness = harnessResult.module;
   }
   const manifest = createAgentSourceManifest(manifestInput);
 
