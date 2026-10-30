@@ -9,7 +9,7 @@ You'll build an agent that reads each new GitHub issue, labels it as a bug, feat
 To have your coding agent build it, ask it to follow this page:
 
 ```text
-Build the eve triage agent from https://eve.dev/docs/getting-started/triage-agent.md. Ask me which GitHub repository to use, and check with me before you connect GitHub or deploy.
+Build the eve triage agent from https://eve.dev/docs/getting-started/triage-agent.md. Check with me before you connect GitHub or deploy.
 ```
 
 Or follow the steps below.
@@ -19,7 +19,7 @@ Or follow the steps below.
 - Node.js 24 or newer, which includes npm
 - Access to an AI model, as in [Getting Started](/docs/getting-started#prerequisites)
 - [Docker](https://docs.docker.com/get-started/get-docker/), running, so the agent gets a Linux sandbox with Node.js and Git on your machine
-- A public GitHub repository of yours with at least one open issue, ideally a small project
+- A GitHub account
 
 ## Create the agent
 
@@ -106,13 +106,15 @@ The agent runs these commands with its built-in `bash` tool in the [sandbox](/do
 
 ## Triage an issue locally
 
-In the terminal UI, send an issue from your repository:
+[vercel-labs/eve-triage-demo](https://github.com/vercel-labs/eve-triage-demo) is a small project with two reported bugs and a feature request. In the terminal UI, send:
 
 ```text
-Triage <owner>/<repo>#<number>
+Triage vercel-labs/eve-triage-demo#1
 ```
 
-The agent calls `get_issue`. For a bug, it loads `reproduce-bug`, clones the repository, and runs a repro. Its reply starts with the label, followed by what it ran and saw.
+The agent calls `get_issue`, loads `reproduce-bug`, clones the repository, and runs the cart subtotal with the quantities from the issue. Its reply starts with `Label: bug` and shows the command it ran and the wrong `$14.50` it printed.
+
+Try `#2`, another bug, and `#3`, a feature request the agent labels without running any code.
 
 ## Connect GitHub
 
@@ -146,7 +148,7 @@ Your `botName` and connection name come from the GitHub App that setup creates. 
 npm run deploy
 ```
 
-Open the GitHub App in the Vercel Connect dashboard and install it on your repository. Then open a new issue.
+Create your own copy of the demo with **Use this template** on [eve-triage-demo](https://github.com/vercel-labs/eve-triage-demo). Open the GitHub App in the Vercel Connect dashboard and install it on your copy. Then open an issue there, such as one with the text of the demo's issue #2.
 
 On Vercel, the GitHub channel checks out the repository into the sandbox before each turn, so the agent works on the real files. The App's token is used only for the checkout, so commands the agent runs afterward have no GitHub credentials. The agent replies on the issue with its label and what it found.
 
