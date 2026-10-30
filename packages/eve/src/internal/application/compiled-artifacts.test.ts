@@ -19,12 +19,14 @@ describe("createWorkflowWorldPluginSource", () => {
     expect(source).toContain(
       'const workflowDeliverySecrets = readWorkflowDeliverySecrets("@acme/eve-world");',
     );
-    expect(source).toContain(
-      "authenticateWorkflowDeliveries(\n  await createWorldFromModule(workflowWorldModule),\n  workflowDeliverySecrets,\n)",
-    );
-    expect(source.indexOf("readWorkflowDeliverySecrets(")).toBeLessThan(
-      source.indexOf("await createWorldFromModule("),
-    );
+    const order = [
+      "readWorkflowDeliverySecrets(",
+      "await createWorldFromModule(workflowWorldModule)",
+      'validateWorkflowWorld({ packageName: "@acme/eve-world", world: configuredWorkflowWorld })',
+      "authenticateWorkflowDeliveries(configuredWorkflowWorld, workflowDeliverySecrets)",
+    ].map((snippet) => source.indexOf(snippet));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(source).toContain(
       'await installWorkflowWorld({ packageName: "@acme/eve-world", world: workflowWorld });',
     );

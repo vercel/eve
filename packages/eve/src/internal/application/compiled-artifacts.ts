@@ -386,18 +386,20 @@ applyVercelWorkflowWorldDefaults(workflowWorld);`.trimStart();
   const workflowRuntimeImportSpecifier = stringifyEsmImportSpecifier(
     resolvePackageCompiledFilePath("src/compiled/@workflow/core/runtime.js"),
   );
-  // Read before the World connects anywhere, so a missing secret fails first.
+  // The secret is read before the World connects anywhere, so a missing secret
+  // fails first; the World is validated before it is wrapped, so a malformed or
+  // incompatible World still fails with the validator's message.
   const createWorldSource = `
 const workflowDeliverySecrets = readWorkflowDeliverySecrets(${JSON.stringify(packageName)});
-const workflowWorld = authenticateWorkflowDeliveries(
-  await createWorldFromModule(workflowWorldModule),
-  workflowDeliverySecrets,
-);`.trimStart();
+const configuredWorkflowWorld = await createWorldFromModule(workflowWorldModule);
+validateWorkflowWorld({ packageName: ${JSON.stringify(packageName)}, world: configuredWorkflowWorld });
+const workflowWorld = authenticateWorkflowDeliveries(configuredWorkflowWorld, workflowDeliverySecrets);`.trimStart();
   return {
     moduleImportSpecifier: packageName,
     extraImportLines: [
       `import { createWorldFromModule } from ${workflowRuntimeImportSpecifier};`,
       `import { authenticateWorkflowDeliveries, readWorkflowDeliverySecrets } from ${deliveryAuthImportSpecifier()};`,
+      `import { validateWorkflowWorld } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/internal/workflow/validate-world.ts"))};`,
     ],
     createWorldSource,
   };

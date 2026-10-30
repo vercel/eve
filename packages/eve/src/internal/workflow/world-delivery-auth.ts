@@ -25,10 +25,14 @@ const DELIVERY_PROOF_PREFIX = "v1.";
  * delivered message identically.
  */
 export function signWorkflowDelivery(secret: string, queueName: string, message: unknown): string {
+  return signCanonicalMessage(secret, queueName, canonicalMessageJson(message));
+}
+
+function signCanonicalMessage(secret: string, queueName: string, canonicalMessage: string): string {
   const mac = createHmac("sha256", secret)
     .update(queueName)
     .update("\n")
-    .update(canonicalMessageJson(message))
+    .update(canonicalMessage)
     .digest("base64url");
   return `${DELIVERY_PROOF_PREFIX}${mac}`;
 }
@@ -142,8 +146,12 @@ export function authenticateWorkflowDeliveries<TWorld extends World>(
     // delivery gets a handler that checks the message the World hands it.
     let rejected = false;
     const deliver = createQueueHandler(queueNamePrefix, async (message, metadata) => {
+      const canonicalMessage = canonicalMessageJson(message);
       const trusted = secrets.some((secret) =>
-        timingSafeEqualStrings(proof, signWorkflowDelivery(secret, metadata.queueName, message)),
+        timingSafeEqualStrings(
+          proof,
+          signCanonicalMessage(secret, metadata.queueName, canonicalMessage),
+        ),
       );
       if (!trusted) {
         rejected = true;
@@ -181,10 +189,10 @@ async function withActiveRunsHidden(world: World, run: () => Promise<void>): Pro
 }
 
 /**
- * Mirrors `reenqueueActiveRuns` from `@workflow/world`, but through the
- * stamped `world.queue`. Like it, each run goes back to the namespace it
- * recorded, so agents sharing one database recover only into their own
- * consumers.
+ * Mirrors `reenqueueActiveRuns` from `@workflow/world`, whose vendored copy
+ * here is types only, but through the stamped `world.queue`. Like it, each
+ * run goes back to the namespace it recorded, so agents sharing one database
+ * recover only into their own consumers.
  */
 async function recoverActiveRuns(world: World): Promise<void> {
   const namespace = process.env[WORKFLOW_QUEUE_NAMESPACE_ENV];

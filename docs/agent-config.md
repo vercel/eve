@@ -398,7 +398,7 @@ options in the environment variables the world package reads, not in
 to choose a world and set up the Postgres world's database.
 
 Postgres and other custom worlds also require `EVE_WORKFLOW_DELIVERY_SECRET` at
-runtime: the same random value of at least 32 characters on every `eve start`
+runtime: the same random value of at least 32 characters on every server
 process. eve uses it to sign queued jobs and reject unsigned deliveries. See
 [Authenticate workflow deliveries](./guides/deployment/self-hosting#authenticate-workflow-deliveries)
 for setup, rotation, and development defaults.
