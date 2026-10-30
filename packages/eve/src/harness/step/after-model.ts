@@ -26,6 +26,8 @@ import {
 } from "#harness/action-result-helpers.js";
 import { askStepApprovals, stopForToolSignIn } from "#harness/hitl/index.js";
 import { hasQueuedTurnInput, park } from "#harness/step/park.js";
+import { decideAfterModel } from "#harness/policy/apply.js";
+import type { ModelStep } from "#harness/policy/policy.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
@@ -155,7 +157,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   // History grows by append only; nothing rewrites earlier messages mid-turn,
   // so the prompt prefix stays stable and the provider's prompt cache keeps
   // hitting across steps. Compaction is the sole mechanism that ever rewrites
-  // history, and it runs before the model call (see `maybeCompact`).
+  // history, and it runs before the model call (see `compactIfDue`).
   // An `eve__reply` call is terminal even when the model emits it alongside
   // executing tools: continuing the loop would leave the no-execute call as a
   // dangling tool_use the next provider call rejects, and drop the result.
@@ -175,24 +177,34 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       : responseTail;
   step.session = changeHistory(step.session, { extend: [...promptMessages, ...historyTail] });
 
-  const endsTurn = await stepEndsTurn(result, responseMessages, input.endsTurnTools);
-  const continueLoop =
-    (!calledFinalOutput || finalOutputRejected) &&
-    ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
-      normalizedProviderHistory.outcomeEndsResponse ||
-      hasQueuedTurnInput(step.view()));
-  if (continueLoop) return { next: step.runStep, session: step.session };
-  // The turn rule: no turn ends while its tasks work. The session waits for
-  // one to settle, then calls the model again in the same turn.
-  if (workingTasks.length > 0) {
-    return { held: { kind: "tasks", taskIds: workingTasks }, next: null, session: step.session };
+  // Two continues are eve's own, before any policy decides: a provider-run call's outcome the
+  // model hasn't answered, and input that joined the turn while the model ran.
+  const delivered = calledFinalOutput && !finalOutputRejected;
+  if (
+    !delivered &&
+    (normalizedProviderHistory.outcomeEndsResponse || hasQueuedTurnInput(step.view()))
+  ) {
+    return { next: step.runStep, session: step.session };
   }
+  const lastStep: ModelStep = {
+    endsTurn: await stepEndsTurn(result, responseMessages, input.endsTurnTools),
+    text: stepOutput,
+    ...(delivered && { output: finalOutput }),
+  };
+  return decideAfterModel(
+    step,
+    {
+      lastStep,
+      // Results the model hasn't read: this step's own, still at the end of history. A delivered
+      // reply replaced them in history, and a step that made no calls left none.
+      unread: responseTail.at(-1)?.role === "tool" && step.session.history.at(-1)?.role === "tool",
+    },
+    (settling, output) => settleTurn(settling, { result, stepOutput: toText(output) }),
+  );
+}
 
-  return settleTurn(step, {
-    result,
-    // Text written before an `endsTurn` call was narration, not the reply.
-    stepOutput: endsTurn ? null : stepOutput,
-  });
+function toText(output: JsonValue | null): string | null {
+  return output === null || typeof output === "string" ? output : JSON.stringify(output);
 }
 
 /**
