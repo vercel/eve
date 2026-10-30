@@ -269,11 +269,19 @@ describe("readWorkflowDeliverySecrets", () => {
     vi.unstubAllEnvs();
   });
 
-  it("names the variable and the world when the secret is missing", () => {
+  it("leaves deliveries open when no secret is set, and warns naming the variable and world", () => {
     vi.stubEnv("EVE_WORKFLOW_DELIVERY_SECRET", " , ");
-    expect(() => readWorkflowDeliverySecrets("@workflow/world-postgres")).toThrow(
-      /EVE_WORKFLOW_DELIVERY_SECRET is not set\. The "@workflow\/world-postgres" Workflow world/,
-    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(readWorkflowDeliverySecrets("@workflow/world-postgres")).toBeUndefined();
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        expect.stringMatching(
+          /EVE_WORKFLOW_DELIVERY_SECRET is not set, so the "@workflow\/world-postgres" Workflow world accepts unauthenticated/,
+        ),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("reads a comma-separated rotation list in order", () => {
