@@ -158,8 +158,9 @@ export function assertCommandNames(
 }
 
 /**
- * Resolves a typed name or alias to its command. Only own keys match, so a name like
- * `constructor` never resolves to an inherited member.
+ * Resolves a typed name or alias to its command and the name it's keyed by, for
+ * {@link runCommand}. Only own keys match, so a name like `constructor` never resolves to an
+ * inherited member.
  */
 export function findCommand(
   commands: CommandDefinitions | undefined,
@@ -186,13 +187,21 @@ export class CommandNeedsSessionError extends Error {
 
 /** Thrown when text follows a command that takes no argument. */
 export class CommandTakesNoArgumentError extends Error {
+  readonly commandName: string;
+
   constructor(commandName: string) {
     super(`/${commandName} takes no argument.`);
     this.name = "CommandTakesNoArgumentError";
+    this.commandName = commandName;
   }
 }
 
-/** Runs a command and keeps only the fields of its result a channel acts on. */
+/**
+ * Runs a command found by {@link findCommand} with the same checks as the eve channel. Throws
+ * {@link CommandNeedsSessionError} for a `session: "required"` command without `ctx.session`,
+ * {@link CommandTakesNoArgumentError} for text after a command without `input`, and an error when
+ * a command without a session returns `send`. Returns only the result fields a channel acts on.
+ */
 export async function runCommand(
   found: { readonly name: string; readonly command: CommandDefinition },
   ctx: CommandContext,

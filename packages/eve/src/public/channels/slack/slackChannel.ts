@@ -569,6 +569,14 @@ export interface SlackShortcutContext {
 
 /** Workspace-scoped context handed to `slackChannel({ onSlashCommand })`. */
 export interface SlackSlashCommandContext {
+  /** Auth for the Slack user who ran the command, the same principal a message from them has. */
+  readonly defaultAuth: SessionAuthContext;
+  /**
+   * Starts a session on this Slack channel, as `onEvent`'s `ctx.send` does. Slack sends slash
+   * commands without a thread, so pass `target.initialMessage` to post a thread root for the
+   * conversation, or `target.threadTs` to continue an existing thread.
+   */
+  readonly send: SlackEventSendFn;
   /** Slack workspace identity and raw Web API escape hatch. */
   readonly slack: SlackWorkspaceHandle;
 }
@@ -1104,7 +1112,19 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           return handleInteractionPost(
             body,
             { from, resolveSession, waitUntil },
-            { api, config, onAnswers },
+            {
+              api,
+              config,
+              onAnswers,
+              receive: (input, trigger) =>
+                receiveOnSlack(input, {
+                  from,
+                  api,
+                  codeChannels: config.codeChannels === true,
+                  credentials: config.credentials,
+                  ...trigger,
+                }),
+            },
           );
         }
         return handleEventPost({

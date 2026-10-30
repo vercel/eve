@@ -148,6 +148,52 @@ function slackCalls(operation: string): Record<string, unknown>[] {
     });
 }
 
+describe("slackChannel onSlashCommand", () => {
+  it("starts a thread for the user who ran the command", async () => {
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+    await firePost(
+      slackChannel({
+        credentials: { botToken: "xoxb-test" },
+        async onSlashCommand(command, ctx) {
+          await ctx.send(`Write a standup about ${command.text}.`, {
+            auth: ctx.defaultAuth,
+            target: {
+              channelId: command.channelId,
+              initialMessage: { text: `<@${command.user.id}> asked for a standup` },
+            },
+          });
+        },
+      }),
+      signed(
+        new URLSearchParams({
+          channel_id: "C01",
+          channel_name: "general",
+          command: "/standup",
+          response_url: "https://hooks.slack.com/commands/T01/1/abc",
+          team_id: "T01",
+          text: "the release",
+          trigger_id: "trigger-1",
+          user_id: "U01",
+          user_name: "alice",
+        }).toString(),
+        "application/x-www-form-urlencoded",
+      ),
+      send,
+    );
+
+    expect(slackCalls("chat.postMessage")[0]).toMatchObject({
+      channel: "C01",
+      text: "<@U01> asked for a standup",
+    });
+    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    expect(input).toMatchObject({
+      auth: { principalId: "slack:T01:U01" },
+      message: "Write a standup about the release.",
+      state: { channelId: "C01", threadTs: "1700000001.000001", triggeringUserId: "U01" },
+    });
+  });
+});
+
 describe("slackChannel ephemeral threading", () => {
   const postEphemeralOnMention = () =>
     slackChannel({

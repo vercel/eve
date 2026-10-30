@@ -29,8 +29,10 @@
   "CommandDefinition",
   "CommandDefinitions",
   "CommandInput",
+  "CommandNeedsSessionError",
   "CommandResult",
   "CommandSession",
+  "CommandTakesNoArgumentError",
   "CommittedLine",
   "ConversationEnvironment",
   "DELETE",
@@ -79,6 +81,8 @@
   "defineChannel",
   "defineCommand",
   "disableRoute",
+  "findCommand",
   "isChannel",
+  "runCommand",
   "sessionCommands"
 ]
