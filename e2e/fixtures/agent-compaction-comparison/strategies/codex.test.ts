@@ -61,12 +61,14 @@ describe("codexCompaction", () => {
     expect(ids(sent)).not.toContain("call-1");
   });
 
-  it("is due at a step at 90% of the window, or the configured limit", () => {
+  it("is due at a step at 90% of the window, or the configured limit below it", () => {
     const base = { phase: "step" as const, threshold: 150_000, contextWindowTokens: 200_000 };
     expect(dueOf(codexCompaction())({ ...base, inputTokens: 179_999 })).toBe(false);
     expect(dueOf(codexCompaction())({ ...base, inputTokens: 180_000 })).toBe(true);
     const limited = dueOf(codexCompaction({ autoCompactTokenLimit: 100_000 }));
     expect(limited({ ...base, inputTokens: 100_000 })).toBe(true);
+    const aboveCap = dueOf(codexCompaction({ autoCompactTokenLimit: 195_000 }));
+    expect(aboveCap({ ...base, inputTokens: 185_000 })).toBe(true);
   });
 
   it("is due at turn end only with a post-turn share, of the 95% usable window", () => {

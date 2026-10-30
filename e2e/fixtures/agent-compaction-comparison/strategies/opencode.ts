@@ -214,7 +214,9 @@ export function serialize(message: StoredHistoryMessage): string {
   if (message.role === "system") return "";
   if (message.role === "user") {
     const text = textOf(message.content);
-    return message.kind === "user" && text ? `[User]: ${text}` : "";
+    if (message.kind !== "user") return "";
+    const files = typeof message.content === "string" ? [] : attachments(message.content);
+    return [...(text ? [`[User]: ${text}`] : []), ...files].join("\n");
   }
   if (typeof message.content === "string") {
     return message.content ? `[Assistant]: ${message.content}` : "";
@@ -230,12 +232,13 @@ export function serialize(message: StoredHistoryMessage): string {
           return [`[Assistant tool call]: ${part.toolName}(${JSON.stringify(part.input)})`];
         case "tool-result": {
           const output = outputText(part.output);
+          const attached = part.output.type === "content" ? attachments(part.output.value) : [];
           return [
             output === PRUNE_MARKER
               ? `[Tool result]: ${PRUNE_MARKER}`
               : part.output.type.startsWith("error")
                 ? `[Tool error]: ${output}`
-                : `[Tool result]: ${truncate(output)}`,
+                : `[Tool result]: ${truncate([output, ...attached].join("\n"))}`,
           ];
         }
         default:
@@ -316,7 +319,25 @@ function textOf(content: StoredHistoryMessage["content"]): string {
 }
 
 function outputText(output: { readonly type: string; readonly value?: unknown }): string {
+  if (output.type === "content" && Array.isArray(output.value)) {
+    return textOf(output.value as { type: "text"; text: string }[]);
+  }
   return typeof output.value === "string" ? output.value : JSON.stringify(output.value ?? "");
+}
+
+/** opencode's `[Attached <mime>: <filename>]` line for each file a message or tool result carries. */
+function attachments(
+  parts: readonly {
+    readonly type: string;
+    readonly mediaType?: string;
+    readonly filename?: string;
+  }[],
+): string[] {
+  return parts.flatMap((part) =>
+    part.type === "text"
+      ? []
+      : [`[Attached ${part.mediaType ?? part.type}: ${part.filename ?? "file"}]`],
+  );
 }
 
 function truncate(value: string): string {

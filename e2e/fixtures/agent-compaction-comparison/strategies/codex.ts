@@ -23,7 +23,7 @@ export const SUMMARY_PREFIX =
   "Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:";
 
 export interface CodexCompactionOptions {
-  /** `model_auto_compact_token_limit`. Defaults to 90% of the context window. */
+  /** `model_auto_compact_token_limit`, capped at 90% of the context window, its default. */
   readonly autoCompactTokenLimit?: number;
   /**
    * `model_post_turn_compact_threshold_percent`: compact after a turn once it fills this share
@@ -42,8 +42,8 @@ export function codexCompaction(options: CodexCompactionOptions = {}): Compactio
       phases: ["step", "turn-end"],
       due(measure) {
         const fullLimit = measure.contextWindowTokens * EFFECTIVE_WINDOW_SHARE;
-        const autoLimit =
-          options.autoCompactTokenLimit ?? measure.contextWindowTokens * AUTO_COMPACT_SHARE;
+        const contextLimit = measure.contextWindowTokens * AUTO_COMPACT_SHARE;
+        const autoLimit = Math.min(options.autoCompactTokenLimit ?? contextLimit, contextLimit);
         const limitReached = measure.inputTokens >= Math.min(autoLimit, fullLimit);
         if (measure.phase === "step") return limitReached;
         return (

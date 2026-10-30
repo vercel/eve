@@ -141,6 +141,43 @@ describe("serialize", () => {
     expect(serialize({ role: "user", kind: "context.state", content: "state" })).toBe("");
   });
 
+  it("keeps a placeholder for each file a user message or tool result attaches", () => {
+    expect(
+      serialize({
+        content: [
+          { text: "Inspect attached report", type: "text" },
+          {
+            data: "JVBERi0=",
+            filename: "incident.pdf",
+            mediaType: "application/pdf",
+            type: "file",
+          },
+        ],
+        kind: "user",
+        role: "user",
+      }),
+    ).toBe("[User]: Inspect attached report\n[Attached application/pdf: incident.pdf]");
+    expect(
+      serialize({
+        content: [
+          {
+            output: {
+              type: "content",
+              value: [
+                { text: "Rendered the chart.", type: "text" },
+                { data: "iVBORw0=", mediaType: "image/png", type: "image-data" },
+              ],
+            },
+            toolCallId: "call-1",
+            toolName: "chart",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      }),
+    ).toBe("[Tool result]: Rendered the chart.\n[Attached image/png: file]");
+  });
+
   it("builds opencode's prompt, with the prior summary when there is one", () => {
     expect(buildPrompt({ context: ["A"] })).toContain("Create a new anchored summary");
     expect(buildPrompt({ context: ["A"], previousSummary: "S" })).toContain(
