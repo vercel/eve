@@ -84,8 +84,7 @@ describe("withEve", () => {
     ).resolves.toBeUndefined();
   });
 
-  // TODO(#5706): withEve does not write the workspace summary index yet.
-  it.fails("writes the multi-agent summary index Vercel uploads for the dashboard", async () => {
+  it("writes the multi-agent summary index Vercel uploads for the dashboard", async () => {
     const root = await createWorkspace();
 
     await withEve({ services: { web: { framework: "nextjs", root: "apps/web" } } }, { root });

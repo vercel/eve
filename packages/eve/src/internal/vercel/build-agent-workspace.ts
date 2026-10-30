@@ -1,5 +1,5 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
@@ -17,8 +17,9 @@ import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
 
 const VERCEL_BUILD_OUTPUT_VERSION = 3;
 
-function createMultiAgentSummary(workspace: AgentWorkspace): VercelEveMultiAgentSummary {
-  return {
+/** Write the root summary index Vercel uses to compose member summaries for the dashboard. */
+export async function writeMultiAgentSummary(workspace: AgentWorkspace): Promise<void> {
+  const summary: VercelEveMultiAgentSummary = {
     agents: workspace.members.map((member) => ({
       name: member.name,
       routePrefix: `/eve/${member.name}`,
@@ -31,6 +32,9 @@ function createMultiAgentSummary(workspace: AgentWorkspace): VercelEveMultiAgent
     kind: VERCEL_EVE_MULTI_AGENT_SUMMARY_KIND,
     schemaVersion: VERCEL_EVE_MULTI_AGENT_SUMMARY_VERSION,
   };
+  const outputPath = join(workspace.root, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH);
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, `${JSON.stringify(summary, null, 2)}\n`);
 }
 
 /** Emit the inferred Vercel Services project for a strict hostless workspace. */
@@ -75,11 +79,7 @@ export async function buildAgentWorkspace(
   await Promise.all(
     assembled.rootDirectories.map((rootDirectory) => mkdir(rootDirectory, { recursive: true })),
   );
-  await mkdir(join(workspace.root, ".eve"), { recursive: true });
-  await writeFile(
-    join(workspace.root, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH),
-    `${JSON.stringify(createMultiAgentSummary(workspace), null, 2)}\n`,
-  );
+  await writeMultiAgentSummary(workspace);
   const staticDirectory = join(outputDirectory, "static");
   await mkdir(staticDirectory, { recursive: true });
   await writeFile(join(staticDirectory, "index.html"), buildMultiAgentLandingPage(workspace));

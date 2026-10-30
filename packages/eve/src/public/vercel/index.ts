@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 
 import { resolveEveProjectContext } from "#internal/project-context.js";
 import { assembleEveVercelServices } from "#internal/vercel/assemble-eve-services.js";
+import { writeMultiAgentSummary } from "#internal/vercel/build-agent-workspace.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import {
   createEveHomeRouteSrc,
@@ -176,6 +177,9 @@ export async function withEve<TConfig extends EveVercelConfig>(
   await Promise.all(
     assembled.rootDirectories.map((directory) => mkdir(directory, { recursive: true })),
   );
+  if (context.kind === "workspace") {
+    await writeMultiAgentSummary(context.workspace);
+  }
 
   const services = Object.fromEntries(
     Object.entries(assembled.services).map(([name, service]) => {
