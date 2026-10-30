@@ -1,4 +1,5 @@
 import type { HarnessModelMessage } from "#harness/messages.js";
+import type { PublicAgentStaticModelDefinition } from "#shared/agent-definition.js";
 import type { JsonValue } from "#shared/json.js";
 
 // A session program is a function of the session that says what should happen next. eve
@@ -35,12 +36,23 @@ export interface ProgramTurn {
   readonly lastStep?: ModelStep;
 }
 
+export interface NativeCompactionOptions {
+  readonly model?: PublicAgentStaticModelDefinition;
+  readonly instructions?: string;
+}
+
 /** Where eve has to shrink the history: what asked, and eve's own way of doing it. */
 export interface Compaction {
   /** `automatic`: the prompt eve measured is over the threshold. `manual`: `session.compact()`. */
   readonly reason: "automatic" | "manual";
-  /** eve's compaction: older turns become a summary checkpoint, and recent ones stay whole. */
-  native(history: readonly HarnessModelMessage[]): Promise<HarnessModelMessage[]>;
+  /**
+   * eve's compaction: older turns become a summary checkpoint, and recent ones stay whole.
+   * `options` choose the summary model and extend its prompt.
+   */
+  native(
+    history: readonly HarnessModelMessage[],
+    options?: NativeCompactionOptions,
+  ): Promise<HarnessModelMessage[]>;
 }
 
 export interface ProgramContext {

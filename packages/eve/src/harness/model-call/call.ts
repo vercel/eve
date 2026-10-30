@@ -304,6 +304,7 @@ export class ModelCaller {
         messages: prompt.messages,
         model: this.input.model,
         promptMessages: withClientContext(prompt),
+        request: { instructions: this.instructions(options.extraSystemNote), tools },
         requestEnvelopeTokens: this.requestEnvelopeTokens,
       });
     } catch (error) {

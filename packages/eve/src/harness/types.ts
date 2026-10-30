@@ -1,3 +1,4 @@
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
@@ -315,6 +316,8 @@ export interface ToolLoopHarnessConfig {
   readonly clearOnly?: boolean;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
+  /** The agent's `compaction.compact`, which replaces eve's default rewrite. */
+  readonly compactionStrategy?: CompactionStrategy;
   /** The delivery a clear or compact control arrived as; its facts name it. */
   readonly controlDelivery?: ControlDelivery;
   readonly handleEvent?: HandleEventFn;

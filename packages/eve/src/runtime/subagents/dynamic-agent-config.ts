@@ -56,6 +56,11 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   if (isDynamicModelDefinition(definition.model)) {
     throw new Error(`${message} The returned "model" must be static.`);
   }
+  if (definition.compaction?.compact !== undefined) {
+    throw new Error(
+      `${message} The "compaction.compact" field cannot be selected at runtime; a dynamic subagent's config is serialized, so it can't carry a function.`,
+    );
+  }
   if (definition.limits?.sessionUsage !== undefined) {
     throw new Error(
       `${message} The "limits.sessionUsage" field cannot be selected at runtime; the root agent's \`sessionUsage\` applies.`,

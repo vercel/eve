@@ -15,6 +15,7 @@ import {
   type Compaction,
   force,
   type ModelStep,
+  type NativeCompactionOptions,
   type Next,
   type Program,
   type ProgramContext,
@@ -145,15 +146,20 @@ export async function programHistory(
     readonly messages: readonly HarnessModelMessage[];
     readonly reason: Compaction["reason"];
     readonly limit: number;
-    readonly native: (history: HarnessModelMessage[]) => Promise<HarnessModelMessage[]>;
+    readonly native: (
+      history: HarnessModelMessage[],
+      options?: NativeCompactionOptions,
+    ) => Promise<HarnessModelMessage[]>;
+    /** The agent's compaction strategy, which keeps the history instead of the program's. */
+    readonly history?: (ctx: ProgramContext) => Promise<readonly HarnessModelMessage[] | undefined>;
   },
 ): Promise<HarnessModelMessage[]> {
   const natives = new WeakSet<object>();
   const failures = new WeakSet<object>();
   const compaction: Compaction = {
-    native: async (history) => {
+    native: async (history, options) => {
       try {
-        const compacted = await input.native([...history]);
+        const compacted = await input.native([...history], options);
         natives.add(compacted);
         return compacted;
       } catch (error) {
@@ -165,6 +171,17 @@ export async function programHistory(
   };
   const ctx = programContext(step, { compaction, history: input.messages });
   let history: readonly HarnessModelMessage[] | undefined;
+  if (input.history !== undefined) {
+    // The agent's own strategy: its errors are the author's to read, and keeping the history as
+    // it is still has to fit.
+    const kept = (await input.history(ctx)) ?? input.messages;
+    if (natives.has(kept)) return kept as HarnessModelMessage[];
+    return checkHistory(input.messages, kept, {
+      automatic: input.reason === "automatic",
+      limit: input.limit,
+      subject: "The compaction strategy's history",
+    });
+  }
   try {
     history = await force(programOf(step)(ctx).history ?? (() => compaction.native(ctx.history)));
   } catch (error) {

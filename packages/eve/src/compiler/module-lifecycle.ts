@@ -57,8 +57,10 @@ export function markConfigRuntimeEntries(
     config.dynamicModel,
     config.model?.source,
     config.compaction?.model?.source,
-    // The runtime loads `limits.sessionUsage` from the agent config module.
-    config.limits?.sessionUsage === true ? config.source : undefined,
+    // The runtime loads `limits.sessionUsage` and `compaction.compact` from the agent config module.
+    config.limits?.sessionUsage === true || config.compaction?.compact === true
+      ? config.source
+      : undefined,
   ];
   for (const source of sources) {
     if (source !== undefined) evaluation.requireRuntimeEntry(source.sourceId);
