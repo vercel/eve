@@ -119,7 +119,7 @@ See [Run the relay outside Vercel](/docs/channels/discord/reference#run-the-rela
 
 The bot answers DMs, mentions of its user, replies to its messages, and messages in threads where it's already talking. A mention in a text channel starts a public thread, and the thread is one session. Set `gateway: { startThread: false }` to answer in the channel instead.
 
-Thread follow-ups without a mention need the privileged **Message Content** intent. Setup turns it on when Discord allows it, for bots in fewer than 100 servers.
+Thread follow-ups without a mention need the privileged **Message Content** intent. Setup turns it on when Discord allows it.
 
 ## Configure approval prompts
 
@@ -149,7 +149,7 @@ export default defineSchedule({
 
 ## Handle file attachments
 
-Files attached through a command's attachment option reach the agent as files, up to 25 MB.
+Files attached through a command's attachment option reach the agent as files. See [Attachments](/docs/channels/discord/reference#attachments) for limits.
 
 ## Filter messages
 

@@ -59,7 +59,7 @@ Portable credentials also work on Vercel when you manage the Slack app yourself.
 
 With the generated channel file, the agent answers `@mentions` in any channel it has joined. To answer DMs too, add the `message.im` event and `im:history` scope to the Slack app and reinstall it. It replies in a thread under the message. Each thread is one session, so people continue the conversation by mentioning the agent again in that thread.
 
-While a turn runs, the thread status names the agent's latest step, such as `Search useEveAgent` or a tool's progress label. Replies up to 12,000 characters post inline. Longer replies upload as an `eve-response.md` snippet, which needs the `files:write` scope.
+While the agent works, the thread status shows what it's doing.
 
 ## Reply without a mention
 

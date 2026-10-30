@@ -54,7 +54,7 @@ After deploying, create a Linq webhook for `https://your-agent.example/eve/v1/li
 
 ## Respond to messages
 
-Every accepted message continues the conversation's session. A message that arrives while the agent is working steers the current turn. Set `turnPolicy: "queue"` to finish each response before the next message starts. Images and other files reach the agent as files, up to 25 MB.
+Every message continues the conversation's session, so the agent keeps the context of earlier messages. Images and other files people send reach the agent as files.
 
 ## Filter messages
 

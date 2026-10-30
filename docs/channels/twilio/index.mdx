@@ -45,7 +45,7 @@ export default twilioChannel({
 
 ## Handle phone calls
 
-When someone calls, eve answers, asks the caller to speak, and sends the transcript to the agent. The call ends with "Thanks. I'll follow up by text.", and the reply arrives by SMS. `onVoice` runs when the call comes in: return `null` to reject it, or return an object to change the spoken prompt, language, voice, or speech recognition options.
+When someone calls, eve answers, asks the caller to speak, and sends the transcript to the agent. The caller hears a short acknowledgement, and the reply arrives by SMS. `onVoice` runs when the call comes in: return `null` to reject it, or return an object to change the spoken prompt, language, voice, or speech recognition options.
 
 ## Configure approval prompts
 

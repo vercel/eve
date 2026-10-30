@@ -45,7 +45,7 @@ In a group, a message wakes the agent when it's a command (`/ask` or `/ask@my_bo
 
 ## Configure approval prompts
 
-Tool approvals and option questions appear as inline-keyboard buttons. Freeform questions use a reply prompt, and the person's reply becomes the answer. Replies are plain text, so Markdown shows literally, and replies longer than 4,096 characters split across messages.
+Tool approvals and option questions appear as inline-keyboard buttons. Freeform questions use a reply prompt, and the person's reply becomes the answer.
 
 ## Start conversations proactively
 
@@ -67,16 +67,7 @@ export default defineSchedule({
 
 ## Handle file attachments
 
-Photos and documents reach the agent as files, up to 25 MB of any type by default. Set `uploadPolicy` to narrow the types or size:
-
-```ts title="agent/channels/telegram.ts"
-import { telegramChannel } from "eve/channels/telegram";
-
-export default telegramChannel({
-  botUsername: "my_bot",
-  uploadPolicy: { allowedMediaTypes: ["image/*", "application/pdf"], maxBytes: 10 * 1024 * 1024 },
-});
-```
+Photos and documents people send reach the agent as files. To limit their types or size, see [Attachments](/docs/channels/telegram/reference#attachments).
 
 ## Restrict access
 
