@@ -6,7 +6,6 @@ import { callPluginHook } from "#internal/testing/plugin-hooks.js";
 
 const NO_EXTERNALS: ExternalsPolicy = {
   checkedExternals: [],
-  extensionTracePaths: {},
   pruneDevelopmentRuntime: false,
   pruneSandboxProviders: false,
   traceDeps: [],

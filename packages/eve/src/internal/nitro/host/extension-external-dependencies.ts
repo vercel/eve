@@ -2,48 +2,12 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 
-import { exactRegex, prefixRegex } from "#internal/bundler/filters.js";
-
-interface BundlerPluginShape {
-  readonly name: string;
-  readonly resolveId: {
-    readonly filter: { readonly id: RegExp[] };
-    handler(source: string): { external: true; id: string } | null;
-  };
-}
-
 interface ExtensionExternalDependencyMount {
   readonly externalDependencies: readonly string[];
   readonly sourceRoot: string;
 }
 
-/** Keeps extension-owned runtime packages external so Nitro can preserve their full package trees. */
-export function createExtensionExternalDependencyPlugin(
-  mounts: readonly ExtensionExternalDependencyMount[],
-): BundlerPluginShape | null {
-  const dependencyAnchors = collectDependencyAnchors(mounts);
-  if (dependencyAnchors.size === 0) {
-    return null;
-  }
-
-  const dependencies = [...dependencyAnchors.keys()];
-  return {
-    name: "eve-extension-external-dependency",
-    resolveId: {
-      filter: {
-        id: dependencies.flatMap((name) => [exactRegex(name), prefixRegex(`${name}/`)]),
-      },
-      handler(source) {
-        const dependency = dependencies.find(
-          (packageName) => source === packageName || source.startsWith(`${packageName}/`),
-        );
-        return dependency === undefined ? null : { external: true, id: source };
-      },
-    },
-  };
-}
-
-/** Resolves package entries for Nitro's nft tracer from the mounted extension package. */
+/** Resolves each extension-owned runtime package's entry from the extension that declared it. */
 export function resolveExtensionExternalDependencyPaths(
   mounts: readonly ExtensionExternalDependencyMount[],
 ): Record<string, string> {

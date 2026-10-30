@@ -8,7 +8,7 @@ import { resolveDevelopmentStateDirectory } from "#internal/application/dev-envi
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
 import { copyDevelopmentSourceSnapshot } from "#internal/nitro/dev-runtime-source-snapshot-copy.js";
-import { resolveExtensionExternalDependencyPaths } from "#internal/nitro/host/extension-external-dependency-plugin.js";
+import { resolveExtensionExternalDependencyPaths } from "#internal/nitro/host/extension-external-dependencies.js";
 import {
   createDevelopmentSourceSnapshotPlan,
   toDevelopmentSourceSnapshotPath,

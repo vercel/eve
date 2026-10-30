@@ -178,7 +178,6 @@ function toNitroConfig(
     serverAssets: built.serverAssets,
     serverDir: false,
     traceDeps: [...spec.externals.traceDeps],
-    traceOpts: { nft: { paths: { ...spec.externals.extensionTracePaths } } },
     vercel: spec.vercel,
   };
 }

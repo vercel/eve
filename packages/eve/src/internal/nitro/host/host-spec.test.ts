@@ -239,6 +239,25 @@ describe("createHostSpec", () => {
     });
   });
 
+  it("fully traces mounted extensions' dependencies in production", async () => {
+    const manifest = await compileAgent({ externalDependencies: ["sharp"] });
+    manifest.extensionMounts = [
+      {
+        externalDependencies: ["zod", "sharp"],
+        mountId: "extensions/layout",
+        mountLogicalPath: "extensions/layout.ts",
+        mountSourceId: "extensions/layout.ts",
+        mountSourcePath: `${APP_ROOT}/node_modules/layout-extension/dist/extension.mjs`,
+        namespace: "layout",
+        packageName: "layout-extension",
+        sourceRoot: `${APP_ROOT}/node_modules/layout-extension/dist/extension`,
+        specifier: "layout-extension",
+      },
+    ];
+
+    expect(spec(manifest, PRODUCTION).externals.traceDeps).toEqual(["sharp", "zod*", "sharp*"]);
+  });
+
   it("enables WebSocket support in dev and for production hosts that declare a WebSocket route", async () => {
     const plain = await compileAgent();
     expect(spec(plain, DEVELOPMENT).websocket).toBe(true);

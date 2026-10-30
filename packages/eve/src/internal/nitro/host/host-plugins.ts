@@ -12,7 +12,6 @@ import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-pl
 import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import type { CompiledExtensionMount } from "#compiler/manifest.js";
 import { exactRegex, pathsRegex } from "#internal/bundler/filters.js";
-import { createExtensionExternalDependencyPlugin } from "#internal/nitro/host/extension-external-dependency-plugin.js";
 import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
 import { createHostedGraphPlugin } from "#internal/nitro/host/hosted-graph-plugin.js";
 import { workflowHandlerPath } from "#internal/nitro/host/host-routes.js";
@@ -60,7 +59,6 @@ export function createHostPlugins(input: HostPluginsInput): HostBuildPlugins {
     // the output as a live import.
     createPseudoPackagePlugin(),
     createHostedGraphPlugin({ appRoot: input.appRoot, externals: input.externals }),
-    createExtensionExternalDependencyPlugin(input.extensionMounts),
     createExtensionMountPlugin(input.extensionMounts, input.extensionOverridePaths),
     createExtensionScopePlugin(
       input.extensionMounts.map((mount) => ({

@@ -1,6 +1,5 @@
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { resolvePackageSourceDirectoryPath } from "#internal/application/package.js";
-import { resolveExtensionExternalDependencyPaths } from "#internal/nitro/host/extension-external-dependency-plugin.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 
 /**
@@ -22,8 +21,6 @@ const LOCAL_SANDBOX_BACKEND_NAMES = new Set([
 export interface ExternalsPolicy {
   /** Packages Nitro externalizes and traces into production output, beyond its own database. */
   readonly traceDeps: readonly string[];
-  /** Entries Nitro's tracer resolves from the mounted extension instead of the app root. */
-  readonly extensionTracePaths: Readonly<Record<string, string>>;
   /** Imports kept external and untraced: optional engines the app did not configure. */
   readonly untracedExternals: readonly string[];
   /** Configured externals whose resolution from the written output is checked. */
@@ -67,7 +64,6 @@ export function createExternalsPolicy(input: {
   const production = !input.development;
   return {
     checkedExternals: production ? configuredExternals : [],
-    extensionTracePaths: production ? resolveExtensionExternalDependencyPaths(extensionMounts) : {},
     pruneDevelopmentRuntime: production,
     // On Vercel, `DefaultSandbox.environment()` records Vercel Sandbox, so
     // local providers are reachable only when the app configured one.

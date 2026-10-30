@@ -13,7 +13,6 @@ const APP_ROOT = join("/app");
 
 const NO_EXTERNALS: ExternalsPolicy = {
   checkedExternals: [],
-  extensionTracePaths: {},
   pruneDevelopmentRuntime: false,
   pruneSandboxProviders: false,
   traceDeps: [],

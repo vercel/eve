@@ -1,4 +1,3 @@
-import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -8,9 +7,6 @@ import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
 import { createHostPlugins, type HostPluginsInput } from "#internal/nitro/host/host-plugins.js";
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
 import { callPluginHook } from "#internal/testing/plugin-hooks.js";
-import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
-
-const createTemporaryDirectory = useTemporaryDirectories();
 
 const APP_ROOT = "/tmp/weather-agent";
 const WORKFLOW_DIR = `${APP_ROOT}/.eve/workflow`;
@@ -18,7 +14,6 @@ const STEP_SOURCE = 'export async function add(a, b) { "use step"; return a + b;
 
 const NO_EXTERNALS: ExternalsPolicy = {
   checkedExternals: [],
-  extensionTracePaths: {},
   pruneDevelopmentRuntime: false,
   pruneSandboxProviders: false,
   traceDeps: [],
@@ -59,13 +54,7 @@ async function firstResult(list: Plugin[], hook: HookName, ...args: unknown[]) {
 
 describe("createHostPlugins", () => {
   it("orders step transforms and side-effect resolution first, then the hosted graph, then extensions", async () => {
-    const sourceRoot = await realpath(await createTemporaryDirectory("eve-host-plugins-mount-"));
-    await mkdir(join(sourceRoot, "node_modules", "zod"), { recursive: true });
-    await writeFile(
-      join(sourceRoot, "node_modules", "zod", "package.json"),
-      JSON.stringify({ name: "zod", main: "index.js" }),
-    );
-    await writeFile(join(sourceRoot, "node_modules", "zod", "index.js"), "");
+    const sourceRoot = `${APP_ROOT}/node_modules/layout-extension/dist/extension`;
     const names = plugins({
       externals: {
         ...NO_EXTERNALS,
@@ -76,7 +65,7 @@ describe("createHostPlugins", () => {
       },
       extensionMounts: [
         {
-          externalDependencies: ["zod"],
+          externalDependencies: [],
           mountId: "extensions/layout",
           mountLogicalPath: "extensions/layout.ts",
           mountSourceId: "extensions/layout.ts",
@@ -105,7 +94,6 @@ describe("createHostPlugins", () => {
       "eve-node-esm-compat-banner",
       "eve-pseudo-packages",
       "eve:hosted-graph",
-      "eve-extension-external-dependency",
       "eve-extension-mount",
       "eve-extension-scope",
       "eve-authored-asset-import",
