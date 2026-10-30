@@ -22,10 +22,7 @@ import type {
   PreparedApplicationHost,
   PreparedDevelopmentApplicationHost,
 } from "#internal/nitro/host/types.js";
-import {
-  createEveVercelOptions,
-  EVE_WORKFLOW_FLOW_ROUTE_PATH,
-} from "#internal/nitro/host/vercel-build-output-config.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { defineChannel, WS } from "#public/definitions/channel.js";
@@ -36,23 +33,17 @@ import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 
 const workflowStepTargets = vi.hoisted(() => ({ value: [] as string[] }));
-const configureDevelopmentNitroRoutes = vi.fn(async () => undefined);
-const configureProductionNitroRoutes = vi.fn(async () => undefined);
 const createNitroMock = vi.fn();
-const registerScheduleTaskHandlers = vi.fn();
 const createTemporaryDirectory = useTemporaryDirectories();
 
 vi.mock("nitro/builder", () => ({
   createNitro: createNitroMock,
 }));
 
-vi.mock("./schedule-task-routes.js", () => ({
-  registerScheduleTaskHandlers,
-}));
-
-vi.mock("./configure-nitro-routes.js", () => ({
-  configureDevelopmentNitroRoutes,
-  configureProductionNitroRoutes,
+// Rendering writes the workflow handler beside the bundle, which these fixtures never create.
+vi.mock("./host-routes.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./host-routes.js")>()),
+  renderHostRoutes: async () => ({ handlers: [], scheduledTasks: {}, tasks: {}, virtual: {} }),
 }));
 
 vi.mock("#internal/workflow-bundle/builder.js", () => ({
@@ -414,10 +405,7 @@ describe("application Nitro creation", () => {
     const preparedHost = await createPreparedHost();
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
-    expect(createNitroMock.mock.calls[0]?.[0]).toMatchObject({
-      preset: "vercel",
-      vercel: createEveVercelOptions({ agentName: "weather-agent", enabled: true }),
-    });
+    expect(createNitroMock.mock.calls[0]?.[0]).toMatchObject({ preset: "vercel" });
 
     const vercelOptions = createNitroMock.mock.calls[0]?.[0].vercel;
     expect(vercelOptions?.config).toEqual({
@@ -451,9 +439,7 @@ describe("application Nitro creation", () => {
       },
       preset: "vercel",
     });
-    expect(nitroOptions?.vercel).toEqual(
-      createEveVercelOptions({ agentName: "weather-agent", enabled: true }),
-    );
+    expect(nitroOptions?.vercel).not.toHaveProperty("entryFormat");
   });
 
   it("rewrites Windows paths in Nitro generated routing imports", async () => {

@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import { readDevelopmentEnvironmentHostValues } from "#cli/dev/environment.js";
-import { computeChannelRouteRegistrations } from "#internal/nitro/host/channel-routes.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 import { usesLocalVercelSchedules } from "#internal/schedules/consumer-route.js";
 
@@ -39,7 +38,11 @@ export async function computeDevelopmentHostFingerprint(
         ),
       ].sort((left, right) => left.localeCompare(right)),
     },
-    channels: computeChannelRouteRegistrations(host),
+    channels: manifest.channelRoutes.effective.map((route) => ({
+      cors: route.cors,
+      method: route.method,
+      route: route.urlPath,
+    })),
     environment: readDevelopmentEnvironmentHostValues(host.appRoot),
     instrumentation: await readInstrumentationSource(host),
     localScheduleConsumer: usesLocalVercelSchedules(manifest),

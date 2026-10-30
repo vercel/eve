@@ -6,10 +6,7 @@ import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import
 import { findAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
 import { createNitro } from "nitro/builder";
 import type { LoadConfigOptions, Nitro } from "nitro/types";
-import {
-  hasVercelScheduleCollections,
-  usesLocalVercelSchedules,
-} from "#internal/schedules/consumer-route.js";
+import { usesLocalVercelSchedules } from "#internal/schedules/consumer-route.js";
 import { configureInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import {
@@ -19,7 +16,10 @@ import {
   resolveWorkflowModulePath,
   WORKFLOW_MODULE_SPECIFIERS,
 } from "#internal/application/package.js";
-import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import {
+  createDevelopmentNitroArtifactsConfig,
+  createProductionNitroArtifactsConfig,
+} from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxProviderPrunePlugin } from "#internal/nitro/host/compiled-sandbox-provider-prune-plugin.js";
 import { createDevelopmentRuntimePrunePlugin } from "#internal/nitro/host/development-runtime-prune-plugin.js";
 import { prepareSkillServerAssets } from "#internal/nitro/host/skill-server-assets.js";
@@ -31,11 +31,6 @@ import {
   createExtensionExternalDependencyPlugin,
   resolveExtensionExternalDependencyPaths,
 } from "#internal/nitro/host/extension-external-dependency-plugin.js";
-import {
-  configureDevelopmentNitroRoutes,
-  configureProductionNitroRoutes,
-} from "#internal/nitro/host/configure-nitro-routes.js";
-import { applyEveCronHandlerRoute } from "#internal/nitro/host/cron-handler-route.js";
 import { createExternalDependencyOutputCheckPlugin } from "#internal/nitro/host/external-dependency-output-check-plugin.js";
 import { createNitroBundlerConfig } from "#internal/nitro/host/nitro-bundler-config.js";
 import {
@@ -43,7 +38,7 @@ import {
   OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME,
 } from "#internal/nitro/host/optional-engine-dependency-plugin.js";
 import { addNitroRoutingImportSpecifierPlugin } from "#internal/nitro/host/nitro-routing-import-specifier-plugin.js";
-import { registerScheduleTaskHandlers } from "#internal/nitro/host/schedule-task-routes.js";
+import { createHostRouteTable, renderHostRoutes } from "#internal/nitro/host/host-routes.js";
 import type {
   PreparedApplicationHost,
   PreparedDevelopmentApplicationHost,
@@ -104,10 +99,6 @@ function resolveProductionNitroPreset(): "vercel" | undefined {
 function manifestHasWorkflowProgram(manifest: CompiledAgentManifest): boolean {
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
   return nodes.some((node) => node.tools.some((tool) => tool.workflowProgram !== undefined));
-}
-
-function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {
-  return manifest.channelRoutes.effective.some((entry) => entry.method === "WEBSOCKET");
 }
 
 function collectHostedTraceDependencies(
@@ -624,8 +615,23 @@ export async function createDevelopmentApplicationNitro(
   }
 
   const workflowArtifacts = await buildWorkflowArtifacts(preparedHost);
+  const routeTable = createHostRouteTable({
+    manifest: preparedHost.compileResult.manifest,
+    mode: "development",
+    scheduleRegistrations: preparedHost.scheduleRegistrations,
+    vercel: false,
+  });
+  const routes = await renderHostRoutes(routeTable, {
+    artifactsConfig: createDevelopmentNitroArtifactsConfig({
+      appRoot: preparedHost.appRoot,
+      configuredWorld: preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
+    }),
+    workflowArtifacts,
+    workflowWorldPluginPath: preparedHost.compiledArtifacts.workflowWorldPluginPath,
+  });
   const nitro = await createNitro(
     {
+      ...routes,
       builder: EVE_NITRO_BUILDER,
       buildDir: nitroBuildDir,
       compatibilityDate: EVE_NITRO_COMPATIBILITY_DATE,
@@ -647,6 +653,7 @@ export async function createDevelopmentApplicationNitro(
       vercel: createEveVercelOptions({
         agentName: preparedHost.compileResult.manifest.config.name,
         enabled: false,
+        routeTable,
       }),
     },
     createNitroLoadOptions(nitroBuildDir),
@@ -654,7 +661,6 @@ export async function createDevelopmentApplicationNitro(
 
   configureSharedApplicationNitro(nitro, preparedHost);
   configureNitroStepPlugins(nitro, workflowArtifacts);
-  await configureDevelopmentNitroRoutes(nitro, preparedHost, workflowArtifacts);
 
   return nitro;
 }
@@ -704,14 +710,26 @@ export async function createProductionApplicationNitro(
       "skills",
     ),
   });
+  const routeTable = createHostRouteTable({
+    manifest,
+    mode: "production",
+    scheduleRegistrations: preparedHost.scheduleRegistrations,
+    vercel: preset === "vercel",
+  });
+  const routes = await renderHostRoutes(routeTable, {
+    artifactsConfig: createProductionNitroArtifactsConfig(preparedHost.appRoot),
+    workflowArtifacts,
+    workflowWorldPluginPath: preparedHost.compiledArtifacts.workflowWorldPluginPath,
+  });
   const nitro = await createNitro(
     {
+      ...routes,
       builder: EVE_NITRO_BUILDER,
       buildDir: options.buildDir,
       compatibilityDate: EVE_NITRO_COMPATIBILITY_DATE,
       dev: false,
       features: {
-        websocket: manifestHasWebSocketChannel(preparedHost.compileResult.manifest),
+        websocket: routeTable.routes.some((route) => route.method === "WEBSOCKET"),
       },
       // Gzipping every output file only annotates the build log's file tree.
       logging: { compressedSizes: false },
@@ -736,10 +754,8 @@ export async function createProductionApplicationNitro(
       vercel: createEveVercelOptions({
         agentName: preparedHost.compileResult.manifest.config.name,
         enabled: preset === "vercel",
-        hasVercelScheduleCollections: hasVercelScheduleCollections(
-          preparedHost.compileResult.manifest,
-        ),
         publicRoutePrefix: options.publicRoutePrefix,
+        routeTable,
         workspaceMember: options.workspaceMember,
       }),
     },
@@ -754,19 +770,5 @@ export async function createProductionApplicationNitro(
 
   configureSharedApplicationNitro(nitro, preparedHost);
   configureNitroStepPlugins(nitro, workflowArtifacts);
-
-  if (preparedHost.scheduleRegistrations.length > 0) {
-    applyEveCronHandlerRoute(nitro);
-    const artifactsConfig = createProductionNitroArtifactsConfig(preparedHost.appRoot);
-    registerScheduleTaskHandlers(nitro, {
-      artifactsConfig,
-      dispatchModulePath: resolvePackageSourceFilePath(
-        "src/internal/nitro/routes/schedule-task.ts",
-      ),
-      registrations: preparedHost.scheduleRegistrations,
-    });
-  }
-
-  await configureProductionNitroRoutes(nitro, preparedHost, workflowArtifacts);
   return nitro;
 }
