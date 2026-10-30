@@ -37,7 +37,7 @@ describe("agentRouter", () => {
       "operated",
     );
     expect(decide).toHaveBeenCalledWith({
-      abortSignal,
+      signal: abortSignal,
       state: { message: "Deploy the service" },
       questions: {
         route: {
@@ -99,7 +99,12 @@ describe("agentRouter", () => {
 /** An agent whose session replies to every message with `message`. */
 function replyingAgent(message: string) {
   const send = vi.fn(async () => ({
-    result: async () => ({ data: undefined, message, status: "waiting" as const }),
+    result: async () => ({
+      data: undefined,
+      reply: message,
+      sessionEnded: false,
+      status: "completed" as const,
+    }),
   }));
   return { agent: vi.fn(() => ({ send })), send };
 }

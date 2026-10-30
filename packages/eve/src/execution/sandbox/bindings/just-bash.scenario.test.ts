@@ -10,7 +10,7 @@ import { createSandboxEnvironmentHarness } from "#internal/testing/sandbox-provi
 import { JustBashSandbox, type JustBashEnvironmentOptions } from "#sandbox/providers/just-bash.js";
 import { executeBashOnSandbox } from "#execution/sandbox/bash.js";
 import { executeGlobOnSandbox } from "#execution/sandbox/glob-tool.js";
-import { executeGrepOnSandbox } from "#execution/sandbox/grep-tool.js";
+import { executeGrepSearch } from "#execution/sandbox/grep-search.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
@@ -68,23 +68,25 @@ describe("just-bash sandbox file API", () => {
     await writeFile(join(sourceRoot, "instructions.md"), "before");
     let factoryCalls = 0;
     const provider = createJustBashProvider({
-      async filesystem(context) {
-        factoryCalls += 1;
-        expect(context.resolveProjectPath(".")).toBe(appRoot);
-        await context.defaultFilesystem.mkdir("/source", { recursive: true });
-        return new MountableFs({
-          base: context.defaultFilesystem,
-          mounts: [
-            {
-              filesystem: new ReadWriteFs({
-                allowSymlinks: false,
-                maxFileReadSize: Number.MAX_SAFE_INTEGER,
-                root: sourceRoot,
-              }),
-              mountPoint: "/source",
-            },
-          ],
-        });
+      experimental: {
+        async filesystem(context) {
+          factoryCalls += 1;
+          expect(context.resolveProjectPath(".")).toBe(appRoot);
+          await context.defaultFilesystem.mkdir("/source", { recursive: true });
+          return new MountableFs({
+            base: context.defaultFilesystem,
+            mounts: [
+              {
+                filesystem: new ReadWriteFs({
+                  allowSymlinks: false,
+                  maxFileReadSize: Number.MAX_SAFE_INTEGER,
+                  root: sourceRoot,
+                }),
+                mountPoint: "/source",
+              },
+            ],
+          });
+        },
       },
     });
 
@@ -103,12 +105,22 @@ describe("just-bash sandbox file API", () => {
       path: "/source",
     });
     await expect(
-      executeGrepOnSandbox(handle.sandbox, { path: "/source", pattern: "before" }),
-    ).resolves.toMatchObject({
-      content: "/source/instructions.md:1:before",
-      matchCount: 1,
-      path: "/source",
-    });
+      executeGrepSearch(
+        {
+          path: "/source",
+          pattern: "before",
+          outputMode: "content",
+        },
+        handle.sandbox,
+      ),
+    ).rejects.toThrow("outside the workspace");
+    await handle.sandbox.writeTextFile({ path: "/workspace/grep-note.txt", content: "before" });
+    await expect(
+      executeGrepSearch({ pattern: "before", outputMode: "content" }, handle.sandbox),
+    ).resolves.toMatchObject({ content: "/workspace/grep-note.txt:1:before", matchCount: 1 });
+    await expect(
+      executeGrepSearch({ pattern: "[", literal: false, outputMode: "content" }, handle.sandbox),
+    ).rejects.toThrow("grep failed");
     await handle.sandbox.writeTextFile({
       content: "after",
       path: "/source/instructions.md",
@@ -123,9 +135,11 @@ describe("just-bash sandbox file API", () => {
     const appRoot = await createTemporaryCacheDirectory("filesystem-factory-lifecycle");
     let factoryCalls = 0;
     const provider = createJustBashProvider({
-      async filesystem({ defaultFilesystem }) {
-        factoryCalls += 1;
-        return defaultFilesystem;
+      experimental: {
+        async filesystem({ defaultFilesystem }) {
+          factoryCalls += 1;
+          return defaultFilesystem;
+        },
       },
     });
 
@@ -424,18 +438,20 @@ describe("just-bash custom commands", () => {
   it("forwards custom commands to live sessions", async () => {
     const appRoot = await createTemporaryCacheDirectory("custom-command");
     const provider = createJustBashProvider({
-      customCommands: [
-        defineCommand("cap", async (args, context) => {
-          if (args[0] === "fail") {
-            return { exitCode: 23, stderr: "cap failed\n", stdout: "" };
-          }
-          return {
-            exitCode: 0,
-            stderr: "",
-            stdout: decodeBytesToUtf8(context.stdin).toUpperCase(),
-          };
-        }),
-      ],
+      experimental: {
+        customCommands: [
+          defineCommand("cap", async (args, context) => {
+            if (args[0] === "fail") {
+              return { exitCode: 23, stderr: "cap failed\n", stdout: "" };
+            }
+            return {
+              exitCode: 0,
+              stderr: "",
+              stdout: decodeBytesToUtf8(context.stdin).toUpperCase(),
+            };
+          }),
+        ],
+      },
     });
     const handle = await provider.openSession({
       appRoot,

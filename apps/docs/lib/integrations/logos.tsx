@@ -149,32 +149,207 @@ export const discordLogo = (props: LogoProps) => (
   </svg>
 );
 
+// Microsoft Teams' current mark, from geistcn-assets (logo-microsoft-teams-color-light.svg).
 const teamsLogo = (props: LogoProps) => (
-  <svg fill="none" viewBox="0 0 2229 2074" xmlns="http://www.w3.org/2000/svg" {...props}>
-    <path
-      d="M1554.64 777.5H2130.35C2184.74 777.5 2228.83 821.592 2228.83 875.983V1400.38C2228.83 1600.28 2066.78 1762.33 1866.88 1762.33H1865.17C1665.27 1762.36 1503.2 1600.33 1503.17 1400.43V828.971C1503.17 800.544 1526.21 777.5 1554.64 777.5Z"
-      fill="#5059C9"
-    />
-    <path
-      d="M1943.75 673.833C2072.57 673.833 2177 569.403 2177 440.583C2177 311.763 2072.57 207.333 1943.75 207.333C1814.93 207.333 1710.5 311.763 1710.5 440.583C1710.5 569.403 1814.93 673.833 1943.75 673.833Z"
-      fill="#5059C9"
-    />
-    <path
-      d="M1218.08 673.834C1404.16 673.834 1555 522.991 1555 336.917C1555 150.843 1404.16 0 1218.08 0C1032.01 0 881.166 150.843 881.166 336.917C881.166 522.991 1032.01 673.834 1218.08 673.834Z"
-      fill="#7B83EB"
-    />
-    <path
-      d="M1667.32 777.5H717.01C663.267 778.83 620.753 823.431 622 877.176V1475.28C614.495 1797.8 869.657 2065.44 1192.17 2073.33C1514.68 2065.44 1769.84 1797.8 1762.33 1475.28V877.176C1763.58 823.431 1721.07 778.83 1667.32 777.5Z"
-      fill="#7B83EB"
-    />
-    <path
-      d="M95.01 466.5H1045.32C1097.8 466.5 1140.33 509.038 1140.33 561.51V1511.82C1140.33 1564.3 1097.79 1606.83 1045.32 1606.83H95.01C42.537 1606.83 0 1564.29 0 1511.82V561.51C0 509.038 42.538 466.5 95.01 466.5Z"
-      fill="#4D55BD"
-    />
-    <path
-      d="M820.211 828.193H630.241V1345.49H509.211V828.193H320.123V727.844H820.211V828.193Z"
-      fill="white"
-    />
+  <svg fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <g clipPath="url(#logo-microsoft-teams__a)">
+      <path
+        fill="url(#logo-microsoft-teams__b)"
+        d="M7.98 6.74h5.05c1.4 0 2.53 1.13 2.53 2.52v4.21a2.53 2.53 0 0 1-5.05 0v-4.2c0-1.4-1.14-2.53-2.53-2.53"
+      />
+      <path
+        fill="url(#logo-microsoft-teams__c)"
+        d="M2.08 8.42c0-1.4 1.14-2.53 2.53-2.53h3.37c1.4 0 2.53 1.14 2.53 2.53v5.05c0 1.4 1.13 2.53 2.52 2.53H6.3a4.2 4.2 0 0 1-4.2-4.21z"
+      />
+      <path
+        fill="url(#logo-microsoft-teams__d)"
+        fillOpacity=".7"
+        d="M2.08 8.42c0-1.4 1.14-2.53 2.53-2.53h3.37c1.4 0 2.53 1.14 2.53 2.53v5.05c0 1.4 1.13 2.53 2.52 2.53H6.3a4.2 4.2 0 0 1-4.2-4.21z"
+      />
+      <path
+        fill="url(#logo-microsoft-teams__e)"
+        fillOpacity=".7"
+        d="M2.08 8.42c0-1.4 1.14-2.53 2.53-2.53h3.37c1.4 0 2.53 1.14 2.53 2.53v5.05c0 1.4 1.13 2.53 2.52 2.53H6.3a4.2 4.2 0 0 1-4.2-4.21z"
+      />
+      <path
+        fill="url(#logo-microsoft-teams__f)"
+        d="M12.61 5.9a2.1 2.1 0 1 0 0-4.22 2.1 2.1 0 0 0 0 4.21"
+      />
+      <path
+        fill="url(#logo-microsoft-teams__g)"
+        fillOpacity=".46"
+        d="M12.61 5.9a2.1 2.1 0 1 0 0-4.22 2.1 2.1 0 0 0 0 4.21"
+      />
+      <path
+        fill="url(#logo-microsoft-teams__h)"
+        fillOpacity=".4"
+        d="M12.61 5.9a2.1 2.1 0 1 0 0-4.22 2.1 2.1 0 0 0 0 4.21"
+      />
+      <path
+        fill="url(#logo-microsoft-teams__i)"
+        d="M6.3 5.05A2.53 2.53 0 1 0 6.3 0a2.53 2.53 0 0 0 0 5.05"
+      />
+      <path
+        fill="url(#logo-microsoft-teams__j)"
+        fillOpacity=".6"
+        d="M6.3 5.05A2.53 2.53 0 1 0 6.3 0a2.53 2.53 0 0 0 0 5.05"
+      />
+      <path
+        fill="url(#logo-microsoft-teams__k)"
+        fillOpacity=".5"
+        d="M6.3 5.05A2.53 2.53 0 1 0 6.3 0a2.53 2.53 0 0 0 0 5.05"
+      />
+      <path
+        fill="url(#logo-microsoft-teams__l)"
+        d="M5.77 8h-4C1 8 .4 8.61.4 9.37v4c0 .75.61 1.37 1.37 1.37h4c.75 0 1.37-.62 1.37-1.37v-4C7.14 8.6 6.52 8 5.77 8"
+      />
+      <path
+        fill="url(#logo-microsoft-teams__m)"
+        fillOpacity=".7"
+        d="M5.77 8h-4C1 8 .4 8.61.4 9.37v4c0 .75.61 1.37 1.37 1.37h4c.75 0 1.37-.62 1.37-1.37v-4C7.14 8.6 6.52 8 5.77 8"
+      />
+      <path fill="white" d="M5.23 10.15H4.2v3.14h-.87v-3.14H2.3v-.7h2.93z" />
+    </g>
+    <defs>
+      <radialGradient
+        id="logo-microsoft-teams__b"
+        cx="0"
+        cy="0"
+        r="1"
+        gradientTransform="matrix(5.68 0 0 14 15.47 7.65)"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop stopColor="#A98AFF" />
+        <stop offset=".14" stopColor="#8C75FF" />
+        <stop offset=".565" stopColor="#5F50E2" />
+        <stop offset=".9" stopColor="#3C2CB8" />
+      </radialGradient>
+      <radialGradient
+        id="logo-microsoft-teams__c"
+        cx="0"
+        cy="0"
+        r="1"
+        gradientTransform="matrix(5.13 12.8 -12.95 5.19 2.43 5.22)"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop stopColor="#85C2FF" />
+        <stop offset=".69" stopColor="#7588FF" />
+        <stop offset="1" stopColor="#6459FE" />
+      </radialGradient>
+      <linearGradient
+        id="logo-microsoft-teams__d"
+        x1="7.387"
+        x2="7.387"
+        y1="5.895"
+        y2="16"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop offset=".801" stopColor="#6864F6" stopOpacity="0" />
+        <stop offset="1" stopColor="#5149DE" />
+      </linearGradient>
+      <radialGradient
+        id="logo-microsoft-teams__e"
+        cx="0"
+        cy="0"
+        r="1"
+        gradientTransform="rotate(113.33 3.32 6.16)scale(8.1 6.5)"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop stopColor="#BD96FF" />
+        <stop offset=".687" stopColor="#BD96FF" stopOpacity="0" />
+      </radialGradient>
+      <radialGradient
+        id="logo-microsoft-teams__f"
+        cx="0"
+        cy="0"
+        r="1"
+        gradientTransform="matrix(0 -4.21 5.31 0 12.61 3.19)"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop offset=".268" stopColor="#6868F7" />
+        <stop offset="1" stopColor="#3923B1" />
+      </radialGradient>
+      <radialGradient
+        id="logo-microsoft-teams__g"
+        cx="0"
+        cy="0"
+        r="1"
+        gradientTransform="rotate(40.05 1.66 16.29)scale(3 4.35)"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop offset=".271" stopColor="#A1D3FF" />
+        <stop offset=".813" stopColor="#A1D3FF" stopOpacity="0" />
+      </radialGradient>
+      <radialGradient
+        id="logo-microsoft-teams__h"
+        cx="0"
+        cy="0"
+        r="1"
+        gradientTransform="matrix(2.68 -2.38 5.84 6.57 14.29 2.68)"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop stopColor="#E3ACFD" />
+        <stop offset=".816" stopColor="#9FA2FF" stopOpacity="0" />
+      </radialGradient>
+      <radialGradient
+        id="logo-microsoft-teams__i"
+        cx="0"
+        cy="0"
+        r="1"
+        gradientTransform="matrix(0 -5.05 6.38 0 6.3 1.8)"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop offset=".268" stopColor="#8282FF" />
+        <stop offset="1" stopColor="#3923B1" />
+      </radialGradient>
+      <radialGradient
+        id="logo-microsoft-teams__j"
+        cx="0"
+        cy="0"
+        r="1"
+        gradientTransform="matrix(2.76 2.32 -3.36 4 4.2 1.29)"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop offset=".271" stopColor="#A1D3FF" />
+        <stop offset=".813" stopColor="#A1D3FF" stopOpacity="0" />
+      </radialGradient>
+      <radialGradient
+        id="logo-microsoft-teams__k"
+        cx="0"
+        cy="0"
+        r="1"
+        gradientTransform="matrix(3.21 -2.86 7.01 7.88 8.3 1.2)"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop stopColor="#E3ACFD" />
+        <stop offset=".816" stopColor="#9FA2FF" stopOpacity="0" />
+      </radialGradient>
+      <radialGradient
+        id="logo-microsoft-teams__l"
+        cx="0"
+        cy="0"
+        r="1"
+        gradientTransform="rotate(45 -9.46 4.48)scale(9.53)"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop offset=".047" stopColor="#688EFF" />
+        <stop offset=".947" stopColor="#230F94" />
+      </radialGradient>
+      <radialGradient
+        id="logo-microsoft-teams__m"
+        cx="0"
+        cy="0"
+        r="1"
+        gradientTransform="matrix(0 4.72 -5.5 0 3.77 12.04)"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop offset=".571" stopColor="#6965F6" stopOpacity="0" />
+        <stop offset="1" stopColor="#8F8FFF" />
+      </radialGradient>
+      <clipPath id="logo-microsoft-teams__a">
+        <rect width="15.158" height="16" fill="white" transform="translate(.4)" />
+      </clipPath>
+    </defs>
   </svg>
 );
 

@@ -1,3 +1,4 @@
+import { issueInboxHandle } from "#execution/session-inbox/handle.js";
 import type { SessionPrewarmPayload } from "#execution/session-prewarm.js";
 import type { SessionFailurePayload } from "#execution/session-inbox/inbox.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
@@ -24,6 +25,7 @@ import {
   lookupSessionOwnerHook,
   resumeRunnableHook,
 } from "#execution/session-inbox/owner.js";
+import { withPreV27Answers } from "#execution/session-inbox/pre-v27.js";
 import { getHookByToken, type Hook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
@@ -33,6 +35,7 @@ const HANDOFF_RETRY_INTERVAL_MS = 20;
 
 export interface ResumedSessionInboxHook {
   readonly ownerRunId: string;
+  readonly inbox?: string;
   /** Lazy identity resolution; delivery never needs to decrypt hook metadata. */
   readonly sessionId: Promise<string>;
 }
@@ -55,13 +58,18 @@ export async function resumeSessionInbox(
     | SessionFailurePayload
     | SessionPrewarmPayload,
 ): Promise<ResumedSessionInboxHook> {
+  command = withPreV27Answers(command);
   const token = logicalSessionToken(address);
   const knownSessionId = typeof address === "string" ? undefined : address.sessionId;
   const deadline = Date.now() + HANDOFF_RETRY_WINDOW_MS;
   while (true) {
     let hook: Awaited<ReturnType<typeof resumeRunnableHook>>;
     try {
-      hook = await resumeRunnableHook(sessionInboxHookToken(token), command);
+      hook = await resumeRunnableHook(
+        sessionInboxHookToken(token),
+        command,
+        typeof address === "string" ? undefined : address.inbox,
+      );
     } catch (error) {
       if (!HookNotFoundError.is(error)) throw error;
       if (await waitWhileHandoffInProgress(token, deadline)) continue;
@@ -71,6 +79,7 @@ export async function resumeSessionInbox(
     let identity: Promise<string> | undefined;
     return {
       ownerRunId: hook.runId,
+      inbox: issueInboxHandle(hook),
       get sessionId() {
         return (identity ??= (async () => {
           try {
@@ -152,7 +161,7 @@ async function waitWhileHandoffInProgress(token: string, deadline: number): Prom
   }
   if (Date.now() >= deadline) {
     // A releasing owner that cannot execute never finishes its handoff.
-    await assertRunnableSessionOwner(marker);
+    await assertRunnableSessionOwner({ hook: marker, runId: marker.runId });
     throw new SessionHandoffPendingError(token);
   }
   await new Promise<void>((resolve) => setTimeout(resolve, HANDOFF_RETRY_INTERVAL_MS));

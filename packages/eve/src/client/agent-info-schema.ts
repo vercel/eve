@@ -1,101 +1,89 @@
 import { z } from "#compiled/zod/index.js";
 import { mountIdSchema } from "#shared/extension-mount.js";
 
+/** Bumped only for breaking reshapes; additive changes keep the version. */
+export const AGENT_INFO_VERSION = 5;
+
+/**
+ * A value set the server may grow. Older clients read a newer string as
+ * `"unrecognized"` instead of rejecting the whole inspection payload; a missing
+ * or non-string value is still malformed and fails the parse.
+ */
+function openEnum<const Values extends readonly [string, ...string[]]>(values: Values) {
+  return z.union([z.enum(values), z.string().transform(() => "unrecognized" as const)]);
+}
+
 const owner = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("application") }).strict(),
-  z.object({ feature: z.string(), kind: z.literal("framework") }).strict(),
-  z
-    .object({
-      kind: z.literal("extension"),
-      mountId: mountIdSchema.optional(),
-      namespace: z.string(),
-      packageName: z.string(),
-    })
-    .strict(),
+  z.object({ kind: z.literal("application") }),
+  z.object({ feature: z.string(), kind: z.literal("framework") }),
+  z.object({
+    kind: z.literal("extension"),
+    mountId: mountIdSchema.optional(),
+    namespace: z.string(),
+    packageName: z.string(),
+  }),
 ]);
 
 const moduleBacking = z.discriminatedUnion("kind", [
-  z
-    .object({
-      externalDependencies: z.array(z.string()),
-      extensionScope: z
-        .object({ namespace: z.string(), sourceRoot: z.string() })
-        .strict()
-        .optional(),
-      kind: z.literal("filesystem"),
-      mountId: z.string().optional(),
-      sourcePath: z.string(),
-    })
-    .strict(),
-  z
-    .object({
-      dependencies: z.record(z.string(), z.string()).optional(),
-      kind: z.literal("programmatic"),
-      mountId: z.string().optional(),
-      moduleId: z.string(),
-      parameters: z.record(z.string(), z.unknown()).optional(),
-      registryId: z.string(),
-      revision: z.string(),
-      semanticRevision: z.string().optional(),
-    })
-    .strict(),
+  z.object({
+    externalDependencies: z.array(z.string()),
+    extensionScope: z.object({ namespace: z.string(), sourceRoot: z.string() }).optional(),
+    kind: z.literal("filesystem"),
+    mountId: z.string().optional(),
+    sourcePath: z.string(),
+  }),
+  z.object({
+    dependencies: z.record(z.string(), z.string()).optional(),
+    kind: z.literal("programmatic"),
+    mountId: z.string().optional(),
+    moduleId: z.string(),
+    parameters: z.record(z.string(), z.unknown()).optional(),
+    registryId: z.string(),
+    revision: z.string(),
+    semanticRevision: z.string().optional(),
+  }),
 ]);
 
-const binding = z
-  .object({
-    backing: moduleBacking,
-    logicalPath: z.string(),
-    owner,
-  })
-  .strict();
+const binding = z.object({
+  backing: moduleBacking,
+  logicalPath: z.string(),
+  owner,
+});
 
-const source = z
-  .object({
-    binding: binding.optional(),
-    exportName: z.string().optional(),
-    logicalPath: z.string(),
-    owner,
-    sourceId: z.string(),
-    sourceKind: z.enum(["markdown", "module", "skill-package"]),
-  })
-  .strict();
+const source = z.object({
+  binding: binding.optional(),
+  exportName: z.string().optional(),
+  logicalPath: z.string(),
+  owner,
+  sourceId: z.string(),
+  sourceKind: openEnum(["markdown", "module", "skill-package"]),
+});
 
 type ParsedAgentInfoSource = z.output<typeof source>;
 
-const entry = source.extend({ name: z.string() }).strict();
+const entry = source.extend({ name: z.string() });
 
-const dynamicResolver = source
-  .extend({
-    eventNames: z.array(z.string()),
-    slug: z.string(),
-  })
-  .strict();
+const dynamicResolver = source.extend({ slug: z.string() });
 
 const modelRouting = z.discriminatedUnion("kind", [
-  z
-    .object({ kind: z.literal("gateway"), target: z.string(), byok: z.string().optional() })
-    .strict(),
-  z.object({ kind: z.literal("external"), provider: z.string() }).strict(),
+  z.object({ kind: z.literal("gateway"), target: z.string(), byok: z.string().optional() }),
+  z.object({ kind: z.literal("external"), provider: z.string() }),
 ]);
 
 const modelEndpoint = z.union([
-  z.object({ kind: z.literal("external"), provider: z.string() }).strict(),
-  z
-    .object({
-      kind: z.literal("chatgpt"),
-      state: z.enum(["checking", "ready", "signed-out", "reauth-required", "unavailable"]),
-      accountLabel: z.string().optional(),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("gateway"),
-      connected: z.literal(true),
-      credential: z.enum(["api-key", "oidc", "oauth"]),
-      team: z.optional(z.string()),
-    })
-    .strict(),
-  z.object({ kind: z.literal("gateway"), connected: z.literal(false) }).strict(),
+  z.object({ kind: z.literal("external"), provider: z.string() }),
+  z.object({
+    kind: z.literal("chatgpt"),
+    state: openEnum(["checking", "ready", "signed-out", "reauth-required", "unavailable"]),
+    accountLabel: z.string().optional(),
+  }),
+  z.object({
+    kind: z.literal("gateway"),
+    connected: z.literal(true),
+    credential: openEnum(["api-key", "oidc", "oauth"]),
+    team: z.optional(z.string()),
+  }),
+  z.object({ kind: z.literal("gateway"), connected: z.literal(false) }),
 ]);
 
 const modelBaseFields = {
@@ -109,55 +97,50 @@ const modelBaseFields = {
 };
 
 const agentModel = z.union([
-  z
-    .object({
-      ...modelBaseFields,
-      endpoint: modelEndpoint.optional(),
-      id: z.string(),
-      routing: modelRouting,
-    })
-    .strict(),
-  z
-    .object({
-      ...modelBaseFields,
-      endpoint: z.never().optional(),
-      id: z.never().optional(),
-      routing: z.object({ kind: z.literal("dynamic"), resolver: dynamicResolver }).strict(),
-    })
-    .strict(),
+  z.object({
+    ...modelBaseFields,
+    endpoint: modelEndpoint.optional(),
+    id: z.string(),
+    routing: modelRouting,
+  }),
+  z.object({
+    ...modelBaseFields,
+    endpoint: z.never().optional(),
+    id: z.never().optional(),
+    routing: z.object({ kind: z.literal("dynamic"), resolver: dynamicResolver }),
+  }),
 ]);
 
-const tool = entry
-  .extend({
-    description: z.string(),
-    hasAuth: z.boolean(),
-    hasExecute: z.boolean(),
-    hasModelOutputProjection: z.boolean(),
-    hasOutputSchema: z.boolean(),
-    inputSchema: z.unknown(),
-    outputSchema: z.unknown().optional(),
-    requiresApproval: z.boolean(),
-  })
-  .strict();
+const tool = entry.extend({
+  description: z.string(),
+  hasAuth: z.boolean(),
+  hasExecute: z.boolean(),
+  hasModelOutputProjection: z.boolean(),
+  hasOutputSchema: z.boolean(),
+  inputSchema: z.unknown(),
+  outputSchema: z.unknown().optional(),
+  requiresApproval: z.boolean(),
+});
 
-const skill = entry
-  .extend({
-    description: z.string(),
-    license: z.string().optional(),
-    markdown: z.string(),
-    metadata: z.record(z.string(), z.string()).optional(),
-  })
-  .strict();
+const skill = entry.extend({
+  description: z.string(),
+  license: z.string().optional(),
+  markdown: z.string(),
+  metadata: z.record(z.string(), z.string()).optional(),
+});
 
-const instructions = entry
-  .extend({ content: z.string(), role: z.enum(["system", "user"]) })
-  .strict();
+const instructions = entry.extend({
+  content: z.string(),
+  role: openEnum(["system", "user"]),
+});
 
-const schedule = entry
-  .extend({ cron: z.string(), hasRun: z.boolean(), markdown: z.string().optional() })
-  .strict();
+const schedule = entry.extend({
+  cron: z.string(),
+  hasRun: z.boolean(),
+  markdown: z.string().optional(),
+});
 
-const channelMethod = z.enum([
+const channelMethod = openEnum([
   "GET",
   "HEAD",
   "POST",
@@ -168,180 +151,149 @@ const channelMethod = z.enum([
   "WEBSOCKET",
 ]);
 
-const channelRoute = entry
-  .extend({ adapterKind: z.string().optional(), method: channelMethod, urlPath: z.string() })
-  .strict();
+const channelRoute = entry.extend({
+  adapterKind: z.string().optional(),
+  method: channelMethod,
+  urlPath: z.string(),
+});
 
-const sourceDescriptor = z
-  .object({
-    backing: z.union([
-      moduleBacking,
-      z.object({ kind: z.literal("resource"), sourcePath: z.string() }).strict(),
-    ]),
-    form: z.enum(["derived", "direct"]),
-    layer: z.enum(["framework-default", "extension-package", "extension-override", "application"]),
-    logicalPath: z.string(),
-    owner,
-    sourceId: z.string(),
-  })
-  .strict();
+const sourceDescriptor = z.object({
+  backing: z.union([
+    moduleBacking,
+    z.object({ kind: z.literal("resource"), sourcePath: z.string() }),
+  ]),
+  form: openEnum(["derived", "direct"]),
+  layer: openEnum(["framework-default", "extension-package", "extension-override", "application"]),
+  logicalPath: z.string(),
+  owner,
+  sourceId: z.string(),
+});
 
-const shadowedChannelRoute = z
-  .object({
-    method: channelMethod,
-    source: sourceDescriptor,
-    urlPath: z.string(),
-    winnerSourceId: z.string(),
-  })
-  .strict();
+const shadowedChannelRoute = z.object({
+  method: channelMethod,
+  source: sourceDescriptor,
+  urlPath: z.string(),
+  winnerSourceId: z.string(),
+});
 
-const connection = source
-  .extend({
-    connectionName: z.string(),
-    description: z.string(),
-    hasApproval: z.boolean(),
-    hasAuthorization: z.boolean(),
-    hasHeaders: z.boolean(),
-    protocol: z.string(),
-    toolFilter: z.unknown().optional(),
-    url: z.string(),
-  })
-  .strict();
+const connection = source.extend({
+  connectionName: z.string(),
+  description: z.string(),
+  hasApproval: z.boolean(),
+  hasAuthorization: z.boolean(),
+  hasHeaders: z.boolean(),
+  protocol: z.string(),
+  toolFilter: z.unknown().optional(),
+  url: z.string(),
+});
 
-const hook = source.extend({ eventNames: z.array(z.string()), slug: z.string() }).strict();
+const hook = source.extend({ eventNames: z.array(z.string()), slug: z.string() });
 
-const memory = source
-  .extend({
-    description: z.string().optional(),
-    slot: z.string(),
-    visibility: z.enum(["scope", "session"]),
-  })
-  .strict();
+const memory = source.extend({
+  description: z.string().optional(),
+  slot: z.string(),
+});
 
-const sandbox = source
-  .extend({
-    provider: z.string().optional(),
-    environmentExportName: z.string().optional(),
-    revisionHash: z.string(),
-  })
-  .strict();
+const sandbox = source.extend({
+  provider: z.string().optional(),
+  environmentExportName: z.string().optional(),
+  revisionHash: z.string(),
+});
 
-const subagent = entry
-  .extend({
-    configResolver: dynamicResolver.optional(),
-    description: z.string().optional(),
-    entryPath: z.string(),
-    nodeId: z.string(),
-    parentNodeId: z.string(),
-    rootPath: z.string(),
-    summary: z
-      .object({
-        channels: z.number(),
-        connections: z.number(),
-        hooks: z.number(),
-        instructions: z.number(),
-        memories: z.number(),
-        schedules: z.number(),
-        skills: z.number(),
-        tools: z.number(),
-      })
-      .strict(),
-  })
-  .strict();
+const subagent = entry.extend({
+  configResolver: dynamicResolver.optional(),
+  description: z.string().optional(),
+  entryPath: z.string(),
+  nodeId: z.string(),
+  parentNodeId: z.string(),
+  rootPath: z.string(),
+  summary: z.object({
+    channels: z.number(),
+    connections: z.number(),
+    hooks: z.number(),
+    instructions: z.number(),
+    memories: z.number(),
+    schedules: z.number(),
+    skills: z.number(),
+    tools: z.number(),
+  }),
+});
 
-const remoteAgent = entry
-  .extend({
-    description: z.string(),
-    nodeId: z.string(),
-    parentNodeId: z.string(),
-    url: z.string().optional(),
-  })
-  .strict();
+const remoteAgent = entry.extend({
+  description: z.string(),
+  nodeId: z.string(),
+  parentNodeId: z.string(),
+  url: z.string().optional(),
+});
 
-// Kernel effects are inspection metadata only. Deployments can retain removed
-// effects across framework versions, so preserve the response and identify an
-// option this client cannot interpret instead of rejecting agent info entirely.
-const kernelEffect = z
-  .object({
-    action: z
-      .union([z.enum(["subagent-call", "workflow-tool-call"]), z.literal("unrecognized")])
-      .catch("unrecognized")
-      .optional(),
-    audience: z.array(
-      z.union([z.literal("root-session"), z.literal("unrecognized")]).catch("unrecognized"),
-    ),
-    kind: z
-      .union([z.enum(["dispatch", "provider-tool"]), z.literal("unrecognized")])
-      .catch("unrecognized"),
-    sourceId: z.string(),
-  })
-  .strict();
+const kernelEffect = z.object({
+  action: openEnum(["subagent-call", "workflow-tool-call"]).optional(),
+  audience: z.array(openEnum(["root-session"])),
+  kind: openEnum(["dispatch", "provider-tool"]),
+  sourceId: z.string(),
+});
 
-const compositionDiagnostic = z
-  .object({
-    kind: z.enum(["disabled", "shadowed"]),
-    logicalPath: z.string(),
-    owner,
-    sourceId: z.string(),
-    winnerSourceId: z.string().optional(),
-  })
-  .strict();
+const compositionDiagnostic = z.object({
+  kind: openEnum(["disabled", "shadowed"]),
+  logicalPath: z.string(),
+  owner,
+  sourceId: z.string(),
+  winnerSourceId: z.string().optional(),
+});
 
-/** Runtime contract for the authoritative `/eve/v1/info` v5 response. */
+/**
+ * Runtime contract for the authoritative `/eve/v1/info` v5 response. Parsing is
+ * tolerant so a server may add fields and enum values without a version bump:
+ * unknown keys are stripped and unknown enum strings read as `"unrecognized"`.
+ * Discriminated-union `kind` fields stay closed, so a new variant needs a
+ * version bump.
+ */
 export const AgentInfoResultSchema = z
   .object({
-    agent: z
-      .object({
-        agentRoot: z.string(),
-        appRoot: z.string(),
-        config: source.extend({ binding }).strict(),
-        description: z.string().optional(),
-        model: agentModel,
-        name: z.string(),
-        nodeId: z.string(),
-        outputSchema: z.unknown().optional(),
-      })
-      .strict(),
-    capabilities: z.object({ devRoutes: z.boolean() }).strict(),
-    channels: z
-      .object({ routes: z.array(channelRoute), shadowed: z.array(shadowedChannelRoute) })
-      .strict(),
-    composition: z
-      .object({
-        disabled: z.array(compositionDiagnostic),
-        shadowed: z.array(compositionDiagnostic),
-      })
-      .strict(),
+    agent: z.object({
+      agentRoot: z.string(),
+      appRoot: z.string(),
+      config: source.extend({ binding }),
+      description: z.string().optional(),
+      model: agentModel,
+      name: z.string(),
+      nodeId: z.string(),
+      outputSchema: z.unknown().optional(),
+    }),
+    capabilities: z.object({ devRoutes: z.boolean() }),
+    channels: z.object({ routes: z.array(channelRoute), shadowed: z.array(shadowedChannelRoute) }),
+    composition: z.object({
+      disabled: z.array(compositionDiagnostic),
+      shadowed: z.array(compositionDiagnostic),
+    }),
     connections: z.array(connection),
-    diagnostics: z.object({ discoveryErrors: z.number(), discoveryWarnings: z.number() }).strict(),
+    diagnostics: z.object({ discoveryErrors: z.number(), discoveryWarnings: z.number() }),
     hooks: z.array(hook),
-    instructions: z
-      .object({ dynamic: z.array(dynamicResolver), static: z.array(instructions) })
-      .strict(),
+    instructions: z.object({ dynamic: z.array(dynamicResolver), static: z.array(instructions) }),
     instrumentation: source.optional(),
     kernelEffects: z.array(kernelEffect),
     kind: z.literal("eve-agent-info"),
     memories: z.array(memory),
-    mode: z.enum(["development", "production"]),
-    remoteAgents: z.object({ entries: z.array(remoteAgent), total: z.number() }).strict(),
+    mode: openEnum(["development", "production"]),
+    remoteAgents: z.object({ entries: z.array(remoteAgent), total: z.number() }),
     sandbox,
     schedules: z.array(schedule),
-    skills: z.object({ dynamic: z.array(dynamicResolver), static: z.array(skill) }).strict(),
-    subagents: z.object({ local: z.array(subagent), total: z.number() }).strict(),
-    tools: z.object({ dynamic: z.array(dynamicResolver), static: z.array(tool) }).strict(),
-    version: z.literal(5),
-    workspace: z.object({ resourceRoot: z.unknown(), rootEntries: z.array(z.string()) }).strict(),
+    skills: z.object({ dynamic: z.array(dynamicResolver), static: z.array(skill) }),
+    subagents: z.object({ local: z.array(subagent), total: z.number() }),
+    tools: z.object({ dynamic: z.array(dynamicResolver), static: z.array(tool) }),
+    version: z.literal(AGENT_INFO_VERSION),
+    workspace: z.object({ resourceRoot: z.unknown(), rootEntries: z.array(z.string()) }),
   })
-  .strict()
   .superRefine((value, context) => {
     const assertUnique = <Entry>(
       entries: readonly Entry[],
-      identity: (entry: Entry) => string,
+      identity: (entry: Entry) => string | undefined,
       path: readonly (string | number)[],
     ) => {
       const seen = new Set<string>();
       entries.forEach((entry, index) => {
         const key = identity(entry);
+        if (key === undefined) return;
         if (seen.has(key)) {
           context.addIssue({
             code: "custom",
@@ -376,9 +328,14 @@ export const AgentInfoResultSchema = z
     assertUnique(value.connections, (entry) => entry.connectionName, ["connections"]);
     assertUnique(value.hooks, (entry) => entry.slug, ["hooks"]);
     assertUnique(value.memories, (entry) => entry.slot, ["memories"]);
+    // Distinct methods this client does not know all read as "unrecognized", so
+    // they cannot be compared; a newer server may serve several on one path.
     assertUnique(
       value.channels.routes,
-      (entry) => `${entry.method} ${normalizeRoutePattern(entry.urlPath)}`,
+      (entry) =>
+        entry.method === "unrecognized"
+          ? undefined
+          : `${entry.method} ${normalizeRoutePattern(entry.urlPath)}`,
       ["channels", "routes"],
     );
     assertUnique(value.subagents.local, (entry) => entry.nodeId, ["subagents", "local"]);
@@ -437,7 +394,12 @@ export const AgentInfoResultSchema = z
         });
         continue;
       }
-      if (entry.sourceKind !== "module" && entry.binding !== undefined) {
+      // A source kind this client does not know may legitimately be bound.
+      if (
+        entry.sourceKind !== "module" &&
+        entry.sourceKind !== "unrecognized" &&
+        entry.binding !== undefined
+      ) {
         context.addIssue({
           code: "custom",
           message: `${entry.sourceKind} source cannot carry a module binding.`,
@@ -463,6 +425,22 @@ export const AgentInfoResultSchema = z
     }
   });
 
+/**
+ * Names which side to upgrade when an agent-info body carries another version,
+ * so the caller sees one actionable issue instead of every reshaped field.
+ */
+export function describeAgentInfoVersionMismatch(payload: unknown): string | undefined {
+  if (typeof payload !== "object" || payload === null) return undefined;
+  const { kind, version } = payload as { kind?: unknown; version?: unknown };
+  if (kind !== "eve-agent-info" || typeof version !== "number") return undefined;
+  if (version === AGENT_INFO_VERSION) return undefined;
+  const upgrade =
+    version < AGENT_INFO_VERSION
+      ? "Upgrade eve in the agent and redeploy it"
+      : "Upgrade the eve package this client runs from";
+  return `version: the server sent agent-info version ${version}, but this client reads version ${AGENT_INFO_VERSION}. ${upgrade}.`;
+}
+
 function normalizeRoutePattern(path: string): string {
   return path
     .replace(/^\/+|\/+$/g, "")
@@ -471,27 +449,23 @@ function normalizeRoutePattern(path: string): string {
     .join("/");
 }
 
-type ReadonlyDeep<T> = T extends readonly (infer Item)[]
-  ? readonly ReadonlyDeep<Item>[]
-  : T extends object
-    ? { readonly [Key in keyof T]: ReadonlyDeep<T[Key]> }
-    : T;
-
-export type AgentInfoResult = ReadonlyDeep<z.output<typeof AgentInfoResultSchema>>;
-export type AgentInfoSource = ReadonlyDeep<z.output<typeof source>>;
-export type AgentInfoEntry = ReadonlyDeep<z.output<typeof entry>>;
-export type AgentInfoToolEntry = ReadonlyDeep<z.output<typeof tool>>;
-export type AgentInfoDynamicResolverEntry = ReadonlyDeep<z.output<typeof dynamicResolver>>;
-export type AgentInfoTools = AgentInfoResult["tools"];
-export type AgentInfoSkillEntry = ReadonlyDeep<z.output<typeof skill>>;
-export type AgentInfoInstructionsEntry = ReadonlyDeep<z.output<typeof instructions>>;
-export type AgentInfoInstructions = AgentInfoResult["instructions"];
-export type AgentInfoScheduleEntry = ReadonlyDeep<z.output<typeof schedule>>;
-export type AgentInfoSubagentEntry = ReadonlyDeep<z.output<typeof subagent>>;
-export type AgentInfoRemoteAgentEntry = ReadonlyDeep<z.output<typeof remoteAgent>>;
-export type AgentInfoChannelEntry = ReadonlyDeep<z.output<typeof channelRoute>>;
-export type AgentInfoChannels = AgentInfoResult["channels"];
-export type AgentInfoConnectionEntry = ReadonlyDeep<z.output<typeof connection>>;
-export type AgentInfoHookEntry = ReadonlyDeep<z.output<typeof hook>>;
-export type AgentInfoMemoryEntry = ReadonlyDeep<z.output<typeof memory>>;
-export type AgentInfoSandboxEntry = ReadonlyDeep<z.output<typeof sandbox>>;
+export type {
+  AgentInfoResult,
+  AgentInfoSource,
+  AgentInfoEntry,
+  AgentInfoToolEntry,
+  AgentInfoDynamicResolverEntry,
+  AgentInfoTools,
+  AgentInfoSkillEntry,
+  AgentInfoInstructionsEntry,
+  AgentInfoInstructions,
+  AgentInfoScheduleEntry,
+  AgentInfoSubagentEntry,
+  AgentInfoRemoteAgentEntry,
+  AgentInfoChannelEntry,
+  AgentInfoChannels,
+  AgentInfoConnectionEntry,
+  AgentInfoHookEntry,
+  AgentInfoMemoryEntry,
+  AgentInfoSandboxEntry,
+} from "./agent-info-types.js";

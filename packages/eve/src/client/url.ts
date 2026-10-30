@@ -1,9 +1,9 @@
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
 
 /**
- * Builds a fetchable URL from a caller-provided host and an eve route path.
+ * Builds a fetchable URL from a caller-provided base URL and an eve route path.
  *
- * `host` may be an absolute origin (`https://agent.example.com`) or a
+ * `baseUrl` may be an absolute origin (`https://agent.example.com`) or a
  * same-origin prefix (`/api`). Prefixes are important for browser clients that
  * talk to an app-owned proxy instead of the eve deployment directly.
  *
@@ -13,7 +13,7 @@ import { joinEveRoutePath } from "#shared/eve-route-path.js";
  * over same-named embedded query params.
  */
 export function createClientUrl(
-  host: string,
+  baseUrl: string,
   routePath: string,
   searchParams?: Readonly<Record<string, string>>,
 ): string {
@@ -22,8 +22,8 @@ export function createClientUrl(
   const embeddedQuery = queryIndex === -1 ? "" : routePath.slice(queryIndex + 1);
   const normalizedRoute = pathOnly.startsWith("/") ? pathOnly : `/${pathOnly}`;
 
-  if (isAbsoluteUrl(host)) {
-    const url = new URL(host);
+  if (isAbsoluteUrl(baseUrl)) {
+    const url = new URL(baseUrl);
     const basePath = trimTrailingSlash(url.pathname);
     url.pathname = joinEveRoutePath(basePath, normalizedRoute);
     mergeEmbeddedQuery(url.searchParams, embeddedQuery);
@@ -32,7 +32,7 @@ export function createClientUrl(
     return url.toString();
   }
 
-  const url = new URL(host, "http://eve.local");
+  const url = new URL(baseUrl, "http://eve.local");
   const basePath = trimTrailingSlash(url.pathname);
   mergeEmbeddedQuery(url.searchParams, embeddedQuery);
   mergeSearchParams(url.searchParams, searchParams);

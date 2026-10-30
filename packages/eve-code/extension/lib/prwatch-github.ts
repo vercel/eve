@@ -1,7 +1,7 @@
 import { deleteTokenCacheEntry, getToken } from "@vercel/connect";
 import { z } from "zod";
 
-import extension from "../extension.ts";
+type WatchGitHubConfig = { readonly connector: string; readonly org: string };
 
 const GITHUB_API = "https://api.github.com";
 
@@ -220,9 +220,7 @@ function githubTokenParams(org: string, repoName: string) {
   };
 }
 
-async function mintWatchToken(repo: string): Promise<string> {
-  const github = extension.config.github;
-  if (github === undefined) throw new Error("GitHub is not configured for this agent.");
+async function mintWatchToken(repo: string, github: WatchGitHubConfig): Promise<string> {
   const parts = repoParts(repo);
   if (parts.owner !== github.org.toLowerCase()) {
     throw new Error(`Repository ${repo} is outside ${github.org}.`);
@@ -234,9 +232,7 @@ async function mintWatchToken(repo: string): Promise<string> {
   return token;
 }
 
-async function invalidateWatchToken(repo: string): Promise<void> {
-  const github = extension.config.github;
-  if (github === undefined) return;
+async function invalidateWatchToken(repo: string, github: WatchGitHubConfig): Promise<void> {
   const parts = repoParts(repo);
   deleteTokenCacheEntry(github.connector, githubTokenParams(github.org, parts.name));
 }
@@ -286,11 +282,12 @@ async function readPullRequestWatchSnapshotWithToken(
 
 export async function readPullRequestWatchSnapshot(
   input: PullRequestWatchInput,
+  github: WatchGitHubConfig,
 ): Promise<PullRequestWatchSnapshot> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let token: string;
     try {
-      token = await mintWatchToken(input.repo);
+      token = await mintWatchToken(input.repo, github);
     } catch (error) {
       if (!isRetryablePullRequestWatchError(error)) throw error;
       throw new RetryablePullRequestWatchError(
@@ -301,7 +298,7 @@ export async function readPullRequestWatchSnapshot(
       return await readPullRequestWatchSnapshotWithToken(input, token);
     } catch (error) {
       if (attempt > 0 || !shouldRefreshPullRequestWatchToken(error)) throw error;
-      await invalidateWatchToken(input.repo);
+      await invalidateWatchToken(input.repo, github);
     }
   }
   throw new Error("Pull request watch token refresh exhausted unexpectedly.");

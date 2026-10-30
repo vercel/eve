@@ -1555,7 +1555,12 @@ describe("createVercelSandbox", () => {
     const abortSignal = new AbortController().signal;
 
     await expect(
-      provider.endSession({ ...session, abortSignal, reason: "deleted", state: handle.state }),
+      provider.endSession({
+        ...session,
+        signal: abortSignal,
+        reason: "deleted",
+        state: handle.state,
+      }),
     ).resolves.toBeUndefined();
 
     expect(fake.sandboxModule.Sandbox.get).toHaveBeenLastCalledWith(
@@ -1712,6 +1717,49 @@ describe("createVercelSandbox", () => {
       "/tmp",
       "/workspace",
     ]);
+  });
+
+  // https://github.com/vercel/eve/issues/5301
+  it("kills a running command when its signal fires", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+    // Like the SDK's detached Command, the `runCommand` signal only covers the
+    // start request: `wait` and `logs` honor their own signal, and only
+    // `kill()` ends the process.
+    const exited = Promise.withResolvers<void>();
+    const untilExitOrAbort = (signal: AbortSignal | undefined) =>
+      new Promise<void>((resolve, reject) => {
+        void exited.promise.then(resolve);
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    const command = {
+      kill: vi.fn(async () => exited.resolve()),
+      // The SDK aborts its log request without the caller's reason.
+      async *logs(params?: { signal?: AbortSignal }) {
+        yield { data: "started\n", stream: "stdout" } as const;
+        await untilExitOrAbort(params?.signal).catch(() => {
+          throw new DOMException("This operation was aborted", "AbortError");
+        });
+      },
+      wait: vi.fn(async (params?: { signal?: AbortSignal }) => {
+        await untilExitOrAbort(params?.signal);
+        return { exitCode: 143 };
+      }),
+    };
+    vi.mocked(sessionSandbox.runCommand).mockResolvedValueOnce(command as never);
+    const controller = new AbortController();
+    const stop = new Error("stop");
+
+    const running = handle.sandbox.run({ signal: controller.signal, command: "sleep 60" });
+    // Settle `run()` now so its rejection is handled while `kill()` is awaited.
+    const settled = running.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await vi.waitFor(() => expect(command.wait).toHaveBeenCalled());
+    controller.abort(stop);
+
+    await vi.waitFor(() => expect(command.kill).toHaveBeenCalledOnce());
+    expect(await settled).toBe(stop);
   });
 
   it("converts Vercel Node file streams to the public Web stream contract", async () => {

@@ -157,7 +157,8 @@ class ScopedAuthorizationRequiredError extends Error {
   }
 }
 
-function isScopedAuthorizationRequiredError(
+/** Whether `error` asks the enclosing boundary to start a sign-in. */
+export function isScopedAuthorizationRequiredError(
   error: unknown,
 ): error is ScopedAuthorizationRequiredError {
   return error instanceof Error && error.name === "ScopedAuthorizationRequiredError";
@@ -429,7 +430,7 @@ export function resolveAuthorizationCallbackUrl(input: {
 
 /**
  * Resolves the user-facing `displayName` onto a challenge before it is
- * surfaced on `authorization.required`.
+ * surfaced on sign-in `interaction.opened`.
  *
  * The agent author's static definition-level value wins over the
  * strategy-stamped one: an author writing

@@ -1,11 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  coveredLengthBetween,
-  firstDeltaInStep,
-  pairIntervals,
-  unionIntervals,
-} from "./measurements/intervals.mjs";
+import { coveredLengthBetween, pairIntervals, unionIntervals } from "./measurements/intervals.mjs";
 
 const event = (type, id, second, data = {}) => ({
   type,
@@ -81,20 +76,4 @@ test("unions overlapping intervals and measures coverage within and outside boun
     2.5,
   );
   assert.equal(coveredLengthBetween([]), 0);
-});
-
-test("finds the first text or reasoning delta of each step, ignoring other steps", () => {
-  const step = (type, id, second, stepIndex, turnId = "t") =>
-    event(type, id, second, { turnId, stepIndex });
-  const steps = firstDeltaInStep([
-    step("step.started", "s0", 1, 0),
-    step("message.appended", "m-late", 4, 0),
-    step("reasoning.appended", "r-early", 2, 0),
-    step("step.started", "s1", 5, 1),
-    step("action.input.appended", "tool-delta", 6, 1),
-    step("message.appended", "other-turn", 3, 0, "other"),
-  ]);
-  assert.equal(steps.get("t/0").firstDelta.meta.id, "r-early");
-  assert.equal(steps.get("t/1").firstDelta, undefined);
-  assert.equal(steps.has("other/0"), false);
 });

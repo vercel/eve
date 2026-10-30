@@ -9,22 +9,15 @@
 
 import { createHash } from "node:crypto";
 
-import { attemptKey, findPendingAuthorization } from "#channel/pending-authorization.js";
+import { findPendingAuthorization } from "#channel/pending-authorization.js";
 import type { Session } from "#channel/session.js";
+import type { SignIn } from "#channel/sign-in.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { createLogger } from "#internal/logging.js";
-import type {
-  AuthorizationCompletedStreamEvent,
-  AuthorizationRequiredStreamEvent,
-} from "#protocol/message.js";
 import type { DiscordMessageBody } from "#public/channels/discord/api.js";
 import { DISCORD_COMPONENT_TYPE } from "#public/channels/discord/hitl.js";
-import { displayProperName } from "#shared/display-name.js";
 
 const log = createLogger("discord.authorization");
-
-type AuthorizationRequired = AuthorizationRequiredStreamEvent["data"];
-type AuthorizationCompleted = AuthorizationCompletedStreamEvent["data"];
 
 /** Custom id prefix of the shared sign-in message's button. */
 export const DISCORD_AUTHORIZATION_CUSTOM_ID_PREFIX = "eve_auth:";
@@ -38,21 +31,12 @@ export interface DiscordAuthorizationReveal {
   readonly attempt: string;
 }
 
-function displayNameOf(event: {
-  readonly authorization?: { readonly displayName?: string };
-  readonly name: string;
-}): string {
-  return event.authorization?.displayName ?? displayProperName(event.name);
-}
-
 /** The full sign-in, link and code included, for the person signing in alone. */
-export function renderDiscordAuthorizationPrompt(event: AuthorizationRequired): DiscordMessageBody {
-  const displayName = displayNameOf(event);
-  const url = event.authorization?.url;
-  const userCode = event.authorization?.userCode;
+export function renderDiscordAuthorizationPrompt(event: SignIn): DiscordMessageBody {
+  const { displayName, url, userCode } = event;
   const content = [
     `Sign in to ${displayName} to continue.`,
-    event.authorization?.instructions,
+    event.instructions,
     userCode ? `If ${displayName} asks for a confirmation code, enter ${userCode}.` : undefined,
   ]
     .filter(Boolean)
@@ -77,7 +61,7 @@ export function renderDiscordAuthorizationPrompt(event: AuthorizationRequired): 
 }
 
 /** The shared sign-in message: who must sign in, and a button that shows them the challenge. */
-export function renderDiscordAuthorizationStatus(event: AuthorizationRequired): DiscordMessageBody {
+export function renderDiscordAuthorizationStatus(event: SignIn): DiscordMessageBody {
   const userId = discordUserIdOf(event.principalId);
   const who = userId ? `<@${userId}> needs` : "Someone needs";
   return {
@@ -94,16 +78,8 @@ export function renderDiscordAuthorizationStatus(event: AuthorizationRequired): 
         type: DISCORD_COMPONENT_TYPE.ACTION_ROW,
       },
     ],
-    content: `${who} to sign in to ${displayNameOf(event)} to continue. Only they can open the sign-in.`,
+    content: `${who} to sign in to ${event.displayName} to continue. Only they can open the sign-in.`,
   };
-}
-
-/** What a sign-in's message says once it settles. */
-export function renderDiscordAuthorizationCompleted(event: AuthorizationCompleted): string {
-  const displayName = displayNameOf(event);
-  if (event.outcome === "authorized") return `${displayName} connected.`;
-  const reason = event.reason === undefined ? "" : ` (${event.reason})`;
-  return `${displayName} sign-in ${event.outcome}${reason}.`;
 }
 
 /** Reads the sign-in attempt a button names, or `null` for any other component. */
@@ -127,7 +103,7 @@ export async function answerDiscordAuthorizationReveal(input: {
   readonly reveal: DiscordAuthorizationReveal;
 }): Promise<DiscordMessageBody> {
   if (input.auth === null) return { content: NOT_YOURS };
-  let event: AuthorizationRequired | undefined;
+  let event: SignIn | undefined;
   try {
     const session = await input.resolveSession();
     event =
@@ -144,25 +120,20 @@ export async function answerDiscordAuthorizationReveal(input: {
   return renderDiscordAuthorizationPrompt(event);
 }
 
-function authorizationCustomId(event: AuthorizationRequired): string {
+function authorizationCustomId(event: SignIn): string {
   return `${DISCORD_AUTHORIZATION_CUSTOM_ID_PREFIX}${attemptDigest(event)}`;
 }
 
 /**
- * A fixed-length digest of one sign-in attempt. Connection names can be long
- * enough to overflow Discord's 100-character `custom_id`, and a digest never
- * needs truncating, so the button always names its exact attempt.
+ * A fixed-length digest of one sign-in. Connection names can be long enough to
+ * overflow Discord's 100-character `custom_id`, and a digest never needs
+ * truncating, so the button always names its exact sign-in.
  */
-function attemptDigest(event: { readonly attemptId?: string; readonly name: string }): string {
-  return createHash("sha256").update(attemptKey(event)).digest("base64url").slice(0, 32);
-}
-
-/** The key a channel's state tracks one sign-in attempt's message under. */
-export function discordAuthorizationMessageKey(event: {
-  readonly attemptId?: string;
-  readonly name: string;
-}): string {
-  return attemptDigest(event);
+function attemptDigest(event: Pick<SignIn, "interactionId" | "name">): string {
+  return createHash("sha256")
+    .update(JSON.stringify([event.name, event.interactionId]))
+    .digest("base64url")
+    .slice(0, 32);
 }
 
 /** The Discord user behind a default principal (`discord:<userId>`), when it is one. */

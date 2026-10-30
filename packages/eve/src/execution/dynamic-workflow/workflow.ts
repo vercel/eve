@@ -81,11 +81,9 @@ async function callProgramAgent(
     .send<JsonValue>(message, { outputSchema, signal: ctx.abortSignal });
   const result = await response.result();
   if (result.status === "failed") {
-    throw new Error(
-      `Agent "${call.target}" failed to handle the message: ${result.error?.message ?? "no reason given"}`,
-    );
+    throw new Error(`Agent "${call.target}" failed to handle the message: ${result.error.message}`);
   }
-  const output = outputSchema !== undefined ? (result.data ?? null) : (result.message ?? null);
+  const output = outputSchema !== undefined ? (result.data ?? null) : (result.reply ?? null);
   // Checked here so the program can catch an oversized reply; run would fail the whole workflow.
   const bytes = new TextEncoder().encode(JSON.stringify(output)).byteLength;
   if (bytes > WORKFLOW_PROGRAM_MAX_AGENT_OUTPUT_BYTES) {

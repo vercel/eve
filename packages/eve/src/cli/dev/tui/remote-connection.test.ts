@@ -67,6 +67,11 @@ const TRUSTED_SOURCES_MISMATCH = [
   "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
 ].join("\n\n");
 
+const INFO_FORBIDDEN = new ClientError(
+  403,
+  JSON.stringify({ code: "info_forbidden", error: "Forbidden.", ok: false }),
+);
+
 function eveUnauthorized(error = "Authorization is required for this route."): ClientError {
   return new ClientError(401, JSON.stringify({ code: "unauthorized", error, ok: false }));
 }
@@ -81,7 +86,7 @@ type HarnessOptions = Pick<
 function createHarness(options: HarnessOptions = {}) {
   const { info = async () => INFO, ...controllerOptions } = options;
   const credentials = createDevelopmentCredentialGate(TARGET.serverUrl);
-  const client = new Client({ host: TARGET.serverUrl });
+  const client = new Client({ baseUrl: TARGET.serverUrl });
   const infoSpy = vi.spyOn(client, "info").mockImplementation(() => info(credentials));
   const controller = createRemoteConnectionController({
     ...controllerOptions,
@@ -239,6 +244,36 @@ describe("createRemoteConnectionController", () => {
     const harness = createHarness({
       info: async () => {
         throw new AgentInfoResponseError(["agent: Required"]);
+      },
+    });
+    vi.spyOn(harness.client, "health").mockRejectedValue(new ClientError(404, "Not Found"));
+
+    await expect(harness.controller.check()).resolves.toMatchObject({ state: "unavailable" });
+  });
+
+  it("stays ready with an access hint when the info route refuses the credential", async () => {
+    const harness = createHarness({
+      info: async () => {
+        throw INFO_FORBIDDEN;
+      },
+    });
+    const health = vi.spyOn(harness.client, "health").mockResolvedValue({
+      ok: true,
+      status: "ready",
+      workflowId: "wf_test",
+    });
+
+    await expect(harness.controller.check()).resolves.toEqual({
+      state: "ready",
+      warning: expect.stringContaining("allowAgentInfo: true"),
+    });
+    expect(health).toHaveBeenCalledOnce();
+  });
+
+  it("is unavailable when the info route refuses the credential and health cannot confirm Eve", async () => {
+    const harness = createHarness({
+      info: async () => {
+        throw INFO_FORBIDDEN;
       },
     });
     vi.spyOn(harness.client, "health").mockRejectedValue(new ClientError(404, "Not Found"));

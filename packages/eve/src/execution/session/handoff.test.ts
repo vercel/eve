@@ -96,12 +96,18 @@ describe("SessionHandoff", () => {
       }),
       delivery: trigger.delivery,
       hookTokens: TOKENS,
+      sessionWritable: expect.any(WritableStream),
       sourceRunId: "owner-1",
       targetDeploymentId: "deployment-b",
     });
     expect(sendSessionHandoverPartStepMock.mock.calls.map(([call]) => call)).toEqual([
-      { part: { attemptKey: "owner-1:0", index: 0, payloads: accepted }, sessionId: "session-1" },
       {
+        bufferedPayloadCount: 1,
+        part: { attemptKey: "owner-1:0", index: 0, payloads: accepted },
+        sessionId: "session-1",
+      },
+      {
+        bufferedPayloadCount: 1,
         part: { attemptKey: "owner-1:0", final: true, index: 1, payloads: [] },
         sessionId: "session-1",
       },
@@ -529,6 +535,7 @@ function createHandoff(inbox: SessionInboxHandle): SessionHandoff {
     inbox,
     isInitialOwner: true,
     sessionId: "session-1",
+    sessionWritable: new WritableStream<Uint8Array>(),
   });
 }
 

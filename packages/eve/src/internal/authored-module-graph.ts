@@ -9,11 +9,11 @@ import {
   AUTHORED_BUNDLED_MODULE_EXTENSION,
   AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH,
   createAuthoredWorkflowDirectivePlugin,
-  resolveAuthoredPackageRoot,
 } from "#internal/authored-module-loader.js";
 import {
   createRuntimeLoaderPackageBoundaryPlugin,
   normalizeExternalDependencies,
+  resolveAuthoredPackageRoot,
 } from "#internal/authored-package-boundary.js";
 import { buildWithNitroRolldown } from "#internal/bundler/nitro-rolldown.js";
 
@@ -92,6 +92,9 @@ async function writeAuthoredModuleGraph(
       entryFileNames: fileName,
       format: "esm",
       sourcemap,
+      // Shared chunks can import each other even when the source graph is
+      // acyclic; strict order keeps top-level evaluation in source order.
+      strictExecutionOrder: true,
     },
   });
   const directoryPath = join(packageRoot, AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH);

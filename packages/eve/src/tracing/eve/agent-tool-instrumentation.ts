@@ -1,3 +1,5 @@
+import { traceStepIndex } from "#instrumentation/scope.js";
+import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import {
   ROOT_CONTEXT,
   type Context,
@@ -6,10 +8,10 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 
 import type {
-  InstrumentationAttemptScope,
+  InstrumentationScope,
   InstrumentationExecutionOperation,
-  InstrumentationToolCallStartedEvent,
-  InstrumentationToolCallTerminalEvent,
+  InstrumentationCallRequestedEvent,
+  InstrumentationCallSettledEvent,
 } from "#instrumentation/lifecycle.js";
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
@@ -70,10 +72,8 @@ export async function resumeTool(
  */
 export function createAgentToolInstrumentation(input: {
   readonly tracing: AgentRun;
-  readonly attemptFor: (
-    scope: InstrumentationAttemptScope,
-  ) => Promise<AttemptOperation | undefined>;
-  readonly stepFor: (scope: InstrumentationAttemptScope) => AttemptOperation | undefined;
+  readonly attemptFor: (scope: InstrumentationScope) => Promise<AttemptOperation | undefined>;
+  readonly stepFor: (scope: InstrumentationScope) => AttemptOperation | undefined;
   readonly recordInputs: boolean;
   readonly recordOutputs: boolean;
   readonly stateStore: AgentTraceStateStore;
@@ -118,7 +118,9 @@ export function createAgentToolInstrumentation(input: {
     });
   }
 
-  async function onDispatchStarted(event: InstrumentationToolCallStartedEvent): Promise<void> {
+  async function onDispatchStarted(event: InstrumentationCallRequestedEvent): Promise<void> {
+    const stepIndex = traceStepIndex(event.scope);
+    if (event.scope.turnId === undefined || stepIndex === undefined) return;
     let state = await input.stateStore.get("action", event.idempotencyKey);
     if (state === undefined) {
       const parent = await input.attemptFor(event.scope);
@@ -126,53 +128,51 @@ export function createAgentToolInstrumentation(input: {
       const tool = await parent.tool({
         callId: event.callId,
         name: event.toolName,
-        kind: event.kind ?? "tool-call",
+        kind:
+          event.capability.kind === "agent"
+            ? event.capability.remote
+              ? "remote-agent-call"
+              : "subagent-call"
+            : event.capability.kind === "skill"
+              ? "load-skill"
+              : "tool-call",
         arguments: input.recordInputs ? event.input : undefined,
         startTimeMs: event.startedAtMs,
       });
       tool.attributes({ "agent.tool.is_framework": event.frameworkTool === true });
       state = {
-        attemptId: event.scope.attemptId,
-        attemptIndex: event.scope.attemptIndex,
+        attemptId: attemptIdempotencyKey(event.scope),
+        attemptIndex: event.scope.attempt,
         callId: event.callId,
         channelAudience: normalizeChannelAudience(event.scope.channelAudience),
         context: { ...tool.reference, isRemote: false },
         rootSessionId: event.scope.rootSessionId,
         sessionId: event.scope.sessionId,
-        stepIndex: event.scope.stepIndex,
+        stepIndex,
         turnId: event.scope.turnId,
       };
       await input.stateStore.set("action", event.idempotencyKey, state);
       const execution = executions.get(event.idempotencyKey);
       if (execution !== undefined) await settleExecution(execution, state);
     }
-    if (event.isWorkflowTool === true) {
+    if (event.capability.kind === "agent") {
       await input.stateStore.set("anchor", event.idempotencyKey, state);
     }
   }
 
-  async function onDispatchTerminal(event: InstrumentationToolCallTerminalEvent): Promise<void> {
+  async function onDispatchTerminal(event: InstrumentationCallSettledEvent): Promise<void> {
     const state = await input.stateStore.get("action", event.idempotencyKey);
     if (state === undefined) return;
     try {
       const tool = await resumeTool(input.tracing, state);
-      const error =
-        event.type === "tool.call.failed"
-          ? event.error
-          : event.output.type === "error"
-            ? event.output.error
-            : undefined;
+      const failed = event.outcome !== "completed";
       await tool?.complete({
-        outcome: event.outcome ?? (event.type === "tool.call.failed" ? "failed" : "completed"),
-        failed: event.type === "tool.call.failed" || event.output.type === "error",
-        errorType: event.type === "tool.call.failed" ? event.errorCode : undefined,
-        error,
-        output:
-          input.recordOutputs &&
-          event.type === "tool.call.completed" &&
-          event.output.type === "result"
-            ? event.output.output
-            : undefined,
+        // Trace schema 4 still calls an interrupted call cancelled.
+        outcome: event.outcome === "interrupted" ? "cancelled" : event.outcome,
+        failed,
+        errorType: failed ? event.errorCode : undefined,
+        error: failed ? event.error : undefined,
+        output: input.recordOutputs && !failed ? event.output : undefined,
         usage: event.usage,
         endTimeMs: event.acceptedAtMs ?? state.toolEndTimeMs,
       });
@@ -185,7 +185,11 @@ export function createAgentToolInstrumentation(input: {
     operation: ToolExecution & { callId: string; toolName: string },
     ceiling: CaptureDecision,
   ) {
-    const key = callKey(operation.scope, operation.callId);
+    if (operation.scope.turnId === undefined) return undefined;
+    const key = callKey(
+      { sessionId: operation.scope.sessionId, turnId: operation.scope.turnId },
+      operation.callId,
+    );
     const known = executions.get(key);
     if (known !== undefined) return known;
     const state = await stateFor(
@@ -205,7 +209,7 @@ export function createAgentToolInstrumentation(input: {
         : await reenter(state, report);
     if (tool === undefined || executions.size >= OPEN_EXECUTIONS) return undefined;
     const execution: Execution = {
-      attemptId: operation.scope.attemptId,
+      attemptId: attemptIdempotencyKey(operation.scope),
       idempotencyKey: key,
       tool,
     };
@@ -232,9 +236,10 @@ export function createAgentToolInstrumentation(input: {
           if (state.sessionId === sessionId) await input.stateStore.delete(kind, key);
     },
     // A failed attempt closes its calls in the trace tree; only the locators remain.
-    async forgetAttempt(scope: InstrumentationAttemptScope) {
+    async forgetAttempt(scope: InstrumentationScope) {
       for (const [key, state] of await input.stateStore.entries("action"))
-        if (state.attemptId === scope.attemptId) await input.stateStore.delete("action", key);
+        if (state.attemptId === attemptIdempotencyKey(scope))
+          await input.stateStore.delete("action", key);
     },
     /** Closes SDK runs that no dispatch claimed before their step ended. */
     async drain(attemptId: string, failure?: { readonly error: unknown }) {
@@ -292,9 +297,8 @@ export function createAgentToolInstrumentation(input: {
       }
     },
     events: {
-      "tool.call.completed": onDispatchTerminal,
-      "tool.call.failed": onDispatchTerminal,
-      "tool.call.started": onDispatchStarted,
+      "call.requested": onDispatchStarted,
+      "call.settled": onDispatchTerminal,
     },
   };
 }
