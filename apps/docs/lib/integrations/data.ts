@@ -2640,6 +2640,49 @@ See Shopify's [agent profile documentation](https://shopify.dev/docs/agents/prof
     keywords: ["mcp", "sql", "analytics", "pipes", "datasources", "queries", "connect"],
     authModes: ["app"],
   },
+  tinyfish: {
+    logo: "tinyfish",
+    docsHref: "https://docs.tinyfish.ai/mcp-integration",
+    keywords: ["mcp", "web search", "content extraction", "browser automation", "oauth", "connect"],
+    authModes: ["user"],
+    quickStart: `Create \`agent/connections/tinyfish.ts\`. The connection name is derived from the filename:
+
+\`\`\`ts
+// agent/connections/tinyfish.ts
+import { connect } from "@vercel/connect/eve";
+import { defineMcpClientConnection } from "eve/connections";
+
+const READ_ONLY_TOOLS = new Set([
+  "batch_status",
+  "fetch_content",
+  "get_deep_research",
+  "get_monitor",
+  "get_run",
+  "get_search_usage",
+  "get_wallet",
+  "list_browser_sessions",
+  "list_fetch_usage",
+  "list_monitors",
+  "list_runs",
+  "search",
+]);
+
+export default defineMcpClientConnection({
+  url: "https://agent.tinyfish.ai/mcp",
+  description:
+    "TinyFish: search the web, fetch page content, and run browser automation and research.",
+  auth: connect("tinyfish"),
+  approval: ({ toolName }) =>
+    READ_ONLY_TOOLS.has(toolName.split("__").pop() ?? toolName)
+      ? "not-applicable"
+      : "user-approval",
+});
+\`\`\`
+
+The connection does not require approval for documented read-only tools. It requires approval for every other tool, including unknown future tools.`,
+    configureNote:
+      "The registry connection requires approval for browser automation, deep research, monitors, browser sessions, wallet actions, cancellations, and unrecognized tools. Keep that fail-closed policy unless you have reviewed the tool's effects and TinyFish credit usage.",
+  },
   todoist: {
     logo: "todoist",
     docsHref: "/docs/connections/mcp",
