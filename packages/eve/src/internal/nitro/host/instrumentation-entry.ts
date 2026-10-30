@@ -23,6 +23,7 @@ export function createInstrumentationEntry(instrumentationPath: string) {
       // Module hooks run after preset hooks, which finish selecting the
       // runtime entry in build:before; the bundler reads the entry afterward.
       nitro.hooks.hook("build:before", () => {
+        if (nitro.options.entry === INSTRUMENTATION_ENTRY) return;
         presetEntry = nitro.options.entry;
         nitro.options.entry = INSTRUMENTATION_ENTRY;
       });
