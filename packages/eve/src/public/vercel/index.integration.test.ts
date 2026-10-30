@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -82,6 +82,31 @@ describe("withEve", () => {
     await expect(
       access(join(root, ".eve", "vercel-services", "eve-support")),
     ).resolves.toBeUndefined();
+  });
+
+  // TODO(#5706): withEve does not write the workspace summary index yet.
+  it.fails("writes the multi-agent summary index Vercel uploads for the dashboard", async () => {
+    const root = await createWorkspace();
+
+    await withEve({ services: { web: { framework: "nextjs", root: "apps/web" } } }, { root });
+
+    const summary = JSON.parse(await readFile(join(root, ".eve", "agent-summary.json"), "utf8"));
+    expect(summary).toMatchObject({
+      agents: [
+        {
+          name: "research",
+          routePrefix: "/eve/research",
+          summaryPath: "agents/research/.eve/agent-summary.json",
+        },
+        {
+          name: "support",
+          routePrefix: "/eve/support",
+          summaryPath: "agents/support/.eve/agent-summary.json",
+        },
+      ],
+      kind: "vercel-eve-multi-agent-summary",
+      schemaVersion: 1,
+    });
   });
 
   it("discovers the workspace when Vercel evaluates config from .vercel", async () => {
