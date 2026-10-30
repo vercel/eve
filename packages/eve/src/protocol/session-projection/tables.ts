@@ -104,6 +104,8 @@ export interface RunRow extends Introduced, Ended {
   readonly attempt?: number;
   readonly outcome?: ModelOutcome;
   readonly finishReason?: string;
+  /** The delivery id of the steering message that cut the run, with `finishReason: "steered"`. */
+  readonly steeredBy?: string;
   readonly generationId?: string;
   readonly error?: ErrorInfo;
   readonly usage?: Usage;

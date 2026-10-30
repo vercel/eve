@@ -245,6 +245,10 @@ export class ModelCaller {
         discardAttempt(step.view(), {
           ending: "steered",
           runId,
+          steeredBy:
+            typeof step.config.steeringSignal?.reason === "string"
+              ? step.config.steeringSignal.reason
+              : undefined,
           usage: this.interruptedUsage === undefined ? undefined : usageOf(this.interruptedUsage),
         }),
       );

@@ -302,14 +302,20 @@ export function isSteeringDelivery(
   );
 }
 
+/** A payload with a message for the model, not only answers to requests. */
+function isMessagePayload(payload: DeliverPayload): boolean {
+  return payload.message !== undefined && payload.answers === undefined;
+}
+
 /** A steering delivery with a message for the model, not only answers to requests. */
 export function isSteeringMessage(delivery: DeliverHookPayload, turn: SteeringTurn): boolean {
-  return (
-    isSteeringDelivery(delivery, turn) &&
-    delivery.payloads.some(
-      (payload) => payload.message !== undefined && payload.answers === undefined,
-    )
-  );
+  return isSteeringDelivery(delivery, turn) && delivery.payloads.some(isMessagePayload);
+}
+
+/** The delivery id of the message that steers: the metadata entry of the first payload that carries a message and no answers. */
+export function steeringDeliveryId(delivery: DeliverHookPayload): string | undefined {
+  const index = delivery.payloads.findIndex(isMessagePayload);
+  return delivery.deliveryMetadata?.find((entry) => entry.payloadIndex === index)?.deliveryId;
 }
 
 function combine(entries: readonly DeliveryAdmission[]): DeliverHookPayload {

@@ -12,6 +12,7 @@ import {
   fact,
   defined,
   runSettledFacts,
+  type RunSettlement,
   sessionEndedFacts,
   turnSettled,
 } from "#harness/facts.js";
@@ -271,9 +272,12 @@ export function discardAttempt(
   view: SessionView,
   input: {
     readonly runId: string;
-    readonly ending: "retried" | "steered";
     readonly usage?: FactOf<"usage.recorded">["data"]["usage"];
-  },
+  } & (
+    | { readonly ending: "retried" }
+    /** `steeredBy`: the delivery id of the message that cut the run. */
+    | { readonly ending: "steered"; readonly steeredBy?: string }
+  ),
 ): Transition {
   const tables = view.projection.view;
   const ref = { family: "run" as const, id: input.runId };
@@ -281,13 +285,14 @@ export function discardAttempt(
   // completes what it streamed, so its calls close here.
   const work = input.ending === "steered" ? closeUnder(tables, ref, "steered") : [];
   if (!isOpen(tables, ref)) return unchanged(view, work);
-  const run =
+  const run: RunSettlement =
     input.ending === "retried"
-      ? { outcome: "abandoned" as const, runId: input.runId, usage: input.usage }
+      ? { outcome: "abandoned", runId: input.runId, usage: input.usage }
       : {
-          finishReason: "other",
-          outcome: "completed" as const,
+          finishReason: "steered",
+          outcome: "completed",
           runId: input.runId,
+          steeredBy: input.steeredBy,
           usage: input.usage,
         };
   return unchanged(view, [...work, ...runSettledFacts(run)]);

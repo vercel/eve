@@ -8,6 +8,7 @@ import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import {
   isSteeringDelivery,
   isSteeringMessage,
+  steeringDeliveryId,
   type SteeringOptions,
   type SteeringTurn,
 } from "#execution/session/input-queue.js";
@@ -113,7 +114,7 @@ export class ActiveTurn {
       isSteeringMessage(delivery, this.identity) &&
       !this.input.cursor.sessionState.hasProxyInputRequests
     )
-      this.steeringController.abort();
+      this.steeringController.abort(steeringDeliveryId(delivery));
   };
 
   get signal(): AbortSignal {

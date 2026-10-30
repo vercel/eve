@@ -87,6 +87,22 @@ it("publishes complete commits and retains partial lines across replay overlap",
   expect(events.session(pending).status).toBe("new");
 });
 
+it("projects the delivery that steered a run onto its observation", () => {
+  const view = events.foldEvents(
+    events.emptySessionView(),
+    stampTestEvents([
+      ...opening.slice(0, 3),
+      {
+        type: "model.settled",
+        data: { runId: "r", outcome: "completed", finishReason: "steered", steeredBy: "dlv_steer" },
+      },
+    ]),
+  );
+  expect(events.runs(view, { turnId: "turn_0" })).toMatchObject([
+    { finishReason: "steered", steeredBy: "dlv_steer" },
+  ]);
+});
+
 it("projects interactions without exposing callback URLs through waiting or activity", () => {
   const view = events.foldEvents(
     events.emptySessionView(),

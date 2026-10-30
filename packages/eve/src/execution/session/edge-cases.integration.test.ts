@@ -930,6 +930,65 @@ describe("calls in flight", () => {
     expect(ofType(events, "content.completed").map((event) => event.data.value)).toEqual([
       "The end.",
     ]);
+    // The cut run settles as steered and names the message that cut it; the rerun doesn't.
+    const steeringId = ofType(events, "delivery.consumed")[1]?.data.deliveryId;
+    expect(steeringId).toBeDefined();
+    expect(ofType(events, "model.settled").map((event) => event.data)).toMatchObject([
+      { finishReason: "steered", steeredBy: steeringId },
+      { finishReason: "stop" },
+    ]);
+    expect(ofType(events, "model.settled")[1]!.data).not.toHaveProperty("steeredBy");
+  });
+
+  it("doesn't settle a cancelled run as steered by a message sent after the cancel", async () => {
+    const release = gate();
+    const { events } = await withSession(
+      "edge-cancel-then-message",
+      {
+        message: "Write a long story.",
+        model: scriptedModel(() => heldReply("Once upon a time", release.wait)),
+        tools: [],
+      },
+      async (session) => {
+        await session.until("thinking", (event) => event.type === "model.started");
+        await session.control("cancel");
+        await session.until("cancelled", (event) => event.type === "turn.settled");
+        release.open();
+        await session.send("Make it short.");
+        await session.next("reply");
+      },
+    );
+
+    const run = ofType(events, "model.settled")[0]!.data;
+    expect(run.finishReason).not.toBe("steered");
+    expect(run).not.toHaveProperty("steeredBy");
+  });
+
+  it("names the first message when two arrive before the model replies", async () => {
+    const release = gate();
+    const { events } = await withSession(
+      "edge-two-steers",
+      {
+        message: "Write a long story.",
+        model: scriptedModel(({ said }) =>
+          said("Make it short") ? "The end." : heldReply("Once upon a time", release.wait),
+        ),
+        tools: [],
+      },
+      async (session) => {
+        await session.until("thinking", (event) => event.type === "model.started");
+        await session.send("Make it short.");
+        await session.send("Also rhyme.");
+        await session.until("done", (event) => event.type === "turn.settled");
+        release.open();
+      },
+    );
+
+    const settled = ofType(events, "model.settled").map((event) => event.data);
+    const consumed = ofType(events, "delivery.consumed").map((event) => event.data.deliveryId);
+    expect(settled[0]).toMatchObject({ finishReason: "steered" });
+    expect(settled[0]!.steeredBy).toBe(consumed[1]);
+    expect(settled.at(-1)).toMatchObject({ finishReason: "stop" });
   });
 
   it("finishes a reply already streaming, and answers a message sent meanwhile in its own turn", async () => {
@@ -958,6 +1017,16 @@ describe("calls in flight", () => {
     expect(ofType(events, "content.completed").map((event) => event.data.value)).toEqual([
       "Once there was a dragon.",
       "The end.",
+    ]);
+    // Nothing was cut, so no run settles as steered.
+    expect(
+      ofType(events, "model.settled").map((event) => [
+        event.data.finishReason,
+        event.data.steeredBy,
+      ]),
+    ).toEqual([
+      ["stop", undefined],
+      ["stop", undefined],
     ]);
   });
 });

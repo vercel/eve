@@ -261,6 +261,29 @@ describe("closing what a turn leaves open", () => {
     });
   });
 
+  it("settles a steered run as steered, naming the delivery that cut it", () => {
+    const settle = (steeredBy?: string) =>
+      committed(viewOf(busyTurn()), (view) =>
+        discardAttempt(view, { ending: "steered", runId, steeredBy }),
+      ).find((event) => event.type === "model.settled")?.data;
+    expect(settle("dlv_correction")).toMatchObject({
+      finishReason: "steered",
+      outcome: "completed",
+      steeredBy: "dlv_correction",
+    });
+    expect(settle()).toMatchObject({ finishReason: "steered", outcome: "completed" });
+    expect(settle()).not.toHaveProperty("steeredBy");
+  });
+
+  it("leaves a retried run's settle free of steering fields", () => {
+    const settled = committed(viewOf(busyTurn()), (view) =>
+      discardAttempt(view, { ending: "retried", runId }),
+    ).find((event) => event.type === "model.settled")?.data;
+    expect(settled).toMatchObject({ outcome: "abandoned" });
+    expect(settled).not.toHaveProperty("finishReason");
+    expect(settled).not.toHaveProperty("steeredBy");
+  });
+
   it("ends the session with everything it left open, the task too; its turn didn't fail", () => {
     const projection = storedProjection(busyTurn().state);
     const facts = cascade(projection.view, sessionEndedFacts(projection, { outcome: "failed" }));
