@@ -1,4 +1,6 @@
-import { basename } from "node:path";
+import { randomUUID } from "node:crypto";
+import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 import { readActiveDevelopmentRuntimeArtifactsSnapshot } from "#internal/nitro/dev-runtime-artifacts.js";
 import { normalizeDevelopmentServerClientUrl } from "#internal/nitro/host/dev-server-url.js";
@@ -55,19 +57,25 @@ export function createDevelopmentWorkflowWorld(input: {
 }
 
 /**
- * Publishes the worker transport settings. A configured non-local World runs
- * inside the workers and requires a shared delivery secret; when the developer
- * set none, the session gets its own, so jobs queued by an earlier session
- * are refused and their runs recover through startup re-enqueue instead.
+ * Publishes the worker transport settings. A World other than the parent's
+ * local one runs inside the workers and needs a delivery secret shared by
+ * every process on its queue, so unless the developer set one, every local
+ * session of the app reads the same generated secret from `.eve/`.
  */
-export function installWorkflowTransportEnvironment(appRoot: string, secret: string): () => void {
+export function installWorkflowTransportEnvironment(input: {
+  readonly appRoot: string;
+  readonly secret: string;
+  readonly workersOwnWorld: boolean;
+}): () => void {
   const previousSecret = process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
   const previousAppRoot = process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV];
   const previousDeliverySecret = process.env[WORKFLOW_DELIVERY_SECRET_ENV];
-  process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = secret;
-  process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] = appRoot;
-  if (!previousDeliverySecret?.trim()) {
-    process.env[WORKFLOW_DELIVERY_SECRET_ENV] = createWorkflowDeliverySecret();
+  process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = input.secret;
+  process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] = input.appRoot;
+  if (input.workersOwnWorld && !previousDeliverySecret?.trim()) {
+    process.env[WORKFLOW_DELIVERY_SECRET_ENV] = readOrCreateDevelopmentDeliverySecret(
+      input.appRoot,
+    );
   }
   return () => {
     if (previousDeliverySecret === undefined) {
@@ -86,6 +94,28 @@ export function installWorkflowTransportEnvironment(appRoot: string, secret: str
       process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] = previousAppRoot;
     }
   };
+}
+
+/**
+ * Lives in the app's `.eve/` rather than the session state directory, which a
+ * local `eve eval` moves so it can run beside `eve dev`: both must accept each
+ * other's jobs on a shared queue.
+ */
+function readOrCreateDevelopmentDeliverySecret(appRoot: string): string {
+  const path = join(appRoot, ".eve", "workflow-delivery-secret");
+  mkdirSync(dirname(path), { recursive: true });
+  // Linking a fully written file publishes it atomically, so a session that
+  // starts at the same moment reads either nothing or the whole secret.
+  const pending = `${path}.${randomUUID()}`;
+  writeFileSync(pending, createWorkflowDeliverySecret(), { mode: 0o600 });
+  try {
+    linkSync(pending, path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  } finally {
+    rmSync(pending, { force: true });
+  }
+  return readFileSync(path, "utf8").trim();
 }
 
 export function installWorkflowLocalQueueEnvironment(serverUrl: string): () => void {

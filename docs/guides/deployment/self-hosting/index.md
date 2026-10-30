@@ -59,7 +59,7 @@ You can instead run `eve build` where Docker is reachable and copy the output in
 
 ## Authenticate workflow deliveries
 
-Postgres and other custom Workflow worlds require `EVE_WORKFLOW_DELIVERY_SECRET`. Generate a random value of at least 32 characters, for example with `openssl rand -hex 32`, store it in your secret manager, and set the same value on every `eve start` process connected to the world. `eve start` exits at startup when the variable is unset. The built-in local world generates its own secret for each process, and Vercel Workflow authenticates deliveries itself.
+Postgres and other custom Workflow worlds require `EVE_WORKFLOW_DELIVERY_SECRET`. Generate a random value of at least 32 characters, for example with `openssl rand -hex 32`, store it in your secret manager, and set the same value on every server process connected to the world. The server exits at startup when the variable is unset, including when you deploy a custom world to Vercel. The built-in local world generates its own secret for each process, and Vercel Workflow authenticates deliveries itself.
 
 When eve queues a workflow job, it signs the job's queue name and message with the secret and stores the signature in the job's `x-eve-workflow-delivery` header. Before it runs a delivery, eve checks that signature against the message it received and answers HTTP 401 when they don't match. This check is separate from [channel route auth](../auth-and-route-protection), and it applies whether the world delivers a job inside the process or over HTTP to another replica. Use HTTPS when deliveries cross hosts.
 
@@ -71,9 +71,9 @@ To rotate the secret without interrupting deliveries:
 2. After every process accepts both, set `new_secret,old_secret` so new jobs are signed with `new_secret`.
 3. Remove `old_secret` after every process has switched and the jobs signed with it have finished.
 
-A queued job whose secret is no longer accepted fails each delivery attempt with HTTP 401. At startup, eve queues every active run again with a current signature, so those runs resume. This does not change the [eve-version requirements for resuming sessions](./self-hosted-operations#upgrade-a-self-hosted-agent).
+A queued job whose secret is no longer accepted fails each delivery attempt with HTTP 401 until the world stops retrying it. Jobs queued by an eve version without delivery signatures fail the same way after you upgrade. At startup, eve queues every active run again with a current signature, so runs that the [eve-version requirements](./self-hosted-operations#upgrade-a-self-hosted-agent) allow to resume do resume.
 
-`eve dev` and a local `eve eval` generate a secret for the session when none is set. If your development database outlives the session, set a stable value in `.env.local`.
+When the variable is unset, `eve dev` and a local `eve eval` share a generated secret stored in `.eve/workflow-delivery-secret`, so they can run beside each other against one database.
 
 ## Configure proxy routes
 
