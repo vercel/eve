@@ -122,7 +122,35 @@ type Harness = (ctx: HarnessContext) => {
 const { value } = await evaluate(step, { decision: "next", field: (plan) => plan.next });
 ```
 
-The reactions that compute dynamic tools, instructions, and model fold into `agent`. Files under `agent/` stay the declared defaults, which `agent` keeps or replaces.
+### What the model is given, as data
+
+Today each piece of the system prompt is formatted as a string where it is produced. The base prompt is composed when the session refreshes: the authored instructions, a `Workspace` section, a note that tool calls run in parallel, and the skills list. Each model call then adds dynamic instructions and task guidance, and a recovery note when a retry drops a tool the provider rejected:
+
+```ts
+// Before: strings composed where each piece is produced.
+session.agent.system = [
+  instructionsBlock,
+  workspaceSection,
+  PARALLEL_ACTION_INSTRUCTION,
+  skillsSection,
+].join("\n\n");
+system = [recoveryNote, session.agent.system, ...dynamicInstructions, ...taskGuidance];
+```
+
+After the refactor, what the model is given comes from two sources of data, and turning data into text is a separate function:
+
+```ts
+// After: data from two sources, rendered by the harness's agent.instructions.
+const files = await declared(ctx); // what the agent's files say, resolved for this session
+const eve = builtins(ctx); // eve's own tools, and its renderers from data to text
+const instructions = eve.prompt.instructions(files); // the native harness's agent.instructions
+system = [recoveryNote, ...instructions]; // the kernel's note, then the harness's text
+```
+
+- **`declared(ctx)`** is the agent's definition: `instructions` (`agent` and each file under `agent/instructions/`, with its role), `skills` (`name`, `description`, `deferred`, and `load()`), `tools`, `workspace`, and `model`. Default tools such as `bash` count as declared, because each fills an `agent/tools/<name>` slot that a file can replace or disable. Evaluating `declared(ctx)` is the evaluation that reactions do today, and it is lazy: a harness that replaces everything never pays for it.
+- **`builtins(ctx)`** is what eve adds to support its own features. Its `tools` are `eve__skill`, `eve__task_wait`, `eve__task_cancel`, `eve__search` and `eve__tool`, and `eve__reply` when the turn has an output schema. Its `prompt` renderers are `skills(skills)`, `workspace(workspace)`, `tools(tools)`, `tasks()`, and `instructions(files)`, which composes eve's whole default system prompt from the others.
+
+The kernel keeps only its recovery note. When a provider rejects a tool and the kernel retries the call without it, the note tells the model the tool is gone.
 
 ### History as one function
 
@@ -169,7 +197,8 @@ The ports are identity, sandbox access, and the publication sink, which runs the
 | `continueLoop`, proposed `beforeSettle` callbacks, critic loops          | `next`                                                               |
 | The compaction stage, `shouldCompact`, threshold options, new strategies | `history`, with a summarizer and the threshold in the native harness |
 | Proposals to truncate or offload tool results                            | `history` edits to new messages, folded into the append              |
-| Reactions for dynamic tools, instructions, and model                     | `agent`                                                              |
+| Reactions for dynamic tools, instructions, and model                     | `declared(ctx)`, which `agent` reads                                 |
+| Prompt sections formatted where they are produced                        | Renderers in `builtins(ctx)`, which `agent` calls or replaces        |
 | Several writers of history                                               | `changeHistory`                                                      |
 | Special handling for asking a person or waiting on tasks                 | Ordinary tool calls through the gate                                 |
 | A new callback for each extension request                                | Nothing new                                                          |
@@ -210,6 +239,39 @@ Whatever the harness returns, the kernel enforces:
 - A settled output is validated against the turn's output schema, as a model's would be.
 - A harness that throws fails the turn with a generic message.
 
+### The system prompt
+
+The system prompt is the kernel's recovery note, when there is one, then exactly what `agent.instructions` returns, in that order. eve's default is `builtins(ctx).prompt.instructions(files)`: the agent's instructions, the workspace, the tools note, the skills list, the files under `agent/instructions/`, and task guidance when tasks are offered. A string replaces all of it. An array can keep, reorder, or drop each piece, and can render a piece in its own way; empty entries are skipped.
+
+Skills show why rendering belongs to the author. eve's skills list mixes data (each skill's name and description), mechanism (load a skill with `eve__skill({ name })`), and policy ("activate the minimal set"). With skills as data, all three are the author's:
+
+```ts title="agent/harness.ts"
+import { defineHarness } from "eve";
+import { declared } from "eve/harness";
+
+export default defineHarness((ctx) => ({
+  agent: {
+    instructions: async () => {
+      const files = await declared(ctx);
+      const refunds = files.skills.find((skill) => skill.name === "refunds");
+      const others = files.skills.filter((skill) => skill !== refunds && !skill.deferred);
+
+      return [
+        "You are Acme's billing assistant.",
+        files.instructions.agent.content,
+        await refunds?.load(), // always in context, not loaded on demand
+        "Load these with eve__skill({ name }) when a request needs one:\n" +
+          others.map((skill) => `- ${skill.name}: ${skill.description}`).join("\n"),
+      ];
+    },
+  },
+}));
+```
+
+`eve__skill` loads by name however the list is rendered, so a custom rendering only has to tell the model the tool exists. When skills change mid-session, the native harness announces them as history messages so the start of the prompt stays cached; a custom harness can render the list again instead, at the cost of that cache. The kernel keeps placing the provider's cache breakpoint at the end of the system prompt, so system text that changes from call to call costs the prompt cache wherever it sits.
+
+Tools follow the same rule. A harness that sets `agent.tools` offers exactly what it returns, and leaving out one of eve's tools turns off what it serves. Without `eve__skill`, skills cannot load. Without `eve__task_wait`, the model cannot wait on tasks, though the turn still does not settle while they work. Without `eve__reply`, the model cannot deliver structured output, so the harness settles the turn itself.
+
 ### eve's loop as a harness
 
 This is the whole native policy:
@@ -229,7 +291,11 @@ export const native: Harness = (ctx) => ({
     return { settle: { output: last.endsTurn ? null : last.text } };
   },
 
-  // agent is omitted, so the files under agent/ apply.
+  agent: {
+    model: async () => (await declared(ctx)).model,
+    instructions: async () => builtins(ctx).prompt.instructions(await declared(ctx)),
+    tools: async () => ({ ...(await declared(ctx)).tools, ...builtins(ctx).tools }),
+  },
 });
 ```
 
@@ -396,6 +462,7 @@ When to compact is a line of code, not a setting. The summarizer's model call is
 
 ```ts title="agent/harness.ts"
 import { defineHarness } from "eve";
+import { builtins, declared } from "eve/harness";
 import { loadWorkspace } from "./lib/workspaces";
 
 export default defineHarness((ctx) => {
@@ -410,13 +477,14 @@ export default defineHarness((ctx) => {
     },
 
     agent: {
-      tools: async (declared) => {
-        if ((await workspace()).plan === "enterprise") return declared;
-        const { deploy, bash, ...rest } = declared;
-        return rest;
+      tools: async () => {
+        const { tools } = await declared(ctx);
+        const { deploy, bash, ...rest } = tools;
+        const plan = (await workspace()).plan;
+        return { ...(plan === "enterprise" ? tools : rest), ...builtins(ctx).tools };
       },
-      instructions: async (declared) => [
-        ...Object.values(declared),
+      instructions: async () => [
+        ...builtins(ctx).prompt.instructions(await declared(ctx)),
         `This workspace is on the ${(await workspace()).plan} plan.`,
       ],
     },
@@ -424,7 +492,7 @@ export default defineHarness((ctx) => {
 });
 ```
 
-One cached lookup drives three decisions. A suspended workspace fails before the model runs, and workspaces off the enterprise plan never see `deploy` or `bash`.
+One cached lookup drives three decisions. A suspended workspace fails before the model runs, and workspaces off the enterprise plan never see `deploy` or `bash`. The harness adds eve's own tools back, because a harness that sets `tools` offers exactly what it returns.
 
 </details>
 
@@ -497,6 +565,7 @@ After 1.0, the same structure could become public in steps, starting as experime
 
 - **`agent/harness.ts`** default-exports `defineHarness((ctx) => plan)`. Authors adopt one field at a time: `next` for a critic or a command, `history` for compaction or trimming, `agent` for per-call tools and models, or all three.
 - **Composition is a function call.** A harness that wants eve's compaction plus its own trimming calls eve's exported native pieces inside its own `history`. There is no ordered pipeline of processors.
+- **`declared(ctx)` and `builtins(ctx)`** from `eve/harness` give a harness what the files declare and what eve adds, as data, along with eve's renderers. A harness that sets `agent.instructions` or `agent.tools` gets exactly what it returns.
 - **`compaction` options in `agent.ts`** keep configuring the native harness. A harness that defines `history` owns compaction.
 - **`eve/embed`** exports `createSession` with explicit ports for identity, the sandbox, and storage, plus the protocol's selectors for hosts that render their own UI.
 - **What stays sealed** is the kernel's list above: the gate, tasks, input, caps, usage, history checks, output validation, and failures that reveal nothing internal.
