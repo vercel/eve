@@ -313,6 +313,10 @@ interface WorkflowWorldWiring {
  * co-vary and must stay together: a world constructed through an explicit
  * `createWorld(config)` call must not import `createWorldFromModule`, and
  * only the vendored local World needs the data-directory resolver import.
+ * The local World always authenticates its queue deliveries with a
+ * per-process secret. Any other World except Vercel's authenticates them when
+ * `EVE_WORKFLOW_DELIVERY_SECRET` is set, because any replica may deliver its
+ * jobs and so the secret must be shared.
  */
 function resolveWorkflowWorldWiring(packageName: string): WorkflowWorldWiring {
   if (packageName === "@workflow/world-local") {
@@ -322,19 +326,16 @@ function resolveWorkflowWorldWiring(packageName: string): WorkflowWorldWiring {
     const deliveryTimeoutsImportSpecifier = stringifyEsmImportSpecifier(
       resolvePackageSourceFilePath("src/internal/workflow/local-world-delivery-timeouts.ts"),
     );
-    const deliveryAuthImportSpecifier = stringifyEsmImportSpecifier(
-      resolvePackageSourceFilePath("src/internal/workflow/local-world-delivery-auth.ts"),
-    );
     const moduleImportSpecifier = resolvePackageCompiledFilePath(
       `src/compiled/${packageName}/index.js`,
     );
     const importLines = `
 import { applyLocalWorkflowWorldDeliveryTimeoutDefaults } from ${deliveryTimeoutsImportSpecifier};
-import { authenticateLocalWorkflowDeliveries } from ${deliveryAuthImportSpecifier};
+import { authenticateWorkflowDeliveries } from ${deliveryAuthImportSpecifier()};
 import { resolveLocalWorkflowWorldDataDirectory } from ${dataDirectoryImportSpecifier};`.trimStart();
     const createWorldSource = `
 applyLocalWorkflowWorldDeliveryTimeoutDefaults();
-const workflowWorld = authenticateLocalWorkflowDeliveries(
+const workflowWorld = authenticateWorkflowDeliveries(
   await workflowWorldModule.createWorld({
     dataDir: resolveLocalWorkflowWorldDataDirectory(process.cwd()),
     recoverActiveRuns: false,
@@ -371,11 +372,31 @@ applyVercelWorkflowWorldDefaults(workflowWorld);`.trimStart();
   const workflowRuntimeImportSpecifier = stringifyEsmImportSpecifier(
     resolvePackageCompiledFilePath("src/compiled/@workflow/core/runtime.js"),
   );
+  // The secret is read before the World connects anywhere, so an invalid
+  // secret fails first; the World is validated before it is wrapped, so a
+  // malformed or incompatible World still fails with the validator's message.
+  const createWorldSource = `
+const workflowDeliverySecrets = readWorkflowDeliverySecrets(${JSON.stringify(packageName)});
+let workflowWorld = await createWorldFromModule(workflowWorldModule);
+if (workflowDeliverySecrets !== undefined) {
+  validateWorkflowWorld({ packageName: ${JSON.stringify(packageName)}, world: workflowWorld });
+  workflowWorld = authenticateWorkflowDeliveries(workflowWorld, workflowDeliverySecrets);
+}`.trimStart();
   return {
     moduleImportSpecifier: packageName,
-    extraImportLines: [`import { createWorldFromModule } from ${workflowRuntimeImportSpecifier};`],
-    createWorldSource: "const workflowWorld = await createWorldFromModule(workflowWorldModule);",
+    extraImportLines: [
+      `import { createWorldFromModule } from ${workflowRuntimeImportSpecifier};`,
+      `import { authenticateWorkflowDeliveries, readWorkflowDeliverySecrets } from ${deliveryAuthImportSpecifier()};`,
+      `import { validateWorkflowWorld } from ${stringifyEsmImportSpecifier(resolvePackageSourceFilePath("src/internal/workflow/validate-world.ts"))};`,
+    ],
+    createWorldSource,
   };
+}
+
+function deliveryAuthImportSpecifier(): string {
+  return stringifyEsmImportSpecifier(
+    resolvePackageSourceFilePath("src/internal/workflow/world-delivery-auth.ts"),
+  );
 }
 
 export function createWorkflowWorldPluginSource(input: {

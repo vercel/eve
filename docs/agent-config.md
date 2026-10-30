@@ -397,6 +397,13 @@ options in the environment variables the world package reads, not in
 `build.externalDependencies`. See [Workflow worlds](./guides/deployment/workflow-worlds)
 to choose a world and set up the Postgres world's database.
 
+For Postgres and other custom worlds, set `EVE_WORKFLOW_DELIVERY_SECRET` at
+runtime to the same random value of at least 32 characters on every server
+process. eve then signs queued jobs and rejects unsigned deliveries; without
+it, those deliveries are unauthenticated. See
+[Use the Postgres world](./guides/deployment/workflow-worlds#use-the-postgres-world)
+for setup and rotation.
+
 ## Workflow checkpoint batching
 
 eve saves a Workflow step after every model call and its inline tool calls. `experimental.workflow.modelCallsPerStep` lets one step run several

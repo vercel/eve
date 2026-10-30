@@ -29,6 +29,8 @@ On startup, `eve start` queues pending and running local workflow runs again. Ru
 
 The [`@workflow/world-postgres`](https://www.npmjs.com/package/@workflow/world-postgres) package stores runs in PostgreSQL and queues their work with Graphile Worker. Every `eve start` process connected to the same database processes queued work, so you can run several replicas behind a load balancer.
 
+Set `EVE_WORKFLOW_DELIVERY_SECRET` so eve signs every Postgres queue job and rejects deliveries without a valid signature. Channel route auth doesn't cover these deliveries, so without the secret, anyone who can reach the flow route can submit one. Set the same secret on every replica. To rotate it, set `old_secret,new_secret` everywhere, then `new_secret,old_secret`, then remove `old_secret` once jobs signed with it have finished.
+
 1. Install the package in your app:
 
    ```bash
@@ -50,7 +52,7 @@ The [`@workflow/world-postgres`](https://www.npmjs.com/package/@workflow/world-p
    });
    ```
 
-3. Set the connection string in the runtime environment with `WORKFLOW_POSTGRES_URL`. The package also reads `DATABASE_URL`. When neither is set, it connects to `postgres://world:world@localhost:5432/world`.
+3. Set `WORKFLOW_POSTGRES_URL` in the runtime environment. The connection string can also come from `DATABASE_URL`; without either connection variable, the package connects to `postgres://world:world@localhost:5432/world`. To authenticate queue deliveries (recommended), also set `EVE_WORKFLOW_DELIVERY_SECRET`: generate it once, for example with `openssl rand -hex 32`, and configure the same value on every replica. Without it, eve warns at startup and leaves queue deliveries unauthenticated.
 
 4. Create the schema before the first start:
 
@@ -94,6 +96,8 @@ export default defineAgent({
 ```
 
 The package must export a default factory or `createWorld()` function. It reads credentials and host options from runtime environment variables, not `agent.ts`. If the package must stay external in hosted output, list it in `build.externalDependencies`.
+
+Custom worlds authenticate queue deliveries the same way when you set [`EVE_WORKFLOW_DELIVERY_SECRET`](#use-the-postgres-world). Their queues must then deliver each job with the headers eve queued it with, and any startup recovery must re-enqueue through `world.queue` and read runs through `world.runs`, so eve can sign those jobs. eve checks the delivery signature in addition to any authentication the world provides. With the secret set, eve rejects a world that enables `invoke()` delivery, because those deliveries skip the signed queue.
 
 Install a world built against the same `@workflow/*` major version as your eve release, currently `5.x`. eve checks the world's `@workflow/core` or `@workflow/world` dependency at startup, and fails with the version to install when the major versions differ.
 

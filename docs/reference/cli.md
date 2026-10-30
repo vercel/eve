@@ -255,6 +255,8 @@ Set `EVE_SCHEDULES_DISABLED=1` or `true` (case-insensitive) to disable authored 
 
 Use this setting when [scaling self-hosted replicas](../guides/deployment/self-hosted-operations#run-schedules). It also disables authored cron dispatch on Vercel if set there, but not explicit schedule dispatch in `eve dev`.
 
+With the Postgres world or a custom Workflow world, set `EVE_WORKFLOW_DELIVERY_SECRET` to authenticate workflow queue deliveries. Without it, `eve start` prints a warning and leaves those deliveries unauthenticated. See [Use the Postgres world](../guides/deployment/workflow-worlds#use-the-postgres-world).
+
 For self-hosted deployments, copy the app source, `.output/`, and installed dependencies together. Preserve the relative layout of workspace packages, because startup loads sandbox modules from the deployed source. The deployment directory can differ from the build directory.
 
 ## `eve dev`
