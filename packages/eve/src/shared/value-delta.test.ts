@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { copyView, emptySessionView } from "#protocol/session-projection/fold.js";
+import type { CallRow, SessionView } from "#protocol/session-projection/tables.js";
 import { applyValueDelta, diffValue, snapshotValue } from "#shared/value-delta.js";
 
 describe("value deltas", () => {
@@ -47,7 +49,35 @@ describe("value deltas", () => {
     expect(rebuilt.session.history[0]).toBe(history[0]);
     expect(diffValue(base, snapshotValue(base))).toBeUndefined();
   });
+
+  // https://github.com/vercel/eve/issues/5635
+  it.fails("carry one added row of a session projection table, not the whole table", () => {
+    const base = emptySessionView();
+    for (let index = 0; index < 100; index++) {
+      settleCall(base, `call_${index}`, `Alice's report ${index}`);
+    }
+    const next = copyView(base);
+    settleCall(next, "call_100", "Bob's reply");
+
+    const delta = diffValue(snapshotValue(base), next);
+
+    expect(JSON.stringify(delta)).toContain("Bob's reply");
+    expect(JSON.stringify(delta)).not.toContain("Alice's report");
+  });
 });
+
+/** Adds a settled call to `view` in place, as a fold does. */
+function settleCall(view: SessionView, callId: string, output: string): void {
+  (view.calls as Record<string, CallRow>)[callId] = {
+    callId,
+    capability: { kind: "tool", name: "search_notes" },
+    introducedAt: 1,
+    output,
+    owner: { runId: "run_1" },
+    startedAt: "2026-01-01T00:00:00.000Z",
+    status: "settled",
+  };
+}
 
 type Random = () => number;
 
