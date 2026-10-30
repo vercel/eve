@@ -39,6 +39,8 @@ Every production deployment needs these steps:
 
 `eve build` always writes compiler artifacts under `.eve/`. A Vercel build also writes `.vercel/output`. A build for another host writes the eve server under `.output/`.
 
+Files in a `public/` directory at the app root are copied into the build output, and eve's host serves them as static files.
+
 ## Configure credentials
 
 Keep credentials in your deployment environment or secret manager, not in source or compiled artifacts.
