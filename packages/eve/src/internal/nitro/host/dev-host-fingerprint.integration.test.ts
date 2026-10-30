@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { CompiledAgentManifest, CompiledExtensionMount } from "#compiler/manifest.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host-fingerprint.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
@@ -25,6 +26,8 @@ afterEach(async () => {
 
 interface HostVariant {
   readonly channel?: { readonly path: string };
+  readonly connection?: { readonly events: boolean };
+  readonly extensionSpecifier?: string;
   readonly instrumentationSlot?: string;
   readonly instrumentationSource?: string;
   readonly schedule?: { readonly cron: string; readonly content: string };
@@ -116,6 +119,17 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
     modules,
     name: "fingerprint-host",
   });
+  if (variant.connection !== undefined) {
+    manifest.connections = [
+      {
+        connectionName: "issues",
+        ...(variant.connection.events && { experimental_events: true }),
+      },
+    ] as CompiledAgentManifest["connections"];
+  }
+  if (variant.extensionSpecifier !== undefined) {
+    manifest.extensionMounts = [extensionMount(appRoot, variant.extensionSpecifier)];
+  }
 
   return {
     appRoot,
@@ -132,7 +146,18 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
           }),
       workflowWorldPluginPath: join(appRoot, "workflow-world.mjs"),
     },
-    compileResult: { manifest } as PreparedDevelopmentApplicationHost["compileResult"],
+    compileResult: {
+      manifest,
+      paths: { compileDirectoryPath: join(appRoot, ".eve", "compile") },
+    } as PreparedDevelopmentApplicationHost["compileResult"],
+    scheduleRegistrations: [],
+    schedules: [],
+    workflowBuildDir: join(appRoot, ".eve", "workflow"),
+    workspace: {
+      nitroBuildDir: join(appRoot, ".eve", "nitro"),
+      nitroOutputDir: join(appRoot, ".eve", "output"),
+    } as PreparedDevelopmentApplicationHost["workspace"],
+    workspaceExtensions: [],
     generation: {
       fingerprint: "generation",
       ...(variant.workflowSourceFingerprint === undefined
@@ -140,6 +165,21 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
         : { workflowSourceFingerprint: variant.workflowSourceFingerprint }),
     } as PreparedDevelopmentApplicationHost["generation"],
   } as PreparedDevelopmentApplicationHost;
+}
+
+function extensionMount(appRoot: string, specifier: string): CompiledExtensionMount {
+  const packageRoot = join(appRoot, "node_modules", "layout-extension");
+  return {
+    externalDependencies: [],
+    mountId: "extensions/layout",
+    mountLogicalPath: "extensions/layout.ts",
+    mountSourceId: "extensions/layout.ts",
+    mountSourcePath: join(appRoot, "agent", "extensions", "layout.ts"),
+    namespace: "layout",
+    packageName: "layout-extension",
+    sourceRoot: join(packageRoot, "dist", "extension"),
+    specifier,
+  };
 }
 
 describe("computeDevelopmentHostFingerprint", () => {
@@ -182,6 +222,39 @@ describe("computeDevelopmentHostFingerprint", () => {
     );
 
     expect(withRoute).not.toBe(base);
+  });
+
+  it("treats connection event receivers as structural", async () => {
+    const withoutEvents = await computeDevelopmentHostFingerprint(
+      await createHost({ connection: { events: false } }),
+    );
+    const withEvents = await computeDevelopmentHostFingerprint(
+      await createHost({ connection: { events: true } }),
+    );
+
+    expect(withEvents).not.toBe(withoutEvents);
+  });
+
+  it("treats the specifier an extension is mounted from as structural", async () => {
+    const host = await createHost({ extensionSpecifier: "layout-extension" });
+    const root = await computeDevelopmentHostFingerprint(host);
+    host.compileResult.manifest.extensionMounts = [
+      extensionMount(host.appRoot, "layout-extension/tools"),
+    ];
+    const subpath = await computeDevelopmentHostFingerprint(host);
+
+    expect(subpath).not.toBe(root);
+  });
+
+  it("is stable for the same extension mount installed in different app roots", async () => {
+    const first = await computeDevelopmentHostFingerprint(
+      await createHost({ extensionSpecifier: "layout-extension" }),
+    );
+    const second = await computeDevelopmentHostFingerprint(
+      await createHost({ extensionSpecifier: "layout-extension" }),
+    );
+
+    expect(first).toBe(second);
   });
 
   it("treats configured environment values as structural", async () => {
