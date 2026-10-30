@@ -175,7 +175,7 @@ describe("eveTanStack", () => {
 
   it("merges the generated eve service into the user's resolved Nitro Vercel config", async () => {
     vi.stubEnv("VERCEL", "1");
-    const generated = { mode: "generated", services: {} } as const;
+    const generated = { mode: "generated", agents: [] } as const;
     ensureEveVercelServicesConfigMock.mockResolvedValueOnce(generated);
     const plugin = eveTanStack({
       eveBuildCommand: "pnpm build:eve",
@@ -188,7 +188,13 @@ describe("eveTanStack", () => {
     await plugin.nitro.setup({ options });
 
     expect(ensureEveVercelServicesConfigMock).toHaveBeenCalledWith({
-      appRoot: "/projects/web/agent",
+      agents: [
+        {
+          appRoot: "/projects/web/agent",
+          publicRoutePrefix: "",
+          transportRoutePrefix: EVE_ROUTE_PREFIX,
+        },
+      ],
       eveBuildCommand: "pnpm build:eve",
       frameworkName: "TanStack Start",
       hostRoot: "/projects/web",

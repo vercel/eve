@@ -40,6 +40,11 @@ export function assembleEveVercelServices(input: {
     const configured = findConfiguredEveServiceEntry(existingServices, agent);
     const serviceName = configured?.name ?? contribution.serviceName;
 
+    if (configured === undefined && Object.hasOwn(existingServices, serviceName)) {
+      throw new Error(
+        `Cannot generate eve service "${serviceName}": services["${serviceName}"] already defines a non-eve service. Rename the existing service and update its route destinations before adding this eve agent.`,
+      );
+    }
     if (configured === undefined) rootDirectories.push(contribution.rootDirectory);
     services[serviceName] =
       configured === undefined

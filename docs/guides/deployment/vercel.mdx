@@ -53,6 +53,10 @@ For a single-agent project without a frontend, use `eve build`. For an agent-onl
 
 A Next.js-centered project uses [`withEve` in `next.config.ts`](../frontend/nextjs) and its Next.js build command. To author the project's service graph in `vercel.ts`, use the configuration below instead.
 
+### Generated service name conflicts
+
+Framework integrations fail the build if an unrelated service occupies a generated eve service key, such as `eve-support`. Rename the unrelated service and update its route destinations before building again. Authored services with `framework: "eve"` retain their configuration.
+
 ### Compose agents with other Vercel services
 
 `withEve` from `eve/vercel` adds eve agents to a Vercel service graph as peers of your other applications, with no frontend framework required. Unlike `eve/next`, it doesn't depend on a Next.js build. Both deploy the agent services together in one Vercel project.

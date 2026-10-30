@@ -3,7 +3,7 @@ title: "SvelteKit"
 description: "Run an eve agent and a SvelteKit app as one project with the eveSvelteKit Vite plugin."
 ---
 
-`eve/sveltekit` runs a SvelteKit frontend and an eve agent as one project. The `eveSvelteKit()` Vite plugin puts both on one dev server and one Vercel deploy. [`useEveAgent`](./use-eve-agent-svelte) finds the mounted routes on its own, so you configure no CORS or URL env vars.
+`eve/sveltekit` runs a SvelteKit frontend and an eve agent as one project. The `eveSvelteKit()` Vite plugin puts both on one browser origin and one Vercel deploy. [`useEveAgent`](./use-eve-agent-svelte) finds the mounted routes on its own, so you configure no CORS or URL env vars.
 
 ## Prerequisites
 
@@ -25,7 +25,7 @@ export default defineConfig({
 });
 ```
 
-The plugin looks for an `agent/` folder in the SvelteKit project root. Pass `eveRoot` when the agent lives elsewhere:
+The plugin looks for an `agent/` folder or an `agents/` workspace in the SvelteKit project root. Pass `eveRoot` when the eve project lives elsewhere:
 
 ```ts
 export default defineConfig({
@@ -39,6 +39,23 @@ export default defineConfig({
 ```
 
 The plugin accepts two options, `eveRoot` and `eveBuildCommand`.
+
+## Mount a workspace
+
+Point `eveRoot` at an [eve workspace](../../concepts/project-structure#several-root-agents), or omit it when SvelteKit runs from the workspace root:
+
+```text
+project/
+├── package.json
+├── vite.config.ts
+└── agents/
+    ├── billing/agent/
+    └── support/agent/
+```
+
+The plugin discovers members without their own `package.json`. Each member gets a public transport route, such as `/eve/support/v1/*`. Select it with `useEveAgent({ agent: "support" })`. An empty workspace fails with an error asking you to add an agent. Pointing `eveRoot` at one member instead mounts it as a standalone agent at `/eve/v1/*`.
+
+Development and local preview start a shared eve server per member. If you set `EVE_BASE_URL`, that server must expose all named member routes. Vercel builds generate one service per member.
 
 ## Call the binding
 
@@ -75,7 +92,7 @@ The browser still needs a production authentication policy. See [Authenticate br
 ## Dev vs deploy topology
 
 - **Local dev.** `npm run dev` starts the eve dev server next to SvelteKit and proxies the eve routes to it. The browser talks only to the SvelteKit origin. `npm run build && npm run preview` works the same way: the preview server proxies the eve routes and reuses the shared eve server or starts one.
-- **Vercel.** The SvelteKit app and the eve runtime deploy as a single project. On Vercel builds, the plugin adds an eve [service](https://vercel.com/docs/services) and routes `/eve/v1/**` to it before filesystem routing. The SvelteKit app serves everything else, and no `vercel.json` is required. By default, the generated service runs the installed eve binary from the SvelteKit app's dependencies, so the agent directory doesn't need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
+- **Vercel.** The SvelteKit app and the eve runtime deploy as a single project. On Vercel builds, the plugin adds an eve [service](https://vercel.com/docs/services) per agent before filesystem routing. Standalone agents use `/eve/v1/**`; workspace members use `/eve/<name>/v1/**`. The SvelteKit app serves everything else, and no `vercel.json` is required. By default, the generated service runs the installed eve binary from the SvelteKit app's dependencies, so the agent directory doesn't need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
 
   ```ts
   export default defineConfig({
@@ -98,7 +115,7 @@ The browser still needs a production authentication policy. See [Authenticate br
 
 ## Managing vercel.json yourself
 
-When `vercel.json` declares [`services`](https://vercel.com/docs/services), the plugin generates nothing, and your configuration controls routing. It must include the eve service (`framework: "eve"`) and a rewrite that sends `/eve/v1/*` requests to it, or the build fails:
+When `vercel.json` declares [`services`](https://vercel.com/docs/services), the plugin generates nothing, and your configuration controls routing. A missing eve service (`framework: "eve"`) fails the build. Add a rewrite that sends `/eve/v1/*` requests to it:
 
 ```json title="vercel.json"
 {
@@ -109,6 +126,10 @@ When `vercel.json` declares [`services`](https://vercel.com/docs/services), the 
   "rewrites": [{ "source": "/eve/v1/(.*)", "destination": { "service": "eve" } }]
 }
 ```
+
+For a workspace, prefer generated services. To author the full service graph instead, use [`withEve` from `eve/vercel`](../deployment/vercel#compose-agents-with-other-vercel-services) in a root `vercel.ts`. That composition configures named routes, service-scoped path transforms, and public callback prefixes together. Changing only the service names and rewrites in the single-agent example is not sufficient.
+
+A standalone service can use any key when its framework is `"eve"`.
 
 ### Remove `experimentalServices`
 

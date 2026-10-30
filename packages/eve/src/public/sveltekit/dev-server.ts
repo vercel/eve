@@ -241,10 +241,7 @@ function startEveDevServer(appRoot: string): Promise<EveProcessHandle> {
     args: [createEveBinaryPath(), "dev", "--no-ui", "--port", "0"],
     command: process.execPath,
     cwd: appRoot,
-  }).then((handle) => {
-    process.env[EVE_BASE_URL_ENV] = handle.origin;
-    return installProcessShutdown(handle);
-  });
+  }).then(installProcessShutdown);
 }
 
 /**
@@ -255,7 +252,6 @@ function startEveDevServer(appRoot: string): Promise<EveProcessHandle> {
 export async function resolveSharedEveDevServer(appRoot: string): Promise<EveProcessHandle> {
   const registeredOrigin = await readUsableEveDevServerRegistry(appRoot);
   if (registeredOrigin !== undefined) {
-    process.env[EVE_BASE_URL_ENV] = registeredOrigin;
     return { origin: registeredOrigin };
   }
 
@@ -263,7 +259,6 @@ export async function resolveSharedEveDevServer(appRoot: string): Promise<EvePro
   try {
     const lockedRegisteredOrigin = await readUsableEveDevServerRegistry(appRoot);
     if (lockedRegisteredOrigin !== undefined) {
-      process.env[EVE_BASE_URL_ENV] = lockedRegisteredOrigin;
       return { origin: lockedRegisteredOrigin };
     }
     const handle = await startEveDevServer(appRoot);
