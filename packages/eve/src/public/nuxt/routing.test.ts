@@ -74,24 +74,28 @@ describe("readLocalProductionPort", () => {
 describe("resolveProductionTarget", () => {
   it("uses a production origin override", () => {
     vi.stubEnv("EVE_NUXT_PRODUCTION_ORIGIN", "https://agent.example.com/root");
-    expect(resolveProductionTarget()).toBe(`https://agent.example.com${EVE_PROTOCOL_PREFIX}`);
+    expect(resolveProductionTarget({ localPortOffset: 0, routePrefix: EVE_PROTOCOL_PREFIX })).toBe(
+      `https://agent.example.com${EVE_PROTOCOL_PREFIX}`,
+    );
   });
 
   it("keeps named routes when proxying to an absolute production origin", () => {
     vi.stubEnv("EVE_NUXT_PRODUCTION_ORIGIN", "https://agent.example.com/root");
-    expect(resolveProductionTarget({ routePrefix: "/eve/support/v1" })).toBe(
+    expect(resolveProductionTarget({ localPortOffset: 0, routePrefix: "/eve/support/v1" })).toBe(
       "https://agent.example.com/eve/support/v1",
     );
   });
 
   it("falls back to a local port", () => {
     vi.stubEnv("EVE_NUXT_PRODUCTION_PORT", "5000");
-    expect(resolveProductionTarget()).toBe(`http://127.0.0.1:5000${EVE_PROTOCOL_PREFIX}`);
+    expect(resolveProductionTarget({ localPortOffset: 0, routePrefix: EVE_PROTOCOL_PREFIX })).toBe(
+      `http://127.0.0.1:5000${EVE_PROTOCOL_PREFIX}`,
+    );
   });
 
   it("offsets local ports for workspace members", () => {
     vi.stubEnv("EVE_NUXT_PRODUCTION_PORT", "5000");
-    expect(resolveProductionTarget({ localPortOffset: 2 })).toBe(
+    expect(resolveProductionTarget({ localPortOffset: 2, routePrefix: "/eve/support/v1" })).toBe(
       `http://127.0.0.1:5002${EVE_PROTOCOL_PREFIX}`,
     );
   });

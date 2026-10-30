@@ -9,13 +9,11 @@ import { eveSvelteKit } from "./index.js";
 import { resolveSharedEveDevServer } from "./dev-server.js";
 
 vi.mock("#shared/framework-agents.js", () => ({
-  assertFrameworkAgentsPresent: vi.fn(),
   resolveFrameworkAgents: vi.fn(async (appRoot: string) => [
     {
       appRoot,
       publicRoutePrefix: "",
       transportRoutePrefix: "/eve/v1",
-      workspaceMember: false,
     },
   ]),
 }));
@@ -76,42 +74,52 @@ describe("eveSvelteKit", () => {
     });
   });
 
-  it("proxies each workspace member through its named route", async () => {
-    resolveFrameworkAgentsMock.mockResolvedValueOnce([
-      {
-        appRoot: "/repo/agents/billing",
-        name: "billing",
-        publicRoutePrefix: "/eve/billing",
-        transportRoutePrefix: "/eve/billing/v1",
-        workspaceMember: true,
-      },
-      {
-        appRoot: "/repo/agents/support",
-        name: "support",
-        publicRoutePrefix: "/eve/support",
-        transportRoutePrefix: "/eve/support/v1",
-        workspaceMember: true,
-      },
-    ]);
-    resolveSharedEveDevServerMock
-      .mockResolvedValueOnce({ origin: "http://127.0.0.1:49152" })
-      .mockResolvedValueOnce({ origin: "http://127.0.0.1:49153" });
+  it.each([undefined, "https://agents.example.com"])(
+    "proxies workspace routes with EVE_BASE_URL=%s",
+    async (baseUrl) => {
+      vi.stubEnv("EVE_BASE_URL", baseUrl);
+      resolveFrameworkAgentsMock.mockResolvedValueOnce([
+        {
+          appRoot: "/repo/agents/billing",
+          name: "billing",
+          publicRoutePrefix: "/eve/billing",
+          transportRoutePrefix: "/eve/billing/v1",
+        },
+        {
+          appRoot: "/repo/agents/support",
+          name: "support",
+          publicRoutePrefix: "/eve/support",
+          transportRoutePrefix: "/eve/support/v1",
+        },
+      ]);
+      if (baseUrl === undefined) {
+        resolveSharedEveDevServerMock
+          .mockResolvedValueOnce({ origin: "http://127.0.0.1:49152" })
+          .mockResolvedValueOnce({ origin: "http://127.0.0.1:49153" });
+      }
 
-    const result = (await getConfigHook(eveSvelteKit())(
-      {},
-      { command: "serve", mode: "development" },
-    )) as UserConfig;
+      const result = (await getConfigHook(eveSvelteKit())(
+        {},
+        { command: "serve", mode: "development" },
+      )) as UserConfig;
 
-    const billingProxy = result.server?.proxy?.["/eve/billing/v1"];
-    const supportProxy = result.server?.proxy?.["/eve/support/v1"];
-    expect(resolveSharedEveDevServerMock).toHaveBeenCalledWith("/repo/agents/billing");
-    expect(resolveSharedEveDevServerMock).toHaveBeenCalledWith("/repo/agents/support");
-    expect(billingProxy).toMatchObject({ target: "http://127.0.0.1:49152" });
-    expect(supportProxy).toMatchObject({ target: "http://127.0.0.1:49153" });
-    expect(typeof billingProxy === "object" && billingProxy.rewrite?.("/eve/billing/v1/chat")).toBe(
-      "/eve/v1/chat",
-    );
-  });
+      const billingProxy = result.server?.proxy?.["/eve/billing/v1"];
+      const supportProxy = result.server?.proxy?.["/eve/support/v1"];
+      if (baseUrl === undefined) {
+        expect(resolveSharedEveDevServerMock).toHaveBeenCalledWith("/repo/agents/billing");
+        expect(resolveSharedEveDevServerMock).toHaveBeenCalledWith("/repo/agents/support");
+        expect(billingProxy).toMatchObject({ target: "http://127.0.0.1:49152" });
+        expect(supportProxy).toMatchObject({ target: "http://127.0.0.1:49153" });
+        expect(
+          typeof billingProxy === "object" && billingProxy.rewrite?.("/eve/billing/v1/chat"),
+        ).toBe("/eve/v1/chat");
+      } else {
+        expect(resolveSharedEveDevServerMock).not.toHaveBeenCalled();
+        expect(billingProxy).toEqual({ changeOrigin: true, target: baseUrl });
+        expect(supportProxy).toEqual({ changeOrigin: true, target: baseUrl });
+      }
+    },
+  );
 
   it("configures Vite preview proxy and starts eve for local production preview", async () => {
     const plugin = eveSvelteKit();
@@ -170,10 +178,8 @@ describe("eveSvelteKit", () => {
           appRoot: agentRoot,
           publicRoutePrefix: "",
           transportRoutePrefix: EVE_ROUTE_PREFIX,
-          workspaceMember: false,
         },
       ],
-      appRoot: agentRoot,
       eveBuildCommand: "pnpm build:eve",
       frameworkName: "SvelteKit",
       hostRoot: process.cwd(),

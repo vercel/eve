@@ -4,11 +4,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import type { Plugin, ResolvedConfig, UserConfig } from "vite";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
-import {
-  assertFrameworkAgentsPresent,
-  resolveFrameworkAgents,
-  type ResolvedFrameworkAgent,
-} from "#shared/framework-agents.js";
+import { resolveFrameworkAgents, type ResolvedFrameworkAgent } from "#shared/framework-agents.js";
 import {
   ensureEveVercelServicesConfig,
   mergeEveVercelConfig,
@@ -24,8 +20,9 @@ import { normalizeOrigin } from "./routing.js";
  */
 export interface EveSvelteKitPluginOptions {
   /**
-   * Path to the eve application root, relative to the SvelteKit project root
-   * unless absolute. Defaults to the SvelteKit project root.
+   * Path to a standalone eve app or workspace, relative to the SvelteKit project
+   * root unless absolute. Defaults to the SvelteKit project root. Workspace
+   * members mount at `/eve/<name>/v1/*` and build as separate Vercel services.
    */
   readonly eveRoot?: string;
   /**
@@ -87,7 +84,7 @@ async function resolveEveDevProxyTargets(agents: readonly ResolvedFrameworkAgent
   return await Promise.all(
     agents.map(async (agent) => ({
       agent,
-      rewriteNamedRoute: agent.workspaceMember,
+      rewriteNamedRoute: agent.name !== undefined,
       target: (await resolveSharedEveDevServer(agent.appRoot)).origin,
     })),
   );
@@ -153,10 +150,8 @@ export function eveSvelteKit(options: EveSvelteKitPluginOptions = {}): Plugin {
 
       if (env.command === "build" && process.env.VERCEL) {
         const agents = await resolveFrameworkAgents(appRoot);
-        assertFrameworkAgentsPresent(agents, appRoot);
         const configured = await ensureEveVercelServicesConfig({
           agents,
-          appRoot,
           eveBuildCommand: options.eveBuildCommand,
           frameworkName: "SvelteKit",
           hostRoot: svelteKitRoot,
@@ -170,7 +165,6 @@ export function eveSvelteKit(options: EveSvelteKitPluginOptions = {}): Plugin {
       }
 
       const agents = await resolveFrameworkAgents(appRoot);
-      assertFrameworkAgentsPresent(agents, appRoot);
       const proxyTargets = await resolveEveDevProxyTargets(agents);
 
       if (env.isPreview) {

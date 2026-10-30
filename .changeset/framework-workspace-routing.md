@@ -1,5 +1,7 @@
 ---
-"eve": minor
+"eve": patch
 ---
 
-Discover agent workspaces in the Nuxt and SvelteKit integrations, proxy named agent routes during local development, and generate one Vercel service per workspace member.
+Discover agent workspaces in the Nuxt and SvelteKit integrations, proxy each member's named routes locally, and generate one Vercel service per member while preserving authored service configuration.
+
+Thanks to @OwenKephart for the workspace integration contribution.

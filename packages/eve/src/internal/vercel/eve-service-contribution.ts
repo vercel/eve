@@ -174,8 +174,8 @@ export function compileEveVercelService(input: {
       outputDirectory: ".vercel/output",
       root: isolated.root,
       routes: [
-        ...(homeRoute === undefined ? [] : [homeRoute]),
         createEveRequestPathRoute(routeSrc),
+        ...(homeRoute === undefined ? [] : [homeRoute]),
       ],
       ...(input.agent.publicRoutePrefix.length > 0
         ? { routePrefix: input.agent.publicRoutePrefix }

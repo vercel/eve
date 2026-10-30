@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,317 +7,161 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("#shared/resolve-eve-binary.js", async () => {
   const { join } = await import("node:path");
   return {
-    // Pin resolution to the conventional app-local path so build-command
-    // assertions stay deterministic without a real eve install on disk. The
-    // real resolver is exercised in resolve-eve-binary.integration.test.ts.
-    resolveEveBinaryPath: (appRoot: string) =>
-      join(appRoot, "node_modules", "eve", "bin", "eve.js"),
+    resolveEveBinaryPath: (root: string) => join(root, "node_modules", "eve", "bin", "eve.js"),
   };
 });
 
-import { ensureEveVercelServicesConfig } from "#shared/vercel-services.js";
+import { resolveFrameworkAgents } from "#shared/framework-agents.js";
+import { ensureEveVercelServicesConfig, mergeEveVercelConfig } from "#shared/vercel-services.js";
 
+const roots: string[] = [];
 async function createTempHostRoot(): Promise<string> {
-  return await mkdtemp(join(tmpdir(), "eve-vercel-services-"));
+  const root = await mkdtemp(join(tmpdir(), "eve-vercel-services-"));
+  roots.push(root);
+  return root;
 }
 
-async function directoryExists(path: string): Promise<boolean> {
-  try {
-    return (await stat(path)).isDirectory();
-  } catch {
-    return false;
+async function ensureConfig(hostRoot: string, eveRoot = hostRoot, eveBuildCommand?: string) {
+  return ensureEveVercelServicesConfig({
+    agents: await resolveFrameworkAgents(eveRoot),
+    frameworkName: "Test",
+    hostRoot,
+    eveBuildCommand,
+  });
+}
+
+async function writeConfig(root: string, config: unknown): Promise<void> {
+  await mkdir(root, { recursive: true });
+  await writeFile(join(root, "vercel.json"), JSON.stringify(config));
+}
+
+async function createWorkspace(root: string): Promise<void> {
+  await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "0.0.0" } }));
+  for (const name of ["billing", "support"]) {
+    await mkdir(join(root, "agents", name, "agent"), { recursive: true });
+    await writeFile(join(root, "agents", name, "agent", "agent.ts"), "export default {};\n");
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 describe("ensureEveVercelServicesConfig", () => {
-  it("generates the eve service when vercel.json is missing", async () => {
+  it.each([undefined, "pnpm build:eve"])(
+    "prepares standalone builds with command %s",
+    async (command) => {
+      const hostRoot = await createTempHostRoot();
+      const result = await ensureConfig(hostRoot, hostRoot, command);
+      if (result.mode !== "generated") throw new Error("Expected generated services");
+      const config = mergeEveVercelConfig(undefined, result);
+      expect(config.services?.eve?.buildCommand).toBe(
+        "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='.vercel/output' && " +
+          (command ?? "node 'node_modules/eve/bin/eve.js' build"),
+      );
+      expect((await stat(join(hostRoot, ".eve/vercel-services/eve"))).isDirectory()).toBe(true);
+    },
+  );
+
+  it("generates isolated builds for every discovered workspace member", async () => {
     const hostRoot = await createTempHostRoot();
-
-    const result = await ensureEveVercelServicesConfig({
-      appRoot: hostRoot,
-      frameworkName: "Test",
-      hostRoot: hostRoot,
-    });
-
-    expect(result).toEqual({
-      mode: "generated",
-      services: {
-        eve: {
-          buildCommand:
-            "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='.vercel/output' && node 'node_modules/eve/bin/eve.js' build",
-          framework: "eve",
-          outputDirectory: ".vercel/output",
-          routes: [
-            {
-              src: "^/eve/v1/(.*)$",
-              transforms: [
-                {
-                  args: "/eve/v1/$1",
-                  op: "set",
-                  type: "request.path",
-                },
-              ],
-            },
-          ],
-          root: ".eve/vercel-services/eve",
-        },
-      },
-    });
-  });
-
-  it("generates one named service and route per workspace agent", async () => {
-    const hostRoot = await createTempHostRoot();
-    const billingRoot = join(hostRoot, "agents", "billing");
-    const supportRoot = join(hostRoot, "agents", "support");
-
-    const result = await ensureEveVercelServicesConfig({
-      agents: [
-        {
-          appRoot: billingRoot,
-          name: "billing",
-          publicRoutePrefix: "/eve/billing",
-          workspaceMember: true,
-        },
-        {
-          appRoot: supportRoot,
-          name: "support",
-          publicRoutePrefix: "/eve/support",
-          workspaceMember: true,
-        },
-      ],
-      appRoot: hostRoot,
-      frameworkName: "Test",
-      hostRoot,
-    });
-
-    expect(result.mode).toBe("generated");
-    if (result.mode !== "generated") return;
-    expect(Object.keys(result.services)).toEqual(["eve-billing", "eve-support"]);
-    expect(result.routes?.map((route) => route.src)).toEqual([
+    await createWorkspace(hostRoot);
+    const result = await ensureConfig(hostRoot);
+    if (result.mode !== "generated") throw new Error("Expected generated services");
+    const config = mergeEveVercelConfig(undefined, result);
+    expect(Object.keys(config.services!)).toEqual(["eve-billing", "eve-support"]);
+    expect(config.routes?.map((route) => (route as { src: string }).src)).toEqual([
       "^/eve/billing/v1/(.*)$",
       "^/eve/billing/?$",
       "^/eve/support/v1/(.*)$",
       "^/eve/support/?$",
     ]);
-    expect(result.services["eve-support"]?.buildCommand).toContain(
+    expect(config.services?.["eve-support"]?.buildCommand).toContain(
       "export EVE_PUBLIC_ROUTE_PREFIX='/eve/support'",
     );
-    expect(await directoryExists(join(hostRoot, ".eve/vercel-services/eve-billing"))).toBe(true);
-    expect(await directoryExists(join(hostRoot, ".eve/vercel-services/eve-support"))).toBe(true);
-  });
-
-  it("creates the isolated service build root", async () => {
-    const hostRoot = await createTempHostRoot();
-
-    await ensureEveVercelServicesConfig({
-      appRoot: hostRoot,
-      frameworkName: "Test",
-      hostRoot: hostRoot,
-    });
-
-    expect(await directoryExists(join(hostRoot, ".eve", "vercel-services", "eve"))).toBe(true);
-  });
-
-  it("uses a custom eve build command verbatim", async () => {
-    const hostRoot = await createTempHostRoot();
-
-    const result = await ensureEveVercelServicesConfig({
-      appRoot: hostRoot,
-      eveBuildCommand: "pnpm build:eve",
-      frameworkName: "Test",
-      hostRoot: hostRoot,
-    });
-
-    expect(result.mode).toBe("generated");
-    expect(result.mode === "generated" && result.services.eve?.buildCommand).toBe(
-      "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='.vercel/output' && pnpm build:eve",
+    expect(config.services?.["eve-support"]?.buildCommand).toContain(
+      "export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1",
     );
+    for (const name of ["billing", "support"]) {
+      expect((await stat(join(hostRoot, `.eve/vercel-services/eve-${name}`))).isDirectory()).toBe(
+        true,
+      );
+    }
   });
 
   it("resolves relative paths for an eve app in a subdirectory", async () => {
     const hostRoot = await createTempHostRoot();
-    const appRoot = join(hostRoot, "agent");
-    await mkdir(appRoot, { recursive: true });
-
-    const result = await ensureEveVercelServicesConfig({
-      appRoot,
-      frameworkName: "Test",
-      hostRoot: hostRoot,
-    });
-
-    expect(result.mode === "generated" && result.services.eve?.buildCommand).toBe(
+    const result = await ensureConfig(hostRoot, join(hostRoot, "agent"));
+    if (result.mode !== "generated") throw new Error("Expected generated services");
+    expect(mergeEveVercelConfig(undefined, result).services?.eve?.buildCommand).toBe(
       "cd '../../../agent' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../.vercel/output' && node '../node_modules/eve/bin/eve.js' build",
     );
   });
 
-  it("reads vercel.json from a linked Vercel project root", async () => {
+  it.each(["record", "array"])(
+    "accepts custom-named authored standalone services (%s)",
+    async (shape) => {
+      const hostRoot = await createTempHostRoot();
+      const agent = { framework: "eve", root: "agent" };
+      await writeConfig(hostRoot, {
+        services: shape === "record" ? { agent } : [{ name: "agent", ...agent }],
+      });
+      expect(await ensureConfig(hostRoot)).toEqual({ mode: "root" });
+      await expect(stat(join(hostRoot, ".eve/vercel-services"))).rejects.toThrow();
+    },
+  );
+
+  it("requires an authored service for every workspace member", async () => {
+    const hostRoot = await createTempHostRoot();
+    await createWorkspace(hostRoot);
+    const services = { "eve-billing": { framework: "eve", root: "agents/billing" } };
+    await writeConfig(hostRoot, { services });
+    await expect(ensureConfig(hostRoot)).rejects.toThrow(
+      /cannot add a generated service for support/,
+    );
+    await writeConfig(hostRoot, {
+      services: { ...services, "eve-support": { framework: "eve", root: "agents/support" } },
+    });
+    expect(await ensureConfig(hostRoot)).toEqual({ mode: "root" });
+  });
+
+  it("reads linked project services but prefers the host's services", async () => {
     const projectRoot = await createTempHostRoot();
-    const hostRoot = join(projectRoot, "apps", "web");
+    const hostRoot = join(projectRoot, "apps/web");
     await mkdir(join(projectRoot, ".vercel"), { recursive: true });
-    await writeFile(join(projectRoot, ".vercel", "project.json"), "{}\n");
+    await writeFile(join(projectRoot, ".vercel/project.json"), "{}");
     await mkdir(hostRoot, { recursive: true });
-    await writeFile(
-      join(projectRoot, "vercel.json"),
-      `${JSON.stringify({
-        services: {
-          web: { root: "apps/web", framework: "nuxtjs" },
-          eve: { root: "agent", framework: "eve" },
-        },
-      })}\n`,
-    );
-
-    const result = await ensureEveVercelServicesConfig({
-      appRoot: hostRoot,
-      frameworkName: "Test",
-      hostRoot: hostRoot,
-    });
-
-    expect(result).toEqual({ mode: "root" });
+    await writeConfig(projectRoot, { services: { agent: { framework: "eve" } } });
+    expect(await ensureConfig(hostRoot)).toEqual({ mode: "root" });
+    await writeConfig(hostRoot, { services: { web: { framework: "nuxtjs" } } });
+    await expect(ensureConfig(hostRoot)).rejects.toThrow(/already defines services/);
   });
 
-  it("prefers the host root vercel.json services over the linked project root's", async () => {
-    const projectRoot = await createTempHostRoot();
-    const hostRoot = join(projectRoot, "apps", "web");
-    await mkdir(join(projectRoot, ".vercel"), { recursive: true });
-    await writeFile(join(projectRoot, ".vercel", "project.json"), "{}\n");
-    await mkdir(hostRoot, { recursive: true });
-    await writeFile(join(projectRoot, "vercel.json"), `${JSON.stringify({})}\n`);
-    await writeFile(
-      join(hostRoot, "vercel.json"),
-      `${JSON.stringify({
-        services: {
-          web: { root: ".", framework: "nuxtjs" },
-          eve: { root: "agent", framework: "eve" },
-        },
-      })}\n`,
-    );
-
-    const result = await ensureEveVercelServicesConfig({
-      appRoot: hostRoot,
-      frameworkName: "Test",
-      hostRoot: hostRoot,
-    });
-
-    expect(result).toEqual({ mode: "root" });
-  });
-
-  it("generates nothing when vercel.json declares services including eve", async () => {
-    const hostRoot = await createTempHostRoot();
-    await writeFile(
-      join(hostRoot, "vercel.json"),
-      `${JSON.stringify({
-        services: {
-          web: { root: ".", framework: "nuxtjs" },
-          agent: { root: "agent", framework: "eve" },
-        },
-      })}\n`,
-    );
-
-    const result = await ensureEveVercelServicesConfig({
-      appRoot: hostRoot,
-      frameworkName: "Test",
-      hostRoot: hostRoot,
-    });
-
-    expect(result).toEqual({ mode: "root" });
-    expect(await directoryExists(join(hostRoot, ".eve", "vercel-services"))).toBe(false);
-  });
-
-  it("accepts the named service array form", async () => {
-    const hostRoot = await createTempHostRoot();
-    await writeFile(
-      join(hostRoot, "vercel.json"),
-      `${JSON.stringify({
-        services: [
-          { name: "web", root: ".", framework: "nuxtjs" },
-          { name: "eve", root: "agent", framework: "eve" },
-        ],
-      })}\n`,
-    );
-
-    await expect(
-      ensureEveVercelServicesConfig({
-        appRoot: hostRoot,
-        frameworkName: "Test",
-        hostRoot: hostRoot,
-      }),
-    ).resolves.toEqual({ mode: "root" });
-  });
-
-  it("throws when vercel.json services omit the eve service", async () => {
-    const hostRoot = await createTempHostRoot();
-    await writeFile(
-      join(hostRoot, "vercel.json"),
-      `${JSON.stringify({ services: { web: { root: ".", framework: "nuxtjs" } } })}\n`,
-    );
-
-    await expect(
-      ensureEveVercelServicesConfig({
-        appRoot: hostRoot,
-        frameworkName: "Test",
-        hostRoot: hostRoot,
-      }),
-    ).rejects.toThrow(/already defines services/);
-  });
-
-  it("warns and generates when vercel.json only has legacy experimentalServices", async () => {
+  it("warns about experimentalServices only when stable services are absent", async () => {
     const hostRoot = await createTempHostRoot();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await writeFile(
-      join(hostRoot, "vercel.json"),
-      `${JSON.stringify({
-        experimentalServices: {
-          web: { entrypoint: ".", framework: "nuxtjs", routePrefix: "/" },
-          eve: { entrypoint: ".", framework: "eve", routePrefix: "/_eve_internal/eve" },
-        },
-      })}\n`,
-    );
-
-    const result = await ensureEveVercelServicesConfig({
-      appRoot: hostRoot,
-      frameworkName: "Test",
-      hostRoot: hostRoot,
-    });
-
-    expect(result.mode).toBe("generated");
+    await writeConfig(hostRoot, { experimentalServices: { eve: { framework: "eve" } } });
+    expect((await ensureConfig(hostRoot)).mode).toBe("generated");
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("experimentalServices"));
-  });
-
-  it("prefers stable services over legacy experimentalServices without warning", async () => {
-    const hostRoot = await createTempHostRoot();
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await writeFile(
-      join(hostRoot, "vercel.json"),
-      `${JSON.stringify({
-        experimentalServices: { eve: { entrypoint: ".", framework: "eve", routePrefix: "/x" } },
-        services: { eve: { root: ".", framework: "eve" } },
-      })}\n`,
-    );
-
-    const result = await ensureEveVercelServicesConfig({
-      appRoot: hostRoot,
-      frameworkName: "Test",
-      hostRoot: hostRoot,
+    warn.mockClear();
+    await writeConfig(hostRoot, {
+      experimentalServices: {},
+      services: { eve: { framework: "eve" } },
     });
-
-    expect(result).toEqual({ mode: "root" });
+    expect(await ensureConfig(hostRoot)).toEqual({ mode: "root" });
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("rejects a malformed vercel.json", async () => {
+  it.each([
+    { config: ["not an object"], error: /must contain a JSON object/ },
+    {
+      config: { services: { agent: { framework: "eve", routes: [null] } } },
+      error: /routes\[0\].*JSON object/,
+    },
+  ])("rejects malformed authored config: $config", async ({ config, error }) => {
     const hostRoot = await createTempHostRoot();
-    await writeFile(join(hostRoot, "vercel.json"), `["not", "an", "object"]\n`);
-
-    await expect(
-      ensureEveVercelServicesConfig({
-        appRoot: hostRoot,
-        frameworkName: "Test",
-        hostRoot: hostRoot,
-      }),
-    ).rejects.toThrow(/must contain a JSON object/);
+    await writeConfig(hostRoot, config);
+    await expect(ensureConfig(hostRoot)).rejects.toThrow(error);
   });
 });

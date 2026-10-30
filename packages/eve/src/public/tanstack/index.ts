@@ -150,7 +150,7 @@ export function eveTanStack(options: EveTanStackPluginOptions = {}): Plugin {
         }
 
         const configured = await ensureEveVercelServicesConfig({
-          appRoot,
+          agents: [{ appRoot, publicRoutePrefix: "", transportRoutePrefix: EVE_ROUTE_PREFIX }],
           eveBuildCommand: options.eveBuildCommand,
           frameworkName: "TanStack Start",
           hostRoot,

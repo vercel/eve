@@ -100,12 +100,12 @@ describe("buildAgentWorkspace", () => {
       routePrefix: "/eve/support",
       routes: [
         {
-          src: "^/eve/support/?$",
-          transforms: [{ args: "/", op: "set", type: "request.path" }],
-        },
-        {
           src: "^/eve/support/v1/(.*)$",
           transforms: [{ args: "/eve/v1/$1", op: "set", type: "request.path" }],
+        },
+        {
+          src: "^/eve/support/?$",
+          transforms: [{ args: "/", op: "set", type: "request.path" }],
         },
       ],
     });

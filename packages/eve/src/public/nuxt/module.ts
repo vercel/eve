@@ -4,11 +4,7 @@ import { isAbsolute, resolve } from "node:path";
 import { addImports, defineNuxtModule, extendRouteRules } from "@nuxt/kit";
 
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
-import {
-  assertFrameworkAgentsPresent,
-  resolveFrameworkAgents,
-  type ResolvedFrameworkAgent,
-} from "#shared/framework-agents.js";
+import { resolveFrameworkAgents, type ResolvedFrameworkAgent } from "#shared/framework-agents.js";
 import {
   resolveDevServerTimeout,
   resolveSharedEveDevServer,
@@ -36,10 +32,9 @@ export interface EveNuxtModuleOptions {
    */
   devServerTimeoutMs?: number;
   /**
-   * Path to the eve application root, resolved relative to the Nuxt project
-   * root unless absolute. Defaults to the Nuxt project root. The dev server is
-   * spawned here, and on Vercel it is the root the generated eve service
-   * builds from.
+   * Path to a standalone eve app or workspace, relative to the Nuxt project
+   * root unless absolute. Defaults to the Nuxt project root. Workspace members
+   * mount at `/eve/<name>/v1/*` and build as separate Vercel services.
    */
   eveRoot?: string;
   /**
@@ -136,7 +131,6 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
     const nuxtRoot = nuxt.options.rootDir;
     const appRoot = resolveApplicationRoot(nuxtRoot, options.eveRoot);
     const agents = await resolveFrameworkAgents(appRoot);
-    assertFrameworkAgentsPresent(agents, appRoot);
     const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs, EVE_NUXT_HOST);
 
     // Auto-import the Vue composable so app code can call `useEveAgent()`
@@ -159,7 +153,6 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
     if (!nuxt.options.dev && process.env.VERCEL) {
       const configured = await ensureEveVercelServicesConfig({
         agents,
-        appRoot,
         eveBuildCommand: options.eveBuildCommand,
         frameworkName: "Nuxt",
         hostRoot: nuxtRoot,
