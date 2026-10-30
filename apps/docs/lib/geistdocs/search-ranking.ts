@@ -1,6 +1,7 @@
 interface SearchResult {
   readonly content: unknown;
   readonly type: string;
+  readonly url?: unknown;
 }
 
 const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
@@ -10,8 +11,11 @@ const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\
 // Fumadocs scores every heading and paragraph as its own document, so a page that
 // only mentions a term in a one-word line (e.g. `slackContinuationToken`) can
 // outrank the page titled with that term.
-const titleRank = (title: unknown, query: string): number => {
-  if (typeof title !== "string") return 3;
+const titleRank = ({ content: title, url }: SearchResult, query: string): number => {
+  // Integration pages are mostly marketing copy, so they keep the engine's ranking.
+  if (typeof title !== "string" || (typeof url === "string" && url.startsWith("/integrations/"))) {
+    return 3;
+  }
   const normalized = normalize(title);
   if (normalized === query) return 0;
   const word = new RegExp(`(^|[^a-z0-9])${escapeRegExp(query)}($|[^a-z0-9])`);
@@ -21,8 +25,8 @@ const titleRank = (title: unknown, query: string): number => {
 };
 
 /**
- * Moves pages whose title matches the query ahead of pages that only mention it,
- * keeping the search engine's order otherwise. Results arrive as page groups: a
+ * Moves docs pages whose title matches the query ahead of pages that only mention
+ * it, keeping the search engine's order otherwise. Results arrive as page groups: a
  * `page` entry followed by its matching headings and text.
  */
 export function rankTitleMatches<T extends SearchResult>(
@@ -39,7 +43,7 @@ export function rankTitleMatches<T extends SearchResult>(
   }
 
   return groups
-    .map((group, index) => ({ group, index, rank: titleRank(group[0]!.content, term) }))
+    .map((group, index) => ({ group, index, rank: titleRank(group[0]!, term) }))
     .sort((a, b) => a.rank - b.rank || a.index - b.index)
     .flatMap(({ group }) => group);
 }

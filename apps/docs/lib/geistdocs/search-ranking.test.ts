@@ -40,6 +40,20 @@ describe("rankTitleMatches", () => {
     ]);
   });
 
+  it("doesn't promote integration pages", () => {
+    const results = [
+      page("Custom Channels"),
+      { content: "Slack", type: "page", url: "/integrations/slack" },
+      page("Slack"),
+    ];
+
+    expect(rankTitleMatches(results, "slack").map((result) => result.url)).toEqual([
+      "/Slack",
+      "/Custom Channels",
+      "/integrations/slack",
+    ]);
+  });
+
   it("returns results unchanged for an empty query", () => {
     const results = [page("Tools"), hit("defineTool")];
 
