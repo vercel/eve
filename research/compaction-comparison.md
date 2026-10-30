@@ -78,5 +78,22 @@ The mock model, for a deterministic baseline:
 | `read-file` calls | 6       | 6        | 6       |
 | Input tokens      | 75,523  | 65,865   | 94,027  |
 
+The real model (the e2e default, `e2eModel()`), one run each:
+
+|                   | default | opencode | Codex   |
+| ----------------- | ------- | -------- | ------- |
+| Task finished     | yes     | yes      | yes     |
+| Compactions       | 3, step | 1, step  | 1, step |
+| Model calls       | 14      | 14       | 14      |
+| `read-file` calls | 6       | 6        | 6       |
+| Input tokens      | 77,814  | 91,621   | 103,027 |
+| Cache-read tokens | 75,867  | 78,953   | 82,593  |
+
+No strategy lost the code: every run read each file once. Codex no longer thrashes: the earlier port,
+which had to put the summary first and also compacted after each turn, compacted 20 times with 74
+reads on the same replay. opencode and
+Codex compact once and then carry a larger history to the end, so they spend more input tokens than
+eve's default, which compacts three times.
+
 Out of scope here: provider-native compaction items (Codex's encrypted `Compaction` item), background
 precompute, and cache-TTL timers.
