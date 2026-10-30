@@ -42,7 +42,7 @@ The plugin accepts two options, `eveRoot` and `eveBuildCommand`.
 
 ### Explicit agent mounts
 
-The plugin has no explicit `agents` map or `servicePrefix` option like [`eve/next`](./nextjs#mount-agents-outside-a-workspace). The `agent` option of [`useEveAgent`](./use-eve-agent-svelte) selects a named route; it does not mount another agent.
+The plugin has no explicit `agents` map or `servicePrefix` option like [`eve/next`](./nextjs#use-multiple-agents). The `agent` option of [`useEveAgent`](./use-eve-agent-svelte) selects a named route; it does not mount another agent.
 
 To reach an independently deployed agent, use a same-origin reverse proxy and pass its path prefix as `baseUrl`. This keeps cookie authentication on the app's origin. For a direct cross-origin connection, pass the agent's absolute origin as `baseUrl`, allow the frontend origin in the agent's [CORS policy](../../channels/eve#cors), and supply `auth` or `headers` accepted by its route policy. The binding does not expose a cross-origin fetch credentials option, so use the same-origin proxy for cookie-based authentication.
 
