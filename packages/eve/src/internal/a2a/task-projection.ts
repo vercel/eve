@@ -26,7 +26,7 @@ import type {
 } from "#protocol/session-projection/tables.js";
 import { isV26Line } from "#protocol/v26-lines.js";
 
-import { encodeTaskId, type TaskRef } from "./ids.js";
+import { encodeTaskId, messageIdOfDelivery, type TaskRef } from "./ids.js";
 import {
   A2A_JSON_RPC_ERRORS,
   A2aError,
@@ -321,7 +321,15 @@ function taskHistory(
     );
     return parts.length === 0
       ? []
-      : [{ contextId: ref.sessionId, messageId: row.deliveryId, parts, role: "ROLE_USER", taskId }];
+      : [
+          {
+            contextId: ref.sessionId,
+            messageId: messageIdOfDelivery(row.deliveryId) ?? row.deliveryId,
+            parts,
+            role: "ROLE_USER",
+            taskId,
+          },
+        ];
   });
   return historyLength === undefined ? messages : messages.slice(-historyLength);
 }

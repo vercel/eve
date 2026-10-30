@@ -129,3 +129,46 @@ function securityFields(input: BuildAgentCardInput): Record<string, JsonValue> {
   }
   return { securityRequirements, securitySchemes };
 }
+
+/**
+ * When this module loaded: the most recent time the card could have changed, since the card is
+ * built from configuration a deployment fixes. Instances that loaded later report a later time,
+ * which only costs a client a refetch.
+ */
+const CARD_LOADED_AT = new Date(Math.floor(Date.now() / 1000) * 1000);
+
+/**
+ * The card as a cacheable response (spec 8.6): a strong `ETag` over its exact bytes, which a
+ * matching `If-None-Match` answers with `304`, plus `Last-Modified`, which `If-Modified-Since`
+ * consults only when the request has no `If-None-Match` (RFC 9110 13.2.2).
+ */
+export async function agentCardResponse(
+  request: Request,
+  card: unknown,
+  headers: Readonly<Record<string, string>>,
+): Promise<Response> {
+  const body = JSON.stringify(card);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body));
+  const etag = `"${Buffer.from(digest).toString("base64url").slice(0, 27)}"`;
+  const validators = {
+    ...headers,
+    etag,
+    "last-modified": CARD_LOADED_AT.toUTCString(),
+  };
+  if (isNotModified(request, etag)) return new Response(null, { headers: validators, status: 304 });
+  return new Response(body, {
+    headers: { ...validators, "content-type": "application/json" },
+  });
+}
+
+function isNotModified(request: Request, etag: string): boolean {
+  const ifNoneMatch = request.headers.get("if-none-match");
+  if (ifNoneMatch !== null) {
+    return ifNoneMatch
+      .split(",")
+      .map((tag) => tag.trim().replace(/^W\//u, ""))
+      .some((tag) => tag === "*" || tag === etag);
+  }
+  const ifModifiedSince = Date.parse(request.headers.get("if-modified-since") ?? "");
+  return !Number.isNaN(ifModifiedSince) && CARD_LOADED_AT.getTime() <= ifModifiedSince;
+}

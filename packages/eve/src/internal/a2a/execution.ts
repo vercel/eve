@@ -12,7 +12,6 @@
  * task, never a second one.
  */
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
-import { deliveryIdForIdempotencyKey } from "#channel/delivery-idempotency.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
@@ -31,6 +30,7 @@ import type { MessageContent, MessagePart } from "#shared/message-content.js";
 import {
   decodePageToken,
   decodeTaskId,
+  deliveryIdForMessage,
   encodePageToken,
   messageIdempotencyKey,
   type TaskRef,
@@ -243,7 +243,7 @@ export class A2aTaskExecution {
     const ownerKey = invocationOwnerKey(call.auth);
     const idempotencyKey = messageIdempotencyKey(ownerKey, message.messageId);
     const delivery: DeliveryKeys = {
-      deliveryId: await deliveryIdForIdempotencyKey(idempotencyKey),
+      deliveryId: deliveryIdForMessage(message.messageId),
       idempotencyKey,
     };
     if (message.taskId !== undefined) return await this.#continueTask(message, call, delivery);

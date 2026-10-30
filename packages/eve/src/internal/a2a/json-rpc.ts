@@ -5,7 +5,6 @@
  */
 import type { SessionAuthContext } from "#channel/types.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
-import type { JsonValue } from "#shared/json.js";
 
 import type { A2aCallContext, A2aTaskExecution } from "./execution.js";
 import {
@@ -19,6 +18,7 @@ import {
   listTasksRequestSchema,
   sendMessageRequestSchema,
   subscribeToTaskRequestSchema,
+  type A2aErrorDetail,
   type JsonRpcId,
   type StreamResponse,
 } from "./protocol.js";
@@ -49,6 +49,16 @@ export async function handleA2aJsonRpc(
   auth: SessionAuthContext | null,
   execution: A2aOperations,
 ): Promise<Response> {
+  const contentType = request.headers.get("content-type");
+  if (contentType !== null && !isJsonMediaType(contentType)) {
+    return rpcError(
+      null,
+      new A2aError(
+        A2A_JSON_RPC_ERRORS.contentTypeNotSupported,
+        `Content-Type ${contentType} is not supported; send application/json.`,
+      ),
+    );
+  }
   const body = await readJsonBody(request);
   if (body instanceof A2aError) return rpcError(null, body);
   if (Array.isArray(body)) {
@@ -133,20 +143,67 @@ function parse<T>(
   },
   params: unknown,
 ): T {
-  const result = schema.safeParse(params ?? {});
+  const result = schema.safeParse(protoJsonNames(params ?? {}));
   if (result.success) return result.data;
-  throw new A2aError(
-    A2A_JSON_RPC_ERRORS.invalidParams,
-    "Invalid params.",
-    JSON.parse(JSON.stringify(result.error.issues)) as JsonValue,
-  );
+  throw new A2aError(A2A_JSON_RPC_ERRORS.invalidParams, "Invalid params.", {
+    details: [badRequest(result.error.issues as readonly ParamsIssue[])],
+  });
 }
+
+/**
+ * `application/json`, or a JSON type such as `application/a2a+json`. An absent header passes:
+ * only a declared non-JSON body is refused.
+ */
+function isJsonMediaType(contentType: string): boolean {
+  const essence = contentType.split(";")[0]!.trim().toLowerCase();
+  return essence === "application/json" || /^application\/[\w.+-]+\+json$/u.test(essence);
+}
+
+/**
+ * ProtoJSON parsers accept a field's original proto name as well as its lowerCamelCase JSON
+ * name, so `history_length` reads as `historyLength`. Free-form values (`metadata`, and a data
+ * part's `data`) are application JSON and keep their keys; a camelCase key wins over its
+ * snake_case twin.
+ */
+function protoJsonNames(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(protoJsonNames);
+  if (value === null || typeof value !== "object") return value;
+  const renamed: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const name = key.replace(/_([a-z0-9])/gu, (_, next: string) => next.toUpperCase());
+    // `__proto__` names no protocol field, and assigning it would replace the prototype.
+    if (name === "__proto__" || (name !== key && Object.hasOwn(value, name))) continue;
+    renamed[name] = FREE_FORM_FIELDS.has(name) ? entry : protoJsonNames(entry);
+  }
+  return renamed;
+}
+
+const FREE_FORM_FIELDS: ReadonlySet<string> = new Set(["data", "metadata"]);
 
 function asA2aError(error: unknown, method: string): A2aError {
   if (error instanceof A2aError) return error;
   const errorId = createErrorId();
   log.error("A2A request failed", { error, errorId, method });
-  return new A2aError(A2A_JSON_RPC_ERRORS.internalError, "Internal error.", { errorId });
+  // The ID ties the response to the logged error; nothing else about the failure leaves.
+  return new A2aError(A2A_JSON_RPC_ERRORS.internalError, "Internal error.", {
+    details: [{ "@type": "type.googleapis.com/google.rpc.RequestInfo", requestId: errorId }],
+  });
+}
+
+interface ParamsIssue {
+  readonly message: string;
+  readonly path: readonly PropertyKey[];
+}
+
+/** Schema issues as a `google.rpc.BadRequest`, fields in the camelCase JSON names. */
+function badRequest(issues: readonly ParamsIssue[]): A2aErrorDetail {
+  return {
+    "@type": "type.googleapis.com/google.rpc.BadRequest",
+    fieldViolations: issues.map((issue) => ({
+      description: issue.message,
+      field: issue.path.map(String).join("."),
+    })),
+  };
 }
 
 /**
@@ -164,7 +221,7 @@ function checkVersion(request: Request): A2aError | undefined {
   return new A2aError(
     A2A_JSON_RPC_ERRORS.versionNotSupported,
     `A2A version ${requested} is not supported. Send A2A-Version: ${A2A_PROTOCOL_VERSION}.`,
-    { supportedVersions: [A2A_PROTOCOL_VERSION] },
+    { metadata: { supportedVersions: A2A_PROTOCOL_VERSION } },
   );
 }
 
