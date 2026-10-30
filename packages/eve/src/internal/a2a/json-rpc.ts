@@ -4,6 +4,7 @@
  * refused: the Agent Card doesn't advertise it.
  */
 import type { SessionAuthContext } from "#channel/types.js";
+import { readJsonBody } from "#internal/http/json-body.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
 
 import type { A2aCallContext, A2aTaskExecution } from "./execution.js";
@@ -59,8 +60,20 @@ export async function handleA2aJsonRpc(
       ),
     );
   }
-  const body = await readJsonBody(request);
-  if (body instanceof A2aError) return rpcError(null, body);
+  const read = await readJsonBody(request, A2A_REQUEST_BODY_MAX_BYTES);
+  if (read.kind === "too-large") {
+    return rpcError(
+      null,
+      new A2aError(
+        A2A_JSON_RPC_ERRORS.invalidRequest,
+        `Request body exceeds ${A2A_REQUEST_BODY_MAX_BYTES} bytes.`,
+      ),
+    );
+  }
+  if (read.kind !== "json") {
+    return rpcError(null, new A2aError(A2A_JSON_RPC_ERRORS.parseError, "Parse error."));
+  }
+  const body = read.value;
   if (Array.isArray(body)) {
     return rpcError(
       null,
@@ -227,46 +240,6 @@ function checkVersion(request: Request): A2aError | undefined {
 
 function responseHeaders(): Headers {
   return new Headers({ "a2a-version": A2A_PROTOCOL_VERSION, "cache-control": "no-store" });
-}
-
-/** Reads the body, counting bytes as they stream: a declared length is only a fast refusal. */
-async function readJsonBody(request: Request): Promise<unknown> {
-  const tooLarge = () =>
-    new A2aError(
-      A2A_JSON_RPC_ERRORS.invalidRequest,
-      `Request body exceeds ${A2A_REQUEST_BODY_MAX_BYTES} bytes.`,
-    );
-  const body = request.body;
-  if (body === null) return new A2aError(A2A_JSON_RPC_ERRORS.parseError, "Parse error.");
-  const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > A2A_REQUEST_BODY_MAX_BYTES) {
-    await body.cancel().catch(() => {});
-    return tooLarge();
-  }
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const chunk = await reader.read();
-    if (chunk.done) break;
-    size += chunk.value.byteLength;
-    if (size > A2A_REQUEST_BODY_MAX_BYTES) {
-      await reader.cancel().catch(() => {});
-      return tooLarge();
-    }
-    chunks.push(chunk.value);
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  try {
-    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
-  } catch {
-    return new A2aError(A2A_JSON_RPC_ERRORS.parseError, "Parse error.");
-  }
 }
 
 /**
