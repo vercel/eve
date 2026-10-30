@@ -1,5 +1,5 @@
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
-import type { SessionAuthContext, SessionParent } from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext, SessionParent } from "#channel/types.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
@@ -272,6 +272,7 @@ interface Session {
     interactionId: string,
     optionId: string,
     auth?: SessionAuthContext,
+    fields?: Omit<DeliverPayload, "answers">,
   ) => Promise<void>;
   readonly answerAndSend: (interactionId: string, message: string) => Promise<string>;
   readonly control: (
@@ -409,12 +410,12 @@ async function withSession(
               ? [event.data.interactionId]
               : [],
           ),
-        async answer(interactionId, optionId, auth = ALICE) {
+        async answer(interactionId, optionId, auth = ALICE, fields = {}) {
           await resumeHook(commandInbox, {
             auth,
             kind: "send",
             delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
-            payload: { answers: [{ interactionId, optionId }] },
+            payload: { ...fields, answers: [{ interactionId, optionId }] },
           });
         },
         async answerAndSend(interactionId, message) {
@@ -1501,36 +1502,39 @@ describe("work delegated to a child session", () => {
     ).toMatchObject({ output: `Stopped ${ended!.data.taskId}; it won't report back.` });
   });
 
+  const delegatedDeploy = () =>
+    scriptedModel((_prompt, raw) => {
+      const prompt = JSON.stringify(raw);
+      const called = (tool: string) => prompt.includes(`"toolName":"${tool}"`);
+      // The child, whose conversation starts with the parent's message: deploys, behind an
+      // approval, and reports.
+      const first = raw.find((message) => message.role === "user");
+      if (JSON.stringify(first?.content).includes("CHILD:")) {
+        return called("deploy")
+          ? "Child deployed."
+          : [{ toolName: "deploy", toolCallId: "call_child_deploy" }];
+      }
+      // The parent: delegates once, waits for its child, and reports. A delegated call's
+      // result arrives when its task ends, so the prompt shows the call before it does.
+      if (!called("agent"))
+        return [
+          {
+            input: { message: "CHILD: deploy it." },
+            toolName: "agent",
+            toolCallId: "call_agent",
+          },
+        ];
+      if (!called("eve__task_wait"))
+        return [{ input: {}, toolName: "eve__task_wait", toolCallId: "call_wait" }];
+      return "The child is done.";
+    });
+
   it("relays a child's approval to its parent, and answering it there runs the child's call", async () => {
     const { events, ran } = await withSession(
       "edge-child-approval",
       {
         message: "Delegate the deploy.",
-        model: scriptedModel((_prompt, raw) => {
-          const prompt = JSON.stringify(raw);
-          const called = (tool: string) => prompt.includes(`"toolName":"${tool}"`);
-          // The child, whose conversation starts with the parent's message: deploys, behind an
-          // approval, and reports.
-          const first = raw.find((message) => message.role === "user");
-          if (JSON.stringify(first?.content).includes("CHILD:")) {
-            return called("deploy")
-              ? "Child deployed."
-              : [{ toolName: "deploy", toolCallId: "call_child_deploy" }];
-          }
-          // The parent: delegates once, waits for its child, and reports. A delegated call's
-          // result arrives when its task ends, so the prompt shows the call before it does.
-          if (!called("agent"))
-            return [
-              {
-                input: { message: "CHILD: deploy it." },
-                toolName: "agent",
-                toolCallId: "call_agent",
-              },
-            ];
-          if (!called("eve__task_wait"))
-            return [{ input: {}, toolName: "eve__task_wait", toolCallId: "call_wait" }];
-          return "The child is done.";
-        }),
+        model: delegatedDeploy(),
         tools: [{ approval: true, name: "deploy" }],
       },
       async (session) => {
@@ -1564,6 +1568,37 @@ describe("work delegated to a child session", () => {
     ).toMatchObject({ outcome: "completed", output: "Child deployed." });
     expect(ofType(events, "child.opened")).toHaveLength(1);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
+  });
+
+  // #5726: Slack sends its responder as `state` with every button answer. That field stays
+  // with the parent, and the child still has to admit the answer forwarded to it.
+  it.fails("runs the child's call when its relayed approval's answer also carries channel state", async () => {
+    const { events, ran } = await withSession(
+      "edge-child-approval-state",
+      {
+        message: "Delegate the deploy.",
+        model: delegatedDeploy(),
+        tools: [{ approval: true, name: "deploy" }],
+      },
+      async (session) => {
+        await session.next("relayed approval pause");
+        await session.answer(session.approvals()[0]!, "approve", ALICE, {
+          state: { responder: "U123" },
+        });
+        await session.until(
+          "the parent's turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_0",
+        );
+      },
+    );
+
+    expect(ran).toEqual(["deploy"]);
+    expect(ofType(events, "interaction.settled").map((event) => event.data.outcome)).toEqual([
+      "accepted",
+    ]);
+    expect(
+      ofType(events, "call.settled").find((event) => event.data.callId === "call_agent")?.data,
+    ).toMatchObject({ outcome: "completed", output: "Child deployed." });
   });
 
   // #4923: a typed answer to a relayed prompt is a message, so only the turn's
