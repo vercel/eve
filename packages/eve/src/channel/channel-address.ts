@@ -47,12 +47,16 @@ interface BaseChannelAddressDeliveryOptions {
 }
 
 /**
- * Delivery options only framework channels pass. A retried idempotency key is dropped as a
- * duplicate, so a channel that hands out delivery IDs names the delivery itself (see
- * `deliveryIdForIdempotencyKey`): the retry's receipt is then the first attempt's.
+ * Delivery options only framework channels pass.
+ *
+ * - `deliveryId`: a retried idempotency key is dropped as a duplicate, so a channel that hands out
+ *   delivery IDs names the delivery itself: the retry's receipt is then the first attempt's.
+ * - `turnTarget`: the one turn a message may join, or `null` for a turn of its own (see
+ *   `DeliverHookPayload.turnTarget`).
  */
-interface InternalChannelAddressDeliveryOptions {
+export interface InternalChannelAddressDeliveryOptions {
   readonly deliveryId?: string;
+  readonly turnTarget?: string | null;
 }
 
 /**
@@ -119,7 +123,7 @@ export function createChannelAddress<TState = undefined>(input: {
         channelName: input.channelName,
         ...metadata,
       });
-      const { deliveryId } = options as InternalChannelAddressDeliveryOptions;
+      const { deliveryId, turnTarget } = options as InternalChannelAddressDeliveryOptions;
       const delivery = deliveryId === undefined ? minted : { ...minted, deliveryId };
       const payload = withValidatedHistory(normalizeSendInput(sendInput));
       const caller = sessionCallbackToTurnCaller(options.callback);
@@ -137,6 +141,7 @@ export function createChannelAddress<TState = undefined>(input: {
           payload.message === undefined
             ? undefined
             : (options.turnPolicy ?? input.turnPolicy ?? DEFAULT_TURN_POLICY),
+        ...(turnTarget !== undefined && payload.message !== undefined && { turnTarget }),
       };
       const command: Extract<SessionCommand, { readonly kind: "send" }> =
         caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller };

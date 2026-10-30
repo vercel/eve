@@ -265,7 +265,7 @@ export const sendMessageRequestSchema = z.object({
   configuration: z
     .object({
       acceptedOutputModes: z.array(z.string()).optional(),
-      // Push notifications are phase 3; a request that asks for one is refused explicitly.
+      // Push notifications aren't supported; a request that asks for one is refused explicitly.
       taskPushNotificationConfig: z.unknown().optional(),
       historyLength: historyLengthSchema,
       returnImmediately: z.boolean().optional(),

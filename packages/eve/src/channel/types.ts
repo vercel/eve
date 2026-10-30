@@ -191,6 +191,14 @@ export type SessionCommand =
       readonly delivery?: ChannelDeliveryMetadata;
       readonly requestId?: string;
       readonly turnPolicy?: TurnPolicy;
+      /**
+       * @internal The running turn this delivery may join, for channels that track turns themselves
+       * (A2A tasks). A turn ID: it steers or answers only that turn, and when that turn isn't running
+       * it waits and starts its own. `null`: it always starts its own turn, even while the running
+       * turn waits on its person. Either way it never shares a turn with other queued deliveries.
+       * Absent: `turnPolicy` alone decides.
+       */
+      readonly turnTarget?: string | null;
     }
   | ({
       readonly kind: "cancel";
@@ -299,6 +307,14 @@ export interface DeliverHookPayload {
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
   readonly turnPolicy?: TurnPolicy;
+  /**
+   * @internal The running turn this delivery may join, for channels that track turns themselves
+   * (A2A tasks). A turn ID: it steers or answers only that turn, and when that turn isn't running
+   * it waits and starts its own. `null`: it always starts its own turn, even while the running
+   * turn waits on its person. Either way it never shares a turn with other queued deliveries.
+   * Absent: `turnPolicy` alone decides.
+   */
+  readonly turnTarget?: string | null;
 }
 
 /** Internal deadline signal sent through the stable session command inbox. */

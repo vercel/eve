@@ -17,7 +17,18 @@ const A2A_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
     "agent/agent.ts": `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 
-const model = mockModel((request) => {
+const model = mockModel(async (request) => {
+  const last = request.lastUserMessage ?? "";
+  if (last.includes("A2A-SLOW")) {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    return "A2A-SLOW-DONE";
+  }
+  if (last.startsWith("A2A-ECHO")) return \`ECHO:\${last}\`;
+  if (last.includes("A2A-APPROVE")) {
+    return request.toolResults.some((result) => result.name === "guarded")
+      ? "A2A-APPROVED"
+      : { toolCalls: [{ id: "guard-1", input: {}, name: "guarded" }] };
+  }
   const prompt = JSON.stringify(request.messages);
   if (prompt.includes("A2A-FAILURE-PROBE")) {
     throw new Error("A2A-FAILURE-PROBE: provider rejected the request.");
@@ -62,6 +73,16 @@ export default a2aChannel({
 });
 `,
     "agent/instructions.md": "Follow the deterministic mock-model lifecycle.\n",
+    "agent/tools/guarded.ts": `import { defineTool } from "eve/tools";
+import { always } from "eve/tools/approval";
+
+export default defineTool({
+  approval: always(),
+  description: "A guarded action that needs a person's approval.",
+  execute: () => ({ ok: true }),
+  inputSchema: { properties: {}, type: "object" },
+});
+`,
     "agent/tools/ask_question.ts":
       'import { askQuestion } from "eve/tools/ask_question";\n\nexport default askQuestion;\n',
   },
@@ -375,7 +396,185 @@ describe("A2A channel", () => {
     },
     TEST_TIMEOUT_MS,
   );
+
+  it(
+    "queues a new task behind an interrupted one instead of joining it",
+    async () => {
+      const asked = await sendTask("alice", { message: userMessage("q-1", "A2A-ASK") });
+      expect(asked.status).toMatchObject({ state: "TASK_STATE_INPUT_REQUIRED" });
+      const contextId = requiredString(asked.contextId, "contextId");
+
+      // A message with only the contextId is a new task, even while the first waits on its
+      // person: it must neither answer the open question nor steer the waiting turn.
+      const queued = await sendTask("alice", {
+        configuration: { returnImmediately: true },
+        message: { ...userMessage("q-2", "A2A-ECHO queued"), contextId },
+      });
+      expect(queued.id).not.toBe(asked.id);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      expect(await readTask("alice", queued.id)).toMatchObject({
+        status: { state: "TASK_STATE_SUBMITTED" },
+      });
+      expect(await readTask("alice", asked.id)).toMatchObject({
+        status: { state: "TASK_STATE_INPUT_REQUIRED" },
+      });
+
+      const answered = await sendTask("alice", {
+        message: { ...userMessage("q-3", "Yes"), contextId, taskId: asked.id },
+      });
+      expect(answered).toMatchObject({
+        artifacts: [{ parts: [{ text: "A2A-LIFECYCLE-COMPLETE" }] }],
+        id: asked.id,
+        status: { state: "TASK_STATE_COMPLETED" },
+      });
+      expect(await waitForTerminal("alice", queued.id)).toMatchObject({
+        artifacts: [{ parts: [{ text: "ECHO:A2A-ECHO queued" }] }],
+        status: { state: "TASK_STATE_COMPLETED" },
+      });
+      const listed = requiredRecord((await rpc("alice", "ListTasks", { contextId })).result, "p");
+      expect(listed).toMatchObject({ totalSize: 2 });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps new tasks queued behind a working one apart",
+    async () => {
+      const slow = await sendTask("alice", {
+        configuration: { returnImmediately: true },
+        message: userMessage("k-1", "A2A-SLOW"),
+      });
+      const contextId = requiredString(slow.contextId, "contextId");
+      await waitForState("alice", slow.id, "TASK_STATE_WORKING");
+      const queue = (messageId: string, text: string) =>
+        sendTask("alice", {
+          configuration: { returnImmediately: true },
+          message: { ...userMessage(messageId, text), contextId },
+        });
+      const second = await queue("k-2", "A2A-ECHO second");
+      const third = await queue("k-3", "A2A-ECHO third");
+
+      // A follow-up to a task that hasn't started has no turn to join.
+      expect(
+        rpcErrorCode(
+          await rpc("alice", "SendMessage", {
+            message: { ...userMessage("k-4", "more"), contextId, taskId: second.id },
+          }),
+        ),
+      ).toBe(-32004);
+
+      expect(await waitForTerminal("alice", slow.id)).toMatchObject({
+        status: { state: "TASK_STATE_COMPLETED" },
+      });
+      expect(await waitForTerminal("alice", second.id)).toMatchObject({
+        artifacts: [{ parts: [{ text: "ECHO:A2A-ECHO second" }] }],
+        status: { state: "TASK_STATE_COMPLETED" },
+      });
+      expect(await waitForTerminal("alice", third.id)).toMatchObject({
+        artifacts: [{ parts: [{ text: "ECHO:A2A-ECHO third" }] }],
+        status: { state: "TASK_STATE_COMPLETED" },
+      });
+      const listed = requiredRecord((await rpc("alice", "ListTasks", { contextId })).result, "p");
+      expect(listed).toMatchObject({ totalSize: 3 });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "steers a working task with a follow-up on its taskId",
+    async () => {
+      const slow = await sendTask("alice", {
+        configuration: { returnImmediately: true },
+        message: userMessage("w-1", "A2A-SLOW"),
+      });
+      await waitForState("alice", slow.id, "TASK_STATE_WORKING");
+      const steered = await sendTask("alice", {
+        message: {
+          ...userMessage("w-2", "A2A-ECHO steer"),
+          contextId: slow.contextId,
+          taskId: slow.id,
+        },
+      });
+      expect(steered).toMatchObject({ id: slow.id, status: { state: "TASK_STATE_COMPLETED" } });
+      const read = await readTask("alice", slow.id);
+      expect((read.history as { messageId: string }[]).map((m) => m.messageId)).toEqual([
+        "w-1",
+        "w-2",
+      ]);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "refuses an answer that matches none of an approval's options",
+    async () => {
+      const asked = await sendTask("alice", { message: userMessage("a-1", "A2A-APPROVE") });
+      expect(asked.status).toMatchObject({ state: "TASK_STATE_INPUT_REQUIRED" });
+      const promptText = JSON.stringify(asked.status);
+      expect(promptText).toContain("Approve");
+
+      const refused = await rpc("alice", "SendMessage", {
+        message: {
+          ...userMessage("a-2", "maybe later"),
+          contextId: asked.contextId,
+          taskId: asked.id,
+        },
+      });
+      expect(rpcErrorCode(refused)).toBe(-32602);
+      expect(await readTask("alice", asked.id)).toMatchObject({
+        status: { state: "TASK_STATE_INPUT_REQUIRED" },
+      });
+
+      const approved = await sendTask("alice", {
+        message: { ...userMessage("a-3", "approve"), contextId: asked.contextId, taskId: asked.id },
+      });
+      expect(approved).toMatchObject({
+        artifacts: [{ parts: [{ text: "A2A-APPROVED" }] }],
+        id: asked.id,
+        status: { state: "TASK_STATE_COMPLETED" },
+      });
+    },
+    TEST_TIMEOUT_MS,
+  );
 });
+
+async function readTask(principal: string, id: unknown): Promise<Record<string, unknown>> {
+  const envelope = await rpc(principal, "GetTask", { id });
+  if (envelope.error !== undefined) throw new Error(JSON.stringify(envelope.error));
+  return requiredRecord(envelope.result, "task");
+}
+
+async function waitForState(
+  principal: string,
+  id: unknown,
+  state: string,
+): Promise<Record<string, unknown>> {
+  return await waitForTask(principal, id, (task) => taskStateOf(task) === state);
+}
+
+async function waitForTerminal(principal: string, id: unknown): Promise<Record<string, unknown>> {
+  const terminal = ["TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED"];
+  return await waitForTask(principal, id, (task) => terminal.includes(String(taskStateOf(task))));
+}
+
+async function waitForTask(
+  principal: string,
+  id: unknown,
+  done: (task: Record<string, unknown>) => boolean,
+): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + OPERATION_TIMEOUT_MS;
+  for (;;) {
+    const task = await readTask(principal, id);
+    if (done(task)) return task;
+    if (Date.now() > deadline)
+      throw new Error(`Task never reached the state: ${JSON.stringify(task)}`);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+function taskStateOf(task: Record<string, unknown>): unknown {
+  return (task.status as { state?: unknown } | undefined)?.state;
+}
 
 function userMessage(messageId: string, text: string) {
   return { messageId, parts: [{ text }], role: "ROLE_USER" };
