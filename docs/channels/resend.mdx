@@ -1,0 +1,94 @@
+---
+title: "Resend"
+description: "Hold email conversations with your agent through Resend."
+type: integration
+---
+
+The Resend channel gives your agent an email address. It lives in `agent/channels/resend.ts`. Each email thread is one eve session, and the agent's replies go back in the same thread. See [Channels](./overview) for what every channel shares.
+
+You need a Resend domain that can both send and receive email, so replies to the agent's emails reach it again.
+
+## Add the channel with Vercel Connect
+
+Create a Resend connector in Vercel Connect, turn on triggers, and add a trigger destination for your project at `/eve/v1/resend`. Connect registers the Resend webhook, verifies each event, and forwards it to the channel with Vercel OIDC.
+
+```ts title="agent/channels/resend.ts"
+import { connectResendCredentials } from "@vercel/connect/eve";
+import { resendChannel } from "eve/channels/resend";
+
+export default resendChannel({
+  allowFrom: "@acme.com",
+  credentials: connectResendCredentials("resend/my-agent"),
+  fromAddress: "agent@acme.com",
+  fromName: "Acme Agent",
+});
+```
+
+With no `webhookSecret` or `webhookVerifier`, the channel accepts only Vercel OIDC from the same project and environment.
+
+## Add the channel with a Resend webhook
+
+On a host without Vercel Connect, deploy the agent, then add a webhook in the Resend dashboard for your public `https://…/eve/v1/resend` URL with the `email.received` event. Copy its signing secret:
+
+```ts title="agent/channels/resend.ts"
+import { resendChannel } from "eve/channels/resend";
+
+export default resendChannel({
+  allowFrom: ["alice@example.com", "@acme.com"],
+  credentials: {
+    apiKey: process.env.RESEND_API_KEY!,
+    webhookSecret: process.env.RESEND_WEBHOOK_SECRET!,
+  },
+  fromAddress: "agent@acme.com",
+});
+```
+
+`apiKey` defaults to `RESEND_API_KEY`. Credentials can also be functions that resolve the value on each use.
+
+## Who can reach the agent
+
+`allowFrom` is required. List sender addresses, whole domains written as `@domain`, or `"*"` for everyone. The channel checks it before fetching the email and again on the fetched email.
+
+The default `onEmail` runs the session as the sender, with principal `resend:<address>`. It drops an email when the receiving mail server reported a DMARC failure, which means the `From` address was likely forged. Replace it to apply your own policy:
+
+```ts
+import { defaultResendAuth, resendChannel } from "eve/channels/resend";
+
+export default resendChannel({
+  allowFrom: "*",
+  fromAddress: "agent@acme.com",
+  onEmail(_ctx, email) {
+    if (email.authentication?.dkim !== "pass") return null;
+    return {
+      auth: defaultResendAuth(email),
+      context: [`The sender's subject line is "${email.subject}".`],
+    };
+  },
+});
+```
+
+## Threads and replies
+
+eve keys a session on the sender and the `Message-ID` that started the thread, the first entry in `References`. A reply to any email in the thread continues the same session. A new email starts a new session.
+
+The agent receives the email's text part, or its HTML part as Markdown, with the quoted earlier message removed. A `<resend_context>` block gives it the sender, recipients, subject, and attachment names. Attachments are not downloaded.
+
+Each reply is a plain-text email to the sender with a `Re:` subject and `In-Reply-To` and `References` headers, so mail clients thread it. Approvals and questions arrive as numbered options, and the person answers by replying with a number.
+
+## Options
+
+| Option        | Description                                                               |
+| ------------- | ------------------------------------------------------------------------- |
+| `fromAddress` | Address the agent sends from. Required.                                   |
+| `fromName`    | Display name for the `From` header.                                       |
+| `allowFrom`   | Senders allowed to reach the agent. Required.                             |
+| `credentials` | `apiKey`, plus `webhookSecret` or `webhookVerifier` for inbound webhooks. |
+| `route`       | Webhook path. Defaults to `/eve/v1/resend`.                               |
+| `turnPolicy`  | What happens to an email that arrives during a turn.                      |
+| `onEmail`     | Inbound policy. Return `null` to drop the email.                          |
+| `events`      | Per-event overrides. `ctx.channel.resend.reply(text)` replies in thread.  |
+
+## What to read next
+
+- [Channels overview](./overview): the channel contract and every built-in channel
+- [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic

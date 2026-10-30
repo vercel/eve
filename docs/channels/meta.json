@@ -12,6 +12,7 @@
     "teams",
     "telegram",
     "twilio",
+    "resend",
     "github",
     "linear",
     "chat-sdk",
