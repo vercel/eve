@@ -13,7 +13,6 @@ function makeSession(): HarnessSession {
   return {
     agent: {
       modelReference: { id: "test-model" },
-      system: "",
       tools: [],
     },
     compaction: { recentWindowSize: 10, threshold: 100_000 },

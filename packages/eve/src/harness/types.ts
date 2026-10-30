@@ -59,7 +59,6 @@ interface SessionAgentBase {
    */
   readonly compactionModelReference?: RuntimeModelReference;
   readonly reasoning?: AgentReasoningDefinition;
-  readonly system: string;
   readonly tools: readonly SessionToolDefinition[];
 }
 

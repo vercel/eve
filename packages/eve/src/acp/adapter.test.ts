@@ -152,6 +152,51 @@ describe("EveAcpAdapter", () => {
     });
   });
 
+  it("sends a harness's reply, not the model's draft it replaced", async () => {
+    const { adapter } = adapterWith([
+      [
+        ...opening(),
+        {
+          data: { delta: "Draft without sources.", draft: true, kind: "text", partId: "p_d" },
+          scope,
+          type: "content.delta",
+        },
+        { data: { delta: " More.", partId: "p_d" }, scope, type: "content.delta" },
+        {
+          data: {
+            kind: "text",
+            partId: "p_d",
+            phase: "draft",
+            runId,
+            value: "Draft without sources. More.",
+          },
+          scope,
+          type: "content.completed",
+        },
+        {
+          data: {
+            kind: "text",
+            partId: `${turnId}.reply`,
+            phase: "reply",
+            turnId,
+            value: "Cited [1].",
+          },
+          scope: { turnId },
+          type: "content.completed",
+        },
+        ...closing(),
+      ],
+    ]);
+    const { sessionId } = await adapter.newSession({ cwd: process.cwd(), mcpServers: [] });
+    const { client, notifications } = acpClient();
+
+    await adapter.prompt(textPrompt(sessionId), client, new AbortController().signal);
+
+    expect(updates(notifications)).toMatchObject([
+      { content: { text: "Cited [1]." }, sessionUpdate: "agent_message_chunk" },
+    ]);
+  });
+
   it("asks the ACP client to approve a call, and answers eve with its choice", async () => {
     const approvalTurn: SessionEvent[] = [
       ...opening(),

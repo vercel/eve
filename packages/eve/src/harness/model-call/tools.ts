@@ -30,7 +30,7 @@ export async function prepareModelTools(
     profile,
     tools: catalog.advertised,
   });
-  if (step.session.outputSchema !== undefined) {
+  if (step.session.outputSchema !== undefined && catalog.allows(REPLY_TOOL_NAME)) {
     modelTools[REPLY_TOOL_NAME] = buildFinalOutputTool(step.session.outputSchema);
   }
 

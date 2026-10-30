@@ -27,7 +27,7 @@ vi.mock("./sandbox/ensure.js", () => ({
 
 function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSession {
   return {
-    agent: { modelReference: { id: "test" }, system: "", tools: [] },
+    agent: { modelReference: { id: "test" }, tools: [] },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "test-token",
     history: [],

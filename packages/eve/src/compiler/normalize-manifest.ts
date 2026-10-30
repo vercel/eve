@@ -28,6 +28,7 @@ import {
   type CompiledSkillDefinition,
   type CompiledScheduleCollectionDefinition,
   type CompiledScheduleDefinition,
+  type CompiledHarnessDefinition,
   type CompiledSandboxDefinition,
   type CompiledSubagentNode,
   type CompiledToolDefinition,
@@ -58,6 +59,7 @@ import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
 import { compileMemoryDefinition } from "#compiler/normalize-memory.js";
 import { createMemoryWrapperCandidates } from "#compiler/memory-wrapper-candidates.js";
 import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
+import { compileHarnessDefinition } from "#compiler/normalize-harness.js";
 import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
 import { compileScheduleCollectionDefinition } from "#compiler/normalize-schedule-collection.js";
 import { isScheduleCollectionDefinition } from "#shared/schedule-collection-definition.js";
@@ -483,6 +485,7 @@ class AgentGraphCompiler {
     const scheduleCollections: CompiledScheduleCollectionDefinition[] = [];
     const channels: CompiledChannelDefinition[] = [];
     let sandbox: CompiledSandboxDefinition | undefined;
+    let harness: CompiledHarnessDefinition | undefined;
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
     const loadNamespace = state.evaluation.loadNamespace;
 
@@ -531,6 +534,13 @@ class AgentGraphCompiler {
           state.evaluation.requireRuntimeEntry(candidate.sourceId);
           break;
         }
+        case "harness":
+          harness = await compileHarnessDefinition(entry.source, {
+            binding: binding!,
+            loadNamespace,
+          });
+          state.evaluation.requireRuntimeEntry(candidate.sourceId);
+          break;
         case "hook":
           hooks.push(
             await compileHookEntry(entry.source, {
@@ -673,6 +683,7 @@ class AgentGraphCompiler {
       dynamicSkills,
       dynamicTools,
       extensionMounts,
+      ...(harness !== undefined && { harness }),
       hooks,
       memories,
       instructions,

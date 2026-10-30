@@ -13,6 +13,9 @@ import {
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession } from "#harness/types.js";
 
+/** Carries the test's marker through the durable session. */
+const MARKER_KEY = "test.marker";
+
 /** Synthetic minimal session for storage-layer round-trips. */
 function buildSyntheticSession(input: {
   sessionId: string;
@@ -32,9 +35,9 @@ function buildSyntheticSession(input: {
     agent: {
       compactionModelReference: { id: "test", contextWindowTokens: 1_000_000 },
       modelReference: { id: "test", contextWindowTokens: 1_000_000 },
-      system: input.marker,
       tools: [],
     },
+    state: { [MARKER_KEY]: input.marker },
     compaction: {
       recentWindowSize: 0,
       thresholdPercent: 0.9,
@@ -107,7 +110,7 @@ async function durableSessionReadStep(input: DurableSessionValues): Promise<{
 
   return {
     historyDepth: input.history.length,
-    marker: durable.agent.system,
+    marker: String(durable.state?.[MARKER_KEY]),
     sessionId: durable.sessionId,
   };
 }

@@ -353,6 +353,7 @@ function collectReferencedModuleSources(
   for (const value of node.dynamicSkills) add(value);
   for (const value of node.dynamicTools) add(value);
   for (const value of node.hooks) add(value);
+  if (node.harness !== undefined) add(node.harness);
   for (const value of node.memories) add(value);
   for (const value of node.instructions) if (value.sourceKind === "module") add(value);
   for (const value of node.skills) if (value.sourceKind === "module") add(value);

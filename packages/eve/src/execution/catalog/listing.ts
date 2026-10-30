@@ -33,6 +33,8 @@ interface CatalogListing {
   readonly connections: Capped<ListedConnection>;
   readonly kinds: readonly Kind[];
   readonly namespaces: Capped<string>;
+  /** A harness left `eve__search` out, so the listing doesn't point to it. */
+  readonly unsearchable?: true;
 }
 
 /**
@@ -58,12 +60,17 @@ export function catalogAnnouncements(
 }
 
 function listCatalog(catalog: StepCatalog): CatalogListing {
-  const deferred = [...catalog.deferred.values()];
+  // A harness may offer only some of eve's catalog tools: the listing names what those reach.
+  const callable = catalog.allows(CALL_TOOL_NAME);
+  const loadable = catalog.allows(SKILL_TOOL_NAME);
+  const deferred = callable ? [...catalog.deferred.values()] : [];
   const kinds: Kind[] = [];
   if (deferred.some((definition) => !isAgentTool(definition))) kinds.push("tools");
   if (deferred.some(isAgentTool)) kinds.push("agents");
   // Skills that aren't deferred are announced with their descriptions elsewhere.
-  if ([...catalog.skills.values()].some(({ deferred }) => deferred)) kinds.push("skills");
+  if (loadable && [...catalog.skills.values()].some(({ deferred }) => deferred)) {
+    kinds.push("skills");
+  }
   // The largest namespaces make the cut, rendered by name, so an entry joining or leaving one
   // only changes the text when it moves a namespace across the cap.
   const namespaces = capped(
@@ -72,13 +79,14 @@ function listCatalog(catalog: StepCatalog): CatalogListing {
       .map(([namespace]) => namespace),
     MAX_LISTED_NAMESPACES,
   );
-  const connections = catalog.connections
+  const connections = (callable ? catalog.connections : [])
     .map(({ connectionName, description }) => ({ description, name: connectionName }))
     .sort((a, b) => compareCodeUnits(a.name, b.name));
   return {
     connections: capped(connections, MAX_LISTED_CONNECTIONS),
     kinds,
     namespaces: { ...namespaces, items: [...namespaces.items].sort(compareCodeUnits) },
+    ...(!catalog.allows(SEARCH_TOOL_NAME) && { unsearchable: true }),
   };
 }
 
@@ -115,8 +123,12 @@ function namespaceOf(name: string): string {
 
 function deferredNames(catalog: StepCatalog): readonly string[] {
   return [
-    ...[...catalog.deferred.values()].map(({ name }) => name),
-    ...[...catalog.skills.values()].filter(({ deferred }) => deferred).map(({ name }) => name),
+    ...(catalog.allows(CALL_TOOL_NAME) ? [...catalog.deferred.values()] : []).map(
+      ({ name }) => name,
+    ),
+    ...(catalog.allows(SKILL_TOOL_NAME) ? [...catalog.skills.values()] : [])
+      .filter(({ deferred }) => deferred)
+      .map(({ name }) => name),
   ];
 }
 
@@ -144,7 +156,7 @@ function renderCatalogAnnouncement(
   ].join("\n");
 }
 
-function renderListing({ connections, kinds, namespaces }: CatalogListing): string {
+function renderListing({ connections, kinds, namespaces, unsearchable }: CatalogListing): string {
   const subject =
     kinds.length === 0 ? "Your connections have more tools" : `You have more ${joinWords(kinds)}`;
   const call = !kinds.includes("skills")
@@ -152,9 +164,11 @@ function renderListing({ connections, kinds, namespaces }: CatalogListing): stri
     : kinds.length === 1 && connections.items.length === 0
       ? `Load them with ${SKILL_TOOL_NAME}({ name }).`
       : `Call tools with ${CALL_TOOL_NAME}({ name, input }) and load skills with ${SKILL_TOOL_NAME}({ name }).`;
-  const lines = [
-    `${subject} than are loaded here. Before saying you have no tool for a task, look for one with ${SEARCH_TOOL_NAME}, which searches your own catalog, not the web. ${call}`,
-  ];
+  const search =
+    unsearchable === true
+      ? ""
+      : ` Before saying you have no tool for a task, look for one with ${SEARCH_TOOL_NAME}, which searches your own catalog, not the web.`;
+  const lines = [`${subject} than are loaded here.${search} ${call}`];
   if (namespaces.items.length > 0) {
     const listed = [...namespaces.items, ...(namespaces.more ? ["and more"] : [])];
     lines.push(

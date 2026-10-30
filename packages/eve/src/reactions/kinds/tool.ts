@@ -33,14 +33,7 @@ const log = createLogger("dynamic-tools");
  */
 export function toolReaction(resolver: ResolvedDynamicToolResolver): ValueReaction {
   return {
-    contribute: (result, { ctx }) => {
-      const tools = namedTools(resolver, result).map(({ entry, name }) => {
-        assertToolNameAvailable(ctx, resolver, name);
-        return liveTool(name, entry);
-      });
-      if (tools.length === 0) return { value: null };
-      return { live: tools, value: tools.map(declaration) };
-    },
+    contribute: (result, { ctx }) => contributeTools(resolver, result, ctx),
     id: `tool:${resolver.extensionNamespace ?? ""}:${resolver.slug}`,
     kind: "tool",
     evaluate: authoredEvaluate(resolver.evaluate, { framework: resolver.framework }),
@@ -49,12 +42,19 @@ export function toolReaction(resolver: ResolvedDynamicToolResolver): ValueReacti
 }
 
 /**
- * Every dynamic tool the session's slots hold, in run order. The first reaction to name a tool
- * keeps it; a later one that names it again is logged and left out.
+ * Every dynamic tool the session's slots hold, the harness's first, then in run order. The first
+ * to name a tool keeps it; a later one that names it again is logged and left out.
  */
 export function dynamicTools(ctx: Pick<ContextReader, "get"> | undefined): HarnessToolDefinition[] {
   const tools = new Map<string, HarnessToolDefinition>();
-  for (const { id, live, slot } of slotsOf(ctx, "tool")) {
+  const replaced = new Set<string>();
+  // The harness's own tools come first: one it names after a declared tool replaces that tool.
+  const slots = slotsOf(ctx, "tool");
+  const ordered = [
+    ...slots.filter(({ id }) => id === HARNESS_TOOLS),
+    ...slots.filter(({ id }) => id !== HARNESS_TOOLS),
+  ];
+  for (const { id, live, slot } of ordered) {
     const versionOf = entryVersions(ctx!, id);
     const declarations = Array.isArray(slot.value) ? slot.value : [];
     for (const [index, built] of (
@@ -62,10 +62,14 @@ export function dynamicTools(ctx: Pick<ContextReader, "get"> | undefined): Harne
     ).entries()) {
       const tool = { ...built, version: versionOf(declarations[index] ?? null) };
       if (tools.has(tool.name)) {
-        log.error(`Dynamic tool "${tool.name}" from "${id}" collides with another dynamic tool.`);
+        // A harness replacing a declared tool by name is what it means; anything else collides.
+        if (!replaced.has(tool.name)) {
+          log.error(`Dynamic tool "${tool.name}" from "${id}" collides with another dynamic tool.`);
+        }
         continue;
       }
       tools.set(tool.name, tool);
+      if (id === HARNESS_TOOLS) replaced.add(tool.name);
     }
   }
   return [...tools.values()];
@@ -78,8 +82,67 @@ export function dynamicToolNames(ctx: Pick<ContextReader, "get"> | undefined): r
   );
 }
 
+/**
+ * The harness's tools: its own, `{ name, declared: true, description? }` for each declared tool it
+ * offers, and `{ name, builtin: true }` for each of eve's `eve__` tools it allows.
+ */
+export const HARNESS_TOOLS = "tool:@harness";
+
+/** What the harness offers the model, where it says: every tool, by name. */
+export interface HarnessOffer {
+  /** Its own tools and the declared tools it offers. */
+  readonly names: ReadonlySet<string>;
+  /** Descriptions it gives declared tools in place of theirs. */
+  readonly descriptions: ReadonlyMap<string, string>;
+  /** The `eve__` tools it allows. */
+  readonly builtins: ReadonlySet<string>;
+}
+
+export function harnessOffer(
+  ctx: Pick<ContextReader, "get"> | undefined,
+): HarnessOffer | undefined {
+  const slot = slotsOf(ctx, "tool").find(({ id }) => id === HARNESS_TOOLS)?.slot;
+  if (slot === undefined || !Array.isArray(slot.value)) return undefined;
+  const names = new Set<string>();
+  const descriptions = new Map<string, string>();
+  const builtins = new Set<string>();
+  for (const entry of slot.value as readonly {
+    name: string;
+    builtin?: boolean;
+    declared?: boolean;
+    description?: string;
+  }[]) {
+    if (entry.builtin === true) {
+      builtins.add(entry.name);
+      continue;
+    }
+    names.add(entry.name);
+    if (entry.declared === true && entry.description !== undefined) {
+      descriptions.set(entry.name, entry.description);
+    }
+  }
+  return { builtins, descriptions, names };
+}
+
+/** Where dynamic tools come from: a file, by its slug, in an extension's namespace or none. */
+type ToolSource = Pick<ResolvedDynamicToolResolver, "extensionNamespace" | "logicalPath" | "slug">;
+
+/** The tools `result` defines, checked and named as `source`'s, with their declarations. */
+export function contributeTools(
+  source: ToolSource,
+  result: unknown,
+  ctx: ContextContainer,
+): Awaited<ReturnType<ValueReaction["contribute"]>> {
+  const tools = namedTools(source, result).map(({ entry, name }) => {
+    assertToolNameAvailable(ctx, source, name);
+    return liveTool(name, entry);
+  });
+  if (tools.length === 0) return { value: null };
+  return { live: tools, value: tools.map(declaration) };
+}
+
 function namedTools(
-  resolver: ResolvedDynamicToolResolver,
+  resolver: ToolSource,
   value: unknown,
 ): readonly { readonly name: string; readonly entry: DynamicToolEntry }[] {
   if (value === null || value === undefined) return [];
@@ -126,11 +189,7 @@ function namedTools(
  * The agent's workflow tools and agents run after the model step, so a dynamic tool, which runs in
  * it, can't take their names. Nor can a connection's.
  */
-function assertToolNameAvailable(
-  ctx: ContextContainer,
-  resolver: ResolvedDynamicToolResolver,
-  name: string,
-): void {
+function assertToolNameAvailable(ctx: ContextContainer, resolver: ToolSource, name: string): void {
   assertNotConnectionOwned({
     connectionNames: sessionConnectionNames(ctx),
     name,
