@@ -276,7 +276,7 @@ describe("readWorkflowDeliverySecrets", () => {
       expect(readWorkflowDeliverySecrets("@workflow/world-postgres")).toBeUndefined();
       expect(warn).toHaveBeenCalledExactlyOnceWith(
         expect.stringMatching(
-          /EVE_WORKFLOW_DELIVERY_SECRET is not set, so the "@workflow\/world-postgres" Workflow world accepts unauthenticated/,
+          /EVE_WORKFLOW_DELIVERY_SECRET is not set or empty, so the "@workflow\/world-postgres" Workflow world accepts unauthenticated/,
         ),
       );
     } finally {
