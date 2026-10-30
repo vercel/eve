@@ -33,6 +33,8 @@ export function discordDaemonFiles(
       "@vercel/connect": DEFAULT_CONNECT_PACKAGE_VERSION,
       eve: formatEveDependencySpecifier(resolveEvePackageContract().version),
     },
+    // Connect's broad eve peer range excludes prereleases; use the relay's selected release.
+    overrides: { "@vercel/connect": { eve: "$eve" } },
   };
   return {
     ".dockerignore": "node_modules\n",
