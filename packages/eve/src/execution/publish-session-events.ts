@@ -1,3 +1,4 @@
+import { checksSessionEvents } from "#shared/dev-checks.js";
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 import { readSessionStreamTailIndex, streamSessionLines } from "#execution/session-event-stream.js";
 import type { ControlDelivery } from "#harness/types.js";
@@ -361,18 +362,6 @@ export interface SessionEventPublisher {
    * tables.
    */
   finish(options?: { readonly announce?: boolean }): Promise<void>;
-}
-
-/**
- * Whether publication checks each line against the event contract before writing it: on under
- * `eve dev` and with `EVE_CHECK_SESSION_EVENTS=1`, off with `EVE_CHECK_SESSION_EVENTS=0`. A
- * violation fails the publication instead of writing a line readers can't fold.
- */
-export function checksSessionEvents(): boolean {
-  const configured = process.env.EVE_CHECK_SESSION_EVENTS;
-  if (configured === "1") return true;
-  if (configured === "0") return false;
-  return process.env.EVE_DEV === "1";
 }
 
 /** A line an interrupted attempt of the current step wrote after the step's checkpoint. */
@@ -929,7 +918,6 @@ function changesNothing(view: MachineView, transition: Transition): boolean {
     transition.events.length === 0 &&
     transition.signIns === undefined &&
     transition.relays === undefined &&
-    transition.commit === undefined &&
-    transition.clearsHistory === undefined
+    transition.history === undefined
   );
 }

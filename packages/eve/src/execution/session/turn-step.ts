@@ -1,3 +1,4 @@
+import { checksSessionEvents } from "#shared/dev-checks.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
 import { channelOf } from "#reactions/frame.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
@@ -64,7 +65,6 @@ import type {
 import { pausedOrParked, resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import {
-  checksSessionEvents,
   foldOrphanedLines,
   openSessionEventPublisher,
   readOrphanedLines,

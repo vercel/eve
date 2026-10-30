@@ -1,14 +1,11 @@
+import { changeHistory } from "#harness/session-machine/history.js";
 import { stageToolResultMedia } from "#harness/attachment-staging.js";
 import type { ModelMessage, ToolSet, TypedToolCall, TypedToolError } from "ai";
 
 import type { StepResult } from "#harness/types.js";
 import { FINAL_OUTPUT_BESIDE_PENDING_CALLS } from "#harness/final-output.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
-import {
-  type HarnessModelMessage,
-  resolveAssistantStepText,
-  validateHarnessModelMessages,
-} from "#harness/messages.js";
+import { resolveAssistantStepText } from "#harness/messages.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import {
   appendMissingToolResultMessages,
@@ -132,7 +129,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       tools: input.catalog,
       turnId,
     });
-    step.session = { ...dispatched.session, history: validateHarnessModelMessages(promptMessages) };
+    step.session = changeHistory(dispatched.session, { extend: promptMessages });
     const parked = {
       event: { sequence, stepIndex, turnId },
       // A suspended response commits once every call it made has a result, so a call that will
@@ -159,26 +156,24 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   // so the prompt prefix stays stable and the provider's prompt cache keeps
   // hitting across steps. Compaction is the sole mechanism that ever rewrites
   // history, and it runs before the model call (see `maybeCompact`).
-  step.session = {
-    ...step.session,
-    history: validateHarnessModelMessages([...promptMessages, ...responseMessages]),
-  };
-
   // An `eve__reply` call is terminal even when the model emits it alongside
   // executing tools: continuing the loop would leave the no-execute call as a
   // dangling tool_use the next provider call rejects, and drop the result.
-  const calledFinalOutput =
-    step.session.outputSchema !== undefined && extractFinalOutput(result) !== undefined;
+  const finalOutput =
+    step.session.outputSchema === undefined ? undefined : extractFinalOutput(result);
+  const calledFinalOutput = finalOutput !== undefined;
   const workingTasks = workingTaskIds(step.session);
   const finalOutputRejected = calledFinalOutput && workingTasks.length > 0;
-  let responseTail: readonly ModelMessage[] = responseMessages;
-  if (finalOutputRejected) {
-    responseTail = rejectFinalOutput(responseMessages, result, workingTasks);
-    step.session = {
-      ...step.session,
-      history: validateHarnessModelMessages([...promptMessages, ...responseTail]),
-    };
-  }
+  const responseTail: readonly ModelMessage[] = finalOutputRejected
+    ? rejectFinalOutput(responseMessages, result, workingTasks)
+    : responseMessages;
+  // A delivered structured value replaces the un-executed `eve__reply` call, which would be a
+  // dangling tool_use on the next turn.
+  const historyTail: readonly ModelMessage[] =
+    calledFinalOutput && !finalOutputRejected
+      ? [{ content: JSON.stringify(finalOutput), role: "assistant" }]
+      : responseTail;
+  step.session = changeHistory(step.session, { extend: [...promptMessages, ...historyTail] });
 
   const endsTurn = await stepEndsTurn(result, responseMessages, input.endsTurnTools);
   const continueLoop =
@@ -194,7 +189,6 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   }
 
   return settleTurn(step, {
-    history: promptMessages,
     result,
     // Text written before an `endsTurn` call was narration, not the reply.
     stepOutput: endsTurn ? null : stepOutput,
@@ -316,19 +310,16 @@ function extractFinalOutput(result: HarnessStepResult): JsonValue | undefined {
 /**
  * Closes a terminal turn. An unmet output schema fails the turn recoverably;
  * otherwise the structured value (or prose) ends the turn and the session
- * waits for the next message. The structured value replaces the un-executed
- * `eve__reply` call, which would be a dangling tool_use on the next turn,
- * and the schema, scoped to the turn, clears.
+ * waits for the next message, and the schema, scoped to the turn, clears.
  */
 async function settleTurn(
   step: Step,
   input: {
-    readonly history: readonly HarnessModelMessage[];
     readonly result: HarnessStepResult;
     readonly stepOutput: string | null;
   },
 ): Promise<StepResult> {
-  const { history, result, stepOutput } = input;
+  const { result, stepOutput } = input;
   // A hook that failed after the turn's last model call fails it rather than let it complete.
   const hookFailure = await failTurnForReaction(step);
   if (hookFailure !== undefined) return hookFailure;
@@ -356,11 +347,7 @@ async function settleTurn(
     };
   }
 
-  step.session = {
-    ...step.session,
-    history: [...history, { content: JSON.stringify(structured), role: "assistant" }],
-    outputSchema: undefined,
-  };
+  step.session = { ...step.session, outputSchema: undefined };
   await step.apply(
     turnSettled(step.view().projection, { outcome: "completed" }),
     step.session.history,

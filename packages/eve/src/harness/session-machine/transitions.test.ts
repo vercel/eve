@@ -552,7 +552,8 @@ describe("settle", () => {
       },
     };
 
-    const { commit, events } = settle(view, { results });
+    const { events, history } = settle(view, { results });
+    const commit = history !== undefined && "append" in history ? history.append : [];
 
     // Both results reach the model; only the recorded call settles and owns what it spent.
     expect(commit.at(-1)?.content).toHaveLength(2);
@@ -636,7 +637,7 @@ describe("calls a sign-in stopped", () => {
       "turn.settled:turn_0": "cancelled",
     });
     expect(transition.turn.suspended).toEqual([]);
-    expect(JSON.stringify(transition.commit)).toContain(CANCELLED_CALL_RESULT);
+    expect(JSON.stringify(transition.history)).toContain(CANCELLED_CALL_RESULT);
   });
 });
 
