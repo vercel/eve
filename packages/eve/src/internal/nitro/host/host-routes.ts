@@ -237,7 +237,8 @@ export async function renderHostRoutes(
           }),
           { method: route.method, route: route.path },
         );
-        // Nitro routes HEAD only to HEAD handlers; this one rejects it.
+        // The beta router sends HEAD only to HEAD handlers, so the guard needs
+        // its own registration. Redundant once Nitro serves HEAD from GET routes.
         if (route.allow !== undefined) {
           handlers.push({ handler: id, method: "HEAD", route: route.path });
         }
