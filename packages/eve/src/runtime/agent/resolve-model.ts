@@ -197,17 +197,17 @@ export async function resolveRuntimeModelSelection(input: {
   if (typeof selectedModel === "string") {
     const id = formatLanguageModelGatewayId(selectedModel);
     if (promptCache !== undefined) throw gatewayPromptCacheError(id);
-    const contextWindowTokens =
-      selection.modelContextWindowTokens ??
-      (
-        await lookupModelMetadata(input.modelMetadata, id, (metadata) =>
-          lookupCatalogModelBySlug(metadata, id),
-        )
-      ).contextWindowTokens;
+    const entry =
+      selection.modelContextWindowTokens === undefined
+        ? await lookupModelMetadata(input.modelMetadata, id, (metadata) =>
+            lookupCatalogModelBySlug(metadata, id),
+          )
+        : undefined;
     return {
       reference: {
         id,
-        contextWindowTokens,
+        contextWindowTokens: selection.modelContextWindowTokens ?? entry!.contextWindowTokens,
+        maxOutputTokens: entry?.maxOutputTokens,
         providerOptions,
         reasoning: selection.reasoning,
       },
@@ -229,6 +229,7 @@ export async function resolveRuntimeModelSelection(input: {
   // A Gateway instance carries its Gateway model id, as a string selection does.
   let id = routesThroughGateway ? selectedModel.modelId : formattedId;
   let contextWindowTokens = selection.modelContextWindowTokens;
+  let maxOutputTokens: number | undefined;
   if (contextWindowTokens === undefined) {
     const entry = await lookupModelMetadata(input.modelMetadata, id, (metadata) =>
       routesThroughGateway
@@ -242,6 +243,7 @@ export async function resolveRuntimeModelSelection(input: {
     // A direct provider model takes its Gateway slug, as the compiler names a static one.
     if (!routesThroughGateway) id = entry.slug;
     contextWindowTokens = entry.contextWindowTokens;
+    maxOutputTokens = entry.maxOutputTokens;
   }
 
   return {
@@ -249,6 +251,7 @@ export async function resolveRuntimeModelSelection(input: {
     reference: {
       id,
       contextWindowTokens,
+      maxOutputTokens,
       promptCache,
       providerOptions,
       reasoning: selection.reasoning,

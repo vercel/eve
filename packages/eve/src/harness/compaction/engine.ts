@@ -525,7 +525,8 @@ const MIN_CLIP_CHARS = 40;
 const OMITTED_FILE_NOTE =
   "[eve: a file in this message was omitted during context compaction: it is too large for the context window.]";
 
-function checkpointHead(summary: string): ModelMessage[] {
+/** The checkpoint head a compaction writes, and the next one recognizes. */
+export function checkpointHead(summary: string): ModelMessage[] {
   return [
     createFrameworkUserMessage("context.compaction", COMPACTION_CHECKPOINT_MARKER),
     { content: summary, role: "assistant" },
@@ -628,7 +629,7 @@ function findLastRealUserIndex(conversation: readonly ModelMessage[]): number {
   return -1;
 }
 
-function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
+export function extractPreviousCheckpoint(messages: readonly ModelMessage[]): {
   readonly conversation: ModelMessage[];
   readonly previousCheckpoint: string | undefined;
 } {

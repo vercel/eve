@@ -1,3 +1,4 @@
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
 import type {
   AgentDefinition,
@@ -326,8 +327,33 @@ function normalizeAgentCompactionDefinition(
       `${message} Rename "compaction.thresholdPercent" to "compaction.threshold" (a fraction from 0 to 1).`,
     );
   }
-  expectOnlyKnownKeys(record, ["model", "modelContextWindowTokens", "threshold"], message);
-  const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["compaction"]>> = {};
+  expectOnlyKnownKeys(
+    record,
+    ["compact", "model", "modelContextWindowTokens", "threshold"],
+    message,
+  );
+  const normalizedDefinition: {
+    compact?: CompactionStrategy;
+    model?: PublicAgentStaticModelDefinition;
+    modelContextWindowTokens?: number;
+    threshold?: number;
+  } = {};
+
+  if (record.compact !== undefined) {
+    if (!isCompactionStrategy(record.compact)) {
+      throw new Error(
+        `${message} "compaction.compact" must be a compaction strategy: a function, such as fixedTail() from "eve/compaction", or { compact, when }.`,
+      );
+    }
+    for (const key of ["model", "modelContextWindowTokens"] as const) {
+      if (record[key] !== undefined) {
+        throw new Error(
+          `${message} "compaction.${key}" configures eve's default strategy. With "compaction.compact", choose the summary model in the strategy, for example fixedTail({ model }).`,
+        );
+      }
+    }
+    normalizedDefinition.compact = record.compact as CompactionStrategy;
+  }
 
   if (record.model !== undefined) {
     if (isDynamicSentinel(record.model)) {
@@ -360,7 +386,7 @@ function normalizeAgentCompactionDefinition(
     normalizedDefinition.threshold = threshold;
   }
 
-  return normalizedDefinition;
+  return normalizedDefinition as NonNullable<NormalizedAgentDefinition["compaction"]>;
 }
 
 /**
@@ -483,4 +509,19 @@ export function normalizeScheduleDefinition(value: unknown, message: string): Sc
   }
 
   return definition as ScheduleDefinition;
+}
+
+function isCompactionStrategy(value: unknown): value is CompactionStrategy {
+  if (typeof value === "function") return true;
+  if (typeof value !== "object" || value === null) return false;
+  const { compact, when } = value as { readonly compact?: unknown; readonly when?: unknown };
+  if (typeof compact !== "function") return false;
+  if (when === undefined) return true;
+  if (typeof when !== "object" || when === null) return false;
+  const { due, phases } = when as { readonly due?: unknown; readonly phases?: unknown };
+  return (
+    (due === undefined || typeof due === "function") &&
+    (phases === undefined ||
+      (Array.isArray(phases) && phases.every((phase) => phase === "step" || phase === "turn-end")))
+  );
 }

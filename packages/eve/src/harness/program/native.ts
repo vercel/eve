@@ -41,7 +41,8 @@ export async function nativeHistory(
   return ctx.history;
 }
 
-function nativeThreshold(
+/** The call's input tokens eve's own compaction aims under: a share of the window, or the session's. */
+export function nativeThreshold(
   size: ProgramContext["size"],
   options: { readonly threshold: number; readonly thresholdPercent?: number },
 ): number {

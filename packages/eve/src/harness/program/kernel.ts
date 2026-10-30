@@ -153,6 +153,8 @@ export async function programHistory(
     readonly size: HistorySize;
     readonly compact?: true;
     readonly summarize: Summarize;
+    /** The agent's compaction strategy, which keeps the history instead of the program. */
+    readonly history?: (ctx: ProgramContext) => Promise<readonly HarnessModelMessage[] | undefined>;
   },
 ): Promise<readonly HarnessModelMessage[]> {
   const failures = new WeakSet<object>();
@@ -177,6 +179,8 @@ export async function programHistory(
     size: input.size,
     summarize,
   });
+  // The agent's own strategy: its errors are the author's to read.
+  if (input.history !== undefined) return (await input.history(ctx)) ?? input.messages;
   try {
     return (await force(programOf(step)(ctx).history)) ?? (await nativeHistory(ctx, options));
   } catch (error) {

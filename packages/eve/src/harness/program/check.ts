@@ -11,38 +11,42 @@ import { estimateTokens } from "#harness/token-estimate.js";
 
 /**
  * A program's history, checked before it replaces the session's: every user message keeps its
- * kind, no call loses its result, a checkpoint opens the history, a running turn's input stays, and
- * it fits the model's window.
+ * kind, no call loses its result, a checkpoint opens the history, and it fits the model's window.
+ * What the model answers next is the program's: it keeps the turn's input, or carries it in a
+ * summary.
  */
 export function checkHistory(
   before: readonly HarnessModelMessage[],
   after: readonly ModelMessage[],
   input: {
-    /** A turn is running, so its latest input must stay: the model answers it next. */
-    readonly keepInput: boolean;
     /** The history's room in the call. */
     readonly limit: number;
+    /** Who returned the history, as the errors name it. */
+    readonly subject?: string;
   },
 ): HarnessModelMessage[] {
+  const subject = input.subject ?? "The session program's history";
   let messages: HarnessModelMessage[];
   try {
     messages = validateHarnessModelMessages(after);
   } catch {
-    throw new Error("The session program's history has a user message without a kind.");
+    throw new Error(
+      `${subject} has a user message without a kind. Keep the messages eve passed, or build a checkpoint with ctx.checkpoint().`,
+    );
   }
   const was = callsAndResults(before);
   const now = callsAndResults(messages);
   for (const callId of now.calls) {
     if (!now.results.has(callId) && (was.results.has(callId) || !was.calls.has(callId))) {
       throw new Error(
-        `The session program's history keeps tool call ${callId} but not its result. Keep or remove a call together with its result.`,
+        `${subject} keeps tool call ${callId} but not its result. Keep or remove a call together with its result.`,
       );
     }
   }
   for (const callId of now.results) {
     if (!now.calls.has(callId)) {
       throw new Error(
-        `The session program's history keeps the result of tool call ${callId} but not the call. Keep or remove a call together with its result.`,
+        `${subject} keeps the result of tool call ${callId} but not the call. Keep or remove a call together with its result.`,
       );
     }
   }
@@ -50,26 +54,12 @@ export function checkHistory(
     isCheckpointMarker(message) ? [index] : [],
   );
   if (checkpoints.some((index) => index !== 0) || checkpoints.length > 1) {
-    throw new Error(
-      "The session program's history has a checkpoint after other messages. A checkpoint goes first.",
-    );
-  }
-  const turnInput = before.findLast(
-    (message) => isUserModelMessage(message) && message.kind === "user",
-  );
-  if (
-    input.keepInput &&
-    turnInput !== undefined &&
-    !messages.some((message) => JSON.stringify(message) === JSON.stringify(turnInput))
-  ) {
-    throw new Error(
-      "The session program's history drops the turn's input. Keep the latest user message: the model answers it next.",
-    );
+    throw new Error(`${subject} has a checkpoint after other messages. A checkpoint goes first.`);
   }
   const size = estimateTokens(messages);
   if (size > input.limit) {
     throw new CompactionOverLimitError(
-      `The session program's history is ~${Math.round(size)} tokens; the limit is ~${Math.round(input.limit)}.`,
+      `${subject} is ~${Math.round(size)} tokens; the limit is ~${Math.round(input.limit)}.`,
     );
   }
   return messages;

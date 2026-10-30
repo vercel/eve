@@ -337,26 +337,6 @@ describe("a session program's history", () => {
     expect(result.session.history).toEqual(older.slice(-2));
   });
 
-  it("fails the change when a rewrite drops the turn's input", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
-
-    const { events, prompts } = await runTurn(
-      withHistory((ctx) => (ctx.size!.tokens > 600 ? ctx.history.slice(0, 2) : ctx.history)),
-      ["Two court cases back it."],
-      { history: older },
-    );
-
-    expect(prompts).toEqual([]);
-    expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
-      {
-        data: {
-          error: { message: expect.stringContaining("drops the turn's input") },
-          outcome: "failed",
-        },
-      },
-    ]);
-  });
-
   it("fails the turn when it keeps rewriting what it returned", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     let asked = 0;

@@ -1,4 +1,5 @@
 import type { HarnessModelMessage } from "#harness/messages.js";
+import type { PublicAgentStaticModelDefinition } from "#shared/agent-definition.js";
 import type { JsonValue } from "#shared/json.js";
 
 // A session program is a function of the session that says what should happen next. eve
@@ -49,6 +50,10 @@ export type Summarize = (
   options?: {
     /** The call's input tokens to aim under. eve's own threshold when absent. */
     readonly tokens?: number;
+    /** The model that writes the summary. Defaults to the agent's compaction model, or the turn's. */
+    readonly model?: PublicAgentStaticModelDefinition;
+    /** Added to eve's summary prompt, such as what the summary must keep word for word. */
+    readonly instructions?: string;
   },
 ) => Promise<HarnessModelMessage[]>;
 
@@ -58,7 +63,10 @@ export interface ProgramContext {
   readonly history: readonly HarnessModelMessage[];
   /** The next model call's size, where eve asks for the history. */
   readonly size?: HistorySize;
-  /** `session.compact()` asked for a compaction, where eve asks for the history. */
+  /**
+   * eve must compact, where it asks for the history: `session.compact()` asked, or the provider
+   * rejected the call as longer than the model's window.
+   */
   readonly compact?: true;
   /** eve's summarizer. Only where eve asks for the history; elsewhere it throws. */
   readonly summarize: Summarize;

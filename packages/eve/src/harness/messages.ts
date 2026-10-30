@@ -9,23 +9,17 @@ import type {
   TurnCaller,
 } from "#channel/types.js";
 import type { Answer } from "#shared/input.js";
+import type { HistoryMessageKind } from "#shared/history-message.js";
 import type { HarnessStepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { attachInputText, readInputText } from "#internal/input-text.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 /** Reason a framework-authored user-role message was added to model history. */
-export type FrameworkMessageKind =
-  | "context.instruction"
-  | "context.state"
-  | "context.compaction"
-  | "memory.load"
-  | "execution.continuation"
-  | "execution.retry"
-  | "task.result";
+export type FrameworkMessageKind = Exclude<HistoryMessageKind, "user">;
 
 /** Semantic classification for every user-role message in model history. */
-export type UserMessageKind = "user" | FrameworkMessageKind;
+export type UserMessageKind = HistoryMessageKind;
 
 /** A user-role message that is safe to retain in framework model history. */
 export type UserModelMessage = Extract<ModelMessage, { readonly role: "user" }> & {

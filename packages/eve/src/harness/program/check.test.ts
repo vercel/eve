@@ -15,8 +15,8 @@ const history: HarnessModelMessage[] = [
   { content: "Here is the report.", role: "assistant" },
   latest,
 ];
-const automatic = { keepInput: true, limit: 10_000 };
-const manual = { keepInput: false, limit: Number.POSITIVE_INFINITY };
+const automatic = { limit: 10_000 };
+const manual = { limit: Number.POSITIVE_INFINITY };
 
 function checkpoint(summary: string): HarnessModelMessage[] {
   return [
@@ -31,14 +31,9 @@ describe("checkHistory", () => {
     expect(checkHistory(history, compacted, automatic)).toEqual(compacted);
   });
 
-  it("rejects an automatic result that keeps an earlier message but not the latest input", () => {
-    expect(() =>
-      checkHistory(history, [...checkpoint("Bob had a question."), earlier], automatic),
-    ).toThrow("drops the turn's input");
-  });
-
-  it("lets a manual result drop the latest input, since no model call answers it next", () => {
-    expect(checkHistory(history, checkpoint("Alice and Bob talked."), manual)).toHaveLength(2);
+  it("lets an automatic result carry the turn's input in its summary", () => {
+    const compacted = checkpoint("Bob asked which sources back the second claim.");
+    expect(checkHistory(history, compacted, automatic)).toEqual(compacted);
   });
 
   it("rejects a checkpoint after other messages", () => {
@@ -69,8 +64,6 @@ describe("checkHistory", () => {
   });
 
   it("rejects an automatic result over the limit", () => {
-    expect(() => checkHistory(history, [latest], { keepInput: true, limit: 1 })).toThrow(
-      "the limit is ~1",
-    );
+    expect(() => checkHistory(history, [latest], { limit: 1 })).toThrow("the limit is ~1");
   });
 });
