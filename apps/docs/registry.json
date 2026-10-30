@@ -2724,7 +2724,7 @@
       "title": "Telegram",
       "description": "Connect your agent to a Telegram bot for 1:1 and group chats.",
       "dependencies": [
-        "@vercel/connect@>=2.6.0"
+        "@vercel/connect@>=2.7.0"
       ],
       "devDependencies": [
         "vercel@>=58.7.0"
