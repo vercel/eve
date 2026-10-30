@@ -50,7 +50,8 @@
  *             vendored integration catalog. The scaffold stays free of
  *             framework runtime, compiler, terminal UI, and provider SDK
  *             dependencies.
- *   rule 29 — Changeset package keys must match workspace package names.
+ *   rule 29 — Changeset package keys must match workspace package names and
+ *             summaries must start with one complete sentence.
  *             Release metadata is consumed before `pnpm release`, so bad
  *             changeset package names must fail in PR CI rather than in the
  *             post-merge release workflow.
@@ -78,11 +79,6 @@
  *             `queue-namespace.ts`. The generated agent bootstrap installs the
  *             agent-scoped namespace before queue-producing APIs can run.
  *   rule 34 — `phase` stays a runtime-only dependency. No file under the Eve\n *             logo renderer's GPU/runtime boundary (render/, shaders/, or the\n *             offline render harness) may import the `phase` package. This keeps\n *             the mechanical separation between the lifecycle layer and the GPU\n *             renderer enforceable.
- *   rule 36 — Extension capability epochs have immutable hashed API metadata
- *             and explicit support history. The current hash must match the
- *             authoring roots, every historical epoch must be supported or
- *             dropped, every retained epoch needs a compiling fixture, and
- *             every public authoring value must belong to a capability.
  *   rule 37 — Instrumentation ownership stays provider-neutral and outside the
  *             harness. The lifecycle contract must not import from `ai`, harness
  *             code may import only runtime facade types, and execution may use
@@ -95,10 +91,19 @@
  *             executor. The generic inbox and state cursor must not
  *             import subagent modules; session/turn composition roots may
  *             compose built-in executors directly.
- *   rule 44 — Every concrete built-in sandbox provider is defined through
- *             `defineSandboxProvider()` and does not import sandbox runtime
- *             orchestration, registries, key derivation, or session state.
- *             Built-ins and authored providers must share one contract.
+ *   rule 44 — Sandbox providers are built on the public provider contract.
+ *             Files under `src/execution/sandbox/bindings/` and
+ *             `src/sandbox/providers/` reach the contract only through
+ *             `#public/sandbox/*` and never import core sandbox modules
+ *             (session construction, ensure, prewarm, sandbox state, the
+ *             shutdown registry, tool sessions, the runtime sandbox
+ *             registry, or the shared provider and session internals).
+ *             `sandbox/providers/default.ts` may import `#sandbox/state.js`
+ *             for `DefaultSandbox`'s two internal state hooks. Engine
+ *             helpers such as other binding modules,
+ *             stream utilities, and the optional-package loader stay
+ *             allowed. Every concrete built-in under `src/sandbox/providers/`
+ *             is defined through `defineSandboxProvider()`.
  *   rule 45 — Provided tools under `packages/eve/src/tools/provided/**` and
  *             the body of every agent tool import only public eve entry
  *             points (the `#` specifiers of the package's `exports`), the
@@ -107,39 +112,58 @@
  *             tool that needs a private hook means authors cannot build the
  *             same tool. Files that predate the rule are baselined and may
  *             only leave the baseline.
- *   rule 46 — Tasks own their records and their words. Only
- *             `execution/tasks/table*.ts` names the session's task table, so
- *             every record write goes through it, and the model-facing task
- *             markers appear only in `execution/tasks/render.ts`, which holds
- *             all of the tasks' model text.
+ *   rule 46 — Running work owns its record, and tasks their words. Only
+ *             `harness/running-work.ts` names the session's one record of
+ *             running work, and only its two owners read or write it:
+ *             `execution/tasks/table*.ts` for tasks and
+ *             `harness/workflow-tool-runs.ts` for the runs a turn waits on.
+ *             `execution/session/checkpoint-migrations.ts` may also name it:
+ *             its upgrades pin the shapes released builds wrote.
+ *             The model-facing task markers appear only in
+ *             `execution/tasks/render.ts`, which holds all of the tasks'
+ *             model text.
  *   rule 47 — A caller hears from its session only at a turn's real end.
  *             Only `execution/session/program.ts` sends the caller's reply,
  *             after the turn loop returns, and `execution/session/finalization.ts`
  *             when the session ends. A held turn is still open, so nothing
  *             inside the turn loop or the harness may reply.
- *   rule 48 — Remote agent protocol 1 stays in
- *             `execution/legacy-remote-agent/`. Only the ingress files that
- *             route protocol-1 callers into it may import it, so deleting the
- *             directory removes protocol 1 without a search.
+ *   rule 48 — Retired: remote agent protocol 1 and its directory were removed.
  *   rule 49 — Provided tool definitions carry a framework tool flag,
  *             so telemetry ownership survives renamed and namespaced tools.
  *   rule 50 — The human-in-the-loop lifecycle in `harness/hitl/` is
  *             reached only through its `index.ts`, its request vocabulary
  *             (`approval-prompt`, `budget-request`, `relays`, `sign-ins`) and
- *             read surface via index.ts. Only commit.ts and checkpoint-migrations.ts
- *             import requests.ts for saving and legacy upgrades.
+ *             read surface via index.ts or the Workflow-safe view.ts.
+ *             Only commit.ts and checkpoint-migrations.ts import requests.ts
+ *             for saving and legacy upgrades.
  *   rule 51 — Only the session machine (`harness/session-machine/`) and the
  *             human-in-the-loop lifecycle it delegates to
  *             (`harness/hitl/`) build lifecycle events and read the
  *             machine's private state. The guard checks only those imports;
  *             it does not prove every state change emits events (approval
  *             candidates are still written directly, and `matchSignIns`
- *             emits none). The model step's streamed content (its calls and
- *             their inline results) is built where it streams.
+ *             emits none). The model step's streamed content (its calls) is
+ *             built where it streams, and their results where eve runs them
+ *             (`call-executor.ts`).
  *   rule 52 — The tracing library in `packages/tracing/src/` imports only
  *             itself and external packages. eve reaches it only through the
  *             vendored root, delegation, otel, and ai-sdk entrypoints under
  *             `#compiled/@vercel/agent-runs/`, never the workspace package itself.
+ *   rule 53 — The session event contract (`protocol/session-events/`) and
+ *             the shared fold (`protocol/session-projection/`) stand alone:
+ *             they import only each other, plus the vendored Zod in the
+ *             schema files, so a runtime refactor can't change the wire.
+ *             Legacy snapshots stay at ingress so current execution consumes
+ *             only normalized session state.
+ *   rule 54 — Zod stays out of readers. The modules readers load (the
+ *             contract's catalog, envelope, guards, and index; the fold;
+ *             `eve/events`; the client) never import a schema module by
+ *             value: schemas serve tests and development only.
+ *
+ *   rule 55 — Public named exports match checker-generated per-entry lists,
+ *             and no entry exports a name `stripInternal` drops (`@internal`).
+ *   rule 56 — Retired: dangling references to stripped declarations are caught
+ *             by `packages/eve/test/scenarios/packed-public-types.scenario.test.ts`.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -150,7 +174,8 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadYaml } from "js-yaml";
-import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
+import { parseSummary } from "./changeset-format.mjs";
+import { checkPublicExports } from "./public-exports.mjs";
 
 const require = createRequire(import.meta.url);
 const extractorRequire = createRequire(require.resolve("@microsoft/api-extractor/package.json"));
@@ -258,10 +283,10 @@ function isTsLike(relPath) {
  *   rule45: { allowlist: Set<string>; violations: Violation[] };
  *   rule46: Violation[];
  *   rule47: Violation[];
- *   rule48: Violation[];
  *   rule50: Violation[];
  *   rule51: Violation[];
  *   rule52: Violation[];
+ *   rule53: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -291,10 +316,10 @@ async function scanRepo(state) {
     checkRule37(posix, content, state.rule37);
     checkRule43(posix, lines, state.rule43);
     checkRule44(posix, lines, state.rule44);
+    checkLegacySessionImports(posix, lines, state.rule53);
     checkRule45(posix, lines, state.rule45);
     checkRule46(posix, lines, state.rule46);
     checkRule47(posix, lines, state.rule47);
-    checkRule48(posix, lines, state.rule48);
     checkRule50(posix, lines, state.rule50);
     checkRule51(posix, lines, state.rule51);
     if (posix.startsWith("packages/tracing/src/")) {
@@ -343,6 +368,7 @@ async function scanRepo(state) {
           });
       });
     }
+    checkRule53(posix, lines, state.rule53);
   }
 }
 
@@ -385,7 +411,7 @@ const LEGACY_INGRESS_FILES = new Set([
   "packages/eve/src/eve-channel/index.ts",
 ]);
 /** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
-function checkRule44(posix, lines, violations) {
+function checkLegacySessionImports(posix, lines, violations) {
   if (
     posix.includes("/execution/legacy-session/") ||
     posix.includes("/internal/testing/") ||
@@ -399,13 +425,61 @@ function checkRule44(posix, lines, violations) {
       /import\(["'][^"']*legacy-session\//.test(line)
     )
       violations.push({
-        rule: 44,
+        rule: 53,
         file: posix,
         line: index + 1,
         message:
           "Legacy session import belongs at ingress; current execution must consume only normalized session state.",
       });
   });
+}
+
+// ---------- Rule 44: sandbox providers use the public provider contract ----------
+
+const SANDBOX_PROVIDER_DIRS = [
+  "packages/eve/src/execution/sandbox/bindings/",
+  "packages/eve/src/sandbox/providers/",
+];
+
+const SANDBOX_CORE_IMPORT_RE =
+  /(?:from\s+|import\s*\()["']#(?:sandbox\/(?:provider|state)|execution\/sandbox\/(?:active-connections|ensure|prewarm|session|logging-session)|execution\/tool-session\/[^"']*|runtime\/sandbox\/[^"']*|shared\/sandbox-(?:provider|session|write-files))\.js["']/;
+
+const SANDBOX_CORE_IMPORT_EXEMPTIONS = new Map([
+  ["packages/eve/src/sandbox/providers/default.ts", /["']#sandbox\/state\.js["']/],
+]);
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule44(posix, lines, violations) {
+  if (!SANDBOX_PROVIDER_DIRS.some((dir) => posix.startsWith(dir))) return;
+  if (posix.endsWith(".test.ts")) return;
+  const exemption = SANDBOX_CORE_IMPORT_EXEMPTIONS.get(posix);
+  lines.forEach((line, index) => {
+    if (!SANDBOX_CORE_IMPORT_RE.test(line) || exemption?.test(line)) return;
+    violations.push({
+      rule: 44,
+      file: posix,
+      line: index + 1,
+      message:
+        "Sandbox providers reach the provider contract only through #public/sandbox/* and may not import core sandbox modules. Use the public contract, or an engine helper such as another binding module.",
+    });
+  });
+  if (!posix.startsWith("packages/eve/src/sandbox/providers/")) return;
+  const source = lines.join("\n");
+  if (!/\bdefineSandboxProvider\(/.test(source)) {
+    violations.push({
+      rule: 44,
+      file: posix,
+      message: "Built-in sandbox providers must use defineSandboxProvider().",
+    });
+  }
+  if (source.includes("createSandboxEnvironment")) {
+    violations.push({
+      rule: 44,
+      file: posix,
+      message:
+        "Built-in sandbox providers must not bypass defineSandboxProvider() through createSandboxEnvironment().",
+    });
+  }
 }
 
 // ---------- Rule 45: provided tools use only public entry points ----------
@@ -488,7 +562,14 @@ function checkRule45(posix, lines, state) {
 const TASKS_DIR = "packages/eve/src/execution/tasks/";
 const TASK_TABLE_FILE_RE = /^packages\/eve\/src\/execution\/tasks\/table[\w-]*\.ts$/;
 const TASK_RENDER_FILE = `${TASKS_DIR}render.ts`;
-const TASK_TABLE_KEY = '"eve.taskTable"';
+const RUNNING_WORK_FILE = "packages/eve/src/harness/running-work.ts";
+const CHECKPOINT_MIGRATIONS_FILE = "packages/eve/src/execution/session/checkpoint-migrations.ts";
+const RUNNING_WORK_KEY = '"eve.work"';
+const RUNNING_WORK_ACCESS_RE = /\b(?:readRunningWork|writeRunningWork)\(/;
+const RUNNING_WORK_OWNER_FILES = new Set([
+  RUNNING_WORK_FILE,
+  "packages/eve/src/harness/workflow-tool-runs.ts",
+]);
 const TASK_MODEL_MARKERS = ["<task_result", "[Tasks]", "Started task ", "Sent to task "];
 
 /**
@@ -499,13 +580,30 @@ const TASK_MODEL_MARKERS = ["<task_result", "[Tasks]", "Started task ", "Sent to
 function checkRule46(posix, lines, violations) {
   if (!posix.startsWith("packages/eve/src/") || posix.endsWith(".test.ts")) return;
   lines.forEach((line, idx) => {
-    if (line.includes(TASK_TABLE_KEY) && !TASK_TABLE_FILE_RE.test(posix)) {
+    if (
+      line.includes(RUNNING_WORK_KEY) &&
+      posix !== RUNNING_WORK_FILE &&
+      posix !== CHECKPOINT_MIGRATIONS_FILE
+    ) {
       violations.push({
         rule: 46,
         file: posix,
         line: idx + 1,
         message:
-          "names the session's task table outside execution/tasks/table*.ts. Read and write task records through the table module's helpers.",
+          "names the session's record of running work outside harness/running-work.ts. Read and write it through its owners' helpers.",
+      });
+    }
+    if (
+      RUNNING_WORK_ACCESS_RE.test(line) &&
+      !RUNNING_WORK_OWNER_FILES.has(posix) &&
+      !TASK_TABLE_FILE_RE.test(posix)
+    ) {
+      violations.push({
+        rule: 46,
+        file: posix,
+        line: idx + 1,
+        message:
+          "reads or writes the record of running work outside its owners. Use execution/tasks/table.ts for tasks and harness/workflow-tool-runs.ts for the runs a turn waits on.",
       });
     }
     if (posix === TASK_RENDER_FILE || /^\s*(?:\/?\*|\/\/)/.test(line)) return;
@@ -553,7 +651,7 @@ function checkRule47(posix, lines, violations) {
 
 const HUMAN_INPUT_DIR = "packages/eve/src/harness/hitl/";
 const HUMAN_INPUT_PRIVATE_IMPORT_RE =
-  /["'](?:#harness\/|(?:\.\.?\/)+)hitl\/(?!(?:index|approval-prompt|budget-request|relays|sign-ins)\.js["'])/;
+  /["'](?:#harness\/|(?:\.\.?\/)+)hitl\/(?!(?:index|view|approval-prompt|budget-request|relays|sign-ins)\.js["'])/;
 
 /** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
 function checkRule50(posix, lines, violations) {
@@ -577,8 +675,61 @@ function checkRule50(posix, lines, violations) {
       file: posix,
       line: idx + 1,
       message:
-        "imports the human-in-the-loop lifecycle's internals. Reach it through `#harness/hitl/index.js`, the one seam the rest of eve meets it at.",
+        "imports the human-in-the-loop lifecycle's internals. Reach it through `#harness/hitl/index.js`, or use the read-only `#harness/hitl/view.js` from workflow bodies.",
     });
+  });
+}
+
+// ---------- Rules 53 and 54: the session event contract stands alone ----------
+
+const CONTRACT_DIR = "packages/eve/src/protocol/session-events/";
+const FOLD_DIR = "packages/eve/src/protocol/session-projection/";
+const CONTRACT_IMPORT_RE = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)["']([^"']+)["']/;
+const CONTRACT_SPECIFIER_RE = /^(?:#protocol\/session-(?:events|projection)\/|\.\.?\/)/;
+const SCHEMA_FILE_RE =
+  /^packages\/eve\/src\/protocol\/session-events\/(?:common|schemas|families\/[^/]+)\.ts$/;
+const SCHEMA_SPECIFIER_RE =
+  /session-events\/(?:common|schemas|families\/[^"'/]+)\.js$|^\.\.?\/(?:common|schemas)\.js$|^\.\/families\//;
+const READER_FILE_RE =
+  /^packages\/eve\/src\/(?:protocol\/session-events\/(?:catalog|envelope|facts|guards|index)\.ts$|protocol\/session-projection\/|public\/events\/|client\/)/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule53(posix, lines, violations) {
+  if (/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix)) return;
+  const inContract = posix.startsWith(CONTRACT_DIR) || posix.startsWith(FOLD_DIR);
+  const isReader = READER_FILE_RE.test(posix);
+  if (!inContract && !isReader) return;
+  // A multi-line `import type { … } from` names its specifier lines after the `type`.
+  let statementTypeOnly = false;
+  lines.forEach((line, idx) => {
+    if (/^\s*(?:import|export)\b/.test(line)) {
+      statementTypeOnly = /^\s*(?:import|export)\s+type\b/.test(line);
+    }
+    const specifier = CONTRACT_IMPORT_RE.exec(line)?.[1];
+    if (specifier === undefined) return;
+    const typeOnly = statementTypeOnly;
+    if (inContract) {
+      const allowed =
+        CONTRACT_SPECIFIER_RE.test(specifier) ||
+        (specifier === "#compiled/zod/index.js" && SCHEMA_FILE_RE.test(posix));
+      if (!allowed) {
+        violations.push({
+          rule: 53,
+          file: posix,
+          line: idx + 1,
+          message: `imports "${specifier}". The session event contract and its fold stand alone, so runtime refactors can't change the wire.`,
+        });
+        return;
+      }
+    }
+    if (isReader && !typeOnly && SCHEMA_SPECIFIER_RE.test(specifier)) {
+      violations.push({
+        rule: 54,
+        file: posix,
+        line: idx + 1,
+        message: `imports the schema module "${specifier}" by value, which loads Zod. Readers import its types with \`import type\`, and validate nothing.`,
+      });
+    }
   });
 }
 
@@ -588,8 +739,9 @@ const SESSION_MACHINE_DIR = "packages/eve/src/harness/session-machine/";
 const LIFECYCLE_EVENT_BUILDER_RE =
   /\bcreate(?:Session(?:Started|Waiting|Failed|Completed)|Turn(?:Started|Completed|Failed|Cancelled|Waiting)|MessageReceived|Step(?:Started|Failed)|Input(?:Requested|Resolved)|Authorization(?:Required|Completed)|Approval(?:Candidate|Settled)|Task(?:Started|Settled)|ContextCleared|ResultCompleted)Event\b/;
 const CALL_EVENT_BUILDER_RE = /\bcreateAction(?:Result|sRequested)Event\b/;
-/** Where the model step streams its calls, their inline results, and the calls they made. */
+/** Where the model step streams its calls, runs them, and reports the calls they made. */
 const STREAM_CONTENT_FILES = new Set([
+  "packages/eve/src/harness/call-executor.ts",
   "packages/eve/src/harness/emission.ts",
   "packages/eve/src/harness/nested-actions.ts",
   "packages/eve/src/harness/step-hooks.ts",
@@ -631,42 +783,6 @@ function checkRule51(posix, lines, violations) {
           "imports the session machine's private state or event builders. Read execution state through `#harness/session-machine/view.js`; change it with a transition.",
       });
     }
-  });
-}
-
-// ---------- Rule 48: remote agent protocol 1 stays compartmentalized ----------
-
-const LEGACY_REMOTE_AGENT_DIR = "packages/eve/src/execution/legacy-remote-agent/";
-const LEGACY_REMOTE_AGENT_INGRESS_FILES = new Set([
-  "packages/eve/src/channel/types.ts",
-  "packages/eve/src/context/keys.ts",
-  "packages/eve/src/eve-channel/create-request.ts",
-  "packages/eve/src/eve-channel/index.ts",
-  "packages/eve/src/eve-channel/request.ts",
-  "packages/eve/src/execution/forward-session-input.ts",
-  "packages/eve/src/subagents/callback-route.ts",
-]);
-// `from "…"` covers imports and re-exports; `import "…"` and `import("…")` cover side effects and dynamic imports.
-const LEGACY_REMOTE_AGENT_IMPORT_RE = /\b(?:from|import)\s*\(?\s*["'][^"']*legacy-remote-agent\//;
-
-/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
-function checkRule48(posix, lines, violations) {
-  if (
-    !posix.startsWith("packages/eve/src/") ||
-    posix.startsWith(LEGACY_REMOTE_AGENT_DIR) ||
-    /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix) ||
-    LEGACY_REMOTE_AGENT_INGRESS_FILES.has(posix)
-  )
-    return;
-  lines.forEach((line, idx) => {
-    if (!LEGACY_REMOTE_AGENT_IMPORT_RE.test(line)) return;
-    violations.push({
-      rule: 48,
-      file: posix,
-      line: idx + 1,
-      message:
-        "imports remote agent protocol 1 outside its ingress files. Route protocol-1 behavior through execution/legacy-remote-agent/ from an existing ingress so the legacy path stays removable in one place.",
-    });
   });
 }
 
@@ -1142,7 +1258,7 @@ function checkRule28(posix, lines, violations) {
   }
 }
 
-// ---------- Rule 29: changeset package names exist in the workspace ----------
+// ---------- Rule 29: changeset package names and summaries ----------
 
 const CHANGESET_DIR = ".changeset";
 
@@ -1220,6 +1336,16 @@ async function checkRule29ChangesetPackageNames() {
         rule: 29,
         file: relPath,
         message: `changeset references package "${packageName}", but no workspace package has that name. Use the exact package.json "name" from the target workspace package; for packages/eve that is "eve".`,
+      });
+    }
+    try {
+      const frontmatter = FRONTMATTER_RE.exec(content);
+      parseSummary(content.slice(frontmatter[0].length), entry.name);
+    } catch (error) {
+      violations.push({
+        rule: 29,
+        file: relPath,
+        message: error instanceof Error ? error.message : String(error),
       });
     }
   }
@@ -1682,43 +1808,6 @@ function diffCounts(current, baseline) {
 
 // ---------- Entry point ----------
 
-async function checkRule44SandboxProviders() {
-  const providerNames = ["docker", "just-bash", "vercel"];
-  const forbidden = [
-    "#execution/sandbox/ensure.js",
-    "#execution/sandbox/prewarm.js",
-    "#runtime/sandbox/registry.js",
-    "#sandbox/state.js",
-  ];
-  const issues = [];
-  for (const name of providerNames) {
-    const file = `packages/eve/src/sandbox/providers/${name}.ts`;
-    const source = await readFile(join(REPO_ROOT, file), "utf8");
-    if (!source.includes("defineSandboxProvider")) {
-      issues.push({
-        file,
-        message: "Built-in sandbox providers must use defineSandboxProvider().",
-      });
-    }
-    if (source.includes("createSandboxEnvironment")) {
-      issues.push({
-        file,
-        message:
-          "Built-in sandbox providers must not bypass defineSandboxProvider() through createSandboxEnvironment().",
-      });
-    }
-    for (const specifier of forbidden) {
-      if (source.includes(specifier)) {
-        issues.push({
-          file,
-          message: `Built-in sandbox providers may not bypass the provider contract through ${specifier}.`,
-        });
-      }
-    }
-  }
-  return issues;
-}
-
 async function main() {
   const baselineRaw = await readFile(BASELINE_PATH, "utf8");
   const baseline = JSON.parse(baselineRaw);
@@ -1752,10 +1841,10 @@ async function main() {
     },
     rule46: /** @type {Violation[]} */ ([]),
     rule47: /** @type {Violation[]} */ ([]),
-    rule48: /** @type {Violation[]} */ ([]),
     rule50: /** @type {Violation[]} */ ([]),
     rule51: /** @type {Violation[]} */ ([]),
     rule52: /** @type {Violation[]} */ ([]),
+    rule53: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1841,11 +1930,6 @@ async function main() {
   // Rule 34
   violations.push(...(await checkRule34PhaseBoundary()));
 
-  // Rule 36
-  for (const issue of await checkExtensionCapabilityContracts()) {
-    violations.push({ rule: 36, ...issue });
-  }
-
   // Rule 37
   violations.push(...state.rule37);
 
@@ -1854,12 +1938,9 @@ async function main() {
 
   // Rule 43
   violations.push(...state.rule43);
-  violations.push(...state.rule44);
 
   // Rule 44
-  for (const issue of await checkRule44SandboxProviders()) {
-    violations.push({ rule: 44, ...issue });
-  }
+  violations.push(...state.rule44);
 
   // Rule 45
   violations.push(...state.rule45.violations);
@@ -1869,11 +1950,15 @@ async function main() {
 
   // Rule 47
   violations.push(...state.rule47);
-  violations.push(...state.rule48);
   violations.push(...(await checkFrameworkActionIdentity()));
   violations.push(...state.rule50);
   violations.push(...state.rule51);
   violations.push(...state.rule52);
+  violations.push(...state.rule53);
+
+  for (const issue of await checkPublicExports()) {
+    violations.push({ rule: 55, ...issue });
+  }
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

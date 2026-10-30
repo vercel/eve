@@ -196,7 +196,7 @@ Titles are capped at 80 characters and `output` at 200.
 
 - **Blocked rows.** A request or sign-in a task's run relays through the root carries the task's
   `taskId`, so its row shows `Waiting for approval`, `Waiting for a response`, or `Waiting for
-sign-in` in `details`. The row goes back to working on the request's `input.resolved`, the
+  sign-in` in `details`. The row goes back to working on the request's `input.resolved`, the
   sign-in's `authorization.completed`, or the task's `task.settled`. The request itself posts
   wherever `approvalChannel` sends it.
 - **Requests stay where `approvalChannel` sends them.** A blocked row names the request's prompt

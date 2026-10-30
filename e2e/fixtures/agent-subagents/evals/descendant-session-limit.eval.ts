@@ -23,58 +23,59 @@ export default defineEval({
   async test(t) {
     const { session } = await t.send(DELEGATE_PROMPT);
     const continueSession = await waitForInput(t, session);
-    const continueRequest = continueSession.requireInputRequest({
+    const continueRequest = continueSession.requireInteraction({
       display: "confirmation",
-      optionIds: ["continue", "stop"],
-      toolName: "session_limit_continuation",
+      optionIds: ["approve", "deny"],
+      kind: "budget",
     });
-    const rootSessionId = session.sessionId;
+    const rootSessionId = session.id;
     if (rootSessionId === undefined) {
       throw new Error("The root session did not expose its session id.");
     }
     await t.require(
-      continueRequest.requestId,
+      continueRequest.interactionId,
       satisfies(
-        (requestId: string) => !new RegExp(`^${rootSessionId}:\\d+:limit:`, "u").test(requestId),
+        (interactionId: string) =>
+          !new RegExp(`^${rootSessionId}:\\d+:limit:`, "u").test(interactionId),
         "continuation request belongs to a descendant session",
       ),
     );
 
     const resumed = await continueSession.respond([
       {
-        optionId: "continue",
-        requestId: continueRequest.requestId,
+        optionId: "approve",
+        interactionId: continueRequest.interactionId,
       },
     ]);
     resumed.expectOk();
-    const completed = resumed.message?.includes(CHILD_TOKEN)
+    const completed = resumed.reply?.includes(CHILD_TOKEN)
       ? resumed
       : await waitForMessage(t, continueSession, CHILD_TOKEN);
     completed.expectOk();
     completed.messageIncludes(CHILD_TOKEN);
-    t.noFailedActions();
+    t.noFailedCalls();
 
     const stopSession = await t.session();
     await stopSession.send(DELEGATE_PROMPT);
     const blockedStopSession = await waitForInput(t, stopSession);
-    const stopRequest = blockedStopSession.requireInputRequest({
+    const stopRequest = blockedStopSession.requireInteraction({
       display: "confirmation",
-      optionIds: ["continue", "stop"],
-      toolName: "session_limit_continuation",
+      optionIds: ["approve", "deny"],
+      kind: "budget",
     });
 
     const stopped = await blockedStopSession.respond([
       {
-        optionId: "stop",
-        requestId: stopRequest.requestId,
+        optionId: "deny",
+        interactionId: stopRequest.interactionId,
       },
     ]);
     stopped.expectOk();
-    stopped.notEvent("turn.failed");
-    stopped.notEvent("session.failed");
-    stopped.notEvent("session.completed");
-    stopped.event("turn.cancelled");
-    t.check(stopped.status, equals("waiting"));
+    stopped.notEvent("turn.settled", { data: { outcome: "failed" } });
+    stopped.notEvent("session.ended", { data: { outcome: "failed" } });
+    stopped.notEvent("session.ended", { data: { outcome: "completed" } });
+    stopped.event("turn.settled", { data: { outcome: "cancelled" } });
+    t.check(stopped.status, equals("cancelled"));
 
     const recovered = await blockedStopSession.send(
       `Do not call any tool or subagent. Reply with exactly ${ROOT_RECOVERY_TOKEN} and nothing else.`,
@@ -87,16 +88,16 @@ export default defineEval({
 
 type SessionCursor = Pick<
   EveEvalSession,
-  "pendingInputRequests" | "requireInputRequest" | "respond" | "send" | "sessionId" | "state"
+  "pendingInteractions" | "requireInteraction" | "respond" | "send" | "id" | "state"
 >;
 
 async function waitForInput(t: EveEvalContext, initial: SessionCursor): Promise<SessionCursor> {
   let session = initial;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (session.pendingInputRequests.length > 0) return session;
+    if (session.pendingInteractions.length > 0) return session;
     const live = watchNextTurn(t, session, "descendant input wait");
     const turn = await live.result();
-    turn.noFailedActions();
+    turn.noFailedCalls();
     session = live.session;
   }
   throw new Error("Descendant did not surface its session-limit request after five turns.");
@@ -111,16 +112,16 @@ async function waitForMessage(
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const live = watchNextTurn(t, session, "descendant completion wait");
     const turn = await live.result();
-    turn.noFailedActions();
-    if (turn.message?.includes(marker) === true) return turn;
+    turn.noFailedCalls();
+    if (turn.reply?.includes(marker) === true) return turn;
     session = live.session;
   }
   throw new Error("Descendant result did not reach the parent after five turns.");
 }
 
 function watchNextTurn(t: EveEvalContext, session: SessionCursor, operation: string) {
-  if (session.sessionId === undefined || session.state === undefined) {
+  if (session.id === undefined || session.state === undefined) {
     throw new Error(`${operation} has no parent session cursor.`);
   }
-  return t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
+  return t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch();
 }

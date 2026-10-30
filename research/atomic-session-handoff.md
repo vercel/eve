@@ -331,7 +331,7 @@ target deployment.
 4. **Retire v2 compatibility, on evidence rather than a date.** Every session that is live when
    this ships is owned by a run on an earlier release, and it can reach current code only through
    a released handoff. The successor logs `session moved from an owner that releases its
-addresses first` each time it accepts one. Once production logs show none for a sustained
+   addresses first` each time it accepts one. Once production logs show none for a sustained
    period, a later release may delete the ingress marker path, `SessionHandoffPendingError`,
    `bootReleasedHandoffOwner`, and the marker token, as a deliberate breaking change in its
    changeset. Sessions with disabled timeouts (`sessionTimeoutMs: false`) can stay on an earlier

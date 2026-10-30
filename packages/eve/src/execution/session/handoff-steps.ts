@@ -1,13 +1,4 @@
-import { queuedInput, storedProjection } from "#harness/session-machine/view.js";
-import { openInputs, openSignIns } from "#protocol/session-projection.js";
-import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
-import { holdsHitlRequests } from "#harness/hitl/index.js";
-import {
-  EntityConflictError,
-  HookNotFoundError,
-  RunExpiredError,
-  WorkflowRunNotFoundError,
-} from "#compiled/@workflow/errors/index.js";
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { SessionHandoverPayload } from "#execution/session-inbox/inbox.js";
 import { findSessionHookHolder } from "#execution/session-inbox/owner.js";
 import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
@@ -17,14 +8,15 @@ import {
 } from "#execution/session-inbox/address.js";
 import { deserializeContext, IncompatibleStateLayoutError } from "#context/serialize.js";
 import type { SessionCheckpointMigration } from "#execution/session/checkpoint-migrations.js";
-import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
+import { readDurableSession } from "#execution/durable-session-read.js";
+import { isSessionStateIdleForHandoff } from "#execution/session/handoff-state.js";
 import {
   SESSION_CHECKPOINT_VERSION,
   type SessionCheckpoint,
   type SessionOwnerActivation,
 } from "#execution/session/handoff.js";
-import { createLogger, logError } from "#internal/logging.js";
-import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { createLogger } from "#internal/logging.js";
+import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import {
   hasRunEnded,
   startWorkflowOnDeployment,
@@ -39,45 +31,20 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   EVE_SESSION_ATTRIBUTE,
   EVE_VERSION_ATTRIBUTE,
+  EVE_PREWARM_ATTRIBUTE,
 } from "#execution/eve-workflow-attributes.js";
 import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { owningSandboxDefinition } from "#runtime/sandbox/registry.js";
-import { isRetiredSandboxSessionState } from "#sandbox/state.js";
+import {
+  isRetiredSandboxSessionState,
+  resolvePersistedSandboxSessionState,
+} from "#sandbox/state.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
-import { walkCauseChain } from "#shared/errors.js";
+import { traceSessionHandover } from "#execution/session/handover-tracing.js";
+import { readSessionStreamTailIndex } from "#execution/session-event-stream.js";
 
 const log = createLogger("execution.handoff");
-
-/** Parses retained work with this deployment's code before deciding whether it can move. */
-export function isSessionStateIdleForHandoff(input: {
-  readonly sessionState: DurableSessionState;
-}): boolean {
-  const { state } = readDurableSession(input.sessionState);
-  // Decoding the run registry rejects corrupt state before any busy-work shortcut.
-  const workflowToolRuns = getBlockingWorkflowToolRuns(state);
-
-  // These registries are deleted when work settles. Their ordinary readers
-  // tolerate malformed values as absent; that must not authorize a handoff.
-  if (holdsHitlRequests(state)) return false;
-  const pendingKeys = [
-    "eve.runtime.pendingInputBatch",
-    "eve.runtime.pendingCoordinationBatch",
-    "eve.runtime.deferredStepInput",
-    "eve.harness.pendingWorkflowInterrupt",
-  ];
-  if (pendingKeys.some((key) => state?.[key] !== undefined)) return false;
-  const batches = state?.["eve.runtime.pendingInputBatches"];
-  if (batches !== undefined && (!Array.isArray(batches) || batches.length > 0)) return false;
-  const projection = storedProjection(state);
-  return (
-    workflowToolRuns.length === 0 &&
-    projection.activeTurnId === undefined &&
-    openInputs(projection).length === 0 &&
-    openSignIns(projection).length === 0 &&
-    queuedInput(state) === undefined
-  );
-}
 
 export type SuccessorStartInput = SessionHandoffStart & {
   readonly activationToken: string;
@@ -86,6 +53,7 @@ export type SuccessorStartInput = SessionHandoffStart & {
   readonly attemptKey: string;
   readonly checkpoint: SessionCheckpoint;
   readonly hookTokens: readonly string[];
+  readonly sessionWritable: WritableStream<Uint8Array>;
   /** The owner starting the successor, which hands over what it accepts meanwhile. */
   readonly sourceRunId: string;
   readonly targetDeploymentId: string;
@@ -103,7 +71,14 @@ export type SuccessorStart =
  */
 export async function startSuccessorStep(input: SuccessorStartInput): Promise<SuccessorStart> {
   "use step";
-  const { activationToken, anchorRunId, checkpoint, targetDeploymentId, ...start } = input;
+  const {
+    activationToken,
+    anchorRunId,
+    checkpoint,
+    sessionWritable,
+    targetDeploymentId,
+    ...start
+  } = input;
   const { capabilities } = await getWorld();
   // Forced claims move the addresses; the attempt lease must outlive its candidate.
   if (capabilities?.hookForceClaim !== true || capabilities.hookRetention?.active !== true) {
@@ -120,7 +95,8 @@ export async function startSuccessorStep(input: SuccessorStartInput): Promise<Su
     handoffVersion: SESSION_HANDOFF_VERSION,
     kind: "handoff",
     ownerDeploymentId: targetDeploymentId,
-    sessionWritable: getRun(anchorRunId).getWritable<Uint8Array>(),
+    // Preserve the original stream's public encryption metadata across owners.
+    sessionWritable,
     sessionId: anchorRunId,
   };
   // The successor is stamped with this eve version at start, because the
@@ -160,7 +136,7 @@ export type SessionCheckpointValidation =
 export async function prepareSuccessorStep(input: {
   /** Absent for version 1 sources, which predate the field. */
   readonly handoffVersion: number | undefined;
-  readonly migration: SessionCheckpointMigration;
+  readonly migration: Exclude<SessionCheckpointMigration, { readonly kind: "busy" }>;
   readonly sessionId: string;
   /** Version 3: the run that still holds the session and the addresses it hands over. */
   readonly source?: { readonly runId: string; readonly hookTokens: readonly string[] };
@@ -176,13 +152,20 @@ export async function prepareSuccessorStep(input: {
     return { kind: "incompatible", reason: "checkpoint-version" };
   };
   if (migration.kind === "incompatible") return unreadable(migration.detail);
-  const { checkpoint } = migration;
+  // An owner before v27 remembers only `incompatible` targets; any other refusal it would retry
+  // on every delivery, though the checkpoint never changes.
+  const refuse = (detail: string): SessionCheckpointValidation => {
+    if (migration.kind === "pre-v27") return unreadable(detail);
+    throw new Error(detail);
+  };
+  const checkpoint =
+    migration.kind === "pre-v27" ? migration.imported.checkpoint : migration.checkpoint;
   const timeout = checkpoint.sessionTimeoutMs;
   if (
     timeout !== false &&
     (typeof timeout !== "number" || !Number.isFinite(timeout) || timeout < 0)
   )
-    throw new Error("Session checkpoint contains an invalid timeout duration.");
+    return refuse("Session checkpoint contains an invalid timeout duration.");
   let context: Awaited<ReturnType<typeof deserializeContext>>;
   try {
     context = await deserializeContext(checkpoint.serializedContext);
@@ -203,18 +186,19 @@ export async function prepareSuccessorStep(input: {
       getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId).sandboxRegistry.sandbox,
     );
     if (definition.kind !== "independent") {
-      throw new Error("Session checkpoint sandbox has no resolved provider.");
+      return refuse("Session checkpoint sandbox has no resolved provider.");
     }
     const provider = getSandboxEnvironmentRuntime(definition.environment);
+    const resolved = resolvePersistedSandboxSessionState(sandboxState, provider);
     if (
-      sandboxState.providerName !== provider.providerName ||
-      sandboxState.stateProtocolVersion !== provider.stateProtocolVersion
+      resolved?.providerName !== provider.providerName ||
+      resolved.stateProtocolVersion !== provider.stateProtocolVersion
     ) {
-      throw new Error("Session checkpoint sandbox provider state is incompatible.");
+      return refuse("Session checkpoint sandbox provider state is incompatible.");
     }
   }
   if (!isSessionStateIdleForHandoff(checkpoint)) {
-    throw new Error("Session checkpoint contains pending work and cannot be handed off.");
+    return refuse("Session checkpoint contains pending work and cannot be handed off.");
   }
   if (input.source !== undefined && !(await holdsEveryAddress(input.source))) {
     return { kind: "source-gone" };
@@ -228,6 +212,9 @@ export async function prepareSuccessorStep(input: {
       sessionId: input.sessionId,
     });
   }
+  // This line shows when no owner before v27 remains, which is when that import can go.
+  if (migration.kind === "pre-v27")
+    log.info("session handoff accepted from an owner before v27", { sessionId: input.sessionId });
   return { kind: "valid" };
 }
 
@@ -246,37 +233,6 @@ async function holdsEveryAddress(source: {
     findSessionHookHolder(sessionInboxHookToken(token)),
   );
   return holders.every((holder) => holder?.runId === source.runId);
-}
-
-/**
- * Stops idle subagent sessions an older owner kept resumable, after this owner
- * activates. Best effort: a child that cannot be stopped ends at its own timeout.
- */
-export async function stopUntrackedChildSessionsStep(input: {
-  readonly runIds: readonly string[];
-  readonly sessionId: string;
-}): Promise<void> {
-  "use step";
-  const world = await getWorld();
-  for (const runId of input.runIds) {
-    if (runId === input.sessionId) continue;
-    try {
-      await cancelRun(world, runId, { cancelReason: "Session upgraded" });
-    } catch (error) {
-      const settled = [...walkCauseChain(error)].some(
-        (cause) =>
-          EntityConflictError.is(cause) ||
-          RunExpiredError.is(cause) ||
-          WorkflowRunNotFoundError.is(cause),
-      );
-      if (!settled) {
-        logError(log, "could not stop a subagent session after handoff", error, {
-          childRunId: runId,
-          sessionId: input.sessionId,
-        });
-      }
-    }
-  }
 }
 
 /** Records why the owner kept a session it tried to move, so a stuck handoff is visible. */
@@ -312,6 +268,7 @@ async function recordSessionOwner(sessionId: string): Promise<void> {
   await setAttributes(
     {
       [EVE_SESSION_ATTRIBUTE]: sessionId,
+      [EVE_PREWARM_ATTRIBUTE]: "1",
       [EVE_VERSION_ATTRIBUTE]: resolveInstalledPackageInfo().version,
     },
     { allowReservedAttributes: true },
@@ -362,15 +319,29 @@ export async function reportHandoverPartStuckStep(input: {
  * for the caller to retry until it is delivered.
  */
 export async function sendSessionHandoverPartStep(input: {
+  readonly bufferedPayloadCount: number;
   readonly part: Omit<SessionHandoverPayload, "kind">;
   readonly sessionId: string;
 }): Promise<"delivered" | "session-ended"> {
   "use step";
+  const attributes = {
+    "eve.handoff.buffered_payload_count": input.bufferedPayloadCount,
+    "eve.handoff.part_index": input.part.index,
+  };
+  if (input.part.index === 0) {
+    traceSessionHandover("forwarding_started", input.sessionId, input.part.attemptKey, attributes);
+  }
   try {
-    await resumeHook(sessionInboxHookToken(sessionCommandHookToken(input.sessionId)), {
+    const hook = await resumeHook(sessionInboxHookToken(sessionCommandHookToken(input.sessionId)), {
       ...input.part,
       kind: "handover",
     } satisfies SessionHandoverPayload);
+    traceSessionHandover(
+      input.part.final === true ? "final_submitted" : "part_submitted",
+      input.sessionId,
+      input.part.attemptKey,
+      { ...attributes, "eve.handoff.destination_run_id": hook.runId },
+    );
     return "delivered";
   } catch (error) {
     // The session has ended, so nothing waits for these payloads.
@@ -385,4 +356,12 @@ export async function signalSessionAnchorStep(input: {
 }): Promise<void> {
   "use step";
   await resumeHook(input.token, input.result);
+}
+
+/** The position of the session stream's last line, or `-1` before the first. */
+export async function readSessionStreamTailStep(input: {
+  readonly sessionId: string;
+}): Promise<number> {
+  "use step";
+  return await readSessionStreamTailIndex(input.sessionId);
 }

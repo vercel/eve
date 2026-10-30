@@ -1,15 +1,16 @@
 /**
  * Ordinary Discord messages, which Discord delivers only over its Gateway
- * WebSocket. A relay such as `experimental_runDiscordGatewayRelay` from
- * `eve/channels/discord/gateway` holds that connection and forwards each
- * dispatch, unchanged, to the route this module mounts.
+ * WebSocket. A relay such as `runDiscordGatewayRelay` from
+ * `eve/experimental/channels/discord/gateway` holds that connection and
+ * forwards each dispatch, unchanged, to the route this module mounts.
  */
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { readLimitedBytes } from "#internal/attachments/limited-read.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { type AuthFn, localDev, routeAuth, vercelOidc } from "#public/channels/auth.js";
+import { type AuthFn, localDev, routeAuth } from "#public/channels/auth.js";
+import { sameEnvironmentVercelOidc } from "#public/channels/same-environment-oidc.js";
 import {
   callDiscordApi,
   discordContinuationToken,
@@ -135,7 +136,7 @@ export interface DiscordGatewayConfig {
    * Authenticates the relay. The body names the message author, so whoever
    * passes can act as any Discord user. Defaults to `localDev()` plus Vercel
    * OIDC tokens from this project's own runtime in the same environment,
-   * which is what `experimental_runDiscordGatewayRelay` sends from a Vercel Daemon.
+   * which is what `runDiscordGatewayRelay` sends from a Vercel Daemon.
    */
   readonly auth?: AuthFn<Request> | readonly AuthFn<Request>[];
   /**
@@ -161,7 +162,7 @@ export function createDiscordGatewayRoute(input: {
   readonly buildContext: (state: DiscordChannelState) => DiscordContext;
 }): HttpRouteDefinition<DiscordChannelState> {
   const { config, gateway } = input;
-  const auth = gateway.auth ?? [localDev(), sameEnvironmentRuntime()];
+  const auth = gateway.auth ?? [localDev(), sameEnvironmentVercelOidc()];
   const onMessage = gateway.onMessage ?? defaultOnMessage;
 
   return POST<DiscordChannelState>(
@@ -198,7 +199,10 @@ export function createDiscordGatewayRoute(input: {
       const channelSession = isDirectMessage
         ? undefined
         : await resolveSession(
-            discordContinuationToken(parsed.channelId, WHOLE_CHANNEL_CONVERSATION),
+            discordContinuationToken({
+              channelId: parsed.channelId,
+              conversationId: WHOLE_CHANNEL_CONVERSATION,
+            }),
           );
       const message: DiscordGatewayMessage = {
         ...parsed,
@@ -223,7 +227,7 @@ export function createDiscordGatewayRoute(input: {
       // Bots receive only 1:1 DMs over the Gateway, never group DMs.
       if (isDirectMessage) {
         state.audience = discordAudience(1);
-        state.directMessage = true;
+        state.channelType = 1;
       }
 
       let result: DiscordMessageResult;
@@ -250,8 +254,9 @@ export function createDiscordGatewayRoute(input: {
           const replyTo = message.referencedMessageId;
           if (
             replyTo !== undefined &&
-            (await resolveSession(discordContinuationToken(message.channelId, replyTo))) !==
-              undefined
+            (await resolveSession(
+              discordContinuationToken({ channelId: message.channelId, conversationId: replyTo }),
+            )) !== undefined
           ) {
             return replyTo;
           }
@@ -287,29 +292,19 @@ export function createDiscordGatewayRoute(input: {
         username: message.author.username,
       });
       const session = await from(
-        discordContinuationToken(state.channelId ?? message.channelId, state.conversationId),
+        discordContinuationToken({
+          channelId: state.channelId ?? message.channelId,
+          conversationId: state.conversationId,
+        }),
       ).send(discordCommandContent(content, message.attachments), {
         auth: result.auth,
         context: [contextBlock, ...(result.context ?? [])],
         state,
         title: result.title,
       });
-      return Response.json({ accepted: true, sessionId: session.id }, { status: 202 });
+      return Response.json({ accepted: true, sessionId: session.sessionId }, { status: 202 });
     },
   );
-}
-
-/**
- * Vercel OIDC from this project's runtime in the current environment only.
- * Other environments, such as a preview deployment, authenticate as
- * `service` and must not reach production as any Discord user.
- */
-function sameEnvironmentRuntime(): AuthFn<Request> {
-  const oidc = vercelOidc();
-  return async (request) => {
-    const auth = await oidc(request);
-    return auth?.principalType === "runtime" ? auth : null;
-  };
 }
 
 function ignored(reason: string): Response {

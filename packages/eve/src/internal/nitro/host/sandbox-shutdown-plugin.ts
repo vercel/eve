@@ -1,4 +1,4 @@
-import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
+import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 
 const SHUTDOWN_SIGNALS = ["SIGINT", "SIGTERM"] as const;
@@ -62,7 +62,7 @@ export async function runSandboxShutdown(log: (message: string) => void): Promis
   });
 
   try {
-    await Promise.race([shutdownActiveSandboxHandles({ log }), deadline]);
+    await Promise.race([shutdownActiveSandboxConnections({ log }), deadline]);
   } finally {
     clearTimeout(timer);
   }

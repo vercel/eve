@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { compileAgentInWorkspace } from "#compiler/compile-agent.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
-import type { SandboxProviderPrepareContext } from "#shared/sandbox-provider.js";
+import { populatedPaths } from "#internal/testing/sandbox-provider-harness.js";
+import type { SandboxPrepareContext } from "#sandbox/provider.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
@@ -26,7 +27,10 @@ describe("prewarmAppSandboxes", () => {
       join(appRoot, "package.json"),
       JSON.stringify({ name: "dockerfile-prewarm-test", type: "module" }),
     );
-    await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };');
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "Use the sandbox.");
     await writeFile(join(agentRoot, "sandbox", "Dockerfile"), "FROM alpine:3.21\n");
     await writeFile(
@@ -111,8 +115,8 @@ describe("prewarmAppSandboxes", () => {
 
     expect(events.seededTemplateCount).toBe(2);
     expect([...events.seededFilePaths].sort()).toEqual([
-      "$HOME/.agents/skills/research/SKILL.md",
-      "$HOME/.agents/skills/route-weather/SKILL.md",
+      "/home/agent/.agents/skills/research/SKILL.md",
+      "/home/agent/.agents/skills/route-weather/SKILL.md",
     ]);
   });
 });
@@ -159,7 +163,10 @@ async function createScenarioAppRoot(): Promise<string> {
       2,
     ),
   );
-  await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };\n');
+  await writeFile(
+    join(agentRoot, "agent.ts"),
+    'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+  );
   await writeFile(join(agentRoot, "instructions.md"), "Root system prompt.\n");
   await writeFile(
     join(agentRoot, "skills", "route-weather.md"),
@@ -172,10 +179,11 @@ async function createScenarioAppRoot(): Promise<string> {
   await writeFile(
     join(subagentRoot, "agent.ts"),
     [
-      "export default {",
+      'import { defineAgent } from "eve";',
+      "export default defineAgent({",
       '  model: "openai/gpt-5.4",',
       '  description: "Research one topic.",',
-      "};",
+      "});",
       "",
     ].join("\n"),
   );
@@ -193,23 +201,14 @@ async function createScenarioAppRoot(): Promise<string> {
 }
 
 function createRecordingDispatch(events: ReturnType<typeof createPrewarmEvents>) {
-  return async ({ context }: { context: SandboxProviderPrepareContext }) => {
+  return async ({ context }: { context: SandboxPrepareContext }) => {
     events.templateKeys.push(context.storagePath);
     events.runtimeContextAppRoots.push(context.storagePath);
 
-    const resourceFiles = [
-      ...(context.resources.workspace?.files.map((file) => ({
-        ...file,
-        path: `${context.resources.workspace?.targetPath}/${file.relativePath}`,
-      })) ?? []),
-      ...(context.resources.skills?.files.map((file) => ({
-        ...file,
-        path: `${context.resources.skills?.targetPath}/${file.relativePath}`,
-      })) ?? []),
-    ];
-    if (resourceFiles.length > 0) {
+    const paths = await populatedPaths(context);
+    if (paths.length > 0) {
       events.seededTemplateCount += 1;
-      events.seededFilePaths.push(...resourceFiles.map((file) => file.path));
+      events.seededFilePaths.push(...paths);
     }
 
     return { storagePath: context.storagePath };

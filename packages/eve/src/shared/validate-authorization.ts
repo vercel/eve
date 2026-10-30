@@ -35,17 +35,15 @@ export function validateAuthorizationSpec(
 
   const hasStart = auth.startAuthorization !== undefined;
   const hasComplete = auth.completeAuthorization !== undefined;
-  const hasCredentialOwner = auth.credentialOwner !== undefined;
-  const hasPrincipalType = auth.principalType !== undefined;
-
-  if (hasCredentialOwner && hasPrincipalType) {
-    return `The "${fieldName}" field must not provide both "credentialOwner" and "principalType".`;
+  if ("credentialOwner" in auth) {
+    return `The "${fieldName}.credentialOwner" field is no longer supported. Use "principalType": "app" or "user".`;
   }
-
-  const credentialOwnerField = hasCredentialOwner ? "credentialOwner" : "principalType";
-  const credentialOwner = hasCredentialOwner ? auth.credentialOwner : auth.principalType;
-  if (credentialOwner !== undefined && credentialOwner !== "app" && credentialOwner !== "user") {
-    return `The "${fieldName}.${credentialOwnerField}" field must be "app" or "user".`;
+  if (
+    auth.principalType !== undefined &&
+    auth.principalType !== "app" &&
+    auth.principalType !== "user"
+  ) {
+    return `The "${fieldName}.principalType" field must be "app" or "user".`;
   }
 
   if (hasStart !== hasComplete) {
@@ -58,10 +56,6 @@ export function validateAuthorizationSpec(
 
   if (hasComplete && typeof auth.completeAuthorization !== "function") {
     return `The "${fieldName}.completeAuthorization" field must be a function when provided.`;
-  }
-
-  if (hasStart && hasCredentialOwner) {
-    return `The "${fieldName}.credentialOwner" field is only supported by getToken-only authorization. Interactive authorization is restricted to "principalType": "user" in v1.`;
   }
 
   if (hasStart && auth.principalType !== "user") {
@@ -124,8 +118,7 @@ export function normalizeAuthorizationSpec(
 
   let nonInteractive: NonInteractiveAuthorizationDefinition = {
     getToken: auth.getToken as NonInteractiveAuthorizationDefinition["getToken"],
-    principalType: (auth.credentialOwner ??
-      auth.principalType ??
+    principalType: (auth.principalType ??
       "app") as NonInteractiveAuthorizationDefinition["principalType"],
   };
   if (runtimeConnect !== undefined)

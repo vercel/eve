@@ -2,8 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { finalizeSession } from "#execution/session/finalization.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { writeTaskTable } from "#execution/tasks/table.js";
-import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
-import { setTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
+import {
+  reportChildSessionTeardownFailureStep,
+  terminateChildSessionsStep,
+} from "#execution/terminate-child-sessions-step.js";
+import { takeSessionUsageDelta } from "#harness/session-usage.js";
+import { withSessionUsage } from "#internal/testing/session-usage.js";
+import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import type { HarnessSession } from "#harness/types.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
@@ -14,7 +19,8 @@ import {
 } from "#execution/session/end-sandbox-step.js";
 
 vi.mock("#execution/terminate-child-sessions-step.js", () => ({
-  terminateChildSessionsStep: vi.fn(),
+  reportChildSessionTeardownFailureStep: vi.fn(async () => {}),
+  terminateChildSessionsStep: vi.fn(async () => {}),
 }));
 vi.mock("#execution/session/end-sandbox-step.js", () => ({
   endSessionSandboxStep: vi.fn(),
@@ -31,15 +37,7 @@ vi.mock("#subagents/parent-notification.js", () => ({
 }));
 
 function withUsage(session: HarnessSession, inputTokens: number): HarnessSession {
-  const totals = {
-    inputTokens,
-    outputTokens: 0,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-    costUsd: 0,
-    sawCost: false,
-  };
-  return setTurnUsageState(session, { ...totals, session: totals, turnId: "current" });
+  return withSessionUsage(session, { inputTokens });
 }
 
 function baseSession(): HarnessSession {
@@ -183,6 +181,47 @@ describe("session finalization with an unsettled caller", () => {
 
   it("terminates child sessions when a task run is live", async () => {
     const sessionState = sessionWithTaskRun();
+    await finalizeSession(
+      { kind: "expired" },
+      {
+        caller: undefined,
+        cursor: { serializedContext: {}, sessionState },
+        sessionWritable: new WritableStream(),
+      },
+    );
+    expect(terminateChildSessionsStep).toHaveBeenCalledExactlyOnceWith({ sessionState });
+  });
+
+  it("reports a failed child teardown and still ends the session", async () => {
+    vi.mocked(terminateChildSessionsStep).mockRejectedValueOnce(new Error("teardown failed"));
+    const sessionState = sessionWithTaskRun();
+
+    await expect(
+      finalizeSession(
+        { kind: "expired" },
+        {
+          caller: undefined,
+          cursor: { serializedContext: {}, sessionState },
+          sessionWritable: new WritableStream(),
+        },
+      ),
+    ).resolves.toMatchObject({ isError: false });
+    expect(reportChildSessionTeardownFailureStep).toHaveBeenCalledExactlyOnceWith({
+      error: expect.objectContaining({ message: "teardown failed" }),
+      parentSessionId: sessionState.sessionId,
+    });
+    expect(emitTerminalSessionCompletionStep).toHaveBeenCalledOnce();
+  });
+
+  it("terminates the workflow tool calls a turn waits on when no task run is live", async () => {
+    const sessionState = createDurableSessionState({
+      session: registerWorkflowToolRun(baseSession(), {
+        address: { hookToken: "hook-call-1", runId: "run-call-1" },
+        callId: "call-1",
+        origin: { stepIndex: 0, turnId: "turn_0" },
+        toolName: "deploy",
+      }),
+    });
     await finalizeSession(
       { kind: "expired" },
       {

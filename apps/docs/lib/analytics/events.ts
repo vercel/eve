@@ -12,17 +12,11 @@ export const analyticsEvents = {
   integrationSetupOptionSelected: "Selected integration setup option",
   integrationsSearched: "Searched integrations",
   smartMarkdownNotFound: "Served smart Markdown 404",
-  templateFilterSelected: "Selected template filter",
-  templateOpened: "Opened template",
-  templatesSearched: "Searched templates",
-  templateDemoOpened: "Opened template demo",
-  templateSetupCopied: "Copied template setup prompt",
-  templateSourceOpened: "Opened template source",
 } as const;
 
 export type AnalyticsEventName = (typeof analyticsEvents)[keyof typeof analyticsEvents];
 
-type DocsSurface = "docs" | "home" | "integrations" | "other" | "templates";
+type DocsSurface = "docs" | "home" | "integrations" | "other";
 
 export const isQueryFreeUrl = (url: string): boolean => {
   try {
@@ -53,7 +47,6 @@ export const getDocsSurface = (value: unknown): DocsSurface => {
   if (pathname === "/integrations" || pathname.startsWith("/integrations/")) {
     return "integrations";
   }
-  if (pathname === "/templates" || pathname.startsWith("/templates/")) return "templates";
   return "other";
 };
 

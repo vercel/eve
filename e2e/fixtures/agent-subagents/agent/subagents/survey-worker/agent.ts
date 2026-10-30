@@ -1,4 +1,5 @@
-import { defineAgent, defineDynamic } from "eve";
+import { defineAgent } from "eve";
+import { defineDynamic } from "eve/models";
 import { mockModel } from "eve/evals";
 
 import { respondAsSurveyWorker } from "../../lib/survey.js";
@@ -11,9 +12,5 @@ export default defineAgent({
     "Test fixture: counts Alice's tide survey stations. Call it only for SURVEY-DELEGATE directives.",
   // Selected per step: in mock mode this fixture replaces static authored
   // models with eve's bootstrap mock, which would drop the worker's usage.
-  model: defineDynamic({
-    events: {
-      "step.started": () => ({ model: workerModel, modelContextWindowTokens: 1_000_000 }),
-    },
-  }),
+  model: defineDynamic(() => ({ model: workerModel, modelContextWindowTokens: 1_000_000 })),
 });

@@ -1,6 +1,6 @@
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
-import { createDefaultVercelEnvironment } from "#sandbox/providers/vercel.js";
+import { VercelSandbox } from "#sandbox/providers/vercel.js";
 import { bindSandboxEnvironment, type SandboxSelector } from "#shared/sandbox-environment.js";
 import { shellQuote } from "#shared/shell-quote.js";
 
@@ -14,12 +14,12 @@ import {
 } from "./remote/config.js";
 
 const VERCEL_SANDBOX_REQUIRED_MESSAGE =
-  "Deployed self-modification requires deploying on Vercel, where Vercel Sandbox provides the runtime credential transforms that keep the GitHub token out of the sandbox. Deploy this agent to Vercel, or remove the eve/self-modification/remote extension mount from self-hosted deployments.";
+  "Deployed self-modification requires deploying on Vercel, where Vercel Sandbox provides the runtime credential transforms that keep the GitHub token out of the sandbox. Deploy this agent to Vercel, or remove the eve/extensions/self-modification/remote extension mount from self-hosted deployments.";
 
 /**
  * Defines the deployed child's sandbox. During `eve dev` the deployed child is never
- * offered, so its sandbox binds an inert environment. Other builds bind the default
- * Vercel environment, whose empty preparation is a no-op, so they compile on any host;
+ * offered, so its sandbox binds an inert environment. Other builds bind a Vercel
+ * environment, whose empty preparation is a no-op, so they compile on any host;
  * the Vercel requirement is enforced when a deployed child opens its sandbox.
  */
 export function defineDeployedSelfModificationSandbox(
@@ -35,7 +35,7 @@ export function defineDeployedSelfModificationSandbox(
   }
 
   const deployed = resolveDeployedSelfModificationConfig(config);
-  const environment = createDefaultVercelEnvironment();
+  const environment = VercelSandbox.environment();
   return bindSandboxEnvironment(
     defineSandbox(async ({ session }) => {
       if (!isDeployedOnVercel()) throw new Error(VERCEL_SANDBOX_REQUIRED_MESSAGE);

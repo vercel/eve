@@ -14,12 +14,7 @@ import type {
   CommandPresentation,
 } from "./runner.js";
 import type { AgentTUIConversationView, TokenUsage } from "./conversation-view.js";
-import {
-  ConversationTranscript,
-  TASK_END_GRACE_MS,
-  turnActivity,
-  type TranscriptOptions,
-} from "./transcript.js";
+import { ConversationTranscript, turnActivity, type TranscriptOptions } from "./transcript.js";
 import { renderTaskPanelRows } from "./task-activity.js";
 import { interruptedError } from "./errors.js";
 import {
@@ -359,7 +354,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #updateSequence = 0;
   /** Projects the current session's conversation; reset at every context cut. */
   readonly #transcript = new ConversationTranscript();
-  #taskEndGraceTimer?: ReturnType<typeof setTimeout>;
   #view?: AgentTUIConversationView;
   /** Live blocks whose content the conversation projection owns. */
   #conversationBlockIds = new Set<string>();
@@ -1021,7 +1015,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#hasUserMessage = true;
     }
     const projected = this.#transcript.project(view, this.#transcriptOptions());
-    this.#scheduleTaskEndGrace();
     const ids = new Set<string>();
     for (const [index, block] of projected.entries()) {
       const id = block.id!;
@@ -1565,7 +1558,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #clearConversationState(): void {
     this.#transcript.reset();
-    this.#clearTaskEndGrace();
     this.#view = undefined;
     this.#conversationBlockIds = new Set();
     this.#steeredMessages.length = 0;
@@ -3143,25 +3135,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** Running work, or tasks still working after their turn ended; the task panel ticks. */
   #hasLiveSessionActivity(): boolean {
     return this.#view?.working === true || this.#transcript.tasks.length > 0;
-  }
-
-  /**
-   * A settled agent task waits for its own last events before writing its end line, but not past
-   * a short grace period; the next projection after it writes the line.
-   */
-  #scheduleTaskEndGrace(): void {
-    if (!this.#transcript.finishing || this.#taskEndGraceTimer !== undefined) return;
-    this.#taskEndGraceTimer = setTimeout(() => {
-      this.#taskEndGraceTimer = undefined;
-      if (this.#view !== undefined) this.renderConversation(this.#view);
-    }, TASK_END_GRACE_MS);
-    this.#taskEndGraceTimer.unref?.();
-  }
-
-  #clearTaskEndGrace(): void {
-    if (this.#taskEndGraceTimer === undefined) return;
-    clearTimeout(this.#taskEndGraceTimer);
-    this.#taskEndGraceTimer = undefined;
   }
 
   #taskPanelRows(width: number, maxRows = Math.max(8, Math.floor(this.#height() / 2))): string[] {

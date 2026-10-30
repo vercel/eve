@@ -71,6 +71,6 @@ export default defineEval({
       count: 1,
     });
     live.messageIncludes("LIVE-LOOKUP");
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

@@ -43,11 +43,11 @@ export default defineChannel({
         });
         return Response.json({ created, ok: true, sessionId: session.id });
       }
-      const session = await address.send(body.message ?? "What did we agree on?", {
+      const delivery = await address.send(body.message ?? "What did we agree on?", {
         auth: AUTH,
         history: body.withBob === true ? [...BOB_LATER] : undefined,
       });
-      return Response.json({ ok: true, sessionId: session.id });
+      return Response.json({ ok: true, sessionId: delivery.sessionId });
     }),
   ],
 });

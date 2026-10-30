@@ -4,7 +4,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import type { SandboxSession } from "#shared/sandbox-session.js";
-import { writeSandboxFiles } from "#shared/sandbox-write-files.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import { resolveSandboxSkillRoot, resolveSandboxSkillWritePath } from "#shared/skill-paths.js";
 
@@ -18,13 +17,13 @@ export interface MaterializableSkillPackage {
   readonly description: string;
   readonly files: readonly NormalizedSkillPackageFile[];
   readonly license?: string;
-  readonly markdown: string;
+  readonly content: string;
   readonly metadata?: Readonly<Record<string, string>>;
   readonly name: string;
 }
 
-export function stripSkillFrontmatter(markdown: string): string {
-  return markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+export function stripSkillFrontmatter(content: string): string {
+  return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
 }
 
 /** Content hash over every package file, including `SKILL.md`. */
@@ -45,7 +44,7 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
 
   const files: NormalizedSkillPackageFile[] = [
     {
-      content: Buffer.from(input.markdown, "utf8"),
+      content: Buffer.from(input.content, "utf8"),
       relativePath: "SKILL.md",
     },
   ];
@@ -65,7 +64,7 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
     description: input.description,
     files,
     license: input.license,
-    markdown: input.markdown,
+    content: input.content,
     metadata: input.metadata === undefined ? undefined : { ...input.metadata },
     name: input.name,
   };
@@ -106,7 +105,7 @@ export async function writeSkillPackageToSandbox(input: {
       }),
     })),
   );
-  await writeSandboxFiles(input.sandbox, { files });
+  await input.sandbox.writeFiles({ files });
 }
 
 /**

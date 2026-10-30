@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
 import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
+import { readBuiltServerStartFailure } from "#shared/built-server-start-failure.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 /** Default time to wait for an eve server spawned by a framework integration. */
@@ -328,6 +329,7 @@ function startServerProcess(input: {
   readonly command: string;
   readonly cwd: string;
   readonly env?: Record<string, string>;
+  readonly listen?: { readonly host: string; readonly port: string; readonly retryHint: string };
   readonly logLabel?: string;
   readonly timeoutMs?: number;
 }): Promise<EveProcessHandle> {
@@ -355,7 +357,12 @@ function startServerProcess(input: {
       reject(new Error(`Timed out after ${timeoutMs}ms waiting for eve to print its server URL.`));
     }, timeoutMs);
 
+    let settled = false;
+    // Accumulated because a failure line can span several `data` chunks.
+    let startupOutput = "";
     const cleanup = () => {
+      settled = true;
+      startupOutput = "";
       clearTimeout(timeout);
       child.off("error", handleError);
       child.off("exit", handleEarlyExit);
@@ -379,7 +386,26 @@ function startServerProcess(input: {
       );
     };
     const handleOutput = (chunk: Buffer) => {
-      const origin = findLocalServerOrigin(chunk.toString("utf8"));
+      if (settled) {
+        return;
+      }
+
+      const text = chunk.toString("utf8");
+      startupOutput += text;
+      const startFailure =
+        input.listen === undefined
+          ? undefined
+          : readBuiltServerStartFailure(startupOutput, input.listen);
+
+      if (startFailure !== undefined) {
+        flushOutput();
+        cleanup();
+        child.kill();
+        reject(startFailure);
+        return;
+      }
+
+      const origin = findLocalServerOrigin(text);
 
       if (origin === undefined) {
         return;
@@ -456,6 +482,8 @@ export function startEveProductionServer(input: {
   readonly appRoot: string;
   readonly host: EveFrameworkHost;
   readonly origin: string;
+  /** How to pick another port, completing "stop it or ..." when the port is taken. */
+  readonly portRetryHint: string;
 }): Promise<EveProcessHandle> {
   const parsedOrigin = new URL(input.origin);
   const port = parsedOrigin.port;
@@ -477,6 +505,7 @@ export function startEveProductionServer(input: {
       NITRO_PORT: port,
       PORT: port,
     },
+    listen: { host: parsedOrigin.hostname, port, retryHint: input.portRetryHint },
   }).then(installProcessShutdown);
 }
 

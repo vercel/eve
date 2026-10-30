@@ -21,13 +21,13 @@ export default defineEval({
     // Then A still requires approval and the workflow cannot produce a final reply alone.
     const approval = requestFrom(parked, "change-a");
     parked.calledTool("workflow-draft", { status: "completed", count: 1 });
-    parked.notEvent("message.completed");
+    parked.notEvent("content.completed", { data: { kind: "text", phase: "reply" } });
     const session = parked.session;
     expectChangeStillUnexecuted(session);
 
     // When the user approves A.
     const live = await session.startRespond([
-      { requestId: approval.requestId, optionId: "approve" },
+      { interactionId: approval.interactionId, optionId: "approve" },
     ]);
 
     // Then both tools execute once and their combined reply completes the resumed turn.
@@ -35,7 +35,7 @@ export default defineEval({
       t,
       live,
       "Workflow draft status: ready. Change A resolved.",
-      approval.requestId,
+      approval.interactionId,
     );
     session.calledTool("change-a", { status: "completed", output: { executions: 1 }, count: 1 });
     session.calledTool("workflow-draft", { status: "completed", count: 1 });

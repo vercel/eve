@@ -17,7 +17,7 @@ export default defineEval({
     );
     turn.expectOk();
 
-    turn.notEvent("input.requested");
+    turn.notEvent("interaction.opened");
     turn.calledTool("loopback__publish_notice", {
       count: 1,
       output: mentions("needs a person's approval, which this MCP channel cannot ask for"),

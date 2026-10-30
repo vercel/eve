@@ -18,13 +18,13 @@ export default defineEval({
     const turn = await t.send("SKILL-LOAD dynamic-tenant-policy alpha house-rules");
 
     turn.expectOk();
-    turn.noFailedActions();
-    t.loadedSkill("dynamic-tenant-policy", {
+    turn.noFailedCalls();
+    t.calledSkill("dynamic-tenant-policy", {
       count: 1,
       output: new RegExp(DYNAMIC_SKILL_TOKEN, "u"),
     });
-    t.loadedSkill("alpha", { count: 1, output: new RegExp(DYNAMIC_MULTI_ALPHA_TOKEN, "u") });
-    t.loadedSkill("house-rules", {
+    t.calledSkill("alpha", { count: 1, output: new RegExp(DYNAMIC_MULTI_ALPHA_TOKEN, "u") });
+    t.calledSkill("house-rules", {
       count: 1,
       output: new RegExp(HOUSE_RULES_OVERRIDE_TOKEN, "u"),
     });

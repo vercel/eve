@@ -15,7 +15,7 @@ export interface NoReplyToolInput {
  * ```ts
  * import { noReply } from "eve/tools/no_reply";
  *
- * export default noReply();
+ * export default noReply;
  * ```
  *
  * A turn that ends with `no_reply` completes without a final message, so
@@ -26,25 +26,23 @@ export interface NoReplyToolInput {
  * This tool records an explicit choice to stay quiet and an optional reason
  * instead of relying on blank model output.
  */
-export function noReply(): ToolDefinition<NoReplyToolInput, string> {
-  return frameworkTool(
-    defineTool<NoReplyToolInput, string>({
-      availableInSubagents: false,
-      description: NO_REPLY_TOOL_DESCRIPTION,
-      endsTurn: true,
-      execute: () => "No reply was sent.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          reason: {
-            type: "string",
-            description:
-              "Why no reply is needed. Kept in the session history and traces; never sent.",
-          },
+export const noReply: ToolDefinition<NoReplyToolInput, string> = frameworkTool(
+  defineTool<NoReplyToolInput, string>({
+    availableInSubagents: false,
+    description: NO_REPLY_TOOL_DESCRIPTION,
+    endsTurn: true,
+    execute: () => "No reply was sent.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        reason: {
+          type: "string",
+          description:
+            "Why no reply is needed. Kept in the session history and traces; never sent.",
         },
-        additionalProperties: false,
       },
-    }),
-  );
-}
+      additionalProperties: false,
+    },
+  }),
+);
 import { frameworkTool } from "./framework-tool.js";

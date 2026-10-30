@@ -11,10 +11,11 @@ const {
   vercelOidc,
 } = vi.hoisted(() => ({
   createLinqAdapter: vi.fn(
-    (_config: {
-      credentials?: () => unknown | Promise<unknown>;
-      webhookVerifier?: (request: Request, rawBody: Uint8Array) => unknown;
-    }) => ({
+    (
+      _config: Parameters<
+        typeof import("#compiled/@linqapp/chat-sdk-adapter/index.js").createLinqAdapter
+      >[0],
+    ) => ({
       name: "linq",
     }),
   ),
@@ -38,7 +39,7 @@ vi.mock("#public/channels/chat-sdk/index.js", () => ({
     channel: { routes: [] },
     send,
   }),
-  messageToUserContent: (message: Message) => message.text,
+  messageContentOf: (message: Message) => message.text,
 }));
 vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
   createMemoryState: vi.fn(),
@@ -169,6 +170,20 @@ describe("linqChannel", () => {
     >("#compiled/@linqapp/chat-sdk-adapter/index.js");
 
     linqChannel({ credentials: { apiKey: "linq-api-key", webhookVerifier } });
+    const config = createLinqAdapter.mock.calls[0]?.[0];
+    if (config === undefined) throw new Error("Expected Linq adapter config.");
+    const response = await createRealLinqAdapter(config).handleWebhook(forgedWebhook());
+
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects default-verified webhooks signed by another environment of the project", async () => {
+    vercelOidc.mockReturnValue(async () => ({ principalType: "service", subject: "preview" }));
+    const { createLinqAdapter: createRealLinqAdapter } = await vi.importActual<
+      typeof import("#compiled/@linqapp/chat-sdk-adapter/index.js")
+    >("#compiled/@linqapp/chat-sdk-adapter/index.js");
+
+    linqChannel({ credentials: { apiKey: "linq-api-key" } });
     const config = createLinqAdapter.mock.calls[0]?.[0];
     if (config === undefined) throw new Error("Expected Linq adapter config.");
     const response = await createRealLinqAdapter(config).handleWebhook(forgedWebhook());

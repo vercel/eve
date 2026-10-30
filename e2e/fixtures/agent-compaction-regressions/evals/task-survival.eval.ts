@@ -12,7 +12,7 @@ export default defineEval({
         "Alice is updating the library's reading-list application. Please review the repository and confirm these requirements for Bob's handoff.",
         // Sized to a narrow window: long enough that a 280-char summarizer
         // input cap would destroy the tail sentinel, but short enough that
-        // the task alone cannot cross the fixture's ~640-token history budget —
+        // the task alone cannot cross the fixture's history budget —
         // otherwise compaction fires before the first model call and the
         // mock never generates pressure.
         [
@@ -29,7 +29,7 @@ export default defineEval({
     turn.expectOk();
     t.succeeded();
     t.calledTool("inspect-repository");
-    t.event("compaction.completed");
+    t.event("context.settled", { data: { kind: "compaction", outcome: "completed" } });
     t.messageIncludes(TASK_PRESERVED_MARKER);
   },
 });

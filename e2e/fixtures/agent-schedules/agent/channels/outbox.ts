@@ -16,7 +16,9 @@ export default defineChannel<
     });
   },
   events: {
-    "message.completed": ({ message }, channel) =>
-      recordCollectionDelivery(channel.scheduleName, message),
+    "content.completed": ({ data }, { channel }) => {
+      if (data.phase !== "reply" || typeof data.value !== "string") return;
+      recordCollectionDelivery(channel.scheduleName, data.value);
+    },
   },
 });

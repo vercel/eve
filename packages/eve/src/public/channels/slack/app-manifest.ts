@@ -10,10 +10,24 @@ interface SlackAppManifestBuildDefinition {
 
 export function defineSlackAppManifest(input: {
   readonly botName?: string;
+  /** Adds the scopes, events, and feature flag Slack code channels need. */
+  readonly codeChannels?: boolean;
+  /** Adds the `users:read` scope `messageContext.users` needs for names. */
+  readonly users?: boolean;
+  /** Adds the `users:read.email` scope `messageContext.users.email` needs. */
+  readonly userEmails?: boolean;
 }): SlackAppManifestBuildDefinition {
   return {
     build(channelName) {
       const name = (input.botName ?? channelName).slice(0, 35);
+      const botScopes = [
+        "app_mentions:read" as const,
+        "chat:write" as const,
+        ...(input.users === true ? (["users:read"] as const) : []),
+        ...(input.users === true && input.userEmails === true
+          ? (["users:read.email"] as const)
+          : []),
+      ];
       const manifest = {
         $type: SLACK_APP_MANIFEST_TYPE,
         display_information: { name },
@@ -25,7 +39,7 @@ export function defineSlackAppManifest(input: {
           },
           bot_user: { display_name: name },
         },
-        oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
+        oauth_config: { scopes: { bot: botScopes } },
         settings: {
           event_subscriptions: { bot_events: ["app_mention"] },
           org_deploy_enabled: false,
@@ -33,7 +47,43 @@ export function defineSlackAppManifest(input: {
           token_rotation_enabled: false,
         },
       } satisfies AppsManifestCreateArguments["manifest"];
-      return manifest;
+      return input.codeChannels === true ? withCodeChannels(manifest) : manifest;
     },
   };
+}
+
+// @slack/web-api's manifest types predate code channels.
+function withCodeChannels(manifest: {
+  readonly features: object;
+  readonly oauth_config: { readonly scopes: { readonly bot: readonly string[] } };
+  readonly settings: { readonly event_subscriptions: { readonly bot_events: readonly string[] } };
+}): JsonObject {
+  return {
+    ...manifest,
+    features: { ...manifest.features, code_channels: { enabled: true } },
+    oauth_config: {
+      scopes: {
+        bot: [
+          ...manifest.oauth_config.scopes.bot,
+          "channels:history",
+          "channels:read",
+          "code_channels:manage",
+          "groups:history",
+          "groups:read",
+          "im:read",
+          "mpim:read",
+        ],
+      },
+    },
+    settings: {
+      ...manifest.settings,
+      event_subscriptions: {
+        bot_events: [
+          ...manifest.settings.event_subscriptions.bot_events,
+          "agent_session_stopped",
+          "message.session",
+        ],
+      },
+    },
+  } as JsonObject;
 }

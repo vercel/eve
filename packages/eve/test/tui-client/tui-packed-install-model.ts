@@ -69,7 +69,7 @@ void (async () => {
     const tarballPath = join(consumerRoot, "eve.tgz");
 
     // `--config.ignore-scripts=true` skips `prepack` (a full rebuild): the
-    // `test:tui` script already built `dist`, and packing must stay faithful
+    // `test:tui` script already built the package, and packing must stay faithful
     // to it. pnpm still resolves `catalog:` ranges in the packed manifest.
     await exec("pnpm", ["pack", "--config.ignore-scripts=true", "--out", tarballPath], packageRoot);
     console.log(theme.muted("[tui-packed-install] packed eve tarball"));

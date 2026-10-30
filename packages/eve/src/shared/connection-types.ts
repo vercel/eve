@@ -8,6 +8,7 @@ import type { ConnectionEventsBackend } from "#shared/connection-events.js";
 
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type { SessionContext } from "#context/session-context.js";
+import type { ApprovedCall } from "#tools/definition.js";
 import type { JsonValue } from "#shared/json.js";
 
 /**
@@ -41,11 +42,27 @@ export interface TokenResult {
  */
 export type ConnectionProtocol = "mcp" | "openapi";
 
+/**
+ * Context passed to a connection's `headers` and `toolCall.providedArguments`
+ * callbacks.
+ */
+export interface ConnectionCallbackContext extends SessionContext {
+  /**
+   * Who approved the tool call these values are for. Present only while a
+   * connection tool call runs after a person approved it. The call still runs
+   * as the requester, `session.auth.current`, and its `auth` token is still
+   * the requester's. `approval.responder.getToken(provider)` resolves the
+   * approver's token as it does in a `defineTool` tool, so a callback can send
+   * the approver's credentials where the server should act for them.
+   */
+  readonly approval?: ApprovedCall;
+}
+
 /** A single header value, supporting static strings and per-caller resolution. */
 export type HeaderValue =
   | string
   | Promise<string>
-  | ((ctx: SessionContext) => string | Promise<string>);
+  | ((ctx: ConnectionCallbackContext) => string | Promise<string>);
 
 /**
  * Arbitrary HTTP headers sent with every request to a connection server.
@@ -53,13 +70,14 @@ export type HeaderValue =
  * Static form: key-value pairs where each value may be a string, Promise,
  * or callback. Function form: a callback returning the full headers map,
  * useful when multiple headers must be resolved together. Header callbacks
- * receive the active {@link SessionContext}, so credentials and routing
- * metadata can be selected from the current caller.
+ * receive the active {@link ConnectionCallbackContext}, so credentials and
+ * routing metadata can be selected from the current caller, or from the
+ * approver of an approved tool call.
  */
 export type HeadersDefinition =
   | Readonly<Record<string, HeaderValue>>
   | ((
-      ctx: SessionContext,
+      ctx: ConnectionCallbackContext,
     ) => Readonly<Record<string, string>> | Promise<Readonly<Record<string, string>>>);
 
 /**
@@ -142,7 +160,7 @@ export interface ConnectionAuthorizationContext {
  * 1. **`getToken`-only**: the runtime probes {@link getToken} per
  *    tool invocation. Throwing
  *    {@link ConnectionAuthorizationRequiredError} emits a
- *    `authorization.required` event; the workflow does
+ *    sign-in `interaction.opened` event; the workflow does
  *    not suspend on a webhook. Works for both `"app"` and `"user"`
  *    principal types.
  * 2. **Full interactive OAuth**: all three methods provided. The
@@ -165,38 +183,6 @@ export type AuthorizationDefinition<Resume extends JsonValue = JsonValue> =
   | NonInteractiveAuthorizationDefinition
   | InteractiveAuthorizationDefinition<Resume>;
 
-/** Declares whether a connection credential belongs to the agent or end user. */
-export type CredentialOwner = "app" | "user";
-
-type NonInteractiveCredentialOwner =
-  | {
-      readonly credentialOwner?: CredentialOwner;
-      readonly principalType?: never;
-    }
-  | {
-      readonly credentialOwner?: never;
-      /**
-       * @deprecated Use `credentialOwner` for connection credential ownership.
-       * Session auth continues to use `principalType`.
-       */
-      readonly principalType?: CredentialOwner;
-    };
-
-/**
- * Auth provider returned directly from or resolved by a connection's `auth`
- * field.
- *
- * Identical to {@link AuthorizationDefinition} except the
- * non-interactive form may omit `credentialOwner`; normalization
- * defaults it to `"app"`. Its legacy `principalType` remains supported
- * and deprecated for compatibility. Interactive definitions continue to
- * use `principalType: "user"`. The resolved token is sent as
- * `Authorization: Bearer <token>`.
- */
-export type ConnectionAuthProvider =
-  | (Omit<NonInteractiveAuthorizationDefinition, "principalType"> & NonInteractiveCredentialOwner)
-  | AuthorizationDefinition;
-
 /**
  * Resolves a connection auth provider from the active turn.
  *
@@ -206,14 +192,14 @@ export type ConnectionAuthProvider =
  */
 export type ConnectionAuthResolver = (
   ctx: SessionContext,
-) => ConnectionAuthProvider | Promise<ConnectionAuthProvider>;
+) => AuthorizationDefinition | Promise<AuthorizationDefinition>;
 
 /**
  * Protocol-agnostic `auth` shape accepted by every connection `define*`
  * factory. Pass a provider directly for static configuration, or a resolver
  * to select the provider from the current caller's session context.
  */
-export type ConnectionAuthDefinition = ConnectionAuthProvider | ConnectionAuthResolver;
+export type ConnectionAuthDefinition = AuthorizationDefinition | ConnectionAuthResolver;
 
 /**
  * Fields shared by every {@link AuthorizationDefinition} shape.
@@ -235,7 +221,7 @@ interface AuthorizationDefinitionBase {
    *   no authenticated user. The token cache keys on a JSON tuple of
    *   the issuer and id so concurrent users never share tokens.
    */
-  readonly principalType: "app" | "user";
+  readonly principalType?: "app" | "user";
 
   /**
    * Optional metadata marker attached by `connect()` from
@@ -308,7 +294,7 @@ export interface NonInteractiveAuthorizationDefinition extends AuthorizationDefi
    * tool invocation. Throw
    * {@link ConnectionAuthorizationRequiredError} to signal that the
    * user must complete authorization out of band; the runtime emits
-   * `authorization.required` and does not suspend on a
+   * sign-in `interaction.opened` and does not suspend on a
    * webhook.
    */
   getToken(opts: {
@@ -342,7 +328,7 @@ export interface InteractiveAuthorizationDefinition<
    * a {@link TokenResult} lets the tool run. Throwing
    * {@link ConnectionAuthorizationRequiredError} signals that the
    * user must complete an authorization flow; the runtime emits a
-   * `authorization.required` event and suspends the turn
+   * sign-in `interaction.opened` event and suspends the turn
    * on a framework-owned webhook while it runs
    * {@link startAuthorization}.
    */
@@ -354,7 +340,7 @@ export interface InteractiveAuthorizationDefinition<
   /**
    * Start an authorization flow. Invoked inside a durable step after the
    * runtime mints a framework-owned callback URL. Returns the user-facing
-   * `challenge` (forwarded verbatim on `authorization.required`) and an
+   * `challenge` (forwarded verbatim on sign-in `interaction.opened`) and an
    * optional serializable `resume` value (e.g. a PKCE verifier) that the
    * runtime journals and hands back to {@link completeAuthorization} when
    * the callback URL receives the provider redirect. Omit `resume` when
@@ -447,6 +433,11 @@ export interface ConnectionToolMetadata {
   readonly description: string;
   readonly inputSchema: Record<string, unknown>;
   readonly name: string;
+  /**
+   * The OpenAPI `operationId` the tool was generated from. The tool name is a
+   * sanitized form of it, so connection filters match both.
+   */
+  readonly operationId?: string;
   readonly outputSchema?: Record<string, unknown>;
 }
 

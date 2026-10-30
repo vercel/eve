@@ -17,8 +17,9 @@ import { executeEval } from "#evals/runner/execute-eval.js";
 
 function createTaskResult(label: string): EveEvalTaskResult {
   return {
-    output: label,
-    finalMessage: label,
+    sessionEnded: false,
+    data: label,
+    reply: label,
     status: "completed",
     events: [],
     derived: createEmptyDerivedFacts(),
@@ -56,7 +57,7 @@ function createEval(overrides: Partial<EveEval> = {}): EveEval {
 
 // `executeTask` is mocked in these tests, so the client never reaches the
 // network. We pass a real `Client` instance to satisfy the type.
-const unusedClient = new Client({ host: "http://localhost" });
+const unusedClient = new Client({ baseUrl: "http://localhost" });
 
 const localTarget = createEvalTargetHandle({
   capabilities: { devRoutes: true },

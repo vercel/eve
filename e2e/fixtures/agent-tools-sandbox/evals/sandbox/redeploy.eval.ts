@@ -88,7 +88,7 @@ export default defineEval({
       // the dynamic callback in the new process before the model calls it.
       const dynamicParked = await t.send("DYNAMIC-TURN-REPLAY-START");
       const dynamicSession = dynamicParked.session;
-      dynamicSession.requireInputRequest({
+      dynamicSession.requireInteraction({
         display: "confirmation",
         optionIds: ["approve", "cancel"],
         toolName: "dynamic-turn-replay-gate",
@@ -150,7 +150,7 @@ export default defineEval({
         `Load the \`${SKILL_NAME}\` skill and follow its instructions exactly.`,
       );
       skill.expectOk();
-      skill.loadedSkill(SKILL_NAME);
+      skill.calledSkill(SKILL_NAME);
       skill.messageIncludes(SKILL_TOKEN);
     } finally {
       await writeFile(INSTRUCTIONS_PATH, originalInstructions);

@@ -80,6 +80,7 @@ describe("vercelScheduleProvider", () => {
       expect(new Headers(init?.headers).get("Authorization")).toBe(
         `Bearer ${local ? "local-token" : oidcToken}`,
       );
+      expect(new Headers(init?.headers).get("x-vss-framework")).toBe("eve");
     },
   );
 

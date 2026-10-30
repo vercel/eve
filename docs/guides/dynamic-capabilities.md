@@ -1,504 +1,248 @@
 ---
 title: "Dynamic Capabilities"
-description: "Resolve models, subagents, connections, tools, skills, and instructions at runtime with defineDynamic resolver events."
+description: "Compute models, subagents, connections, tools, skills, and instructions from the session with defineDynamic."
 ---
 
-`defineDynamic` resolves the model, subagents, connections, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capability isn't known until the session starts, because it hinges on who the caller is, what tenant they belong to, feature flags, or external data. The [subagents](../subagents), [connections](../connections), [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
+`defineDynamic(fn)` builds a model, subagent, connection, tool, skill, or instructions from the caller, the conversation, or external data. The function returns the definition, or `null` to leave it out. Import `defineDynamic` from `eve` or from the entry point of what you define, such as `eve/tools`.
 
-eve evaluates a dynamic definition module once during compilation to classify and validate it, then retains that module as a runtime entry so its event handlers can run. Its top-level code therefore runs in both phases; keep caller-specific work inside the handlers. See [Authored module lifecycle](../reference/typescript-api#authored-module-lifecycle).
+eve runs the function before every ordinary model call, including when a turn continues after steering, a sign-in, or an approval. It doesn't run for compaction's summary call or `auto()`'s routing call. Introspection reads the values it last returned.
 
-## Dynamic models
+The module's top-level code runs at build time and at runtime, so keep caller-specific work inside the function. See [Authored module lifecycle](../reference/typescript-api#authored-module-lifecycle).
 
-The `model` field in `agent.ts` accepts `defineDynamic({ events })`. Resolvers
-run at `session.started`, `turn.started`, or `step.started` (precedence: step >
-turn > session). Every matching handler must return a concrete model. A
-missing, invalid, or throwing selection fails the turn before model-dependent
-work begins. Prefer `session.started` — prompt caches are per model, so
-switching mid-session re-ingests the conversation at uncached prices. See
-[agent configuration](../agent-config#choose-the-model-dynamically) for the
-full contract.
+## Context and memoization
 
-Dynamic models do not compile a default model or model metadata. When a
-resolver first selects a model, eve normalizes the selection and resolves any
-omitted context-window metadata from the AI Gateway catalog. Dynamic connections,
-tools, skills, instructions, and subagents may return `null` to omit a capability.
+Every dynamic function receives:
 
-### Route image inputs to a vision model
+| Field                     | Contents                                                                                                                                |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `ctx.session`             | Session ID, authenticated caller and initiator, and optional schedule and predecessor.                                                  |
+| `ctx.session.parent`      | In a delegated session: the parent session, its turn, the call that opened this session, and `rootSessionId`. Absent in a root session. |
+| `ctx.channel`             | Channel kind, continuation token, and metadata. Narrow typed metadata with `isChannel`.                                                 |
+| `ctx.view`                | Read-only view of the session so far. Read it with selectors from `eve/events`, such as `turns(ctx.view)`.                              |
+| `ctx.turn`                | Latest turn, with its ID, input, and status; `null` before the first turn.                                                              |
+| `ctx.now`                 | Time of the latest recorded session event, as a `Date`.                                                                                 |
+| `ctx.model.id`            | Selected model ID. Unavailable inside the `model` field, before the model is chosen.                                                    |
+| `await ctx.messages()`    | The conversation so far, assembled only when you call it.                                                                               |
+| `await ctx.memo(key, fn)` | A saved JSON result for a key.                                                                                                          |
 
-Use `step.started` when model choice depends on the current messages. This
-keeps GLM for text and switches to Gemini Flash when user history contains an
-image:
-
-```ts title="agent/agent.ts"
-import { defineAgent, defineDynamic } from "eve";
-
-export default defineAgent({
-  model: defineDynamic({
-    events: {
-      "step.started": (_event, ctx) => {
-        const hasImage = ctx.messages.some(
-          (message) =>
-            message.role === "user" &&
-            Array.isArray(message.content) &&
-            message.content.some(
-              (part) =>
-                part.type === "image" ||
-                (part.type === "file" &&
-                  (part.mediaType === "image" || part.mediaType.startsWith("image/"))),
-            ),
-        );
-
-        return hasImage ? "google/gemini-3.5-flash" : "zai/glm-5.2";
-      },
-    },
-  }),
-});
-```
-
-eve stages byte-backed `file` parts under `/workspace/.eve/attachments` before
-`step.started`, but keeps their media type in `ctx.messages`. When an image
-reaches the provider, vision models can process it and non-vision models reject
-it. eve does not reroute automatically. See [Inbound
-attachments](../sandbox#inbound-attachments).
-
-## Dynamic subagents
-
-Wrap a declared subagent's own `agent.ts` in `defineDynamic` when its
-availability depends on the caller, tenant, environment, or a feature flag.
-Return the child definition to configure and expose it. Return `null` to omit
-it from the parent's model-visible tools.
-
-The example below exposes a finance subagent to enterprise callers and gives
-it the model that the parent would use at that point:
-
-```ts title="agent/subagents/finance/agent.ts"
-import { defineAgent, defineDynamic } from "eve";
-
-export default defineDynamic({
-  events: {
-    "session.started": (_event, ctx) => {
-      if (ctx.session.auth.current?.attributes.plan !== "enterprise") {
-        return null;
-      }
-
-      return defineAgent({
-        description: "Analyze financial and accounting data.",
-        model: ctx.model ? ctx.model.id : "openai/gpt-5.5-mini",
-      });
-    },
-  },
-});
-```
-
-`ctx.model` is the parent's effective model when the resolver runs. In this
-example, this dynamic subagent uses the parent's effective model when it is
-available falls back to `openai/gpt-5.5-mini` if the parent has not selected
-one yet. The returned child config snapshots the model ID; a later parent
-model change does not retarget the child.
-
-eve always compiles the subagent's filesystem resources, including its
-instructions, tools, skills, connections, sandbox, and nested subagents. It
-does not compile an agent config or placeholder model for a dynamic subagent.
-When the resolver selects the subagent, eve combines the returned config with
-those resources before starting the child session. Each resolution can return
-a different model or other runtime agent settings. A returned local config
-must use a static model; it cannot contain another `defineDynamic` model.
-Runtime-selected models must use string model IDs. Put build configuration on
-the outer `defineDynamic` definition; build and Workflow-world configuration
-cannot be selected in a handler result.
-
-A single-file remote subagent uses the same lifecycle. Return
-`defineRemoteAgent(...)` to expose the selected deployment, or `null` to omit it:
-
-```ts title="agent/subagents/finance.ts"
-import { defineDynamic, defineRemoteAgent } from "eve";
-
-export default defineDynamic({
-  events: {
-    "session.started": (_event, ctx) =>
-      ctx.session.auth.current?.attributes.plan === "enterprise"
-        ? defineRemoteAgent({
-            description: "Analyze financial and accounting data.",
-            url: "https://finance-agent.example.com",
-          })
-        : null,
-  },
-});
-```
-
-The returned remote definition can change its URL, path, headers, auth, and
-principal forwarding. Function-valued URLs resolve when the
-dynamic event runs. Auth and headers remain lazy and resolve before each
-outbound request without entering durable workflow state.
-
-Dynamic subagents support `session.started` and `turn.started`. A turn selection
-shadows the session selection for that turn, including when the turn handler
-returns `null`. If a resolver throws or returns an invalid definition, eve logs the
-failure and omits the subagent.
-
-The resolved set applies to local and remote direct delegation. An authored workflow tool can
-also call a selected subagent through `ctx.agent`. A generated program can call it through the
-provided `workflow` tool. eve checks availability again before starting the child, so a stale or
-manually constructed call fails: a subagent tool call with `SUBAGENT_UNAVAILABLE`, and a
-`ctx.agent` session's first `send()` with an error saying the subagent is not available. Treat conditional
-availability as capability composition, not as the only authorization
-boundary: sensitive child tools still need their own authorization and
-approval checks.
-
-## Dynamic connections
-
-Use a dynamic connection when the available MCP servers or OpenAPI services
-depend on the authenticated caller. A handler returns one
-`defineMcpClientConnection(...)` or `defineOpenAPIConnection(...)`, a map of
-connection definitions, or `null`. Wrap every returned connection in its
-protocol helper. Connection resolvers receive `ctx.session` and
-`ctx.channel.kind`; they do not receive conversation messages, delivery
-payloads, tool inputs, model outputs, continuation tokens, or free-form channel
-metadata. Select accounts and endpoints from authenticated session identity or
-application-owned data.
-
-This example exposes one MCP connection for each cloud account enabled for the
-current user:
-
-```ts title="agent/connections/accounts.ts"
-import { defineDynamic, defineMcpClientConnection } from "eve/connections";
-import { listEnabledAccounts, mintAccountToken } from "../lib/accounts";
-
-export default defineDynamic({
-  events: {
-    "session.started": async (_event, ctx) => {
-      const principal = ctx.session.auth.current;
-      if (principal?.principalType !== "user") return null;
-
-      const accounts = await listEnabledAccounts(principal);
-      return Object.fromEntries(
-        accounts.map((account) => [
-          account.slug,
-          defineMcpClientConnection({
-            url: "https://mcp.cloud.example.com",
-            description: `${account.label} (${account.accountId})`,
-            instanceKey: account.accountId,
-            auth: {
-              credentialOwner: "user",
-              getToken: ({ principal }) => mintAccountToken(principal, account),
-            },
-          }),
-        ]),
-      );
-    },
-  },
-});
-```
-
-The returned definitions use the same auth, headers, filtering, provided
-arguments, and approval options as static [MCP](../connections/mcp) and
-[OpenAPI](../connections/openapi) connections. Each resolved connection joins
-the per-step connection registry. eve announces it to the model in an
-append-only context message, and the model reaches its tools through
-`eve__search` and `eve__tool`. If the session doesn't have those two tools yet,
-eve adds them when its first connection resolves and keeps them for the rest of
-the session, so later connections don't change the tool list.
-
-Set `instanceKey` on every authenticated dynamic connection. Use a stable,
-non-secret account or tenant identifier, and change it whenever the endpoint,
-account, or auth provider changes. eve hashes the value before storing the
-resolved instance identity in durable authorization state. If a parked sign-in
-callback resumes after the resolver selects a different instance, eve rejects
-the callback instead of passing it to the new connection or reusing its token.
-
-### Naming and conflicts
-
-| Return shape                  | File                            | Connection name(s)      |
-| ----------------------------- | ------------------------------- | ----------------------- |
-| single connection definition  | `agent/connections/accounts.ts` | `accounts`              |
-| map `{ production, staging }` | `agent/connections/accounts.ts` | `production`, `staging` |
-
-A map key must be a legal connection name: lowercase ASCII letters, digits,
-and dashes, starting with a letter, up to 64 characters. Map keys are bare;
-eve does not prefix them with the file slug. A dynamic connection overrides a
-same-named static connection. Two effective dynamic resolvers cannot emit the
-same name; namespace one map key to remove the ambiguity.
-
-A connection owns its name and every name that starts with `<name>__`. When a
-dynamic connection resolves, eve rejects it if its name is, or is the `__`
-prefix of, one of the agent's tools, subagents, current dynamic tools, or
-other connections. Dynamic tools and dynamic subagents get the same check when
-they resolve. The error names both sides.
-
-### Events and recovery
-
-Dynamic connections support `session.started` and `turn.started`. A turn result
-replaces that file's session result for the turn, including when the turn
-handler returns `null`. A throwing or invalid handler fails the current turn
-and parks the session, so a later message can retry after the dependency
-recovers. The failed lifecycle does not rebuild the registry, so a static
-connection shadowed by the dynamic result cannot reappear as a fallback.
-
-Recovery needs another message. eve does not keep the input from the failed
-turn or replay it, so the caller must send it again once the dependency is
-back. This applies to the first message of a session too. A scheduled run
-whose resolver fails is not retried; the session stays idle until the next
-scheduled run or message arrives.
-
-eve may run the active session and turn handlers again when a parked turn
-resumes or a durable step retries. This rebuilds live auth, header, approval,
-and provided-argument callbacks without serializing them into workflow state.
-Keep connection resolvers idempotent, and keep external side effects outside
-the handler.
-
-## Dynamic tools
-
-Pass `defineDynamic` an `events` object whose handlers return either a single `defineTool(...)`, a `Record<string, defineTool(...)>`, or `null` for no tools. Wrap every entry in `defineTool()`. eve records durable descriptors for `execute`, approval request and response policies, input-scoped `approvalKey` callbacks, and `toModelOutput`, so a parked call can reconstruct the same callbacks in a fresh process.
-
-Dynamic tool executors receive the same `ToolContext` as static authored tools, including inline provider auth through `ctx.getToken(provider)` and `ctx.requireAuth(provider)`.
-
-The example below builds one tool per warehouse table. A map return names each tool by its bare key, so the model sees `orders`, `users`, and so on.
+Code outside a memo runs every time eve runs the function. Put a fetch or decision inside a memo when its answer should stay fixed for a key:
 
 ```ts title="agent/tools/query.ts"
 import { defineDynamic, defineTool } from "eve/tools";
 import { z } from "zod";
 import { listTables, runReadOnly } from "../lib/warehouse";
 
-export default defineDynamic({
-  events: {
-    "session.started": async (_event, ctx) =>
-      Object.fromEntries(
-        (await listTables()).map((t) => [
-          t.name,
-          defineTool({
-            description: `Query ${t.name}. Columns: ${t.columns.join(", ")}`,
-            inputSchema: z.object({ sql: z.string() }),
-            execute: ({ sql }) => runReadOnly(t.name, sql),
-          }),
-        ]),
-      ),
-  },
+export default defineDynamic(async (ctx) => {
+  const tables = await ctx.memo(ctx.session.id, listTables);
+  return Object.fromEntries(
+    tables.map((table) => [
+      table.name,
+      defineTool({
+        description: `Query ${table.name}. Columns: ${table.columns.join(", ")}`,
+        inputSchema: z.object({ sql: z.string() }),
+        execute: ({ sql }) => runReadOnly(table.name, sql),
+      }),
+    ]),
+  );
 });
 ```
 
-An entry with `deferred: true` stays out of the model's tool list, like a static [deferred tool](../tools#keep-a-tool-out-of-the-tool-list). The model finds it with `eve__search` and calls it with `eve__tool`. If the session doesn't have those two tools yet, eve adds them on the first step where a resolver returns a deferred entry, and keeps them for the rest of the session. A resolver whose entries are all listed adds neither, so the model doesn't spend steps searching for tools it already has.
+After a cold start, eve runs the function again. The memo returns the saved tables without querying the database, and ordinary code rebuilds the tools and their callbacks.
+
+### Choose a lifetime
+
+| Key                    | Observation runs                            |
+| ---------------------- | ------------------------------------------- |
+| No memo                | Every run of the function                   |
+| `ctx.turn?.id ?? null` | Once per turn                               |
+| `ctx.session.id`       | Once per session, until a deployment change |
+| A caller or tenant ID  | When that key changes                       |
+
+The key sets a lifetime, not a dependency list. A change in context that the callback reads doesn't clear a saved result.
+
+### Memo rules
+
+- Keys compare as canonical JSON. A top-level `undefined` key means `null`; `undefined` inside a key is rejected. Use `tenantId ?? null` to represent a missing value explicitly. A key is at most 64 KB and a result at most 1 MB. Save plain JSON, not clients, functions, dates, or schemas.
+- Each definition or hook retains at most 4 MB of memo JSON, including keys. Memoize a collection rather than each row, and keep IDs instead of whole records.
+- Identity includes the session and mounted definition. Separate files do not share memo results.
+- Give multiple memos distinct keys, usually tuples such as `["tables", tenantId]` and `["flags", ctx.turn?.id ?? null]`. Reusing a key in one run of the function throws.
+- eve keeps only the keys that the latest successful run used. A skipped branch loses its saved results; returning to it runs the callback again.
+- A failing memo keeps no result. Successful memos survive a later error in the definition if they fit alongside its earlier memo results. If they don't fit within 4 MB, eve keeps the earlier results, and the new memos run again next time.
+- Deployment changes discard memos. Memos are a cache, not a record of side effects.
+- Memos can run concurrently with `Promise.all`, but cannot nest. Await every memo before returning.
+- Memo results are saved privately with the session and never appear on the stream.
+
+A memo callback receives `{ idempotencyKey, abortSignal }`. Pass `idempotencyKey` to an external service that supports idempotency, because an interrupted step can run again before eve saves its result. The key is stable per session, definition, and memo key. It repeats when a deployment change or skipped branch runs the memo again, so send your own key when a run needs a fresh response. Perform side effects in [hooks](./hooks) or tool execution, not while computing a definition.
+
+## Dynamic models
+
+The agent's `model` field accepts a dynamic function that returns a model ID, a provider instance, or a selection containing `model` and optional model settings. A missing or invalid model fails the turn. `ctx.model` is unavailable here.
+
+```ts title="agent/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+
+export default defineAgent({
+  model: defineDynamic(async (ctx) => {
+    const hasImage = (await ctx.messages()).some(
+      (message) =>
+        message.role === "user" &&
+        Array.isArray(message.content) &&
+        message.content.some(
+          (part) =>
+            part.type === "image" || (part.type === "file" && part.mediaType.startsWith("image/")),
+        ),
+    );
+    return hasImage ? "google/gemini-3.5-flash" : "zai/glm-5.2";
+  }),
+});
+```
+
+Changing models can reduce prompt-cache reuse. Use a session- or turn-keyed memo for a decision that should stay fixed. See [Choose the model dynamically](../agent-config#choose-the-model-dynamically).
+
+## Dynamic subagents
+
+A declared subagent's `agent.ts` can return a child configuration or `null`:
+
+```ts title="agent/subagents/finance/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+
+export default defineDynamic((ctx) =>
+  ctx.session.auth.current?.attributes.plan === "enterprise"
+    ? defineAgent({ description: "Analyze financial data.", model: ctx.model.id })
+    : null,
+);
+```
+
+The child's tools, instructions, skills, and nested subagents still build from the filesystem; the returned config supplies runtime settings. A local child config requires a string model ID. Put build settings such as `build.externalDependencies` on the root agent, because build and Workflow world settings can't be chosen at runtime.
+
+A single-file remote subagent returns `defineRemoteAgent(...)` or `null`. Compute the URL string in the function. Credentials can use memo results, and later requests to the same child rebuild them from the session as it was when the child opened. See [Dynamic remote agents](./remote-agents#dynamic-remote-agents) for the rebuild rules.
+
+Hiding a subagent doesn't authorize anything: sensitive child tools still need authorization and approval checks.
+
+## Dynamic connections
+
+Return a `defineMcpClientConnection(...)`, a `defineOpenAPIConnection(...)`, a map of definitions, or `null`. Select accounts and endpoints from authenticated identity or application-owned data, not untrusted conversation URLs.
+
+```ts title="agent/connections/accounts.ts"
+import { defineDynamic, defineMcpClientConnection } from "eve/connections";
+import { listEnabledAccounts, mintAccountToken } from "../lib/accounts";
+
+export default defineDynamic(async (ctx) => {
+  const principal = ctx.session.auth.current;
+  if (principal?.principalType !== "user") return null;
+  const accounts = await ctx.memo(principal, () => listEnabledAccounts(principal));
+  return Object.fromEntries(
+    accounts.map((account) => [
+      account.slug,
+      defineMcpClientConnection({
+        url: "https://mcp.cloud.example.com",
+        description: account.label,
+        instanceKey: account.accountId,
+        auth: {
+          principalType: "user",
+          getToken: ({ principal }) => mintAccountToken(principal, account),
+        },
+      }),
+    ]),
+  );
+});
+```
+
+The memo saves account metadata, not tokens; auth and header callbacks run when needed. Set `instanceKey` to a stable, non-secret account identifier, and change it when the endpoint, account, or auth provider changes. eve rejects a waiting sign-in callback if its connection's name, URL, or `instanceKey` changed.
+
+Dynamic connections take the same filtering, provided arguments, and approval options as static [MCP](../connections/mcp) and [OpenAPI](../connections/openapi) connections. Each run refreshes connection callbacks and may replace clients, so don't rely on a dynamic MCP protocol session surviving between model calls. Models discover connection tools through `eve__search` and call them through `eve__tool`.
+
+## Dynamic tools
+
+Return a single `defineTool(...)`, a map of tools, or `null`. Executors receive the same `ToolContext` as static tools, including `ctx.getToken` and `ctx.requireAuth`. Validators, including refinements and transformations, and an `endsTurn` function run as they do on a static tool.
 
 ### Author replayable callbacks
 
-Write callback properties as inline function expressions, arrows, method shorthand, or module-level function references. eve transforms authored modules that import `defineTool`, including helper modules outside `agent/tools/`, and stores each callback's referenced closure values independently.
-
-Closure values must be JSON-serializable. Plain objects, arrays, strings, finite numbers, booleans, and `null` are supported; `undefined` object properties are omitted. Functions, class instances, `Date`, `Map`, symbols, non-finite numbers, and cyclic values fail resolution with the tool name and callback phase instead of being serialized lossily.
-
-Dynamic tools preserve authored input and output validation, including Zod refinements and transformations. JSON Schema describes the tool to the model; the authored validator checks its input and output. eve transforms inline `inputSchema` and `outputSchema` expressions into schema factories and snapshots the JSON-serializable values they capture, just as it does for callbacks.
-
-Write schemas inline in `defineTool()`, or reference a stable module-level schema. A schema stored in a resolver-local variable is a non-serializable capture; inline its construction instead. Schema factories must be synchronous and deterministic for their captured values. Keep external reads in the resolver and capture the resulting JSON data. Imported functions and module-level values remain live code, so they must not hide per-session state.
-
-Schema factories use the same session, scope, resolver entry, and recovery rules as the tool's callbacks. A recovered factory receives its original captures, even if re-running the resolver produces different values. If a required factory is missing, validation fails explicitly; eve does not substitute its JSON Schema description.
-
-Call expressions such as `execute: makeExecutor()` are not transformed. Put the callback body directly in `defineTool()` inside an authored module; eve rejects a dynamic tool if a callback lacks durable metadata.
+Build callbacks and schemas with ordinary code. Save observations in memos when a fresh process must rebuild from the same data, because values fetched outside a memo are fetched again. Avoid `Math.random()` and `Date.now()` in declarations unless memoized; use `ctx.now` for commit time.
 
 ### Create dynamic tools in a package
 
-Prefer an [extension](../extensions) for reusable eve integrations. Extensions contribute a namespaced set of capabilities that consumers can override. Author the final `defineTool()` calls in the extension source. Then build the package with `eve extension build` so eve transforms its callbacks.
-
-Use `defineDurableCallback` when a provider package must return dynamic `defineTool()` values directly. eve cannot transform callback code inside an installed dependency. Put every per-tool value in the helper's `closure`. The callback receives that snapshot as its first argument. The closure follows the same JSON-serializability rules as transformed captures.
-
-```ts title="provider-package/search.ts"
-import { defineDurableCallback, defineTool } from "eve/tools";
-import { z } from "zod";
-
-interface SearchInput {
-  query: string;
-}
-
-export function createSearchTool(baseUrl: string) {
-  return defineTool({
-    description: "Search the provider catalog.",
-    inputSchema: z.object({ query: z.string() }),
-    execute: defineDurableCallback({
-      closure: { baseUrl },
-      callback: async ({ baseUrl }, { query }: SearchInput) => {
-        const response = await fetch(`${baseUrl}/search?q=${encodeURIComponent(query)}`);
-        return response.json();
-      },
-    }),
-  });
-}
-```
-
-Wrap every callback property with the helper. This includes labels, approval policies, `approvalKey`, `execute`, and `toModelOutput`.
-
-For live schemas created in a provider package, use `defineDurableSchema` from `eve/tools`. Put the schema's per-tool values in `closure` and construct the schema in `schema`. Plain JSON Schema objects need no helper.
-
-```ts
-import { defineDurableSchema } from "eve/tools";
-import { z } from "zod";
-
-export function amountSchema(limit: number) {
-  return defineDurableSchema({
-    closure: { limit },
-    schema: ({ limit }) => z.object({ amount: z.number().refine((amount) => amount <= limit) }),
-  });
-}
-```
-
-Pass the result as `inputSchema` or `outputSchema` in `defineTool()`. Rebuild existing extensions with the current `eve extension build` to generate schema factories. A live dynamic schema without a durable factory is rejected at resolution with instructions to inline its construction or use `defineDurableSchema`.
-
-`closure` is the callback's only durable snapshot. Store the identifiers and configuration needed to reproduce the call there. Reconstruct clients or look up live runtime state when the callback runs. The callback may call stable imported functions, but it must not capture runtime objects outside `closure`. Those values disappear on a cold start.
-
-eve-provided factories, including [memory provider tools](../memory), use the same durable callback mechanism.
+Packages can return ordinary `defineTool` values, including callbacks made by factories. Prefer an [extension](../extensions) when distributing a namespaced collection of capabilities.
 
 ### Identity and redeploys
 
-A parked call binds to its callback within its session, lifecycle scope, and resolver entry. Another session or scope can expose the same tool name without replacing that binding. Callback identity does not depend on source position:
+A fresh process rebuilds tools from their definitions and saved memo results. A deployment change discards the results and runs the new code. Approved work runs before the functions run for the next model call. Check authorization inside execution when a check must also stop already-approved work.
 
-- Editing a callback body while keeping its resolver entry and tool names is safe: replaying a parked call runs the latest deployed code with the closure values snapshotted when the call was made.
-- If a persisted session-scoped callback has no registered implementation (a fresh process, a redeploy, or an expired in-process binding), eve re-runs `session.started` resolvers once to rebind it, then replays.
-- If an active turn resumes without a registered turn-scoped callback, eve re-runs the owning `turn.started` resolver to restore the callback while preserving the tool set and closure captured earlier in that turn. If an authored resolver no longer returns the tool, the turn can continue, but calling that tool fails closed. Framework-provided resolvers such as memory provider-tool wrappers require all of their callbacks to be restored and fail the continuation if their locked tool set changed.
-- Step-scoped callbacks are restored from the persisted step immediately before eve replays that step.
-
-A recovery rebind is not a new lifecycle event, but it can run resolver code again. Keep `session.started` and `turn.started` resolvers idempotent and return the same tool identities for the same persisted scope.
+A call waiting for approval or sign-in runs only if its dynamic tool, connection, or subagent is unchanged. eve compares what the model was offered, a connection's target, or a subagent's selection, plus the memo results its definition used. If any changed, the call returns a tool error saying the tool changed since it was offered, and the model can request it again.
 
 ### Naming
 
-| Return shape            | File                       | Tool name(s)      |
-| ----------------------- | -------------------------- | ----------------- |
-| single `defineTool`     | `agent/tools/analytics.ts` | `analytics`       |
-| map `{ export, query }` | `agent/tools/tenant.ts`    | `export`, `query` |
+A single tool takes the file's slug. A map uses bare keys, with no automatic file prefix: `agent/tools/tenant.ts` returning `{ query, export }` exposes `query` and `export`.
 
-A single return produces one tool named after the file slug, identical to a static tool. A map names each entry by its **bare key** — there is no automatic slug prefix. If a bare name might collide, namespace the key yourself by including the prefix in the key (e.g. return `{ "tenant__export": … }` to get `tenant__export`).
-
-A map key must be a legal tool name: ASCII letters, digits, underscores, and dashes, starting with a letter, up to 64 characters. A key cannot be `eve` or start with `eve__`, which eve [reserves](../concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) for its built-in tools, and cannot be a connection's name or start with its `<name>__` prefix. eve rejects such a key when the resolver returns it.
+Names use ASCII letters, digits, underscores, and dashes, start with a letter, and contain at most 64 characters. `eve` and the `eve__` prefix are reserved. A connection reserves its name and its `<name>__` prefix, so tools cannot take those names.
 
 ### Conflicts
 
-A dynamic connection, tool, or skill whose name matches an **authored** one **overrides** it — a per-caller resolver can replace a static capability by name. Workflow tools and subagents are the exception: a dynamic tool can't take one of their names, and eve logs the error and skips that resolver's result. Two **dynamic** resolvers of the same capability type emitting the same name is a genuine ambiguity and throws; namespace one of the keys manually to resolve it.
+A dynamic tool, connection, or skill overrides a static one of the same kind and name. Two dynamic connection definitions can't emit the same name. For tools and skills, the earlier definition keeps a duplicate name and eve logs an error for the other. Dynamic tools can't take workflow-tool or subagent names. Other invalid results and name conflicts fail the turn.
 
-### Events
+<span id="events"></span>
 
-| Event             | Resolver runs                                            | Tools available for             |
-| ----------------- | -------------------------------------------------------- | ------------------------------- |
-| `session.started` | At session start; may be redelivered during recovery¹    | Every model call in the session |
-| `turn.started`    | Once per turn; may re-run to restore a missing callback¹ | Every model call in the turn    |
-| `step.started`    | Before each model call                                   | That model call                 |
+### Steering and sign-in
 
-¹ Workflow recovery can redeliver an event or re-run a resolver to restore a missing callback, so keep resolvers idempotent. Rebinding restores the persisted tool set; it does not make newly returned tools available in the active turn.
-
-At `turn.started`, model, tool, skill, and subagent resolvers receive the visible conversation history and incoming message in `ctx.messages`, oldest first. Request context is included, and history projection still applies. Read these messages from the handler's second argument; the event itself contains turn metadata. Instruction resolvers use the separate snapshot described under [Dynamic instructions](#dynamic-instructions).
-
-A message that steers a held turn joins it without another `turn.started`, as does a completed sign-in, so `turn.started` resolvers do not see it; `step.started` resolvers do. A message sent while a session-limit prompt waits queues in the held turn without another `turn.started`. After Continue grants the budget, `step.started` resolvers see the queued message before the model runs. When memory recall runs, its results appear in the projected snapshot before incoming input.
+Because eve runs dynamic functions before every model call, they see a steering message or completed sign-in without a new turn. A turn-keyed memo stays fixed until the next turn.
 
 ### Execution order
 
-When a stream event fires, three things happen in order.
+Hooks finish first, then model selection, then connections, subagents, tools, skills, and instructions. Don't depend on the order in which files run; each definition computes its own value.
 
-1. The channel adapter handler runs and the event is written to the durable stream.
-2. Stream-event [hooks](./hooks) fire.
-3. Dynamic tool resolvers subscribed to that event run and update the tool set.
-
-The tool loop reads the current set right before each model call, so a mid-turn update is visible on the next call.
-
-A single file can declare handlers for several events, and the most recently fired one owns that file's tool set. Re-resolve on `turn.started` to replace what `session.started` returned:
-
-```ts title="agent/tools/catalog.ts"
-import { defineDynamic, defineTool } from "eve/tools";
-import { z } from "zod";
-import { runReadOnly, searchCatalog } from "../lib/catalog";
-
-export default defineDynamic({
-  events: {
-    "session.started": async (_event, ctx) => ({
-      query: defineTool({
-        description: "Run a read-only query.",
-        inputSchema: z.object({ sql: z.string() }),
-        execute: ({ sql }) => runReadOnly(sql),
-      }),
-    }),
-    // On each turn, re-resolve. Replaces this file's session.started tools for later calls.
-    "turn.started": async (_event, ctx) => ({
-      search: defineTool({
-        description: "Search the catalog.",
-        inputSchema: z.object({ term: z.string() }),
-        execute: ({ term }) => searchCatalog(term),
-      }),
-    }),
-  },
-});
-```
-
-Resolvers across files run concurrently.
+A tool with `deferred: true` stays out of the model's tool list. It is found with `eve__search` and called with `eve__tool`, like a [static deferred tool](../tools#keep-a-tool-out-of-the-tool-list).
 
 ## Dynamic skills
 
-A dynamic skills file resolves which [skill](../skills) a caller can load, keyed on the principal. It resolves on `session.started` and `turn.started` only (`step.started` is reserved for dynamic tools). Read `ctx.session.auth` or channel metadata and return a `defineSkill(...)` (named after the file slug) or `null`:
+Return a `defineSkill(...)`, a map, or `null`. A single skill takes the file slug; map entries use bare keys, with the same name constraints as tools.
 
 ```ts title="agent/skills/team_playbook.ts"
 import { defineDynamic, defineSkill } from "eve/skills";
 import { PLAYBOOKS } from "../lib/playbooks";
 
-export default defineDynamic({
-  events: {
-    "session.started": (_event, ctx) => {
-      const team = ctx.session.auth.current?.attributes.team;
-      const markdown = team ? PLAYBOOKS[team] : undefined;
-      return markdown ? defineSkill({ markdown }) : null;
-    },
-  },
+export default defineDynamic((ctx) => {
+  const team = ctx.session.auth.current?.attributes.team;
+  const content = team ? PLAYBOOKS[team] : undefined;
+  return content ? defineSkill({ content, description: "The team's playbook." }) : null;
 });
 ```
 
-The caller's team gets its own playbook advertised as a loadable skill; everyone else gets nothing.
+A skill with only `content` doesn't start a sandbox. A skill with files installs its package in the sandbox, and a changed package replaces the earlier files:
 
-Skills follow the same naming rule as tools: a single `defineSkill(...)` is named after the file slug, while a map names each entry by its bare key (namespace the key yourself if it might collide). Every name must use only ASCII letters, digits, underscores, and dashes, start with a letter, and have at most 64 characters; eve logs a resolver that returns another name and skips its result. A dynamic skill overrides a same-named authored one; two dynamic resolvers emitting the same name throws.
+- The model call doesn't wait for the install. A tool or hook that uses the sandbox waits for it.
+- If the install fails twice in a row, eve logs a warning and retries on the next model call.
+- When the session detects a recreated sandbox, the next run reinstalls the package. A replacement made by a subagent or workflow step sharing the sandbox may go undetected, and then the files aren't rewritten until the package changes.
+- Omitting `files` from a skill that stays available keeps its installed files; withdraw the skill to remove them.
 
-A dynamic skill with `deferred: true` is left out of the dynamic skill announcement and isn't named in context. The model finds it with `eve__search` and loads it with `eve__skill({ name })`, like a static deferred skill. When it overrides a static skill that isn't deferred, the system prompt still lists the static skill's description, and loading returns the dynamic body.
-
-A dynamic skill that returns only `markdown` never starts a sandbox: eve keeps its instructions in session state and returns them when the model loads the skill. When the skill also returns `files`, eve writes the package to the sandbox skill root when the resolver first returns it, and again only when its contents change or the session gets a new sandbox. Resolvers run when the turn starts, before the sandbox opens, so when eve replaces a sandbox that was removed outside eve, it writes the files into the new sandbox at the start of the next turn. A replacement made by a subagent or workflow step that shares the session's sandbox is not detected: the session treats the files as written until their contents change. A changed package replaces the previous directory, so files omitted from the new result are removed, and a skill the resolver stops returning has its files removed. A skill that keeps its name but stops returning `files` keeps the files already written, since the sandbox may provide them another way, such as from its snapshot. Keep content meant for only some callers in `markdown`, or stop returning the skill for the others.
+`deferred: true` keeps a skill out of the announcement, while leaving it discoverable through `eve__search` and loadable with `eve__skill`.
 
 ## Dynamic instructions
 
-A dynamic instructions file returns `defineInstructions({ content, role? })` built from the principal, tenant, channel, or external data. Omit `role` for system context:
-
-```ts title="agent/instructions/persona.ts"
-import { defineDynamic, defineInstructions } from "eve/instructions";
-
-export default defineDynamic({
-  events: {
-    "session.started": (_event, ctx) => {
-      const plan = ctx.session.auth.current?.attributes.plan ?? "free";
-      return defineInstructions({
-        content: `The caller is on the ${plan} plan. Match the depth of your answers to it.`,
-      });
-    },
-  },
-});
-```
-
-Use `role: "user"` when the resolved value is application or user context that should become part of durable history:
+Return `defineInstructions({ content, role? })` or `null`. System instructions apply while the function returns them and stay outside history. User instructions join the conversation history only when their content changes:
 
 ```ts title="agent/instructions/brief.ts"
 import { defineDynamic, defineInstructions } from "eve/instructions";
 import { loadBrief } from "../lib/briefs";
 
-export default defineDynamic({
-  events: {
-    "turn.started": async (_event, ctx) => {
-      const brief = await loadBrief(ctx.session.auth.current);
-      return brief ? defineInstructions({ content: brief, role: "user" }) : null;
-    },
-  },
+export default defineDynamic(async (ctx) => {
+  if (!ctx.turn) return null;
+  const brief = await ctx.memo(ctx.turn.id, () => loadBrief(ctx.session.auth.current));
+  return brief ? defineInstructions({ content: brief, role: "user" }) : null;
 });
 ```
 
-Instruction resolvers support `session.started` and `turn.started` only. A system result lives in that scope and stays outside history. A user result is appended to history at the lifecycle boundary, with session results before turn results and both before the current delivery. There is no automatic deduplication: returning the same user content on a later turn intentionally appends another message.
+Before a turn's first model call, new user content joins just before the turn's input; mid-turn changes append at the current position. Returning `null` adds nothing and resets content tracking, so returning the earlier content later adds it again, but it doesn't remove earlier history. Clear, compaction, and deployment changes don't re-append unchanged content.
 
-Resolver snapshots reflect that order. At `session.started`, `ctx.messages` includes static user-role instructions. At `turn.started`, it also includes user-role results from `session.started`. These augmented snapshots are specific to instruction resolvers; tools, skills, models, and subagents keep their existing message snapshots.
+## Errors and recovery
 
-Returning `null` or blank content contributes nothing. A throwing or invalid session resolver leaves any wider valid system selection in place. Every turn starts with fresh turn-scoped system instructions, so a failed or empty turn result cannot leak the previous turn's value. Completed lifecycle steps are replay-safe: parking, resuming, or replaying them does not duplicate user-role messages.
+An unhandled error in a dynamic function or memo fails the turn with `REACTION_FAILED`. Catch optional work and return `null` when it should contribute nothing. A catch around `await ctx.memo(...)` leaves the failure uncached, so a later run tries it again. A catch inside the memo that returns `null` caches that `null` for the key's lifetime. A failed turn's input is not replayed.
 
-Dynamic system content that changes frequently can reduce provider prompt-cache reuse. Prefer session scope for stable values and use turn scope only when the context must be refreshed. Cache behavior remains provider-specific.
+With `EVE_LOG_LEVEL=debug`, eve logs each memo run with its file, key digest, reason (`new key` or `deployment change`), and duration, and whether each run's value changed. Logs never include the key. The digest is an unsalted hash, so someone who can guess a key, such as a tenant ID, can confirm it against the digest.
 
 ## What to read next
 
-- Conditionally expose a specialist → [Subagents](../subagents)
-- Resolve caller-specific external services → [Connections](../connections)
-- The static tool basics this builds on → [Tools](../tools)
-- The built-in tools and how to override them → [Built-in tools](../concepts/built-in-tools)
-- Authenticate a tool or connection to an external service → [Auth & route protection](./auth-and-route-protection)
-- Durable per-session memory for resolvers to read → [State](../concepts/state)
-- Cross-session recall and provider-generated tools → [Memory](../memory)
+- [Hooks](./hooks) for effects and cancellation
+- [Subagents](../subagents) and [Remote agents](./remote-agents)
+- [Connections](../connections), [Tools](../tools), and [Skills](../skills)
+- [State](../concepts/state) for durable application state
+- [Memory](../memory) for cross-session recall and provider tools
