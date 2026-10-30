@@ -85,11 +85,13 @@ export default teamsChannel({
 
 A custom `onMessage` makes eve reject approval and question card submissions until you also set `onAnswers`, so a card can't bypass your message check. If `onMessage` restricts who can reach the agent, apply the same rule in `onAnswers`.
 
-## Configure approval prompts
+## Human-in-the-loop interactions
 
-Tool approvals and questions render as Adaptive Cards with buttons, selects, or a text input. When an approval settles, eve replaces the card with the outcome and who answered.
+By default, tool approvals and questions render as Adaptive Cards with buttons, selects, or a text input. When an approval settles, eve replaces the card with the outcome and who answered. When a tool needs a connection the person hasn't authorized, a personal chat shows the sign-in link directly. In group chats and channels, the shared card has a **Sign in** button, and only the person who needs to sign in can open the link.
 
-When a tool needs a connection the person hasn't authorized, a personal chat shows the sign-in link directly. In group chats and channels, the shared card has a **Sign in** button, and only the person who needs to sign in can open the link.
+- To require approval for a tool or ask the person a question, see [Human-in-the-loop](/docs/human-in-the-loop).
+- To control who can answer, add `onAnswers`. See [Human-in-the-loop](/docs/channels/teams/reference#human-in-the-loop-hitl).
+- For how sign-ins are delivered, see [Connection sign-ins](/docs/channels/teams/reference#connection-sign-ins).
 
 ## Handle file attachments
 

@@ -129,11 +129,13 @@ The bot answers DMs, mentions of its user, replies to its messages, and messages
 
 Thread follow-ups without a mention need the privileged **Message Content** intent. Setup turns it on when Discord allows it.
 
-## Configure approval prompts
+## Human-in-the-loop interactions
 
-Approvals and option questions appear as buttons, `display: "select"` questions as a select, and freeform questions as a button that opens a modal. Approvals are requester-only by default, so only the person who asked can approve.
+By default, approvals and option questions appear as buttons, `display: "select"` questions as a select, and freeform questions as a button that opens a modal. Approvals are requester-only, so only the person who asked can approve. When a tool needs a connection the person hasn't authorized, a DM shows the sign-in link directly. In a server, the shared message has a **Sign in** button, and only the person who needs to sign in sees the link.
 
-When a tool needs a connection the person hasn't authorized, a DM shows the sign-in link directly. In a server, the shared message has a **Sign in** button, and only the person who needs to sign in sees the link.
+- To require approval for a tool or ask the person a question, see [Human-in-the-loop](/docs/human-in-the-loop).
+- To control who can answer, add `onAnswers`. See [Human-in-the-loop](/docs/channels/discord/reference#human-in-the-loop-hitl).
+- For how sign-ins are delivered, see [Connection sign-ins](/docs/channels/discord/reference#connection-sign-ins).
 
 ## Start conversations proactively
 

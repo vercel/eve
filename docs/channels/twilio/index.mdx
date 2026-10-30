@@ -51,9 +51,12 @@ export default twilioChannel({
 });
 ```
 
-## Configure approval prompts
+## Human-in-the-loop interactions
 
-SMS has no buttons, so eve sends each approval or question as a text with numbered options. Replying `1` or `approve` runs an approval-gated tool, and `2` or `deny` stops it. Callers get these prompts by SMS too.
+By default, eve sends each approval or question as a text with numbered options, since SMS has no buttons. Replying `1` or `approve` runs an approval-gated tool, and `2` or `deny` stops it. Callers get these prompts by SMS too.
+
+- To require approval for a tool or ask the person a question, see [Human-in-the-loop](/docs/human-in-the-loop).
+- To word or format prompts differently, override `events["interaction.opened"]`. See [Human-in-the-loop](/docs/channels/twilio/reference#human-in-the-loop-hitl).
 
 ## Start conversations proactively
 

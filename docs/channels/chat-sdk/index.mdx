@@ -58,9 +58,11 @@ Each adapter serves its webhook at `/eve/v1/{adapterName}`, so this one is `/eve
 
 Replies stream by default: eve posts a message and edits it as text arrives. Set `streaming: false` for surfaces that can't edit sent messages, such as email and WhatsApp, so the reply posts once.
 
-## Configure approval prompts
+## Human-in-the-loop interactions
 
-Approvals and questions render as a Chat SDK card with buttons, and a click resumes the session. Adapters that can't show cards get numbered options, and a reply with an option's number or label answers. Set `resolveInputAuth` to carry the clicking user's identity into the resumed turn:
+By default, approvals and questions render as a Chat SDK card with buttons, and a click resumes the session. Adapters that can't show cards get numbered options, and a reply with an option's number or label answers.
+
+To carry the clicking user's identity into the resumed turn, set `resolveInputAuth`:
 
 ```ts title="agent/channels/slack.ts"
 import { createSlackAdapter } from "@chat-adapter/slack";
@@ -81,6 +83,10 @@ export const { bot, channel, send } = chatSdkChannel({
 
 export default channel;
 ```
+
+- To require approval for a tool or ask the person a question, see [Human-in-the-loop](/docs/human-in-the-loop).
+- To answer requests from buttons you render yourself, call `respond`. See [Dispatch](/docs/channels/chat-sdk/reference#dispatch).
+- To change the action ID prefix, see [Human-in-the-loop](/docs/channels/chat-sdk/reference#human-in-the-loop-hitl). To render cards yourself, override `events["interaction.opened"]`, as described in [Optional capabilities degrade gracefully](/docs/channels/chat-sdk/reference#optional-capabilities-degrade-gracefully).
 
 ## Deliver sign-ins privately
 

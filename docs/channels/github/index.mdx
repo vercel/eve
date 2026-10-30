@@ -97,9 +97,12 @@ Before the first model call, each turn checks out the relevant ref into the sand
 
 For any GitHub API the channel doesn't wrap, call `ctx.github.request({ method, path, body })` with the installation token.
 
-## Configure approval prompts
+## Human-in-the-loop interactions
 
-GitHub comments have no buttons, so approvals and questions post as a comment prompt. The person's reply comment answers the pending request.
+By default, approvals and questions post as a comment prompt, since GitHub comments have no buttons. The person's reply comment answers the pending request.
+
+- To require approval for a tool or ask the person a question, see [Human-in-the-loop](/docs/human-in-the-loop).
+- To customize the prompt, override `events["interaction.opened"]`. See [Human-in-the-loop](/docs/channels/github/reference#human-in-the-loop-hitl).
 
 ## Start conversations proactively
 

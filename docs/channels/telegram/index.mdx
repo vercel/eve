@@ -46,9 +46,12 @@ By default, the agent answers every message in a private chat. In a group, a mes
 - To customize which commands, mentions, or replies wake the agent, override `onMessage`. See [Dispatch](/docs/channels/telegram/reference#dispatch).
 - To change how replies are sent, see [Delivery](/docs/channels/telegram/reference#delivery).
 
-## Configure approval prompts
+## Human-in-the-loop interactions
 
-Tool approvals and option questions appear as inline-keyboard buttons. Freeform questions use a reply prompt, and the person's reply becomes the answer.
+By default, tool approvals and option questions appear as inline-keyboard buttons. Freeform questions use a reply prompt, and the person's reply becomes the answer.
+
+- To require approval for a tool or ask the person a question, see [Human-in-the-loop](/docs/human-in-the-loop).
+- To render prompts differently, override `events["interaction.opened"]`. See [Human-in-the-loop](/docs/channels/telegram/reference#human-in-the-loop-hitl) and [Options](/docs/channels/telegram/reference#options).
 
 ## Start conversations proactively
 

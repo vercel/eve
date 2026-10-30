@@ -174,9 +174,11 @@ export default slackChannel({
 
 This adds the `users:read` scope, plus `users:read.email` with `email: true`, so reinstall the Slack app after enabling it. It's off by default because names and emails then reach model context, session history, and traces. See [Add sender names and emails](/docs/channels/slack/reference#add-sender-names-and-emails) for caching and custom lookups.
 
-## Configure approval prompts
+## Human-in-the-loop interactions
 
-[Tool approvals](/docs/human-in-the-loop) and questions from `ctx.ask()` appear in the thread as buttons and selects. Once someone answers, the card shows the answer and who gave it. To send a request only to the person who started the turn, return `"direct-message"` from `approvalChannel`:
+By default, [tool approvals](/docs/human-in-the-loop) and questions from `ctx.ask()` appear in the thread as buttons and selects. Once someone answers, the card shows the answer and who gave it. When a tool needs a connection the person hasn't authorized, the sign-in link goes to them in an ephemeral message, and the thread shows a status without the link.
+
+To send a request only to the person who started the turn, return `"direct-message"` from `approvalChannel`:
 
 ```ts title="agent/channels/slack.ts"
 import { slackChannel } from "eve/channels/slack";
@@ -186,7 +188,9 @@ export default slackChannel({
 });
 ```
 
-When a tool needs a connection the person hasn't authorized, the sign-in link goes to them in an ephemeral message, and the thread shows a status without the link.
+- To require approval for a tool or ask the person a question, see [Human-in-the-loop](/docs/human-in-the-loop).
+- To control who can answer, add `onAnswers`. See [Restrict access](#restrict-access).
+- To change how approval and question cards look, see [Restyle approval and question cards](/docs/channels/slack/reference#restyle-approval-and-question-cards).
 
 ## Start conversations proactively
 
