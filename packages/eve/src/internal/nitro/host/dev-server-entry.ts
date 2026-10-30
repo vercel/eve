@@ -8,6 +8,11 @@ const DEVELOPMENT_SERVER_ENTRY = "#eve/dev-server-entry";
 
 /** Lets the dev worker attach the WebSocket adapter of the runtime it runs in. */
 export function configureDevelopmentServerEntry(nitro: Nitro): void {
+  if (!/\/_nitro\/runtime\/nitro-dev(?:\.mjs)?$/.test(nitro.options.entry.replaceAll("\\", "/"))) {
+    throw new Error(
+      `eve replaces Nitro's nitro-dev entry, but Nitro now uses "${nitro.options.entry}". Check whether it ships nitrojs/nitro#4711 and drop eve's dev entry.`,
+    );
+  }
   nitro.options.virtual[DEVELOPMENT_SERVER_ENTRY] = createDevelopmentServerEntrySource();
   nitro.options.entry = DEVELOPMENT_SERVER_ENTRY;
 }

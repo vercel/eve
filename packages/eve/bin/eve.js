@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { access, readdir, realpath, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { constants as osConstants } from "node:os";
@@ -211,21 +212,42 @@ async function assertSupportedNodeVersion(
  * Bun-launched CLI would otherwise run in Node whenever Node is installed.
  * Bun identifies itself through the npm-compatible launcher environment.
  */
-export function resolveBunLauncher(env = process.env, versions = process.versions) {
+export function resolveBunLauncher(
+  env = process.env,
+  versions = process.versions,
+  cwd = process.cwd(),
+) {
   if (versions.bun !== undefined) return undefined;
   if (!env.npm_config_user_agent?.startsWith("bun/")) return undefined;
+  // Vercel derives the deployed function runtime from the build runtime, and
+  // projects opt into Bun there with `bunVersion`.
+  if (env.VERCEL && !vercelProjectUsesBun(cwd)) return undefined;
   const execPath = env.npm_execpath;
-  return execPath !== undefined && /^bunx?(?:\.exe)?$/i.test(basename(execPath)) ? execPath : "bun";
+  return execPath !== undefined && /^bun(?:\.exe)?$/i.test(basename(execPath))
+    ? execPath
+    : undefined;
+}
+
+function vercelProjectUsesBun(cwd) {
+  try {
+    return JSON.parse(readFileSync(resolve(cwd, "vercel.json"), "utf8")).bunVersion !== undefined;
+  } catch {
+    return false;
+  }
 }
 
 /** Re-runs this bin in Bun and resolves with the exit code to mirror. */
 async function runInBun(bunExecutable, argv) {
-  const child = spawn(bunExecutable, [fileURLToPath(import.meta.url), ...argv], {
-    stdio: "inherit",
-  });
-  // The terminal delivers Ctrl-C to the whole process group; Bun owns shutdown.
+  const args = [fileURLToPath(import.meta.url), ...argv];
+  // Replacing the process keeps its PID, so supervisors signal Bun directly.
+  if (typeof process.execve === "function") {
+    process.execve(bunExecutable, [bunExecutable, ...args], process.env);
+  }
+  const child = spawn(bunExecutable, args, { stdio: "inherit" });
+  // Windows has no execve; its console delivers Ctrl-C to both processes.
   const ignoreSignal = () => {};
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, ignoreSignal);
+  process.on("SIGINT", ignoreSignal);
+  for (const signal of ["SIGTERM", "SIGHUP"]) process.on(signal, () => child.kill(signal));
   return await new Promise((resolveExit, rejectExit) => {
     child.once("error", (error) =>
       rejectExit(

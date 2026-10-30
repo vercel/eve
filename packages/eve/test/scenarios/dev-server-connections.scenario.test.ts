@@ -23,6 +23,9 @@ import {
   startEveDev,
   waitForCondition,
   waitForPath,
+  waitForWebSocketClose,
+  waitForWebSocketMessage,
+  waitForWebSocketOpen,
   withinDeadline,
 } from "./dev-server-harness.js";
 
@@ -124,46 +127,6 @@ function createBlockedInstrumentationSource(): string {
     "export default defineInstrumentation({});",
     "",
   ].join("\n");
-}
-
-async function waitForWebSocketOpen(socket: WebSocket): Promise<void> {
-  await waitForWebSocketEvent(socket, "open", () => undefined);
-}
-
-async function waitForWebSocketMessage(socket: WebSocket): Promise<string> {
-  return await waitForWebSocketEvent(socket, "message", (event) => String(event.data));
-}
-
-async function waitForWebSocketClose(socket: WebSocket): Promise<void> {
-  await waitForWebSocketEvent(socket, "close", () => undefined);
-}
-
-async function waitForWebSocketEvent<T>(
-  socket: WebSocket,
-  eventName: "close" | "message" | "open",
-  select: (event: MessageEvent) => T,
-): Promise<T> {
-  return await new Promise<T>((resolve, reject) => {
-    const deadline = setTimeout(() => {
-      cleanup();
-      reject(new Error(`Timed out waiting for WebSocket ${eventName}.`));
-    }, 10_000);
-    const cleanup = () => {
-      clearTimeout(deadline);
-      socket.removeEventListener(eventName, onEvent);
-      socket.removeEventListener("error", onError);
-    };
-    const onEvent = (event: Event) => {
-      cleanup();
-      resolve(select(event as MessageEvent));
-    };
-    const onError = () => {
-      cleanup();
-      reject(new Error(`WebSocket failed while waiting for ${eventName}.`));
-    };
-    socket.addEventListener(eventName, onEvent, { once: true });
-    socket.addEventListener("error", onError, { once: true });
-  });
 }
 
 describe("eve dev server live connections", () => {

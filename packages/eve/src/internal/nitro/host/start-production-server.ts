@@ -7,6 +7,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import type { ProductionServerHandle } from "#internal/nitro/host/types.js";
 import { EVE_SCHEDULES_DISABLED_ENV } from "#internal/schedules/disabled.js";
+import { assertBuiltServerRuntime } from "#shared/built-server-runtime.js";
 import { readBuiltServerStartFailure } from "#shared/built-server-start-failure.js";
 
 const DEFAULT_PRODUCTION_SERVER_HOST = "0.0.0.0";
@@ -184,6 +185,7 @@ export async function startProductionServer(
       `Missing eve build output at ${serverEntry}. Run "eve build" before "eve start".`,
     );
   }
+  assertBuiltServerRuntime(appRoot);
 
   await loadDevelopmentEnvironmentFiles(appRoot);
 

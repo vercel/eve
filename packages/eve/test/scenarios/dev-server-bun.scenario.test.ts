@@ -9,7 +9,14 @@ import {
   DEV_SERVER_AGENT_DESCRIPTOR,
   DEV_SERVER_SCENARIO_TIMEOUT_MS,
 } from "./dev-server-descriptors.js";
-import { hasKnownDevServerFailure, isBunAvailable, startEveDev } from "./dev-server-harness.js";
+import {
+  hasKnownDevServerFailure,
+  resolveBunExecutable,
+  startEveDev,
+  waitForCondition,
+  waitForWebSocketMessage,
+  waitForWebSocketOpen,
+} from "./dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
 
@@ -33,36 +40,44 @@ const BUN_WEBSOCKET_DESCRIPTOR: ScenarioAppDescriptor = {
   },
 };
 
-describe("eve dev server under Bun", () => {
+describe("eve dev server launched by Bun", () => {
   // CI installs Bun, so a missing binary there fails instead of skipping.
-  it.runIf(isBunAvailable() || process.env.CI !== undefined)(
-    "serves HTTP and WebSocket routes from a Bun dev worker",
+  it.runIf(resolveBunExecutable() !== undefined || process.env.CI !== undefined)(
+    "hands the Node bin off to Bun, serves HTTP and WebSocket routes, and stops on SIGTERM",
     async () => {
       const app = await scenarioApp(BUN_WEBSOCKET_DESCRIPTOR);
       const server = await startEveDev(app.appRoot, { defaultExtensions: false, runtime: "bun" });
-      const diagnostics = `stdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`;
+      const diagnostics = () => `stdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`;
 
       try {
         const health = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, server.url));
-        expect(health.status, diagnostics).toBe(200);
+        expect(health.status, diagnostics()).toBe(200);
 
         const socketUrl = new URL("/echo", server.url);
         socketUrl.protocol = "ws:";
         const socket = new WebSocket(socketUrl);
-        const reply = new Promise<string>((resolve, reject) => {
-          socket.addEventListener("open", () => socket.send("hello"), { once: true });
-          socket.addEventListener("message", (event) => resolve(String(event.data)), {
-            once: true,
-          });
-          socket.addEventListener("error", () => reject(new Error(diagnostics)), { once: true });
-        });
         try {
+          await waitForWebSocketOpen(socket);
+          const reply = waitForWebSocketMessage(socket);
+          socket.send("hello");
           // The route reports its own runtime, proving the worker is not Node.
-          await expect(reply).resolves.toBe("object:hello");
+          expect(await reply, diagnostics()).toBe("object:hello");
         } finally {
           socket.close();
         }
-        expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
+        expect(hasKnownDevServerFailure(diagnostics()), diagnostics()).toBe(false);
+
+        // Supervisors signal only the PID they started; it must reach Bun.
+        const exit = await server.signalAndAwaitExit("SIGTERM", 20_000);
+        expect(exit.forcedKill, diagnostics()).toBe(false);
+        await waitForCondition(
+          async () =>
+            await fetch(new URL(EVE_HEALTH_ROUTE_PATH, server.url)).then(
+              () => false,
+              () => true,
+            ),
+          () => `The dev server kept serving after SIGTERM.\n\n${diagnostics()}`,
+        );
       } finally {
         await server.stop();
       }

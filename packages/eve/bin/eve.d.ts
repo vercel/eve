@@ -72,11 +72,13 @@ export function ensureBuiltCli(
 
 /**
  * Returns the Bun executable that launched this bin under Node (for example
- * `bunx eve` honoring the `node` shebang), or `undefined` when no handoff is needed.
+ * `bunx eve` honoring the `node` shebang), or `undefined` when eve should stay in Node.
+ * Vercel builds stay in Node unless `vercel.json` sets `bunVersion`.
  */
 export function resolveBunLauncher(
   env?: Record<string, string | undefined>,
   versions?: Record<string, string | undefined>,
+  cwd?: string,
 ): string | undefined;
 
 /**

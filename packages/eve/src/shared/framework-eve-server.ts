@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
 import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
+import { assertBuiltServerRuntime } from "#shared/built-server-runtime.js";
 import { readBuiltServerStartFailure } from "#shared/built-server-start-failure.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
@@ -494,6 +495,7 @@ export function startEveProductionServer(input: {
       `eve production output is missing at ${serverEntry}. Run eve build from ${input.appRoot} before starting ${input.host.label}.`,
     );
   }
+  assertBuiltServerRuntime(input.appRoot);
 
   return startServerProcess({
     args: [serverEntry],

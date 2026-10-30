@@ -35,7 +35,7 @@ export interface StartEveDevOptions {
   readonly defaultExtensions?: boolean;
   readonly resume?: boolean;
   readonly env?: Readonly<Record<string, string | undefined>>;
-  /** Runtime executing the CLI. Defaults to the current Node executable. */
+  /** `bun` launches the Node bin with the environment `bunx` sets, so eve hands off to Bun. */
   readonly runtime?: "bun" | "node";
 }
 
@@ -177,71 +177,84 @@ export async function stopChildProcess(child: ChildProcess): Promise<void> {
   });
 }
 
-/**
- * Spawns `eve dev` and resolves with the process exit for flows that expect
- * startup to fail (e.g. unsupported runtimes).
- */
-export async function runEveDevToExit(
-  appRoot: string,
-  options: StartEveDevOptions = {},
-): Promise<{ readonly code: number | null; readonly output: string }> {
-  const child = spawnEveDev(appRoot, options);
-  let output = "";
-
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => {
-    output += chunk;
-  });
-  child.stderr.on("data", (chunk: string) => {
-    output += chunk;
-  });
-
-  try {
-    return await withinDeadline(
-      new Promise<{ readonly code: number | null; readonly output: string }>((resolve, reject) => {
-        child.once("error", reject);
-        child.once("exit", (code) => resolve({ code, output }));
-      }),
-      `Timed out waiting for eve dev to exit.\n\noutput:\n${output}`,
-      120_000,
-    );
-  } finally {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
-  }
-}
-
 function spawnEveDev(
   appRoot: string,
   options: StartEveDevOptions,
 ): ChildProcessByStdio<null, Readable, Readable> {
   const eveBinPath = join(appRoot, "node_modules", "eve", "bin", "eve.js");
-  const command = options.runtime === "bun" ? "bun" : process.execPath;
-
   const args = [eveBinPath, "dev", "--no-ui", "--host", "127.0.0.1", "--port", "0"];
   if (options.defaultExtensions === false) args.push("--no-default-extensions");
   if (options.resume) args.push("--resume");
 
-  return spawn(command, args, {
+  return spawn(process.execPath, args, {
     cwd: appRoot,
     env: {
       ...process.env,
       NODE_ENV: "test",
+      ...(options.runtime === "bun" && bunLauncherEnvironment()),
       ...options.env,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
 }
 
-/** Reports whether `bun` is runnable on this machine. */
-export function isBunAvailable(): boolean {
+/** The environment `bunx` gives a bin whose Node shebang it honors. */
+function bunLauncherEnvironment(): Record<string, string> {
+  const bunExecutable = resolveBunExecutable();
+  if (bunExecutable === undefined) throw new Error("Bun is not installed.");
+  return { npm_config_user_agent: "bun/scenario", npm_execpath: bunExecutable };
+}
+
+/** Absolute path of the `bun` binary on `PATH`, if any. */
+export function resolveBunExecutable(): string | undefined {
   try {
-    return spawnSync("bun", ["--version"], { stdio: "ignore" }).status === 0;
+    const result = spawnSync("bun", ["-e", "process.stdout.write(process.execPath)"], {
+      encoding: "utf8",
+    });
+    return result.status === 0 && result.stdout.length > 0 ? result.stdout : undefined;
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+export async function waitForWebSocketOpen(socket: WebSocket): Promise<void> {
+  await waitForWebSocketEvent(socket, "open", () => undefined);
+}
+
+export async function waitForWebSocketMessage(socket: WebSocket): Promise<string> {
+  return await waitForWebSocketEvent(socket, "message", (event) => String(event.data));
+}
+
+export async function waitForWebSocketClose(socket: WebSocket): Promise<void> {
+  await waitForWebSocketEvent(socket, "close", () => undefined);
+}
+
+async function waitForWebSocketEvent<T>(
+  socket: WebSocket,
+  eventName: "close" | "message" | "open",
+  select: (event: MessageEvent) => T,
+): Promise<T> {
+  return await new Promise<T>((resolve, reject) => {
+    const deadline = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for WebSocket ${eventName}.`));
+    }, 10_000);
+    const cleanup = () => {
+      clearTimeout(deadline);
+      socket.removeEventListener(eventName, onEvent);
+      socket.removeEventListener("error", onError);
+    };
+    const onEvent = (event: Event) => {
+      cleanup();
+      resolve(select(event as MessageEvent));
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error(`WebSocket failed while waiting for ${eventName}.`));
+    };
+    socket.addEventListener(eventName, onEvent, { once: true });
+    socket.addEventListener("error", onError, { once: true });
+  });
 }
 
 export function hasUnsupportedWindowsEsmImport(text: string): boolean {

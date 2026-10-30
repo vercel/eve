@@ -22,7 +22,13 @@ Run this process under the same process manager or container platform you use fo
 
 eve runs in the runtime that launches it. `bunx eve dev`, `bunx eve build`, `bunx eve start`, and `bun run` scripts that call `eve` run the CLI, dev server, and built server in Bun; you don't need `--bun`.
 
-When `eve build` runs in Bun, it writes Nitro's Bun server output, which serves requests with `Bun.serve`. Start that output with Bun, and build with Node when you deploy to a Node host.
+When `eve build` runs in Bun, it writes Nitro's Bun server output, which serves requests with `Bun.serve`. Start that output with Bun; `eve start` in Node rejects it with an error. To build Node output from a Bun script, set `NITRO_PRESET=node-server`:
+
+```bash
+NITRO_PRESET=node-server bunx eve build
+```
+
+On Vercel, `eve build` stays in Node so functions keep the Node runtime. Set `bunVersion` in `vercel.json` to build in Bun and deploy on Vercel's Bun runtime.
 
 ## Configure model access and route auth
 

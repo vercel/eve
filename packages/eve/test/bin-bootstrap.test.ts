@@ -2,6 +2,20 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ensureBuiltCli, resolveBunLauncher, runEveCli } from "../bin/eve.js";
 
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...fs,
+    readFileSync: (path: string, encoding: BufferEncoding) =>
+      path === "/bun-app/vercel.json" ? '{ "bunVersion": "1.x" }' : fs.readFileSync(path, encoding),
+  };
+});
+
+const BUN_LAUNCHER_ENV = {
+  npm_config_user_agent: "bun/1.4.4 npm/? node/v26.3.0",
+  npm_execpath: "/u/.bun/bin/bun",
+};
+
 const bootstrapOptions = {
   cliEntrypointPath: "/workspace/packages/eve/dist/src/cli/run.js",
   packageRoot: "/workspace/packages/eve",
@@ -253,25 +267,19 @@ describe("eve CLI bootstrap", () => {
   it.each([
     {
       name: "hands bunx off to the Bun binary that launched it",
-      env: {
-        npm_config_user_agent: "bun/1.4.4 npm/? node/v26.3.0",
-        npm_execpath: "/u/.bun/bin/bun",
-      },
+      env: BUN_LAUNCHER_ENV,
       versions: {},
       expected: "/u/.bun/bin/bun",
     },
     {
-      name: "falls back to bun on PATH when the launcher path is not Bun",
-      env: { npm_config_user_agent: "bun/1.4.4 npm/? node/v26.3.0", npm_execpath: "/u/pnpm.cjs" },
+      name: "stays in Node when the launcher path is not the Bun binary",
+      env: { ...BUN_LAUNCHER_ENV, npm_execpath: "/u/.bun/bin/bunx" },
       versions: {},
-      expected: "bun",
+      expected: undefined,
     },
     {
       name: "stays put when already running in Bun",
-      env: {
-        npm_config_user_agent: "bun/1.4.4 npm/? node/v26.3.0",
-        npm_execpath: "/u/.bun/bin/bun",
-      },
+      env: BUN_LAUNCHER_ENV,
       versions: { bun: "1.4.4" },
       expected: undefined,
     },
@@ -281,7 +289,21 @@ describe("eve CLI bootstrap", () => {
       versions: {},
       expected: undefined,
     },
-  ])("$name", ({ env, versions, expected }) => {
-    expect(resolveBunLauncher(env, versions)).toBe(expected);
+    {
+      name: "keeps Vercel builds in Node without a bunVersion opt-in",
+      env: { ...BUN_LAUNCHER_ENV, VERCEL: "1" },
+      versions: {},
+      expected: undefined,
+      cwd: "/app",
+    },
+    {
+      name: "hands Vercel builds off when vercel.json sets bunVersion",
+      env: { ...BUN_LAUNCHER_ENV, VERCEL: "1" },
+      versions: {},
+      expected: "/u/.bun/bin/bun",
+      cwd: "/bun-app",
+    },
+  ])("$name", ({ env, versions, expected, cwd = "/app" }) => {
+    expect(resolveBunLauncher(env, versions, cwd)).toBe(expected);
   });
 });
