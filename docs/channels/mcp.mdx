@@ -5,7 +5,7 @@ description: "Publish an eve agent as an MCP server with auth support."
 
 The MCP channel publishes your agent as an MCP server, so clients such as Claude Code can hand it long-running work. It lives in `agent/channels/mcp.ts`. Clients start and follow that work with four tools: `agent_start`, `agent_get`, `agent_update`, and `agent_cancel`. The channel can also [publish the agent's tools](#publish-the-agents-tools) for clients to call directly, and [its skills](#publish-the-agents-skills) for clients to read.
 
-Use an [MCP connection](../connections/mcp) instead when your eve agent needs to call someone else's MCP server.
+Use an [MCP connection](../connections/mcp) instead when your eve agent needs to call someone else's MCP server. To let agents that speak the Agent2Agent protocol delegate work instead, use the experimental [A2A channel](../experimental/a2a).
 
 ## Configure the channel
 

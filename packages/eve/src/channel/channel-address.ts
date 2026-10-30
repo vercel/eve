@@ -47,6 +47,15 @@ interface BaseChannelAddressDeliveryOptions {
 }
 
 /**
+ * Delivery options only framework channels pass. A retried idempotency key is dropped as a
+ * duplicate, so a channel that hands out delivery IDs names the delivery itself (see
+ * `deliveryIdForIdempotencyKey`): the retry's receipt is then the first attempt's.
+ */
+interface InternalChannelAddressDeliveryOptions {
+  readonly deliveryId?: string;
+}
+
+/**
  * Result of `create()`. `created` is `false` when another session already owned the address, or
  * won it concurrently; that session is returned unchanged and any `history` was not added.
  */
@@ -105,11 +114,13 @@ export function createChannelAddress<TState = undefined>(input: {
     continuationToken: input.continuationToken,
     async deliver(sendInput, options) {
       validateDeliveryIdempotencyKey(options.idempotencyKey);
-      const delivery = createChannelDeliveryMetadata({
+      const minted = createChannelDeliveryMetadata({
         channelKind: `channel:${input.channelName}`,
         channelName: input.channelName,
         ...metadata,
       });
+      const { deliveryId } = options as InternalChannelAddressDeliveryOptions;
+      const delivery = deliveryId === undefined ? minted : { ...minted, deliveryId };
       const payload = withValidatedHistory(normalizeSendInput(sendInput));
       const caller = sessionCallbackToTurnCaller(options.callback);
       const commandWithoutCaller = {

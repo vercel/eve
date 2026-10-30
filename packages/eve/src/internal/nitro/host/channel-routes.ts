@@ -58,6 +58,16 @@ function createChannelRouteKey(input: {
   return `${input.method.toUpperCase()} ${input.path}`;
 }
 
+/**
+ * The virtual module ID serving one route. A path that ends in a file extension, such as
+ * `/.well-known/agent-card.json`, gets a `.mjs` suffix: the bundler infers a module's type from
+ * its ID's extension, and would otherwise parse the generated handler as JSON.
+ */
+export function channelVirtualId(routeKey: string): string {
+  const id = `${EVE_CHANNEL_VIRTUAL_ID_PREFIX}${routeKey}`;
+  return /\.[A-Za-z0-9]+$/u.test(routeKey) ? `${id}.mjs` : id;
+}
+
 function addChannelVirtualHandler(
   nitro: Pick<ChannelRouteNitro, "options">,
   input: {
@@ -71,7 +81,7 @@ function addChannelVirtualHandler(
   }
 
   const routeKey = createChannelRouteKey(input.route);
-  const virtualId = `${EVE_CHANNEL_VIRTUAL_ID_PREFIX}${routeKey}`;
+  const virtualId = channelVirtualId(routeKey);
   const dispatchModulePath = stringifyEsmImportSpecifier(
     resolvePackageSourceFilePath("src/internal/nitro/routes/channel-dispatch.ts"),
   );
@@ -123,7 +133,7 @@ function addChannelCorsPreflightHandler(
   route: ApplicationChannelPreflightRoute,
 ): void {
   const routeKey = createChannelRouteKey(route);
-  const virtualId = `${EVE_CHANNEL_VIRTUAL_ID_PREFIX}${routeKey}`;
+  const virtualId = channelVirtualId(routeKey);
   const nitroH3ModulePath = stringifyEsmImportSpecifier(resolvePackageDependencyPath("nitro/h3"));
 
   nitro.options.handlers.push({
