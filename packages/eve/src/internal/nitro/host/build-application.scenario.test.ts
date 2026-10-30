@@ -10,7 +10,6 @@ import {
   APPLICATION_BUILD_PROFILE_SCHEMA_VERSION,
   type ApplicationBuildProfile,
 } from "#internal/application/build-profile.js";
-import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import type { ApplicationBuildWorkspace } from "#internal/application/build-workspace.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
@@ -220,10 +219,7 @@ describe("buildApplication", () => {
         createNitroStub(options.outputDir),
     );
     await mkdir(outputDir, { recursive: true });
-    await Promise.all([
-      writeFile(join(outputDir, "eve-cache.json"), `${JSON.stringify({ eveVersion: "old" })}\n`),
-      writeFile(staleOutputPath, "stale\n"),
-    ]);
+    await writeFile(staleOutputPath, "stale\n");
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
     const builtOutputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
@@ -238,15 +234,6 @@ describe("buildApplication", () => {
       }),
     );
     await expect(readFile(staleOutputPath, "utf8")).rejects.toThrow();
-    await expect(readFile(join(outputDir, "eve-cache.json"), "utf8")).resolves.toBe(
-      `${JSON.stringify(
-        {
-          eveVersion: resolveInstalledPackageInfo().version,
-        },
-        null,
-        2,
-      )}\n`,
-    );
     expect(runVercelBuildPrewarmMock).not.toHaveBeenCalled();
     expect(prewarmAppSandboxesMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -372,8 +359,8 @@ describe("buildApplication", () => {
       });
 
       expect(outputDir).toBe(join(appRoot, ".output"));
-      await expect(readFile(join(outputDir, "eve-cache.json"), "utf8")).resolves.toContain(
-        "eveVersion",
+      await expect(readFile(join(outputDir, "server", "index.mjs"), "utf8")).resolves.toContain(
+        "deploymentId",
       );
       await expect(readFile(profilePath, "utf8")).rejects.toThrow();
       expect(warn).toHaveBeenCalledWith(
@@ -405,10 +392,6 @@ describe("buildApplication", () => {
     ]);
     await Promise.all([
       writeFile(join(outputDir, "marker.txt"), "last-good-output\n"),
-      writeFile(
-        join(outputDir, "eve-cache.json"),
-        `${JSON.stringify({ eveVersion: resolveInstalledPackageInfo().version }, null, 2)}\n`,
-      ),
       writeFile(summaryPath, "last-good-summary\n"),
     ]);
 
