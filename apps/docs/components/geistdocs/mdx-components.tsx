@@ -5,6 +5,7 @@ import { Flag } from "lucide-react";
 import type { MDXComponents } from "mdx/types";
 import Link from "next/link";
 import { AgentRuntimeDiagram } from "./agent-runtime-diagram";
+import { ChannelPreview } from "./channel-preview";
 import { EveCodeBenchmark } from "./eve-code-benchmark";
 import { TabsWithChildren } from "./synced-tabs";
 import {
@@ -35,6 +36,7 @@ const localComponents: MDXComponents = {
   AgentRuntimeDiagram,
   Capabilities,
   Capability,
+  ChannelPreview,
   EveCodeBenchmark,
   Step,
   Steps,
