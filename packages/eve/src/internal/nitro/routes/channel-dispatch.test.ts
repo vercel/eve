@@ -113,6 +113,7 @@ function createEvent(input?: {
   readonly body?: string;
   readonly headers?: Record<string, string>;
   readonly method?: string;
+  readonly params?: Record<string, string>;
   readonly requestIp?: string;
   readonly url?: string;
   readonly waitUntil?: (task: Promise<unknown>) => void;
@@ -128,7 +129,7 @@ function createEvent(input?: {
 
   return {
     context: {
-      params: {},
+      params: input?.params ?? {},
     },
     req: request,
     waitUntil: input?.waitUntil,
@@ -794,6 +795,100 @@ describe("dispatchChannelRequest", () => {
     expect(logged).toBeDefined();
     expect(logged![1]).toMatchObject({ channel: "slack" });
     errorSpy.mockRestore();
+  });
+
+  it("hands Nitro background work a streamed body registers after the handler returns", async () => {
+    const deferred = createDeferred<void>();
+    const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
+
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [
+        slackChannel(
+          async (_request, ctx: { waitUntil: (t: Promise<unknown>) => void }) =>
+            new Response(
+              // No eager pull: the body starts only once the response is read.
+              new ReadableStream(
+                {
+                  pull(controller) {
+                    ctx.waitUntil(deferred.promise);
+                    controller.enqueue(new TextEncoder().encode("ok"));
+                    controller.close();
+                  },
+                },
+                { highWaterMark: 0 },
+              ),
+            ),
+        ),
+      ],
+      runtime,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ waitUntil }),
+      "POST /slack",
+      {} as never,
+    );
+    await expect(response.text()).resolves.toBe("ok");
+
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    let settled = false;
+    const backgroundWork = waitUntil.mock.calls[0]![0].then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    deferred.resolve();
+    await backgroundWork;
+    expect(settled).toBe(true);
+  });
+
+  it("decodes route params but keeps encoded path separators encoded", async () => {
+    const handler = vi.fn(async (_request: Request, args: RouteHandlerArgs) =>
+      Response.json(args.params),
+    );
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [slackChannel(async () => new Response("unused"), { handler })],
+      runtime: createRuntime(),
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ params: { file: "notes%2Fcaf%C3%A9.md", user: "a%5Cb" }, waitUntil: vi.fn() }),
+      "POST /slack",
+      {} as never,
+    );
+
+    await expect(response.json()).resolves.toEqual({ file: "notes%2Fcafé.md", user: "a%5Cb" });
+  });
+
+  it("rejects malformed percent-encoding with a 400 before any handler runs", async () => {
+    const handler = vi.fn(async () => new Response("ok"));
+    const websocket = vi.fn(async () => ({}));
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [slackChannel(async () => new Response("unused"), { handler, websocket })],
+      runtime: createRuntime(),
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ params: { id: "%E0%A4%A" }, waitUntil: vi.fn() }),
+      "POST /slack",
+      {} as never,
+    );
+    const hooks = await dispatchChannelWebSocketRequest(
+      createEvent({ params: { id: "100%" }, waitUntil: vi.fn() }),
+      "POST /slack",
+      {} as never,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ ok: false });
+    expect(() => hooks.upgrade?.(new Request("https://eve.test/slack"))).toThrow(
+      expect.objectContaining({ status: 400 }),
+    );
+    expect(handler).not.toHaveBeenCalled();
+    expect(websocket).not.toHaveBeenCalled();
   });
 
   it("does not call waitUntil when no background work is registered", async () => {

@@ -1,4 +1,5 @@
 import type { H3Event } from "nitro";
+import { getRouterParams } from "nitro/h3";
 import { sessionCommandErrorResponse } from "#eve-channel/support.js";
 import {
   context as otelContext,
@@ -9,6 +10,7 @@ import type { RouteContext } from "#public/definitions/channel.js";
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
+import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { createAgentDescriptionRouteArgs } from "#channel/agent-description.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
@@ -38,11 +40,6 @@ import { getWorld } from "#internal/workflow/runtime.js";
 
 const log = createLogger("channel.dispatch");
 
-interface BuiltRouteArgs {
-  readonly args: RouteHandlerArgs;
-  readonly backgroundTasks: Promise<unknown>[];
-}
-
 /**
  * Dispatches one channel request identified by `routeKey`.
  *
@@ -50,9 +47,10 @@ interface BuiltRouteArgs {
  * route key and artifacts config baked in. Nitro's router matches the URL
  * and populates `event.context.params`, so no custom URL matching is
  * needed — the handler looks up the channel by its `(method, urlPath)` key
- * directly. When routes register background work through `ctx.waitUntil`,
- * Nitro forwards that work to `event.waitUntil()` so webhook
- * acknowledgements can return immediately.
+ * directly. Each task a route registers through `ctx.waitUntil` goes to
+ * `event.waitUntil()` as soon as it is registered, including work started
+ * while a streamed body is still being sent, so webhook acknowledgements
+ * can return immediately.
  *
  * Authored channels receive `RouteHandlerArgs`; framework-internal channels
  * receive the smaller `RouteContext` used by callback routes.
@@ -62,16 +60,15 @@ export async function dispatchChannelRequest(
   routeKey: string,
   config: NitroArtifactsConfig,
 ): Promise<Response> {
+  const params = decodeRouteParams(event);
+  if (params === undefined) return malformedParamsResponse();
   return await traceChannelRequest({ request: event.req, routeKey }, async (span) => {
     // Correlation does not require an eve-owned request span. Preserve any
     // active platform request or function span before route resolution.
     const requestTraceContext =
       span?.reference ?? otelTrace.getSpan(otelContext.active())?.spanContext();
     const bundle = await resolveNitroChannelRuntimeBundle(config);
-
-    const matchedChannel = bundle.channels.find(
-      (channel) => `${channel.method.toUpperCase()} ${channel.urlPath}` === routeKey,
-    );
+    const matchedChannel = channelsByRouteKey(bundle.channels).get(routeKey);
 
     if (matchedChannel === undefined) {
       return Response.json(
@@ -93,40 +90,37 @@ export async function dispatchChannelRequest(
       span?.channel({ channelKind });
     }
 
-    const routeArgs = await buildRouteArgs(
-      event,
+    const args = await buildRouteArgs({
       bundle,
-      matchedChannel.name,
-      channelKind ?? "channel",
+      channel: matchedChannel,
+      channelKind: channelKind ?? "channel",
       config,
+      event,
+      params,
       requestTraceContext,
-    );
-
-    let response: Response;
+      routeKey,
+    });
 
     try {
-      response = await withDevelopmentVercelOidcContext(config, event.req, async () => {
+      return await withDevelopmentVercelOidcContext(config, event.req, async () => {
         if (matchedChannel.handler) {
           // Authored CompiledChannel route — build RouteHandlerArgs.
-          return await matchedChannel.handler(event.req, routeArgs.args);
+          return await matchedChannel.handler(event.req, args);
         }
 
         // Framework-internal fetch-only channel (e.g. the connection
         // callback route). Build a RouteContext with the agent handle.
         const ctx: RouteContext = {
-          waitUntil: routeArgs.args.waitUntil,
-          params: routeArgs.args.params,
-          requestIp: routeArgs.args.requestIp,
+          waitUntil: args.waitUntil,
+          params: args.params,
+          requestIp: args.requestIp,
         };
 
         return await matchedChannel.fetch(event.req, ctx);
       });
     } catch (error) {
       const commandError = sessionCommandErrorResponse(error);
-      if (commandError !== undefined) {
-        flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
-        return commandError;
-      }
+      if (commandError !== undefined) return commandError;
       // Without this a handler throw is only Nitro's default 5xx, with no eve
       // log. logError records the exception against the active request span,
       // so traceChannelRequest must not record the returned 500 again.
@@ -134,16 +128,11 @@ export async function dispatchChannelRequest(
         routeKey,
         channel: matchedChannel.name,
       });
-      flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
       return Response.json(
         { error: "Channel handler failed.", errorId, ok: false },
         { status: 500 },
       );
     }
-
-    flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
-
-    return response;
   });
 }
 
@@ -152,11 +141,12 @@ export async function dispatchChannelWebSocketRequest(
   routeKey: string,
   config: NitroArtifactsConfig,
 ): Promise<WebSocketRouteHooks> {
+  const params = decodeRouteParams(event);
+  if (params === undefined) {
+    return rejectWebSocketUpgrade(MALFORMED_PARAMS_BODY, 400);
+  }
   const bundle = await resolveNitroChannelRuntimeBundle(config);
-
-  const matchedChannel = bundle.channels.find(
-    (channel) => `${channel.method.toUpperCase()} ${channel.urlPath}` === routeKey,
-  );
+  const matchedChannel = channelsByRouteKey(bundle.channels).get(routeKey);
 
   if (matchedChannel === undefined || matchedChannel.websocket === undefined) {
     return rejectWebSocketUpgrade(
@@ -170,29 +160,28 @@ export async function dispatchChannelWebSocketRequest(
     getChannelInstrumentationKind(matchedChannel.definition) ??
     matchedChannel.adapter?.kind ??
     "channel";
-  const routeArgs = await buildRouteArgs(
-    event,
+  const args = await buildRouteArgs({
     bundle,
-    matchedChannel.name,
+    channel: matchedChannel,
     channelKind,
     config,
-    undefined,
-  );
+    event,
+    params,
+    requestTraceContext: undefined,
+    routeKey,
+  });
 
   try {
-    const hooks = await withDevelopmentVercelOidcContext(
+    return await withDevelopmentVercelOidcContext(
       config,
       event.req,
-      async () => await websocket(event.req, routeArgs.args),
+      async () => await websocket(event.req, args),
     );
-    flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
-    return hooks;
   } catch (error) {
     const errorId = logError(log, "channel websocket handler threw", error, {
       routeKey,
       channel: matchedChannel.name,
     });
-    flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
     return rejectWebSocketUpgrade(
       { error: "Channel websocket handler failed.", errorId, ok: false },
       500,
@@ -227,28 +216,33 @@ async function withDevelopmentVercelOidcContext<T>(
   );
 }
 
-async function buildRouteArgs(
-  event: H3Event,
-  bundle: Awaited<ReturnType<typeof resolveNitroChannelRuntimeBundle>>,
-  channelName: string,
-  channelKind: string,
-  config: NitroArtifactsConfig,
-  requestTraceContext: SpanContext | undefined,
-): Promise<BuiltRouteArgs> {
+async function buildRouteArgs(input: {
+  readonly bundle: Awaited<ReturnType<typeof resolveNitroChannelRuntimeBundle>>;
+  readonly channel: ResolvedChannelDefinition;
+  readonly channelKind: string;
+  readonly config: NitroArtifactsConfig;
+  readonly event: H3Event;
+  readonly params: Record<string, string>;
+  readonly requestTraceContext: SpanContext | undefined;
+  readonly routeKey: string;
+}): Promise<RouteHandlerArgs> {
+  const { bundle, channel, channelKind, config, event, params, requestTraceContext } = input;
+  const channelName = channel.name;
   const requestId = readVercelRequestId(event.req.headers);
   const requestIp = extractRequestIp(event, config);
-  const backgroundTasks: Promise<unknown>[] = [];
-  const rawParams = (event.context.params as Record<string, string>) ?? {};
-  const params: Record<string, string> = {};
-  for (const [key, value] of Object.entries(rawParams)) {
-    params[key] = decodeURIComponent(value);
-  }
-
+  // A bare `waitUntil(allSettled(tasks))` never rejects and so silently
+  // discards failed post-ack work (the Slack inbound dispatch).
   const waitUntil = (task: Promise<unknown>) => {
-    backgroundTasks.push(task);
+    event.waitUntil(
+      task.catch((error: unknown) => {
+        logError(log, "channel background task failed", error, {
+          routeKey: input.routeKey,
+          channel: channelName,
+        });
+      }),
+    );
   };
-  const channel = bundle.channels.find((candidate) => candidate.name === channelName);
-  const adapter = channel?.adapter ?? { kind: "channel" };
+  const adapter = channel.adapter ?? { kind: "channel" };
   const acceptedDeploymentId = await resolveAcceptedDeploymentId(config);
   const deliverySource = {
     acceptedDeploymentId,
@@ -269,11 +263,11 @@ async function buildRouteArgs(
     channelName,
     metadata: deliverySource,
     runtime: bundle.runtime,
-    turnPolicy: channel?.turnPolicy,
+    turnPolicy: channel.turnPolicy,
   });
   const attachSession = createAttachSessionFn(bundle.runtime, {
     ...deliverySource,
-    turnPolicy: channel?.turnPolicy,
+    turnPolicy: channel.turnPolicy,
   });
   const to = createCrossChannelToFn(
     bundle.runtime,
@@ -333,10 +327,7 @@ async function buildRouteArgs(
     attachRemoteAgentStreamHeadersResolver(args, bundle.resolveRemoteAgentStreamHeaders);
   }
 
-  return {
-    args,
-    backgroundTasks,
-  };
+  return args;
 }
 
 async function resolveAcceptedDeploymentId(
@@ -377,32 +368,49 @@ function rejectWebSocketUpgrade(
   };
 }
 
+const MALFORMED_PARAMS_BODY = {
+  error: "The request path has malformed percent-encoding.",
+  ok: false,
+} as const;
+
+function malformedParamsResponse(): Response {
+  return Response.json(MALFORMED_PARAMS_BODY, { status: 400 });
+}
+
 /**
- * Drains channel background tasks through `event.waitUntil`, logging each
- * rejection. A bare `waitUntil(allSettled(tasks))` never rejects and so
- * silently discards failed post-ack work (the Slack inbound dispatch).
+ * The matched route's params, percent-decoded except for encoded `/` and
+ * `\`, which stay encoded so a param never gains a path separator. A path
+ * with malformed percent-encoding has no params.
  */
-function flushBackgroundTasks(
-  event: H3Event,
-  tasks: Promise<unknown>[],
-  routeKey: string,
-  channel: string,
-): void {
-  if (tasks.length === 0) {
-    return;
+function decodeRouteParams(event: H3Event): Record<string, string> | undefined {
+  try {
+    return getRouterParams(event, { decode: true });
+  } catch (error) {
+    if (error instanceof URIError) return undefined;
+    throw error;
   }
-  event.waitUntil(
-    Promise.allSettled(tasks).then((results) => {
-      for (const result of results) {
-        if (result.status === "rejected") {
-          logError(log, "channel background task failed", result.reason, {
-            routeKey,
-            channel,
-          });
-        }
-      }
-    }),
-  );
+}
+
+const routeKeyIndexes = new WeakMap<
+  readonly ResolvedChannelDefinition[],
+  ReadonlyMap<string, ResolvedChannelDefinition>
+>();
+
+/** The channels of one resolved bundle by route key, built once per bundle. */
+function channelsByRouteKey(
+  channels: readonly ResolvedChannelDefinition[],
+): ReadonlyMap<string, ResolvedChannelDefinition> {
+  let index = routeKeyIndexes.get(channels);
+  if (index === undefined) {
+    const byRouteKey = new Map<string, ResolvedChannelDefinition>();
+    for (const channel of channels) {
+      const routeKey = `${channel.method.toUpperCase()} ${channel.urlPath}`;
+      if (!byRouteKey.has(routeKey)) byRouteKey.set(routeKey, channel);
+    }
+    index = byRouteKey;
+    routeKeyIndexes.set(channels, index);
+  }
+  return index;
 }
 
 function extractRequestIp(event: H3Event, config: NitroArtifactsConfig): string | null {
