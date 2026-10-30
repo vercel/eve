@@ -376,84 +376,101 @@ End returns a `Delivery` for the retiring session; `await delivery.result()` wai
 
 #### Add commands
 
-The Slack channel doesn't read `commands`, but the commands you [define for the eve channel](./eve#slash-commands) with `defineCommand` are plain objects, so a Slack handler can run them too. Slack has two places for them: Slack slash commands, and commands typed in a thread.
-
-A Slack slash command, such as `/oncall`, comes to `onSlashCommand` without a thread, so it suits a command that doesn't need a session. This one runs a command defined next to `escalate` and shows its `message` only to the person who ran it:
+The Slack channel doesn't read `commands`, but the commands you [define for the eve channel](./eve#slash-commands) with `defineCommand` are plain objects, so Slack handlers can run them too. Keep them in one record and pass it to both channels:
 
 ```ts title="agent/lib/commands.ts"
-import { defineCommand } from "eve/channels";
+import { sessionCommands } from "eve/channels";
 
-import { currentOncall } from "./oncall";
+import { escalate } from "./escalate";
+import { oncall } from "./oncall";
 
-export const oncall = defineCommand({
-  description: "Show who's on call",
-  async run() {
-    return { message: `On call this week: ${await currentOncall()}` };
-  },
-});
+export const commands = { ...sessionCommands, escalate, oncall };
 ```
 
-```ts title="agent/channels/slack.ts"
-import { slackChannel } from "eve/channels/slack";
-
-import { oncall } from "../lib/commands";
-
-export default slackChannel({
-  async onSlashCommand(command, ctx) {
-    if (command.command !== "/oncall") return;
-    const result = await oncall.run({ argument: command.text.trim(), caller: ctx.defaultAuth });
-    if (!result?.message) return;
-    await ctx.slack.request("chat.postEphemeral", {
-      channel: command.channelId,
-      user: command.user.id,
-      text: result.message,
-    });
-  },
-});
-```
-
-`ctx.defaultAuth` is the principal a message from the same user would have. Register each command under **Slash Commands** in the Slack app's settings, with the same request URL as its interactivity, and add the `commands` bot scope. To start a conversation from a slash command instead, call `ctx.send(message, { auth: ctx.defaultAuth, target: { channelId, initialMessage: { text } } })`: eve posts `initialMessage` as the thread root and runs the first turn under it. It takes the same options as `onEvent`'s [`ctx.send`](#other-events-api-callbacks).
-
-A command inside a thread, such as `@bot !escalate the refund failed`, is a message. Read it in the message hook, run it in the thread's session, and return `null` so the text doesn't reach the model. This offers `sessionCommands` and `escalate`, the same set as the eve channel:
+The Slack channel below runs any command in that record two ways. A Slack slash command, such as `/oncall`, arrives without a thread, so it runs commands that don't need a session; a returned `send` starts a thread. A command typed in a thread, such as `@bot !escalate the refund failed`, is a message: the hook runs it in the thread's session and returns `null`, so the text doesn't reach the model.
 
 ```ts title="agent/channels/slack.ts"
-import { sessionCommands, type CommandSession } from "eve/channels";
+import type { CommandDefinition, CommandSession } from "eve/channels";
 import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
 
-import { escalate } from "../lib/commands";
+import { commands } from "../lib/commands";
 
-const commands = { ...sessionCommands, escalate };
-const COMMAND = /^(?:<@\w+>\s*)*!([a-z-]+)(?:\s+([\s\S]*))?$/u;
+const THREAD_COMMAND = /^(?:<@\w+>\s*)*!([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/u;
+
+function findCommand(name: string): CommandDefinition | undefined {
+  return Object.entries(commands).find(
+    ([key, command]) => key === name || command.aliases?.includes(name),
+  )?.[1];
+}
 
 export default slackChannel({
+  async onSlashCommand(slash, ctx) {
+    const command = findCommand(slash.command.slice(1));
+    if (command === undefined) return;
+    const argument = slash.text.trim();
+    const reply = (text: string) =>
+      ctx.slack.request("chat.postEphemeral", {
+        channel: slash.channelId,
+        user: slash.user.id,
+        text,
+      });
+    if (command.session === "required") {
+      await reply(
+        `${slash.command} works in a thread: mention me there and type !${slash.command.slice(1)}.`,
+      );
+      return;
+    }
+    if (argument !== "" && command.input === undefined) {
+      await reply(`${slash.command} doesn't take any text.`);
+      return;
+    }
+
+    const result = await command.run({ argument, caller: ctx.defaultAuth });
+    if (result?.message) await reply(result.message);
+    if (result?.send) {
+      await ctx.send(result.send, {
+        auth: ctx.defaultAuth,
+        target: {
+          channelId: slash.channelId,
+          initialMessage: { text: `<@${slash.user.id}> ran ${slash.command}` },
+        },
+      });
+    }
+  },
+
   async onAppMention(ctx, message) {
     const auth = defaultSlackAuth(message, ctx);
-    const [, name = "", argument = ""] = COMMAND.exec(message.text.trim()) ?? [];
-    if (!Object.hasOwn(commands, name)) return { auth };
-    const command = commands[name as keyof typeof commands];
+    const [, name = "", rest = ""] = THREAD_COMMAND.exec(message.text.trim()) ?? [];
+    const command = findCommand(name);
+    const argument = rest.trim();
     // Like the eve channel, a command without `input` runs only when it's typed alone.
-    if (argument.trim() !== "" && command.input === undefined) return { auth };
+    if (command === undefined || (argument !== "" && command.input === undefined)) {
+      return { auth };
+    }
 
     const current = await ctx.resolveSession();
-    if (current === undefined) {
+    if (current === undefined && command.session === "required") {
       await ctx.thread.post(`Mention me first, then use !${name} in the thread.`);
       return null;
     }
-    const session: CommandSession = {
+    const session: CommandSession | undefined = current && {
       id: current.id,
       cancel: async () => void (await ctx.cancel()),
       clear: async () => void (await ctx.clear()),
       compact: async () => void (await ctx.compact()),
       end: async () => void (await ctx.end()),
     };
-    const result = await command.run({ argument: argument.trim(), caller: auth, session });
+    const result = await command.run({ argument, caller: auth, session });
     if (result?.message) await ctx.thread.post(result.message);
+    if (result?.send) await ctx.send(result.send, { auth });
     return null;
   },
 });
 ```
 
-The hook decides who can run a command, and `run` gets the same `caller` the hook would deliver with. The prefix is up to you; `!` keeps thread commands apart from Slack's own, since Slack treats a message that starts with `/` as a slash command. Anything that doesn't match, such as `@bot !clear the cache`, still reaches the model. This sample leaves out aliases and a returned `send`; to deliver `send`, call `ctx.send(result.send, { auth })` before returning `null`.
+Register each session-free command and alias under **Slash Commands** in the Slack app's settings, with the same request URL as its interactivity, and add the `commands` bot scope. `ctx.defaultAuth` is the principal a message from the same user would have, and `ctx.send` takes the same options as `onEvent`'s [`ctx.send`](#other-events-api-callbacks); `initialMessage` becomes the thread root, and the first turn runs under it.
+
+The hook decides who can run a thread command, and `run` gets the same `caller` the hook would deliver with. The `!` prefix is up to you; it keeps thread commands apart from Slack's own, since Slack treats a message that starts with `/` as a slash command. Anything that isn't a known command still reaches the model.
 
 #### Serve Slack code channels
 
