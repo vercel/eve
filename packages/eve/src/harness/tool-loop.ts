@@ -177,9 +177,10 @@ async function runtimeResults(step: Step, input: HarnessStepInput | undefined) {
 /**
  * The delivery's answers are admitted, then decide what they answer. The model reads what they
  * decided before the delivery's own input, as the AI SDK ran it, so that input waits a step; and
- * when nothing they decided can run, it waits, unreceived, behind them. Input also waits a step
- * while history ends on local results beside a provider tool's unanswered call: Anthropic opens
- * the next response with that result, and rejects a request that adds anything after them.
+ * when nothing they decided can run, it waits, unreceived, behind them. Input that steers a turn
+ * also waits a step while history ends on local results beside a provider tool's unanswered call:
+ * Anthropic opens the next response with that result, and rejects a request that adds anything
+ * after them. A new turn's input doesn't wait for a stale call; the prompt closes it instead.
  */
 async function answers(
   step: Step,
@@ -192,7 +193,8 @@ async function answers(
   if (
     decided.approved.length > 0 ||
     decided.settledApprovals ||
-    awaitsProviderToolResult(step.session.history)
+    (awaitsProviderToolResult(step.session.history) &&
+      activeTurnIdOf(step.view().projection) !== undefined)
   ) {
     await step.apply(queueInput(step.view(), turnInputOnly(input)));
     input = withoutTurnInput(input);

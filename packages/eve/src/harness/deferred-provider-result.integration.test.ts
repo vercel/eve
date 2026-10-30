@@ -1,10 +1,12 @@
-import { jsonSchema, type LanguageModel } from "ai";
+import { APICallError, jsonSchema, type LanguageModel } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
+import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
+import { takeDeferredMessage } from "#harness/hitl/index.js";
 import { eventsOf } from "#harness/publication.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import type { HarnessSession } from "#harness/types.js";
+import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot be written.
@@ -33,13 +35,12 @@ const searchResult: StreamPart = {
 };
 
 /**
- * Runs a turn whose first response ends with a local call and a server tool call the provider
- * hasn't answered, then serves `later` responses until the turn stops. A `steer` message reaches
- * the turn right after the first step. Returns the contract violations, the server call's facts,
- * and the last message of each request.
+ * A harness whose first response ends with a local call and a server tool call the provider
+ * hasn't answered, then serves `later` responses; an error fails its model call. Records the
+ * contract violations, the server call's facts, and each request's prompt.
  */
-async function runLateResult(later: StreamPart[][], options: { readonly steer?: string } = {}) {
-  const responses: StreamPart[][] = [
+function deferredHarness(later: (StreamPart[] | Error)[]) {
+  const responses: (StreamPart[] | Error)[] = [
     [
       { input: '{"command":"ls"}', toolCallId: "toolu_bash", toolName: "bash", type: "tool-call" },
       {
@@ -54,7 +55,11 @@ async function runLateResult(later: StreamPart[][], options: { readonly steer?: 
     ...later,
   ];
   const model = new MockLanguageModelV4({
-    doStream: async () => ({ stream: convertArrayToReadableStream(responses.shift() ?? []) }),
+    doStream: async () => {
+      const next = responses.shift() ?? [];
+      if (next instanceof Error) throw next;
+      return { stream: convertArrayToReadableStream(next) };
+    },
   });
   const bash = {
     description: "Run a command",
@@ -84,21 +89,40 @@ async function runLateResult(later: StreamPart[][], options: { readonly steer?: 
     history: [],
     sessionId: "deferred-result",
   };
+  const prompts = () => model.doStreamCalls.map(({ prompt }) => prompt);
+  return { prompts, runStep, searchFacts, session, violations };
+}
 
-  const first = await runStep(session, { message: "List the files and find a weather tool." });
-  if (typeof first.next !== "function") throw new TypeError("Expected the turn to continue.");
-  let result = await first.next(
-    first.session,
-    options.steer === undefined ? undefined : { message: options.steer },
-  );
+/** Runs steps from `result` until the turn stops. */
+async function untilStopped(result: StepResult): Promise<StepResult> {
   for (let steps = 0; typeof result.next === "function" && steps < 5; steps += 1) {
     result = await result.next(result.session);
   }
-  const requests = model.doStreamCalls.map(({ prompt }) => ({
+  return result;
+}
+
+const start = "List the files and find a weather tool.";
+
+/**
+ * Runs a turn on {@link deferredHarness} until it stops. A `steer` message reaches the turn right
+ * after the first step. Returns the contract violations, the server call's facts, and the last
+ * message of each request.
+ */
+async function runLateResult(later: StreamPart[][], options: { readonly steer?: string } = {}) {
+  const run = deferredHarness(later);
+  const first = await run.runStep(run.session, { message: start });
+  if (typeof first.next !== "function") throw new TypeError("Expected the turn to continue.");
+  await untilStopped(
+    await first.next(
+      first.session,
+      options.steer === undefined ? undefined : { message: options.steer },
+    ),
+  );
+  const requests = run.prompts().map((prompt) => ({
     last: prompt.at(-1),
     system: prompt.flatMap((message) => (message.role === "system" ? [message.content] : [])),
   }));
-  return { requests, searchFacts, violations };
+  return { requests, searchFacts: run.searchFacts, violations: run.violations };
 }
 
 const reply: StreamPart[] = [
@@ -168,5 +192,71 @@ describe("input while a provider result is still to come", () => {
       last: localResult,
       system: expect.arrayContaining([expect.stringContaining("was not delivered")]),
     });
+  });
+});
+
+// A failed or cancelled turn leaves history on the local results with the server call unanswered,
+// and its result can't come once anything else follows them. The next request answers the call
+// instead, so it reads the person's message first and the provider accepts it.
+describe("a provider result that can no longer come", () => {
+  const failure = new APICallError({
+    isRetryable: false,
+    message: "The provider is unavailable.",
+    requestBodyValues: {},
+    statusCode: 400,
+    url: "https://provider.test",
+  });
+  const followUp = "Alice is back: which files were there?";
+
+  /** Server calls the prompt sends without a result anywhere in it. */
+  function danglingServerCalls(
+    prompt: ReturnType<ReturnType<typeof deferredHarness>["prompts"]>[number],
+  ) {
+    const parts = prompt.flatMap(
+      (message): { type: string; toolCallId?: string; providerExecuted?: boolean }[] =>
+        Array.isArray(message.content) ? message.content : [],
+    );
+    const answered = new Set(
+      parts.flatMap((part) => (part.type === "tool-result" ? [part.toolCallId] : [])),
+    );
+    return parts.filter(
+      (part) =>
+        part.type === "tool-call" &&
+        part.providerExecuted === true &&
+        !answered.has(part.toolCallId),
+    );
+  }
+
+  it("answers it for a new turn instead of holding the message", async () => {
+    const run = deferredHarness([failure, reply]);
+    const first = await run.runStep(run.session, { message: start });
+    if (typeof first.next !== "function") throw new TypeError("Expected the turn to continue.");
+    const failed = await untilStopped(await first.next(first.session));
+
+    await untilStopped(await run.runStep(failed.session, { message: followUp }));
+
+    const [, , request] = run.prompts();
+    expect(run.prompts()).toHaveLength(3);
+    expect(request?.at(-1)).toMatchObject({ content: [{ text: followUp }], role: "user" });
+    expect(danglingServerCalls(request!)).toEqual([]);
+  });
+
+  // A cancel during the step that waits for the result keeps the held message in history after
+  // the local results, as an interrupted step's retry note follows them.
+  it("answers it once a message follows the local results", async () => {
+    const steer = "Also check whether it covers Lisbon.";
+    const run = deferredHarness([failure, reply]);
+    const first = await run.runStep(run.session, { message: start });
+    if (typeof first.next !== "function") throw new TypeError("Expected the turn to continue.");
+    const stopped = await untilStopped(await first.next(first.session, { message: steer }));
+    const held = takeDeferredMessage(stopped.session);
+    const cancelled = await preserveCancelledTurnMessage(held.session, { message: held.message });
+
+    await untilStopped(await run.runStep(cancelled, { message: followUp }));
+
+    const request = run.prompts().at(-1)!;
+    expect(held.message).toBe(steer);
+    expect(request.at(-1)).toMatchObject({ content: [{ text: followUp }], role: "user" });
+    expect(danglingServerCalls(request)).toEqual([]);
   });
 });
