@@ -24,8 +24,10 @@ const QUEUE_TRIGGERS = {
  * Each route that needs its own function gets a `functionRules` entry, so
  * Nitro emits a dedicated `.func` from the same build output carrying the
  * agent's queue trigger, an extended execution window, and the environment
- * the deployed runtime needs. Every other function setting (runtime, memory,
- * streaming) is inherited from the base server function config.
+ * the deployed runtime needs. Every other function setting (memory,
+ * streaming) is inherited from the base server function config, which pins
+ * the Node.js runtime eve requires rather than the build machine's or the
+ * app's `engines` version.
  */
 export function createEveVercelOptions(input: {
   agentName: string;
@@ -66,6 +68,7 @@ export function createEveVercelOptions(input: {
     ...(input.routeTable.cronHandlerRoute !== undefined && {
       cronHandlerRoute: input.routeTable.cronHandlerRoute,
     }),
+    functions: { runtime: "nodejs24.x" },
     functionRules: Object.fromEntries(
       Object.entries(QUEUE_TRIGGERS).flatMap(([vercelFunction, createTrigger]) =>
         input.routeTable.routes
