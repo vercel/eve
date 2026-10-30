@@ -1,7 +1,7 @@
 ---
 issue: "None (maintainer-requested research)"
 status: proposed
-last_updated: "2026-10-30"
+last_updated: "2026-10-31"
 ---
 
 # Session kernel and harness
@@ -41,7 +41,7 @@ The protocol is already its own layer. `protocol/session-events` defines facts a
 ```text
 app              compiler · agent/ files · routes · channels
 session runtime  execution/session/*                       written against Workflow
-loop             harness/tool-loop.ts, step/{intake,after-model,park},
+loop             harness/kernel.ts, step/{intake,after-model,park},
                  compaction/step.ts, reactions/kinds/*     policy and guarantees together
 protocol         protocol/session-events, protocol/session-projection
 ```
@@ -179,7 +179,7 @@ There is no separate per-call prompt. The session's history is exactly what the 
 
 ### A kernel with explicit inputs
 
-The kernel is a step function, `createKernel` (renamed from `createToolLoopHarness` in #5681). The state it still reads ambiently becomes input:
+The kernel is a step function, `createKernel` (renamed from `createToolLoopHarness`). The state it still reads ambiently becomes input:
 
 ```ts
 const step = createKernel({ tools, resolveModel, harness, publish, abortSignal, ports });
@@ -246,7 +246,7 @@ The system prompt is the kernel's recovery note, when there is one, then exactly
 Skills show why rendering belongs to the author. eve's skills list mixes data (each skill's name and description), mechanism (load a skill with `eve__skill({ name })`), and policy ("activate the minimal set"). With skills as data, all three are the author's:
 
 ```ts title="agent/harness.ts"
-import { declared, defineHarness } from "eve";
+import { declared, defineHarness } from "eve/experimental/harness";
 
 export default defineHarness((ctx) => ({
   agent: {
@@ -308,7 +308,7 @@ Each example is a complete `agent/harness.ts`, written against the API sketched 
 <summary><strong>Critic:</strong> check the draft before the turn settles, and send it back with a note.</summary>
 
 ```ts title="agent/harness.ts"
-import { defineHarness } from "eve";
+import { defineHarness } from "eve/experimental/harness";
 import { decide } from "eve/ai";
 
 export default defineHarness((ctx) => ({
@@ -342,7 +342,7 @@ The turn still produces one reply. The rejected draft stays in history before th
 <summary><strong>Command turn:</strong> run <code>/deploy staging</code> without calling the model.</summary>
 
 ```ts title="agent/harness.ts"
-import { defineHarness } from "eve";
+import { defineHarness } from "eve/experimental/harness";
 
 export default defineHarness((ctx) => ({
   next: () => {
@@ -367,7 +367,7 @@ The call still passes the gate. If `deploy` requires approval, the turn waits fo
 <summary><strong>Model cascade:</strong> answer on a fast model, and escalate when the draft falls short.</summary>
 
 ```ts title="agent/harness.ts"
-import { defineHarness } from "eve";
+import { defineHarness } from "eve/experimental/harness";
 import { decide } from "eve/ai";
 
 export default defineHarness((ctx) => {
@@ -407,7 +407,7 @@ Whether the turn has escalated comes from the turn itself, a note the harness ad
 <summary><strong>Large tool results:</strong> keep a preview in history while the full output stays on the stream.</summary>
 
 ```ts title="agent/harness.ts"
-import { defineHarness } from "eve";
+import { defineHarness } from "eve/experimental/harness";
 
 const LIMIT = 20_000;
 
@@ -434,7 +434,7 @@ export default defineHarness((ctx) => ({
 <summary><strong>Compaction on your terms:</strong> compact earlier, with your own summary instructions.</summary>
 
 ```ts title="agent/harness.ts"
-import { defineHarness } from "eve";
+import { defineHarness } from "eve/experimental/harness";
 
 export default defineHarness((ctx) => ({
   history: () => {
@@ -459,7 +459,7 @@ When to compact is a line of code, not a setting. The summarizer's model call is
 <summary><strong>Workspace-scoped agent:</strong> fail early for suspended workspaces, and fit tools to the plan.</summary>
 
 ```ts title="agent/harness.ts"
-import { builtins, declared, defineHarness } from "eve";
+import { builtins, declared, defineHarness } from "eve/experimental/harness";
 import { loadWorkspace } from "./lib/workspaces";
 
 export default defineHarness((ctx) => {
