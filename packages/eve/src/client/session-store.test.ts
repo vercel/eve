@@ -183,6 +183,64 @@ describe("SessionStore acceptance and observation", () => {
     current.newSession();
     expect(current.snapshot.session).toBeUndefined();
   });
+  it("runs a slash command in its session and follows the turn eve sent for it", async () => {
+    const server = agent();
+    const fetchAgent = vi.mocked(fetch).getMockImplementation()!;
+    const commandBodies: unknown[] = [];
+    vi.mocked(fetch).mockImplementation(async (request, init) => {
+      const path = new URL(String(request)).pathname;
+      if (path === "/eve/v1/session/session_1/commands/standup") {
+        commandBodies.push(JSON.parse(String(init?.body)));
+        return Response.json({
+          ok: true,
+          message: "Drafting.",
+          delivery: { sessionId: "session_1", deliveryId: "d_command" },
+        });
+      }
+      if (path === "/eve/v1/session/session_1/commands/new") {
+        return Response.json({ ok: true, ended: true });
+      }
+      return await fetchAgent(request, init);
+    });
+    const current = store({ initialSession });
+
+    expect(await current.runCommand("standup", { argument: "today" })).toMatchObject({
+      message: "Drafting.",
+    });
+    expect(commandBodies).toEqual([{ argument: "today" }]);
+    // The follow-up is eve's to send; the store only reads its turn.
+    server.append(testTurnFacts(0, "Draft my standup.", ["d_command"]));
+    await vi.waitFor(() =>
+      expect(texts(current)).toEqual(["user: draft my standup.", "assistant: Draft my standup."]),
+    );
+    expect(server.posts).toEqual([]);
+
+    await current.runCommand("new");
+    expect(current.snapshot.session).toBeUndefined();
+  });
+  it("returns but doesn't apply a command result that lands after newSession()", async () => {
+    const server = agent();
+    const fetchAgent = vi.mocked(fetch).getMockImplementation()!;
+    const response = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockImplementation(async (request, init) =>
+      new URL(String(request)).pathname.includes("/commands/")
+        ? await response.promise
+        : await fetchAgent(request, init),
+    );
+    const current = store({ initialSession });
+
+    const pending = current.runCommand("standup");
+    await vi.waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
+    current.newSession();
+    const delivery = { sessionId: "session_1", deliveryId: "d_late" };
+    response.resolve(Response.json({ ok: true, delivery }));
+
+    // Following the old session's delivery from the new conversation would throw.
+    expect(await pending).toEqual({ delivery });
+    expect(current.snapshot.session).toBeUndefined();
+    expect(server.posts).toEqual([]);
+  });
+
   it("preserves refreshed inbox handles in saved snapshots and session-change callbacks", async () => {
     agent();
     const fetchAgent = vi.mocked(fetch).getMockImplementation()!;

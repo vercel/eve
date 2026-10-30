@@ -44,15 +44,15 @@ async function handleSubmit() {
 
 The state fields are computed refs; the commands are ordinary methods:
 
-| Property                                                                                  | Vue shape                                       |
-| ----------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `messages`, `agents`                                                                      | Computed refs for each projected snapshot field |
-| `view`                                                                                    | `ComputedRef<SessionView>`                      |
-| `status`                                                                                  | `ComputedRef<UseEveAgentStatus>`                |
-| `error`                                                                                   | `ComputedRef<Error \| undefined>`               |
-| `events`                                                                                  | `ComputedRef<readonly SessionStreamEvent[]>`    |
-| `session`                                                                                 | `ComputedRef<ClientSessionState \| undefined>`  |
-| `send`, `respond`, `prewarm`, `resume`, `cancel`, `clear`, `compact`, `end`, `newSession` | Methods                                         |
+| Property                                                                                                            | Vue shape                                       |
+| ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `messages`, `agents`                                                                                                | Computed refs for each projected snapshot field |
+| `view`                                                                                                              | `ComputedRef<SessionView>`                      |
+| `status`                                                                                                            | `ComputedRef<UseEveAgentStatus>`                |
+| `error`                                                                                                             | `ComputedRef<Error \| undefined>`               |
+| `events`                                                                                                            | `ComputedRef<readonly SessionStreamEvent[]>`    |
+| `session`                                                                                                           | `ComputedRef<ClientSessionState \| undefined>`  |
+| `send`, `respond`, `prewarm`, `resume`, `cancel`, `clear`, `compact`, `end`, `newSession`, `commands`, `runCommand` | Methods                                         |
 
 Destructuring preserves reactivity because each state value remains a ref. Read refs with `.value` in `<script>` and without `.value` in a template. The [`useEveAgent` reference](./use-eve-agent#returned-state) describes what each value and command does.
 

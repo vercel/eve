@@ -49,3 +49,26 @@ export class CommandResponseError extends EveError {
     this.issues = issues;
   }
 }
+
+/**
+ * Reads `/name argument` as one of `commands`, by name or alias. Returns `undefined` for anything
+ * else, including text after a command without `input`; a client should send those as ordinary
+ * messages.
+ */
+export function parseSlashCommand(
+  text: string,
+  commands: readonly ChannelCommandInfo[],
+): { readonly command: ChannelCommandInfo; readonly argument: string } | undefined {
+  const match = /^\/([a-z][a-z0-9-]*)(?:\s+([\s\S]*))?$/u.exec(text.trim());
+  if (match === null) return undefined;
+  const token = match[1]!;
+  const command = commands.find(
+    (candidate) => candidate.name === token || candidate.aliases?.includes(token) === true,
+  );
+  const argument = (match[2] ?? "").trim();
+  // A command that takes no arguments stays a message when text follows it: "/clear the cache".
+  if (command === undefined || (command.input === undefined && argument !== "")) {
+    return undefined;
+  }
+  return { command, argument };
+}

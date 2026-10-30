@@ -61,6 +61,7 @@ export type {
 
 export {
   CommandResponseError,
+  parseSlashCommand,
   type ChannelCommandInfo,
   type ChannelCommandResult,
 } from "#client/commands.js";

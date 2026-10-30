@@ -25,6 +25,7 @@ import type { DeliveryReceipt } from "#protocol/delivery.js";
 import { toError } from "#shared/errors.js";
 import { waitWithSignal } from "#shared/wait-with-signal.js";
 import type { ClientSessionState, SendTurnPayload } from "#client/types.js";
+import type { ChannelCommandInfo, ChannelCommandResult } from "#client/commands.js";
 
 export type {
   SessionStoreCallbacks,
@@ -316,6 +317,48 @@ export class SessionStore {
     } finally {
       this.#turnWaiters.delete(check);
     }
+  }
+
+  /** Lists the eve channel's slash commands from `GET /eve/v1/commands`. */
+  async commands(options?: {
+    readonly signal?: AbortSignal;
+  }): Promise<readonly ChannelCommandInfo[]> {
+    return await this.#commandClient().commands(options);
+  }
+
+  /**
+   * Runs one of the eve channel's slash commands in this store's session, when it has one. A
+   * command that ended the session starts a fresh local one, and a follow-up message eve sent for
+   * the command is followed on the stream. Resolves with the result so the caller can show its
+   * `message`. When `newSession()` runs before the command returns, its result isn't applied.
+   */
+  async runCommand(
+    name: string,
+    options: { readonly argument?: string; readonly signal?: AbortSignal } = {},
+  ): Promise<ChannelCommandResult> {
+    const client = this.#commandClient();
+    // A prewarm still creating the session would otherwise send the command without it.
+    await this.#creation?.catch(() => undefined);
+    const session = this.#session;
+    const result = await client.runCommand(name, {
+      ...options,
+      ...(session !== undefined && { sessionId: session.id }),
+    });
+    // A newSession() while the command ran replaced the conversation it belongs to.
+    if (this.#session !== session) return result;
+    if (result.ended === true) this.newSession();
+    // eve sent the command's follow-up as the caller; read its turn even if the stream closed.
+    else if (result.delivery !== undefined) this.follow(result.delivery);
+    return result;
+  }
+
+  #commandClient(): Client {
+    if (this.#client === undefined) {
+      throw new Error(
+        "Slash commands need a store that owns its client. Create it with `baseUrl` or `agent` instead of `session`.",
+      );
+    }
+    return this.#client;
   }
 
   compact(): Promise<Delivery> {

@@ -117,6 +117,12 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 | a file that can't be downloaded reaches the agent as a note, not a link, and the next message still works | —<sup>[24](#note-24)</sup> | —<sup>[25](#note-25)</sup> | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | —<sup>[24](#note-24)</sup> | ✅ | ✅ | ✅ | ✅ |
 | a file sent earlier in the conversation is still there on a later message | —<sup>[24](#note-24)</sup> | ✅ | ✅ |  | ✅ | —<sup>[26](#note-26)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | —<sup>[24](#note-24)</sup> | ✅ | ✅ | ✅ | ✅ |
 
+## Slash commands
+
+| Rule | `tui` | `web chat` | `chat-sdk` | `chat-sdk-dm` | `chat-sdk-text` | `discord` | `discord-dm` | `discord-gateway` | `discord-gateway-dm` | `linq` | `linq-dm` | `slack` | `slack-dm` | `teams` | `teams-dm` | `telegram` | `telegram-dm` | `discord-gateway-threads` | `github` | `linear` | `photon` | `slack-code-channel` | `twilio` |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| a typed /clear runs the channel's command instead of reaching the agent | ✅ | ✅ | —<sup>[27](#note-27)</sup> |  | —<sup>[27](#note-27)</sup> | —<sup>[27](#note-27)</sup> |  | —<sup>[27](#note-27)</sup> |  | —<sup>[27](#note-27)</sup> |  | —<sup>[27](#note-27)</sup> |  | —<sup>[27](#note-27)</sup> |  | —<sup>[27](#note-27)</sup> |  | —<sup>[27](#note-27)</sup> | —<sup>[27](#note-27)</sup> | —<sup>[27](#note-27)</sup> | —<sup>[27](#note-27)</sup> | —<sup>[27](#note-27)</sup> | —<sup>[27](#note-27)</sup> |
+
 ## Notes
 
 1. <a id="note-1"></a>the platform has no buttons a person can press
@@ -145,3 +151,4 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 24. <a id="note-24"></a>the platform has no files a person can send
 25. <a id="note-25"></a>the browser sends a file's bytes with the message, so there is no download to fail
 26. <a id="note-26"></a>each slash command starts its own session, so no later message shares one with the file
+27. <a id="note-27"></a>the platform has no slash commands a person can run
