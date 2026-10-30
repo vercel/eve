@@ -61,7 +61,8 @@ its turn is therefore a new task, named by its own delivery.
 - The [A2A TCK](https://github.com/a2aproject/a2a-tck) (JSON-RPC, `d4d6fae`) passed 63 of 64
   applicable MUSTs, every SHOULD, and 3 of 4 MAYs, behind a proxy that copied each `messageId` into
   the message text (the TCK scripts behavior by `messageId`) and made each one unique (the TCK
-  reuses one per scenario, which eve reads as a retry). The failing MUST is a TCK bug
+  reuses one per scenario, which eve reads as a retry). The proxy tags the last text part inline,
+  since an answer's text parts join into one answer. Re-run after `turnTarget`: unchanged. The failing MUST is a TCK bug
   ([a2a-tck#202](https://github.com/a2aproject/a2a-tck/issues/202)); the MAY is client-chosen
   `contextId`s, unsupported because a context is a session. The TCK found the snake_case field
   name and `Content-Type` bugs, and prompted typed `error.data` and the card's `ETag`.

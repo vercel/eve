@@ -134,7 +134,7 @@ When a task is `TASK_STATE_INPUT_REQUIRED`, its status message is plain text: ea
 }
 ```
 
-Each message answers one prompt and carries only text parts. When several are open, the task stays `TASK_STATE_INPUT_REQUIRED` with the rest until each has an answer.
+Each message answers one prompt and carries only text parts, which eve joins into one answer; the task's history records the answer as that one text part. When several are open, the task stays `TASK_STATE_INPUT_REQUIRED` with the rest until each has an answer.
 
 ## Authentication
 
