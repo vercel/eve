@@ -43,7 +43,7 @@ prompt round trips. Nothing is stored beyond the session: every read folds the s
 SendMessage{}                  -> create session (new context) -> task = turn 1
 SendMessage{contextId}         -> send(turnPolicy: "queue")    -> task = next turn
 SendMessage{taskId} working    -> send(turnPolicy: "steer")    -> same turn
-SendMessage{taskId} interrupted-> typed text (send) or extension data part (respond) -> same turn
+SendMessage{taskId} interrupted-> typed answer (send)           -> same turn
 ```
 
 ### Retries
@@ -68,12 +68,12 @@ Streams send the `task`, then a `statusUpdate` per change; completion sends the 
 `artifactUpdate` (`lastChunk: true`) before the final status. `SendStreamingMessage` closes at a
 terminal or interrupted state, `SubscribeToTask` at a terminal one.
 
-### Interactions extension
+### Prompts
 
-`https://eve.dev/a2a/extensions/interactions/v1`. Interrupted status messages carry the prompts as
-text (answerable by option ID, label, or number) and a data part with eve's interaction JSON.
-Clients that activate the extension (`A2A-Extensions` header or `message.extensions`) answer with
-`{ "responses": [Answer] }`; each answer must name an interaction open on the task.
+Interrupted status messages carry the prompts as text only, rendered as on any text channel, and
+callers answer by typing (option number, label, or free-form text). eve's interaction JSON is an
+internal format, so it stays off the wire; a structured A2A extension would be a separate,
+versioned contract, deferred until callers need one.
 
 ## Auth and ownership
 
@@ -89,11 +89,10 @@ issuer and scopes. Applications override with `card.securitySchemes`.
 ## Validation
 
 - Scenario tests drive a real `eve dev` server: discovery, version and capability refusals,
-  principal isolation, typed and structured answers, retries, pagination, cancel, failure,
+  principal isolation, typed answers, retries, pagination, cancel, failure,
   `returnImmediately`, streaming, and subscription.
 - Interop was checked manually against the official clients `@a2a-js/sdk` 1.3.0 and `a2a-sdk`
-  (Python) 1.3.0: every method, streaming and non-streaming, typed error mapping, and structured
-  answers.
+  (Python) 1.3.0: every method, streaming and non-streaming, typed error mapping, and answers.
 
 ## Not supported
 
