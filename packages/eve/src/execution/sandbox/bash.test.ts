@@ -41,7 +41,7 @@ describe("executeBashOnSandbox", () => {
     expect(log).toHaveBeenCalledWith("eve: sandbox command finished (exit 0): ls -la /workspace");
   });
 
-  it.fails(
+  it(
     "returns the tail of output too large to hold as one string",
     { timeout: 30_000 },
     async () => {
