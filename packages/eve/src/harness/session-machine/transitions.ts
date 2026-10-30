@@ -964,8 +964,9 @@ function stoppedTranscript(
 
 /**
  * `session.clear()`: everything the cleared history asked for is withdrawn, its approvals and
- * the session-limit prompt and every sign-in, and the calls awaiting them stop. Requests relayed
- * from live tasks stay: clearing doesn't stop the work that asked them.
+ * the session-limit prompt and every sign-in, and the calls awaiting them stop. A clear cancels
+ * the running turn and the session's working tasks first, and a task run withdraws what it
+ * relayed as it stops, so relayed requests are left to it.
  */
 export function clear(view: SessionView, input: { readonly cause?: Cause } = {}): Transition {
   const { projection } = view;
@@ -975,7 +976,8 @@ export function clear(view: SessionView, input: { readonly cause?: Cause } = {})
     signIns: [],
     events: [
       ...clearedInteractions(view),
-      // Clear runs between turns. A paused turn still owns a lifecycle; end it and its
+      // A clear cancels a running turn before it applies, but a turn parked on a request still
+      // owns a lifecycle; end it and its
       // non-task work before selecting an empty conversation, instead of dropping only its
       // private suspended steps and leaving the public turn and calls open forever.
       ...turnSettled(projection, { cause: input.cause, outcome: "cancelled" }),
@@ -989,7 +991,7 @@ export function clear(view: SessionView, input: { readonly cause?: Cause } = {})
 
 /**
  * What a clear withdraws: every request the cleared history asked for, its turn's too. Requests
- * relayed from live tasks stay.
+ * relayed from tasks are the cancelled task runs' to withdraw.
  */
 function clearedInteractions(view: SessionView): SessionEvent[] {
   const tables = view.projection.view;

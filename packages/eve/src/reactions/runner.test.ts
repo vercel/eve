@@ -658,4 +658,138 @@ describe("runReactions", () => {
       expect.stringMatching(/:hook:audit:2\.0:turn\.started$/),
     ]);
   });
+
+  describe("continuations", () => {
+    const settledFacts = [
+      {
+        data: { cause: { deliveryId: "d_1" }, follows: null, turnId: "turn-1" },
+        type: "turn.started",
+      },
+      { data: { outcome: "completed", turnId: "turn-1" }, type: "turn.settled" },
+    ];
+
+    // A session whose turn-1 settled, and a hook that continued it.
+    async function continued() {
+      const ctx = session(noTools, [
+        {
+          events: {
+            "turn.settled": (_event: unknown, ctx: HookContext<"turn.settled">) =>
+              ctx.continue("Keep going."),
+          },
+          slug: "until-done",
+        },
+      ]);
+      ctx.set(ChannelKey, { kind: "http" } as never);
+      const projection = initialSessionProjection();
+      foldLine(
+        projection.view,
+        { at: "2026-01-01T00:00:00.000Z", facts: settledFacts },
+        projection.view.position,
+      );
+      enterSessionProjectionAt(ctx, projection);
+      await commit(ctx, { written: written(1, "turn.settled", settledFacts[1]!.data) });
+      // The delivery carries what the hook passed, and no sender; intake adds the note.
+      const { continuation } = readReactionsState(ctx);
+      expect(continuation?.turnId).toBe("turn-1");
+      expect(continuation?.delivery).toMatchObject({
+        deliveryMetadata: [{ channelKind: "http", hook: "until-done" }],
+        turnPolicy: "queue",
+      });
+      expect(continuation?.delivery).not.toHaveProperty("auth");
+      expect(continuation?.delivery.payloads).toEqual([{ message: "Keep going." }]);
+      return ctx;
+    }
+
+    it("refuses to continue a turn someone other than the hook cancelled", async () => {
+      const results: unknown[] = [];
+      const ctx = session(noTools, [
+        {
+          events: {
+            "turn.settled": (_event: unknown, ctx: HookContext<"turn.settled">) =>
+              results.push(ctx.continue("Keep going.")),
+          },
+          slug: "until-done",
+        },
+      ]);
+      ctx.set(ChannelKey, { kind: "http" } as never);
+      // Alice cancelled turn-1 through `session.cancel()`, so no hook stopped it.
+      const cancelled = { outcome: "cancelled", turnId: "turn-1" };
+      const projection = initialSessionProjection();
+      foldLine(
+        projection.view,
+        {
+          at: "2026-01-01T00:00:00.000Z",
+          facts: [settledFacts[0]!, { data: cancelled, type: "turn.settled" }],
+        },
+        projection.view.position,
+      );
+      enterSessionProjectionAt(ctx, projection);
+      await commit(ctx, { written: written(1, "turn.settled", cancelled) });
+      expect(results).toEqual([{ queued: false, reason: "not-completed" }]);
+      expect(readReactionsState(ctx).continuation).toBeUndefined();
+    });
+
+    it.each([
+      ["the turn its input opens", "d_alice", "turn-1"],
+      ["no unrelated turn, once the session ignored its input", "d_bob", undefined],
+    ])("binds a cancel before the turn opened to %s", async (_name, cause, bound) => {
+      const ctx = session(noTools, [
+        {
+          events: { "delivery.admitted": (_event: unknown, ctx: HookContext) => ctx.cancel() },
+          slug: "guard",
+        },
+      ]);
+      const cancelBeforeTurn = () => {};
+      await commit(ctx, {
+        cancelBeforeTurn,
+        written: written(1, "delivery.admitted", { deliveryId: "d_alice" }),
+      });
+      await commit(ctx, {
+        written: written(2, "turn.started", {
+          cause: { deliveryId: cause },
+          follows: null,
+          turnId: "turn-1",
+        }),
+      });
+      const state = readReactionsState(ctx);
+      expect(state.cancelledTurnId).toBe(bound);
+      expect(state.cancelledOpening).toBeUndefined();
+    });
+
+    const control = (control: string) =>
+      written(2, "delivery.admitted", { deliveryId: `d_${control}`, source: { control } });
+
+    it.each(["cancel", "reset"])("drops a continuation when a %s arrives", async (kind) => {
+      const ctx = await continued();
+      await commit(ctx, { written: control(kind) });
+      expect(readReactionsState(ctx).continuation).toBeUndefined();
+    });
+
+    it("drops a continuation when the history is cleared", async () => {
+      const ctx = await continued();
+      await commit(ctx, {
+        written: written(2, "context.settled", {
+          changeId: "c_1",
+          kind: "clear",
+          outcome: "completed",
+          selects: null,
+        }),
+      });
+      expect(readReactionsState(ctx).continuation).toBeUndefined();
+    });
+
+    it("keeps a continuation through a compaction", async () => {
+      const ctx = await continued();
+      await commit(ctx, { written: control("compact") });
+      await commit(ctx, {
+        written: written(3, "context.settled", {
+          changeId: "c_1",
+          kind: "compaction",
+          outcome: "completed",
+          selects: null,
+        }),
+      });
+      expect(readReactionsState(ctx).continuation?.turnId).toBe("turn-1");
+    });
+  });
 });

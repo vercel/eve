@@ -260,7 +260,7 @@ Serves the previously built output. Prints the listening URL, and a `schedules d
 
 Set `EVE_SCHEDULES_DISABLED=1` or `true` (case-insensitive) to disable authored cron schedules at runtime, including when you run `node .output/server/index.mjs` directly. Unset, empty, and other values leave schedules enabled. `--no-schedules` sets the variable to `1` only for the spawned server; omitting the flag preserves any value you already set. The same build can run with schedules enabled or disabled.
 
-Use this setting when [scaling self-hosted replicas](../guides/deployment/self-hosting#run-schedules). It also disables authored cron dispatch on Vercel if set there, but does not affect explicit schedule dispatch in `eve dev`.
+Use this setting when [scaling self-hosted replicas](../guides/deployment/self-hosted-operations#run-schedules). It also disables authored cron dispatch on Vercel if set there, but does not affect explicit schedule dispatch in `eve dev`.
 
 For self-hosted deployments, copy the app source, `.output/`, and installed dependencies together. The deployment directory can differ from the build directory. Preserve the relative layout of any workspace packages used by the app; startup resolves sandbox prewarm modules from the deployed source.
 

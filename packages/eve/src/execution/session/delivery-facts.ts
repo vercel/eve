@@ -47,6 +47,7 @@ export function admitDeliveries(input: {
     const deliveryId = metadata.deliveryId;
     const source: DeliverySource = defined({
       channel: metadata.channelKind ?? input.channelKind,
+      hook: metadata.hook,
       scheduleId: delivery.schedule?.definition,
     });
     // Turn context stays out of facts: stream readers may see it, and the turn reads it from

@@ -189,7 +189,7 @@ export class ClientSession {
     return this.#control("cancel", options);
   }
 
-  /** Queues removal of this session's durable model-message history. */
+  /** Cancels a running turn and every working task, then removes this session's model history. */
   async clear(options?: { readonly signal?: AbortSignal }): Promise<Delivery> {
     return this.#control("clear", options);
   }

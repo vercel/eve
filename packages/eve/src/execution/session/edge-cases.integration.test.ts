@@ -1690,6 +1690,97 @@ describe("work delegated to a child session", () => {
     expect([...blocks]).toEqual(["person"]);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
   });
+  it("stops a working task when the conversation is cleared, and its result never arrives", async () => {
+    const never = gate();
+    const prompts: string[] = [];
+    const { events } = await withSession(
+      "edge-clear-working-task",
+      {
+        message: "Delegate the deploy; no need to wait on it.",
+        model: scriptedModel((_prompt, raw) => {
+          const prompt = JSON.stringify(raw);
+          const first = raw.find((message) => message.role === "user");
+          if (JSON.stringify(first?.content).includes("CHILD:"))
+            return heldReply("Child deployed.", never.wait);
+          prompts.push(prompt);
+          if (prompt.includes("What now?")) return "Starting fresh.";
+          if (!prompt.includes('"toolName":"agent"'))
+            return [
+              {
+                input: { message: "CHILD: deploy it." },
+                toolName: "agent",
+                toolCallId: "call_agent",
+              },
+            ];
+          return "The deploy is underway.";
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.until(
+          "underway",
+          (event) => event.type === "content.completed" && event.data.kind === "text",
+        );
+        await session.control("clear");
+        await session.until("cleared", (event) => event.type === "context.settled");
+        await session.send("What now?");
+        await session.next("next turn");
+      },
+    );
+
+    const [ended] = ofType(events, "task.ended");
+    expect(ended?.data).toMatchObject({ outcome: "cancelled", reason: "turn-cancelled" });
+    expect(turnOutcomes(events)).toEqual(["turn_0:cancelled", "turn_1:completed"]);
+    // The cleared conversation's next turn reads only the new message: no task result or note.
+    const last = prompts.at(-1)!;
+    expect(last).not.toContain("call_agent");
+    expect(last).not.toContain(ended!.data.taskId);
+  });
+  it("drops a finished task's unread result when the conversation is cleared", async () => {
+    const never = gate();
+    const childReplied = gate();
+    const prompts: string[] = [];
+    const { events } = await withSession(
+      "edge-clear-unread-task-result",
+      {
+        message: "Delegate the deploy, then keep talking.",
+        model: scriptedModel((_prompt, raw) => {
+          const prompt = JSON.stringify(raw);
+          const first = raw.find((message) => message.role === "user");
+          if (JSON.stringify(first?.content).includes("CHILD:")) {
+            childReplied.open();
+            return "Child deployed.";
+          }
+          prompts.push(prompt);
+          if (prompt.includes("What now?")) return "Starting fresh.";
+          if (!prompt.includes('"toolName":"agent"'))
+            return [
+              {
+                input: { message: "CHILD: deploy it." },
+                toolName: "agent",
+                toolCallId: "call_agent",
+              },
+            ];
+          // The parent keeps generating while the child finishes, so its result stays unread.
+          return heldReply("Still", never.wait, "going");
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.until("generating", (event) => event.type === "content.delta");
+        await waitForOwnerGate(childReplied.wait, "child reply", session.events);
+        // The child's result reaches the parent's inbox while the parent still generates.
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        await session.control("clear");
+        await session.until("cleared", (event) => event.type === "context.settled");
+        await session.send("What now?");
+        await session.next("next turn");
+      },
+    );
+
+    expect(turnOutcomes(events)).toEqual(["turn_0:cancelled", "turn_1:completed"]);
+    expect(prompts.at(-1)).not.toContain("Child deployed.");
+  });
 });
 
 describe("deliveries a child session reads", () => {
@@ -1805,6 +1896,61 @@ describe("deliveries a child session reads", () => {
 });
 
 describe("controls between turns", () => {
+  it.each(["idle", "during a turn"] as const)(
+    "fails a command this owner does not know when %s, so its delivery settles",
+    async (when) => {
+      const release = gate();
+      const { events } = await withSession(
+        `edge-unknown-command-${when === "idle" ? "idle" : "turn"}`,
+        {
+          message: "Say hello.",
+          model: scriptedModel(({ said }) =>
+            said("Still there?")
+              ? "Still here."
+              : when === "idle"
+                ? "Hello."
+                : heldReply("Hello.", release.wait, "Hel"),
+          ),
+          tools: [],
+        },
+        async (session) => {
+          if (when === "idle") await session.next("first");
+          else await session.until("generating", (event) => event.type === "content.delta");
+          // A control from a newer eve, such as one an older owner on another deployment reads.
+          await session.control("from-the-future" as "clear", { turnId: "turn_0" });
+          release.open();
+          await session.until(
+            "unsupported",
+            (event) => event.type === "delivery.settled" && event.data.deliveryId === "control_0",
+          );
+          await session.send("Still there?");
+          await session.until(
+            "second",
+            (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
+          );
+        },
+      );
+
+      const settled = ofType(events, "delivery.settled").find(
+        (event) => event.data.deliveryId === "control_0",
+      );
+      expect(settled?.data).toEqual({
+        deliveryId: "control_0",
+        outcome: "failed",
+        reason: 'This session does not support the "from-the-future" command.',
+      });
+      expect(ofType(events, "delivery.admitted")).toContainEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            deliveryId: "control_0",
+            source: { control: "from-the-future" },
+          }),
+        }),
+      );
+      expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
+    },
+  );
+
   it.each([1, 4])(
     "keeps summary usage when a context.settled hook cancels with %s model calls per step",
     async (modelCallsPerStep) => {
@@ -1915,6 +2061,32 @@ describe("controls between turns", () => {
 
     expect(prompts).toEqual([1, 1]);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
+  });
+
+  it("cancels a turn still generating when the conversation is cleared", async () => {
+    const never = gate();
+    const prompts: number[] = [];
+    const { events } = await withSession(
+      "edge-clear-running-turn",
+      {
+        message: "Write a long story.",
+        model: scriptedModel(({ said, users }) => {
+          prompts.push(users);
+          return said("What now?") ? "Fresh start." : heldReply("Once upon", never.wait, "a");
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.until("generating", (event) => event.type === "content.delta");
+        await session.control("clear");
+        await session.until("cleared", (event) => event.type === "context.settled");
+        await session.send("What now?");
+        await session.next("next turn");
+      },
+    );
+
+    expect(prompts).toEqual([1, 1]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:cancelled", "turn_1:completed"]);
   });
 
   it("compacts between turns, and the next turn reads the summary", async () => {

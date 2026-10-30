@@ -66,6 +66,8 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Deployment Overview](${EVE_ORIGIN}/docs/guides/deployment/overview.md): Choose between Vercel and self-hosted infrastructure.
 - [Deploy to Vercel](${EVE_ORIGIN}/docs/guides/deployment/vercel.md): Build and deploy with Vercel Workflow and Vercel Sandbox.
 - [Self-Hosting](${EVE_ORIGIN}/docs/guides/deployment/self-hosting.md): Run eve as a Node service or container.
+- [Workflow Worlds](${EVE_ORIGIN}/docs/guides/deployment/workflow-worlds.md): Choose the local, Postgres, or another Workflow world for self-hosted sessions.
+- [Self-Hosted Operations](${EVE_ORIGIN}/docs/guides/deployment/self-hosted-operations.md): Upgrade, scale, and troubleshoot a self-hosted agent.
 - [Authentication](${EVE_ORIGIN}/docs/guides/auth-and-route-protection.md): Secure an agent's HTTP routes and establish caller identity.
 - [Instrumentation](${EVE_ORIGIN}/docs/observability/instrumentation.md): Configure lifecycle instrumentation and OpenTelemetry destinations.
 - [Terminal UI](${EVE_ORIGIN}/docs/guides/dev-tui.md): Work with a local or deployed agent from the interactive terminal UI.
