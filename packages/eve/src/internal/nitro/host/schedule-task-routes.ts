@@ -10,7 +10,7 @@ import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifa
  * Rollup can resolve the generated `defineTask({...})` source without writing
  * a physical handler file.
  */
-const EVE_SCHEDULE_TASK_VIRTUAL_ID_PREFIX = "#eve-schedule-task/";
+const EVE_SCHEDULE_TASK_VIRTUAL_ID_PREFIX = "#eve/schedule-task/";
 
 interface ScheduleTaskNitro {
   options: Pick<Nitro["options"], "experimental" | "scheduledTasks" | "tasks" | "virtual">;

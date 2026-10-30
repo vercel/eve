@@ -15,7 +15,7 @@ import {
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
 
-const EVE_CHANNEL_VIRTUAL_ID_PREFIX = "#nitro/virtual/eve-channel/";
+const EVE_CHANNEL_VIRTUAL_ID_PREFIX = "#eve/channel/";
 
 interface ChannelRouteNitro {
   readonly options: Pick<Nitro["options"], "handlers" | "virtual">;

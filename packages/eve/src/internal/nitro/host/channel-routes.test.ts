@@ -29,23 +29,21 @@ describe("registerChannelVirtualHandlers", () => {
 
     expect(nitro.options.handlers).toEqual([
       {
-        handler: "#nitro/virtual/eve-channel/POST /eve/v1/session",
+        handler: "#eve/channel/POST /eve/v1/session",
         method: "POST",
         route: "/eve/v1/session",
       },
       {
-        handler: "#nitro/virtual/eve-channel/OPTIONS /eve/v1/session",
+        handler: "#eve/channel/OPTIONS /eve/v1/session",
         method: "OPTIONS",
         route: "/eve/v1/session",
       },
     ]);
-    expect(nitro.options.virtual["#nitro/virtual/eve-channel/POST /eve/v1/session"]).toContain(
-      "handleCors",
-    );
-    expect(nitro.options.virtual["#nitro/virtual/eve-channel/POST /eve/v1/session"]).toContain(
+    expect(nitro.options.virtual["#eve/channel/POST /eve/v1/session"]).toContain("handleCors");
+    expect(nitro.options.virtual["#eve/channel/POST /eve/v1/session"]).toContain(
       "dispatchChannelRequest",
     );
-    expect(nitro.options.virtual["#nitro/virtual/eve-channel/OPTIONS /eve/v1/session"]).toContain(
+    expect(nitro.options.virtual["#eve/channel/OPTIONS /eve/v1/session"]).toContain(
       "return new Response(null, { status: 204 });",
     );
   });
@@ -109,17 +107,15 @@ describe("registerChannelVirtualHandlers", () => {
 
     expect(nitro.options.handlers).toEqual([
       {
-        handler: "#nitro/virtual/eve-channel/WEBSOCKET /voice",
+        handler: "#eve/channel/WEBSOCKET /voice",
         route: "/voice",
       },
     ]);
-    expect(nitro.options.virtual["#nitro/virtual/eve-channel/WEBSOCKET /voice"]).toContain(
+    expect(nitro.options.virtual["#eve/channel/WEBSOCKET /voice"]).toContain(
       "defineWebSocketHandler",
     );
-    expect(nitro.options.virtual["#nitro/virtual/eve-channel/WEBSOCKET /voice"]).not.toContain(
-      'from "nitro"',
-    );
-    expect(nitro.options.virtual["#nitro/virtual/eve-channel/WEBSOCKET /voice"]).toContain(
+    expect(nitro.options.virtual["#eve/channel/WEBSOCKET /voice"]).not.toContain('from "nitro"');
+    expect(nitro.options.virtual["#eve/channel/WEBSOCKET /voice"]).toContain(
       "dispatchChannelWebSocketRequest",
     );
   });

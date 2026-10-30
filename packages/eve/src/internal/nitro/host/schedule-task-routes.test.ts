@@ -44,11 +44,11 @@ describe("schedule task routes", () => {
     expect(nitro.options.tasks).toEqual({
       "eve.schedule.c2NoZWR1bGVzL2RhaWx5LWRpZ2VzdC5tanM": {
         description: 'Run eve schedule "daily-digest" from "schedules/daily-digest.mjs".',
-        handler: "#eve-schedule-task/eve.schedule.c2NoZWR1bGVzL2RhaWx5LWRpZ2VzdC5tanM",
+        handler: "#eve/schedule-task/eve.schedule.c2NoZWR1bGVzL2RhaWx5LWRpZ2VzdC5tanM",
       },
       "eve.schedule.c2NoZWR1bGVzL3dlZWtseS1jbGVhbnVwLm1qcw": {
         description: 'Run eve schedule "weekly-cleanup" from "schedules/weekly-cleanup.mjs".',
-        handler: "#eve-schedule-task/eve.schedule.c2NoZWR1bGVzL3dlZWtseS1jbGVhbnVwLm1qcw",
+        handler: "#eve/schedule-task/eve.schedule.c2NoZWR1bGVzL3dlZWtseS1jbGVhbnVwLm1qcw",
       },
     });
     expect(nitro.options.scheduledTasks).toEqual({
@@ -59,7 +59,7 @@ describe("schedule task routes", () => {
     });
 
     const virtualSource =
-      nitro.options.virtual["#eve-schedule-task/eve.schedule.c2NoZWR1bGVzL2RhaWx5LWRpZ2VzdC5tanM"];
+      nitro.options.virtual["#eve/schedule-task/eve.schedule.c2NoZWR1bGVzL2RhaWx5LWRpZ2VzdC5tanM"];
     expect(virtualSource).toBeDefined();
     // The virtual module exports a plain task object so Nitro can call
     // `handler.run(event)` at cron-trigger time. We avoid `defineTask`

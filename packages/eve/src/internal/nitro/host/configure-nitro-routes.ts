@@ -212,7 +212,7 @@ function addHostVirtualHandler(
     route: string;
   },
 ): void {
-  const virtualId = `#eve-route${input.route}`;
+  const virtualId = `#eve/route${input.route}`;
   const modulePath = stringifyEsmImportSpecifier(input.modulePath);
 
   nitro.options.handlers.push({
