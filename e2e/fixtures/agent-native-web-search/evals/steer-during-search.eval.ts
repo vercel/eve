@@ -10,6 +10,9 @@ export default defineEval({
   description: "A message that steers a turn while a web search result is deferred is answered.",
   tags: ["real-model"],
   async test(t) {
+    if (process.env.EVE_E2E_MODEL?.startsWith("anthropic/") !== true) {
+      t.skip("Only Anthropic defers a server tool's result to the next response.");
+    }
     const session = await t.session();
     const live = await session.start(
       [
