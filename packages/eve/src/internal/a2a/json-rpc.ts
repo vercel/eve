@@ -14,7 +14,6 @@ import {
   A2A_PROTOCOL_VERSION,
   A2aError,
   cancelTaskRequestSchema,
-  EVE_INTERACTIONS_EXTENSION,
   getTaskRequestSchema,
   jsonRpcRequestSchema,
   listTasksRequestSchema,
@@ -66,15 +65,13 @@ export async function handleA2aJsonRpc(
   const versionFailure = checkVersion(request);
   if (versionFailure !== undefined) return rpcError(id, versionFailure);
 
-  const extensions = requestedExtensions(request);
   // Streams outlive this function; their own controller stops them when the client cancels.
   const stop = new AbortController();
   const call: A2aCallContext = {
     auth,
-    extensions,
     signal: AbortSignal.any([request.signal, stop.signal]),
   };
-  const headers = responseHeaders(extensions);
+  const headers = responseHeaders();
   try {
     switch (method) {
       case "SendStreamingMessage": {
@@ -171,25 +168,8 @@ function checkVersion(request: Request): A2aError | undefined {
   );
 }
 
-/** `A2A-Extensions`: comma-separated URIs, possibly across repeated headers. */
-function requestedExtensions(request: Request): ReadonlySet<string> {
-  const header = request.headers.get("a2a-extensions");
-  if (header === null) return new Set();
-  return new Set(
-    header
-      .split(",")
-      .map((uri) => uri.trim())
-      .filter((uri) => uri.length > 0),
-  );
-}
-
-/** Response headers; the one extension eve implements is echoed back as activated when asked. */
-function responseHeaders(extensions: ReadonlySet<string>): Headers {
-  const headers = new Headers({ "a2a-version": A2A_PROTOCOL_VERSION, "cache-control": "no-store" });
-  if (extensions.has(EVE_INTERACTIONS_EXTENSION)) {
-    headers.set("a2a-extensions", EVE_INTERACTIONS_EXTENSION);
-  }
-  return headers;
+function responseHeaders(): Headers {
+  return new Headers({ "a2a-version": A2A_PROTOCOL_VERSION, "cache-control": "no-store" });
 }
 
 /** Reads the body, counting bytes as they stream: a declared length is only a fast refusal. */
@@ -295,6 +275,6 @@ function errorObject(error: A2aError) {
 function rpcError(id: JsonRpcId, error: A2aError, headers?: Headers): Response {
   return Response.json(
     { error: errorObject(error), id, jsonrpc: "2.0" },
-    { headers: headers ?? responseHeaders(new Set()) },
+    { headers: headers ?? responseHeaders() },
   );
 }

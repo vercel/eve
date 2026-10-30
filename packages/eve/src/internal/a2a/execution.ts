@@ -26,7 +26,6 @@ import {
   formatUploadPolicyViolation,
   type UploadPolicy,
 } from "#public/channels/upload-policy.js";
-import { parseAnswers } from "#shared/input.js";
 import type { MessageContent, MessagePart } from "#shared/message-content.js";
 
 import {
@@ -39,7 +38,6 @@ import {
 import {
   A2A_JSON_RPC_ERRORS,
   A2aError,
-  EVE_INTERACTIONS_EXTENSION,
   isSettledForBlocking,
   isTerminalState,
   type CancelTaskRequest,
@@ -75,8 +73,6 @@ export interface A2aExecutionOptions {
 /** Who is calling, and what the request carries beside its params. */
 export interface A2aCallContext {
   readonly auth: SessionAuthContext | null;
-  /** Extension URIs the client asked for in `A2A-Extensions`. */
-  readonly extensions: ReadonlySet<string>;
   /** Aborts when the client goes away. */
   readonly signal: AbortSignal;
 }
@@ -335,13 +331,6 @@ export class A2aTaskExecution {
       ? { ...sent, answering: statusKey(task) }
       : sent;
 
-    const answers = structuredAnswers(message, call.extensions);
-    if (answers !== undefined) {
-      await this.#options
-        .from(token)
-        .respond(validAnswers(answers, task), { ...delivery, auth: call.auth } as DeliveryOptions);
-      return answering;
-    }
     // Working: refine the running turn. Interrupted: eve's typed-answer intake resolves the text
     // against the first open prompt (option id, label, or number), as on any text channel.
     await this.#options.from(token).send(this.#content(message), {
@@ -469,71 +458,6 @@ function contextEnded(): A2aError {
 function statusKey(task: Task): string {
   const { timestamp: _timestamp, ...status } = task.status;
   return JSON.stringify(status);
-}
-
-/**
- * Answers carried under eve's interactions extension: a data part `{ "responses": [Answer] }`,
- * on a message that declares the extension or a request that activates it.
- */
-function structuredAnswers(
-  message: Message,
-  requested: ReadonlySet<string>,
-): readonly unknown[] | undefined {
-  if (
-    !requested.has(EVE_INTERACTIONS_EXTENSION) &&
-    !message.extensions?.includes(EVE_INTERACTIONS_EXTENSION)
-  ) {
-    return undefined;
-  }
-  for (const part of message.parts) {
-    const data = part.data;
-    if (data !== null && typeof data === "object" && !Array.isArray(data)) {
-      const responses = (data as Record<string, unknown>).responses;
-      if (Array.isArray(responses)) return responses;
-    }
-  }
-  return undefined;
-}
-
-/** Answers that each name one of the task's open prompts. */
-function validAnswers(raw: readonly unknown[], task: Task): ReturnType<typeof parseAnswers> {
-  if (task.status.state !== "TASK_STATE_INPUT_REQUIRED") {
-    throw new A2aError(A2A_JSON_RPC_ERRORS.invalidParams, "Task is not waiting for input.");
-  }
-  let answers: ReturnType<typeof parseAnswers>;
-  try {
-    answers = parseAnswers(raw);
-  } catch {
-    throw new A2aError(
-      A2A_JSON_RPC_ERRORS.invalidParams,
-      "responses must be answers: { interactionId, optionId?, text? }.",
-    );
-  }
-  const open = new Set(promptIds(task));
-  const unknown = answers.find((answer) => !open.has(answer.interactionId));
-  if (answers.length === 0 || unknown !== undefined) {
-    throw new A2aError(
-      A2A_JSON_RPC_ERRORS.invalidParams,
-      unknown === undefined
-        ? "responses is empty."
-        : `Interaction ${unknown.interactionId} isn't open on this task.`,
-    );
-  }
-  return answers;
-}
-
-/** The interaction IDs on an interrupted task's prompt message. */
-function promptIds(task: Task): readonly string[] {
-  for (const part of task.status.message?.parts ?? []) {
-    const interactions = (part.data as { interactions?: unknown } | undefined)?.interactions;
-    if (!Array.isArray(interactions)) continue;
-    return interactions.flatMap((entry) =>
-      typeof (entry as { interactionId?: unknown }).interactionId === "string"
-        ? [(entry as { interactionId: string }).interactionId]
-        : [],
-    );
-  }
-  return [];
 }
 
 /** A2A parts as eve message content. Data parts become JSON text the model reads. */
