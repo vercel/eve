@@ -220,12 +220,17 @@ function StableLabel({ current, labels }: { current: string; labels: string[] })
   );
 }
 
-/** vercel.com/sandbox's "Play demo" button, which turns into "Stop demo" while playing. */
+/**
+ * vercel.com/sandbox's demo button, labeled with the action that starts the example, such as
+ * "Trigger a PR", and turning into "Stop" while it plays.
+ */
 export function DemoButton({
+  action,
   playing,
   onClick,
   className,
 }: {
+  action: string;
   playing: boolean;
   onClick: () => void;
   className?: string;
@@ -238,10 +243,7 @@ export function DemoButton({
       size="small"
       variant="tertiary"
     >
-      <StableLabel
-        current={playing ? "Stop demo" : "Play demo"}
-        labels={["Play demo", "Stop demo"]}
-      />
+      <StableLabel current={playing ? "Stop" : action} labels={[action, "Stop"]} />
     </Button>
   );
 }

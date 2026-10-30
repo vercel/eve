@@ -996,8 +996,10 @@ interface UseCase {
   features: { title: string; text: string }[];
   /** The example draws its own windows, so it skips the shared one. */
   ownWindows?: boolean;
-  /** Stage delays for a "Play demo" replay, for an example that has one. */
+  /** Stage delays for a replay, for an example that has one. */
   demo?: number[];
+  /** What starts the replay, as its button reads. */
+  action?: string;
   /** The example; `stage` is set while a demo plays or after it ends. */
   preview: (stage?: number) => ReactNode;
 }
@@ -1015,6 +1017,7 @@ const USE_CASES: UseCase[] = [
       { title: "Read-only SQL", text: "Queries DuckDB or MotherDuck, and never writes to them." },
     ],
     demo: BRAIN_DEMO,
+    action: "Ask a question",
     preview: (stage) => <CompanyBrainPreview stage={stage} />,
   },
   {
@@ -1035,6 +1038,7 @@ const USE_CASES: UseCase[] = [
       },
     ],
     demo: FACTORY_DEMO,
+    action: "Trigger a PR",
     preview: (stage) => <SoftwareFactoryPreview stage={stage} />,
   },
   {
@@ -1050,6 +1054,7 @@ const USE_CASES: UseCase[] = [
     ],
     ownWindows: true,
     demo: AGENTIC_DEMO,
+    action: "Start a call",
     preview: (stage) => <AgenticAppsPreview stage={stage} />,
   },
 ];
@@ -1215,9 +1220,10 @@ export function AgentTypes(): JSX.Element {
                     </li>
                   ))}
                 </ul>
-                {useCase.demo ? (
+                {useCase.demo && useCase.action ? (
                   // Pulled out by its padding and icon inset, so the icon lines up with the text.
                   <DemoButton
+                    action={useCase.action}
                     className="-ml-2 self-start"
                     onClick={() => setDemo(demo?.playing ? undefined : { stage: 0, playing: true })}
                     playing={Boolean(demo?.playing)}

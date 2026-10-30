@@ -341,12 +341,15 @@ const WHATSAPP_BEATS: Beat[] = [
 const CONVERSATIONS: {
   id: Platform;
   label: string;
+  /** What starts the conversation, as the demo button reads. */
+  action: string;
   logo: (className: string) => ReactNode;
   beats: Beat[];
 }[] = [
   {
     id: "slack",
     label: "Software Factory",
+    action: "Trigger a PR",
     logo: (className) =>
       logos.slack({ "aria-hidden": true, className: cn(className, monochromeLogo) }),
     beats: SLACK_BEATS,
@@ -354,12 +357,14 @@ const CONVERSATIONS: {
   {
     id: "teams",
     label: "Operations",
+    action: "Trigger an alert",
     logo: (className) => <LogoIconMicrosoftTeamsSvg aria-hidden className={className} size={16} />,
     beats: TEAMS_BEATS,
   },
   {
     id: "whatsapp",
     label: "Customer Support",
+    action: "Message support",
     logo: (className) => <SiWhatsapp aria-hidden className={className} />,
     beats: WHATSAPP_BEATS,
   },
@@ -595,8 +600,8 @@ function Bubble({
 
 /**
  * An agent conversation, picked from Slack, Teams, and WhatsApp, each drawn in its
- * platform's way. It shows in full; "Play demo" replays it message by message and "Stop demo"
- * returns to the full conversation, as on vercel.com/sandbox.
+ * platform's way. It shows in full; its action, such as "Trigger a PR", replays it message by
+ * message and "Stop" returns to the full conversation, as on vercel.com/sandbox.
  */
 export function SessionTimeline(): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null);
@@ -880,7 +885,11 @@ export function SessionTimeline(): JSX.Element {
             );
           })}
         </div>
-        <DemoButton onClick={playing ? stop : play} playing={playing} />
+        <DemoButton
+          action={conversation.action}
+          onClick={playing ? stop : play}
+          playing={playing}
+        />
       </div>
     </figure>
   );
