@@ -6,6 +6,8 @@ You author an agent as a directory on disk. The directory is the contract — ma
 
 The framework is called eve. The published npm package is `eve`. The CLI binary is `eve`.
 
+**Building an agent with a coding agent?** Create the project with `npx eve@latest init <name>`, then read `docs/quick-reference.md` in this package: it has a checked snippet for each common requirement (tools, approvals, Slack, SSO, MCP and OpenAPI connections, per-user tools, subagents, skills, schedules, webhooks, memory, evals). `docs/README.md` routes everything else. Docs pages are long, so list a page's sections with `grep -n '^#' <page>` and read only what you need.
+
 ## Release notes
 
 The installed package contains its release notes in `CHANGELOG.md`, with a link to the full changelog through that version. For an upgrade across releases, review the target version's history at `https://raw.githubusercontent.com/vercel/eve/refs/tags/eve%40<version>/packages/eve/CHANGELOG.md`.
@@ -128,7 +130,9 @@ reasoning effort. It installs dependencies, initializes Git, and opens the termi
 human terminal. Coding-agent invocations return setup instructions instead.
 Targeting an existing project directory (`eve init .`) adds the agent files and
 missing dependencies instead. Initialization does not create a Vercel project,
-configure browser sign-in, or deploy the agent.
+configure browser sign-in, or deploy the agent. Once the project exists, read
+`node_modules/eve/docs/quick-reference.md` for copy-ready snippets of common
+requirements.
 
 To add Web Chat with **Sign in with Vercel**, run these commands from the agent's directory:
 
@@ -166,6 +170,7 @@ eve is built to be durable. The runtime is Nitro + Workflows. Read the [deployme
 
 These files ship inside the installed package at `node_modules/eve/docs/`:
 
+- [Quick Reference](https://eve.dev/docs/quick-reference) (`docs/quick-reference.md`) — checked snippets for the requirements most agents need; start here when building from a list of requirements
 - [Full docs index](https://eve.dev/docs) — recommended entry point
 - [Getting Started](https://eve.dev/docs/getting-started) — install, scaffold, and run locally
 - [Project Layout](https://eve.dev/docs/getting-started#project-layout) — every authored directory in depth

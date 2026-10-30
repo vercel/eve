@@ -136,6 +136,30 @@ vercelOidc({
 
 `teamSlug` and `projectName` are the human-readable slugs Vercel embeds in `sub` (not the stable `team_…` / `prj_…` IDs), so they can't contain `:` or `*`. `environment` is `"production" | "preview" | "development" | "*"`. Only hand-write the subject string yourself when you actually mean to match across teams with a wildcard.
 
+### `oidc()`
+
+Verifies a bearer JWT from any OIDC issuer, such as your company SSO. eve reads the issuer's discovery document (`${issuer}/.well-known/openid-configuration` unless you pass `discoveryUrl`) and checks the signature, issuer, audience, and expiry. Optional `subjects` and `claims` matchers reject tokens that don't match.
+
+A verified caller has `authenticator: "oidc"`, `principalType: "service"`, `issuer` and `subject` from the token's `iss` and `sub`, and `principalId` set to `<issuer>:<subject>`. Non-standard string and string-array claims become `attributes`, so a `groups` claim is `ctx.session.auth.current.attributes.groups`. Standard claims (`iss`, `sub`, `aud`, `exp`, `iat`, `nbf`, `jti`) are omitted.
+
+When tokens identify people, relabel the caller as a user. User-scoped connections, such as `connect()` from `@vercel/connect/eve`, require a `user` principal:
+
+```ts title="agent/channels/eve.ts"
+import { type AuthFn, localDev, oidc } from "eve/channels/auth";
+import { eveChannel } from "eve/channels/eve";
+
+const sso = oidc({ issuer: "https://sso.example.com", audiences: ["my-agent"] });
+
+const employee: AuthFn<Request> = async (request) => {
+  const caller = await sso(request);
+  return caller ? { ...caller, principalType: "user" } : null;
+};
+
+export default eveChannel({ auth: [employee, localDev()] });
+```
+
+In production this channel admits only tokens from that issuer and audience, because `localDev()` never accepts a request outside a development server.
+
 ### Custom verifiers
 
 When none of the shipped helpers fit, write your own `AuthFn` (the array example above) or call the low-level verifiers directly. Each verifier is the pure function sitting behind the matching strategy helper, and returns `{ ok: true, sessionAuth }` or `{ ok: false }`:

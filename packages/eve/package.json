@@ -35,6 +35,7 @@
     "eve": "./bin/eve.js"
   },
   "files": [
+    "AGENTS.md",
     "bin",
     "dist",
     "!dist/CHANGELOG.md",
