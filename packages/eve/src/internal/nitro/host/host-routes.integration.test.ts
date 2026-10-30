@@ -41,8 +41,13 @@ vi.mock("#internal/nitro/routes/schedule-task.js", () => ({
 const createDirectory = useTemporaryDirectories();
 const artifactsConfig = createDevelopmentNitroArtifactsConfig({ appRoot: "/app" });
 
-function channel(method: ChannelRouteMethod, urlPath: string): CompiledChannelDefinition {
+function channel(
+  method: ChannelRouteMethod,
+  urlPath: string,
+  cors?: CompiledChannelDefinition["cors"],
+): CompiledChannelDefinition {
   return {
+    ...(cors && { cors }),
     kind: "channel",
     logicalPath: "channels/probe.ts",
     method,
@@ -68,8 +73,8 @@ function manifest(world?: string): Parameters<typeof createHostRouteTable>[0]["m
   return {
     channelRoutes: {
       effective: [
-        channel("GET", "/stream"),
-        channel("POST", "/stream"),
+        channel("GET", "/stream", {}),
+        channel("POST", "/stream", {}),
         channel("GET", "/health"),
         channel("HEAD", "/health"),
         channel("WEBSOCKET", "/voice"),
@@ -166,6 +171,20 @@ describe("rendered host routes", () => {
       "HEAD /health",
       artifactsConfig,
     );
+  });
+
+  it("sends CORS headers with the 405 for a cross-origin HEAD", async () => {
+    const host = await serve({ mode: "production" });
+
+    const head = await host.fetch("/stream", {
+      headers: { origin: "https://app.example" },
+      method: "HEAD",
+    });
+
+    expect(head.status).toBe(405);
+    expect(head.headers.get("allow")).toBe("GET, POST, OPTIONS");
+    expect(head.headers.get("access-control-allow-origin")).toBe("*");
+    expect(routeModules.dispatchChannelRequest).not.toHaveBeenCalled();
   });
 
   it("registers each channel route by method, with HEAD only on GET-only paths", async () => {

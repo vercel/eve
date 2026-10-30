@@ -28,7 +28,7 @@ function headGuard(allow: readonly string[] | undefined): {
   };
 }
 
-/** A channel HTTP route: optional HEAD guard and CORS, then channel dispatch. */
+/** A channel HTTP route: optional CORS and HEAD guard, then channel dispatch. */
 export function renderChannelHandler(input: {
   readonly allow?: readonly string[];
   readonly artifactsConfig: NitroArtifactsConfig;
@@ -37,14 +37,15 @@ export function renderChannelHandler(input: {
 }): string {
   const guard = headGuard(input.allow);
   const dispatch = `dispatchChannelRequest(event, ${JSON.stringify(input.routeKey)}, config)`;
+  // CORS runs first so a cross-origin caller can read the guard's 405.
   const body = [
-    ...guard.statements,
     ...(input.cors === undefined
       ? []
       : [
           `  const corsResponse = handleCors(event, cors);`,
           `  if (corsResponse !== false) return corsResponse;`,
         ]),
+    ...guard.statements,
   ];
   return [
     ...guard.imports,
