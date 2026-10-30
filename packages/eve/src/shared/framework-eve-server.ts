@@ -4,6 +4,7 @@ import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
+import { EVE_HEALTH_ROUTE_PATH } from "#protocol/routes.js";
 import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
 import { readBuiltServerStartFailure } from "#shared/built-server-start-failure.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
@@ -331,6 +332,8 @@ function startServerProcess(input: {
   readonly env?: Record<string, string>;
   readonly listen?: { readonly host: string; readonly port: string; readonly retryHint: string };
   readonly logLabel?: string;
+  readonly readinessOrigin?: string;
+  readonly readOrigin?: (output: string) => string | undefined;
   readonly timeoutMs?: number;
 }): Promise<EveProcessHandle> {
   const timeoutMs = input.timeoutMs ?? DEFAULT_EVE_SERVER_TIMEOUT_MS;
@@ -353,10 +356,14 @@ function startServerProcess(input: {
       stream: process.stdout,
     });
     const timeout = setTimeout(() => {
+      cleanup();
       child.kill();
-      reject(new Error(`Timed out after ${timeoutMs}ms waiting for eve to print its server URL.`));
+      const condition =
+        input.readinessOrigin === undefined ? "print its server URL" : "become ready";
+      reject(new Error(`Timed out after ${timeoutMs}ms waiting for eve to ${condition}.`));
     }, timeoutMs);
 
+    let readinessTimer: ReturnType<typeof setTimeout> | undefined;
     let settled = false;
     // Accumulated because a failure line can span several `data` chunks.
     let startupOutput = "";
@@ -364,6 +371,7 @@ function startServerProcess(input: {
       settled = true;
       startupOutput = "";
       clearTimeout(timeout);
+      clearTimeout(readinessTimer);
       child.off("error", handleError);
       child.off("exit", handleEarlyExit);
     };
@@ -381,7 +389,7 @@ function startServerProcess(input: {
       cleanup();
       reject(
         new Error(
-          `eve server process exited before printing its server URL (code ${String(code)}, signal ${String(signal)}).`,
+          `eve server process exited before ${input.readinessOrigin === undefined ? "printing its server URL" : "becoming ready"} (code ${String(code)}, signal ${String(signal)}).`,
         ),
       );
     };
@@ -405,7 +413,7 @@ function startServerProcess(input: {
         return;
       }
 
-      const origin = findLocalServerOrigin(text);
+      const origin = input.readOrigin?.(text);
 
       if (origin === undefined) {
         return;
@@ -430,6 +438,33 @@ function startServerProcess(input: {
     child.once("exit", handleEarlyExit);
     child.stdout.on("data", handleStdout);
     child.stderr.on("data", handleStderr);
+
+    // Production can listen without printing a URL. Gate on the health endpoint,
+    // while keeping child exit/bind failures and the overall timeout authoritative.
+    const checkReadiness = async () => {
+      if (settled || input.readinessOrigin === undefined) return;
+      let ready = false;
+      try {
+        const response = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, input.readinessOrigin), {
+          redirect: "error",
+          signal: AbortSignal.timeout(DEV_SERVER_READINESS_TIMEOUT_MS),
+        });
+        ready = response.status === 200;
+        await response.body?.cancel();
+      } catch {
+        // The listener may not exist yet.
+      }
+      if (settled) return;
+      if (ready) {
+        cleanup();
+        resolvePromise({ origin: input.readinessOrigin, process: child });
+      } else {
+        readinessTimer = setTimeout(checkReadiness, DEV_SERVER_REGISTRY_POLL_MS);
+      }
+    };
+    if (input.readinessOrigin !== undefined) {
+      readinessTimer = setTimeout(checkReadiness, DEV_SERVER_REGISTRY_POLL_MS);
+    }
   });
 }
 
@@ -470,6 +505,7 @@ function startEveDevServer(input: {
     command: process.execPath,
     cwd: input.appRoot,
     logLabel: input.logLabel,
+    readOrigin: findLocalServerOrigin,
     timeoutMs: input.timeoutMs,
   }).then(installProcessShutdown);
 }
@@ -478,7 +514,7 @@ function startEveDevServer(input: {
  * Serve an existing `eve build` output from `.output/server/index.mjs` on
  * {@link input.origin}'s loopback port.
  */
-export function startEveProductionServer(input: {
+export async function startEveProductionServer(input: {
   readonly appRoot: string;
   readonly host: EveFrameworkHost;
   readonly origin: string;
@@ -486,12 +522,29 @@ export function startEveProductionServer(input: {
   readonly portRetryHint: string;
 }): Promise<EveProcessHandle> {
   const parsedOrigin = new URL(input.origin);
-  const port = parsedOrigin.port;
+  const port = parsedOrigin.port || (parsedOrigin.protocol === "https:" ? "443" : "80");
   const serverEntry = join(input.appRoot, ".output", "server", "index.mjs");
 
   if (!existsSync(serverEntry)) {
     throw new Error(
       `eve production output is missing at ${serverEntry}. Run eve build from ${input.appRoot} before starting ${input.host.label}.`,
+    );
+  }
+
+  // A healthy occupant must not satisfy the new child's readiness check.
+  const occupied = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, input.origin), {
+    redirect: "manual",
+    signal: AbortSignal.timeout(DEV_SERVER_READINESS_TIMEOUT_MS),
+  }).then(
+    async (response) => {
+      await response.body?.cancel();
+      return true;
+    },
+    () => false,
+  );
+  if (occupied) {
+    throw new Error(
+      `Port ${port} on ${parsedOrigin.hostname} is already in use. Another process is listening there; stop it or ${input.portRetryHint}.`,
     );
   }
 
@@ -506,6 +559,7 @@ export function startEveProductionServer(input: {
       PORT: port,
     },
     listen: { host: parsedOrigin.hostname, port, retryHint: input.portRetryHint },
+    readinessOrigin: input.origin,
   }).then(installProcessShutdown);
 }
 

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rename, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -69,7 +69,11 @@ async function findFreePort(): Promise<number> {
   return address.port;
 }
 
-async function assertNuxtHealth(deployment: string, env: NodeJS.ProcessEnv): Promise<void> {
+async function assertNuxtHealth(
+  deployment: string,
+  env: NodeJS.ProcessEnv,
+  expectedStatus = 200,
+): Promise<void> {
   const port = await findFreePort();
   let output = "";
   const child = spawn(process.execPath, [join(deployment, ".output/server/index.mjs")], {
@@ -86,7 +90,7 @@ async function assertNuxtHealth(deployment: string, env: NodeJS.ProcessEnv): Pro
           throw new Error(`Nuxt exited before serving eve.\n${output}`);
         }
         try {
-          const response = await fetch(`http://127.0.0.1:${port}/eve/v1/health`, {
+          const response = await fetch(`http://127.0.0.1:${port}/`, {
             signal: AbortSignal.timeout(2_000),
           });
           await response.body?.cancel();
@@ -98,9 +102,25 @@ async function assertNuxtHealth(deployment: string, env: NodeJS.ProcessEnv): Pro
       () => `Nuxt did not serve eve.\n${output}`,
       60_000,
     );
-    const health = await fetch(`http://127.0.0.1:${port}/eve/v1/health`);
-    expect(await health.json()).toEqual(expect.objectContaining({ ok: true, status: "ready" }));
-    expect(output).not.toContain("failed to start the eve production server");
+    // Do not poll eve: the first transport request must wait for startup.
+    const health = await fetch(`http://127.0.0.1:${port}/eve/v1/health`, {
+      signal: AbortSignal.timeout(15_000),
+    });
+    expect(health.status, output).toBe(expectedStatus);
+    if (expectedStatus === 200) {
+      expect(await health.json()).toEqual(expect.objectContaining({ ok: true, status: "ready" }));
+      expect(output).not.toContain("failed to start the eve production server");
+    } else {
+      expect(await health.text()).toBe("eve production server is unavailable.");
+      expect(output).toContain("failed to start the eve production server");
+      const retry = await fetch(`http://127.0.0.1:${port}/eve/v1/health`);
+      expect(retry.status).toBe(503);
+      await retry.body?.cancel();
+    }
+  } catch (error) {
+    throw new Error(`Nuxt health check failed (expected ${expectedStatus}).\n${output}`, {
+      cause: error,
+    });
   } finally {
     await stopChildProcess(child);
   }
@@ -202,6 +222,14 @@ describe("framework-nuxt build", () => {
     try {
       await rename(join(app.appRoot, ".output"), join(deployment, ".output"));
       await rename(join(app.appRoot, "backend"), join(deployment, "backend"));
+      const serverDirectory = join(deployment, "backend/.output/server");
+      const entry = join(serverDirectory, "index.mjs");
+      await writeFile(
+        entry,
+        `if (process.env.TEST_EVE_START_FAILURE) throw new Error("fixture startup failure");
+await new Promise((resolve) => setTimeout(resolve, 1500));
+${await readFile(entry, "utf8")}`,
+      );
       for (const root of [undefined, "./relocated-agent"]) {
         if (root) await rename(join(deployment, "backend"), join(deployment, "relocated-agent"));
         await assertNuxtHealth(deployment, {
@@ -209,6 +237,39 @@ describe("framework-nuxt build", () => {
           EVE_NUXT_PRODUCTION_PORT: undefined,
           EVE_NUXT_PRODUCTION_ROOT: root,
         });
+      }
+      await assertNuxtHealth(
+        deployment,
+        {
+          ...env,
+          EVE_NUXT_PRODUCTION_ROOT: "./relocated-agent",
+          TEST_EVE_START_FAILURE: "1",
+        },
+        503,
+      );
+      await assertNuxtHealth(
+        deployment,
+        {
+          ...env,
+          EVE_NUXT_PRODUCTION_ROOT: "./missing-agent",
+        },
+        503,
+      );
+      const occupant = createHttpServer((_request, response) => response.end("not eve"));
+      await new Promise<void>((resolve) => occupant.listen(evePort, "127.0.0.1", resolve));
+      try {
+        await assertNuxtHealth(
+          deployment,
+          {
+            ...env,
+            EVE_NUXT_PRODUCTION_ROOT: "./relocated-agent",
+          },
+          503,
+        );
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          occupant.close((error) => (error ? reject(error) : resolve())),
+        );
       }
     } finally {
       await rm(deployment, { recursive: true, force: true });

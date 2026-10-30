@@ -31,14 +31,25 @@ authoring API or test seam. Its configuration carries the fixed `origin` and
 portable `relativeRoot`; startup is deduplicated per process through the existing
 shared process manager.
 
-Keep the import literal and externalize eve through Nitro so its tracer copies
-the package imports into the server output. Do not hide a dynamic import from
-the bundler or pass a bare package name as a trace filename. No new runtime
-dependency is needed.
+Keep the import literal. Ship this runtime entry as a self-contained bundle
+with only Node.js builtin imports, and inline it into Nitro's output. Nitro's
+tracer skips workspace symlinks, and its alias resolver cannot preserve eve's
+private imports. Installed and workspace-linked packages use the same boundary;
+no new runtime dependency or hidden import is needed.
+
+The synchronous plugin registers an awaited request hook for `/eve/v1/**`.
+Requests wait for a bounded startup promise, resolved by eve's health endpoint
+rather than optional startup logs. Failed startup returns a generic `503` on
+these routes, including the deployment readiness endpoint, while diagnostics
+remain in server logs. The frontend may serve unrelated requests independently.
 
 ## Validation boundary
 
 Use a real Nuxt build with prerendering, relocate both independently built
 outputs outside the fixture's dependency tree, and request eve's health route
 through Nuxt. Exercise build-only routing variables, the relative root override,
-static generation, and an externally managed origin.
+static generation, and an externally managed origin. Delay the real backend's
+startup to check the first transport request without health polling. Verify
+failed, missing, and occupied backend startup returns `503`, and retain the
+workspace Nuxt fixture build alongside the relocated installed-package scenario.
+Use fake timers for the three-minute bound and a mock child for normalized port 80.

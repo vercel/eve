@@ -112,6 +112,8 @@ The browser still needs a production authentication policy. See [Authenticate br
   EVE_NUXT_PRODUCTION_ROOT=./relocated-backend node .output/server/index.mjs
   ```
 
+  Requests under `/eve/v1/**` wait for eve's health endpoint during startup, for up to three minutes. If startup fails, these routes return `503`; check the Nuxt server logs for the cause. Use `/eve/v1/health` for deployment readiness checks, because the frontend can serve pages before eve is ready.
+
   To manage eve separately, set `EVE_NUXT_PRODUCTION_ORIGIN` during `nuxt build`. That build proxies to the configured origin and does not start eve, even when the variable is absent at runtime:
 
   ```bash

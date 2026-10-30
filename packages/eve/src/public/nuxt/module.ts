@@ -71,7 +71,7 @@ function resolveApplicationRoot(nuxtRoot: string, appPath: string | undefined): 
  */
 interface NitroConfigHost {
   externals?: {
-    external?: string[];
+    inline?: string[];
     [key: string]: unknown;
   };
   vercel?: {
@@ -215,21 +215,30 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
             write: true,
             getContents:
               () => `import { ensureEveProductionServer } from "eve/nuxt/production-server";
-export default function () {
+import { send, setResponseStatus } from "h3";
+export default function (nitroApp) {
   if (import.meta.prerender) return;
-  void ensureEveProductionServer(${JSON.stringify(config)}).catch((error) => {
+  const ready = ensureEveProductionServer(${JSON.stringify(config)}).then(() => true, (error) => {
     console.error("[eve] failed to start the eve production server.", error);
+    return false;
+  });
+  nitroApp.hooks.hook("request", async (event) => {
+    const path = event.path.split("?")[0];
+    if (path !== "/eve/v1" && !path.startsWith("/eve/v1/")) return;
+    if (await ready) return;
+    setResponseStatus(event, 503);
+    await send(event, "eve production server is unavailable.");
   });
 }
 `,
           });
           addServerPlugin(plugin.dst);
-          // A literal external import lets Nitro trace eve's package imports
-          // without trying to bundle its private # aliases into the host.
+          // This entry is self-contained: Nitro cannot trace workspace symlinks,
+          // and resolving eve's private # aliases through Nuxt changes their meaning.
           const nitro = readNitroConfig(nuxt.options);
           nitro.externals = {
             ...nitro.externals,
-            external: [...(nitro.externals?.external ?? []), "eve"],
+            inline: [...(nitro.externals?.inline ?? []), "eve/nuxt/production-server"],
           };
         }
 
