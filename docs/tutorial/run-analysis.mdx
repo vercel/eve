@@ -212,7 +212,7 @@ Open the saved `chart.png` in your image viewer. The script runs in a separate s
 
 If you return after adding the approval gate in [Guard the spend](./guard-the-spend), the script reports any pending request with its session ID. [Respond through the client](../guides/client/messages#answer-human-input-requests) before collecting that session's chart result.
 
-To save a chart from a hosted agent, pass the deployment URL and configure [client authentication](../guides/client/overview#authentication). In a web UI, build an image preview or download control from the same `call.settled` output. Returning bytes from a tool adds no UI by itself.
+To save a chart from a hosted agent, pass the deployment URL and configure [client authentication](/docs/guides/client#authentication). In a web UI, build an image preview or download control from the same `call.settled` output. Returning bytes from a tool adds no UI by itself.
 
 This example limits charts to 1 MiB because eve saves tool outputs in the session's history. For larger files, copy the bytes to your application's file storage and return an authorized download URL. Sandbox files are not permanent artifact storage.
 

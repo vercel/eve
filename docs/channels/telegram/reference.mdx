@@ -6,7 +6,7 @@ type: reference
 
 This page documents every part of `telegramChannel` from `eve/channels/telegram`. For setup and common tasks, start with [Telegram](/docs/channels/telegram).
 
-The Telegram channel runs your agent as a Telegram bot. It lives in `agent/channels/telegram.ts`. It checks the `X-Telegram-Bot-Api-Secret-Token` header on each Bot API webhook, and replies with `sendMessage`. See [Channels](/docs/channels/overview) for what every channel shares.
+The Telegram channel runs your agent as a Telegram bot. It lives in `agent/channels/telegram.ts`. It checks the `X-Telegram-Bot-Api-Secret-Token` header on each Bot API webhook, and replies with `sendMessage`. See [Channels](/docs/channels) for what every channel shares.
 
 ## Add the channel
 
@@ -96,5 +96,5 @@ export default telegramChannel({
 
 ## What to read next
 
-- [Channels overview](/docs/channels/overview): what every channel shares, and every built-in channel
+- [Channels overview](/docs/channels): what every channel shares, and every built-in channel
 - [Auth & route protection](/docs/guides/auth-and-route-protection): authenticating inbound traffic

@@ -82,14 +82,14 @@ eve remote connect --url https://your_agent.example.com
 
 ## Configure additional features
 
-| Feature                                                               | Configuration                                                                                                     |
-| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Sandbox tools, file attachments, and skill supporting files           | [Run the sandbox](#run-the-sandbox) with Docker or another provider                                               |
-| [Schedules](/docs/schedules)                                          | Keep schedules enabled on [one `eve start` process](/docs/guides/deployment/self-hosted-operations#run-schedules) |
-| Slack, Microsoft Teams, and other [channels](/docs/channels/overview) | Expose `/eve/` over public HTTPS through your [proxy](#configure-proxy-routes)                                    |
-| Connection sign-in and [remote agents](/docs/guides/remote-agents)    | Set a [public callback origin](#set-the-public-callback-origin)                                                   |
-| Agents in a workspace that call each other                            | Configure a [workspace-peer transport](/docs/subagents#vercel-workspace-peers)                                    |
-| Traces                                                                | Configure an [OpenTelemetry](/docs/observability/otel) destination                                                |
+| Feature                                                            | Configuration                                                                                                     |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| Sandbox tools, file attachments, and skill supporting files        | [Run the sandbox](#run-the-sandbox) with Docker or another provider                                               |
+| [Schedules](/docs/schedules)                                       | Keep schedules enabled on [one `eve start` process](/docs/guides/deployment/self-hosted-operations#run-schedules) |
+| Slack, Microsoft Teams, and other [channels](/docs/channels)       | Expose `/eve/` over public HTTPS through your [proxy](#configure-proxy-routes)                                    |
+| Connection sign-in and [remote agents](/docs/guides/remote-agents) | Set a [public callback origin](#set-the-public-callback-origin)                                                   |
+| Agents in a workspace that call each other                         | Configure a [workspace-peer transport](/docs/subagents#vercel-workspace-peers)                                    |
+| Traces                                                             | Configure an [OpenTelemetry](/docs/observability/otel) destination                                                |
 
 ## Run the sandbox
 

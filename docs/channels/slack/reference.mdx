@@ -6,7 +6,7 @@ type: reference
 
 This page documents every part of `slackChannel` from `eve/channels/slack`. For setup and common tasks, start with [Slack](/docs/channels/slack).
 
-The Slack channel connects your agent to a Slack workspace through `agent/channels/slack.ts`. It answers mentions, DMs, slash commands, shortcuts, and button clicks, replies in threads, and shows approvals and questions as buttons. See [Channels](/docs/channels/overview) for what every channel shares.
+The Slack channel connects your agent to a Slack workspace through `agent/channels/slack.ts`. It answers mentions, DMs, slash commands, shortcuts, and button clicks, replies in threads, and shows approvals and questions as buttons. See [Channels](/docs/channels) for what every channel shares.
 
 [Vercel Connect](https://vercel.com/kb/guide/vercel-connect) holds the bot token, rotates it, verifies requests, and supports installs in several workspaces, so no Slack secrets go into your project environment. Without Connect, you provide the bot token and signing secret yourself.
 
@@ -386,7 +386,7 @@ When the triggering message starts the thread's session, eve adds the earlier re
 
 #### Control overlapping turns
 
-A Slack message sent during a running turn joins that turn by default (`turnPolicy: "steer"`). See [Overlapping messages](/docs/channels/overview#overlapping-messages) for when it interrupts the model. Set `turnPolicy: "queue"` to let every running turn finish first:
+A Slack message sent during a running turn joins that turn by default (`turnPolicy: "steer"`). See [Overlapping messages](/docs/channels#overlapping-messages) for when it interrupts the model. Set `turnPolicy: "queue"` to let every running turn finish first:
 
 ```ts title="agent/channels/slack.ts"
 export default slackChannel({
@@ -545,7 +545,7 @@ A sign-in link or device code is a credential: whoever completes it connects the
 
 ## Audience
 
-Public channels are `public`; DMs, group DMs, and private channels are `private`. When an event doesn't say what kind of conversation it came from, eve asks Slack. It treats an unclear or failed lookup as `private`. The audience controls what traces capture, not who can use the channel. See [Audience](/docs/channels/overview#audience).
+Public channels are `public`; DMs, group DMs, and private channels are `private`. When an event doesn't say what kind of conversation it came from, eve asks Slack. It treats an unclear or failed lookup as `private`. The audience controls what traces capture, not who can use the channel. See [Audience](/docs/channels#audience).
 
 ## Options
 
@@ -1214,6 +1214,6 @@ Slack must reach the preview route without an authentication challenge. For a Co
 
 ## What to read next
 
-- [Channels overview](/docs/channels/overview): the channel contract and every built-in channel
+- [Channels overview](/docs/channels): the channel contract and every built-in channel
 - [Auth & route protection](/docs/guides/auth-and-route-protection): authenticating inbound traffic
 - [Chat SDK adapters](/docs/channels/chat-sdk): use a Chat SDK Slack adapter and runtime instead of eve's Slack integration

@@ -1,20 +1,20 @@
 ---
-title: "Overview"
+title: "Frontend Frameworks"
 description: "Put an eve agent behind a browser chat UI with useEveAgent."
 ---
 
-`useEveAgent` connects a browser UI to an eve agent. It starts a session, sends messages, and streams the agent's reply into state you can render. This page uses React; [Vue](./use-eve-agent-vue) and [Svelte](./use-eve-agent-svelte) work the same way.
+`useEveAgent` connects a browser UI to an eve agent. It starts a session, sends messages, and streams the agent's reply into state you can render. This page uses React; [Vue](/docs/guides/frontend/use-eve-agent-vue) and [Svelte](/docs/guides/frontend/use-eve-agent-svelte) work the same way.
 
 ## How it works
 
 Your app and the agent share an origin. The browser calls the agent at `/eve/v1/*`, and a framework integration or your hosting routes those requests to the agent:
 
-- [Next.js](./nextjs)
-- [Nuxt](./nuxt)
-- [SvelteKit](./sveltekit)
-- [TanStack Start](./tanstack)
+- [Next.js](/docs/guides/frontend/nextjs)
+- [Nuxt](/docs/guides/frontend/nuxt)
+- [SvelteKit](/docs/guides/frontend/sveltekit)
+- [TanStack Start](/docs/guides/frontend/tanstack)
 
-To generate a working chat app, run `eve add channel/web`. For scripts and server code that don't render UI, use the [Client SDK](../client/overview).
+To generate a working chat app, run `eve add channel/web`. For scripts and server code that don't render UI, use the [Client SDK](/docs/guides/client).
 
 ## Build a basic chat
 
@@ -67,13 +67,13 @@ Most chat UIs need only a few values from the hook:
 | `cancel`           | Stop the running turn                                           |
 | `newSession`       | Start a new conversation                                        |
 
-See the [`useEveAgent` reference](./use-eve-agent) for everything else.
+See the [`useEveAgent` reference](/docs/guides/frontend/use-eve-agent) for everything else.
 
 ## Authenticate browser requests
 
 Because the browser calls the agent on your own origin, it sends your app's cookies with every request. The agent decides whether to accept them in `agent/channels/eve.ts`.
 
-Until you add an auth check there, production browser requests get `401`. Write an `AuthFn` that verifies your app's session; [Authentication](../auth-and-route-protection) shows how. For a public demo, `none()` from `eve/channels/auth` admits everyone; don't use it for private data.
+Until you add an auth check there, production browser requests get `401`. Write an `AuthFn` that verifies your app's session; [Authentication](/docs/guides/auth-and-route-protection) shows how. For a public demo, `none()` from `eve/channels/auth` admits everyone; don't use it for private data.
 
 If your app uses bearer tokens instead of cookies, pass them to the hook. See [Custom hosts and headers](#custom-hosts-and-headers).
 
@@ -113,7 +113,7 @@ if (activeTurn(agent.view) !== undefined) {
 }
 ```
 
-See [Sending](./use-eve-agent#sending) and [Cancelling](./use-eve-agent#cancelling) for exact timing.
+See [Sending](/docs/guides/frontend/use-eve-agent#sending) and [Cancelling](/docs/guides/frontend/use-eve-agent#cancelling) for exact timing.
 
 ## Human-in-the-loop prompts
 
@@ -145,7 +145,7 @@ return pendingRequests.map(({ interactionId, request }) => (
 
 - For a free-text answer, send `{ interactionId, text }`.
 - A prompt stays `open` until eve decides it, not when you submit an answer. If the answer is refused, the prompt stays answerable.
-- To show how a prompt ended, read its `outcome`. Only `accepted` and `declined` mean a person decided; a prompt can also end because its turn was cancelled. See [Interactions](./use-eve-agent#interactions).
+- To show how a prompt ended, read its `outcome`. Only `accepted` and `declined` mean a person decided; a prompt can also end because its turn was cancelled. See [Interactions](/docs/guides/frontend/use-eve-agent#interactions).
 - A prompt about a tool call also appears on that call's `tool` part as `part.interaction`. Other prompts appear as `interaction` message parts.
 
 ## Sign-ins and other interactions
@@ -244,14 +244,14 @@ A few rules keep restored chats correct:
 - **One saved chat per conversation.** To switch conversations, remount the chat component, for example with `key={chat.id}`.
 - **Create your chat record first.** If the user can reload right after sending, create your app's chat record before `send()`, and save the session ID from `onSessionChange`.
 
-See [Resume a saved session](./use-eve-agent#resume-a-saved-session) for exactly how saved events and catch-up fit together.
+See [Resume a saved session](/docs/guides/frontend/use-eve-agent#resume-a-saved-session) for exactly how saved events and catch-up fit together.
 
 ## Start a new conversation
 
 - `newSession()` clears the chat and starts fresh. The old conversation stays on the server.
 - `end()` ends the conversation on the server. Call `newSession()` afterward to clear it locally.
 
-To make the first reply faster, pass `prewarm: true`. eve then creates the next session before the user sends anything. Turn it on only after your auth headers are ready. See [Prewarming](./use-eve-agent#prewarming).
+To make the first reply faster, pass `prewarm: true`. eve then creates the next session before the user sends anything. Turn it on only after your auth headers are ready. See [Prewarming](/docs/guides/frontend/use-eve-agent#prewarming).
 
 ## Show subagent progress
 
@@ -261,7 +261,7 @@ When the agent delegates to a subagent, `messages` shows the delegated call, not
 const agent = useEveAgent({ followAgents: true });
 ```
 
-See [Child agents](./use-eve-agent#child-agents) for limits, observation states, and showing what a single call caused.
+See [Child agents](/docs/guides/frontend/use-eve-agent#child-agents) for limits, observation states, and showing what a single call caused.
 
 ## Lifecycle callbacks
 
@@ -278,7 +278,7 @@ const agent = useEveAgent({
 });
 ```
 
-See [Lifecycle callbacks](./use-eve-agent#lifecycle-callbacks) for exactly when each one fires.
+See [Lifecycle callbacks](/docs/guides/frontend/use-eve-agent#lifecycle-callbacks) for exactly when each one fires.
 
 ## Derive your own state
 
@@ -292,7 +292,7 @@ const currentActivity = activity(agent.view);
 const blocked = turn === undefined ? undefined : waiting(agent.view, turn.turnId);
 ```
 
-See [Use eve's answers](./use-eve-agent#use-eves-answers) for which query answers each common question, from a request's result to call timing and usage.
+See [Use eve's answers](/docs/guides/frontend/use-eve-agent#use-eves-answers) for which query answers each common question, from a request's result to call timing and usage.
 
 For something `view` doesn't cover, read the raw `events`:
 
@@ -326,17 +326,17 @@ const support = useEveAgent({ agent: "support" });
 
 ## Per-framework integration
 
-| Framework      | Integration                          | Hook                                             |
-| -------------- | ------------------------------------ | ------------------------------------------------ |
-| Next.js        | [Next.js guide](./nextjs)            | [`useEveAgent` (React)](#build-a-basic-chat)     |
-| Nuxt           | [`eve/nuxt` module](./nuxt)          | [`useEveAgent` (Vue)](./use-eve-agent-vue)       |
-| SvelteKit      | [`eveSvelteKit` plugin](./sveltekit) | [`useEveAgent` (Svelte)](./use-eve-agent-svelte) |
-| TanStack Start | [`eveTanStack` plugin](./tanstack)   | [`useEveAgent` (React)](#build-a-basic-chat)     |
-| Any React      | same-origin or `baseUrl`             | [`useEveAgent` (React)](#build-a-basic-chat)     |
+| Framework      | Integration                                              | Hook                                                                 |
+| -------------- | -------------------------------------------------------- | -------------------------------------------------------------------- |
+| Next.js        | [Next.js guide](/docs/guides/frontend/nextjs)            | [`useEveAgent` (React)](#build-a-basic-chat)                         |
+| Nuxt           | [`eve/nuxt` module](/docs/guides/frontend/nuxt)          | [`useEveAgent` (Vue)](/docs/guides/frontend/use-eve-agent-vue)       |
+| SvelteKit      | [`eveSvelteKit` plugin](/docs/guides/frontend/sveltekit) | [`useEveAgent` (Svelte)](/docs/guides/frontend/use-eve-agent-svelte) |
+| TanStack Start | [`eveTanStack` plugin](/docs/guides/frontend/tanstack)   | [`useEveAgent` (React)](#build-a-basic-chat)                         |
+| Any React      | same-origin or `baseUrl`                                 | [`useEveAgent` (React)](#build-a-basic-chat)                         |
 
 ## What to read next
 
-- [`useEveAgent` reference](./use-eve-agent): every value, option, and behavior
-- [Next.js](./nextjs): set up a chat app end to end
-- [Client SDK](../client/overview): call the agent from scripts and server code
-- [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming): how sessions and the event stream work
+- [`useEveAgent` reference](/docs/guides/frontend/use-eve-agent): every value, option, and behavior
+- [Next.js](/docs/guides/frontend/nextjs): set up a chat app end to end
+- [Client SDK](/docs/guides/client): call the agent from scripts and server code
+- [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming): how sessions and the event stream work

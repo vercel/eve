@@ -1,14 +1,5 @@
 {
   "title": "Evals",
   "defaultOpen": false,
-  "pages": [
-    "overview",
-    "cases",
-    "assertions",
-    "tool-stubs",
-    "judge",
-    "targets",
-    "reporters",
-    "running"
-  ]
+  "pages": ["cases", "assertions", "tool-stubs", "judge", "targets", "reporters", "running"]
 }

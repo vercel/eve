@@ -8,7 +8,7 @@ This page documents every part of `githubChannel` from `eve/channels/github`. Fo
 
 The GitHub channel lets people reach your agent from issues and pull requests. It lives in `agent/channels/github.ts`. Write the agent's invocation token, such as `@my-agent`, in a new issue, PR, or review comment, and the agent replies in that thread. It sees the PR diff and works in a checkout of the repo.
 
-[Vercel Connect](/docs/guides/auth-and-route-protection) can manage the GitHub App, its token, and webhook checks, so you hold no private key or webhook secret. See [Channels](/docs/channels/overview) for what all channels share.
+[Vercel Connect](/docs/guides/auth-and-route-protection) can manage the GitHub App, its token, and webhook checks, so you hold no private key or webhook secret. See [Channels](/docs/channels) for what all channels share.
 
 ## Guided Connect setup
 
@@ -152,5 +152,5 @@ For any other GitHub API call, use `ctx.github.request({ method, path, body })`.
 
 ## What to read next
 
-- [Channels overview](/docs/channels/overview): the channel contract and every built-in channel
+- [Channels overview](/docs/channels): the channel contract and every built-in channel
 - [Auth & route protection](/docs/guides/auth-and-route-protection): authenticating inbound traffic

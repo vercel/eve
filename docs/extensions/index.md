@@ -386,7 +386,7 @@ Sessions saved by eve 0.68 or earlier store extension state per package, not per
 - [Instructions](/docs/instructions): static and TypeScript instructions
 - [Skills](/docs/skills): package procedures and supporting files
 - [Connections](/docs/connections): integrate external services
-- [Channels](/docs/channels/overview): receive messages and expose routes
+- [Channels](/docs/channels): receive messages and expose routes
 - [Schedules](/docs/schedules): run the agent on a cron cadence
 - [Subagents](/docs/subagents): delegate to declared specialists
 - [Hooks](/docs/guides/hooks): observe agent events
