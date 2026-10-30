@@ -55,9 +55,10 @@ By default, the Agent Card takes its name and description from the agent, lists 
 How the agent handles a `SendMessage` depends on the IDs the message carries:
 
 - **Neither `contextId` nor `taskId`**: eve starts a new context and its first task.
-- **`contextId` only**: eve starts a new task in that context. It waits for any running task to finish first.
-- **`taskId` of a working task**: the message joins the running turn, as a follow-up message does in eve.
-- **`taskId` of an input-required task**: the message answers the open prompt. See [Answer questions and approvals](#answer-questions-and-approvals).
+- **`contextId` only**: eve starts a new task in that context. It waits for any running task to finish first, including one waiting on input, and never merges into it or into another queued task.
+- **`taskId` of a submitted task**: eve refuses the message with `UnsupportedOperationError`: the task is queued behind another and has no turn to join yet.
+- **`taskId` of a working task**: the message joins the task's turn, as a follow-up message does in eve. If the task finishes before the message arrives, the message starts a new task instead, and the response names that task.
+- **`taskId` of an input-required task**: the message answers the task's open question. See [Answer questions and approvals](#answer-questions-and-approvals).
 - **`taskId` of a terminal task**: eve refuses the message with `UnsupportedOperationError`. Send it with only the `contextId` to start a new task.
 
 A context another caller owns, or one that doesn't exist, is refused with `InvalidParams`. eve never starts a new context in its place.
@@ -119,7 +120,7 @@ A stream starts with the `task`, then sends a `statusUpdate` for each state chan
 
 ## Answer questions and approvals
 
-When a task is `TASK_STATE_INPUT_REQUIRED`, its status message is plain text: each open question or approval, with its options numbered. Answer by sending a text message with the task's `taskId`. eve matches the text against the first open prompt by option number or label, or takes it as a free-form answer when the question allows one, as it does on Slack or any other text channel:
+When a task is `TASK_STATE_INPUT_REQUIRED`, its status message is plain text: each open question or approval, with its options numbered. Answer by sending a text message with the task's `taskId`. eve matches the text against the task's first open question by option number or label, or takes it as a free-form answer when the question allows one, as it does on Slack or any other text channel. A message that matches none of the options of a question without free-form answers, such as an approval, is refused with `InvalidParams` naming the options, and the task keeps waiting:
 
 ```json
 {
@@ -133,7 +134,7 @@ When a task is `TASK_STATE_INPUT_REQUIRED`, its status message is plain text: ea
 }
 ```
 
-Each message answers one prompt. When several are open, the task stays `TASK_STATE_INPUT_REQUIRED` with the rest until each has an answer.
+Each message answers one prompt and carries only text parts. When several are open, the task stays `TASK_STATE_INPUT_REQUIRED` with the rest until each has an answer.
 
 ## Authentication
 

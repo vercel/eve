@@ -40,17 +40,25 @@ An eve turn stays `running` while it waits on interactions, so one task survives
 prompt round trips. Nothing is stored beyond the session: every read folds the session stream.
 
 ```
-SendMessage{}                  -> create session (new context) -> task = turn 1
-SendMessage{contextId}         -> send(turnPolicy: "queue")    -> task = next turn
-SendMessage{taskId} working    -> send(turnPolicy: "steer")    -> same turn
-SendMessage{taskId} interrupted-> typed answer (send)           -> same turn
+SendMessage{}                   -> create session (new context)            -> task = turn 1
+SendMessage{contextId}          -> send(queue, turnTarget: null)            -> task = its own turn
+SendMessage{taskId} submitted   -> refused: no turn to join yet
+SendMessage{taskId} working     -> send(steer, turnTarget: the task's turn) -> same turn, or its own
+SendMessage{taskId} interrupted -> respond(answer matched here)             -> same turn
 ```
+
+`turnTarget` is an internal delivery option (`DeliverHookPayload.turnTarget`) the input queue
+honors. eve's own rules would otherwise break the task mapping: consecutive queued deliveries of
+one principal merge into one turn, and a queued message steers a turn that waits on its person.
+`null` makes a delivery a turn of its own; a turn ID lets it steer only that turn, and when that
+turn has ended it runs alone. A follow-up that missed its turn is therefore a new task, named by
+its own delivery; the response, stream, and `ListTasks` report it as one.
 
 ### Retries
 
 A retried `messageId` must reach the same task. The session drops a duplicate idempotency key
-silently, so the channel names the delivery itself: `deliveryIdForIdempotencyKey(key)`, passed to
-`channel-address` `deliver` as an internal option. A retry of the first message in a context
+silently, so the channel names the delivery itself: `deliveryIdForMessage(messageId)`, reversible
+so history echoes the client's IDs, passed to `channel-address` `deliver` as an internal option. A retry of the first message in a context
 resolves the session through a continuation token derived from the same key, as eve-channel's
 `operationId` does. A retry of a message that already arrived returns its task in whatever state it
 is now, including terminal.
@@ -71,7 +79,10 @@ terminal or interrupted state, `SubscribeToTask` at a terminal one.
 ### Prompts
 
 Interrupted status messages carry the prompts as text only, rendered as on any text channel, and
-callers answer by typing (option number, label, or free-form text). eve's interaction JSON is an
+callers answer by typing (option number, label, or free-form text). The channel matches the text
+against the task's own first open question and delivers a structured answer: eve's typed-answer
+intake would match the session's first open prompt, possibly another turn's, and pass text that
+matches no option through as a message. Unmatched text is refused with `InvalidParams`. eve's interaction JSON is an
 internal format, so it stays off the wire; a structured A2A extension would be a separate,
 versioned contract, deferred until callers need one.
 
