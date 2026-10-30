@@ -906,7 +906,7 @@ const budgetRules = [
 const signInRules = [
   {
     rule: "a sign-in names the service and shows its sign-in link",
-    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    source: "docs/connections/index.mdx#self-hosted-interactive-oauth",
     requires: [],
     variesByConversation: true,
     // A public surface has nowhere private to show a link.
@@ -921,7 +921,7 @@ const signInRules = [
   },
   {
     rule: "a sign-in shows its confirmation code",
-    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    source: "docs/connections/index.mdx#self-hosted-interactive-oauth",
     requires: [],
     variesByConversation: true,
     surfaces: ["shared", "private"],
@@ -976,7 +976,7 @@ const signInRules = [
   },
   {
     rule: "a sign-in without a link shows its instructions",
-    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    source: "docs/connections/index.mdx#self-hosted-interactive-oauth",
     requires: [],
     variesByConversation: true,
     async run(conversation) {
@@ -986,7 +986,7 @@ const signInRules = [
   },
   {
     rule: "after signing in, the agent carries on with the request",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: [],
     async run(conversation) {
       await conversation.say(READ_CALENDAR);
@@ -998,7 +998,7 @@ const signInRules = [
   },
   {
     rule: "completing a sign-in tells the person it succeeded",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: [],
     variesByConversation: true,
     async run(conversation) {
@@ -1010,7 +1010,7 @@ const signInRules = [
   },
   {
     rule: "message after ignored sign-in gets an answer, signing in late doesn't run",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
@@ -1027,7 +1027,7 @@ const signInRules = [
   },
   {
     rule: "message after ignored sign-in tells user it was cancelled",
-    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    source: "docs/connections/index.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
     variesByConversation: true,
     async run(conversation) {
@@ -1105,7 +1105,7 @@ const approvalPermissionRules = [
 const callerRules = [
   {
     rule: "a tool sees the person who sent the message as its caller",
-    source: "docs/tools/overview.mdx",
+    source: "docs/tools/index.mdx",
     requires: [],
     // Platforms name the sender differently in a DM, e.g. Discord's user rather than member.
     variesByConversation: true,
@@ -1122,7 +1122,7 @@ const callerRules = [
   },
   {
     rule: "another person's message reaches tools as a different caller, and each person stays the same caller",
-    source: "docs/tools/overview.mdx",
+    source: "docs/tools/index.mdx",
     requires: ["another-person"],
     async run(conversation) {
       const [alice, bob, aliceAgain] = await lookUpNotesAs(conversation, ["alice", "bob", "alice"]);
