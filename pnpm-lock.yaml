@@ -257,6 +257,9 @@ overrides:
   '@vercel/cli-config>zod': 4.5.4
   '@vercel/connect>eve': workspace:*
 
+patchedDependencies:
+  '@vercel/geistdocs@2.14.1': 21f7c81dc97e5938be34e16c33ee14f8e461ac3e22a0f4b5f7fd3e0685c85ad4
+
 importers:
 
   .:
@@ -330,7 +333,7 @@ importers:
         version: 2.0.1(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.3.0(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@8.3.1(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@6.0.3)(vite@8.3.1(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(next@16.3.8(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(nuxt@4.5.2(31a86ea52c220294323b3b0d6b7c3aec))(react@19.2.6)(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vue@3.5.42(typescript@6.0.3))
       '@vercel/geistdocs':
         specifier: 2.14.1
-        version: 2.14.1(7eb82b335cccccda73811972c8fed49f)
+        version: 2.14.1(patch_hash=21f7c81dc97e5938be34e16c33ee14f8e461ac3e22a0f4b5f7fd3e0685c85ad4)(7eb82b335cccccda73811972c8fed49f)
       '@vercel/speed-insights':
         specifier: 2.0.0
         version: 2.0.0(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@7.3.0(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@8.3.1(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@6.0.3)(vite@8.3.1(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1)))(next@16.3.8(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(nuxt@4.5.2(31a86ea52c220294323b3b0d6b7c3aec))(react@19.2.6)(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vue@3.5.42(typescript@6.0.3))
@@ -21716,7 +21719,7 @@ snapshots:
       '@aws-sdk/credential-provider-web-identity': 3.972.49
       ws: 8.21.3(bufferutil@4.1.0)
 
-  '@vercel/geistdocs@2.14.1(7eb82b335cccccda73811972c8fed49f)':
+  '@vercel/geistdocs@2.14.1(patch_hash=21f7c81dc97e5938be34e16c33ee14f8e461ac3e22a0f4b5f7fd3e0685c85ad4)(7eb82b335cccccda73811972c8fed49f)':
     dependencies:
       '@ai-sdk/react': 3.0.288(react@19.2.6)(zod@4.6.5)
       '@clack/prompts': 0.11.0
