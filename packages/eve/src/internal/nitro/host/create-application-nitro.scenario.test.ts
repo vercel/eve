@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -36,6 +36,7 @@ import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 
+const workflowStepTargets = vi.hoisted(() => ({ value: [] as string[] }));
 const configureDevelopmentNitroRoutes = vi.fn(async () => undefined);
 const configureProductionNitroRoutes = vi.fn(async () => undefined);
 const createNitroMock = vi.fn();
@@ -53,6 +54,24 @@ vi.mock("./schedule-task-routes.js", () => ({
 vi.mock("./configure-nitro-routes.js", () => ({
   configureDevelopmentNitroRoutes,
   configureProductionNitroRoutes,
+}));
+
+vi.mock("#internal/workflow-bundle/builder.js", () => ({
+  WorkflowBundleBuilder: class {
+    readonly #outDir: string;
+
+    constructor(options: { outDir: string }) {
+      this.#outDir = options.outDir;
+    }
+
+    async build() {
+      return {
+        stepTargets: workflowStepTargets.value,
+        stepsPath: `${this.#outDir}/steps.mjs`,
+        workflowsPath: `${this.#outDir}/workflows.mjs`,
+      };
+    }
+  },
 }));
 
 vi.mock("#internal/workflow-bundle/workflow-builders.js", () => ({
@@ -255,6 +274,7 @@ describe("application Nitro creation", () => {
     vi.resetModules();
     vi.clearAllMocks();
     createNitroMock.mockReset();
+    workflowStepTargets.value = [];
   });
 
   afterEach(() => {
@@ -328,7 +348,7 @@ describe("application Nitro creation", () => {
     }
   });
 
-  it("preserves workflow bundle side effects and skips workflow transform for cached bundles", async () => {
+  it("preserves workflow bundle side effects and skips workflow transform for its bundles", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
@@ -365,68 +385,27 @@ describe("application Nitro creation", () => {
     }
 
     const bundledStepPath = `${preparedHost.workflowBuildDir}/steps.mjs`;
-    const cachedStepPath =
-      "/Users/jj/dev/eve/packages/eve/.eve/workflow-cache/hash1234567890/steps.mjs";
 
     expect(sideEffectsPlugin.resolveId?.(bundledStepPath)).toEqual({
       id: bundledStepPath,
       moduleSideEffects: "no-treeshake",
     });
-    expect(sideEffectsPlugin.resolveId?.(cachedStepPath)).toEqual({
-      id: cachedStepPath,
-      moduleSideEffects: "no-treeshake",
-    });
     expect(
       sideEffectsPlugin.resolveId?.(
         "./workflows.mjs",
-        "/tmp/.nitro/workflow/workflows-handler.mjs",
+        `${preparedHost.workflowBuildDir}/workflows-handler.mjs`,
       ),
     ).toEqual({
-      id: "/tmp/.nitro/workflow/workflows.mjs",
+      id: `${preparedHost.workflowBuildDir}/workflows.mjs`,
       moduleSideEffects: "no-treeshake",
     });
     expect(sideEffectsPlugin.resolveId?.("/tmp/other-module.mjs")).toBeNull();
 
     expect(workflowTransformPlugin.transform("code", bundledStepPath)).toBeNull();
-    expect(workflowTransformPlugin.transform("code", cachedStepPath)).toBeNull();
     expect(workflowTransformPlugin.transform("code", "/tmp/other-module.mjs")).toBe(
       "code:/tmp/other-module.mjs:transformed",
     );
     expect(originalTransform).toHaveBeenCalledTimes(1);
-  });
-
-  it("externalizes prebuilt workflow bundles but keeps Nitro workflow entries bundled in dev mode", async () => {
-    const nitroStub = createNitroStub({
-      buildDir: "/tmp/weather-agent/.nitro",
-      dev: true,
-    });
-    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
-
-    const { createDevelopmentApplicationNitro } =
-      await import("#internal/nitro/host/create-application-nitro.js");
-    const preparedHost = await createPreparedHost();
-    await createDevelopmentApplicationNitro(preparedHost);
-
-    const rollupBeforeHooks = nitroStub.hookHandlers.get("rollup:before") ?? [];
-    const existingExternal = vi.fn((id: string) =>
-      id === "/tmp/keep-external" ? false : undefined,
-    );
-    const config = {
-      external: existingExternal,
-      plugins: [],
-    };
-
-    for (const hook of rollupBeforeHooks) {
-      await hook(nitroStub.nitro, config);
-    }
-
-    const external = config.external as (id: string) => boolean | null | undefined;
-    expect(external(`${preparedHost.workflowBuildDir}/workflows.mjs`)).toBe(true);
-    expect(external("/tmp/weather-agent/.nitro/workflow/workflows.mjs")).toBeUndefined();
-    expect(external(`${preparedHost.workflowBuildDir}/steps.mjs`)).toBeUndefined();
-    expect(external("/tmp/weather-agent/.nitro/workflow/steps.mjs")).toBeUndefined();
-    expect(external("/tmp/keep-external")).toBe(false);
-    expect(existingExternal).toHaveBeenCalledWith("/tmp/keep-external");
   });
 
   it("limits step-surface scan directories to the package execution directory", async () => {
@@ -530,48 +509,6 @@ describe("application Nitro creation", () => {
     expect(nitroOptions?.vercel).toEqual(
       createEveVercelOptions({ agentName: "weather-agent", enabled: true }),
     );
-  });
-
-  it("clears Nitro build cache output from a different eve version", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "eve-nitro-version-cache-"));
-
-    try {
-      const nitroStub = createNitroStub();
-      createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
-
-      const preparedHost = await createPreparedHost();
-      preparedHost.appRoot = tempRoot;
-      preparedHost.compileResult.project.appRoot = tempRoot;
-      preparedHost.compileResult.project.agentRoot = join(tempRoot, "agent");
-      const nitroBuildDir = resolveNitroBuildDirectory(tempRoot);
-      const staleBuildOutputPath = join(nitroBuildDir, "stale-build-output.txt");
-
-      await mkdir(nitroBuildDir, { recursive: true });
-      await Promise.all([
-        writeFile(
-          join(nitroBuildDir, "eve-cache.json"),
-          `${JSON.stringify({ eveVersion: "0.0.0-old" })}\n`,
-        ),
-        writeFile(staleBuildOutputPath, "stale\n"),
-      ]);
-
-      const { createProductionApplicationNitro } =
-        await import("#internal/nitro/host/create-application-nitro.js");
-      await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
-
-      await expect(readFile(staleBuildOutputPath, "utf8")).rejects.toThrow();
-      await expect(readFile(join(nitroBuildDir, "eve-cache.json"), "utf8")).resolves.toBe(
-        `${JSON.stringify(
-          {
-            eveVersion: resolveInstalledPackageInfo().version,
-          },
-          null,
-          2,
-        )}\n`,
-      );
-    } finally {
-      await rm(tempRoot, { force: true, recursive: true });
-    }
   });
 
   it("rewrites Windows paths in Nitro generated routing imports", async () => {
@@ -965,7 +902,7 @@ describe("application Nitro creation", () => {
     );
   });
 
-  it("transforms the modules imported by the Nitro step entry", async () => {
+  it("bundles and transforms the workflow step targets in step mode", async () => {
     const nitroBuildDir = await mkdtemp(join(tmpdir(), "eve-nitro-build-"));
     const nitroStub = createNitroStub({
       buildDir: nitroBuildDir,
@@ -983,30 +920,12 @@ describe("application Nitro creation", () => {
       "create-session-step.js",
     );
 
-    await mkdir(importedModulesDir, { recursive: true });
-    await Promise.all([
-      writeFile(
-        stepModulePath,
-        `export const step = "step";
-`,
-      ),
-      writeFile(
-        bootstrapModulePath,
-        `export const bootstrap = "bootstrap";
-`,
-      ),
-      writeFile(
-        join(workflowBuildDir, "steps.mjs"),
-        [
-          'import "workflow/internal/builtins";',
-          'import "./imports/step-module.js";',
-          'import "./imports/bootstrap.mjs";',
-          `import ${JSON.stringify(packageDistStepModulePath)};`,
-          "export const __steps_registered = true;",
-          "",
-        ].join("\n"),
-      ),
-    ]);
+    workflowStepTargets.value = [
+      resolveWorkflowModulePath("workflow/internal/builtins"),
+      stepModulePath,
+      bootstrapModulePath,
+      packageDistStepModulePath,
+    ];
 
     try {
       const { createProductionApplicationNitro } =
@@ -1018,6 +937,7 @@ describe("application Nitro creation", () => {
         buildDir: nitroBuildDir,
       });
 
+      expect(createNitroMock.mock.calls[0]?.[0].noExternals).toEqual(workflowStepTargets.value);
       const rollupBeforeHooks = nitroStub.hookHandlers.get("rollup:before") ?? [];
       const config = {
         plugins: [],
@@ -1039,7 +959,7 @@ describe("application Nitro creation", () => {
       const stepModuleSideEffectsPlugin = (
         config.plugins as Array<{
           name?: string;
-          resolveId?: (id: string, importer?: string) => Promise<unknown>;
+          resolveId?: (id: string, importer?: string) => unknown;
         }>
       ).find((plugin) => plugin.name === "eve:workflow-step-module-side-effects");
       if (stepModuleSideEffectsPlugin?.resolveId === undefined) {
@@ -1069,39 +989,39 @@ describe("application Nitro creation", () => {
         code: "transformed-step-module",
         map: null,
       });
-      await expect(
+      expect(
         stepModuleSideEffectsPlugin.resolveId(
           "./imports/step-module.js",
           join(workflowBuildDir, "steps.mjs"),
         ),
-      ).resolves.toEqual({
+      ).toEqual({
         id: stepModulePath,
         moduleSideEffects: "no-treeshake",
       });
-      await expect(
+      expect(
         stepModuleSideEffectsPlugin.resolveId(
           "./imports/bootstrap.mjs",
           join(workflowBuildDir, "steps.mjs"),
         ),
-      ).resolves.toEqual({
+      ).toEqual({
         id: bootstrapModulePath,
         moduleSideEffects: "no-treeshake",
       });
-      await expect(
+      expect(
         stepModuleSideEffectsPlugin.resolveId(
           "workflow/internal/builtins",
           join(workflowBuildDir, "steps.mjs"),
         ),
-      ).resolves.toEqual({
+      ).toEqual({
         id: resolveWorkflowModulePath("workflow/internal/builtins"),
         moduleSideEffects: "no-treeshake",
       });
-      await expect(
+      expect(
         stepModuleSideEffectsPlugin.resolveId(
           "/tmp/not-imported.js",
           join(workflowBuildDir, "steps.mjs"),
         ),
-      ).resolves.toBeNull();
+      ).toBeNull();
       expect(
         await stepTransformPlugin.transform("other source", "/tmp/not-imported.js"),
       ).toBeNull();

@@ -51,10 +51,8 @@ export function isVercelBuildEnvironment(): boolean {
  *
  * Each application root receives a unique hash-keyed subdirectory so parallel
  * builds targeting different app roots never collide. The key is derived from
- * `appRoot` alone — version-keyed dirs are intentionally avoided so every code
- * path that resolves a cache directory converges on the same location and
- * `prepareEveVersionedCacheDirectory` remains the single source of truth for
- * version-based invalidation.
+ * `appRoot` alone, so every code path that resolves a cache directory
+ * converges on the same location.
  */
 export function resolveWorkflowBuildDirectory(appRoot: string): string {
   const workflowCacheRoot = join(resolvePackageRoot(), ".eve", "workflow-cache");

@@ -9,10 +9,6 @@ import {
   resolvePackageSourceFilePath,
 } from "#internal/application/package.js";
 import {
-  prepareEveVersionedCacheDirectory,
-  writeEveVersionedCacheMetadata,
-} from "#internal/application/cache-metadata.js";
-import {
   createApplicationBuildWorkspace,
   removeApplicationBuildWorkspace,
   type ApplicationBuildWorkspace,
@@ -215,16 +211,10 @@ async function buildNitroOutput(
 ): Promise<string> {
   const outputDirectory = trimTrailingSlash(nitro.options.output.dir);
 
-  await measureBuildPhase(profiler, `${phasePrefix}.cache.prepare`, () =>
-    prepareEveVersionedCacheDirectory(outputDirectory),
-  );
   await measureBuildPhase(profiler, `${phasePrefix}.prepare`, () => prepare(nitro));
   await measureBuildPhase(profiler, `${phasePrefix}.public-assets`, () => copyPublicAssets(nitro));
   await measureBuildPhase(profiler, `${phasePrefix}.prerender`, () => prerender(nitro));
   await measureBuildPhase(profiler, `${phasePrefix}.bundle`, () => buildNitro(nitro));
-  await measureBuildPhase(profiler, `${phasePrefix}.cache.write`, () =>
-    writeEveVersionedCacheMetadata(outputDirectory),
-  );
 
   return outputDirectory;
 }

@@ -28,7 +28,6 @@ export interface WorkflowBundleBuilderOptions {
   compiledArtifactsBootstrapPath: string;
   outDir: string;
   rootDir: string;
-  watch: boolean;
   /** Test-harness-only: also scans `src/internal/testing/`. */
   includeTestFixtures?: boolean;
 }
@@ -71,7 +70,6 @@ export interface WorkflowBundleBuilderConfig {
   readonly dirs: readonly string[];
   readonly externalPackages: readonly string[];
   readonly projectRoot: string;
-  readonly watch: boolean;
   readonly workingDir: string;
 }
 
@@ -82,7 +80,6 @@ export interface WorkflowBundleDiscoveredEntries {
 }
 
 export interface WorkflowBundleCreateWorkflowsBundleOptions {
-  readonly additionalOutputs?: readonly WorkflowBundleOutput[];
   readonly appWorkflowFiles: readonly string[];
   readonly frameworkSerdeFiles: readonly string[];
   readonly frameworkWorkflowFiles: readonly string[];
@@ -93,11 +90,6 @@ export interface WorkflowBundleCreateWorkflowsBundleOptions {
 
 export interface WorkflowBundleCreateWorkflowsBundleResult {
   readonly manifest: WorkflowManifest;
-}
-
-export interface WorkflowBundleOutput {
-  readonly outfile: string;
-  readonly stepRegistrationsPath: string;
 }
 
 interface WorkflowGraph {

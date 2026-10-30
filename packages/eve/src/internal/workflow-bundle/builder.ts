@@ -6,11 +6,6 @@ import {
   resolvePackageSourceDirectoryPath,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
-import {
-  prepareEveVersionedCacheDirectory,
-  writeEveVersionedCacheMetadata,
-} from "#internal/application/cache-metadata.js";
-import { runQueuedWorkflowBuild } from "#internal/workflow-bundle/build-queue.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import { findAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
@@ -57,6 +52,14 @@ import {
 } from "#internal/workflow-bundle/workflow-builders.js";
 import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
 
+/** The workflow directory one build wrote, as the host build consumes it. */
+export interface WorkflowArtifacts {
+  /** Absolute paths of the modules the step entry imports; the host bundles them in step mode. */
+  readonly stepTargets: readonly string[];
+  readonly stepsPath: string;
+  readonly workflowsPath: string;
+}
+
 export class WorkflowBundleBuilder {
   readonly #authoredWorkflowModules: AuthoredWorkflowModules;
   readonly #compiledArtifactsBootstrapPath: string;
@@ -81,7 +84,6 @@ export class WorkflowBundleBuilder {
       externalPackages: [...WORKFLOW_STEP_EXTERNAL_PACKAGES, ...WORKFLOW_BUILDER_DEFERRED_PACKAGES],
       // Keep package-version workflow ids stable across bundling targets.
       projectRoot: options.appRoot,
-      watch: options.watch,
       workingDir: options.rootDir,
     };
 
@@ -94,18 +96,7 @@ export class WorkflowBundleBuilder {
     this.#queueNamespace = deriveEveWorkflowQueueNamespace(options.agentName);
   }
 
-  async build(
-    options: { nitroStepOutfile?: string; nitroWorkflowOutfile?: string } = {},
-  ): Promise<void> {
-    await runQueuedWorkflowBuild(this.#outDir, async () => this.#performBuild(options));
-  }
-
-  async #performBuild(options: {
-    nitroStepOutfile?: string;
-    nitroWorkflowOutfile?: string;
-  }): Promise<void> {
-    await prepareEveVersionedCacheDirectory(this.#outDir);
-
+  async build(): Promise<WorkflowArtifacts> {
     const frameworkInputFiles = await this.#getBuildInputFiles();
 
     if (frameworkInputFiles.length === 0) {
@@ -119,47 +110,27 @@ export class WorkflowBundleBuilder {
     await mkdir(this.#outDir, { recursive: true });
     const frameworkEntries = await this.discoverEntries(frameworkInputFiles);
     const appEntries = this.#authoredWorkflowModules;
-    const stepEntries = mergeStepEntries(frameworkEntries, appEntries);
-
-    const stepsOutfile = join(this.#outDir, "steps.mjs");
-    const workflowsOutfile = join(this.#outDir, "workflows.mjs");
-    const nitroStepOutfile = options.nitroStepOutfile;
-    const nitroWorkflowOutfile = options.nitroWorkflowOutfile;
-    const writeStepEntry = (outfile: string, precomputedManifest?: WorkflowManifest) =>
-      writeNitroStepEntrypoint({
-        builtinsPath: resolveWorkflowModulePath("workflow/internal/builtins"),
-        discoveredEntries: stepEntries,
-        outfile,
-        precomputedManifest,
-        preferAbsoluteFileImports: true,
-        projectRoot: this.config.projectRoot ?? this.config.workingDir,
-        sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
-        workingDir: this.config.workingDir,
-      });
-    const stepsManifest = await writeStepEntry(stepsOutfile);
-    if (nitroStepOutfile !== undefined && nitroStepOutfile !== stepsOutfile) {
-      await writeStepEntry(nitroStepOutfile, stepsManifest);
-    }
+    const stepsPath = join(this.#outDir, "steps.mjs");
+    const workflowsPath = join(this.#outDir, "workflows.mjs");
+    const { manifest: stepsManifest, stepTargets } = await writeNitroStepEntrypoint({
+      builtinsPath: resolveWorkflowModulePath("workflow/internal/builtins"),
+      discoveredEntries: mergeStepEntries(frameworkEntries, appEntries),
+      outfile: stepsPath,
+      projectRoot: this.transformProjectRoot,
+      sideEffectFiles: [this.#compiledArtifactsBootstrapPath],
+      workingDir: this.config.workingDir,
+    });
     const { manifest: workflowsManifest } = await this.createWorkflowsBundle({
-      additionalOutputs:
-        nitroWorkflowOutfile === undefined || nitroWorkflowOutfile === workflowsOutfile
-          ? []
-          : [
-              {
-                outfile: nitroWorkflowOutfile,
-                stepRegistrationsPath: nitroStepOutfile ?? stepsOutfile,
-              },
-            ],
       appWorkflowFiles: appEntries.workflowModules,
       frameworkSerdeFiles: frameworkEntries.discoveredSerdeFiles,
       frameworkWorkflowFiles: frameworkEntries.discoveredWorkflows,
-      outfile: workflowsOutfile,
-      stepRegistrationsPath: stepsOutfile,
+      outfile: workflowsPath,
+      stepRegistrationsPath: stepsPath,
       tsconfigPath,
     });
 
     await this.createManifest({
-      workflowBundlePath: join(this.#outDir, "workflows.mjs"),
+      workflowBundlePath: workflowsPath,
       manifestDir: this.#outDir,
       manifest: {
         steps: {
@@ -176,7 +147,8 @@ export class WorkflowBundleBuilder {
         },
       },
     });
-    await writeEveVersionedCacheMetadata(this.#outDir);
+
+    return { stepTargets, stepsPath, workflowsPath };
   }
 
   protected get transformProjectRoot(): string {
@@ -241,7 +213,6 @@ export class WorkflowBundleBuilder {
   }
 
   protected async createWorkflowsBundle({
-    additionalOutputs = [],
     appWorkflowFiles,
     frameworkSerdeFiles,
     frameworkWorkflowFiles,
@@ -272,16 +243,12 @@ export class WorkflowBundleBuilder {
     for (const chunk of chunks) mergeWorkflowManifest(manifest, chunk.manifest);
     const workflowCode = composeWorkflowDriverCode(chunks.map((chunk) => chunk.code));
 
-    await Promise.all(
-      [{ outfile, stepRegistrationsPath }, ...additionalOutputs].map((output) =>
-        bundleFinalWorkflowOutput({
-          code: workflowCode,
-          outfile: output.outfile,
-          queueNamespace: this.#queueNamespace,
-          stepRegistrationsPath: output.stepRegistrationsPath,
-        }),
-      ),
-    );
+    await bundleFinalWorkflowOutput({
+      code: workflowCode,
+      outfile,
+      queueNamespace: this.#queueNamespace,
+      stepRegistrationsPath,
+    });
 
     return { manifest };
   }

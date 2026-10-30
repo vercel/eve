@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,10 +19,6 @@ import {
   resolveWorkflowModulePath,
   WORKFLOW_MODULE_SPECIFIERS,
 } from "#internal/application/package.js";
-import {
-  prepareEveVersionedCacheDirectory,
-  writeEveVersionedCacheMetadata,
-} from "#internal/application/cache-metadata.js";
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxProviderPrunePlugin } from "#internal/nitro/host/compiled-sandbox-provider-prune-plugin.js";
 import { createDevelopmentRuntimePrunePlugin } from "#internal/nitro/host/development-runtime-prune-plugin.js";
@@ -54,6 +49,10 @@ import type {
   PreparedDevelopmentApplicationHost,
 } from "#internal/nitro/host/types.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
+import {
+  type WorkflowArtifacts,
+  WorkflowBundleBuilder,
+} from "#internal/workflow-bundle/builder.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 
@@ -62,7 +61,6 @@ const INSTRUMENTATION_ALIAS_PATHS = {
   "eve/instrumentation/otel": "src/public/instrumentation/otel.ts",
 } as const;
 const WORKFLOW_TRANSFORM_PATCHED = Symbol("eve.workflow-transform-patched");
-const WORKFLOW_CACHE_PATH_FRAGMENT = "/.eve/workflow-cache/";
 
 // Nitro picks the Vite builder when the app root has a `vite.config` that calls
 // `nitro(`, which is the case when a TanStack Start host shares its root with
@@ -196,48 +194,25 @@ function stripPathQueryAndHash(path: string): string {
   return cutoff === -1 ? path : path.slice(0, cutoff);
 }
 
-function stripFileSystemPrefix(path: string): string {
-  return path.startsWith("/@fs/") ? path.slice("/@fs".length) : path;
-}
-
 function resolveNitroModuleComparisonPath(rootDir: string, path: string): string {
   if (path.startsWith("file://")) {
-    return normalizePath(stripFileSystemPrefix(stripPathQueryAndHash(fileURLToPath(path))));
+    return normalizePath(stripPathQueryAndHash(fileURLToPath(path)));
   }
 
   if (isAbsolute(path)) {
-    return normalizePath(stripFileSystemPrefix(stripPathQueryAndHash(path)));
+    return normalizePath(stripPathQueryAndHash(path));
   }
 
-  return normalizePath(stripFileSystemPrefix(stripPathQueryAndHash(resolve(rootDir, path))));
+  return normalizePath(stripPathQueryAndHash(resolve(rootDir, path)));
 }
 
 function isWorkflowBundlePath(path: string, normalizedWorkflowBuildDir: string): boolean {
-  const normalizedPath = normalizePath(path);
-
-  return (
-    normalizedPath.startsWith(normalizedWorkflowBuildDir) ||
-    normalizedPath.includes(WORKFLOW_CACHE_PATH_FRAGMENT)
-  );
+  return normalizePath(path).startsWith(normalizedWorkflowBuildDir);
 }
 
 function normalizeStepTransformComparisonPath(path: string): string {
   const normalizedPath = normalizePath(path);
   return process.platform === "win32" ? normalizedPath.toLowerCase() : normalizedPath;
-}
-
-function parseImportedModuleSpecifiers(source: string): string[] {
-  const importSpecifierPattern = /^\s*import\s+(?:.+?\s+from\s+)?["']([^"']+)["'];?\s*$/gm;
-  const importedSpecifiers: string[] = [];
-
-  for (const match of source.matchAll(importSpecifierPattern)) {
-    const importedSpecifier = match[1];
-    if (importedSpecifier !== undefined) {
-      importedSpecifiers.push(importedSpecifier);
-    }
-  }
-
-  return importedSpecifiers;
 }
 
 function resolveNitroImportPath(
@@ -263,50 +238,6 @@ function resolveNitroImportPath(
   }
 
   return null;
-}
-
-async function collectNitroStepTransformTargets(
-  stepEntrypointPath: string,
-  rootDir: string,
-): Promise<Set<string>> {
-  const stepEntrypointSource = await readFile(stepEntrypointPath, "utf8");
-  const stepTransformTargets = new Set<string>();
-
-  for (const importSpecifier of parseImportedModuleSpecifiers(stepEntrypointSource)) {
-    const resolvedImportPath = resolveNitroImportPath(rootDir, importSpecifier, stepEntrypointPath);
-
-    if (resolvedImportPath !== null) {
-      stepTransformTargets.add(normalizeStepTransformComparisonPath(resolvedImportPath));
-    }
-  }
-
-  return stepTransformTargets;
-}
-
-async function addNitroStepNoExternals(nitro: Nitro, stepEntrypointPath: string): Promise<void> {
-  if (nitro.options.noExternals === true) {
-    return;
-  }
-
-  let stepTransformTargets: Set<string>;
-
-  try {
-    stepTransformTargets = await collectNitroStepTransformTargets(
-      stepEntrypointPath,
-      nitro.options.rootDir,
-    );
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return;
-    }
-
-    throw error;
-  }
-  const existingNoExternals = Array.isArray(nitro.options.noExternals)
-    ? [...nitro.options.noExternals]
-    : [];
-
-  nitro.options.noExternals = [...new Set([...existingNoExternals, ...stepTransformTargets])];
 }
 
 function createRelativeTransformFilename(workingDir: string, path: string): string {
@@ -367,10 +298,10 @@ function createPackageRelativeTransformFilename(path: string): string | undefine
 }
 
 function addWorkflowModuleSideEffectsPlugin(nitro: Nitro, workflowBuildDir: string): void {
-  const workflowBundleDirectories = [
+  const workflowBundleDirectory = resolveNitroModuleComparisonPath(
+    nitro.options.rootDir,
     workflowBuildDir,
-    join(nitro.options.buildDir, "workflow"),
-  ].map((directoryPath) => resolveNitroModuleComparisonPath(nitro.options.rootDir, directoryPath));
+  );
 
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
@@ -384,11 +315,7 @@ function addWorkflowModuleSideEffectsPlugin(nitro: Nitro, workflowBuildDir: stri
           resolveNitroImportPath(nitro.options.rootDir, source, importer) ??
           resolveNitroModuleComparisonPath(nitro.options.rootDir, source);
 
-        if (
-          !workflowBundleDirectories.some((workflowBundleDirectory) =>
-            isWorkflowBundlePath(resolvedSource, workflowBundleDirectory),
-          )
-        ) {
+        if (!isWorkflowBundlePath(resolvedSource, workflowBundleDirectory)) {
           return null;
         }
 
@@ -403,7 +330,7 @@ function addWorkflowModuleSideEffectsPlugin(nitro: Nitro, workflowBuildDir: stri
 
 function addNitroStepModuleSideEffectsPlugin(
   nitro: Nitro,
-  getStepTransformTargets: () => Promise<Set<string>>,
+  stepTransformTargets: ReadonlySet<string>,
 ): void {
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
@@ -412,14 +339,13 @@ function addNitroStepModuleSideEffectsPlugin(
 
     config.plugins.unshift({
       name: "eve:workflow-step-module-side-effects",
-      async resolveId(source: string, importer?: string) {
+      resolveId(source: string, importer?: string) {
         const resolvedSource = resolveNitroImportPath(nitro.options.rootDir, source, importer);
 
         if (resolvedSource === null) {
           return null;
         }
 
-        const stepTransformTargets = await getStepTransformTargets();
         if (!stepTransformTargets.has(normalizeStepTransformComparisonPath(resolvedSource))) {
           return null;
         }
@@ -440,7 +366,7 @@ function addNitroStepModuleSideEffectsPlugin(
  */
 function addNitroStepTransformPlugin(
   nitro: Nitro,
-  getStepTransformTargets: () => Promise<Set<string>>,
+  stepTransformTargets: ReadonlySet<string>,
 ): void {
   nitro.hooks.hook("rollup:before", (_nitro, config) => {
     if (!Array.isArray(config.plugins)) {
@@ -449,8 +375,6 @@ function addNitroStepTransformPlugin(
 
     config.plugins.unshift({
       async transform(code: string, id: string) {
-        const stepTransformTargets = await getStepTransformTargets();
-
         const resolvedId = resolveNitroModuleComparisonPath(nitro.options.rootDir, id);
 
         if (!stepTransformTargets.has(normalizeStepTransformComparisonPath(resolvedId))) {
@@ -695,42 +619,26 @@ function configureSharedApplicationNitro(
   }
 }
 
-function configureNitroStepPlugins(nitro: Nitro, stepEntrypointPath: string): Array<() => void> {
-  let targets: Promise<Set<string>> | undefined;
-  const getTargets = () =>
-    (targets ??= collectNitroStepTransformTargets(stepEntrypointPath, nitro.options.rootDir));
-  const invalidate = () => {
-    targets = undefined;
-  };
-  nitro.hooks.hook("build:before", invalidate);
-  addNitroStepModuleSideEffectsPlugin(nitro, getTargets);
-  addNitroStepTransformPlugin(nitro, getTargets);
-  return [invalidate];
+function configureNitroStepPlugins(nitro: Nitro, workflowArtifacts: WorkflowArtifacts): void {
+  const stepTransformTargets = new Set(
+    workflowArtifacts.stepTargets.map(normalizeStepTransformComparisonPath),
+  );
+  addNitroStepModuleSideEffectsPlugin(nitro, stepTransformTargets);
+  addNitroStepTransformPlugin(nitro, stepTransformTargets);
 }
 
-function externalizeDevelopmentWorkflowBundle(
-  nitro: Nitro,
+async function buildWorkflowArtifacts(
   preparedHost: PreparedApplicationHost,
-): void {
-  const externalWorkflowModules = new Set([
-    normalizePath(join(preparedHost.workflowBuildDir, "workflows.mjs")),
-  ]);
-
-  nitro.hooks.hook("rollup:before", (_nitro, config) => {
-    const existingExternal = config.external;
-    config.external = (id: string, ...rest: unknown[]) => {
-      if (externalWorkflowModules.has(normalizePath(id))) {
-        return true;
-      }
-      if (typeof existingExternal === "function") {
-        return (existingExternal as (id: string, ...rest: unknown[]) => boolean | null | undefined)(
-          id,
-          ...rest,
-        );
-      }
-      return undefined;
-    };
+): Promise<WorkflowArtifacts> {
+  const builder = new WorkflowBundleBuilder({
+    authoredWorkflowModules: preparedHost.compiledArtifacts.authoredWorkflowModules,
+    agentName: preparedHost.compileResult.manifest.config.name,
+    appRoot: preparedHost.appRoot,
+    compiledArtifactsBootstrapPath: preparedHost.compiledArtifacts.bootstrapPath,
+    outDir: preparedHost.workflowBuildDir,
+    rootDir: resolvePackageRoot(),
   });
+  return await builder.build();
 }
 
 /**
@@ -756,7 +664,7 @@ export async function createDevelopmentApplicationNitro(
     );
   }
 
-  await prepareEveVersionedCacheDirectory(nitroBuildDir);
+  const workflowArtifacts = await buildWorkflowArtifacts(preparedHost);
   const nitro = await createNitro(
     {
       _cli: { command: "dev" },
@@ -765,6 +673,7 @@ export async function createDevelopmentApplicationNitro(
       dev: true,
       features: { websocket: true },
       logLevel: 1,
+      noExternals: [...workflowArtifacts.stepTargets],
       output: { dir: preparedHost.workspace.nitroOutputDir },
       plugins,
       publicAssets: [],
@@ -783,19 +692,10 @@ export async function createDevelopmentApplicationNitro(
     },
     { watch: true },
   );
-  await writeEveVersionedCacheMetadata(nitroBuildDir);
 
-  const stepEntrypointPath = join(nitro.options.buildDir, "workflow", "steps.mjs");
   configureSharedApplicationNitro(nitro, preparedHost);
-  const clearStepTransformCaches = configureNitroStepPlugins(nitro, stepEntrypointPath);
-  nitro.hooks.hook("dev:reload", () => {
-    for (const clearCache of clearStepTransformCaches) {
-      clearCache();
-    }
-  });
-  externalizeDevelopmentWorkflowBundle(nitro, preparedHost);
-  await configureDevelopmentNitroRoutes(nitro, preparedHost);
-  await addNitroStepNoExternals(nitro, stepEntrypointPath);
+  configureNitroStepPlugins(nitro, workflowArtifacts);
+  await configureDevelopmentNitroRoutes(nitro, preparedHost, workflowArtifacts);
 
   return nitro;
 }
@@ -832,7 +732,7 @@ export async function createProductionApplicationNitro(
     resolvePackageSourceFilePath("src/internal/nitro/host/sandbox-shutdown-plugin.ts"),
   );
 
-  await prepareEveVersionedCacheDirectory(options.buildDir);
+  const workflowArtifacts = await buildWorkflowArtifacts(preparedHost);
   // Production reads skill files through Nitro server assets; dev reads the
   // compile directory directly (see `createCompiledSkillFileSource`).
   const { manifest, paths } = preparedHost.compileResult;
@@ -855,6 +755,7 @@ export async function createProductionApplicationNitro(
     },
     // Gzipping every output file only annotates the build log's file tree.
     logging: { compressedSizes: false },
+    noExternals: [...workflowArtifacts.stepTargets],
     output: { dir: options.outputDir },
     preset,
     plugins: nitroPlugins,
@@ -881,7 +782,6 @@ export async function createProductionApplicationNitro(
       workspaceMember: options.workspaceMember,
     }),
   });
-  await writeEveVersionedCacheMetadata(options.buildDir);
   // Nitro always appends a `server` asset for `<rootDir>/assets`. eve reads
   // only its own bases, and reading storage would otherwise start bundling
   // an app's `assets/` directory.
@@ -890,7 +790,7 @@ export async function createProductionApplicationNitro(
   );
 
   configureSharedApplicationNitro(nitro, preparedHost);
-  configureNitroStepPlugins(nitro, join(preparedHost.workflowBuildDir, "steps.mjs"));
+  configureNitroStepPlugins(nitro, workflowArtifacts);
 
   if (preparedHost.scheduleRegistrations.length > 0) {
     applyEveCronHandlerRoute(nitro);
@@ -904,7 +804,6 @@ export async function createProductionApplicationNitro(
     });
   }
 
-  await configureProductionNitroRoutes(nitro, preparedHost);
-  await addNitroStepNoExternals(nitro, join(preparedHost.workflowBuildDir, "steps.mjs"));
+  await configureProductionNitroRoutes(nitro, preparedHost, workflowArtifacts);
   return nitro;
 }

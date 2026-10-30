@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
 import type { Nitro } from "nitro/types";
@@ -8,11 +8,10 @@ import {
 } from "#internal/application/import-specifier.js";
 import { isVercelBuildEnvironment } from "#internal/application/paths.js";
 import {
-  resolvePackageRoot,
   resolvePackageSourceFilePath,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
-import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
+import type { WorkflowArtifacts } from "#internal/workflow-bundle/builder.js";
 import {
   createDevelopmentNitroArtifactsConfig,
   createProductionNitroArtifactsConfig,
@@ -33,10 +32,6 @@ import {
   EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
   hasVercelScheduleCollections,
 } from "#internal/schedules/consumer-route.js";
-
-function resolveNitroWorkflowBuildDirectory(nitro: Nitro): string {
-  return join(nitro.options.buildDir, "workflow");
-}
 
 function createRelativeImportSpecifier(fromDirectoryPath: string, targetPath: string): string {
   const relativePath = relative(fromDirectoryPath, targetPath).replaceAll("\\", "/");
@@ -87,11 +82,8 @@ async function addWorkflowFileHandler(
     workflowWorldPluginPath?: string;
   },
 ): Promise<void> {
-  const handlerPath = join(
-    resolveNitroWorkflowBuildDirectory(nitro),
-    `${input.bundleName}-handler.mjs`,
-  );
-  const handlerDirectoryPath = dirname(handlerPath);
+  const handlerDirectoryPath = dirname(input.bundlePath);
+  const handlerPath = join(handlerDirectoryPath, `${input.bundleName}-handler.mjs`);
   const bundlePath = createRelativeImportSpecifier(handlerDirectoryPath, input.bundlePath);
   const directHandlers = input.directHandlers ?? [];
   const workflowWorldPluginImportSpecifier =
@@ -107,7 +99,6 @@ async function addWorkflowFileHandler(
     };
   });
 
-  await mkdir(handlerDirectoryPath, { recursive: true });
   await writeFile(
     handlerPath,
     buildWorkflowFileHandlerSource({
@@ -235,23 +226,6 @@ function addHostVirtualHandler(
   ].join("\n");
 }
 
-async function registerWorkflowArtifactBuildHook(
-  nitro: Nitro,
-  syncWorkflowArtifacts: () => Promise<void>,
-): Promise<void> {
-  let isInitialBuild = true;
-
-  await syncWorkflowArtifacts();
-  nitro.hooks.hook("build:before", async () => {
-    if (isInitialBuild) {
-      isInitialBuild = false;
-      return;
-    }
-
-    await syncWorkflowArtifacts();
-  });
-}
-
 function registerApplicationRoutes(
   nitro: Nitro,
   artifactsConfig: NitroArtifactsConfig,
@@ -357,26 +331,8 @@ async function registerWorkflowRoute(
 export async function configureDevelopmentNitroRoutes(
   nitro: Nitro,
   preparedHost: PreparedApplicationHost,
+  workflowArtifacts: WorkflowArtifacts,
 ): Promise<void> {
-  const workflowBuildDirectory = resolveNitroWorkflowBuildDirectory(nitro);
-  const builder = new WorkflowBundleBuilder({
-    authoredWorkflowModules: preparedHost.compiledArtifacts.authoredWorkflowModules,
-    agentName: preparedHost.compileResult.manifest.config.name,
-    appRoot: preparedHost.appRoot,
-    compiledArtifactsBootstrapPath: preparedHost.compiledArtifacts.bootstrapPath,
-    outDir: preparedHost.workflowBuildDir,
-    rootDir: resolvePackageRoot(),
-    watch: true,
-  });
-  const syncWorkflowArtifacts = async () => {
-    await builder.build({
-      nitroStepOutfile: join(workflowBuildDirectory, "steps.mjs"),
-      nitroWorkflowOutfile: join(workflowBuildDirectory, "workflows.mjs"),
-    });
-  };
-
-  await registerWorkflowArtifactBuildHook(nitro, syncWorkflowArtifacts);
-
   const artifactsConfig = createDevelopmentNitroArtifactsConfig({
     appRoot: preparedHost.appRoot,
     configuredWorld: preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
@@ -384,7 +340,7 @@ export async function configureDevelopmentNitroRoutes(
   const routeRegistry = createApplicationRouteRegistry(preparedHost, { development: true });
   registerApplicationRoutes(nitro, artifactsConfig, routeRegistry);
 
-  const workflowBundlePath = join(workflowBuildDirectory, "workflows.mjs");
+  const workflowBundlePath = workflowArtifacts.workflowsPath;
   const directHandlers: WorkflowDirectHandlerEntry[] = [];
   if (
     !usesParentDevelopmentWorkflowWorld(
@@ -403,7 +359,6 @@ export async function configureDevelopmentNitroRoutes(
       workflowRoute,
     );
   }
-  nitro.routing.sync();
 }
 
 /**
@@ -413,23 +368,8 @@ export async function configureDevelopmentNitroRoutes(
 export async function configureProductionNitroRoutes(
   nitro: Nitro,
   preparedHost: PreparedApplicationHost,
+  workflowArtifacts: WorkflowArtifacts,
 ): Promise<void> {
-  const builder = new WorkflowBundleBuilder({
-    authoredWorkflowModules: preparedHost.compiledArtifacts.authoredWorkflowModules,
-    agentName: preparedHost.compileResult.manifest.config.name,
-    appRoot: preparedHost.appRoot,
-    compiledArtifactsBootstrapPath: preparedHost.compiledArtifacts.bootstrapPath,
-    outDir: preparedHost.workflowBuildDir,
-    rootDir: resolvePackageRoot(),
-    watch: false,
-  });
-  const syncWorkflowArtifacts = async () => {
-    await builder.build({
-      nitroStepOutfile: join(resolveNitroWorkflowBuildDirectory(nitro), "steps.mjs"),
-    });
-  };
-  await registerWorkflowArtifactBuildHook(nitro, syncWorkflowArtifacts);
-
   const routeRegistry = createApplicationRouteRegistry(preparedHost);
   const artifactsConfig = createProductionNitroArtifactsConfig(preparedHost.appRoot);
   registerApplicationRoutes(nitro, artifactsConfig, routeRegistry);
@@ -448,7 +388,7 @@ export async function configureProductionNitroRoutes(
     });
   }
 
-  const workflowBundlePath = join(preparedHost.workflowBuildDir, "workflows.mjs");
+  const workflowBundlePath = workflowArtifacts.workflowsPath;
   const hasConfiguredWorkflowWorld =
     preparedHost.compileResult.manifest.config.experimental?.workflow?.world !== undefined;
   const directHandlers =
@@ -465,6 +405,4 @@ export async function configureProductionNitroRoutes(
       workflowRoute,
     );
   }
-
-  nitro.routing.sync();
 }

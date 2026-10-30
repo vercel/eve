@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,27 +7,6 @@ import { describe, expect, it } from "vitest";
 import { writeNitroStepEntrypoint } from "#internal/workflow-bundle/nitro-step-entry.js";
 
 describe("writeNitroStepEntrypoint", () => {
-  it("reuses discovered metadata without rereading step sources for a second output", async () => {
-    const root = await mkdtemp(join(tmpdir(), "eve-step-metadata-"));
-    try {
-      const manifest = { steps: { "step.ts": { work: { stepId: "step//work" } } } };
-      const outfile = join(root, "second", "steps.mjs");
-      const result = await writeNitroStepEntrypoint({
-        discoveredEntries: { discoveredSerdeFiles: [], discoveredSteps: [join(root, "step.ts")] },
-        precomputedManifest: manifest,
-        outfile,
-        preferAbsoluteFileImports: true,
-        projectRoot: root,
-        sideEffectFiles: [],
-        workingDir: root,
-      });
-      expect(result).toBe(manifest);
-      expect(await readFile(outfile, "utf8")).toContain("step.ts");
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
   it("serializes Windows absolute imports as file URLs", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-nitro-step-entry-windows-"));
     const outfile = join(tempRoot, "build", "steps.mjs");
@@ -40,7 +19,6 @@ describe("writeNitroStepEntrypoint", () => {
           discoveredSteps: [],
         },
         outfile,
-        preferAbsoluteFileImports: true,
         projectRoot: "G:\\projects\\eve",
         sideEffectFiles: [],
         workingDir: "G:\\projects\\eve",
@@ -54,56 +32,6 @@ describe("writeNitroStepEntrypoint", () => {
           "",
         ].join("\n"),
       );
-    } finally {
-      await rm(tempRoot, { force: true, recursive: true });
-    }
-  });
-
-  it("does not rewrite the Nitro step entry when the content is unchanged", async () => {
-    const tempRoot = await mkdtemp(join(tmpdir(), "eve-nitro-step-entry-"));
-    const stepsDirectory = join(tempRoot, "steps");
-    const stepFilePath = join(stepsDirectory, "ping.ts");
-    const outfile = join(tempRoot, "build", "steps.mjs");
-
-    try {
-      await mkdir(stepsDirectory, { recursive: true });
-      await writeFile(
-        stepFilePath,
-        ["export async function ping() {", '  "use step";', '  return "pong";', "}", ""].join("\n"),
-      );
-
-      await writeNitroStepEntrypoint({
-        discoveredEntries: {
-          discoveredSerdeFiles: [],
-          discoveredSteps: [stepFilePath],
-        },
-        outfile,
-        projectRoot: tempRoot,
-        sideEffectFiles: [],
-        workingDir: tempRoot,
-      });
-
-      const firstSource = await readFile(outfile, "utf8");
-      const firstWrite = await stat(outfile);
-
-      await new Promise((resolve) => setTimeout(resolve, 25));
-
-      await writeNitroStepEntrypoint({
-        discoveredEntries: {
-          discoveredSerdeFiles: [],
-          discoveredSteps: [stepFilePath],
-        },
-        outfile,
-        projectRoot: tempRoot,
-        sideEffectFiles: [],
-        workingDir: tempRoot,
-      });
-
-      const secondSource = await readFile(outfile, "utf8");
-      const secondWrite = await stat(outfile);
-
-      expect(secondSource).toBe(firstSource);
-      expect(secondWrite.mtimeMs).toBe(firstWrite.mtimeMs);
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }
