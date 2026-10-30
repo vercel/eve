@@ -22,7 +22,7 @@ import type { NitroConfig } from "nitro/types";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
 
 /** Rolldown plugins as Nitro's config accepts them. */
-export type HostBuildPlugins = NonNullable<NonNullable<NitroConfig["rolldownConfig"]>["plugins"]>;
+type HostBuildPlugins = NonNullable<NonNullable<NitroConfig["rolldownConfig"]>["plugins"]>;
 
 export interface HostPluginsInput {
   readonly appRoot: string;

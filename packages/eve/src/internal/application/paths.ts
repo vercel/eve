@@ -38,7 +38,7 @@ function getWorkflowBuildCacheKey(appRoot: string): string {
  * deployment. Vercel sets `VERCEL` in both build and runtime environments, so
  * this is the canonical signal for "managed by Vercel" versus self-hosted.
  */
-export function isVercelBuildEnvironment(): boolean {
+function isVercelBuildEnvironment(): boolean {
   return Boolean(process.env.VERCEL);
 }
 

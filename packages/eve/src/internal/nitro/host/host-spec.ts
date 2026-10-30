@@ -66,7 +66,7 @@ export interface HostSpec {
   readonly locations: HostLocations;
 }
 
-export interface HostLocations {
+interface HostLocations {
   readonly appRoot: string;
   /** Package root authored asset imports may not escape. */
   readonly authoredPackageRoot: string;

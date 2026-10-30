@@ -33,7 +33,7 @@ import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace
 /** The dedicated Vercel function a route needs instead of the shared server function. */
 export type HostRouteVercelFunction = "schedule-queue" | "workflow-queue";
 
-export type HostRoute =
+type HostRoute =
   | {
       readonly kind: "channel";
       readonly method: ChannelRouteMethod;
