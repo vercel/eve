@@ -222,7 +222,7 @@ function StableLabel({ current, labels }: { current: string; labels: string[] })
 
 /**
  * vercel.com/sandbox's demo button, labeled with the action that starts the example, such as
- * "Trigger a PR", and turning into "Stop demo" while it plays.
+ * "Trigger a PR", and turning into "Cancel demo" while it plays.
  */
 export function DemoButton({
   action,
@@ -246,7 +246,10 @@ export function DemoButton({
       size="small"
       variant="tertiary"
     >
-      <StableLabel current={playing ? "Stop demo" : action} labels={[...actions, "Stop demo"]} />
+      <StableLabel
+        current={playing ? "Cancel demo" : action}
+        labels={[...actions, "Cancel demo"]}
+      />
     </Button>
   );
 }

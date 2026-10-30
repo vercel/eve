@@ -601,7 +601,7 @@ function Bubble({
 /**
  * An agent conversation, picked from Slack, Teams, and WhatsApp, each drawn in its
  * platform's way. It shows in full; its action, such as "Trigger a PR", replays it message by
- * message and "Stop demo" returns to the full conversation, as on vercel.com/sandbox.
+ * message and "Cancel demo" returns to the full conversation, as on vercel.com/sandbox.
  */
 export function SessionTimeline(): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null);
