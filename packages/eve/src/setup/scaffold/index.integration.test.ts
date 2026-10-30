@@ -1114,7 +1114,7 @@ describe("scaffoldExtensionProject", () => {
 
     const agentsMd = await readFile(join(projectRoot, "AGENTS.md"), "utf8");
     expect(agentsMd).toContain("eve extension");
-    expect(agentsMd).toContain("extensions.md");
+    expect(agentsMd).toContain("docs/extensions/index.md");
     expect(agentsMd).toContain("development dependency pinned exactly");
     expect(agentsMd).toContain("cannot declare");
   });
