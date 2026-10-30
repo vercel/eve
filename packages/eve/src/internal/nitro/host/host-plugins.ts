@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { posix, relative, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
@@ -87,46 +87,48 @@ function stripPathQueryAndHash(path: string): string {
   return cutoff === -1 ? path : path.slice(0, cutoff);
 }
 
-function resolveNitroModuleComparisonPath(rootDir: string, path: string): string {
-  if (path.startsWith("file://")) {
-    return normalizePath(stripPathQueryAndHash(fileURLToPath(path)));
-  }
-
-  if (isAbsolute(path)) {
-    return normalizePath(stripPathQueryAndHash(path));
-  }
-
-  return normalizePath(stripPathQueryAndHash(resolve(rootDir, path)));
-}
-
-function normalizeStepTransformComparisonPath(path: string): string {
-  const normalizedPath = normalizePath(path);
-  return process.platform === "win32" ? normalizedPath.toLowerCase() : normalizedPath;
-}
-
-function resolveNitroImportPath(
+/**
+ * Matches module specifiers and ids against `paths` as the platform's
+ * filesystem does: specifiers resolve against their importer, drive-less
+ * absolute paths take the current drive on Windows, separators are compared as
+ * `/`, and Windows compares case-insensitively. Returns the matched path with
+ * `/` separators, or null.
+ */
+export function createModulePathMatcher(
   rootDir: string,
-  importSpecifier: string,
-  importer?: string,
-): string | null {
-  if (WORKFLOW_MODULE_SPECIFIERS.includes(importSpecifier)) {
-    return resolveWorkflowModulePath(importSpecifier);
-  }
+  paths: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+): (specifier: string, importer?: string) => string | null {
+  const windows = platform === "win32";
+  const path = windows ? win32 : posix;
+  const toPath = (directory: string, specifier: string) =>
+    normalizePath(
+      path.resolve(
+        directory,
+        specifier.startsWith("file://")
+          ? fileURLToPath(specifier, { windows })
+          : stripPathQueryAndHash(specifier),
+      ),
+    );
+  const toKey = (resolved: string) => (windows ? resolved.toLowerCase() : resolved);
+  const keys = new Set(paths.map((target) => toKey(toPath(rootDir, target))));
 
-  if (
-    importSpecifier.startsWith(".") ||
-    importSpecifier.startsWith("/") ||
-    importSpecifier.startsWith("file://")
-  ) {
-    const importerDirectory =
-      importer === undefined
-        ? rootDir
-        : dirname(resolveNitroModuleComparisonPath(rootDir, importer));
-
-    return resolveNitroModuleComparisonPath(importerDirectory, importSpecifier);
-  }
-
-  return null;
+  return (specifier, importer) => {
+    let resolved: string;
+    if (WORKFLOW_MODULE_SPECIFIERS.includes(specifier)) {
+      resolved = toPath(rootDir, resolveWorkflowModulePath(specifier));
+    } else if (
+      specifier.startsWith(".") ||
+      specifier.startsWith("file://") ||
+      path.isAbsolute(specifier)
+    ) {
+      const directory = importer === undefined ? rootDir : path.dirname(toPath(rootDir, importer));
+      resolved = toPath(directory, specifier);
+    } else {
+      return null;
+    }
+    return keys.has(toKey(resolved)) ? resolved : null;
+  };
 }
 
 function createRelativeTransformFilename(workingDir: string, path: string): string {
@@ -186,9 +188,9 @@ function createPackageRelativeTransformFilename(path: string): string | undefine
   return undefined;
 }
 
-// The specifiers resolveNitroImportPath resolves; anything else cannot name a side-effect module.
+// The specifiers createModulePathMatcher resolves; anything else cannot name a side-effect module.
 const SIDE_EFFECT_SPECIFIER_FILTER = [
-  /^(?:\.|\/|file:\/\/)/,
+  /^(?:\.|\/|\\|[A-Za-z]:[\\/]|file:\/\/)/,
   ...WORKFLOW_MODULE_SPECIFIERS.map((specifier) => exactRegex(specifier)),
 ];
 
@@ -198,20 +200,14 @@ const SIDE_EFFECT_SPECIFIER_FILTER = [
  * modules the generated instrumentation plugin imports eagerly.
  */
 function createSideEffectModulesPlugin(rootDir: string, paths: readonly string[]) {
-  const ids = new Set(paths.map(normalizeStepTransformComparisonPath));
+  const match = createModulePathMatcher(rootDir, paths);
   return {
     name: "eve:side-effect-modules",
     resolveId: {
       filter: { id: SIDE_EFFECT_SPECIFIER_FILTER },
       handler(source: string, importer: string | undefined) {
-        const resolvedSource = resolveNitroImportPath(rootDir, source, importer);
-        if (
-          resolvedSource === null ||
-          !ids.has(normalizeStepTransformComparisonPath(resolvedSource))
-        ) {
-          return null;
-        }
-        return { id: resolvedSource, moduleSideEffects: "no-treeshake" as const };
+        const id = match(source, importer);
+        return id === null ? null : { id, moduleSideEffects: "no-treeshake" as const };
       },
     },
   };
@@ -223,16 +219,14 @@ function createSideEffectModulesPlugin(rootDir: string, paths: readonly string[]
  * durable step handlers with the Workflow runtime.
  */
 function createStepTransformPlugin(rootDir: string, stepTargets: readonly string[]) {
-  const targets = new Set(stepTargets.map(normalizeStepTransformComparisonPath));
+  const match = createModulePathMatcher(rootDir, stepTargets);
   return {
     name: "eve:workflow-step-transform",
     transform: {
       filter: { id: pathsRegex(stepTargets) },
       async handler(code: string, id: string) {
-        const resolvedId = resolveNitroModuleComparisonPath(rootDir, id);
-        if (!targets.has(normalizeStepTransformComparisonPath(resolvedId))) {
-          return null;
-        }
+        const resolvedId = match(id);
+        if (resolvedId === null) return null;
         const result = await applyWorkflowTransform(
           createRelativeTransformFilename(rootDir, resolvedId),
           code,

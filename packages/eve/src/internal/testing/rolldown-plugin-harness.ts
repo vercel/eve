@@ -4,6 +4,13 @@ import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 
 const ENTRY = "\0eve-test-entry";
 
+/** A module id as the filesystem identifies it: drive-qualified and case-insensitive on Windows. */
+function fileKey(id: string): string {
+  if (!isAbsolute(id)) return id;
+  const path = resolve(id).replaceAll("\\", "/");
+  return process.platform === "win32" ? path.toLowerCase() : path;
+}
+
 /**
  * Bundles an entry through `plugins` with real Rolldown, so hook filters, hook
  * order, and tree-shaking behave as in a host build. The entry imports
@@ -21,7 +28,9 @@ export async function bundleThroughPlugins(input: {
   readonly files?: Readonly<Record<string, string>>;
   readonly sideEffectFree?: boolean;
 }): Promise<string> {
-  const files = input.files ?? {};
+  const files = new Map(
+    Object.entries(input.files ?? {}).map(([id, code]) => [fileKey(id), code] as const),
+  );
   const harness = {
     name: "eve-test-harness",
     resolveId(source: string, importer: string | undefined) {
@@ -43,7 +52,7 @@ export async function bundleThroughPlugins(input: {
           ),
         ].join("\n");
       }
-      return files[id] ?? "";
+      return files.get(fileKey(id)) ?? "";
     },
   };
   const chunk = await buildSingleRolldownChunk("plugin harness bundle", {
