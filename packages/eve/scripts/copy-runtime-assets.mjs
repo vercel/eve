@@ -12,6 +12,7 @@ const runtimeAssetDirs = ["src/cli/commands/agent-prompt"];
 const extensionAssetDirs = [
   "src/extensions/code/extension",
   "src/extensions/git/extension",
+  "src/extensions/goal/extension",
   "src/computer-use/extension",
 ];
 // Hand-written declaration files are tsc inputs, not outputs. The ambient

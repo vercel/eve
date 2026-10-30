@@ -22,6 +22,7 @@
     "install-integrations",
     "extensions",
     "code-extension",
+    "goal-extension",
     "protocols/acp",
     "guides/client",
     "guides/frontend",

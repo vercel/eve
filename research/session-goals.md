@@ -1,10 +1,12 @@
 ---
 issue: https://github.com/vercel/eve/issues/5456
-status: proposed
+status: in-progress
 last_updated: "2026-10-29"
 ---
 
 # Session goals
+
+> **AI status:** Written entirely by AI; human review pending.
 
 ## Summary
 
@@ -82,20 +84,20 @@ export default defineHook({
 
 Semantics reuse the `ctx.cancel()` command path where they can, and differ where the target turn differs:
 
-|                 | `cancel(reason?)`                        | `continue(message, options?)`                                          |
-| --------------- | ---------------------------------------- | ---------------------------------------------------------------------- |
-| Targets         | The running turn                         | The next turn                                                          |
-| Eligible on     | Events while a turn runs                 | `turn.settled` and `*` handlers; a completed turn, or one it cancelled |
-| Stored as       | An intent keyed by the active `turnId`   | A session-level intent with no turn, keyed by the settled `turnId`     |
-| Consumed by     | `actOnCancels` after the commit          | The idle wait in `nextTurnDelivery`, when nothing is queued            |
-| Effect          | `turn.cancelled`, then `session.waiting` | A message delivery that starts a normal turn                           |
-| Competing input | The first cancel wins                    | Yields to any other turn, cancel, clear, or reset; survives compaction |
+|                 | `cancel(reason?)`                        | `continue(message, options?)`                                              |
+| --------------- | ---------------------------------------- | -------------------------------------------------------------------------- |
+| Targets         | The running turn                         | The next turn                                                              |
+| Eligible on     | Events while a turn runs                 | `turn.settled` and `*` handlers; a completed turn, or one it cancelled     |
+| Stored as       | An intent keyed by the active `turnId`   | The session's one continuation slot, keyed by the settled `turnId`         |
+| Consumed by     | `actOnCancels` after the commit          | The idle wait in `nextTurnDelivery`, when nothing is queued or handed over |
+| Effect          | `turn.cancelled`, then `session.waiting` | A message delivery that starts a normal turn                               |
+| Competing input | The first cancel wins                    | Yields to any other turn, cancel, clear, or reset; survives compaction     |
 
-- **Recorded now, applied later.** It returns `{ queued }` synchronously: it is recorded during the handler and admitted after the event's hooks return, so retries and workflow replay stay deterministic. Like `cancel()`, calling it after the handler settled throws. If the handler throws, its commands are discarded with the rest of its requests.
+- **Recorded now, applied later.** It returns `{ queued }` synchronously: it is recorded during the handler and admitted after the event's hooks return, so retries and workflow replay stay deterministic. Like `cancel()`, calling it after the handler settled throws. If the handler throws, its commands are discarded with the rest of its requests. Like other hook effects, a continuation is lost if the step that settled the turn is interrupted before it is saved.
 - **Fails closed on events, in the types.** A total map over hook event keys decides which handlers receive `continue`, so a new event does not compile until it is classified, and a `turn.started` handler has no `continue` to call. A `*` handler receives it for every event and gets `{ queued: false, reason: "not-settled" }` off `turn.settled`; a `failed` turn, or one a person or another hook cancelled, returns `not-completed`.
 - **Cancel, then redirect.** A hook that cancelled the turn can continue it, for example to cancel an agent that started editing test files and tell it not to. Only that hook can: a person's `session.cancel()` must still stop the session, and letting another hook continue it would let a guard and a goal loop against each other. Failed turns can't be continued yet: a failure that repeats, such as `SESSION_USAGE_LIMIT_REACHED`, would turn a retry hook into a loop of failing turns.
 - **One next turn per settled turn, shared by hooks.** The intent is keyed by the settled `turnId`. Each hook that continues the turn adds a payload to its one delivery, in hook order, the way the input queue coalesces one principal's consecutive messages into a turn, so a goal hook and a lint hook both contribute and load order can't starve either. A hook asking twice returns `already-queued`. One delivery acts for one principal: a continuation that acts for a different principal than the queued one returns `auth-conflict`, where omitted `auth` means the session's current identity, since it couldn't run as a separate turn without yielding to the first.
-- **Queues, never steers, and yields.** The intent belongs to the turn that settled. `nextTurnDelivery` admits it only when the input queue and inbox are empty. Any other turn that starts first discards it: a person's message, an answer, a schedule send, or another hook's continuation. A compaction leaves it queued, so it cannot stall a goal. `cancel`, `clear`, and `reset` discard it, so a person can always stop a loop from any channel, and a cleared session doesn't start on stale guidance. An expiry ends the session with the continuation unsent. `queued: true` means recorded; yielding happens later, and the hook sees the turn that won settle next.
+- **Queues, never steers, and yields.** The intent belongs to the turn that settled. `nextTurnDelivery` admits it only when the input queue and inbox are empty. Behind an awaited handover, older input is queued but not yet readable, so the continuation waits for the handover and yields to that input as well. Any other turn that starts first discards it: a person's message, an answer, a schedule send, or another hook's continuation. A compaction leaves it queued, so it cannot stall a goal. `cancel`, `clear`, and `reset` discard it, so a person can always stop a loop from any channel, and a cleared session doesn't start on stale guidance. An expiry ends the session with the continuation unsent. `queued: true` means recorded; yielding happens later, and the hook sees the turn that won settle next.
 - **Arrives as a marked message delivery.** `delivery.admitted` records `source: { channel, hook: "<slug>" }` and no principal unless the hook passes `auth`. `hook` is an optional field on the existing channel source, not a new source variant, so readers that switch on `source` still match it as a channel delivery. The delivery passes through the owning channel's `deliver` hook like any other message. The model receives the message and `context` as the hook passed them. From `source.hook`, intake records a durable `context.instruction` ahead of the message saying it was sent automatically, not by a person, so the prompt the model reads matches history and measured prompt sizes stay exact. Channels and UIs can render hook-origin turns distinctly.
 - **Same session only.** A continuation never creates or reaches another session, so the delegated-session refusal on `ctx.to()` in #5096 does not apply: that refusal exists because a new session would outlive the delegation and act for the caller, and a message into the running session creates nothing new. Whether the caller waits for those extra turns is an open question below.
 - **No new settlement path.** The continuation runs as a normal turn, so approvals, task waiting, and `limits.sessionUsage` apply unchanged. Unattended sessions keep failing with `SESSION_USAGE_LIMIT_REACHED` instead of prompting.
@@ -107,111 +109,95 @@ Extension compatibility is checked against the eve version an extension was buil
 
 ## Extension: goals
 
-Goals ship as an extension built only on public APIs plus hook `ctx.continue()`.
+Goals ship as `eve/extensions/goal`, built only on public APIs plus hook `ctx.continue()`. Its source is the private `@eve/goal` workspace package, which eve's build copies into the `eve` package, as it does for `eve/extensions/code`.
 
 ```mermaid
 flowchart LR
   Set["goal__set tool"] --> State[("goal state")]
   State --> Instr["dynamic instructions: current objective"]
-  Turn["turn.settled hook"] --> Judge{"judge"}
+  Turn["turn.settled hook"] --> Guards{"guards"}
+  Guards -->|failed, cancelled, or idle| Paused["status: paused"]
+  Guards --> Judge{"judge"}
   Judge -->|met| Done["status: met"]
   Judge -->|impossible| Failed["status: impossible"]
   Judge -->|continue, budget left| Cont["ctx.continue(reason)"]
-  Judge -->|budget spent or no progress| Paused["status: paused"]
+  Judge -->|continue, budget spent| Paused
 ```
 
-- **State.** `defineState("goal")` holds `{ objective, status, runs, maxRuns, idleRuns, lastReason, costAtStart }`. A turn is a continuation when its deliveries' `source.hook` is set, so state doesn't track it. `status` is `active`, `paused`, `met`, or `impossible`. One goal per session; setting a new one replaces it.
-- **Tools.** Names derive from paths and the mount adds the prefix. `goal__set` sets or replaces the objective (up to 4,000 characters) and is the only lifecycle action the model may take on its own. `goal__status` reports status, runs, spend, and the last reason. `goal__pause`, `goal__resume`, and `goal__clear` are for the person; channels can map them to a `/goal` command. The model can never mark a goal met.
+- **Options.** `model` is the default judge's model, an AI Gateway model ID or a model instance, defaulting to `"openai/gpt-6-luna-fast"`. `judge` replaces the default judge with a function. `maxRuns` defaults to 50. `maxCostUsd` is unlimited unless set. `setApproval` puts `goal__set` behind an approval policy.
+- **State.** `defineState("goal")` holds `{ objective, status, runs, maxRuns, idleRuns, continued, costAtStart, lastReason, notes }`. `status` is `active`, `paused`, `met`, or `impossible`. One goal per session; setting a new one replaces it. A turn is the goal's own when `continued` is set and every delivery it consumed has `source.hook`, so a person's message that joins or replaces the continuation isn't counted as one. The first `call.settled` after the goal is set records `costAtStart`.
+- **Tools.** Names derive from paths and the mount adds the prefix. `goal__set` sets or replaces the objective (up to 4,000 characters) and is the only lifecycle action the model may take on its own. `goal__status` reports the objective, status, runs, and the last reason. `goal__pause`, `goal__resume`, and `goal__clear` always require the person's approval. Resume grants a fresh run and spend budget. The model can never mark a goal met.
 - **Instructions.** A `defineDynamic` instruction shows the objective, the run count, and the judge's last reason before every model call while the goal is active.
-- **Judge.** A structured-output model call returns `{ verdict: "met" | "continue" | "impossible", reason }`. It reads the objective, the input the turn consumed (the parts on its `delivery.consumed`), the turn's reply (`reply(ctx.view, turnId)`), and its settled calls (`calls(ctx.view, { turnId })`). Reading the input lets a person's "stop" or change of direction reach the verdict. Hooks do not receive assembled history, so the judge sees evidence the turn surfaced, not the whole transcript. `decide()` is not enough on its own because it returns no prose rationale, and the reason is what steers the next turn.
-- **Budget and guards.** Default `maxRuns` is 50; an optional spend cap compares `usage(ctx.view).total.costUsd` with `costAtStart`. Reaching either pauses with a reason. Two consecutive continuation turns with no tool calls pause the goal. A `failed` or `cancelled` turn pauses it. A judge error pauses it: unattended sessions should not burn budget on a broken judge.
+- **Judge.** A structured-output model call returns `{ verdict: "met" | "continue" | "impossible", reason, notes }`. It reads the objective, the input the turn consumed (the text parts of its deliveries), the turn's reply text (`reply(ctx.view, turnId)`), and its settled calls (`calls(ctx.view, { turnId })`). Reading the input lets a person's "stop" or change of direction reach the verdict. Hooks do not receive assembled history, and the hook view keeps only the latest turn, so the judge sees evidence the turn surfaced, not the whole transcript. To carry proof across turns, each verdict also returns `notes` on what the evidence has proved so far, stored in goal state and read back on the next verdict. Every field is bounded and JSON-encoded with `<` escaped, so session text can't close a tag or forge evidence, and calls are trimmed from the oldest to fit. `decide()` is not enough on its own because it returns no prose rationale, and the reason is what steers the next turn.
+- **Guards and budget.** Before the judge, a `failed` or `cancelled` turn pauses the goal, and so do two of the goal's own continuation turns in a row without tool calls. A judge error pauses it: unattended sessions should not burn budget on a broken judge. Every other completed turn is judged, so a turn that finishes the work at a limit is still met. The limits only stop the next continuation: on `continue`, the goal pauses if it reached `maxRuns` or its spend since `costAtStart` reached `maxCostUsd`. The judge's own calls aren't counted.
+- **Shared continuations.** When another hook already continued the turn for a different principal, `ctx.continue()` returns `auth-conflict`. The goal stays active without `continued`, and goes on from the next turn that settles.
 
 ### Sketch
 
 A consumer mounts it like any extension:
 
 ```ts title="agent/extensions/goal.ts"
-import goal from "@eve/goal";
+import goal from "eve/extensions/goal";
+import { always } from "eve/tools/approval";
 
-export default goal({ judge: "openai/gpt-6-luna", maxRuns: 30, maxCostUsd: 25 });
+export default goal({ maxRuns: 30, maxCostUsd: 25, setApproval: always() });
 ```
 
-The judge hook carries the policy. State, tools, and instructions are ordinary contributions:
+The judge hook reads the turn and applies the policy. `check()` and `settle()` in `lib/policy.ts` hold the guards and verdict handling without eve runtime imports, so unit tests cover them directly:
 
 ```ts title="extension/hooks/judge.ts"
 import { calls, deliveries, reply, usage } from "eve/events";
 import { defineHook } from "eve/hooks";
-import extension from "../extension";
-import { judge } from "../lib/judge";
-import { goal } from "../lib/state";
-import { turnInput } from "../lib/turn-input";
+import extension from "../extension.ts";
+import { modelJudge, type GoalVerdict } from "../lib/judge.ts";
+import { check, pause, settle } from "../lib/policy.ts";
+import { goal } from "../lib/state.ts";
 
 export default defineHook({
   events: {
     async "turn.settled"(event, ctx) {
       const current = goal.get();
       if (current?.status !== "active") return;
-      const pause = (reason: string) =>
-        goal.update((g) => g && { ...g, status: "paused", lastReason: reason });
-
-      if (event.data.outcome !== "completed") return pause(`Turn ${event.data.outcome}.`);
       const { turnId } = event.data;
       const turnCalls = calls(ctx.view, { turnId });
-      const continued = deliveries(ctx.view, { turnId }).every(({ source }) => source?.hook);
-      const idle = continued && turnCalls.length === 0 ? current.idleRuns + 1 : 0;
-      if (idle >= 2) return pause("Two continuation turns made no tool calls.");
-      if (current.runs >= current.maxRuns) return pause(`Reached ${current.maxRuns} runs.`);
-      const spent = (usage(ctx.view).total.costUsd ?? 0) - current.costAtStart;
-      if (spent >= extension.config.maxCostUsd) return pause(`Spent $${spent.toFixed(2)}.`);
+      const input = deliveries(ctx.view, { turnId });
+      const costUsd = usage(ctx.view).total.costUsd;
+      const continued =
+        current.continued === true && input.every(({ source }) => source?.hook !== undefined);
+      const checked = check(current, {
+        costUsd,
+        continued,
+        outcome: event.data.outcome,
+        toolCalls: turnCalls.length,
+      });
+      if (checked.kind === "pause") return goal.update((g) => g && pause(g, checked.reason));
 
-      const verdict = await judge({
-        objective: current.objective,
-        input: turnInput(ctx.view, turnId), // parts from the turn's delivery.consumed
-        reply: reply(ctx.view, turnId),
-        calls: turnCalls,
-      }).catch(() => undefined);
-      if (verdict === undefined) return pause("The goal judge failed.");
-      if (verdict.verdict !== "continue") {
-        return goal.update(
-          (g) => g && { ...g, status: verdict.verdict, lastReason: verdict.reason },
-        );
-      }
-      goal.update(
-        (g) =>
-          g && {
-            ...g,
-            runs: g.runs + 1,
-            idleRuns: idle,
-            lastReason: verdict.reason,
-          },
+      let verdict: GoalVerdict | undefined;
+      try {
+        const judge = extension.config.judge ?? modelJudge(extension.config.model);
+        verdict = await judge({
+          objective: current.objective,
+          notes: current.notes,
+          input: textOf(input),
+          reply: replyText(ctx.view, turnId),
+          calls: turnCalls,
+          abortSignal: ctx.occurrence.abortSignal,
+        });
+      } catch {}
+      const next = settle(
+        current,
+        verdict,
+        { costUsd, idleRuns: checked.idleRuns },
+        extension.config,
       );
-      ctx.continue(`Continue toward the goal. ${verdict.reason}`);
+      const queued = next.message !== undefined && ctx.continue(next.message).queued;
+      goal.update(() => (queued ? next.goal : { ...next.goal, continued: false }));
     },
   },
 });
 ```
 
-```ts title="extension/instructions.ts"
-import { defineDynamic, defineInstructions } from "eve/instructions";
-import { goal } from "./lib/state";
-
-export default defineDynamic(() => {
-  const current = goal.get();
-  if (current?.status !== "active") return null;
-  return defineInstructions({
-    role: "system",
-    content: [
-      `<goal runs="${current.runs}/${current.maxRuns}">${current.objective}</goal>`,
-      current.lastReason && `<last_judgement>${current.lastReason}</last_judgement>`,
-      "Work toward the goal. Prove progress with tool output; the judge only sees what this turn surfaces.",
-    ]
-      .filter(Boolean)
-      .join("\n"),
-  });
-});
-```
-
-`extension/tools/set.ts` (mounted as `goal__set`) validates the objective and writes `{ status: "active", runs: 0, idleRuns: 0, costAtStart }`, reading `costAtStart` from `usage` in the tool's session view. `extension/lib/judge.ts` makes one structured-output model call with the configured judge model and returns `{ verdict, reason }`.
+On `continue` with budget left, `settle()` counts a run and returns `Continue working toward the goal. <reason>` as the message.
 
 ## Alternatives considered
 
