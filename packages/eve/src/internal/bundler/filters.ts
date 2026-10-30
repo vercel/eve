@@ -20,10 +20,13 @@ export function prefixRegex(value: string, flags?: string): RegExp {
  * Matches any of `paths` as a module id, ignoring a query or hash suffix.
  * Windows paths compare case-insensitively, as the filesystem does.
  */
-export function pathsRegex(paths: readonly string[]): RegExp {
+export function pathsRegex(
+  paths: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+): RegExp {
   const alternatives = paths.map((path) => escapeRegex(path.replaceAll("\\", "/")));
   return new RegExp(
     `^(?:${alternatives.join("|")})(?:[?#].*)?$`,
-    process.platform === "win32" ? "i" : undefined,
+    platform === "win32" ? "i" : undefined,
   );
 }

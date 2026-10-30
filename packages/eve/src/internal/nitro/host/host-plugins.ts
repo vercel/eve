@@ -87,18 +87,28 @@ function stripPathQueryAndHash(path: string): string {
   return cutoff === -1 ? path : path.slice(0, cutoff);
 }
 
-/**
- * Matches module specifiers and ids against `paths` as the platform's
- * filesystem does: specifiers resolve against their importer, drive-less
- * absolute paths take the current drive on Windows, separators are compared as
- * `/`, and Windows compares case-insensitively. Returns the matched path with
- * `/` separators, or null.
- */
+export interface ModulePathMatcher {
+  /**
+   * Matches a module specifier or id against the paths as the platform's
+   * filesystem does: specifiers resolve against their importer, drive-less
+   * absolute paths take the current drive on Windows, separators are compared
+   * as `/`, and Windows compares case-insensitively. Returns the matched path
+   * with `/` separators, or null.
+   */
+  readonly match: (specifier: string, importer?: string) => string | null;
+  /**
+   * A Rolldown id filter that admits every path `match` accepts, as given or
+   * as `match` resolves it. A plugin that resolves a path to that form hands
+   * later hooks the resolved id.
+   */
+  readonly idFilter: RegExp;
+}
+
 export function createModulePathMatcher(
   rootDir: string,
   paths: readonly string[],
   platform: NodeJS.Platform = process.platform,
-): (specifier: string, importer?: string) => string | null {
+): ModulePathMatcher {
   const windows = platform === "win32";
   const path = windows ? win32 : posix;
   const toPath = (directory: string, specifier: string) =>
@@ -111,9 +121,10 @@ export function createModulePathMatcher(
       ),
     );
   const toKey = (resolved: string) => (windows ? resolved.toLowerCase() : resolved);
-  const keys = new Set(paths.map((target) => toKey(toPath(rootDir, target))));
+  const targets = paths.map((target) => toPath(rootDir, target));
+  const keys = new Set(targets.map(toKey));
 
-  return (specifier, importer) => {
+  const match = (specifier: string, importer?: string) => {
     let resolved: string;
     if (WORKFLOW_MODULE_SPECIFIERS.includes(specifier)) {
       resolved = toPath(rootDir, resolveWorkflowModulePath(specifier));
@@ -129,6 +140,7 @@ export function createModulePathMatcher(
     }
     return keys.has(toKey(resolved)) ? resolved : null;
   };
+  return { idFilter: pathsRegex([...new Set([...paths, ...targets])], platform), match };
 }
 
 function createRelativeTransformFilename(workingDir: string, path: string): string {
@@ -200,7 +212,7 @@ const SIDE_EFFECT_SPECIFIER_FILTER = [
  * modules the generated instrumentation plugin imports eagerly.
  */
 function createSideEffectModulesPlugin(rootDir: string, paths: readonly string[]) {
-  const match = createModulePathMatcher(rootDir, paths);
+  const { match } = createModulePathMatcher(rootDir, paths);
   return {
     name: "eve:side-effect-modules",
     resolveId: {
@@ -219,11 +231,13 @@ function createSideEffectModulesPlugin(rootDir: string, paths: readonly string[]
  * durable step handlers with the Workflow runtime.
  */
 function createStepTransformPlugin(rootDir: string, stepTargets: readonly string[]) {
-  const match = createModulePathMatcher(rootDir, stepTargets);
+  // Step targets are also side-effect modules, so a transform sees the id
+  // the side-effect plugin resolved them to.
+  const { idFilter, match } = createModulePathMatcher(rootDir, stepTargets);
   return {
     name: "eve:workflow-step-transform",
     transform: {
-      filter: { id: pathsRegex(stepTargets) },
+      filter: { id: idFilter },
       async handler(code: string, id: string) {
         const resolvedId = match(id);
         if (resolvedId === null) return null;
