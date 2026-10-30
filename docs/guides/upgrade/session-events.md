@@ -111,7 +111,7 @@ See [Interactions](/docs/guides/frontend/use-eve-agent#interactions).
 
 Channel `events` handlers take `(event, ctx)` instead of `(eventData, channel, ctx)`. Read the payload from `event.data`, the turn or call it belongs to from `event.scope`, and the channel from `ctx.channel`. To update a status or card once per stored line instead of once per event, use `committed(line, ctx)`.
 
-Slack renderers take `(event, ctx, next)`. Call `next(event)` to hand the event to the default rendering. See [Custom channels](/docs/channels/custom) and [Slack rendering](/docs/channels/slack#customize-rendering).
+Slack renderers take `(event, ctx, next)`. Call `next(event)` to hand the event to the default rendering. See [Custom channels](/docs/channels/custom) and [Slack rendering](/docs/channels/slack/reference#customize-rendering).
 
 ## Instrumentation
 

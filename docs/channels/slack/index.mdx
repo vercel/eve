@@ -243,22 +243,22 @@ export default defineTool({
 });
 ```
 
-Code channels need extra scopes and events:
+Code channels need extra Slack app permissions:
 
 <TabsWithChildren groupId="vercel" ariaLabel="How credentials are managed" tabs={["Vercel Connect", "Self-managed"]}>
 <TabContent order={1}>
 
-With `codeChannels: true`, the app manifest enables code channels and requests what they need. When you create the Connect connector, add the same scopes and events under **Advanced**: the `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:read`, and `mpim:read` bot scopes, and the `message.session` and `agent_session_stopped` events.
+Turn on **Code Channels** in the connector's settings, which adds the `code_channels:manage` scope and the `message.session` and `agent_session_stopped` events. Then add `groups:read` and `mpim:read` under **Bot Scopes**.
 
 </TabContent>
 <TabContent order={2}>
 
-In [Slack app settings](https://api.slack.com/apps), enable code channels, add the `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:read`, and `mpim:read` bot scopes, and subscribe to the `message.session` and `agent_session_stopped` events. Then reinstall the app.
+With `codeChannels: true`, the generated app manifest includes everything code channels need. If you configure the app by hand in [Slack app settings](https://api.slack.com/apps), enable code channels, add the `code_channels:manage`, `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:read`, and `mpim:read` bot scopes, and subscribe to the `message.session` and `agent_session_stopped` events. Then reinstall the app.
 
 </TabContent>
 </TabsWithChildren>
 
-See [Serve Slack code channels](/docs/channels/slack/reference#serve-slack-code-channels) for how eve detects code channels and opens them.
+See [How eve serves code channels](/docs/channels/slack/reference#how-eve-serves-code-channels) for replies, status, and hooks in a code channel.
 
 ## Change what the agent posts
 

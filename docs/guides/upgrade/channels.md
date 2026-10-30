@@ -10,17 +10,17 @@ This page is part of [Upgrade to 1.0](/docs/guides/upgrade).
 
 ## Slack
 
-- **Cards.** Call card builders with their data forms, use `CardText` for labels, and use `cardToFallbackText` for whole cards. Remove imports of `Modal*`, `TextInput*`, `ExternalSelect*`, `CardJSXElement`, `CardJSXProps`, `isCardElement`, `cardChildToFallbackText`, `ChatElement`, `ContainerProps`, and the builder `*Props` types. Use native Slack view data for custom modals. See [Slack cards](/docs/channels/slack#cards).
+- **Cards.** Call card builders with their data forms, use `CardText` for labels, and use `cardToFallbackText` for whole cards. Remove imports of `Modal*`, `TextInput*`, `ExternalSelect*`, `CardJSXElement`, `CardJSXProps`, `isCardElement`, `cardChildToFallbackText`, `ChatElement`, `ContainerProps`, and the builder `*Props` types. Use native Slack view data for custom modals. See [Slack cards](/docs/channels/slack/reference#cards).
 
   ```ts
   Actions({ children: [Button({ id: "approve", children: "Approve" })] }); // [!code --]
   Actions([Button({ id: "approve", label: "Approve" })]); // [!code ++]
   ```
 
-- **Renderers.** `renderers.taskCard` receives a `TaskCard`; use `callState` and `callLabel` from `eve/events` to render calls. `SlackTaskCard` is `SlackCardMessage`. To restyle approval and question cards, use `renderers.interactionCard`. See [Restyle approval and question cards](/docs/channels/slack#restyle-approval-and-question-cards).
+- **Renderers.** `renderers.taskCard` receives a `TaskCard`; use `callState` and `callLabel` from `eve/events` to render calls. `SlackTaskCard` is `SlackCardMessage`. To restyle approval and question cards, use `renderers.interactionCard`. See [Restyle approval and question cards](/docs/channels/slack/reference#restyle-approval-and-question-cards).
 - **State.** `SlackChannelState.pendingApprovalCards` is `interactionCards`. Cards posted before the upgrade keep their buttons. `SlackSessionTarget` is a union that includes `{ channelId, codeChannel: true }`, so handle that variant before you read `target.threadTs`.
 - **Model context.** The model sees sender, bot, and thread metadata in `<sender>`, `<bot>`, and `<thread>` blocks. Update instructions that mention `sender_type`, `sender_id`, `bot_user_id`, or `is_mentioned`.
-- **Proactive messages.** `initialMessage` accepts `{ text }`, `{ markdown }`, `{ blocks, text? }`, or `{ card }`. See [proactive sessions](/docs/channels/slack#proactive-sessions).
+- **Proactive messages.** `initialMessage` accepts `{ text }`, `{ markdown }`, `{ blocks, text? }`, or `{ card }`. See [proactive sessions](/docs/channels/slack/reference#proactive-sessions).
 
 ## Identity, audience, and options
 
