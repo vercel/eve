@@ -15,6 +15,8 @@ describe("package artifacts", () => {
   test("derives channel-specific build versions", () => {
     expect(packageVersion("0.33.0", sha)).toBe("0.33.0+main.aaaaaaaaaaaaaaaa");
     expect(packageVersion("0.33.0", sha, "git")).toBe("0.33.0+git.aaaaaaaaaaaaaaaa");
+    expect(packageVersion("1.0.0-rc.0", sha, "git")).toBe("1.0.0-rc.0+git.aaaaaaaaaaaaaaaa");
+    expect(() => packageVersion("1.0.0+git.abc", sha)).toThrow("without build metadata");
   });
 
   test("derives immutable artifacts and mutable pointers", () => {
