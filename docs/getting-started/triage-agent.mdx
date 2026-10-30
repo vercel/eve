@@ -6,21 +6,13 @@ contentType: "Tutorial"
 
 You'll build an agent that reads each new GitHub issue, labels it as a bug, feature request, question, or duplicate, and reproduces bugs by running the code in a sandbox. It replies on the issue with the label and what it found.
 
-## Build it with a coding agent
-
-Paste this prompt into your coding agent to build the agent from this page. The rest of the page walks through the same steps by hand.
+To have your coding agent build it, ask it to follow this page:
 
 ```text
-Build the triage agent from https://eve.dev/docs/getting-started/triage-agent.md
-in ./triage-agent. Fetch that page and follow each step in order.
-
-- Ask me for the GitHub repository to use in place of <owner>/slugify-demo,
-  and wait while I create it and open the sample issue.
-- Use the code from the page as written.
-- Ask me before you run eve add channel/github or deploy.
-
-Finish with npm run eval and npm run typecheck, then tell me what passed.
+Build the eve triage agent from https://eve.dev/docs/getting-started/triage-agent.md. Ask me which GitHub repository to use, and check with me before you connect GitHub or deploy.
 ```
+
+Or follow the steps below.
 
 ## Prerequisites
 
