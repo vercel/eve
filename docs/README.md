@@ -35,7 +35,7 @@ Important naming note:
 | Authorize routes, sessions, and per-user access          | [Authentication](./guides/auth-and-route-protection.md)                                |
 | Build a web UI, or stream a session to a client          | [Client SDK](./guides/client/overview.mdx), [Frontend](./guides/frontend/overview.mdx) |
 | Test the agent's behavior                                | [Evals](./evals/overview.mdx)                                                          |
-| Look up a CLI command or an exported type                | [CLI](./reference/cli.md), [TypeScript API](./reference/typescript-api.md)             |
+| Look up a CLI command or an exported type                | [CLI](./reference/cli/index.md), [TypeScript API](./reference/typescript-api.md)       |
 
 ## Legal and safeguards
 
@@ -73,7 +73,7 @@ For a full picture rather than a single task, read in this order:
 16. [Evals](./evals/overview.mdx)
 17. [Authentication](./guides/auth-and-route-protection.md)
 18. [Deployment](./guides/deployment/overview.md)
-19. [CLI](./reference/cli.md)
+19. [CLI](./reference/cli/index.md)
 
 ## The public mental model
 
