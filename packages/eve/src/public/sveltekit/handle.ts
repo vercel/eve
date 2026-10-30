@@ -30,8 +30,29 @@ function isEveRoute(pathname: string): boolean {
   return pathname === EVE_ROUTE_PREFIX || pathname.startsWith(`${EVE_ROUTE_PREFIX}/`);
 }
 
+function createProxyHeaders(source: Headers): Headers {
+  const headers = new Headers(source);
+  for (const name of (headers.get("connection") ?? "").split(",")) {
+    if (name.trim()) headers.delete(name.trim());
+  }
+  for (const name of [
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "proxy-connection",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+  ]) {
+    headers.delete(name);
+  }
+  return headers;
+}
+
 function createForwardedRequest(request: Request, target: URL): Request {
-  const headers = new Headers(request.headers);
+  const headers = createProxyHeaders(request.headers);
   // The eve service answers on its own origin; a stale Host breaks its
   // absolute URL construction and any host-based routing in front of it.
   headers.delete("host");
@@ -75,6 +96,15 @@ export function createEveHandle(options: EveSvelteKitHandleOptions = {}) {
       options.origin ?? resolveProductionOrigin(),
     );
 
-    return await fetch(createForwardedRequest(input.event.request, target));
+    const upstream = await fetch(createForwardedRequest(input.event.request, target));
+    const headers = createProxyHeaders(upstream.headers);
+    // fetch decodes the body but retains the upstream's encoded representation headers.
+    headers.delete("content-encoding");
+    headers.delete("content-length");
+    return new Response(upstream.body, {
+      headers,
+      status: upstream.status,
+      statusText: upstream.statusText,
+    });
   };
 }
