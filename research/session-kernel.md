@@ -12,7 +12,7 @@ eve's turn loop decides two kinds of things at once. Some are guarantees every a
 
 This plan splits the loop into a sealed **kernel**, which owns the guarantees and is the only code that emits facts, and a replaceable **harness**, a function that returns policy as data: `{ agent, history, next }`. eve's current behavior becomes the native harness, written in the same shape an author would use. Once the kernel takes its dependencies as input, it can also run outside eve's compiler and Workflow, which makes a local, embedded eve possible.
 
-The plan covers two things: internal refactors that change no observable behavior, and a sketch of how they could be exposed in a release after 1.0. Nothing here is part of 1.0. A draft implementation is GitHub stack #5683, #5638 through #5640, and names here follow it. Fields and options it doesn't have yet are marked as proposed. Code in this document is pseudocode, and signatures are simplified.
+The plan covers two things: internal refactors that change no observable behavior, and a sketch of how they could be exposed in a release after 1.0. Nothing here is part of 1.0. A draft implementation is GitHub stack #5702, #5638 through #5640, and names here follow it. Fields and options it doesn't have yet are marked as proposed. Code in this document is pseudocode, and signatures are simplified.
 
 ## The layers eve should have
 
