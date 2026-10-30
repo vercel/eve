@@ -4,7 +4,7 @@ import type { DevelopmentGeneration } from "#internal/nitro/development-generati
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 
 const mocks = vi.hoisted(() => ({
-  activateTransaction: vi.fn(),
+  activate: vi.fn(async () => undefined),
   prune: vi.fn(async (): Promise<boolean> => false),
   prepare: vi.fn(),
   stage: vi.fn(),
@@ -24,16 +24,13 @@ vi.mock("#internal/materialized-authored-modules.js", () => ({
 }));
 
 vi.mock("#internal/nitro/dev-runtime-artifacts.js", () => ({
-  activateDevelopmentRuntimeArtifactsSnapshotTransaction: mocks.activateTransaction,
+  activateDevelopmentRuntimeArtifactsSnapshot: mocks.activate,
   pruneDevelopmentRuntimeArtifactsSnapshots: mocks.prune,
   stageDevelopmentRuntimeArtifactsSnapshot: mocks.stage,
 }));
 
-const {
-  activateDevelopmentGeneration,
-  activateDevelopmentGenerationTransaction,
-  stageDevelopmentGeneration,
-} = await import("#internal/nitro/development-generation.js");
+const { activateDevelopmentGeneration, stageDevelopmentGeneration } =
+  await import("#internal/nitro/development-generation.js");
 
 function createGeneration(id: string): DevelopmentGeneration {
   return {
@@ -117,28 +114,22 @@ describe("development generation staging", () => {
 
 describe("development generation activation", () => {
   beforeEach(() => {
-    mocks.activateTransaction.mockReset();
+    mocks.activate.mockReset();
+    mocks.activate.mockResolvedValue(undefined);
     mocks.prune.mockReset();
     mocks.prune.mockResolvedValue(false);
   });
 
-  it("requests background storage pruning only after activation commits", async () => {
-    const commit = vi.fn();
-    const rollback = vi.fn(async () => undefined);
-    mocks.activateTransaction.mockResolvedValue({ commit, rollback });
-
+  it("requests background storage pruning once activation succeeds", async () => {
     await activateDevelopmentGeneration({
       appRoot: "/tmp/app-commit",
       generation: createGeneration("committed"),
     });
 
-    expect(commit).toHaveBeenCalledOnce();
-    expect(rollback).not.toHaveBeenCalled();
     expect(mocks.prune).toHaveBeenCalledWith({ appRoot: "/tmp/app-commit" });
   });
 
   it("skips reconciliation after a no-op prune", async () => {
-    mocks.activateTransaction.mockResolvedValue({ commit: vi.fn(), rollback: vi.fn() });
     const pruning = Promise.withResolvers<boolean>();
     mocks.prune.mockReturnValueOnce(pruning.promise);
     const onRuntimePruned = vi.fn(async () => undefined);
@@ -153,7 +144,6 @@ describe("development generation activation", () => {
   });
 
   it("retries failed reconciliation on a later activation even when pruning is a no-op", async () => {
-    mocks.activateTransaction.mockResolvedValue({ commit: vi.fn(), rollback: vi.fn() });
     const pruning = Promise.withResolvers<boolean>();
     const reconciliation = Promise.withResolvers<void>();
     mocks.prune.mockReturnValueOnce(pruning.promise);
@@ -188,7 +178,6 @@ describe("development generation activation", () => {
   });
 
   it("does not reconcile failed pruning and retries a pending prune request", async () => {
-    mocks.activateTransaction.mockResolvedValue({ commit: vi.fn(), rollback: vi.fn() });
     const pruning = Promise.withResolvers<boolean>();
     mocks.prune.mockReturnValueOnce(pruning.promise).mockResolvedValueOnce(false);
     const onRuntimePruned = vi.fn(async () => undefined);
@@ -213,20 +202,16 @@ describe("development generation activation", () => {
     }
   });
 
-  it("does not request pruning when an activation rolls back", async () => {
-    const commit = vi.fn();
-    const rollback = vi.fn(async () => undefined);
-    mocks.activateTransaction.mockResolvedValue({ commit, rollback });
+  it("does not request pruning when activation fails", async () => {
+    mocks.activate.mockRejectedValueOnce(new Error("pointer write failed"));
 
-    const activation = await activateDevelopmentGenerationTransaction({
-      appRoot: "/tmp/app-rollback",
-      generation: createGeneration("rolled-back"),
-    });
-    await activation.rollback();
-    activation.commit();
+    await expect(
+      activateDevelopmentGeneration({
+        appRoot: "/tmp/app-failed",
+        generation: createGeneration("failed"),
+      }),
+    ).rejects.toThrow("pointer write failed");
 
-    expect(rollback).toHaveBeenCalledOnce();
-    expect(commit).not.toHaveBeenCalled();
     expect(mocks.prune).not.toHaveBeenCalled();
   });
 });

@@ -5,10 +5,9 @@ import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import { prepareAuthoredRuntimeModules } from "#internal/authored-runtime-modules.js";
 import { writeMaterializedAuthoredModules } from "#internal/materialized-authored-modules.js";
 import {
-  activateDevelopmentRuntimeArtifactsSnapshotTransaction,
+  activateDevelopmentRuntimeArtifactsSnapshot,
   pruneDevelopmentRuntimeArtifactsSnapshots,
   stageDevelopmentRuntimeArtifactsSnapshot,
-  type DevelopmentRuntimeArtifactsActivation,
   type DevelopmentRuntimeArtifactsSnapshot,
 } from "#internal/nitro/dev-runtime-artifacts.js";
 import { isPathInsideOrEqual } from "#internal/nitro/dev-runtime-source-snapshot-local-roots.js";
@@ -94,37 +93,11 @@ export async function activateDevelopmentGeneration(input: {
   readonly generation: DevelopmentGeneration;
   readonly onRuntimePruned?: () => Promise<void>;
 }): Promise<void> {
-  const activation = await activateDevelopmentGenerationTransaction(input);
-  activation.commit();
-}
-
-export async function activateDevelopmentGenerationTransaction(input: {
-  readonly appRoot: string;
-  readonly generation: DevelopmentGeneration;
-  readonly onRuntimePruned?: () => Promise<void>;
-}): Promise<DevelopmentRuntimeArtifactsActivation> {
-  const activation = await activateDevelopmentRuntimeArtifactsSnapshotTransaction({
+  await activateDevelopmentRuntimeArtifactsSnapshot({
     appRoot: input.appRoot,
     snapshot: input.generation,
   });
-  let settled = false;
-  return {
-    commit() {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      activation.commit();
-      requestDevelopmentGenerationPrune(input.appRoot, input.onRuntimePruned);
-    },
-    async rollback() {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      await activation.rollback();
-    },
-  };
+  requestDevelopmentGenerationPrune(input.appRoot, input.onRuntimePruned);
 }
 
 export async function discardDevelopmentGeneration(
