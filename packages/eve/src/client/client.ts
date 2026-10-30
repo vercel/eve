@@ -1,4 +1,17 @@
-import { EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } from "#protocol/routes.js";
+import {
+  EVE_COMMANDS_ROUTE_PATH,
+  EVE_HEALTH_ROUTE_PATH,
+  EVE_INFO_ROUTE_PATH,
+  EVE_SESSION_ROUTE_PATH,
+} from "#protocol/routes.js";
+import {
+  type ChannelCommandInfo,
+  ChannelCommandListSchema,
+  type ChannelCommandResult,
+  ChannelCommandResultSchema,
+  CommandResponseError,
+} from "#client/commands.js";
+import type { z } from "#compiled/zod/index.js";
 import { AgentInfoResponseError } from "#client/agent-info-error.js";
 import { HealthResponseError } from "#client/health-response-error.js";
 import { HealthResultSchema } from "#client/health-schema.js";
@@ -7,7 +20,7 @@ import {
   AgentInfoResultSchema,
   describeAgentInfoVersionMismatch,
 } from "#client/agent-info-schema.js";
-import { ClientError } from "#client/client-error.js";
+import { ClientError, createClientError } from "#client/client-error.js";
 import { ClientSessions } from "#client/sessions.js";
 import { createClientUrl } from "#client/url.js";
 import type {
@@ -129,6 +142,56 @@ export class Client {
   }
 
   /**
+   * Lists the slash commands the eve channel offers from `GET /eve/v1/commands`.
+   *
+   * @throws {ClientError} If the server returns a non-successful status, including 404 from a
+   * server that predates channel commands.
+   * @throws {CommandResponseError} If a successful response's body is not a command list.
+   */
+  async commands(
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<readonly ChannelCommandInfo[]> {
+    const payload = await this.#readCommandJson(EVE_COMMANDS_ROUTE_PATH, options);
+    return parseCommandResponse(ChannelCommandListSchema, payload).commands;
+  }
+
+  /**
+   * Runs one eve channel slash command: inside `sessionId` through
+   * `POST /eve/v1/session/:sessionId/commands/:name`, or without a session through
+   * `POST /eve/v1/commands/:name`.
+   *
+   * @throws {ClientError} If the command is unknown, needs a session it didn't get, the caller is
+   * unauthorized, the session can't take it, or it fails.
+   * @throws {CommandResponseError} If a successful response's body is not a command result.
+   */
+  async runCommand(
+    name: string,
+    options: {
+      readonly argument?: string;
+      readonly sessionId?: string;
+      readonly signal?: AbortSignal;
+    } = {},
+  ): Promise<ChannelCommandResult> {
+    const command = encodeURIComponent(name);
+    const path =
+      options.sessionId === undefined
+        ? `${EVE_COMMANDS_ROUTE_PATH}/${command}`
+        : `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(options.sessionId)}/commands/${command}`;
+    const payload = await this.#readCommandJson(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ argument: options.argument ?? "" }),
+      signal: options.signal,
+    });
+    const { message, delivery, ended } = parseCommandResponse(ChannelCommandResultSchema, payload);
+    const result: { -readonly [K in keyof ChannelCommandResult]: ChannelCommandResult[K] } = {};
+    if (message !== undefined) result.message = message;
+    if (delivery !== undefined) result.delivery = delivery;
+    if (ended !== undefined) result.ended = ended;
+    return result;
+  }
+
+  /**
    * Performs an authenticated fetch against a path on this eve target.
    *
    * This is the raw escape hatch for framework-owned routes (for example
@@ -144,6 +207,18 @@ export class Client {
   // ---------------------------------------------------------------------------
   // Internal
   // ---------------------------------------------------------------------------
+
+  async #readCommandJson(path: string, init: RequestInit): Promise<unknown> {
+    const response = await this.fetch(path, init);
+    if (!response.ok) {
+      throw createClientError(response.status, await response.text(), response.headers);
+    }
+    try {
+      return await response.json();
+    } catch {
+      throw new CommandResponseError();
+    }
+  }
 
   async #resolveHeaders(perRequest?: Readonly<Record<string, string>>): Promise<Headers> {
     const headers = new Headers();
@@ -210,6 +285,17 @@ export class Client {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function parseCommandResponse<T>(schema: z.ZodType<T>, payload: unknown): T {
+  const result = schema.safeParse(payload);
+  if (result.success) return result.data;
+  throw new CommandResponseError(
+    result.error.issues.slice(0, 5).map((issue) => {
+      const path = issue.path.join(".");
+      return path.length === 0 ? issue.message : `${path}: ${issue.message}`;
+    }),
+  );
+}
 
 async function resolveTokenValue(value: TokenValue): Promise<string> {
   return typeof value === "function" ? value() : value;

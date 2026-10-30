@@ -87,6 +87,167 @@ describe("EveTUIRunner with a stranded session", () => {
   });
 });
 
+describe("EveTUIRunner channel commands", () => {
+  it("offers the eve channel's commands and shows what a command returns", async () => {
+    const commandRequests: unknown[] = [];
+    const server = new FakeEveServer(reply("Done."), async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/eve/v1/commands") {
+        return Response.json({
+          ok: true,
+          commands: [
+            {
+              name: "triage",
+              description: "Triage issues",
+              input: { hint: "[label]" },
+              session: "optional",
+            },
+          ],
+        });
+      }
+      if (path === "/eve/v1/commands/triage") {
+        commandRequests.push(JSON.parse(String(init?.body)));
+        return Response.json({ ok: true, message: "Triage queued" });
+      }
+      return Response.json({ ok: false }, { status: 404 });
+    });
+    vi.stubGlobal("fetch", server.fetch);
+    let loaded!: () => void;
+    const commandsLoaded = new Promise<void>((resolve) => (loaded = resolve));
+    const outcomes: unknown[] = [];
+    const { renderer } = turnTaking(["/triage bugs", undefined], {
+      finishCommand: (outcome) => outcomes.push(outcome),
+      setPromptCommands: (commands) => {
+        if (commands.some((command) => command.name === "triage")) loaded();
+      },
+    });
+    const readInput = renderer.readInput;
+    if (readInput === undefined) throw new Error("turnTaking always reads input.");
+    // Submit only once the channel's commands are recognized.
+    renderer.readInput = async (options) => {
+      await commandsLoaded;
+      return await readInput(options);
+    };
+    await new EveTUIRunner({
+      client: new Client({ baseUrl: "http://localhost:3000" }),
+      renderer,
+    }).run();
+
+    expect(commandRequests).toEqual([{ argument: "bugs" }]);
+    expect(outcomes).toEqual([{ kind: "result", message: "Triage queued" }]);
+    // eve sends a command's follow-up itself; the TUI never posts one.
+    expect(server.requestsTo("POST", "/eve/v1/session")).toEqual([]);
+  });
+
+  it("runs a command in the current session and starts fresh after it ends the session", async () => {
+    const commandRuns: string[] = [];
+    const server = new FakeEveServer(reply("Done."), async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/eve/v1/commands") {
+        return Response.json({
+          ok: true,
+          commands: [{ name: "restart", description: "Restart", session: "required" }],
+        });
+      }
+      commandRuns.push(path);
+      return Response.json({ ok: true, message: "Restarted", ended: true });
+    });
+    vi.stubGlobal("fetch", server.fetch);
+    const outcomes: unknown[] = [];
+    await new EveTUIRunner({
+      client: new Client({ baseUrl: "http://localhost:3000" }),
+      renderer: turnTaking(["/restart", "Hello.", "/restart", "Again.", undefined], {
+        finishCommand: (outcome) => outcomes.push(outcome),
+      }).renderer,
+    }).run();
+
+    expect(outcomes).toEqual([
+      { kind: "result", summary: "/restart needs an active session" },
+      { kind: "result", message: "Restarted" },
+    ]);
+    expect(commandRuns).toEqual(["/eve/v1/session/session_1/commands/restart"]);
+    expect(server.sessionId).toBe("session_2");
+  });
+});
+
+describe("EveTUIRunner channel commands that cancel", () => {
+  it("keeps a turn the command cancelled out of the composer", async () => {
+    const server: FakeEveServer = new FakeEveServer(
+      ({ body, deliveryId, turnId }) => [
+        { type: "delivery.admitted", data: { deliveryId } },
+        {
+          type: "turn.started",
+          data: { turnId, cause: { deliveryId }, follows: null },
+          scope: { turnId },
+        },
+        {
+          type: "delivery.consumed",
+          data: { deliveryId, turnId, parts: [{ kind: "text", text: String(body?.message) }] },
+        },
+      ],
+      async (input) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/eve/v1/commands") {
+          return Response.json({
+            ok: true,
+            commands: [
+              {
+                name: "escalate",
+                description: "Escalate",
+                input: { hint: "[reason]" },
+                session: "required",
+              },
+            ],
+          });
+        }
+        // The command cancels the running turn on the server, as `/escalate` does.
+        server.emit([
+          {
+            type: "turn.settled",
+            data: { turnId: "turn_1", outcome: "cancelled" },
+            scope: { turnId: "turn_1" },
+          },
+          {
+            type: "delivery.settled",
+            data: { deliveryId: "delivery_1", turnId: "turn_1", outcome: "handled" },
+          },
+        ]);
+        return Response.json({ ok: true, message: "Escalated." });
+      },
+    );
+    vi.stubGlobal("fetch", server.fetch);
+    const views: AgentTUIConversationView[] = [];
+    const restoreDraft = vi.fn();
+    const inputs = ["Hello.", "/escalate refund failed"];
+    const renderer: AgentTUIRenderer = {
+      renderConversation: (view) => views.push(view),
+      restoreDraft,
+      finishCommand: vi.fn(),
+      readInput: vi.fn(async () => {
+        const text = inputs.shift();
+        if (text === "/escalate refund failed") {
+          // Run the command once the TUI reads the running turn from the session's stream.
+          await vi.waitFor(() => {
+            expect(views.at(-1)?.working).toBe(true);
+            expect(views.at(-1)?.data.view.session.latestTurnId).toBe("turn_1");
+          });
+        }
+        if (text === undefined) {
+          await vi.waitFor(() => expect(views.at(-1)?.working).toBe(false));
+          return undefined;
+        }
+        return { type: "submit", text } as const;
+      }),
+    };
+    await new EveTUIRunner({
+      client: new Client({ baseUrl: "http://localhost:3000" }),
+      renderer,
+    }).run();
+
+    expect(restoreDraft).not.toHaveBeenCalled();
+  });
+});
+
 describe("EveTUIRunner diagnostics", () => {
   it("names a tool that fails in the commit that requested it", async () => {
     const replied = reply("The lookup failed.");

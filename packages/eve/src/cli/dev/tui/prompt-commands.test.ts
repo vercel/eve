@@ -6,6 +6,7 @@ import {
   parsePromptCommand,
   promptCommandsFor,
   PROMPT_COMMANDS,
+  withChannelPromptCommands,
 } from "./prompt-commands.js";
 
 describe("parsePromptCommand", () => {
@@ -157,6 +158,57 @@ describe("promptCommandsFor", () => {
     expect(formatPromptCommandHelp(remote)).not.toContain("/vc:login");
     expect(formatPromptCommandHelp(remote)).not.toContain("/vc:auth");
     expect(formatPromptCommandHelp(remote)).not.toContain("/model");
+  });
+});
+
+describe("withChannelPromptCommands", () => {
+  it("adds channel commands and aliases without letting them shadow built-ins", () => {
+    const commands = withChannelPromptCommands(PROMPT_COMMANDS, [
+      {
+        name: "standup",
+        description: "Draft a standup",
+        input: { hint: "[topic]" },
+        aliases: ["su", "quit"],
+        session: "optional",
+      },
+      { name: "new", description: "Shadows /new", session: "required" },
+    ]);
+    expect(parsePromptCommand("/standup  today ", commands)).toEqual({
+      type: "channel",
+      name: "standup",
+      argument: "today",
+      session: "optional",
+    });
+    expect(parsePromptCommand("/su", commands)).toEqual({
+      type: "channel",
+      name: "standup",
+      argument: "",
+      session: "optional",
+    });
+    expect(parsePromptCommand("/standup")).toBeNull();
+    expect(parsePromptCommand("/quit", commands)).toEqual({ type: "exit" });
+    expect(parsePromptCommand("/new", commands)).toEqual({ type: "new" });
+  });
+});
+
+describe("withChannelPromptCommands for a command without arguments", () => {
+  it("matches the command only alone and keeps agent text to one plain line", () => {
+    const [clear] = withChannelPromptCommands(
+      [],
+      [
+        {
+          name: "clear",
+          description: "Clear\u001b[31m it\nsecond line",
+          session: "required",
+        },
+      ],
+    );
+    expect(clear?.description).toBe("Clear it");
+    expect(parsePromptCommand("/clear", [clear!])).toMatchObject({
+      type: "channel",
+      name: "clear",
+    });
+    expect(parsePromptCommand("/clear the cache", [clear!])).toBeNull();
   });
 });
 
