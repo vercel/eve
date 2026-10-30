@@ -103,6 +103,38 @@ describe("createHostRouteTable", () => {
     ]);
   });
 
+  it("gives GET routes without a HEAD sibling the methods their path allows", () => {
+    const { routes } = table({
+      manifest: manifest({
+        effective: [
+          channel("GET", "/stream"),
+          channel("POST", "/stream"),
+          channel("GET", "/health"),
+          channel("HEAD", "/health"),
+          channel("GET", "/voice"),
+          channel("WEBSOCKET", "/voice"),
+        ],
+        preflight: ["/stream"],
+      }),
+    });
+
+    expect(
+      routes.map((route) => [
+        `${route.method} ${route.path}`,
+        "allow" in route ? route.allow : undefined,
+      ]),
+    ).toEqual([
+      ["GET /stream", ["GET", "POST", "OPTIONS"]],
+      ["POST /stream", undefined],
+      ["GET /health", undefined],
+      ["HEAD /health", undefined],
+      ["GET /voice", ["GET"]],
+      ["WEBSOCKET /voice", undefined],
+      ["OPTIONS /stream", undefined],
+      [`ALL ${EVE_WORKFLOW_FLOW_ROUTE_PATH}`, undefined],
+    ]);
+  });
+
   it("mounts only opted-in connection receivers and rejects one that collides with a route", () => {
     expect(
       summarize(

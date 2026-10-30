@@ -14,14 +14,40 @@ function importNitroModule(specifier: "nitro" | "nitro/h3"): string {
   return stringifyEsmImportSpecifier(resolvePackageDependencyPath(specifier));
 }
 
-/** A channel HTTP route: optional CORS, then channel dispatch. */
+/** Statements that run first in a GET handler whose path has no HEAD route. */
+function headGuard(allow: readonly string[] | undefined): {
+  readonly imports: readonly string[];
+  readonly statements: readonly string[];
+} {
+  if (allow === undefined) return { imports: [], statements: [] };
+  return {
+    imports: [
+      `import { rejectHeadRequest } from ${importSourceModule("src/internal/nitro/routes/method-guard.ts")};`,
+    ],
+    statements: [`  rejectHeadRequest(event, ${JSON.stringify(allow.join(", "))});`],
+  };
+}
+
+/** A channel HTTP route: optional HEAD guard and CORS, then channel dispatch. */
 export function renderChannelHandler(input: {
+  readonly allow?: readonly string[];
   readonly artifactsConfig: NitroArtifactsConfig;
   readonly cors?: NormalizedChannelCorsOptions;
   readonly routeKey: string;
 }): string {
+  const guard = headGuard(input.allow);
   const dispatch = `dispatchChannelRequest(event, ${JSON.stringify(input.routeKey)}, config)`;
+  const body = [
+    ...guard.statements,
+    ...(input.cors === undefined
+      ? []
+      : [
+          `  const corsResponse = handleCors(event, cors);`,
+          `  if (corsResponse !== false) return corsResponse;`,
+        ]),
+  ];
   return [
+    ...guard.imports,
     ...(input.cors === undefined
       ? []
       : [
@@ -30,15 +56,9 @@ export function renderChannelHandler(input: {
         ]),
     `import { dispatchChannelRequest } from ${importSourceModule("src/internal/nitro/routes/channel-dispatch.ts")};`,
     `const config = ${JSON.stringify(input.artifactsConfig)};`,
-    input.cors === undefined
+    body.length === 0
       ? `export default (event) => ${dispatch};`
-      : [
-          `export default (event) => {`,
-          `  const corsResponse = handleCors(event, cors);`,
-          `  if (corsResponse !== false) return corsResponse;`,
-          `  return ${dispatch};`,
-          `};`,
-        ].join("\n"),
+      : [`export default (event) => {`, ...body, `  return ${dispatch};`, `};`].join("\n"),
   ].join("\n");
 }
 

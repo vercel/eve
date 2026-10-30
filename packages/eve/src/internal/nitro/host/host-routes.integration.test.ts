@@ -148,14 +148,35 @@ describe("rendered host routes", () => {
     vi.clearAllMocks();
   });
 
-  it("registers each channel route by method", async () => {
+  it("answers HEAD on a GET-only path with 405 and its Allow set without running the route", async () => {
+    const host = await serve({ mode: "production" });
+
+    const head = await host.fetch("/stream", { method: "HEAD" });
+    expect(head.status).toBe(405);
+    expect(head.headers.get("allow")).toBe("GET, POST, OPTIONS");
+    expect(routeModules.dispatchChannelRequest).not.toHaveBeenCalled();
+
+    const get = await host.fetch("/stream");
+    expect(await get.text()).toBe("channel GET /stream");
+
+    const explicitHead = await host.fetch("/health", { method: "HEAD" });
+    expect(explicitHead.status).toBe(200);
+    expect(routeModules.dispatchChannelRequest).toHaveBeenLastCalledWith(
+      expect.anything(),
+      "HEAD /health",
+      artifactsConfig,
+    );
+  });
+
+  it("registers each channel route by method, with HEAD only on GET-only paths", async () => {
     const { routes } = await serve({ mode: "production" });
     const methodsAt = (route: string) =>
       routes.handlers.filter((entry) => entry.route === route).map((entry) => entry.method);
     const handlerAt = (route: string, method: string) =>
       routes.handlers.find((entry) => entry.route === route && entry.method === method)?.handler;
 
-    expect(methodsAt("/stream")).toEqual(["GET", "POST", "OPTIONS"]);
+    expect(methodsAt("/stream")).toEqual(["GET", "HEAD", "POST", "OPTIONS"]);
+    expect(handlerAt("/stream", "HEAD")).toBe(handlerAt("/stream", "GET"));
     expect(methodsAt("/health")).toEqual(["GET", "HEAD"]);
     expect(handlerAt("/health", "HEAD")).not.toBe(handlerAt("/health", "GET"));
     // WebSocket upgrades arrive as GET, so the route accepts every method.

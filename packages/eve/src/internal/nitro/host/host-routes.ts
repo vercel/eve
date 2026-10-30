@@ -39,6 +39,11 @@ export type HostRoute =
       readonly method: ChannelRouteMethod;
       readonly path: string;
       readonly cors?: NormalizedChannelCorsOptions;
+      /**
+       * Set on a GET route whose path has no HEAD route: every method declared
+       * for the path. The route answers HEAD with 405 and this `Allow` set.
+       */
+      readonly allow?: readonly string[];
     }
   | {
       readonly kind: "channel-preflight";
@@ -140,7 +145,7 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
 
   const scheduleTasks = development ? [] : input.scheduleRegistrations;
   return {
-    routes,
+    routes: routes.map((route) => withHeadAllow(route, routes)),
     scheduleTasks,
     ...(scheduleTasks.length > 0 && input.vercel && { cronHandlerRoute: createCronHandlerRoute() }),
   };
@@ -156,6 +161,16 @@ function hasDirectWorkflowQueue(input: HostRouteTableInput): boolean {
   return input.mode === "development"
     ? !usesParentDevelopmentWorkflowWorld(configuredWorld)
     : !input.vercel && configuredWorld !== undefined;
+}
+
+function withHeadAllow(route: HostRoute, routes: readonly HostRoute[]): HostRoute {
+  if (route.kind !== "channel" || route.method !== "GET") return route;
+  const methods = routes
+    .filter((candidate) => candidate.path === route.path)
+    .map((candidate) => candidate.method)
+    .filter((method) => method !== "WEBSOCKET" && method !== "ALL");
+  if (methods.includes("HEAD")) return route;
+  return { ...route, allow: [...new Set(methods)] };
 }
 
 /**
@@ -215,12 +230,17 @@ export async function renderHostRoutes(
         addVirtualHandler(
           id,
           renderChannelHandler({
+            allow: route.allow,
             artifactsConfig: input.artifactsConfig,
             cors: route.cors,
             routeKey,
           }),
           { method: route.method, route: route.path },
         );
+        // Nitro routes HEAD only to HEAD handlers; this one rejects it.
+        if (route.allow !== undefined) {
+          handlers.push({ handler: id, method: "HEAD", route: route.path });
+        }
         break;
       }
       case "channel-preflight":

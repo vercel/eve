@@ -33,6 +33,8 @@ export default defineChannel({
 
 A route's `path` is its app URL, without a channel-name prefix. The route above answers at `POST /threads/:threadId/messages`, not `/support/threads/:threadId/messages`. Give each route a unique method and path outside `/eve/v1/*`, which eve reserves.
 
+A path answers `HEAD` only through a route you declare with `HEAD()`. A `HEAD` request to a path that declares `GET` but not `HEAD` gets `405 Method Not Allowed`, with an `Allow` header that lists the methods the path declares. The `GET` handler doesn't run.
+
 Each route handler receives:
 
 - `from(address)` binds `send`, `respond`, `cancel`, `compact`, `clear`, and `end` to an address: your channel's ID for one conversation, such as a thread ID. See [Continuation tokens](#continuation-tokens).
