@@ -108,9 +108,6 @@ function createNitroStub(input: { buildDir?: string; dev?: boolean } = {}): Nitr
         rootDir: "/tmp/weather-agent",
         virtual: {},
       },
-      routing: {
-        sync() {},
-      },
     } as unknown as Nitro,
   };
 }
@@ -417,12 +414,10 @@ describe("application Nitro creation", () => {
     const preparedHost = await createPreparedHost();
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
-    expect(createNitroMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        preset: "vercel",
-        vercel: createEveVercelOptions({ agentName: "weather-agent", enabled: true }),
-      }),
-    );
+    expect(createNitroMock.mock.calls[0]?.[0]).toMatchObject({
+      preset: "vercel",
+      vercel: createEveVercelOptions({ agentName: "weather-agent", enabled: true }),
+    });
 
     const vercelOptions = createNitroMock.mock.calls[0]?.[0].vercel;
     expect(vercelOptions?.config).toEqual({

@@ -5,7 +5,7 @@ import { resolveAuthoredTsConfigPath } from "#internal/authored-module-build-opt
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import { findAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
 import { createNitro } from "nitro/builder";
-import type { Nitro } from "nitro/types";
+import type { LoadConfigOptions, Nitro } from "nitro/types";
 import {
   hasVercelScheduleCollections,
   usesLocalVercelSchedules,
@@ -65,6 +65,23 @@ const INSTRUMENTATION_ALIAS_PATHS = {
 // `nitro(`, which is the case when a TanStack Start host shares its root with
 // the agent. eve bundles its own runtime and never builds through the host's Vite.
 const EVE_NITRO_BUILDER = "rolldown";
+
+// Nitro gates preset behavior on this date. Pinning it keeps the build date
+// and COMPATIBILITY_DATE env out of eve's host; move it with the Nitro version.
+const EVE_NITRO_COMPATIBILITY_DATE = "2026-09-03";
+
+/**
+ * eve owns its host config and env loading, so Nitro must not merge the app
+ * root's `nitro.config`, `.nitrorc`, `package.json` `nitro` key, or `.env`
+ * files into eve's host. c12 has no switch for the main config file, so its
+ * lookup points into eve's build directory, which never holds one.
+ */
+function createNitroLoadOptions(buildDir: string): LoadConfigOptions {
+  return {
+    c12: { configFile: join(buildDir, "nitro.config"), packageJson: false, rcFile: false },
+    dotenv: false,
+  };
+}
 
 const LOCAL_SANDBOX_BACKEND_NAMES = new Set([
   "docker",
@@ -607,29 +624,33 @@ export async function createDevelopmentApplicationNitro(
   }
 
   const workflowArtifacts = await buildWorkflowArtifacts(preparedHost);
-  const nitro = await createNitro({
-    builder: EVE_NITRO_BUILDER,
-    buildDir: nitroBuildDir,
-    dev: true,
-    features: { websocket: true },
-    logLevel: 1,
-    noExternals: createNitroNoExternals(workflowArtifacts),
-    output: { dir: preparedHost.workspace.nitroOutputDir },
-    plugins,
-    publicAssets: [],
-    // eve registers every handler, plugin, and task explicitly.
-    scanDirs: [],
-    rolldownConfig: bundler.nitroRolldownConfig,
-    rollupConfig: bundler.nitroRollupConfig,
-    rootDir: preparedHost.appRoot,
-    serverDir: false,
-    traceDeps: bundler.tracedAppDependencies,
-    traceOpts: { nft: { paths: bundler.tracedAppDependencyPaths } },
-    vercel: createEveVercelOptions({
-      agentName: preparedHost.compileResult.manifest.config.name,
-      enabled: false,
-    }),
-  });
+  const nitro = await createNitro(
+    {
+      builder: EVE_NITRO_BUILDER,
+      buildDir: nitroBuildDir,
+      compatibilityDate: EVE_NITRO_COMPATIBILITY_DATE,
+      dev: true,
+      features: { websocket: true },
+      logLevel: 1,
+      noExternals: createNitroNoExternals(workflowArtifacts),
+      output: { dir: preparedHost.workspace.nitroOutputDir },
+      plugins,
+      publicAssets: [],
+      // eve registers every handler, plugin, and task explicitly.
+      scanDirs: [],
+      rolldownConfig: bundler.nitroRolldownConfig,
+      rollupConfig: bundler.nitroRollupConfig,
+      rootDir: preparedHost.appRoot,
+      serverDir: false,
+      traceDeps: bundler.tracedAppDependencies,
+      traceOpts: { nft: { paths: bundler.tracedAppDependencyPaths } },
+      vercel: createEveVercelOptions({
+        agentName: preparedHost.compileResult.manifest.config.name,
+        enabled: false,
+      }),
+    },
+    createNitroLoadOptions(nitroBuildDir),
+  );
 
   configureSharedApplicationNitro(nitro, preparedHost);
   configureNitroStepPlugins(nitro, workflowArtifacts);
@@ -683,43 +704,47 @@ export async function createProductionApplicationNitro(
       "skills",
     ),
   });
-  const nitro = await createNitro({
-    builder: EVE_NITRO_BUILDER,
-    buildDir: options.buildDir,
-    dev: false,
-    features: {
-      websocket: manifestHasWebSocketChannel(preparedHost.compileResult.manifest),
+  const nitro = await createNitro(
+    {
+      builder: EVE_NITRO_BUILDER,
+      buildDir: options.buildDir,
+      compatibilityDate: EVE_NITRO_COMPATIBILITY_DATE,
+      dev: false,
+      features: {
+        websocket: manifestHasWebSocketChannel(preparedHost.compileResult.manifest),
+      },
+      // Gzipping every output file only annotates the build log's file tree.
+      logging: { compressedSizes: false },
+      noExternals: createNitroNoExternals(workflowArtifacts),
+      output: { dir: options.outputDir },
+      preset,
+      plugins: nitroPlugins,
+      publicAssets: [],
+      // eve registers every handler, plugin, and task explicitly.
+      scanDirs: [],
+      rolldownConfig: {
+        ...bundler.nitroRolldownConfig,
+        // Region comments contain invocation-random scratch paths, not runtime inputs.
+        experimental: { attachDebugInfo: "none" },
+      },
+      rollupConfig: bundler.nitroRollupConfig,
+      rootDir: preparedHost.appRoot,
+      serverAssets: skillServerAssets,
+      serverDir: false,
+      traceDeps: bundler.tracedAppDependencies,
+      traceOpts: { nft: { paths: bundler.tracedAppDependencyPaths } },
+      vercel: createEveVercelOptions({
+        agentName: preparedHost.compileResult.manifest.config.name,
+        enabled: preset === "vercel",
+        hasVercelScheduleCollections: hasVercelScheduleCollections(
+          preparedHost.compileResult.manifest,
+        ),
+        publicRoutePrefix: options.publicRoutePrefix,
+        workspaceMember: options.workspaceMember,
+      }),
     },
-    // Gzipping every output file only annotates the build log's file tree.
-    logging: { compressedSizes: false },
-    noExternals: createNitroNoExternals(workflowArtifacts),
-    output: { dir: options.outputDir },
-    preset,
-    plugins: nitroPlugins,
-    publicAssets: [],
-    // eve registers every handler, plugin, and task explicitly.
-    scanDirs: [],
-    rolldownConfig: {
-      ...bundler.nitroRolldownConfig,
-      // Region comments contain invocation-random scratch paths, not runtime inputs.
-      experimental: { attachDebugInfo: "none" },
-    },
-    rollupConfig: bundler.nitroRollupConfig,
-    rootDir: preparedHost.appRoot,
-    serverAssets: skillServerAssets,
-    serverDir: false,
-    traceDeps: bundler.tracedAppDependencies,
-    traceOpts: { nft: { paths: bundler.tracedAppDependencyPaths } },
-    vercel: createEveVercelOptions({
-      agentName: preparedHost.compileResult.manifest.config.name,
-      enabled: preset === "vercel",
-      hasVercelScheduleCollections: hasVercelScheduleCollections(
-        preparedHost.compileResult.manifest,
-      ),
-      publicRoutePrefix: options.publicRoutePrefix,
-      workspaceMember: options.workspaceMember,
-    }),
-  });
+    createNitroLoadOptions(options.buildDir),
+  );
   // Nitro always appends a `server` asset for `<rootDir>/assets`. eve reads
   // only its own bases, and reading storage would otherwise start bundling
   // an app's `assets/` directory.
