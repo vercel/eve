@@ -102,18 +102,19 @@ export async function discardDevelopmentGeneration(
  * removes snapshots, `onRuntimePruned` reconciles the Workflow runs they
  * owned; a failed reconciliation, or a failed prune that may have removed
  * some, is retried after the next pass even if that pass removes nothing.
+ * `close()` drops pending requests and resolves once the running pass ends.
  */
 export function createDevelopmentGenerationPruner(input: {
   readonly appRoot: string;
   readonly onRuntimePruned?: () => Promise<void>;
-}): () => void {
+}): DevelopmentGenerationPruner {
   let requested = false;
-  let running = false;
+  let closed = false;
+  let running: Promise<void> | undefined;
   let reconciliationPending = false;
 
   const run = async (): Promise<void> => {
-    running = true;
-    while (requested) {
+    while (requested && !closed) {
       requested = false;
       try {
         const removed = await pruneDevelopmentRuntimeArtifactsSnapshots({ appRoot: input.appRoot });
@@ -132,13 +133,24 @@ export function createDevelopmentGenerationPruner(input: {
         }
       }
     }
-    running = false;
+    running = undefined;
   };
 
-  return () => {
-    requested = true;
-    if (!running) {
-      void run();
-    }
+  return {
+    request() {
+      if (closed) return;
+      requested = true;
+      running ??= run();
+    },
+    async close() {
+      closed = true;
+      await running;
+    },
   };
+}
+
+export interface DevelopmentGenerationPruner {
+  /** Requests a pass; ignored once closed. */
+  request(): void;
+  close(): Promise<void>;
 }

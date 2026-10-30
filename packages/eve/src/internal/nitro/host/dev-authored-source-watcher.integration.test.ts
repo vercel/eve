@@ -451,6 +451,7 @@ function createCoordinator(
   host: PreparedDevelopmentApplicationHost,
 ): DevelopmentAuthoredRebuildCoordinator {
   return {
+    close: vi.fn(async () => undefined),
     rebuild: vi.fn(async () => ({ host, kind: "runtime" as const })),
   };
 }

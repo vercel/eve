@@ -13,6 +13,7 @@ import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/ty
 import {
   activateDevelopmentGeneration,
   createDevelopmentGenerationPruner,
+  type DevelopmentGenerationPruner,
   discardDevelopmentGeneration,
 } from "#internal/nitro/development-generation.js";
 
@@ -54,6 +55,8 @@ export interface DevelopmentRebuildResult {
 
 export interface DevelopmentAuthoredRebuildCoordinator {
   rebuild(input: { readonly changedPaths: readonly string[] }): Promise<DevelopmentRebuildResult>;
+  /** Stops generation pruning, waiting for a running pass. */
+  close(): Promise<void>;
 }
 
 export async function createDevelopmentAuthoredRebuildCoordinator(input: {
@@ -94,7 +97,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
   readonly #developmentExtensions: DevelopmentExtensionSelection | undefined;
   readonly #devServer: DrainedNitroDevServer;
   readonly #usesParentWorkflowWorld: boolean;
-  readonly #requestPrune: () => void;
+  readonly #pruner: DevelopmentGenerationPruner;
 
   constructor(input: {
     readonly builds: DevelopmentBuilds;
@@ -107,12 +110,12 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
   }) {
     this.#builds = input.builds;
     this.#currentHost = input.initialHost;
-    this.#requestPrune = createDevelopmentGenerationPruner({
+    this.#pruner = createDevelopmentGenerationPruner({
       appRoot: input.initialHost.appRoot,
       onRuntimePruned: input.onRuntimePruned,
     });
     // The initial generation was activated before this coordinator existed.
-    this.#requestPrune();
+    this.#pruner.request();
     this.#currentHostFingerprint = input.currentHostFingerprint;
     this.#developmentExtensions = input.developmentExtensions;
     this.#currentRuntimeFingerprint = input.currentRuntimeFingerprint;
@@ -120,6 +123,10 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
     this.#usesParentWorkflowWorld = usesParentDevelopmentWorkflowWorld(
       input.initialHost.compileResult.manifest.config.experimental?.workflow?.world,
     );
+  }
+
+  async close(): Promise<void> {
+    await this.#pruner.close();
   }
 
   async rebuild(input: {
@@ -176,7 +183,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
           appRoot: committedHost.appRoot,
           generation: committedHost.generation,
         });
-        this.#requestPrune();
+        this.#pruner.request();
         this.#commitState(committedHost, nextHostFingerprint, nextRuntimeFingerprint);
         nextHost = undefined;
         environmentReload.commit();
@@ -267,7 +274,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
           appRoot: committedHost.appRoot,
           generation: committedHost.generation,
         });
-        this.#requestPrune();
+        this.#pruner.request();
       } catch (error) {
         await discardDevelopmentGeneration(committedHost.generation).catch(() => undefined);
         this.#commitState(

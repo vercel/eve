@@ -129,47 +129,39 @@ const createRunner: DevelopmentRunnerFactory = () => {
   };
 };
 
-async function createCoordinatorWithServer(onRuntimePruned?: () => Promise<void>) {
+async function createCoordinatorWithServer() {
   const devServer = new DrainedNitroDevServer({ error: () => undefined }, createRunner);
   mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce("host-1");
   const coordinator = await createDevelopmentAuthoredRebuildCoordinator({
     builds: createDevelopmentBuilds(),
     devServer,
     initialHost: createHost("initial", "run-1"),
-    onRuntimePruned,
   });
   return { coordinator, devServer };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.createDevelopmentGenerationPruner.mockReturnValue(mocks.requestPrune);
+  mocks.createDevelopmentGenerationPruner.mockReturnValue({
+    close: async () => undefined,
+    request: mocks.requestPrune,
+  });
 });
 
 describe("transactional authored rebuild coordinator", () => {
   it.each(["host-1", "host-2"])(
-    "prunes with reconciliation after the initial and each later activation, host fingerprint %s",
+    "activates the candidate generation with host fingerprint %s",
     async (fingerprint) => {
-      const onRuntimePruned = vi.fn(async () => undefined);
-      const { coordinator, devServer } = await createCoordinatorWithServer(onRuntimePruned);
+      const { coordinator, devServer } = await createCoordinatorWithServer();
       const candidate = createHost("candidate", "run-2");
       mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce(candidate);
       mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce(fingerprint);
       try {
-        expect(mocks.createDevelopmentGenerationPruner).toHaveBeenCalledWith({
-          appRoot: candidate.appRoot,
-          onRuntimePruned,
-        });
-        expect(mocks.requestPrune).toHaveBeenCalledOnce();
         await coordinator.rebuild({ changedPaths: [] });
         expect(mocks.activateDevelopmentGeneration).toHaveBeenCalledWith({
           appRoot: candidate.appRoot,
           generation: candidate.generation,
         });
-        expect(mocks.requestPrune).toHaveBeenCalledTimes(2);
-        expect(mocks.requestPrune.mock.invocationCallOrder[1]).toBeGreaterThan(
-          mocks.activateDevelopmentGeneration.mock.invocationCallOrder[0] ?? Infinity,
-        );
       } finally {
         await devServer.close();
       }

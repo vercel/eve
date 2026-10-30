@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => {
     setClientAddressSecret: vi.fn(),
     setControlHandler: vi.fn(),
   };
+  const closeRebuildCoordinator = vi.fn(async () => undefined);
   const files = new Map<string, string>();
   const nitro = { close: vi.fn(async () => undefined) };
 
@@ -50,7 +51,9 @@ const mocks = vi.hoisted(() => {
         workerData: {},
       };
     }),
+    closeRebuildCoordinator,
     createDevelopmentAuthoredRebuildCoordinator: vi.fn(async () => ({
+      close: closeRebuildCoordinator,
       rebuild: vi.fn(),
     })),
     createHostNitro: vi.fn(async () => nitro),
@@ -577,6 +580,18 @@ describe("createDevelopmentServer", () => {
     expect(mocks.devServer.close).toHaveBeenCalledOnce();
     expect(mocks.stopDevelopmentSandboxResources).toHaveBeenCalledOnce();
     expect(readStateRecord()).toBeUndefined();
+  });
+
+  it("stops generation pruning before the workflow World closes", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    await server.close();
+
+    const pruningStopped = mocks.closeRebuildCoordinator.mock.invocationCallOrder[0];
+    const worldClosed = mocks.worldInstance.close.mock.invocationCallOrder[0];
+    expect(pruningStopped).toBeDefined();
+    expect(pruningStopped ?? Infinity).toBeLessThan(worldClosed ?? 0);
   });
 
   it("keeps the state record when the listener fails to close", async () => {

@@ -119,7 +119,10 @@ describe("development generation pruner", () => {
 
   it("skips reconciliation after a no-op prune", async () => {
     const onRuntimePruned = vi.fn(async () => undefined);
-    createDevelopmentGenerationPruner({ appRoot: "/tmp/app-no-op-prune", onRuntimePruned })();
+    createDevelopmentGenerationPruner({
+      appRoot: "/tmp/app-no-op-prune",
+      onRuntimePruned,
+    }).request();
 
     await vi.waitFor(() => expect(mocks.prune).toHaveBeenCalledOnce());
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -130,16 +133,37 @@ describe("development generation pruner", () => {
   it("coalesces requests made during a prune into one more pass", async () => {
     const pruning = Promise.withResolvers<boolean>();
     mocks.prune.mockReturnValueOnce(pruning.promise);
-    const requestPrune = createDevelopmentGenerationPruner({ appRoot: "/tmp/app-coalesce" });
+    const pruner = createDevelopmentGenerationPruner({ appRoot: "/tmp/app-coalesce" });
 
-    requestPrune();
-    requestPrune();
-    requestPrune();
+    pruner.request();
+    pruner.request();
+    pruner.request();
     pruning.resolve(false);
 
     await vi.waitFor(() => expect(mocks.prune).toHaveBeenCalledTimes(2));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(mocks.prune).toHaveBeenCalledTimes(2);
+  });
+
+  it("close waits for the running pass and starts no other", async () => {
+    const pruning = Promise.withResolvers<boolean>();
+    mocks.prune.mockReturnValueOnce(pruning.promise);
+    const pruner = createDevelopmentGenerationPruner({ appRoot: "/tmp/app-close" });
+    pruner.request();
+    pruner.request();
+    let closed = false;
+
+    const closing = pruner.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(closed).toBe(false);
+    pruning.resolve(false);
+    await closing;
+    pruner.request();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mocks.prune).toHaveBeenCalledOnce();
   });
 
   it("retries failed reconciliation on a later request even when pruning is a no-op", async () => {
@@ -150,16 +174,16 @@ describe("development generation pruner", () => {
       .mockReturnValueOnce(reconciliation.promise)
       .mockResolvedValue(undefined);
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const requestPrune = createDevelopmentGenerationPruner({
+    const pruner = createDevelopmentGenerationPruner({
       appRoot: "/tmp/app-reconcile",
       onRuntimePruned,
     });
     try {
-      requestPrune();
+      pruner.request();
       await vi.waitFor(() => expect(onRuntimePruned).toHaveBeenCalledOnce());
       reconciliation.reject(new Error("storage unavailable"));
       await vi.waitFor(() => expect(warning).toHaveBeenCalledOnce());
-      requestPrune();
+      pruner.request();
       await vi.waitFor(() => expect(onRuntimePruned).toHaveBeenCalledTimes(2));
       expect(mocks.prune).toHaveBeenCalledTimes(2);
       expect(warning).toHaveBeenCalledExactlyOnceWith(
@@ -176,13 +200,13 @@ describe("development generation pruner", () => {
     mocks.prune.mockReturnValueOnce(pruning.promise).mockResolvedValueOnce(false);
     const onRuntimePruned = vi.fn(async () => undefined);
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const requestPrune = createDevelopmentGenerationPruner({
+    const pruner = createDevelopmentGenerationPruner({
       appRoot: "/tmp/app-prune-failure",
       onRuntimePruned,
     });
     try {
-      requestPrune();
-      requestPrune();
+      pruner.request();
+      pruner.request();
       pruning.reject(new Error("filesystem unavailable"));
       await vi.waitFor(() => expect(onRuntimePruned).toHaveBeenCalledOnce());
       expect(mocks.prune).toHaveBeenCalledTimes(2);

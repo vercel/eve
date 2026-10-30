@@ -546,7 +546,7 @@ describe("parent development Workflow World", () => {
             reconciled.reject(error);
           }
         },
-      })();
+      }).request();
       await reconciled.promise;
       for (const runId of [old, running]) {
         await expect(callWorld(world, "runs.get", [runId])).resolves.toMatchObject({

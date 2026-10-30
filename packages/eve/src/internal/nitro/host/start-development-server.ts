@@ -447,6 +447,9 @@ async function startNitroDevelopmentServer(
       initialHost: preparedHost,
       onRuntimePruned,
     });
+    // Registered after the World, so a running prune pass, which may
+    // reconcile runs through it, ends before the World closes.
+    cleanup.defer(async () => await rebuildCoordinator.close());
 
     const watcher = await devBootPhase(
       "starting file watcher",
