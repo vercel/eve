@@ -161,9 +161,9 @@ async function createPreparedHost(appRoot: string): Promise<PreparedApplicationH
       project: {
         agentRoot,
         appRoot,
-        layout: "nested",
+        layout: "nested" as const,
       },
-    } as unknown as PreparedApplicationHost["compileResult"],
+    } as PreparedApplicationHost["compileResult"],
     compiledArtifacts: {
       bootstrapPath: join(appRoot, ".eve", "compile", "compiled-artifacts-bootstrap.mjs"),
       workflowWorldPluginPath: join(
@@ -181,14 +181,14 @@ async function createPreparedHost(appRoot: string): Promise<PreparedApplicationH
 
 function createNitroStub(outputDir: string): Nitro {
   return {
-    close: vi.fn(async () => undefined),
+    close: async () => {},
     options: {
       preset: process.env.VERCEL ? "vercel" : "node-server",
       output: {
         dir: outputDir,
       },
-    },
-  } as unknown as Nitro;
+    } as Nitro["options"],
+  } as Nitro;
 }
 
 async function prepareHostBuildWorkspace(
