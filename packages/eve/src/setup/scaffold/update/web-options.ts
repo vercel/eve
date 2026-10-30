@@ -2,6 +2,8 @@ import { DEFAULT_EVE_PACKAGE_CONTRACT, type EvePackageContract } from "../create
 
 const DEFAULT_AI_PACKAGE_VERSION = "__AI_SDK_VERSION__";
 const DEFAULT_BETTER_AUTH_PACKAGE_VERSION = "__BETTER_AUTH_VERSION__";
+// Satisfies @better-auth/core's optional tracing peer so deployment bundlers can resolve it.
+export const WEB_AUTH_OPENTELEMETRY_API_VERSION = "1.9.0";
 const DEFAULT_NEXT_PACKAGE_VERSION = "__NEXT_VERSION__";
 const DEFAULT_SIGN_IN_WITH_VERCEL_NEXT_PACKAGE_VERSION = "16.3.0";
 const DEFAULT_REACT_PACKAGE_VERSION = "__REACT_VERSION__";
