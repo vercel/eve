@@ -243,15 +243,16 @@ export function LiveView({
     const text = eventType === "keyDown" && !shortcut ? keyText(event.key) : undefined;
     // The sandbox runs Linux, where shortcuts use Ctrl, so a Mac's Cmd is sent as Ctrl.
     const cmdAsCtrl = isMac() && event.key === "Meta";
-    stream.send({
+    const message: Record<string, unknown> = {
       type: "input_keyboard",
       eventType,
       key: cmdAsCtrl ? "Control" : event.key,
       code: cmdAsCtrl ? "ControlLeft" : event.code,
-      ...(text === undefined ? {} : { text }),
       windowsVirtualKeyCode: cmdAsCtrl ? 17 : event.keyCode,
       modifiers: modifiers(event),
-    });
+    };
+    if (text !== undefined) message.text = text;
+    stream.send(message);
   };
 
   const onPaste = (event: React.ClipboardEvent) => {
