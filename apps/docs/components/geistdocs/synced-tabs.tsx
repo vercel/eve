@@ -11,11 +11,26 @@ type TabsWithChildrenProps = ComponentProps<typeof GeistTabsWithChildren> & {
 const listeners = new Map<string, Set<(value: string) => void>>();
 const storageKey = (groupId: string) => `eve-docs-tabs:${groupId}`;
 
+// Browsers can block storage or reject writes; the tabs still switch together in memory.
+function readStored(groupId: string): string | null {
+  try {
+    return window.localStorage.getItem(storageKey(groupId));
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(groupId: string, value: string): void {
+  try {
+    window.localStorage.setItem(storageKey(groupId), value);
+  } catch {}
+}
+
 function useGroupedTab(groupId: string, defaultValue: string) {
   const [value, setValue] = useState(defaultValue);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(storageKey(groupId));
+    const stored = readStored(groupId);
     if (stored) setValue(stored);
     const group = listeners.get(groupId) ?? new Set();
     group.add(setValue);
@@ -27,7 +42,7 @@ function useGroupedTab(groupId: string, defaultValue: string) {
 
   const select = useCallback(
     (next: string) => {
-      window.localStorage.setItem(storageKey(groupId), next);
+      writeStored(groupId, next);
       for (const listener of listeners.get(groupId) ?? []) listener(next);
     },
     [groupId],

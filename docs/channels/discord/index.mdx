@@ -20,7 +20,7 @@ eve add channel/discord
 eve deploy
 ```
 
-Setup asks whether people reach the agent through **DMs, mentions, and threads**, or through **a slash command**. It guides you through creating the Discord application and bot, connects it through Vercel Connect, sets the Interactions Endpoint URL to `/eve/v1/discord`, prints the bot install URL, and writes the channel file:
+Setup asks whether people reach the agent through **DMs, mentions, and threads**, or through **a slash command**. It guides you through creating the Discord application and bot, connects it through Vercel Connect, points the Interactions Endpoint URL at the Connect trigger, which forwards to `/eve/v1/discord`, prints the bot install URL, and writes the channel file:
 
 ```ts title="agent/channels/discord.ts"
 import { connectDiscordCredentials } from "@vercel/connect/eve";
