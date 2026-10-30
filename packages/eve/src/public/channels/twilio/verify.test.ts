@@ -97,3 +97,23 @@ describe("verifyTwilioRequest", () => {
     ).resolves.toMatchObject({ body: body.toString() });
   });
 });
+
+it("parses the body returned by a forwarded verifier", async () => {
+  const request = new Request("https://agent.example/twilio/messages", {
+    method: "POST",
+    body: "Body=original",
+  });
+  const verified = await verifyTwilioRequest(request, {
+    authToken: undefined,
+    webhookVerifier: () => "Body=verified",
+  });
+  expect(verified.params.get("Body")).toBe("verified");
+});
+
+it("preserves query parameters for verified GET callbacks", async () => {
+  const verified = await verifyTwilioRequest(
+    new Request("https://agent.example/twilio/voice?CallSid=CA123"),
+    { authToken: undefined, webhookVerifier: () => true },
+  );
+  expect(verified.params.get("CallSid")).toBe("CA123");
+});

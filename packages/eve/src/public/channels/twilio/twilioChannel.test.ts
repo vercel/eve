@@ -92,3 +92,23 @@ describe("twilioChannel voice", () => {
     expect(twiml).not.toContain("<wait>");
   });
 });
+
+describe("twilioChannel forwarded verification", () => {
+  it.each([true, false])(
+    "honors the configured verifier before dispatch (accepted: %s)",
+    async (accepted) => {
+      const request = call(ALICE);
+      request.headers.delete("x-twilio-signature");
+      const webhookVerifier = vi.fn(() => accepted);
+      const authToken = vi.fn(() => AUTH_TOKEN);
+      const { response } = await post(
+        channel({ credentials: { authToken, webhookVerifier } }),
+        request,
+      );
+      expect(response.status).toBe(accepted ? 200 : 401);
+      if (accepted) expect(await response.text()).toContain('<Gather input="speech"');
+      expect(authToken).not.toHaveBeenCalled();
+      expect(webhookVerifier).toHaveBeenCalledOnce();
+    },
+  );
+});

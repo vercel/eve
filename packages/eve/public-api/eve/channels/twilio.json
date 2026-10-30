@@ -30,6 +30,7 @@
   "TwilioVoiceResult",
   "TwilioVoiceTranscription",
   "TwilioWebhookUrl",
+  "TwilioWebhookVerifier",
   "twilioChannel",
   "twilioContinuationToken"
 ]

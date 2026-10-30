@@ -17,12 +17,19 @@ export interface TwilioVerifiedRequest {
   readonly params: URLSearchParams;
 }
 
+/**
+ * Verifies a forwarded webhook. A falsy result rejects it; a string supplies
+ * the verified body; another truthy result accepts the original body.
+ */
+export type TwilioWebhookVerifier = (request: Request, body: string) => unknown | Promise<unknown>;
+
 /** Options for verifying Twilio inbound webhooks. */
 export interface TwilioVerifyOptions {
   /** Auth token used to verify the signature. Defaults to `TWILIO_AUTH_TOKEN`. */
   readonly authToken: TwilioAuthToken | undefined;
   /** Public URL Twilio signed. Set this when a proxy or tunnel rewrites `request.url`. */
   readonly webhookUrl?: TwilioWebhookUrl;
+  readonly webhookVerifier?: TwilioWebhookVerifier;
 }
 
 /** Resolves a Twilio auth token, falling back to `TWILIO_AUTH_TOKEN`. */
@@ -47,6 +54,16 @@ export async function verifyTwilioRequest(
   request: Request,
   options: TwilioVerifyOptions,
 ): Promise<TwilioVerifiedRequest> {
+  if (options.webhookVerifier !== undefined) {
+    const originalBody = await request.text();
+    const result = await options.webhookVerifier(request, originalBody);
+    if (!result) throw new Error("twilioChannel: inbound webhook verifier rejected the request.");
+    const body = typeof result === "string" ? result : originalBody;
+    const params = new URLSearchParams(
+      request.method === "GET" ? new URL(request.url).search : body,
+    );
+    return { body, params };
+  }
   const signature = request.headers.get("x-twilio-signature");
   if (!signature) {
     throw new Error("twilioChannel: inbound request missing X-Twilio-Signature.");
