@@ -1,4 +1,4 @@
-import { setChannelCredentialMetadata } from "#channel/compiled-channel.js";
+import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type {
   ChannelEventContext,
@@ -284,7 +284,7 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
 
     events: mergedEvents,
   });
-  setChannelCredentialMetadata(channel, config.credentials);
+  setChannelBuildMetadata(channel, { credentials: config.credentials });
   return channel;
 }
 

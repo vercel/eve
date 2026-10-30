@@ -116,6 +116,14 @@ eve's first-class channels handle webhooks, verification, event parsing, and thr
 | Another Chat SDK-supported service          | [Chat SDK adapters](./chat-sdk)                            |
 | Anything else (internal webhook, WebSocket) | [Custom channel](./custom) (`defineChannel`, above)        |
 
+## Connect deployment requirements
+
+Connect-backed Slack, GitHub, Linear, Discord, Teams, Linq, and Photon channels appear in `vercel-connect-manifest.json` with their connector reference and webhook route. The build does not fetch credentials.
+
+The non-Slack helpers need the paired [Connect SDK update](https://github.com/vercel/vercel/pull/17757). SDK releases without that change only declare Slack channels. Plain credentials and environment variables do not declare Connect requirements. Telegram, Twilio, custom channels, and arbitrary Chat SDK adapters need separate support.
+
+A declaration does not prove readiness. Connect must still verify the connector's grants and delivery configuration.
+
 ## Disclaimer
 
 As the deployer, you are responsible for ensuring your agent complies with applicable laws.
@@ -133,11 +141,3 @@ Where an eve agent communicates with people, the law may require you to disclose
 - [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): post to another platform without starting an agent turn
 - [Frontend](../guides/frontend/overview): browser chat on the eve channel with `useEveAgent`
 - [Integrations](/integrations): browse every built-in channel in one gallery using the Channels filter
-
-## Connect deployment requirements
-
-Connect-backed Slack, GitHub, Linear, Discord, Teams, Linq, and Photon channels preserve the credential helper's build metadata. eve emits each declared connector and its event destination in `vercel-connect-manifest.json`. Channels without native provider configuration still declare their credential and delivery requirements. The metadata is read without resolving credentials at build time.
-
-Use a Connect SDK release whose channel helper includes `vercelConnect.requirement`. Older helpers without that metadata do not declare a dependency. Plain credentials and environment variables remain outside Connect manifest setup. Telegram, Twilio, custom channels, and arbitrary Chat SDK adapters do not acquire Connect provisioning support from this change.
-
-A declaration does not prove readiness. Connect still needs to verify the connector's grants and delivery configuration; provider-specific setup may be required. A channel and connection using the same connector reference can share one requirement when the Connect manifest compiler supports that composition.

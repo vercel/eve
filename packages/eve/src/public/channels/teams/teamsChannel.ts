@@ -1,4 +1,4 @@
-import { setChannelCredentialMetadata } from "#channel/compiled-channel.js";
+import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { TeamsChannelCredentials } from "#public/channels/teams/credentials.js";
 export type { TeamsChannelCredentials } from "#public/channels/teams/credentials.js";
@@ -448,7 +448,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
 
     events: mergedEvents,
   });
-  setChannelCredentialMetadata(channel, config.credentials);
+  setChannelBuildMetadata(channel, { credentials: config.credentials });
   return channel;
 }
 

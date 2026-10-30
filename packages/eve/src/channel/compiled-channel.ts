@@ -74,9 +74,21 @@ export function getChannelBuildMetadata(
 
 export function setChannelBuildMetadata(
   channel: unknown,
-  factory: ChannelBuildMetadataFactory,
+  input: {
+    readonly credentials?: unknown;
+    readonly manifest?: (channelName: string) => JsonObject;
+  },
 ): void {
   if (!isCompiledChannel(channel)) throw new TypeError("Expected a compiled channel.");
+  const credentials = input.credentials;
+  const externalCredentials: unknown =
+    credentials !== null && (typeof credentials === "object" || typeof credentials === "function")
+      ? Reflect.get(credentials, "vercelConnect")
+      : undefined;
+  const factory: ChannelBuildMetadataFactory = (channelName) => ({
+    externalCredentials,
+    manifest: input.manifest?.(channelName),
+  });
   // Enumerable so `{ ...channel, routes }` keeps build metadata when an app
   // wraps a channel's routes.
   Object.defineProperty(channel, CHANNEL_BUILD_METADATA, {
@@ -84,17 +96,6 @@ export function setChannelBuildMetadata(
     enumerable: true,
     value: factory,
   });
-}
-
-export function setChannelCredentialMetadata(channel: unknown, credentials: unknown): void {
-  if (
-    credentials === null ||
-    (typeof credentials !== "object" && typeof credentials !== "function")
-  )
-    return;
-  const externalCredentials: unknown = Reflect.get(credentials, "vercelConnect");
-  if (externalCredentials === undefined) return;
-  setChannelBuildMetadata(channel, () => ({ externalCredentials }));
 }
 
 export function getChannelInstrumentationKind(value: unknown): string | undefined {

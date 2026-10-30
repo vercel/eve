@@ -12,6 +12,7 @@ import { discordChannel } from "#public/channels/discord/index.js";
 import { teamsChannel } from "#public/channels/teams/index.js";
 import { linqChannel } from "#public/channels/linq/index.js";
 import { photonIMessageChannel } from "#public/channels/photon/index.js";
+import { slackChannel } from "#public/channels/slack/index.js";
 import { buildExternalResourcesSnapshot } from "#internal/external-resources.js";
 
 it("preserves Connect dependencies through channel compilation without resolving credentials", async () => {
@@ -28,6 +29,7 @@ it("preserves Connect dependencies through channel compilation without resolving
   const credentials = <T extends object>(service: string, value: T) =>
     Object.assign(value, { vercelConnect: metadata(service) });
   const channels = [
+    ["slack", slackChannel({ credentials: credentials("slack", { botToken: token }) })],
     [
       "github",
       githubChannel({
@@ -104,7 +106,20 @@ it("preserves Connect dependencies through channel compilation without resolving
     manifest: compiled,
     publicRoutePrefix: "/app",
   });
-  expect(snapshot.resources).toHaveLength(8);
+  expect(snapshot.resources.map(({ name }) => name).sort()).toEqual([
+    "discord",
+    "github",
+    "linear",
+    "linq",
+    "photon",
+    "slack",
+    "teams",
+  ]);
+  expect(snapshot.resources.find(({ name }) => name === "slack")).toMatchObject({
+    credentials: metadata("slack").requirement,
+    manifest: { $type: "https://docs.slack.dev/reference/app-manifest/" },
+    route: { path: "/app/eve/v1/slack" },
+  });
   for (const [name, service] of [
     ["github", "github"],
     ["linear", "linear"],

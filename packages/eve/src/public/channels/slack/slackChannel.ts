@@ -1134,17 +1134,16 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
 
     events,
   });
-  const credentials = config.credentials as { readonly vercelConnect?: unknown } | undefined;
   const manifest = defineSlackAppManifest({
     botName: config.botName,
     codeChannels: config.codeChannels === true,
     users: userResolver !== undefined,
     userEmails: typeof usersOption === "object" && usersOption.email === true,
   });
-  setChannelBuildMetadata(channel, (channelName) => ({
-    externalCredentials: credentials?.vercelConnect,
-    manifest: manifest.build(channelName),
-  }));
+  setChannelBuildMetadata(channel, {
+    credentials: config.credentials,
+    manifest: (channelName) => manifest.build(channelName),
+  });
   return channel;
 }
 

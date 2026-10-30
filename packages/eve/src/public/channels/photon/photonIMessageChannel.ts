@@ -1,4 +1,4 @@
-import { setChannelCredentialMetadata } from "#channel/compiled-channel.js";
+import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { sameEnvironmentVercelOidc } from "#public/channels/same-environment-oidc.js";
@@ -164,7 +164,7 @@ export function photonIMessageChannel(config: PhotonIMessageChannelConfig): Phot
         sendEmoji: sendPhotonEmojiTapback,
       }),
   });
-  setChannelCredentialMetadata(channel, config.credentials);
+  setChannelBuildMetadata(channel, { credentials: config.credentials });
   return channel;
 }
 

@@ -1,4 +1,4 @@
-import { setChannelCredentialMetadata } from "#channel/compiled-channel.js";
+import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { DiscordChannelCredentials } from "#public/channels/discord/credentials.js";
 export type { DiscordChannelCredentials } from "#public/channels/discord/credentials.js";
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
@@ -392,7 +392,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
 
     events: mergedEvents,
   });
-  setChannelCredentialMetadata(channel, config.credentials);
+  setChannelBuildMetadata(channel, { credentials: config.credentials });
   return channel;
 }
 
