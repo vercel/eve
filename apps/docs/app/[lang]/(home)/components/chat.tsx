@@ -226,11 +226,14 @@ function StableLabel({ current, labels }: { current: string; labels: string[] })
  */
 export function DemoButton({
   action,
+  actions = [action],
   playing,
   onClick,
   className,
 }: {
   action: string;
+  /** Every action the button can show, so it keeps one width when the action changes. */
+  actions?: string[];
   playing: boolean;
   onClick: () => void;
   className?: string;
@@ -243,7 +246,7 @@ export function DemoButton({
       size="small"
       variant="tertiary"
     >
-      <StableLabel current={playing ? "Stop demo" : action} labels={[action, "Stop demo"]} />
+      <StableLabel current={playing ? "Stop demo" : action} labels={[...actions, "Stop demo"]} />
     </Button>
   );
 }

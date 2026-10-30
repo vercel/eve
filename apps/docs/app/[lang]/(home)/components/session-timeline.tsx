@@ -887,6 +887,7 @@ export function SessionTimeline(): JSX.Element {
         </div>
         <DemoButton
           action={conversation.action}
+          actions={CONVERSATIONS.map((c) => c.action)}
           onClick={playing ? stop : play}
           playing={playing}
         />
