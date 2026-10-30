@@ -92,10 +92,11 @@ export interface UseEveAgentReturn extends UseEveAgentSnapshot {
  */
 export interface UseEveAgentOptions extends SessionStoreCallbacks {
   /**
-   * Named agent mounted by a framework integration such as `withEve({ agents })`.
+   * Selects a same-origin named route mounted by the host integration.
    *
-   * `agent: "support"` targets same-origin routes under
-   * `/eve/support/v1/...`. Do not combine with `baseUrl`.
+   * `agent: "support"` targets `/eve/support/v1/...`. The host must mount
+   * that agent, for example with `withEve({ agents })` from `eve/next`.
+   * Do not combine with `baseUrl`.
    */
   readonly agent?: string;
   readonly auth?: ClientAuth;
