@@ -4,15 +4,11 @@ import { jsonSchema, type LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createKernel } from "#harness/kernel.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
-import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import type { HarnessEmitFn, HarnessSession, KernelConfig } from "#harness/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
-
-// The harness runs outside a workflow body here, where run attributes cannot
-// be written; the attribute contract is covered by emit.test.ts.
-vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -47,8 +43,8 @@ function createEventCollector(): {
 function createConfig(
   model: LanguageModel,
   emit: HarnessEmitFn,
-  overrides?: Partial<ToolLoopHarnessConfig>,
-): ToolLoopHarnessConfig {
+  overrides?: Partial<KernelConfig>,
+): KernelConfig {
   return {
     handleEvent: emit,
     resolveModel: vi.fn().mockResolvedValue(model),
@@ -83,7 +79,7 @@ describe("tool loop cancellation (real AI SDK)", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
+    const runStep = createKernel(
       createConfig(model, emit, { abortSignal: abortController.signal }),
     );
 
@@ -112,7 +108,7 @@ describe("tool loop cancellation (real AI SDK)", () => {
       },
     });
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
+    const runStep = createKernel(
       createConfig(model, emit, { abortSignal: abortController.signal }),
     );
 
@@ -135,7 +131,7 @@ describe("tool loop cancellation (real AI SDK)", () => {
     const logs = captureLogRecords();
     const cancellation = new TurnCancelledError();
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
+    const runStep = createKernel(
       createConfig(new MockLanguageModelV3(), emit, {
         abortSignal: new AbortController().signal,
         resolveModel: vi.fn().mockRejectedValue(cancellation),
@@ -152,7 +148,7 @@ describe("tool loop cancellation (real AI SDK)", () => {
 
   it("fails the session when the model resolver throws an ordinary error", async () => {
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
+    const runStep = createKernel(
       createConfig(new MockLanguageModelV3(), emit, {
         abortSignal: new AbortController().signal,
         resolveModel: vi.fn().mockRejectedValue(new Error("No provider for integration-model.")),
@@ -208,7 +204,7 @@ describe("tool loop cancellation (real AI SDK)", () => {
       doStream,
     });
 
-    const tools: ToolLoopHarnessConfig["tools"] = new Map([
+    const tools: KernelConfig["tools"] = new Map([
       [
         "wait_for_cancel",
         {
@@ -234,7 +230,7 @@ describe("tool loop cancellation (real AI SDK)", () => {
     ]);
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
+    const runStep = createKernel(
       createConfig(model, emit, { abortSignal: abortController.signal, tools }),
     );
 
@@ -295,15 +291,14 @@ describe("tool loop cancellation (real AI SDK)", () => {
       });
 
     const inert = createEventCollector();
-    const inertResult = await createToolLoopHarness(
+    const inertResult = await createKernel(
       createConfig(buildModel(), inert.emit, { abortSignal: new AbortController().signal }),
     )(createSession(), { message: "Hi" });
 
     const bare = createEventCollector();
-    const bareResult = await createToolLoopHarness(createConfig(buildModel(), bare.emit))(
-      createSession(),
-      { message: "Hi" },
-    );
+    const bareResult = await createKernel(createConfig(buildModel(), bare.emit))(createSession(), {
+      message: "Hi",
+    });
 
     expect(inertResult.next).toBe(bareResult.next);
     expect(inert.events.map((event) => event.type)).toEqual(bare.events.map((event) => event.type));
