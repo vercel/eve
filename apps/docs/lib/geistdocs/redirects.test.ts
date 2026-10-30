@@ -137,6 +137,10 @@ describe("docsRedirects", () => {
     ["/docs/sandbox/microsandbox", "/docs/sandbox"],
     ["/docs/sandbox/microsandbox.md", "/docs/sandbox.md"],
     ["/en/docs/sandbox/microsandbox.mdx", "/docs/sandbox.mdx"],
+    ["/docs/guides/prepare-for-1-0", "/docs/guides/upgrade"],
+    ["/docs/guides/prepare-for-1-0.md", "/docs/guides/upgrade.md"],
+    ["/docs/concepts/upgrade-to-v27-events", "/docs/guides/upgrade"],
+    ["/docs/concepts/upgrade-to-v27-events.md", "/docs/guides/upgrade.md"],
   ])("redirects %s to %s", (source, destination) => {
     expect(docsRedirects).toContainEqual({ source, destination, permanent: true });
   });

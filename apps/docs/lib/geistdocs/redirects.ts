@@ -88,6 +88,8 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/guides/evaluate", "/guides/decide"),
   ...createDocsRedirects("/sandbox/microsandbox", "/sandbox"),
   ...createDocsRedirects("/tools/tasks-upgrade", "/tools/tasks"),
+  ...createDocsRedirects("/guides/prepare-for-1-0", "/guides/upgrade"),
+  ...createDocsRedirects("/concepts/upgrade-to-v27-events", "/guides/upgrade"),
   ...createDocsRedirects(
     "/observability/instrumentation-migration",
     "/observability/instrumentation",
