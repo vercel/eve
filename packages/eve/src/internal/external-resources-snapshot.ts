@@ -25,7 +25,7 @@ export interface ExternalConnectionResource extends ExternalResourceBase {
 
 export interface ExternalChannelResource extends ExternalResourceBase {
   readonly kind: "channel";
-  readonly manifest: JsonObject;
+  readonly manifest?: JsonObject;
   readonly route: { readonly path: string };
 }
 
