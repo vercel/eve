@@ -7,6 +7,7 @@ import { resolvePackageRoot, resolveWorkflowModulePath } from "#internal/applica
 import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
 import { createHostPlugins, type HostPluginsInput } from "#internal/nitro/host/host-plugins.js";
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
+import { callPluginHook } from "#internal/testing/plugin-hooks.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 
 const createTemporaryDirectory = useTemporaryDirectories();
@@ -39,7 +40,6 @@ function plugins(overrides: Partial<HostPluginsInput> = {}): Plugin[] {
       stepsPath: `${WORKFLOW_DIR}/steps.mjs`,
       workflowsPath: `${WORKFLOW_DIR}/workflows.mjs`,
     },
-    workflowBuildDir: WORKFLOW_DIR,
     ...overrides,
   });
   if (!Array.isArray(list)) throw new Error("Expected a plugin list.");
@@ -48,42 +48,17 @@ function plugins(overrides: Partial<HostPluginsInput> = {}): Plugin[] {
   );
 }
 
-function matchesFilter(filter: unknown, id: string): boolean {
-  if (filter === undefined) return true;
-  if (filter instanceof RegExp) return filter.test(id);
-  if (Array.isArray(filter)) return filter.some((pattern) => matchesFilter(pattern, id));
-  const { exclude, include } = filter as { exclude?: unknown; include?: unknown };
-  return (
-    (exclude === undefined || !matchesFilter(exclude, id)) &&
-    (include === undefined || matchesFilter(include, id))
-  );
-}
-
-/** Calls one hook the way Rolldown does: object hooks run only when their id filter matches. */
-async function callHook(plugin: Plugin, hook: HookName, ...args: unknown[]): Promise<unknown> {
-  const value = plugin[hook] as
-    | ((...hookArgs: unknown[]) => unknown)
-    | { filter?: { id?: unknown }; handler: (...hookArgs: unknown[]) => unknown }
-    | undefined;
-  if (value === undefined) return null;
-  const { filter, handler } =
-    typeof value === "function" ? { filter: undefined, handler: value } : value;
-  const id = String(hook === "transform" ? args[1] : args[0]);
-  if (!matchesFilter(filter?.id, id)) return null;
-  return (await handler.call({}, ...args)) ?? null;
-}
-
 /** The first non-null result across the list, as the bundler resolves, loads, or transforms. */
 async function firstResult(list: Plugin[], hook: HookName, ...args: unknown[]) {
   for (const plugin of list) {
-    const result = await callHook(plugin, hook, ...args);
+    const result = await callPluginHook(plugin, hook, ...args);
     if (result !== null) return result;
   }
   return null;
 }
 
 describe("createHostPlugins", () => {
-  it("orders step and side-effect handling first, then the hosted graph, then extensions", async () => {
+  it("orders step transforms and side-effect resolution first, then the hosted graph, then extensions", async () => {
     const sourceRoot = await realpath(await createTemporaryDirectory("eve-host-plugins-mount-"));
     await mkdir(join(sourceRoot, "node_modules", "zod"), { recursive: true });
     await writeFile(
@@ -115,22 +90,22 @@ describe("createHostPlugins", () => {
       instrumentationEntryPlugin: createInstrumentationEntry(`${APP_ROOT}/.eve/instrumentation.mjs`)
         .plugin,
       instrumentationSourcePaths: [`${APP_ROOT}/agent/instrumentation/audit.ts`],
+      workflowArtifacts: {
+        stepTargets: [`${APP_ROOT}/agent/steps/add.ts`],
+        stepsPath: `${WORKFLOW_DIR}/steps.mjs`,
+        workflowsPath: `${WORKFLOW_DIR}/workflows.mjs`,
+      },
     }).map((plugin) => plugin.name);
 
     expect(names).toEqual([
       "eve:workflow-step-transform",
-      "eve:workflow-step-module-side-effects",
-      "eve:instrumentation-module-side-effects",
-      "eve:workflow-module-side-effects",
+      "eve:side-effect-modules",
       "eve:nitro-routing-import-specifiers",
       "eve:instrumentation-entry",
       "eve-node-esm-compat-banner",
       "eve-pseudo-packages",
-      "eve-hosted-development-runtime-prune",
-      "eve-hosted-sandbox-provider-prune",
-      "eve-optional-engine-dependency-external",
+      "eve:hosted-graph",
       "eve-extension-external-dependency",
-      "eve-external-dependency-output-check",
       "eve-extension-mount",
       "eve-extension-scope",
       "eve-authored-asset-import",

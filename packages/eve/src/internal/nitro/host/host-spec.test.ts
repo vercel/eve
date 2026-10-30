@@ -221,7 +221,7 @@ describe("createHostSpec", () => {
     expect(unconfigured.untracedExternals).toEqual(["just-bash"]);
   });
 
-  it("traces configured externals from root and subagent configs once, never eve itself", async () => {
+  it("traces configured externals from root and subagent configs once in production, never eve itself", async () => {
     const manifest = withSubagent(
       await compileAgent({ externalDependencies: ["fixture-external", "sharp", "sharp", "eve"] }),
       await compileAgent({ externalDependencies: ["subagent-external", "sharp"] }, "researcher"),
@@ -232,7 +232,11 @@ describe("createHostSpec", () => {
     expect(externals.checkedExternals).toEqual(
       expect.arrayContaining(["fixture-external", "sharp", "subagent-external"]),
     );
-    expect(spec(manifest, DEVELOPMENT).externals.checkedExternals).toEqual([]);
+    // Nitro externalizes without tracing in dev.
+    expect(spec(manifest, DEVELOPMENT).externals).toMatchObject({
+      checkedExternals: [],
+      traceDeps: [],
+    });
   });
 
   it("enables WebSocket support in dev and for production hosts that declare a WebSocket route", async () => {

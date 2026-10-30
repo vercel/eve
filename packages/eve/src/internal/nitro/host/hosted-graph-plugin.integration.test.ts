@@ -3,12 +3,29 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { createExternalDependencyOutputCheckPlugin } from "#internal/nitro/host/external-dependency-output-check-plugin.js";
+import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
+import { createHostedGraphPlugin } from "#internal/nitro/host/hosted-graph-plugin.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 
 const createDirectory = useTemporaryDirectories();
 
 const APP_ROOT = join("/app");
+
+const NO_EXTERNALS: ExternalsPolicy = {
+  checkedExternals: [],
+  extensionTracePaths: {},
+  pruneDevelopmentRuntime: false,
+  pruneSandboxProviders: false,
+  traceDeps: [],
+  untracedExternals: [],
+};
+
+function checkingPlugin(externalDependencies: readonly string[]) {
+  return createHostedGraphPlugin({
+    appRoot: APP_ROOT,
+    externals: { ...NO_EXTERNALS, checkedExternals: externalDependencies },
+  });
+}
 
 // A `pg` install whose exports include `./lib/client` only when `withClient`.
 async function writePackage(packageDir: string, input: { readonly withClient: boolean }) {
@@ -43,11 +60,8 @@ async function checkOutput(input: {
     await symlink(join(root, "store", "pg"), join(serverDir, "node_modules", "pg"), "junction");
   }
 
-  const plugin = createExternalDependencyOutputCheckPlugin({
-    appRoot: APP_ROOT,
-    externalDependencies: ["pg"],
-  });
-  await plugin?.writeBundle(
+  const plugin = checkingPlugin(["pg"]);
+  await plugin?.writeBundle?.(
     { dir: serverDir },
     {
       "_chunks/db.mjs": {
@@ -82,10 +96,7 @@ async function checkInstalledPackage(files: Readonly<Record<string, string>>) {
   for (const [path, contents] of Object.entries(files)) {
     await writeFile(join(packageDir, path), contents);
   }
-  await createExternalDependencyOutputCheckPlugin({
-    appRoot: APP_ROOT,
-    externalDependencies: ["pg"],
-  })?.writeBundle(
+  await checkingPlugin(["pg"])?.writeBundle?.(
     { dir: serverDir },
     {
       "index.mjs": {
@@ -105,7 +116,7 @@ async function checkInstalledPackage(files: Readonly<Record<string, string>>) {
 const missing = (specifier: string, chunk: string) =>
   `"${specifier}" is listed in build.externalDependencies and imported by the hosted bundle (${chunk}), but the build output cannot resolve it. Add "pg" to the dependencies in ${join(APP_ROOT, "package.json")}.`;
 
-describe("external dependency output check", () => {
+describe("hosted graph output check", () => {
   it("accepts a configured external the output resolves", async () => {
     await expect(checkOutput({ installAt: "server" })).resolves.toBeUndefined();
   });
@@ -160,9 +171,7 @@ describe("external dependency output check", () => {
     ).rejects.toThrow(missing("pg", "index.mjs"));
   });
 
-  it("does nothing when no externals are configured", () => {
-    expect(
-      createExternalDependencyOutputCheckPlugin({ appRoot: APP_ROOT, externalDependencies: [] }),
-    ).toBeNull();
+  it("adds no plugin when the policy needs no substitutions or checks", () => {
+    expect(createHostedGraphPlugin({ appRoot: APP_ROOT, externals: NO_EXTERNALS })).toBeNull();
   });
 });

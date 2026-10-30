@@ -14,9 +14,9 @@ describe("extension external dependency plugin", () => {
       },
     ]);
 
-    expect(plugin?.resolveId("zod")).toEqual({ external: true, id: "zod" });
-    expect(plugin?.resolveId("layout-sensitive-runtime-extra")).toBeNull();
-    expect(plugin?.resolveId("unconfigured-runtime")).toBeNull();
+    expect(plugin?.resolveId.handler("zod")).toEqual({ external: true, id: "zod" });
+    expect(plugin?.resolveId.handler("layout-sensitive-runtime-extra")).toBeNull();
+    expect(plugin?.resolveId.handler("unconfigured-runtime")).toBeNull();
   });
 
   it("omits the plugin without extension requirements", () => {

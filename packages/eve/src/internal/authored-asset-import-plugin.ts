@@ -16,6 +16,9 @@ const AUTHORED_ASSET_CODE_EXTENSIONS = [
   ".json",
 ] as const;
 
+// Supersets of isPotentialAuthoredAssetImport, so most imports skip the JS hook.
+const RESOLVE_FILTER = /^(?:\.|\/|[A-Za-z]:[\\/])/;
+
 /**
  * Creates the Rollup-compatible plugin that gives authored modules a small
  * asset-module surface for non-code relative imports. An asset may sit outside
@@ -34,61 +37,78 @@ export function createAuthoredAssetImportPlugin(input: {
   readonly authoredSourceOnly?: boolean;
 }) {
   const packageRoot = toCanonicalPath(input.packageRoot);
+  // Built here rather than at module scope: runtime modules import this file.
+  const loadFilter = [
+    /\?raw$/,
+    new RegExp(
+      String.raw`\.(?!(?:${AUTHORED_ASSET_CODE_EXTENSIONS.map((extension) => extension.slice(1)).join("|")}|node)(?:[?#]|$))[^./?#]*(?:[?#].*)?$`,
+    ),
+  ];
   const handles = (path: string): boolean =>
     input.authoredSourceOnly !== true || (isAbsolute(path) && !isNodeModulesPath(path));
   return {
     name: "eve-authored-asset-import",
-    resolveId(source: string, importer: string | undefined) {
-      if (!isPotentialAuthoredAssetImport(source) || importer === undefined || !handles(importer)) {
-        return undefined;
-      }
+    resolveId: {
+      filter: { id: RESOLVE_FILTER },
+      handler(source: string, importer: string | undefined) {
+        if (
+          !isPotentialAuthoredAssetImport(source) ||
+          importer === undefined ||
+          !handles(importer)
+        ) {
+          return undefined;
+        }
 
-      const { path, suffix } = splitImportSuffix(source);
-      const resolvedPath = isAbsolute(path) ? path : resolve(dirname(importer), path);
-      const canonicalPath = toCanonicalPath(resolvedPath);
-      const importerPackageRoot =
-        findAuthoredPackageRoot(dirname(toCanonicalPath(importer))) ?? packageRoot;
-      if (
-        !isPathInsideOrEqual(canonicalPath, packageRoot) &&
-        !isPathInsideOrEqual(canonicalPath, importerPackageRoot)
-      ) {
-        throw new Error(
-          `Authored asset import "${source}" from "${importer}" resolves outside package root "${importerPackageRoot}".`,
-        );
-      }
+        const { path, suffix } = splitImportSuffix(source);
+        const resolvedPath = isAbsolute(path) ? path : resolve(dirname(importer), path);
+        const canonicalPath = toCanonicalPath(resolvedPath);
+        const importerPackageRoot =
+          findAuthoredPackageRoot(dirname(toCanonicalPath(importer))) ?? packageRoot;
+        if (
+          !isPathInsideOrEqual(canonicalPath, packageRoot) &&
+          !isPathInsideOrEqual(canonicalPath, importerPackageRoot)
+        ) {
+          throw new Error(
+            `Authored asset import "${source}" from "${importer}" resolves outside package root "${importerPackageRoot}".`,
+          );
+        }
 
-      return `${canonicalPath}${suffix}`;
+        return `${canonicalPath}${suffix}`;
+      },
     },
-    async load(id: string) {
-      const { path, suffix } = splitImportSuffix(id);
+    load: {
+      filter: { id: loadFilter },
+      async handler(id: string) {
+        const { path, suffix } = splitImportSuffix(id);
 
-      if (!isPotentialAuthoredAssetImport(id) || !handles(path)) {
-        return undefined;
-      }
+        if (!isPotentialAuthoredAssetImport(id) || !handles(path)) {
+          return undefined;
+        }
 
-      if (suffix === "?raw") {
-        const source = await readAssetText(path);
+        if (suffix === "?raw") {
+          const source = await readAssetText(path);
 
-        if (source === undefined) {
+          if (source === undefined) {
+            return undefined;
+          }
+
+          return {
+            code: `export default ${JSON.stringify(source)};`,
+            moduleType: "js" as const,
+          };
+        }
+
+        const dataUrl = await readAssetDataUrl(path);
+
+        if (dataUrl === undefined) {
           return undefined;
         }
 
         return {
-          code: `export default ${JSON.stringify(source)};`,
+          code: `export default ${JSON.stringify(dataUrl)};`,
           moduleType: "js" as const,
         };
-      }
-
-      const dataUrl = await readAssetDataUrl(path);
-
-      if (dataUrl === undefined) {
-        return undefined;
-      }
-
-      return {
-        code: `export default ${JSON.stringify(dataUrl)};`,
-        moduleType: "js" as const,
-      };
+      },
     },
   };
 }

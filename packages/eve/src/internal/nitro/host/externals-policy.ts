@@ -64,24 +64,28 @@ export function createExternalsPolicy(input: {
   const extensionMounts = nodes.flatMap((node) => node.extensionMounts);
   const extensionExternals = extensionMounts.flatMap((mount) => mount.externalDependencies);
 
+  const production = !input.development;
   return {
-    checkedExternals: input.development ? [] : configuredExternals,
-    extensionTracePaths: resolveExtensionExternalDependencyPaths(extensionMounts),
-    pruneDevelopmentRuntime: !input.development,
+    checkedExternals: production ? configuredExternals : [],
+    extensionTracePaths: production ? resolveExtensionExternalDependencyPaths(extensionMounts) : {},
+    pruneDevelopmentRuntime: production,
     // On Vercel, `DefaultSandbox.environment()` records Vercel Sandbox, so
     // local providers are reachable only when the app configured one.
     pruneSandboxProviders:
       input.preset === "vercel" &&
       ![...backendNames].some((backendName) => LOCAL_SANDBOX_BACKEND_NAMES.has(backendName)),
-    traceDeps: [
-      ...new Set([
-        ...configuredEngines,
-        ...configuredExternals,
-        ...extensionExternals.map((dependency) => `${dependency}*`),
-      ]),
-    ].filter(
-      (dependency) => dependency !== EVE_PACKAGE_NAME && dependency !== `${EVE_PACKAGE_NAME}*`,
-    ),
+    // Nitro externalizes without tracing in dev.
+    traceDeps: production
+      ? [
+          ...new Set([
+            ...configuredEngines,
+            ...configuredExternals,
+            ...extensionExternals.map((dependency) => `${dependency}*`),
+          ]),
+        ].filter(
+          (dependency) => dependency !== EVE_PACKAGE_NAME && dependency !== `${EVE_PACKAGE_NAME}*`,
+        )
+      : [],
     untracedExternals,
   };
 }

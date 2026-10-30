@@ -13,14 +13,6 @@ import {
 import type { RolldownOutputAsset, RolldownOutputChunk } from "#internal/bundler/nitro-rolldown.js";
 import { isPathInsideOrEqual } from "#internal/nitro/dev-runtime-source-snapshot-local-roots.js";
 
-interface ExternalDependencyOutputCheckPlugin {
-  readonly name: string;
-  writeBundle(
-    outputOptions: { readonly dir: string },
-    bundle: Readonly<Record<string, RolldownOutputChunk | RolldownOutputAsset>>,
-  ): Promise<void>;
-}
-
 interface ExternalImport {
   readonly chunk: string;
   readonly probe: string;
@@ -41,53 +33,46 @@ const PROBE_SOURCE = "export const resolve = (specifier) => import.meta.resolve(
  * Resolution is Node's own ESM resolver, run by the build's Node in a child
  * process; no dependency code is loaded.
  */
-export function createExternalDependencyOutputCheckPlugin(input: {
+export async function checkExternalDependencyOutput(input: {
   readonly appRoot: string;
+  readonly bundle: Readonly<Record<string, RolldownOutputChunk | RolldownOutputAsset>>;
   readonly externalDependencies: readonly string[];
-}): ExternalDependencyOutputCheckPlugin | null {
-  if (input.externalDependencies.length === 0) {
-    return null;
+  readonly outputDir: string;
+}): Promise<void> {
+  const outputDir = realpathSync(input.outputDir);
+  const probeName = `.eve-resolve-${randomUUID()}.mjs`;
+  const externalImports: ExternalImport[] = [];
+  for (const output of Object.values(input.bundle)) {
+    if (output.type !== "chunk") {
+      continue;
+    }
+    const probe = join(dirname(join(outputDir, output.fileName)), probeName);
+    for (const specifier of [...output.imports, ...output.dynamicImports]) {
+      if (
+        resolveConfiguredExternalDependency(specifier, input.externalDependencies) !== undefined
+      ) {
+        externalImports.push({ chunk: output.fileName, probe, specifier });
+      }
+    }
+  }
+  if (externalImports.length === 0) {
+    return;
   }
 
-  return {
-    name: "eve-external-dependency-output-check",
-    async writeBundle(outputOptions, bundle) {
-      const outputDir = realpathSync(outputOptions.dir);
-      const probeName = `.eve-resolve-${randomUUID()}.mjs`;
-      const externalImports: ExternalImport[] = [];
-      for (const output of Object.values(bundle)) {
-        if (output.type !== "chunk") {
-          continue;
-        }
-        const probe = join(dirname(join(outputDir, output.fileName)), probeName);
-        for (const specifier of [...output.imports, ...output.dynamicImports]) {
-          if (
-            resolveConfiguredExternalDependency(specifier, input.externalDependencies) !== undefined
-          ) {
-            externalImports.push({ chunk: output.fileName, probe, specifier });
-          }
-        }
-      }
-      if (externalImports.length === 0) {
-        return;
-      }
-
-      const resolved = await resolveWithNode(outputDir, probeName, externalImports);
-      externalImports.forEach(({ chunk, specifier }, index) => {
-        const url = resolved[index];
-        const path = url?.startsWith("file:") === true ? fileURLToPath(url) : undefined;
-        if (
-          path === undefined ||
-          statSync(path, { throwIfNoEntry: false })?.isFile() !== true ||
-          !isPathInsideOrEqual(path, outputDir)
-        ) {
-          throw new Error(
-            `"${specifier}" is listed in build.externalDependencies and imported by the hosted bundle (${chunk}), but the build output cannot resolve it. Add "${packageImportName(specifier)}" to the dependencies in ${join(input.appRoot, "package.json")}.`,
-          );
-        }
-      });
-    },
-  };
+  const resolved = await resolveWithNode(outputDir, probeName, externalImports);
+  externalImports.forEach(({ chunk, specifier }, index) => {
+    const url = resolved[index];
+    const path = url?.startsWith("file:") === true ? fileURLToPath(url) : undefined;
+    if (
+      path === undefined ||
+      statSync(path, { throwIfNoEntry: false })?.isFile() !== true ||
+      !isPathInsideOrEqual(path, outputDir)
+    ) {
+      throw new Error(
+        `"${specifier}" is listed in build.externalDependencies and imported by the hosted bundle (${chunk}), but the build output cannot resolve it. Add "${packageImportName(specifier)}" to the dependencies in ${join(input.appRoot, "package.json")}.`,
+      );
+    }
+  });
 }
 
 /**

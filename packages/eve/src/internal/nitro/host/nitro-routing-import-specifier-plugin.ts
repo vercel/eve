@@ -1,4 +1,5 @@
 import { normalizeGeneratedEsmImportSpecifiers } from "#internal/application/import-specifier.js";
+import { exactRegex } from "#internal/bundler/filters.js";
 
 /**
  * Rewrites Nitro's generated routing modules before the bundler resolves their
@@ -7,20 +8,14 @@ import { normalizeGeneratedEsmImportSpecifiers } from "#internal/application/imp
 export function createNitroRoutingImportSpecifierPlugin() {
   return {
     name: "eve:nitro-routing-import-specifiers",
-    transform(code: string, id: string) {
-      if (id !== "#nitro/virtual/routing" && id !== "#nitro/virtual/routing-meta") {
-        return null;
-      }
-
-      const nextCode = normalizeGeneratedEsmImportSpecifiers(code);
-      if (nextCode === code) {
-        return null;
-      }
-
-      return {
-        code: nextCode,
-        map: null,
-      };
+    transform: {
+      filter: {
+        id: [exactRegex("#nitro/virtual/routing"), exactRegex("#nitro/virtual/routing-meta")],
+      },
+      handler(code: string) {
+        const nextCode = normalizeGeneratedEsmImportSpecifiers(code);
+        return nextCode === code ? null : { code: nextCode, map: null };
+      },
     },
   };
 }

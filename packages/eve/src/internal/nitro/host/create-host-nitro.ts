@@ -167,7 +167,6 @@ function toNitroConfig(
         instrumentationEntryPlugin: instrumentationEntry?.plugin,
         instrumentationSourcePaths: compiledArtifacts.instrumentationSourcePaths,
         workflowArtifacts: built.workflowArtifacts,
-        workflowBuildDir: locations.workflowBuildDir,
       }),
       tsconfig: locations.tsconfig,
       // Region comments contain invocation-random scratch paths, not runtime inputs.

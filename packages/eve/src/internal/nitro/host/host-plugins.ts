@@ -11,13 +11,12 @@ import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-pl
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import type { CompiledExtensionMount } from "#compiler/manifest.js";
-import { createCompiledSandboxProviderPrunePlugin } from "#internal/nitro/host/compiled-sandbox-provider-prune-plugin.js";
-import { createDevelopmentRuntimePrunePlugin } from "#internal/nitro/host/development-runtime-prune-plugin.js";
+import { exactRegex, pathsRegex } from "#internal/bundler/filters.js";
 import { createExtensionExternalDependencyPlugin } from "#internal/nitro/host/extension-external-dependency-plugin.js";
-import { createExternalDependencyOutputCheckPlugin } from "#internal/nitro/host/external-dependency-output-check-plugin.js";
 import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
+import { createHostedGraphPlugin } from "#internal/nitro/host/hosted-graph-plugin.js";
+import { workflowHandlerPath } from "#internal/nitro/host/host-routes.js";
 import { createNitroRoutingImportSpecifierPlugin } from "#internal/nitro/host/nitro-routing-import-specifier-plugin.js";
-import { createOptionalEngineDependencyPlugin } from "#internal/nitro/host/optional-engine-dependency-plugin.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 import type { WorkflowArtifacts } from "#internal/workflow-bundle/builder.js";
 import type { NitroConfig } from "nitro/types";
@@ -36,7 +35,6 @@ export interface HostPluginsInput {
   readonly instrumentationEntryPlugin?: HostBuildPlugins;
   readonly instrumentationSourcePaths?: readonly string[];
   readonly workflowArtifacts: WorkflowArtifacts;
-  readonly workflowBuildDir: string;
 }
 
 /**
@@ -45,31 +43,24 @@ export interface HostPluginsInput {
  * resolution never claims a workflow module.
  */
 export function createHostPlugins(input: HostPluginsInput): HostBuildPlugins {
-  const stepTargets = new Set(
-    input.workflowArtifacts.stepTargets.map(normalizeStepTransformComparisonPath),
-  );
-  const { externals } = input;
+  const { stepTargets, stepsPath, workflowsPath } = input.workflowArtifacts;
   return [
-    createStepTransformPlugin(input.appRoot, stepTargets),
-    createStepModuleSideEffectsPlugin(input.appRoot, stepTargets),
-    input.instrumentationSourcePaths === undefined
-      ? null
-      : createInstrumentationModuleSideEffectsPlugin(input.instrumentationSourcePaths),
-    createWorkflowModuleSideEffectsPlugin(input.appRoot, input.workflowBuildDir),
+    stepTargets.length === 0 ? null : createStepTransformPlugin(input.appRoot, stepTargets),
+    createSideEffectModulesPlugin(input.appRoot, [
+      ...stepTargets,
+      stepsPath,
+      workflowsPath,
+      workflowHandlerPath(input.workflowArtifacts),
+      ...(input.instrumentationSourcePaths ?? []),
+    ]),
     createNitroRoutingImportSpecifierPlugin(),
     input.instrumentationEntryPlugin ?? null,
     createNodeEsmCompatBannerPlugin(),
     // Before Nitro's externals and tracing, so a pseudo-package never reaches
     // the output as a live import.
     createPseudoPackagePlugin(),
-    externals.pruneDevelopmentRuntime ? createDevelopmentRuntimePrunePlugin() : null,
-    externals.pruneSandboxProviders ? createCompiledSandboxProviderPrunePlugin() : null,
-    createOptionalEngineDependencyPlugin(externals.untracedExternals),
+    createHostedGraphPlugin({ appRoot: input.appRoot, externals: input.externals }),
     createExtensionExternalDependencyPlugin(input.extensionMounts),
-    createExternalDependencyOutputCheckPlugin({
-      appRoot: input.appRoot,
-      externalDependencies: externals.checkedExternals,
-    }),
     createExtensionMountPlugin(input.extensionMounts, input.extensionOverridePaths),
     createExtensionScopePlugin(
       input.extensionMounts.map((mount) => ({
@@ -197,45 +188,33 @@ function createPackageRelativeTransformFilename(path: string): string | undefine
   return undefined;
 }
 
-function createWorkflowModuleSideEffectsPlugin(rootDir: string, workflowBuildDir: string) {
-  const workflowBundleDirectory = resolveNitroModuleComparisonPath(rootDir, workflowBuildDir);
+// The specifiers resolveNitroImportPath resolves; anything else cannot name a side-effect module.
+const SIDE_EFFECT_SPECIFIER_FILTER = [
+  /^(?:\.|\/|file:\/\/)/,
+  ...WORKFLOW_MODULE_SPECIFIERS.map((specifier) => exactRegex(specifier)),
+];
+
+/**
+ * Keeps modules evaluated for their side effects: the workflow bundle and its
+ * handler, step modules that register durable steps, and instrumentation
+ * modules the generated instrumentation plugin imports eagerly.
+ */
+function createSideEffectModulesPlugin(rootDir: string, paths: readonly string[]) {
+  const ids = new Set(paths.map(normalizeStepTransformComparisonPath));
   return {
-    name: "eve:workflow-module-side-effects",
-    resolveId(source: string, importer: string | undefined) {
-      const resolvedSource =
-        resolveNitroImportPath(rootDir, source, importer) ??
-        resolveNitroModuleComparisonPath(rootDir, source);
-
-      if (!resolvedSource.startsWith(workflowBundleDirectory)) {
-        return null;
-      }
-
-      return {
-        id: resolvedSource,
-        moduleSideEffects: "no-treeshake" as const,
-      };
-    },
-  };
-}
-
-function createStepModuleSideEffectsPlugin(rootDir: string, stepTargets: ReadonlySet<string>) {
-  return {
-    name: "eve:workflow-step-module-side-effects",
-    resolveId(source: string, importer?: string) {
-      const resolvedSource = resolveNitroImportPath(rootDir, source, importer);
-
-      if (resolvedSource === null) {
-        return null;
-      }
-
-      if (!stepTargets.has(normalizeStepTransformComparisonPath(resolvedSource))) {
-        return null;
-      }
-
-      return {
-        id: resolvedSource,
-        moduleSideEffects: "no-treeshake" as const,
-      };
+    name: "eve:side-effect-modules",
+    resolveId: {
+      filter: { id: SIDE_EFFECT_SPECIFIER_FILTER },
+      handler(source: string, importer: string | undefined) {
+        const resolvedSource = resolveNitroImportPath(rootDir, source, importer);
+        if (
+          resolvedSource === null ||
+          !ids.has(normalizeStepTransformComparisonPath(resolvedSource))
+        ) {
+          return null;
+        }
+        return { id: resolvedSource, moduleSideEffects: "no-treeshake" as const };
+      },
     },
   };
 }
@@ -245,54 +224,26 @@ function createStepModuleSideEffectsPlugin(rootDir: string, stepTargets: Readonl
  * `steps.mjs` entry can import raw source files while still registering
  * durable step handlers with the Workflow runtime.
  */
-function createStepTransformPlugin(rootDir: string, stepTargets: ReadonlySet<string>) {
+function createStepTransformPlugin(rootDir: string, stepTargets: readonly string[]) {
+  const targets = new Set(stepTargets.map(normalizeStepTransformComparisonPath));
   return {
-    async transform(code: string, id: string) {
-      const resolvedId = resolveNitroModuleComparisonPath(rootDir, id);
-
-      if (!stepTargets.has(normalizeStepTransformComparisonPath(resolvedId))) {
-        return null;
-      }
-
-      const result = await applyWorkflowTransform(
-        createRelativeTransformFilename(rootDir, resolvedId),
-        code,
-        "step",
-        resolvedId,
-        rootDir,
-      );
-
-      return {
-        code: result.code,
-        map: null,
-      };
-    },
     name: "eve:workflow-step-transform",
-  };
-}
-
-/**
- * Marks the authored instrumentation modules as side-effectful so the final
- * bundle preserves their eager evaluation from the generated instrumentation
- * plugin.
- */
-function createInstrumentationModuleSideEffectsPlugin(
-  instrumentationModulePaths: readonly string[],
-) {
-  const normalizedInstrumentationModulePaths = new Set(
-    instrumentationModulePaths.map(normalizePath),
-  );
-  return {
-    name: "eve:instrumentation-module-side-effects",
-    resolveId(source: string) {
-      if (!normalizedInstrumentationModulePaths.has(normalizePath(source))) {
-        return null;
-      }
-
-      return {
-        id: source,
-        moduleSideEffects: "no-treeshake" as const,
-      };
+    transform: {
+      filter: { id: pathsRegex(stepTargets) },
+      async handler(code: string, id: string) {
+        const resolvedId = resolveNitroModuleComparisonPath(rootDir, id);
+        if (!targets.has(normalizeStepTransformComparisonPath(resolvedId))) {
+          return null;
+        }
+        const result = await applyWorkflowTransform(
+          createRelativeTransformFilename(rootDir, resolvedId),
+          code,
+          "step",
+          resolvedId,
+          rootDir,
+        );
+        return { code: result.code, map: null };
+      },
     },
   };
 }

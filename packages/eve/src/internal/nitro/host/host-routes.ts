@@ -323,6 +323,15 @@ export async function renderHostRoutes(
   };
 }
 
+/**
+ * The workflow route's handler file, written beside the bundle. It stays a
+ * file because it registers queue handlers as top-level side effects, and
+ * Nitro virtual modules default to `moduleSideEffects: false`.
+ */
+export function workflowHandlerPath(workflowArtifacts: WorkflowArtifacts): string {
+  return join(dirname(workflowArtifacts.workflowsPath), "workflows-handler.mjs");
+}
+
 async function writeWorkflowFileHandler(
   route: Extract<HostRoute, { kind: "workflow" }>,
   input: {
@@ -331,7 +340,7 @@ async function writeWorkflowFileHandler(
   },
 ): Promise<string> {
   const directory = dirname(input.workflowArtifacts.workflowsPath);
-  const handlerPath = join(directory, "workflows-handler.mjs");
+  const handlerPath = workflowHandlerPath(input.workflowArtifacts);
   await writeFile(
     handlerPath,
     renderWorkflowFileHandler({

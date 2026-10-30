@@ -2,9 +2,14 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 
+import { exactRegex, prefixRegex } from "#internal/bundler/filters.js";
+
 interface BundlerPluginShape {
   readonly name: string;
-  resolveId(source: string): { external: true; id: string } | null;
+  readonly resolveId: {
+    readonly filter: { readonly id: RegExp[] };
+    handler(source: string): { external: true; id: string } | null;
+  };
 }
 
 interface ExtensionExternalDependencyMount {
@@ -21,16 +26,19 @@ export function createExtensionExternalDependencyPlugin(
     return null;
   }
 
+  const dependencies = [...dependencyAnchors.keys()];
   return {
     name: "eve-extension-external-dependency",
-    resolveId(source) {
-      const dependency = [...dependencyAnchors.keys()].find(
-        (packageName) => source === packageName || source.startsWith(`${packageName}/`),
-      );
-      if (dependency === undefined) {
-        return null;
-      }
-      return { external: true, id: source };
+    resolveId: {
+      filter: {
+        id: dependencies.flatMap((name) => [exactRegex(name), prefixRegex(`${name}/`)]),
+      },
+      handler(source) {
+        const dependency = dependencies.find(
+          (packageName) => source === packageName || source.startsWith(`${packageName}/`),
+        );
+        return dependency === undefined ? null : { external: true, id: source };
+      },
     },
   };
 }
