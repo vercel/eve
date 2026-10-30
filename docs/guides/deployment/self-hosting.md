@@ -59,7 +59,7 @@ You can instead run `eve build` where Docker is reachable and copy the output in
 
 ## Authenticate workflow deliveries
 
-Postgres and other custom Workflow worlds require `EVE_WORKFLOW_DELIVERY_SECRET`. Generate a random value of at least 32 characters, for example with `openssl rand -hex 32`, store it in your secret manager, and set the same value on every server process connected to the world. The server exits at startup when the variable is unset, including when you deploy a custom world to Vercel. The built-in local world generates its own secret for each process, and Vercel Workflow authenticates deliveries itself.
+With the Postgres world or another custom Workflow world, any client that can reach `/.well-known/workflow/v1/flow` can submit a queue delivery, including its run context and principal. Set `EVE_WORKFLOW_DELIVERY_SECRET` to make eve reject deliveries it didn't queue. Generate a random value of at least 32 characters, for example with `openssl rand -hex 32`, store it in your secret manager, and set the same value on every server process connected to the world. When the variable is unset, eve leaves these deliveries unauthenticated and prints a warning at startup; then keep the route unreachable from untrusted networks. The built-in local world always generates its own secret for each process, and Vercel Workflow authenticates deliveries itself.
 
 When eve queues a workflow job, it signs the job's queue name and message with the secret and stores the signature in the job's `x-eve-workflow-delivery` header. Before it runs a delivery, eve checks that signature against the message it received and answers HTTP 401 when they don't match. This check is separate from [channel route auth](../auth-and-route-protection), and it applies whether the world delivers a job inside the process or over HTTP to another replica. Use HTTPS when deliveries cross hosts.
 
@@ -71,9 +71,9 @@ To rotate the secret without interrupting deliveries:
 2. After every process accepts both, set `new_secret,old_secret` so new jobs are signed with `new_secret`.
 3. Remove `old_secret` after every process has switched and the jobs signed with it have finished.
 
-A queued job whose secret is no longer accepted fails each delivery attempt with HTTP 401 until the world stops retrying it. Jobs queued by an eve version without delivery signatures fail the same way after you upgrade. At startup, eve queues every active run again with a current signature, so runs that the [eve-version requirements](./self-hosted-operations#upgrade-a-self-hosted-agent) allow to resume do resume.
+A queued job whose secret is no longer accepted fails each delivery attempt with HTTP 401 until the world stops retrying it. The same happens to jobs queued before you first set the secret. At startup, eve queues every active run again with a current signature, so runs that the [eve-version requirements](./self-hosted-operations#upgrade-a-self-hosted-agent) allow to resume do resume. When you turn on authentication, restart every process with the secret at the same time: a process still running without it queues unsigned jobs, and the other processes reject them.
 
-When the variable is unset, `eve dev` and a local `eve eval` share a generated secret stored in `.eve/workflow-delivery-secret`, so they can run beside each other against one database.
+During development, `eve dev` and a local `eve eval` read the variable the same way; set it in `.env.local` to authenticate their deliveries.
 
 ## Configure proxy routes
 
@@ -84,7 +84,7 @@ Forward both runtime route prefixes through your reverse proxy or ingress withou
 
 If the proxy forwards only `/eve/`, a session starts but the run stalls because its workflow callback can’t reach eve.
 
-eve rejects queue deliveries without a valid [delivery signature](#authenticate-workflow-deliveries), independently of channel route auth. Public Workflow webhook routes keep their own authorization.
+Channel route auth doesn't cover these routes. With a Postgres or custom world, [set a delivery secret](#authenticate-workflow-deliveries) so eve rejects queue deliveries it didn't sign. Public Workflow webhook routes keep their own authorization.
 
 ## Verify the service
 
@@ -133,7 +133,7 @@ Connection sign-in links and the callback URLs a parent passes to [remote agents
 WORKFLOW_LOCAL_BASE_URL=https://support.example.com eve start --host 0.0.0.0
 ```
 
-With the local world, queued work is also delivered to that origin, so those deliveries pass through your proxy. Forward both [proxy route prefixes](#configure-proxy-routes), and keep a single process behind that origin; see [Use the local world](./workflow-worlds#use-the-local-world). The Postgres world usually delivers queued work inside each process; deliveries it sends over HTTP also use this origin and carry a [delivery signature](#authenticate-workflow-deliveries).
+With the local world, queued work is also delivered to that origin, so those deliveries pass through your proxy. Forward both [proxy route prefixes](#configure-proxy-routes), and keep a single process behind that origin; see [Use the local world](./workflow-worlds#use-the-local-world). The Postgres world usually delivers queued work inside each process; deliveries it sends over HTTP also use this origin, and carry a [delivery signature](#authenticate-workflow-deliveries) when you set a secret.
 
 For an agent mounted under a path prefix, also set `EVE_PUBLIC_ROUTE_PREFIX`; see [Run workspace members](./self-hosted-operations#run-workspace-members).
 

@@ -54,27 +54,32 @@ function untrustedDeliveryResponse(): Response {
   return Response.json({ error: "Untrusted workflow delivery." }, { status: 401 });
 }
 
-/** Creates a random delivery secret for a process or `eve dev` session. */
+/** Creates a random per-process delivery secret. */
 export function createWorkflowDeliverySecret(): string {
   return randomBytes(32).toString("hex");
 }
 
 /**
  * Reads the shared delivery secrets for a World whose queue can deliver to
- * any replica. A comma-separated value rotates the secret: deliveries are
- * stamped with the first entry and accepted with any entry, so jobs queued
- * under the previous secret still run.
+ * any replica, or `undefined` when none is configured: authentication is
+ * opt-in for these Worlds, and eve warns that their deliveries stay open. A
+ * comma-separated value rotates the secret: deliveries are stamped with the
+ * first entry and accepted with any entry, so jobs queued under the previous
+ * secret still run.
  */
-export function readWorkflowDeliverySecrets(worldPackage: string): WorkflowDeliverySecrets {
+export function readWorkflowDeliverySecrets(
+  worldPackage: string,
+): WorkflowDeliverySecrets | undefined {
   const secrets = (process.env[WORKFLOW_DELIVERY_SECRET_ENV] ?? "")
     .split(",")
     .map((secret) => secret.trim())
     .filter((secret) => secret.length > 0);
   const [first, ...rest] = secrets;
   if (first === undefined) {
-    throw new Error(
-      `${WORKFLOW_DELIVERY_SECRET_ENV} is not set. The "${worldPackage}" Workflow world delivers queue messages to /.well-known/workflow/v1/flow, and eve rejects deliveries that do not carry this secret. Set ${WORKFLOW_DELIVERY_SECRET_ENV} to the same random value on every replica, for example the output of \`openssl rand -hex 32\`. See ${DELIVERY_SECRET_DOCS_URL}`,
+    console.warn(
+      `[eve] ${WORKFLOW_DELIVERY_SECRET_ENV} is not set, so the "${worldPackage}" Workflow world accepts unauthenticated queue deliveries at /.well-known/workflow/v1/flow. Set it to the same random value on every server process, for example the output of \`openssl rand -hex 32\`, or keep that route unreachable from untrusted networks. See ${DELIVERY_SECRET_DOCS_URL}`,
     );
+    return undefined;
   }
   if (secrets.some((secret) => secret.length < MIN_WORKFLOW_DELIVERY_SECRET_LENGTH)) {
     throw new Error(

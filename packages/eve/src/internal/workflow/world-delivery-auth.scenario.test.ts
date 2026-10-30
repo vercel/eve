@@ -1,7 +1,3 @@
-import { execFile } from "node:child_process";
-import { join } from "node:path";
-import { promisify } from "node:util";
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useScenarioApp } from "#internal/testing/scenario-app.js";
@@ -19,7 +15,7 @@ afterEach(() => vi.unstubAllEnvs());
 describe("workflow delivery authentication for a configured World", () => {
   const scenarioApp = useScenarioApp();
 
-  it("requires a shared secret at startup and rejects flow deliveries without it", async () => {
+  it("leaves deliveries open without a secret and rejects unsigned ones with it", async () => {
     vi.stubEnv("VERCEL", "");
     const app = await scenarioApp({
       name: "world-delivery-auth",
@@ -57,44 +53,45 @@ describe("workflow delivery authentication for a configured World", () => {
     });
     await buildApplication(app.appRoot, { skipSandboxPrewarm: true });
 
+    const queueName = "__wkf_workflow_entry";
+    const message = { runId: "wrun_1", task: "Prepare Alice's weekly summary" };
+    const deliver = (serverUrl: string, proof?: string) => {
+      const headers = new Headers({
+        "content-type": "application/json",
+        "x-vqs-queue-name": queueName,
+      });
+      if (proof !== undefined) headers.set(WORKFLOW_DELIVERY_HEADER, proof);
+      return fetch(new URL("/.well-known/workflow/v1/flow", serverUrl), {
+        body: JSON.stringify(message),
+        headers,
+        method: "POST",
+        signal: AbortSignal.timeout(10_000),
+      });
+    };
+
+    // Without a secret, authentication stays off and the World gets every delivery.
     vi.stubEnv("EVE_WORKFLOW_DELIVERY_SECRET", undefined);
-    await expect(
-      promisify(execFile)(process.execPath, [join(app.appRoot, ".output/server/index.mjs")], {
-        cwd: app.appRoot,
-        env: { ...process.env, PORT: "0" },
-        timeout: 10_000,
-      }),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining("EVE_WORKFLOW_DELIVERY_SECRET is not set"),
-    });
+    const open = await startProductionServer(app.appRoot, { host: "127.0.0.1", port: 0 });
+    try {
+      const unauthenticated = await deliver(open.url);
+      expect(unauthenticated.status).toBe(200);
+      expect(await unauthenticated.text()).toBe("delivered");
+    } finally {
+      await open.close();
+    }
 
     vi.stubEnv("EVE_WORKFLOW_DELIVERY_SECRET", DELIVERY_SECRET);
     const server = await startProductionServer(app.appRoot, { host: "127.0.0.1", port: 0 });
     try {
-      const queueName = "__wkf_workflow_entry";
-      const message = { runId: "wrun_1", task: "Prepare Alice's weekly summary" };
-      const deliver = (proof?: string) => {
-        const headers = new Headers({
-          "content-type": "application/json",
-          "x-vqs-queue-name": queueName,
-        });
-        if (proof !== undefined) headers.set(WORKFLOW_DELIVERY_HEADER, proof);
-        return fetch(new URL("/.well-known/workflow/v1/flow", server.url), {
-          body: JSON.stringify(message),
-          headers,
-          method: "POST",
-          signal: AbortSignal.timeout(10_000),
-        });
-      };
-
-      expect((await deliver()).status).toBe(401);
+      expect((await deliver(server.url)).status).toBe(401);
       // A secret on its own is not a proof for any message.
-      expect((await deliver(DELIVERY_SECRET)).status).toBe(401);
-      expect(
-        (await deliver(signWorkflowDelivery(DELIVERY_SECRET, queueName, { runId: "wrun_2" })))
-          .status,
-      ).toBe(401);
-      const trusted = await deliver(signWorkflowDelivery(DELIVERY_SECRET, queueName, message));
+      expect((await deliver(server.url, DELIVERY_SECRET)).status).toBe(401);
+      const otherMessage = signWorkflowDelivery(DELIVERY_SECRET, queueName, { runId: "wrun_2" });
+      expect((await deliver(server.url, otherMessage)).status).toBe(401);
+      const trusted = await deliver(
+        server.url,
+        signWorkflowDelivery(DELIVERY_SECRET, queueName, message),
+      );
       expect(trusted.status).toBe(200);
       expect(await trusted.text()).toBe("delivered");
     } finally {

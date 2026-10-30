@@ -29,7 +29,7 @@ On startup, `eve start` queues pending and running local workflow runs again. Ru
 
 The [`@workflow/world-postgres`](https://www.npmjs.com/package/@workflow/world-postgres) package stores runs in PostgreSQL and queues their work with Graphile Worker. Every `eve start` process connected to the same database processes queued work, so you can run several replicas behind a load balancer.
 
-eve signs every Postgres queue job with `EVE_WORKFLOW_DELIVERY_SECRET` and rejects deliveries without a valid signature, independently of channel route auth. Set the same secret on every replica. See [Authenticate workflow deliveries](./self-hosting#authenticate-workflow-deliveries) for setup and rotation.
+Set `EVE_WORKFLOW_DELIVERY_SECRET` so eve signs every Postgres queue job and rejects deliveries without a valid signature. Channel route auth doesn't cover these deliveries, so without the secret, anyone who can reach the flow route can submit one. Set the same secret on every replica. See [Authenticate workflow deliveries](./self-hosting#authenticate-workflow-deliveries) for setup and rotation.
 
 1. Install the package in your app:
 
@@ -52,7 +52,7 @@ eve signs every Postgres queue job with `EVE_WORKFLOW_DELIVERY_SECRET` and rejec
    });
    ```
 
-3. Set `WORKFLOW_POSTGRES_URL` and `EVE_WORKFLOW_DELIVERY_SECRET` in the runtime environment. The connection string can also come from `DATABASE_URL`; without either connection variable, the package connects to `postgres://world:world@localhost:5432/world`. Generate the delivery secret once, for example with `openssl rand -hex 32`, and configure the same value on every replica. `eve start` refuses to start without it.
+3. Set `WORKFLOW_POSTGRES_URL` and `EVE_WORKFLOW_DELIVERY_SECRET` in the runtime environment. The connection string can also come from `DATABASE_URL`; without either connection variable, the package connects to `postgres://world:world@localhost:5432/world`. Generate the delivery secret once, for example with `openssl rand -hex 32`, and configure the same value on every replica. Without it, eve warns at startup and leaves queue deliveries unauthenticated.
 
 4. Create the schema before the first start:
 
@@ -97,7 +97,7 @@ export default defineAgent({
 
 The package must export a default factory or `createWorld()` function. It reads credentials and host options from runtime environment variables, not `agent.ts`. If the package must stay external in hosted output, list it in `build.externalDependencies`.
 
-Custom worlds also require [`EVE_WORKFLOW_DELIVERY_SECRET`](./self-hosting#authenticate-workflow-deliveries), and their queues must deliver each job with the headers eve queued it with. eve checks the delivery signature in addition to any authentication the world provides. eve rejects a world that enables `invoke()` delivery, because those deliveries skip the signed queue.
+Custom worlds authenticate queue deliveries the same way when you set [`EVE_WORKFLOW_DELIVERY_SECRET`](./self-hosting#authenticate-workflow-deliveries). Their queues must then deliver each job with the headers eve queued it with. eve checks the delivery signature in addition to any authentication the world provides. With the secret set, eve rejects a world that enables `invoke()` delivery, because those deliveries skip the signed queue.
 
 Install a world built against the same `@workflow/*` major version as your eve release, currently `5.x`. eve checks the world's `@workflow/core` or `@workflow/world` dependency at startup, and fails with the version to install when the major versions differ.
 

@@ -56,7 +56,6 @@ import {
   installWorkflowLocalQueueEnvironment,
   installWorkflowTransportEnvironment,
 } from "#internal/nitro/host/dev-workflow-world-setup.js";
-import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
 import type { ParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-server.js";
 import {
   DEFAULT_DEVELOPMENT_SERVER_HOST,
@@ -422,13 +421,10 @@ async function startNitroDevelopmentServer(
     const activeDevServer = devServer;
     const workflowTransportSecret = randomBytes(32).toString("base64url");
     activeDevServer.setClientAddressSecret(workflowTransportSecret);
-    restoreWorkflowTransportEnvironment = installWorkflowTransportEnvironment({
-      appRoot: project.appRoot,
-      secret: workflowTransportSecret,
-      workersOwnWorld: !usesParentDevelopmentWorkflowWorld(
-        preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
-      ),
-    });
+    restoreWorkflowTransportEnvironment = installWorkflowTransportEnvironment(
+      project.appRoot,
+      workflowTransportSecret,
+    );
     workflowWorld = createDevelopmentWorkflowWorld({
       appRoot: project.appRoot,
       preparedHost,

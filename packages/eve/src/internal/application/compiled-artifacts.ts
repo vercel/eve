@@ -328,9 +328,10 @@ interface WorkflowWorldWiring {
  * co-vary and must stay together: a world constructed through an explicit
  * `createWorld(config)` call must not import `createWorldFromModule`, and
  * only the vendored local World needs the data-directory resolver import.
- * Every World except Vercel's authenticates its queue deliveries: the local
- * World with a per-process secret, any other with the shared
- * `EVE_WORKFLOW_DELIVERY_SECRET`, because any replica may deliver its jobs.
+ * The local World always authenticates its queue deliveries with a
+ * per-process secret. Any other World except Vercel's authenticates them when
+ * `EVE_WORKFLOW_DELIVERY_SECRET` is set, because any replica may deliver its
+ * jobs and so the secret must be shared.
  */
 function resolveWorkflowWorldWiring(packageName: string): WorkflowWorldWiring {
   if (packageName === "@workflow/world-local") {
@@ -386,14 +387,17 @@ applyVercelWorkflowWorldDefaults(workflowWorld);`.trimStart();
   const workflowRuntimeImportSpecifier = stringifyEsmImportSpecifier(
     resolvePackageCompiledFilePath("src/compiled/@workflow/core/runtime.js"),
   );
-  // The secret is read before the World connects anywhere, so a missing secret
-  // fails first; the World is validated before it is wrapped, so a malformed or
-  // incompatible World still fails with the validator's message.
+  // The secret is read before the World connects anywhere, so an invalid
+  // secret fails first; the World is validated before it is wrapped, so a
+  // malformed or incompatible World still fails with the validator's message.
   const createWorldSource = `
 const workflowDeliverySecrets = readWorkflowDeliverySecrets(${JSON.stringify(packageName)});
 const configuredWorkflowWorld = await createWorldFromModule(workflowWorldModule);
 validateWorkflowWorld({ packageName: ${JSON.stringify(packageName)}, world: configuredWorkflowWorld });
-const workflowWorld = authenticateWorkflowDeliveries(configuredWorkflowWorld, workflowDeliverySecrets);`.trimStart();
+const workflowWorld =
+  workflowDeliverySecrets === undefined
+    ? configuredWorkflowWorld
+    : authenticateWorkflowDeliveries(configuredWorkflowWorld, workflowDeliverySecrets);`.trimStart();
   return {
     moduleImportSpecifier: packageName,
     extraImportLines: [
