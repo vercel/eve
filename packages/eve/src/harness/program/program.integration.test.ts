@@ -99,6 +99,7 @@ async function runTurn(
       prompts.push(lastUserText(prompt));
       fullPrompts.push(prompt);
       const answer = answers[Math.min(prompts.length, answers.length) - 1];
+      if (answer instanceof Error) throw answer;
       return outputSchema === undefined ? reply(String(answer)) : deliver(answer);
     },
   });
@@ -276,6 +277,19 @@ function withHistory(
 ): Program {
   return (ctx) => ({ ...nativeProgram(ctx), history: () => history(ctx) });
 }
+
+describe("eve's own loop", () => {
+  it("keeps the turn's input in history when the model call fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { result } = await runTurn(nativeProgram, [new Error("upstream unavailable")]);
+
+    expect(result.settledTurn).toMatchObject({ isError: true });
+    expect(result.session.history).toMatchObject([
+      { content: "Which sources back the second claim?", kind: "user", role: "user" },
+    ]);
+  });
+});
 
 describe("a session program's history", () => {
   it("is asked before every model call, with the call's size", async () => {

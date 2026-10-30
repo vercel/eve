@@ -20,8 +20,8 @@ import { followingToolResults, type TurnInput } from "./intake.js";
 type ClientContext = NonNullable<ReturnType<typeof getTurnClientContextState>>;
 
 /**
- * What the model reads this step: durable history, with the task results and notes the step
- * delivers and the turn's input, and the client's context for the turn, which keeps one position
+ * What the model reads this step: durable history, which holds the turn's input, with the task
+ * results the step delivers, and the client's context for the turn, which keeps one position
  * across the turn's steps and never joins history.
  */
 export interface Prompt {
@@ -62,10 +62,22 @@ export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> 
     );
   }
 
-  const placed = placeTurnInput(step, messages, turn);
+  return { clientContext: getTurnClientContextState(step.session.state, turn.turnId), messages };
+}
+
+/**
+ * The turn's input joins history before the model call, so a call that fails leaves it there. The
+ * client's context keeps the position it takes here.
+ */
+export async function commitTurnInput(step: Step, turn: TurnInput): Promise<TurnInput> {
+  const prompt = await buildPrompt(step, turn);
+  step.session = changeHistory(step.session, {
+    extend: placeTurnInput(step, prompt.messages, turn),
+  });
   return {
-    clientContext: getTurnClientContextState(step.session.state, turn.turnId),
-    messages: placed,
+    ...turn,
+    clientContext: undefined,
+    storedClientContext: getTurnClientContextState(step.session.state, turn.turnId),
   };
 }
 
@@ -85,7 +97,7 @@ export function previewPrompt(step: Step, turn: TurnInput): Prompt {
  * The turn's input after `messages`, past a tool-result boundary when they end in tool results.
  * The client's context takes its position here, and never joins the messages.
  */
-export function placeTurnInput(
+function placeTurnInput(
   step: Step,
   messages: readonly HarnessModelMessage[],
   turn: TurnInput,
