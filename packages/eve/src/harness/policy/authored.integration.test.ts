@@ -30,6 +30,7 @@ import {
   defineInstructions,
 } from "#public/definitions/instructions.js";
 import { defineTool } from "#tools/definition.js";
+import { askQuestion } from "#tools/provided/ask-question.js";
 import { recordUsage } from "#harness/usage-sink.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
@@ -375,6 +376,96 @@ describe.each([
     ]);
     expect(runs).toEqual([{ version: "1.2" }]);
     expect(summarizeTurnEvents(stages[1]!).message).toBe('Released {"released":"1.2"}.');
+    expect(modelCalls).toEqual([]);
+  });
+
+  it("asks the person a question itself, and settles with the answer", async () => {
+    const modelCalls: string[] = [];
+    const runtime = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic(() => ({
+            model: model("gpt-5.5", () => {
+              modelCalls.push("model");
+              return textStreamResult("The model shouldn't answer.");
+            }),
+            modelContextWindowTokens: 200_000,
+          })),
+        }),
+        name: "harness-question",
+      },
+      modules: [
+        {
+          loadNamespace: async () => ({ default: askQuestion }),
+          logicalPath: "tools/ask_question.ts",
+        },
+        {
+          loadNamespace: async () => ({
+            default: defineHarness((ctx) => ({
+              next: () => {
+                const asked = ctx.calls.find((call) => call.tool === "ask_question");
+                if (asked === undefined) {
+                  return {
+                    calls: [
+                      {
+                        input: {
+                          options: [
+                            { description: "The quieter day.", label: "Saturday" },
+                            { description: "The day before the launch.", label: "Sunday" },
+                          ],
+                          question: "Which day should Bob schedule the review?",
+                        },
+                        tool: "ask_question",
+                      },
+                    ],
+                  };
+                }
+                return { settle: { output: `Scheduled: ${JSON.stringify(asked.output)}` } };
+              },
+            })),
+          }),
+          logicalPath: "harness.ts",
+        },
+      ],
+    });
+    const continuationToken = `http:harness-question-${cold}`;
+    const stages = await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          input: { message: "Alice asks to schedule Bob's review." },
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          serializedContext: {
+            ...buildSerializedContext({ auth: ALICE, channelKind: "http", continuationToken }),
+            "eve.capabilities": { requestInput: true },
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const asked = await withTimeout(stream.nextTurn(), "question");
+        const question = filterEventsByType(asked, "interaction.opened").find(
+          (event) => event.data.request.kind === "question",
+        );
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          auth: ALICE,
+          delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+          kind: "send",
+          payload: {
+            answers: [{ interactionId: question!.data.interactionId, optionId: "Saturday" }],
+          },
+        });
+        return [asked, await withTimeout(stream.nextTurn(), "answered")];
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+
+    expect(filterEventsByType(stages[0]!, "call.requested")).toMatchObject([
+      { data: { capability: { name: "ask_question" }, owner: { turnId: expect.any(String) } } },
+    ]);
+    expect(summarizeTurnEvents(stages[1]!).message).toContain("Saturday");
     expect(modelCalls).toEqual([]);
   });
 
