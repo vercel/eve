@@ -67,6 +67,7 @@ export async function prepareWebAuthScaffold(input: {
     };
     document.dependencies = {
       ...document.dependencies,
+      "@opentelemetry/api": document.dependencies?.["@opentelemetry/api"] ?? "1.9.0",
       "better-auth":
         document.dependencies?.["better-auth"] ??
         resolveWebPackageVersions(undefined, "sign-in-with-vercel").betterAuthPackageVersion,
