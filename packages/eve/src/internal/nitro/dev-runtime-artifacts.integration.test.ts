@@ -652,6 +652,43 @@ describe("development runtime artifact snapshots", () => {
     expect(existsSync(retiredSnapshotRoot)).toBe(false);
   });
 
+  it("keeps a retired snapshot that a live run executes on, however old", async () => {
+    const appRoot = await createScratchDirectory("eve-dev-runtime-protected-pruning-");
+    const snapshotsRoot = join(appRoot, ".eve", "dev-runtime", "snapshots");
+    const activeSnapshotRoot = join(snapshotsRoot, "active");
+    const parkedSnapshotRoot = join(snapshotsRoot, "parked");
+    const idleSnapshotRoot = join(snapshotsRoot, "idle");
+
+    for (const snapshotRoot of [activeSnapshotRoot, parkedSnapshotRoot, idleSnapshotRoot]) {
+      await mkdir(snapshotRoot, { recursive: true });
+      await writeFile(join(snapshotRoot, "activated"), "");
+    }
+    for (const snapshotRoot of [parkedSnapshotRoot, idleSnapshotRoot]) {
+      await writeFile(join(snapshotRoot, "retired.json"), `${JSON.stringify({ retiredAt: 1 })}\n`);
+    }
+    await activateSnapshot({
+      appRoot,
+      snapshot: await markSnapshotMaterialized({
+        runtimeAppRoot: join(activeSnapshotRoot, "source"),
+        snapshotRoot: activeSnapshotRoot,
+        snapshotSourceRoot: join(activeSnapshotRoot, "source"),
+        sourceRoot: appRoot,
+      }),
+    });
+
+    await pruneDevelopmentRuntimeArtifactsSnapshots({
+      appRoot,
+      gracePeriodMs: 0,
+      now: 2,
+      protectedGenerationIds: new Set(["parked"]),
+      retainCount: 0,
+    });
+
+    expect(existsSync(activeSnapshotRoot)).toBe(true);
+    expect(existsSync(parkedSnapshotRoot)).toBe(true);
+    expect(existsSync(idleSnapshotRoot)).toBe(false);
+  });
+
   it("removes a partially staged snapshot when staging fails", async () => {
     const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-failed-stage-");
     const agentRoot = join(appRoot, "agent");

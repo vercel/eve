@@ -51,6 +51,8 @@ export interface ParentDevelopmentWorkflowWorld {
   handleRequest(request: Request): Promise<Response | undefined>;
   start(): Promise<void>;
   reconcileExpiredRuns(): Promise<void>;
+  /** Generations that pending or running runs execute on; their snapshots must outlive them. */
+  activeRunGenerationIds(): Promise<ReadonlySet<string>>;
 }
 
 export function createParentDevelopmentWorkflowWorld(input: {
@@ -188,9 +190,25 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     return this.#reconciliation;
   }
 
+  async activeRunGenerationIds(): Promise<ReadonlySet<string>> {
+    return new Set((await this.#listActiveRuns()).map((run) => run.deploymentId));
+  }
+
   async #collectExpiredRunIds(): Promise<readonly string[]> {
-    // Finish pagination before cancellation changes the status-filtered result set.
     const runIds: string[] = [];
+    for (const run of await this.#listActiveRuns()) {
+      const availability = await readDevelopmentGenerationAvailability(
+        this.#appRoot,
+        run.deploymentId,
+      );
+      if (availability.kind === "missing") runIds.push(run.runId);
+    }
+    return runIds;
+  }
+
+  async #listActiveRuns(): Promise<readonly { runId: string; deploymentId: string }[]> {
+    // Finish pagination before cancellation changes the status-filtered result set.
+    const runs: { runId: string; deploymentId: string }[] = [];
     for (const status of ["pending", "running"] as const) {
       let cursor: string | undefined;
       do {
@@ -209,16 +227,12 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
           );
         }
         for (const run of page.data) {
-          const availability = await readDevelopmentGenerationAvailability(
-            this.#appRoot,
-            run.deploymentId,
-          );
-          if (availability.kind === "missing") runIds.push(run.runId);
+          runs.push({ runId: run.runId, deploymentId: run.deploymentId });
         }
         cursor = page.hasMore ? (page.cursor ?? undefined) : undefined;
       } while (cursor !== undefined);
     }
-    return runIds;
+    return runs;
   }
 
   async #handleCall(request: Request): Promise<Response> {

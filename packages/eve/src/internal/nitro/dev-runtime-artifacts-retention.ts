@@ -1,6 +1,6 @@
 import { existsSync, type Dirent } from "node:fs";
 import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 export const DEVELOPMENT_RUNTIME_ARTIFACTS_ACTIVATED_MARKER = "activated";
 
@@ -25,6 +25,8 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshotDirectory(input: {
   readonly gracePeriodMs?: number;
   readonly now?: number;
   readonly protectAll: boolean;
+  /** Generations that live Workflow runs execute on; never removed, whatever their age. */
+  readonly protectedGenerationIds?: ReadonlySet<string>;
   readonly retainCount?: number;
   readonly snapshotsDirectory: string;
 }): Promise<boolean> {
@@ -105,6 +107,7 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshotDirectory(input: {
     snapshots.map(async (snapshot) => {
       if (
         snapshot.active ||
+        input.protectedGenerationIds?.has(basename(snapshot.path)) ||
         (snapshot.activated && snapshot.retiredAt === undefined) ||
         retainedRetiredPaths.has(snapshot.path) ||
         retainedStagedPaths.has(snapshot.path) ||

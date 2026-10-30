@@ -25,6 +25,7 @@ interface DevelopmentGenerationPruneState {
   reconciliationPending: boolean;
   running: Promise<void> | undefined;
   onRuntimePruned?: () => Promise<void>;
+  activeRunGenerationIds?: () => Promise<ReadonlySet<string>>;
 }
 
 const developmentGenerationPruneStates = new Map<string, DevelopmentGenerationPruneState>();
@@ -93,6 +94,7 @@ export async function activateDevelopmentGeneration(input: {
   readonly appRoot: string;
   readonly generation: DevelopmentGeneration;
   readonly onRuntimePruned?: () => Promise<void>;
+  readonly activeRunGenerationIds?: () => Promise<ReadonlySet<string>>;
 }): Promise<void> {
   const activation = await activateDevelopmentGenerationTransaction(input);
   activation.commit();
@@ -102,6 +104,7 @@ export async function activateDevelopmentGenerationTransaction(input: {
   readonly appRoot: string;
   readonly generation: DevelopmentGeneration;
   readonly onRuntimePruned?: () => Promise<void>;
+  readonly activeRunGenerationIds?: () => Promise<ReadonlySet<string>>;
 }): Promise<DevelopmentRuntimeArtifactsActivation> {
   const activation = await activateDevelopmentRuntimeArtifactsSnapshotTransaction({
     appRoot: input.appRoot,
@@ -115,7 +118,11 @@ export async function activateDevelopmentGenerationTransaction(input: {
       }
       settled = true;
       activation.commit();
-      requestDevelopmentGenerationPrune(input.appRoot, input.onRuntimePruned);
+      requestDevelopmentGenerationPrune(
+        input.appRoot,
+        input.onRuntimePruned,
+        input.activeRunGenerationIds,
+      );
     },
     async rollback() {
       if (settled) {
@@ -136,6 +143,7 @@ export async function discardDevelopmentGeneration(
 function requestDevelopmentGenerationPrune(
   appRoot: string,
   onRuntimePruned: (() => Promise<void>) | undefined,
+  activeRunGenerationIds: (() => Promise<ReadonlySet<string>>) | undefined,
 ): void {
   const state: DevelopmentGenerationPruneState = developmentGenerationPruneStates.get(appRoot) ?? {
     requested: false,
@@ -145,6 +153,7 @@ function requestDevelopmentGenerationPrune(
   developmentGenerationPruneStates.set(appRoot, state);
   state.requested = true;
   state.onRuntimePruned = onRuntimePruned;
+  state.activeRunGenerationIds = activeRunGenerationIds;
   if (state.running === undefined) {
     startDevelopmentGenerationPruning(appRoot, state);
   }
@@ -158,9 +167,14 @@ function startDevelopmentGenerationPruning(
     while (state.requested) {
       state.requested = false;
       const onRuntimePruned = state.onRuntimePruned;
+      const activeRunGenerationIds = state.activeRunGenerationIds;
       let removedSnapshots: boolean;
       try {
-        removedSnapshots = await pruneDevelopmentRuntimeArtifactsSnapshots({ appRoot });
+        // A run parked on a person can outlast every retention bound; its snapshot is its code.
+        removedSnapshots = await pruneDevelopmentRuntimeArtifactsSnapshots({
+          appRoot,
+          protectedGenerationIds: await activeRunGenerationIds?.(),
+        });
       } catch (error) {
         // A failed prune may already have removed some snapshots.
         state.reconciliationPending ||= onRuntimePruned !== undefined;
@@ -189,6 +203,7 @@ function startDevelopmentGenerationPruning(
       } else {
         // Retry failed cleanup on the next activation, even if its prune is a no-op.
         state.onRuntimePruned = undefined;
+        state.activeRunGenerationIds = undefined;
       }
     });
 }

@@ -61,6 +61,7 @@ export async function createDevelopmentAuthoredRebuildCoordinator(input: {
   readonly devServer: DrainedNitroDevServer;
   readonly initialHost: PreparedDevelopmentApplicationHost;
   readonly onRuntimePruned?: () => Promise<void>;
+  readonly activeRunGenerationIds?: () => Promise<ReadonlySet<string>>;
 }): Promise<DevelopmentAuthoredRebuildCoordinator> {
   return new TransactionalDevelopmentAuthoredRebuildCoordinator({
     builds: input.builds,
@@ -70,6 +71,7 @@ export async function createDevelopmentAuthoredRebuildCoordinator(input: {
     devServer: input.devServer,
     initialHost: input.initialHost,
     onRuntimePruned: input.onRuntimePruned,
+    activeRunGenerationIds: input.activeRunGenerationIds,
   });
 }
 
@@ -94,6 +96,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
   readonly #devServer: DrainedNitroDevServer;
   readonly #usesParentWorkflowWorld: boolean;
   readonly #onRuntimePruned: (() => Promise<void>) | undefined;
+  readonly #activeRunGenerationIds: (() => Promise<ReadonlySet<string>>) | undefined;
 
   constructor(input: {
     readonly builds: DevelopmentBuilds;
@@ -103,10 +106,12 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
     readonly devServer: DrainedNitroDevServer;
     readonly initialHost: PreparedDevelopmentApplicationHost;
     readonly onRuntimePruned?: () => Promise<void>;
+    readonly activeRunGenerationIds?: () => Promise<ReadonlySet<string>>;
   }) {
     this.#builds = input.builds;
     this.#currentHost = input.initialHost;
     this.#onRuntimePruned = input.onRuntimePruned;
+    this.#activeRunGenerationIds = input.activeRunGenerationIds;
     this.#currentHostFingerprint = input.currentHostFingerprint;
     this.#developmentExtensions = input.developmentExtensions;
     this.#currentRuntimeFingerprint = input.currentRuntimeFingerprint;
@@ -170,6 +175,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
           appRoot: committedHost.appRoot,
           generation: committedHost.generation,
           onRuntimePruned: this.#onRuntimePruned,
+          activeRunGenerationIds: this.#activeRunGenerationIds,
         });
         this.#commitState(committedHost, nextHostFingerprint, nextRuntimeFingerprint);
         nextHost = undefined;
@@ -261,6 +267,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
           appRoot: committedHost.appRoot,
           generation: committedHost.generation,
           onRuntimePruned: this.#onRuntimePruned,
+          activeRunGenerationIds: this.#activeRunGenerationIds,
         });
       } catch (error) {
         await discardDevelopmentGeneration(committedHost.generation).catch(() => undefined);

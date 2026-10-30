@@ -333,14 +333,16 @@ export function readDevelopmentRuntimeArtifactsRevision(
 }
 
 /**
- * Bounds dev snapshot storage without consulting a Workflow World. The active
- * generation is always retained; retired generations receive a grace period,
- * and the newest retired generations remain as a rebuild-rate safety net.
+ * Bounds dev snapshot storage. The active generation and every generation in
+ * `protectedGenerationIds` (those a live Workflow run still executes on) are
+ * always retained; other retired generations receive a grace period, and the
+ * newest retired generations remain as a rebuild-rate safety net.
  */
 export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
   readonly appRoot: string;
   readonly gracePeriodMs?: number;
   readonly now?: number;
+  readonly protectedGenerationIds?: ReadonlySet<string>;
   readonly retainCount?: number;
 }): Promise<boolean> {
   const pointer = readDevelopmentRuntimeArtifactsPointer(
@@ -352,6 +354,7 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
     gracePeriodMs: input.gracePeriodMs,
     now: input.now,
     protectAll: pointer?.version === 1,
+    protectedGenerationIds: input.protectedGenerationIds,
     retainCount: input.retainCount,
     snapshotsDirectory: resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(input.appRoot),
   });

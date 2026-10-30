@@ -436,6 +436,10 @@ async function startNitroDevelopmentServer(
       localWorkflowWorld === undefined
         ? undefined
         : () => localWorkflowWorld.reconcileExpiredRuns();
+    const activeRunGenerationIds =
+      localWorkflowWorld === undefined
+        ? undefined
+        : () => localWorkflowWorld.activeRunGenerationIds();
     // Parent-owned control routes must answer before the World starts: queue
     // redelivery begins at start(), and a delivery's World calls would
     // otherwise fall through to the worker and 404.
@@ -488,6 +492,7 @@ async function startNitroDevelopmentServer(
           appRoot: preparedHost.appRoot,
           generation: preparedHost.generation,
           onRuntimePruned,
+          activeRunGenerationIds,
         });
         initialGenerationPublished = true;
       },
@@ -502,6 +507,7 @@ async function startNitroDevelopmentServer(
       devServer: activeDevServer,
       initialHost: preparedHost,
       onRuntimePruned,
+      activeRunGenerationIds,
     });
 
     authoredSourceWatcher = await devBootPhase(

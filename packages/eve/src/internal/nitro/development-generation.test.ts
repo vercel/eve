@@ -137,6 +137,41 @@ describe("development generation activation", () => {
     expect(mocks.prune).toHaveBeenCalledWith({ appRoot: "/tmp/app-commit" });
   });
 
+  it("never prunes the generations that live runs execute on", async () => {
+    mocks.activateTransaction.mockResolvedValue({ commit: vi.fn(), rollback: vi.fn() });
+
+    await activateDevelopmentGeneration({
+      appRoot: "/tmp/app-live-runs",
+      generation: createGeneration("current"),
+      activeRunGenerationIds: async () => new Set(["parked"]),
+    });
+
+    await vi.waitFor(() =>
+      expect(mocks.prune).toHaveBeenCalledWith({
+        appRoot: "/tmp/app-live-runs",
+        protectedGenerationIds: new Set(["parked"]),
+      }),
+    );
+  });
+
+  it("prunes nothing when the live runs cannot be listed", async () => {
+    mocks.activateTransaction.mockResolvedValue({ commit: vi.fn(), rollback: vi.fn() });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await activateDevelopmentGeneration({
+        appRoot: "/tmp/app-unlistable-runs",
+        generation: createGeneration("current"),
+        activeRunGenerationIds: async () => {
+          throw new Error("run store unreadable");
+        },
+      });
+      await vi.waitFor(() => expect(warning).toHaveBeenCalledOnce());
+      expect(mocks.prune).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
   it("skips reconciliation after a no-op prune", async () => {
     mocks.activateTransaction.mockResolvedValue({ commit: vi.fn(), rollback: vi.fn() });
     const pruning = Promise.withResolvers<boolean>();
