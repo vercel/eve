@@ -10,17 +10,8 @@ import {
 } from "./prompt-commands.js";
 
 describe("parsePromptCommand", () => {
-  it("parses /new and its /reset alias", () => {
-    expect(parsePromptCommand("/new")).toEqual({ type: "new" });
-    expect(parsePromptCommand("/reset")).toEqual({ type: "new" });
-  });
-
-  it("parses /cancel", () => {
+  it("parses /cancel, which stays local", () => {
     expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
-  });
-
-  it("parses /clear as a context clear", () => {
-    expect(parsePromptCommand("/clear")).toEqual({ type: "clear" });
   });
 
   it("parses /exit and its /quit alias", () => {
@@ -102,7 +93,7 @@ describe("parsePromptCommand", () => {
   });
 
   it("trims surrounding whitespace before matching", () => {
-    expect(parsePromptCommand("  /new  ")).toEqual({ type: "new" });
+    expect(parsePromptCommand("  /exit  ")).toEqual({ type: "exit" });
   });
 
   it("rejects near-misses and ordinary prompts", () => {
@@ -165,29 +156,33 @@ describe("withChannelPromptCommands", () => {
   it("adds channel commands and aliases without letting them shadow built-ins", () => {
     const commands = withChannelPromptCommands(PROMPT_COMMANDS, [
       {
-        name: "standup",
-        description: "Draft a standup",
-        input: { hint: "[topic]" },
-        aliases: ["su", "quit"],
+        name: "new",
+        description: "Start a fresh session",
+        aliases: ["reset", "quit"],
+        session: "required",
+      },
+      {
+        name: "triage",
+        description: "Triage issues",
+        input: { hint: "[label]" },
         session: "optional",
       },
-      { name: "new", description: "Shadows /new", session: "required" },
+      { name: "quit", description: "Shadows the /exit alias", session: "optional" },
     ]);
-    expect(parsePromptCommand("/standup  today ", commands)).toEqual({
+    expect(parsePromptCommand("/triage  bugs ", commands)).toEqual({
       type: "channel",
-      name: "standup",
-      argument: "today",
+      name: "triage",
+      argument: "bugs",
       session: "optional",
     });
-    expect(parsePromptCommand("/su", commands)).toEqual({
+    expect(parsePromptCommand("/reset", commands)).toEqual({
       type: "channel",
-      name: "standup",
+      name: "new",
       argument: "",
-      session: "optional",
+      session: "required",
     });
-    expect(parsePromptCommand("/standup")).toBeNull();
+    expect(parsePromptCommand("/triage bugs")).toBeNull();
     expect(parsePromptCommand("/quit", commands)).toEqual({ type: "exit" });
-    expect(parsePromptCommand("/new", commands)).toEqual({ type: "new" });
   });
 });
 
@@ -214,9 +209,8 @@ describe("withChannelPromptCommands for a command without arguments", () => {
 
 describe("isPromptControlCommand", () => {
   it("is true exactly for recognized commands", () => {
-    expect(isPromptControlCommand("/new")).toBe(true);
-    expect(isPromptControlCommand("/reset")).toBe(true);
-    expect(isPromptControlCommand("/clear")).toBe(true);
+    expect(isPromptControlCommand("/exit")).toBe(true);
+    expect(isPromptControlCommand("/quit")).toBe(true);
     expect(isPromptControlCommand("/model gpt-5")).toBe(true);
     expect(isPromptControlCommand("/unknown")).toBe(false);
     expect(isPromptControlCommand("hello")).toBe(false);

@@ -396,7 +396,9 @@ export default eveChannel({
 
 ### Slash commands
 
-`commands` offers slash commands to clients of this channel. The terminal UI lists them in its command typeahead and `/help`, next to its built-in commands. Declare a command with `defineCommand` from `eve/channels`. This one hands the conversation to a person on the support team:
+`commands` offers slash commands to clients of this channel. The terminal UI lists them in its command typeahead and `/help`, next to its built-in commands. The channel always offers `sessionCommands` unless you remove them: `/new` (alias `/reset`), `/clear`, and `/compact`. Cancelling stays with each client, which knows the turn it's showing, such as the terminal UI's `/cancel` or Web Chat's Stop button.
+
+Declare your own commands with `defineCommand` from `eve/channels`; a `commands` record adds them to the defaults. This one hands the conversation to a person on the support team:
 
 ```ts title="agent/lib/commands.ts"
 import { defineCommand } from "eve/channels";
@@ -432,7 +434,7 @@ export default eveChannel({
 });
 ```
 
-The key is the command name, typed as `/escalate the refund failed twice`; `aliases` adds more names, such as `/human`. `input` lets text follow the name, and its `hint` is shown after the name. A command without `input` runs only when it's typed alone: clients send `/name some text` as an ordinary message, and the route answers `400`. Names and aliases are up to 32 lowercase letters, digits, and hyphens, starting with a letter, and no two commands may share one. `eveChannel` throws otherwise. A client's built-in command wins over a channel command with the same name, so a channel cannot replace the terminal UI's `/exit` or `/new`.
+The key is the command name, typed as `/escalate the refund failed twice`; `aliases` adds more names, such as `/human`. `input` lets text follow the name, and its `hint` is shown after the name. A command without `input` runs only when it's typed alone: clients send `/name some text` as an ordinary message, and the route answers `400`. Names and aliases are up to 32 lowercase letters, digits, and hyphens, starting with a letter, and no two commands may share one. `eveChannel` throws otherwise. A client's built-in command wins over a channel command with the same name, so a channel cannot replace the terminal UI's `/exit` or `/help`.
 
 `run` receives:
 
@@ -440,7 +442,13 @@ The key is the command name, typed as `/escalate the refund failed twice`; `alia
 - `caller`: the route-auth result.
 - `session`: the client's current session, when it has one. `session.clear()`, `compact()`, `cancel()`, and `end()` apply as the caller and resolve once eve accepts them.
 
-`session: "required"` marks a command that only makes sense in a conversation, like `/escalate`. `run` then always receives `session`, clients don't run the command before the first message, and the session-free route answers `409`. Omit it for a command that works anywhere; `session` is then present only when the client has one.
+`session: "required"` marks a command that only makes sense in a conversation, like `/escalate`. `run` then always receives `session`, clients don't run the command before the first message, and the session-free route answers `409`. Omit it for a command that works anywhere; `session` is then present only when the client has one. The `sessionCommands` are built the same way: `/clear`, for example, calls `session.clear()`.
+
+A same-named entry in the record replaces a default. To drop or rename defaults, pass `commands` as a function. It receives `sessionCommands` and returns the full set:
+
+```ts
+commands: ({ clear, compact }) => ({ clear, compact, escalate }), // no /new
+```
 
 `run` returns an optional result:
 

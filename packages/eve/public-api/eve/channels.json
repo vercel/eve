@@ -79,5 +79,6 @@
   "defineChannel",
   "defineCommand",
   "disableRoute",
-  "isChannel"
+  "isChannel",
+  "sessionCommands"
 ]

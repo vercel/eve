@@ -8,7 +8,6 @@ import {
   failure,
 } from "#protocol/session-projection/public-view.js";
 import type { Interaction } from "#protocol/session-projection/reader.js";
-import type { Delivery } from "#shared/delivery.js";
 import { optionStyle } from "#channel/interaction-prompts.js";
 import { type ConversationState } from "#client/conversation-state.js";
 import { attachSessionStore, detachSessionStore, SessionStore } from "#client/session-store.js";
@@ -667,7 +666,8 @@ export class EveTUIRunner {
     let prompt: string | undefined;
     this.#renderer.setStartupPhase?.("starting");
     await this.#loadInitialAgentInfo();
-    // Load the channel's commands before the first prompt, so a typed command can't race them.
+    // Session controls such as /new and /clear are channel commands, so load them before the
+    // first prompt can be read.
     await this.#refreshChannelCommands();
     // Fire-and-forget: the link identity is network-bound to resolve, and the
     // first prompt must not wait on it. The segment appears when it lands.
@@ -793,34 +793,6 @@ export class EveTUIRunner {
         this.#finishCommand({ kind: "dismiss" });
         this.#lifecycle?.requestStop();
         return "exit";
-      case "cancel": {
-        const working = hasOpenTurn(this.#store.snapshot);
-        if (working) this.#cancelTurn();
-        this.#finishCommand({
-          kind: "result",
-          summary: working ? "Cancellation requested" : "No active turn to cancel",
-        });
-        return;
-      }
-      case "new":
-        await this.#resetSession();
-        return;
-      case "compact":
-        await this.#runSessionCommand({
-          absent: "No active session to compact",
-          accepted: "Compaction requested",
-          failed: "Couldn't compact the session",
-          invoke: () => this.#store.compact(),
-        });
-        return;
-      case "clear":
-        await this.#runSessionCommand({
-          absent: "No active session to clear",
-          accepted: "Session context cleared",
-          failed: "Couldn't clear the session",
-          invoke: () => this.#store.clear(),
-        });
-        return;
       // Help renders locally; unlike extension commands it must work even
       // without a prompt-command handler (e.g. remote --url sessions).
       case "help": {
@@ -859,6 +831,15 @@ export class EveTUIRunner {
         return;
       case "channel":
         return await this.#runChannelCommand(command);
+      case "cancel": {
+        const working = hasOpenTurn(this.#store.snapshot);
+        if (working) this.#cancelTurn();
+        this.#finishCommand({
+          kind: "result",
+          summary: working ? "Cancellation requested" : "No active turn to cancel",
+        });
+        return;
+      }
     }
   }
 
@@ -1159,47 +1140,6 @@ export class EveTUIRunner {
     void this.#store.cancel().catch((error: unknown) => {
       this.#renderer.renderNotice?.(`Couldn't cancel the turn: ${toErrorMessage(error)}`);
     });
-  }
-
-  /** Runs a session mutation and gives every control command one completion policy. */
-  async #runSessionCommand(input: {
-    readonly absent: string;
-    readonly accepted: string;
-    readonly failed: string;
-    readonly invoke: () => Promise<Delivery>;
-  }): Promise<void> {
-    if (this.#store.snapshot.session === undefined) {
-      this.#finishCommand({ kind: "result", summary: input.absent });
-      return;
-    }
-    try {
-      const result = await (await input.invoke()).result();
-      if (result.status !== "completed") throw new Error(`The command settled ${result.status}.`);
-      this.#finishCommand({ kind: "result", summary: input.accepted });
-    } catch (error) {
-      this.#finishCommand({
-        kind: "result",
-        message: this.#strandedSessionNotice(error) ?? toErrorMessage(error),
-        summary: input.failed,
-      });
-    }
-  }
-
-  /** Retires the durable session before clearing the local conversation view. */
-  async #resetSession(): Promise<void> {
-    try {
-      if (this.#store.snapshot.session !== undefined) await (await this.#store.end()).result();
-      this.#store.newSession();
-    } catch (error) {
-      this.#finishCommand({
-        kind: "result",
-        message: `Couldn't end the session: ${toErrorMessage(error)}`,
-      });
-      return;
-    }
-    this.#clearRunnerState();
-    this.#renderer.reset?.();
-    this.#finishCommand({ kind: "dismiss" });
   }
 
   /**
