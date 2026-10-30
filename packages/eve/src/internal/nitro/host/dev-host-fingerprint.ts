@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { relative } from "node:path";
+import { isAbsolute, relative } from "node:path";
 
 import { readDevelopmentEnvironmentHostValues } from "#cli/dev/environment.js";
 import { createHostSpec } from "#internal/nitro/host/host-spec.js";
@@ -15,6 +16,7 @@ export async function computeDevelopmentHostFingerprint(
 ): Promise<string> {
   const { appRoot, workspace } = host;
   const {
+    authored,
     locations: _locations,
     extensionMounts,
     extensionOverridePaths,
@@ -24,21 +26,32 @@ export async function computeDevelopmentHostFingerprint(
     { kind: "development" },
     { buildDir: workspace.nitroBuildDir, outputDir: workspace.nitroOutputDir },
   );
-  // Equivalent hosts in different app roots or package stores share a fingerprint.
-  const portable = (path: string) => relative(appRoot, path);
+  // Equivalent hosts in different app roots or package stores share a
+  // fingerprint. Some paths are canonical, so the app root may appear as either.
+  const roots = [appRoot, realpathSync(appRoot)];
+  const portable = (path: string) =>
+    roots
+      .map((root) => relative(root, path))
+      .find((candidate) => !candidate.startsWith("..") && !isAbsolute(candidate)) ??
+    relative(appRoot, path);
   const payload = {
     environment: readDevelopmentEnvironmentHostValues(appRoot),
     instrumentation: await readInstrumentationSource(host),
     spec: {
       ...spec,
+      authored: {
+        packageRoot: portable(authored.packageRoot),
+        tsconfig: authored.tsconfig === false ? false : portable(authored.tsconfig),
+      },
       extensionMounts: extensionMounts.map(
         ({ mountSourcePath, programmaticImport, sourceRoot, ...mount }) => ({
           ...mount,
           mountSourcePath: portable(mountSourcePath),
+          // Its config reaches the extension through the runtime module map.
           ...(programmaticImport && {
             programmaticImport: {
-              ...programmaticImport,
               entryPath: portable(programmaticImport.entryPath),
+              specifier: programmaticImport.specifier,
             },
           }),
           sourceRoot: portable(sourceRoot),

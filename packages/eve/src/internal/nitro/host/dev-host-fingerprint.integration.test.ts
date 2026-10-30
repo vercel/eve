@@ -28,19 +28,30 @@ interface HostVariant {
   readonly channel?: { readonly path: string };
   readonly connection?: { readonly events: boolean };
   readonly extensionSpecifier?: string;
+  readonly extensionConfig?: { readonly region: string };
   readonly instrumentationSlot?: string;
   readonly instrumentationSource?: string;
+  /** Where the app's package.json lives: its own root, or an enclosing workspace. */
+  readonly packageJson?: "own" | "enclosing";
   readonly schedule?: { readonly cron: string; readonly content: string };
   readonly tool?: "ordinary" | "workflow" | "workflow-program";
+  readonly tsconfig?: boolean;
   readonly workflowSourceFingerprint?: string;
   readonly workflowWorld?: "local" | "vercel";
 }
 
 async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmentApplicationHost> {
-  const appRoot = await mkdtemp(join(tmpdir(), "eve-host-fingerprint-"));
-  temporaryDirectories.push(appRoot);
+  const root = await mkdtemp(join(tmpdir(), "eve-host-fingerprint-"));
+  temporaryDirectories.push(root);
+  const appRoot = variant.packageJson === "enclosing" ? join(root, "app") : root;
   const agentRoot = join(appRoot, "agent");
   await mkdir(agentRoot, { recursive: true });
+  if (variant.packageJson !== undefined) {
+    await writeFile(join(root, "package.json"), '{ "name": "fingerprint-host" }\n');
+  }
+  if (variant.tsconfig === true) {
+    await writeFile(join(appRoot, "tsconfig.json"), "{}\n");
+  }
 
   let instrumentationSourcePath: string | undefined;
   if (variant.instrumentationSource !== undefined) {
@@ -128,7 +139,9 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
     ] as CompiledAgentManifest["connections"];
   }
   if (variant.extensionSpecifier !== undefined) {
-    manifest.extensionMounts = [extensionMount(appRoot, variant.extensionSpecifier)];
+    manifest.extensionMounts = [
+      extensionMount(appRoot, variant.extensionSpecifier, variant.extensionConfig),
+    ];
   }
 
   return {
@@ -167,9 +180,20 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
   } as PreparedDevelopmentApplicationHost;
 }
 
-function extensionMount(appRoot: string, specifier: string): CompiledExtensionMount {
+function extensionMount(
+  appRoot: string,
+  specifier: string,
+  config?: { readonly region: string },
+): CompiledExtensionMount {
   const packageRoot = join(appRoot, "node_modules", "layout-extension");
   return {
+    ...(config && {
+      programmaticImport: {
+        config,
+        entryPath: join(packageRoot, "dist", "index.mjs"),
+        specifier,
+      },
+    }),
     externalDependencies: [],
     mountId: "extensions/layout",
     mountLogicalPath: "extensions/layout.ts",
@@ -255,6 +279,41 @@ describe("computeDevelopmentHostFingerprint", () => {
     );
 
     expect(first).toBe(second);
+  });
+
+  it("treats the app's tsconfig as structural", async () => {
+    const plain = await computeDevelopmentHostFingerprint(await createHost());
+    const first = await computeDevelopmentHostFingerprint(await createHost({ tsconfig: true }));
+    const second = await computeDevelopmentHostFingerprint(await createHost({ tsconfig: true }));
+
+    expect(first).not.toBe(plain);
+    expect(second).toBe(first);
+  });
+
+  it("treats the package root authored imports stay inside as structural", async () => {
+    const own = await computeDevelopmentHostFingerprint(await createHost({ packageJson: "own" }));
+    const otherRoot = await computeDevelopmentHostFingerprint(
+      await createHost({ packageJson: "own" }),
+    );
+    const enclosing = await computeDevelopmentHostFingerprint(
+      await createHost({ packageJson: "enclosing" }),
+    );
+
+    expect(otherRoot).toBe(own);
+    expect(enclosing).not.toBe(own);
+  });
+
+  it("leaves a programmatic extension mount's config runtime-only", async () => {
+    const host = await createHost({
+      extensionConfig: { region: "us" },
+      extensionSpecifier: "layout-extension",
+    });
+    const before = await computeDevelopmentHostFingerprint(host);
+    host.compileResult.manifest.extensionMounts = [
+      extensionMount(host.appRoot, "layout-extension", { region: "eu" }),
+    ];
+
+    expect(await computeDevelopmentHostFingerprint(host)).toBe(before);
   });
 
   it("treats configured environment values as structural", async () => {

@@ -46,6 +46,8 @@ export type HostRuntimePlugin =
 /** Everything eve's Nitro host serves and bundles, derived from the compiled agent. */
 export interface HostSpec {
   readonly agentName: string;
+  /** How the host bundles authored sources. */
+  readonly authored: HostAuthoredSources;
   readonly development: boolean;
   readonly extensionMounts: readonly CompiledExtensionMount[];
   /** Authored files that override an extension mount's bindings, keyed to the mount id. */
@@ -66,15 +68,19 @@ export interface HostSpec {
   readonly locations: HostLocations;
 }
 
+interface HostAuthoredSources {
+  /** Package root authored asset imports may not escape. */
+  readonly packageRoot: string;
+  /** The app's tsconfig or jsconfig, which resolves authored import aliases. */
+  readonly tsconfig: string | false;
+}
+
 interface HostLocations {
   readonly appRoot: string;
-  /** Package root authored asset imports may not escape. */
-  readonly authoredPackageRoot: string;
   readonly buildDir: string;
   readonly compiledArtifacts: GeneratedCompiledArtifactsFiles;
   readonly outputDir: string;
   readonly skillsRoot: string;
-  readonly tsconfig: string | false;
   readonly workflowBuildDir: string;
 }
 
@@ -107,6 +113,11 @@ export function createHostSpec(
 
   return {
     agentName: manifest.config.name,
+    authored: {
+      // A workspace member without its own package.json shares the enclosing package.
+      packageRoot: findAuthoredPackageRoot(appRoot) ?? appRoot,
+      tsconfig: resolveAuthoredTsConfigPath(appRoot),
+    },
     development,
     extensionMounts: nodes.flatMap((node) => node.extensionMounts),
     extensionOverridePaths: extensionOverridePaths(manifest),
@@ -114,8 +125,6 @@ export function createHostSpec(
     instrumented,
     locations: {
       appRoot,
-      // A workspace member without its own package.json shares the enclosing package.
-      authoredPackageRoot: findAuthoredPackageRoot(appRoot) ?? appRoot,
       buildDir: dirs.buildDir,
       compiledArtifacts,
       outputDir: dirs.outputDir,
@@ -124,7 +133,6 @@ export function createHostSpec(
         manifest.workspaceResourceRoot.logicalPath,
         "skills",
       ),
-      tsconfig: resolveAuthoredTsConfigPath(appRoot),
       workflowBuildDir: preparedHost.workflowBuildDir,
     },
     preset,

@@ -160,7 +160,7 @@ function toNitroConfig(
       output: { sourcemapIgnoreList: /node_modules/ },
       plugins: createHostPlugins({
         appRoot: locations.appRoot,
-        authoredPackageRoot: locations.authoredPackageRoot,
+        authoredPackageRoot: spec.authored.packageRoot,
         externals: spec.externals,
         extensionMounts: spec.extensionMounts,
         extensionOverridePaths: spec.extensionOverridePaths,
@@ -168,7 +168,7 @@ function toNitroConfig(
         instrumentationSourcePaths: compiledArtifacts.instrumentationSourcePaths,
         workflowArtifacts: built.workflowArtifacts,
       }),
-      tsconfig: locations.tsconfig,
+      tsconfig: spec.authored.tsconfig,
       // Region comments contain invocation-random scratch paths, not runtime inputs.
       ...(!spec.development && { experimental: { attachDebugInfo: "none" as const } }),
     },
