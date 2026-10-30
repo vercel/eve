@@ -15,7 +15,6 @@
     "packages/eve/src/harness/prompt-cache.test.ts": 6,
     "packages/eve/src/harness/tool-loop-compaction-accounting.test.ts": 2,
     "packages/eve/src/harness/tool-loop.test.ts": 16,
-    "packages/eve/src/internal/nitro/host/dev-authored-source-watcher.scenario.test.ts": 2,
     "packages/eve/src/internal/nitro/routes/runtime-artifacts.test.ts": 1,
     "packages/eve/src/runtime/agent/bootstrap-model-utils.ts": 3,
     "packages/eve/src/runtime/agent/mock-model-adapter.test.ts": 1,
