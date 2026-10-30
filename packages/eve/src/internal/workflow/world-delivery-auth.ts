@@ -1,6 +1,6 @@
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 
-import type { ValidQueueName, World } from "#compiled/@workflow/world/index.js";
+import type { QueueOptions, ValidQueueName, World } from "#compiled/@workflow/world/index.js";
 import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
 import {
   workflowQueuePrefix,
@@ -15,6 +15,40 @@ const DELIVERY_SECRET_DOCS_URL =
   "https://eve.dev/docs/guides/deployment/self-hosting#authenticate-workflow-deliveries";
 
 export type WorkflowDeliverySecrets = readonly [string, ...string[]];
+
+const DELIVERY_PROOF_PREFIX = "v1.";
+
+/**
+ * Signs one queued message. Worlds round-trip messages through JSON-like
+ * transports, so the MAC covers a canonical JSON form: sorted keys, `toJSON`
+ * applied, and byte arrays in base64, which encodes the enqueued and the
+ * delivered message identically.
+ */
+export function signWorkflowDelivery(secret: string, queueName: string, message: unknown): string {
+  const mac = createHmac("sha256", secret)
+    .update(queueName)
+    .update("\n")
+    .update(canonicalMessageJson(message))
+    .digest("base64url");
+  return `${DELIVERY_PROOF_PREFIX}${mac}`;
+}
+
+function canonicalMessageJson(message: unknown): string {
+  return (
+    JSON.stringify(message, (_key, value: unknown) => {
+      if (value instanceof Uint8Array) return { base64: Buffer.from(value).toString("base64") };
+      if (typeof value === "bigint") return value.toString();
+      if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+      return Object.fromEntries(
+        Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+      );
+    }) ?? ""
+  );
+}
+
+function untrustedDeliveryResponse(): Response {
+  return Response.json({ error: "Untrusted workflow delivery." }, { status: 401 });
+}
 
 /** Creates a random delivery secret for a process or `eve dev` session. */
 export function createWorkflowDeliverySecret(): string {
@@ -52,11 +86,14 @@ export function readWorkflowDeliverySecrets(worldPackage: string): WorkflowDeliv
  * whatever `x-vqs-*` headers and body arrive, so without a proof any client
  * could forge a delivery, including its run context and principal.
  *
- * Every `world.queue` call is stamped with the first secret, and the queue
- * handler accepts any of them. A World's own startup recovery enqueues past
- * the wrapped queue, unstamped, so `start()` hides active runs from it and
- * recovers them through the stamped queue instead. Worlds that enqueue
- * through `invoke()` also bypass the stamp and are refused.
+ * Every enqueue is stamped with an HMAC of its queue name and message under
+ * the first secret, and the queue handler accepts a MAC under any of them. The proof never contains a secret, because Worlds persist and
+ * log job headers: a leaked proof can only replay the message it signs.
+ *
+ * A World's own startup recovery enqueues past the wrapped queue, unstamped,
+ * so `start()` hides active runs from it and recovers them through the
+ * stamped queue instead. Worlds that enqueue through `invoke()` also bypass
+ * the stamp and are refused.
  *
  * Mutates and returns `world`.
  */
@@ -71,26 +108,53 @@ export function authenticateWorkflowDeliveries<TWorld extends World>(
   }
   const [stamp] = secrets;
 
-  const enqueue = world.queue.bind(world);
-  world.queue = async (queueName, message, options) => {
+  const signedOptions = (
+    queueName: ValidQueueName,
+    message: unknown,
+    options: QueueOptions | undefined,
+  ): QueueOptions => {
     const headers = new Headers(options?.headers);
-    headers.set(WORKFLOW_DELIVERY_HEADER, stamp);
-    return await enqueue(queueName, message, {
-      ...options,
-      headers: Object.fromEntries(headers),
-    });
+    headers.set(WORKFLOW_DELIVERY_HEADER, signWorkflowDelivery(stamp, queueName, message));
+    return { ...options, headers: Object.fromEntries(headers) };
   };
+  const enqueue = world.queue.bind(world);
+  world.queue = async (queueName, message, options) =>
+    await enqueue(queueName, message, signedOptions(queueName, message, options));
+  const enqueueBatch = world.queueBatch?.bind(world);
+  if (enqueueBatch !== undefined) {
+    world.queueBatch = async (queueName, messages) =>
+      await enqueueBatch(
+        queueName,
+        messages.map(({ message, opts }) => ({
+          message,
+          opts: signedOptions(queueName, message, opts),
+        })),
+      );
+  }
 
   const createQueueHandler = world.createQueueHandler.bind(world);
-  world.createQueueHandler = (queueNamePrefix, handler) => {
-    const deliver = createQueueHandler(queueNamePrefix, handler);
-    return async (request) => {
-      const proof = request.headers.get(WORKFLOW_DELIVERY_HEADER);
-      if (proof === null || !secrets.some((secret) => timingSafeEqualStrings(proof, secret))) {
-        return Response.json({ error: "Untrusted workflow delivery." }, { status: 401 });
+  world.createQueueHandler = (queueNamePrefix, handler) => async (request) => {
+    const proof = request.headers.get(WORKFLOW_DELIVERY_HEADER);
+    if (proof === null || !proof.startsWith(DELIVERY_PROOF_PREFIX)) {
+      return untrustedDeliveryResponse();
+    }
+    // The proof covers the message, which only the World can decode, so each
+    // delivery gets a handler that checks the message the World hands it.
+    let rejected = false;
+    const deliver = createQueueHandler(queueNamePrefix, async (message, metadata) => {
+      const trusted = secrets.some((secret) =>
+        timingSafeEqualStrings(proof, signWorkflowDelivery(secret, metadata.queueName, message)),
+      );
+      if (!trusted) {
+        rejected = true;
+        throw new Error("Untrusted workflow delivery.");
       }
-      return await deliver(request);
-    };
+      return await handler(message, metadata);
+    });
+    const response = await deliver(request);
+    if (!rejected) return response;
+    await response.body?.cancel();
+    return untrustedDeliveryResponse();
   };
 
   const start = world.start?.bind(world);

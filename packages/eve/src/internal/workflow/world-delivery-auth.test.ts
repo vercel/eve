@@ -5,17 +5,14 @@ import type { World } from "#compiled/@workflow/world/index.js";
 import {
   authenticateWorkflowDeliveries,
   readWorkflowDeliverySecrets,
+  signWorkflowDelivery,
   WORKFLOW_DELIVERY_HEADER,
 } from "#internal/workflow/world-delivery-auth.js";
 
 const SECRET = "test-delivery-secret-0123456789abcdef";
 const PREVIOUS_SECRET = "previous-delivery-secret-0123456789ab";
 const FLOW_URL = "http://localhost/.well-known/workflow/v1/flow";
-const QUEUE_HEADERS = {
-  "x-vqs-message-attempt": "1",
-  "x-vqs-message-id": "msg_1",
-  "x-vqs-queue-name": "__wkf_workflow_entry",
-};
+const QUEUE_NAME = "__wkf_workflow_entry";
 const ACTIVE_RUNS: ReadonlyArray<{
   runId: string;
   workflowName: string;
@@ -26,6 +23,40 @@ const ACTIVE_RUNS: ReadonlyArray<{
 ];
 
 type Enqueued = { name: string; message: unknown; headers: Record<string, string> | undefined };
+
+/** world-local and world-postgres send messages as JSON with byte arrays in a tagged envelope. */
+function serialize(message: unknown): string {
+  return JSON.stringify(message, (_key, value: unknown) =>
+    value instanceof Uint8Array
+      ? { __type: "Uint8Array", data: Buffer.from(value).toString("base64") }
+      : value,
+  );
+}
+
+function deserialize(body: string): unknown {
+  return JSON.parse(body, (_key, value: unknown) =>
+    typeof value === "object" && value !== null && "__type" in value && "data" in value
+      ? new Uint8Array(Buffer.from(String(value.data), "base64"))
+      : value,
+  );
+}
+
+function deliveryRequest(input: {
+  queueName?: string;
+  message: unknown;
+  headers?: Record<string, string>;
+}): Request {
+  return new Request(FLOW_URL, {
+    body: serialize(input.message),
+    headers: {
+      "x-vqs-message-attempt": "1",
+      "x-vqs-message-id": "msg_1",
+      "x-vqs-queue-name": input.queueName ?? QUEUE_NAME,
+      ...input.headers,
+    },
+    method: "POST",
+  });
+}
 
 function createFakeWorld(
   options: {
@@ -48,11 +79,28 @@ function createFakeWorld(
   const world = {
     capabilities: options.capabilities,
     queue: privateQueue,
+    queueBatch: async (
+      name: string,
+      messages: ReadonlyArray<{ message: unknown; opts?: { headers?: Record<string, string> } }>,
+    ) => {
+      for (const { message, opts } of messages) await privateQueue(name, message, opts);
+      return messages.map(() => ({ messageId: "msg_1" }));
+    },
+    // Like world-local: decode the body, hand it to the handler, and answer 500 when it throws.
     createQueueHandler:
-      (_prefix: string, handler: (message: unknown) => Promise<void>) =>
+      (_prefix: string, handler: (message: unknown, metadata: unknown) => Promise<unknown>) =>
       async (request: Request) => {
-        await handler(await request.json());
-        return Response.json({ ok: true });
+        const message = deserialize(await request.text());
+        try {
+          await handler(message, {
+            attempt: 1,
+            messageId: "msg_1",
+            queueName: request.headers.get("x-vqs-queue-name"),
+          });
+          return Response.json({ ok: true });
+        } catch (error) {
+          return Response.json(String(error), { status: 500 });
+        }
       },
     runs: {
       list: async ({ pagination }: { pagination: { cursor?: string } }) =>
@@ -81,60 +129,23 @@ describe("authenticateWorkflowDeliveries", () => {
     vi.unstubAllEnvs();
   });
 
-  it("stamps every enqueue with the first secret and keeps the caller's headers", async () => {
+  it("stamps every enqueue with a proof that does not reveal the secret", async () => {
     const { enqueued, secured } = createFakeWorld({ secrets: [SECRET, PREVIOUS_SECRET] });
-    await secured.queue("__wkf_workflow_entry" as never, { runId: "wrun_1" } as never, {
-      headers: { "x-other": "1", "X-Eve-Workflow-Delivery": PREVIOUS_SECRET },
+    const message = { runId: "wrun_1" };
+    await secured.queue(QUEUE_NAME, message, {
+      headers: { "x-other": "1", "X-Eve-Workflow-Delivery": "caller-supplied" },
     });
     expect(enqueued).toEqual([
       {
-        name: "__wkf_workflow_entry",
-        message: { runId: "wrun_1" },
-        headers: { "x-other": "1", [WORKFLOW_DELIVERY_HEADER]: SECRET },
+        name: QUEUE_NAME,
+        message,
+        headers: {
+          "x-other": "1",
+          [WORKFLOW_DELIVERY_HEADER]: signWorkflowDelivery(SECRET, QUEUE_NAME, message),
+        },
       },
     ]);
-  });
-
-  it("rejects unauthenticated deliveries and accepts both rotation secrets", async () => {
-    const { secured } = createFakeWorld({ secrets: [SECRET, PREVIOUS_SECRET] });
-    const inner = vi.fn(async () => {});
-    const handle = secured.createQueueHandler("__wkf_workflow_" as never, inner as never);
-    const body = JSON.stringify({ task: "Prepare Alice's weekly summary" });
-    const post = (headers: Record<string, string>) =>
-      handle(new Request(FLOW_URL, { body, headers, method: "POST" }));
-
-    expect((await post(QUEUE_HEADERS)).status).toBe(401);
-    expect((await post({ ...QUEUE_HEADERS, [WORKFLOW_DELIVERY_HEADER]: "guess" })).status).toBe(
-      401,
-    );
-    expect(inner).not.toHaveBeenCalled();
-
-    expect((await post({ ...QUEUE_HEADERS, [WORKFLOW_DELIVERY_HEADER]: SECRET })).status).toBe(200);
-    // Jobs queued before a rotation still carry the previous secret.
-    expect(
-      (await post({ ...QUEUE_HEADERS, [WORKFLOW_DELIVERY_HEADER]: PREVIOUS_SECRET })).status,
-    ).toBe(200);
-    expect(inner).toHaveBeenCalledTimes(2);
-  });
-
-  it("recovers active runs only through the stamped queue when the world starts", async () => {
-    vi.stubEnv("WORKFLOW_QUEUE_NAMESPACE", "evetest");
-    const { enqueued, secured, world } = createFakeWorld({ recoversOnStart: true });
-    const list = world.runs.list;
-    await secured.start?.();
-    expect(enqueued).toEqual([
-      {
-        name: "__evetest_wkf_workflow_entry",
-        message: { runId: "wrun_1" },
-        headers: { [WORKFLOW_DELIVERY_HEADER]: SECRET },
-      },
-      {
-        name: "__elsewhere_wkf_workflow_other",
-        message: { runId: "wrun_2" },
-        headers: { [WORKFLOW_DELIVERY_HEADER]: SECRET },
-      },
-    ]);
-    expect(world.runs.list).toBe(list);
+    expect(JSON.stringify(enqueued)).not.toContain(SECRET);
   });
 
   it("delivers a producer's queued work to another replica with the same secret", async () => {
@@ -142,19 +153,90 @@ describe("authenticateWorkflowDeliveries", () => {
     const receiver = createFakeWorld();
     const processMessage = vi.fn(async () => {});
     const handle = receiver.secured.createQueueHandler("__wkf_workflow_", processMessage);
-    const message = { runId: "wrun_1" };
+    const runInput = {
+      deploymentId: "dpl_1",
+      input: new Uint8Array([1, 2, 3]),
+      specVersion: 8,
+      workflowName: "entry",
+    };
+    const message = {
+      runId: "wrun_1",
+      requestedAt: new Date(0),
+      runInput,
+      traceCarrier: undefined,
+    };
 
-    await producer.secured.queue("__wkf_workflow_entry", message);
+    await producer.secured.queue(QUEUE_NAME, message);
     const queued = producer.enqueued[0]!;
-    const response = await handle(
-      new Request(FLOW_URL, {
-        method: "POST",
-        body: JSON.stringify(queued.message),
-        headers: { ...QUEUE_HEADERS, ...queued.headers },
-      }),
-    );
+    const response = await handle(deliveryRequest({ message, headers: queued.headers }));
     expect(response.status).toBe(200);
-    expect(processMessage).toHaveBeenCalledExactlyOnceWith(message);
+    expect(processMessage).toHaveBeenCalledExactlyOnceWith(
+      { runId: "wrun_1", requestedAt: new Date(0).toJSON(), runInput },
+      expect.objectContaining({ queueName: QUEUE_NAME }),
+    );
+  });
+
+  it("rejects a delivery unless its proof signs that queue name and message", async () => {
+    const { secured } = createFakeWorld({ secrets: [SECRET, PREVIOUS_SECRET] });
+    const inner = vi.fn(async () => {});
+    const handle = secured.createQueueHandler("__wkf_workflow_", inner);
+    const message = { runId: "wrun_1", task: "Prepare Alice's weekly summary" };
+    const post = async (proof: string | undefined, delivered = message, queueName = QUEUE_NAME) =>
+      (
+        await handle(
+          deliveryRequest({
+            queueName,
+            message: delivered,
+            headers: proof === undefined ? {} : { [WORKFLOW_DELIVERY_HEADER]: proof },
+          }),
+        )
+      ).status;
+    const proof = signWorkflowDelivery(SECRET, QUEUE_NAME, message);
+
+    expect(await post(undefined)).toBe(401);
+    expect(await post(SECRET)).toBe(401);
+    expect(
+      await post(signWorkflowDelivery("a-guessed-secret-0123456789abcdef", QUEUE_NAME, message)),
+    ).toBe(401);
+    expect(await post(proof, { ...message, task: "Forward Bob's inbox" })).toBe(401);
+    expect(await post(proof, message, "__wkf_workflow_other")).toBe(401);
+    expect(inner).not.toHaveBeenCalled();
+
+    expect(await post(proof)).toBe(200);
+    // Jobs queued before a rotation still carry a proof under the previous secret.
+    expect(await post(signWorkflowDelivery(PREVIOUS_SECRET, QUEUE_NAME, message))).toBe(200);
+    expect(inner).toHaveBeenCalledTimes(2);
+  });
+
+  it("stamps every message of a batch enqueue", async () => {
+    const { enqueued, secured } = createFakeWorld();
+    const messages = [{ runId: "wrun_1" }, { runId: "wrun_2" }];
+    await secured.queueBatch?.(
+      QUEUE_NAME,
+      messages.map((message) => ({ message })),
+    );
+    expect(enqueued.map((job) => job.headers?.[WORKFLOW_DELIVERY_HEADER])).toEqual(
+      messages.map((message) => signWorkflowDelivery(SECRET, QUEUE_NAME, message)),
+    );
+  });
+
+  it("recovers active runs only through the stamped queue when the world starts", async () => {
+    vi.stubEnv("WORKFLOW_QUEUE_NAMESPACE", "evetest");
+    const { enqueued, secured, world } = createFakeWorld({ recoversOnStart: true });
+    const list = world.runs.list;
+    await secured.start?.();
+    expect(enqueued).toEqual(
+      [
+        { name: "__evetest_wkf_workflow_entry", message: { runId: "wrun_1" } },
+        { name: "__elsewhere_wkf_workflow_other", message: { runId: "wrun_2" } },
+      ].map((job) => ({
+        ...job,
+        headers: {
+          [WORKFLOW_DELIVERY_HEADER]: signWorkflowDelivery(SECRET, job.name, job.message),
+        },
+      })),
+    );
+    expect(world.runs.list).toBe(list);
   });
 
   it("restores run storage when the world's startup fails", async () => {

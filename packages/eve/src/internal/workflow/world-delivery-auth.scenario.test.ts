@@ -7,6 +7,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useScenarioApp } from "#internal/testing/scenario-app.js";
 import { buildApplication } from "#internal/nitro/host/build-application.js";
 import { startProductionServer } from "#internal/nitro/host/start-production-server.js";
+import {
+  signWorkflowDelivery,
+  WORKFLOW_DELIVERY_HEADER,
+} from "#internal/workflow/world-delivery-auth.js";
 
 const DELIVERY_SECRET = "workflow-delivery-auth-scenario-secret";
 
@@ -32,12 +36,17 @@ describe("workflow delivery authentication for a configured World", () => {
           exports: "./index.js",
         }),
         // Accepts every delivery it is handed, like world-postgres: only
-        // eve's proof check stands between the route and the handler.
+        // eve's proof check stands between the route and the handler. The
+        // Workflow handler rejects this test message, so its error is ignored.
         "world/index.js": [
           "export function createWorld() {",
           "  return {",
           "    specVersion: 8, events: {},",
-          '    createQueueHandler: () => async () => new Response("delivered"),',
+          "    createQueueHandler: (_prefix, handler) => async (request) => {",
+          "      const queueName = request.headers.get('x-vqs-queue-name');",
+          "      await handler(await request.json(), { attempt: 1, messageId: 'msg_1', queueName }).catch(() => {});",
+          '      return new Response("delivered");',
+          "    },",
           '    getDeploymentId: async () => "test",',
           '    queue: async () => ({ messageId: "msg_1" }),',
           "    runs: { list: async () => ({ cursor: null, data: [], hasMore: false }) },",
@@ -62,17 +71,30 @@ describe("workflow delivery authentication for a configured World", () => {
     vi.stubEnv("EVE_WORKFLOW_DELIVERY_SECRET", DELIVERY_SECRET);
     const server = await startProductionServer(app.appRoot, { host: "127.0.0.1", port: 0 });
     try {
-      const deliver = (headers: Record<string, string>) =>
-        fetch(new URL("/.well-known/workflow/v1/flow", server.url), {
-          body: JSON.stringify({ task: "Prepare Alice's weekly summary" }),
-          headers: { "content-type": "application/json", ...headers },
+      const queueName = "__wkf_workflow_entry";
+      const message = { runId: "wrun_1", task: "Prepare Alice's weekly summary" };
+      const deliver = (proof?: string) => {
+        const headers = new Headers({
+          "content-type": "application/json",
+          "x-vqs-queue-name": queueName,
+        });
+        if (proof !== undefined) headers.set(WORKFLOW_DELIVERY_HEADER, proof);
+        return fetch(new URL("/.well-known/workflow/v1/flow", server.url), {
+          body: JSON.stringify(message),
+          headers,
           method: "POST",
           signal: AbortSignal.timeout(10_000),
         });
+      };
 
-      const unauthenticated = await deliver({});
-      expect(unauthenticated.status).toBe(401);
-      const trusted = await deliver({ "x-eve-workflow-delivery": DELIVERY_SECRET });
+      expect((await deliver()).status).toBe(401);
+      // A secret on its own is not a proof for any message.
+      expect((await deliver(DELIVERY_SECRET)).status).toBe(401);
+      expect(
+        (await deliver(signWorkflowDelivery(DELIVERY_SECRET, queueName, { runId: "wrun_2" })))
+          .status,
+      ).toBe(401);
+      const trusted = await deliver(signWorkflowDelivery(DELIVERY_SECRET, queueName, message));
       expect(trusted.status).toBe(200);
       expect(await trusted.text()).toBe("delivered");
     } finally {
