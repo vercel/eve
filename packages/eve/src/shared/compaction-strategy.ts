@@ -79,7 +79,10 @@ export interface CompactionContext {
   /** The context change this compaction records, as `context.started` reports it. */
   readonly change: { readonly changeId: string };
   readonly tokens: {
-    /** The most history that fits under the threshold, after instructions, tools, and recall. */
+    /**
+     * The most history that fits the model's context window after instructions, tools, and
+     * recall: what eve checks an automatic result against. Infinite when the window is unknown.
+     */
     readonly limit: number;
     /** eve's estimate of `messages`, the one it checks an automatic result against. */
     estimate(messages: readonly StoredHistoryMessage[]): number;

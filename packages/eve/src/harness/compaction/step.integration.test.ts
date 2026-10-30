@@ -636,6 +636,7 @@ describe("an authored compaction strategy", () => {
     strategy: CompactionStrategy,
     respond: (prompt: Prompt) => StreamResult,
     modelReference: HarnessSession["agent"]["modelReference"] = { id: "step-model" },
+    system = "You help Alice.",
   ) {
     const requests: Parameters<MockLanguageModelV3["doStream"]>[0][] = [];
     const model = new MockLanguageModelV3({
@@ -645,7 +646,7 @@ describe("an authored compaction strategy", () => {
       },
     });
     const session: HarnessSession = {
-      agent: { modelReference, system: "You help Alice.", tools: [] },
+      agent: { modelReference, system, tools: [] },
       compaction: { recentWindowSize: 1, threshold: 2_000, thresholdPercent: 0.5 },
       continuationToken: "http:authored-trigger-session",
       history: [],
@@ -813,6 +814,38 @@ describe("an authored compaction strategy", () => {
     expect(summaryRequest!.prompt.some((message) => message.role === "system")).toBe(false);
     expect(summaryRequest!.tools ?? []).toEqual([]);
   });
+
+  it.each([
+    ["under", 100],
+    ["over", 1_200],
+  ])(
+    "runs when the request's fixed part is %s eve's threshold and fits the window",
+    async (_, repeat) => {
+      let compacted = false;
+      const strategy: CompactionStrategy = {
+        compact: async (history, ctx) => {
+          compacted = true;
+          expect(ctx.tokens.limit).toBeGreaterThan(0);
+          const summary = await ctx.summarize(history, { prompt: SUMMARY_PROMPT, system: "" });
+          return [...ctx.checkpoint(summary), ...history];
+        },
+        when: { due: () => !compacted },
+      };
+
+      const { events, session } = await runTurn(
+        strategy,
+        (prompt) => (isSummaryRequest(prompt) ? summaryStream() : answer()),
+        { contextWindowTokens: 10_000, id: "step-model" },
+        `You help Alice. ${"Protected instructions. ".repeat(repeat)}`,
+      );
+
+      expect(compacted).toBe(true);
+      expect(events.filter((event) => event.type === "context.settled")).toMatchObject([
+        { data: { kind: "compaction", outcome: "completed" } },
+      ]);
+      expect(session.history[0]).toMatchObject({ kind: "context.compaction" });
+    },
+  );
 
   it("keeps a summary a strategy places after the messages it keeps", async () => {
     let compacted = false;

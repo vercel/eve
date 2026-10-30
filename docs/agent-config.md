@@ -275,8 +275,9 @@ export default defineAgent({
 - `ctx.model.contextWindowTokens` and `ctx.model.maxOutputTokens` are the session model's limits.
 - `turns(history)` groups the history by turn, so dropping whole turns never separates a tool call
   from its result.
-- `ctx.tokens.limit` is the most history that fits under the threshold, and `ctx.tokens.estimate`
-  is the estimate eve checks an automatic result against.
+- `ctx.tokens.limit` is the most history that fits the model's context window beside the
+  instructions, tools and recall, and `ctx.tokens.estimate` is the estimate eve checks an
+  automatic result against. The threshold decides only when a strategy without `due` runs.
 - Return `undefined` when nothing can be removed.
 
 `fixedTail()` from `eve/compaction` is eve's default strategy. Pass it `model` and `instructions`,

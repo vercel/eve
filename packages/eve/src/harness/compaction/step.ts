@@ -402,7 +402,7 @@ async function decideHistory(
       : strategyHistory(strategy, {
           abortSignal: step.config.abortSignal ?? new AbortController().signal,
           changeId: change.changeId,
-          limit: () => historyContext(step.session, { ...input, threshold }).config.threshold,
+          limit: fitLimit(input),
           model: modelLimitsOf(step.session),
           open: at.open,
           phase: at.phase,

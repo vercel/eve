@@ -64,8 +64,8 @@ export interface StrategyContext {
   readonly abortSignal: AbortSignal;
   /** The call's input tokens the threshold allows. */
   readonly threshold: number;
-  /** The most history that fits under the threshold. It throws when nothing fits. */
-  limit(): number;
+  /** The most history that fits the model's context window beside the request's fixed part. */
+  readonly limit: number;
   /** Starts the compaction's change, once the strategy is due. */
   open(): Promise<void>;
   readonly model: CompactionContext["model"];
@@ -103,7 +103,7 @@ export function strategyHistory(
       if (!isDue) return undefined;
     }
     await rewrite.open();
-    const limit = rewrite.limit();
+    const { limit } = rewrite;
     const ctx: CompactionContext = {
       abortSignal: rewrite.abortSignal,
       change: { changeId: rewrite.changeId },
@@ -142,7 +142,8 @@ export function strategyHistory(
         const prompt = createCompactionPrompt({
           messages: conversation,
           previousCheckpoint,
-          transcriptBudgetTokens: limit,
+          // The summary request carries none of the turn's instructions or tools.
+          transcriptBudgetTokens: Math.min(limit, rewrite.threshold),
         });
         return await summarize({
           messages: [createFrameworkUserMessage("context.compaction", prompt.prompt)],
