@@ -4,9 +4,31 @@ description: "Reach your agent from Telegram bot webhooks, with inline-keyboard 
 type: integration
 ---
 
-The Telegram channel runs your agent as a Telegram bot. It lives in `agent/channels/telegram.ts`. It checks the `X-Telegram-Bot-Api-Secret-Token` header on each Bot API webhook, and replies with `sendMessage`. See [Channels](./overview) for what every channel shares.
+The Telegram channel runs your agent as a Telegram bot. It lives in `agent/channels/telegram.ts`, receives Bot API webhooks at `POST /eve/v1/telegram`, and replies with `sendMessage`. See [Channels](./overview) for what every channel shares.
 
 ## Add the channel
+
+Create a bot with [@BotFather](https://t.me/botfather), then run `eve add channel/telegram`. eve asks how to store the bot token, then checks the token with Telegram.
+
+### With Vercel Connect
+
+Choose Vercel Connect, and eve links a Vercel project, stores the token in a Telegram connector, and routes the connector's triggers to `/eve/v1/telegram`. [Vercel Connect](../guides/auth-and-route-protection) registers the bot's webhook, checks Telegram's secret token, and forwards each update with a Vercel OIDC token. The channel verifies that token, so your deployment holds no bot token or webhook secret:
+
+```ts title="agent/channels/telegram.ts"
+import { connectTelegramCredentials } from "@vercel/connect/eve";
+import { telegramChannel } from "eve/channels/telegram";
+
+export default telegramChannel({
+  botUsername: "my_bot",
+  credentials: connectTelegramCredentials("telegram/my-agent"),
+});
+```
+
+A Telegram bot has one webhook, so Connect replaces any webhook the bot already has. Connect forwards updates only to deployed URLs, so test on a preview or production deployment.
+
+### With portable credentials
+
+Choose portable credentials, and eve writes the bot token and a random webhook secret to `.env.local`. If `.env.local` already has a different `TELEGRAM_BOT_TOKEN`, eve asks before replacing it, and it keeps an existing `TELEGRAM_WEBHOOK_SECRET_TOKEN`:
 
 ```ts title="agent/channels/telegram.ts"
 import { telegramChannel } from "eve/channels/telegram";
@@ -21,7 +43,7 @@ TELEGRAM_BOT_TOKEN=123456:...        # replies, typing, callbacks, proactive sen
 TELEGRAM_WEBHOOK_SECRET_TOKEN=...    # must match the secret_token you register
 ```
 
-Or pass them as `credentials: { botToken, webhookSecretToken }`. The channel mounts `POST /eve/v1/telegram`. eve doesn't call `setWebhook`, so register the deployed URL yourself:
+Or pass them as `credentials: { botToken, webhookSecretToken }`. The channel checks the `X-Telegram-Bot-Api-Secret-Token` header on each webhook. eve doesn't call `setWebhook`, so register the deployed URL yourself:
 
 ```bash
 curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
