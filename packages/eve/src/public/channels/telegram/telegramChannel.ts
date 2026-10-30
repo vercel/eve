@@ -1,3 +1,4 @@
+import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { TelegramChannelCredentials } from "#public/channels/telegram/credentials.js";
 export type { TelegramChannelCredentials } from "#public/channels/telegram/credentials.js";
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
@@ -340,6 +341,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
     events: mergedEvents,
   });
 
+  setChannelBuildMetadata(channel, { credentials: config.credentials });
   attachTelegramDeliver(channel);
   return channel;
 }

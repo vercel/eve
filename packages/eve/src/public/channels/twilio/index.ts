@@ -42,4 +42,5 @@ export {
   type TwilioAuthToken,
   type TwilioVerifiedRequest,
   type TwilioWebhookUrl,
+  type TwilioWebhookVerifier,
 } from "#public/channels/twilio/verify.js";

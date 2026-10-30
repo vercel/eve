@@ -6,7 +6,7 @@ type: reference
 
 This page documents every part of `twilioChannel` from `eve/channels/twilio`. For setup and common tasks, start with [Twilio](/docs/channels/twilio).
 
-The Twilio channel puts your agent on a phone number that people can text or call. It lives in `agent/channels/twilio.ts`. eve answers calls with TwiML `<Gather input="speech">`. The transcript joins the same eve session as SMS from that number, keyed by `From:To`. eve checks `X-Twilio-Signature` on every request first. See [Channels](/docs/channels) for what every channel shares.
+The Twilio channel puts your agent on a phone number that people can text or call. It lives in `agent/channels/twilio.ts`. eve answers calls with TwiML `<Gather input="speech">`. The transcript joins the same eve session as SMS from that number, keyed by `From:To`. eve verifies each request before dispatch, using `X-Twilio-Signature` or your configured forwarded-webhook verifier. See [Channels](/docs/channels) for what every channel shares.
 
 ## Add the channel
 
@@ -32,6 +32,12 @@ Or pass them as `credentials: { accountSid, authToken }`. The channel mounts thr
 
 Point your Twilio number's Messaging webhook at `/messages` and Voice webhook at `/voice`, using the exact public URL Twilio calls.
 
+## Forwarded webhooks
+
+Set `credentials.webhookVerifier` when a trusted integration verifies and forwards Twilio requests. It receives the request and raw body. Return a string to accept that body, or another truthy value to accept the original body. Requests the verifier rejects or throws on must pass native Twilio signature verification. This keeps direct speech transcription callbacks working: Twilio sends those callbacks to the URL in the generated `<Gather action>`, even when the initial call arrives through Connect. Without a verifier, eve checks the native signature only.
+
+Connect's `connectTwilioCredentials` helper supplies a verifier and resolves the account Auth Token at runtime. Pass the matching account SID to the helper. An OAuth access token cannot replace the Auth Token. The manifest declares separate messaging, voice, and transcription destinations; it does not configure provider callbacks by itself.
+
 ## Options
 
 `twilioChannel(config)` requires `allowFrom`. Every other option is optional.
@@ -39,7 +45,7 @@ Point your Twilio number's Messaging webhook at `/messages` and Voice webhook at
 | Option                 | Default                                         | Description                                                                                                                |
 | ---------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `allowFrom`            | Required                                        | A number, a list, an async resolver, or `"*"`. Gates every inbound hook.                                                   |
-| `credentials`          | `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`    | `{ accountSid, authToken }`. Each field also takes a lazy resolver.                                                        |
+| `credentials`          | `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`    | `{ accountSid, authToken, webhookVerifier? }`. The account SID and auth token also take lazy resolvers.                    |
 | `messaging`            | Reply from the inbound `To` number              | `{ from, messagingServiceSid, statusCallbackUrl }` for outbound SMS. Proactive sends need `from` or `messagingServiceSid`. |
 | `voice`                | See below                                       | `{ prompt, acknowledgement, voice, language, speechModel, speechTimeout, timeoutSeconds, hints, profanityFilter }`.        |
 | `route`                | `/eve/v1/twilio`                                | Base path for the three webhook routes.                                                                                    |

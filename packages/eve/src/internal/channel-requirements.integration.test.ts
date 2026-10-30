@@ -12,6 +12,8 @@ import { discordChannel } from "#public/channels/discord/index.js";
 import { teamsChannel } from "#public/channels/teams/index.js";
 import { linqChannel } from "#public/channels/linq/index.js";
 import { photonIMessageChannel } from "#public/channels/photon/index.js";
+import { telegramChannel } from "#public/channels/telegram/index.js";
+import { twilioChannel } from "#public/channels/twilio/index.js";
 import { slackChannel } from "#public/channels/slack/index.js";
 import { buildExternalResourcesSnapshot } from "#internal/external-resources.js";
 
@@ -29,6 +31,14 @@ it("preserves Connect dependencies through channel compilation without resolving
   const credentials = <T extends object>(service: string, value: T) =>
     Object.assign(value, { vercelConnect: metadata(service) });
   const channels = [
+    ["telegram", telegramChannel({ credentials: credentials("telegram", { botToken: token }) })],
+    [
+      "twilio",
+      twilioChannel({
+        allowFrom: ["+15550000001"],
+        credentials: credentials("twilio", { accountSid: "AC123", authToken: token }),
+      }),
+    ],
     ["slack", slackChannel({ credentials: credentials("slack", { botToken: token }) })],
     [
       "github",
@@ -114,6 +124,20 @@ it("preserves Connect dependencies through channel compilation without resolving
     "photon",
     "slack",
     "teams",
+    "telegram",
+    "twilio",
+    "twilio",
+    "twilio",
+  ]);
+  expect(
+    snapshot.resources
+      .filter(({ name }) => name === "twilio")
+      .map((resource) => (resource.kind === "channel" ? resource.route.path : null))
+      .sort(),
+  ).toEqual([
+    "/app/eve/v1/twilio/messages",
+    "/app/eve/v1/twilio/voice",
+    "/app/eve/v1/twilio/voice/transcription",
   ]);
   expect(snapshot.resources.find(({ name }) => name === "slack")).toMatchObject({
     credentials: metadata("slack").requirement,
