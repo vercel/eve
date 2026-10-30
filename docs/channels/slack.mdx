@@ -620,8 +620,12 @@ export default defineTool({
 For full control, skip the helper and send to the Slack channel with a `codeChannel` target. `codeChannel` takes the origin message's `originTs`, its thread's `originThreadTs`, and an optional `name`. Pass `history` to start the session with earlier messages:
 
 ```ts
-const { channelId, threadTs } = ctx.channel.metadata ?? {};
+const { channelId, threadTs } = ctx.channel.metadata;
+if (typeof channelId !== "string" || typeof threadTs !== "string") {
+  return { status: "unavailable" };
+}
 await ctx
+  // Opens the channel from the thread's root message.
   .to(slack, { channelId, codeChannel: { originThreadTs: threadTs, originTs: threadTs } })
   .send(task, {
     auth: ctx.session.auth.current,
