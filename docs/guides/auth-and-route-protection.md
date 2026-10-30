@@ -142,6 +142,35 @@ vercelOidc({
 
 `teamSlug` and `projectName` are the human-readable slugs in `sub`, not the `team_…` / `prj_…` IDs, and can't contain `:` or `*`. `environment` is `"production" | "preview" | "development" | "*"`. Hand-write the subject string only to match across teams with a wildcard.
 
+### `oidc()`
+
+Verifies a bearer JWT from any OIDC issuer, such as your company SSO. eve reads the issuer's discovery document (`${issuer}/.well-known/openid-configuration` unless you pass `discoveryUrl`) and checks the signature, issuer, audience, and expiry. Optional `subjects` and `claims` matchers reject tokens that don't match.
+
+A verified caller has `authenticator: "oidc"`, `principalType: "service"`, `issuer` and `subject` from the token's `iss` and `sub`, and `principalId` set to `<issuer>:<subject>`. Non-standard string and string-array claims become `attributes`, so a `groups` claim is `ctx.session.auth.current.attributes.groups`. Standard claims (`iss`, `sub`, `aud`, `exp`, `iat`, `nbf`, `jti`) are omitted.
+
+User-scoped connections, such as `connect()` from `@vercel/connect/eve`, require a `user` principal. When the issuer also mints machine tokens for the same audience, such as client-credentials grants, relabel only tokens that carry a person claim. Otherwise a machine token would get user-scoped connections. This example keys on `email`; use whichever claim your identity provider sets only on user tokens:
+
+```ts title="agent/channels/eve.ts"
+import { type AuthFn, localDev, oidc } from "eve/channels/auth";
+import { eveChannel } from "eve/channels/eve";
+
+const sso = oidc({ issuer: "https://sso.example.com", audiences: ["my-agent"] });
+
+// Only tokens that name a person become users. Machine tokens from the same
+// issuer have no email claim and stay "service" principals.
+const employee: AuthFn<Request> = async (request) => {
+  const caller = await sso(request);
+  if (!caller) return null;
+  return typeof caller.attributes.email === "string"
+    ? { ...caller, principalType: "user" }
+    : caller;
+};
+
+export default eveChannel({ auth: [employee, localDev()] });
+```
+
+In production this channel admits only tokens from that issuer and audience, as users when they name a person and as services otherwise, because `localDev()` never accepts a request outside a development server.
+
 ### Custom verifiers
 
 When no helper fits, write your own `AuthFn` (the array example above) or call the low-level verifiers directly.

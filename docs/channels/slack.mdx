@@ -46,6 +46,19 @@ Choose **Use portable credentials** when the agent doesn't run on Vercel or you 
 2. Install the app, then set `SLACK_BOT_TOKEN` to its Bot User OAuth Token and `SLACK_SIGNING_SECRET` to the signing secret from **Basic Information**. Put both in `.env.local` for local development or in the deployed runtime's environment.
 3. Set the Request URL to `https://your-agent.example/eve/v1/slack` under **Event Subscriptions** (subscribe to `app_mention`, plus `message.im` for DMs), **Interactivity & Shortcuts**, and each **Slash Command**.
 
+The channel reads both variables when you omit `credentials`. To name the source explicitly:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: {
+    botToken: process.env.SLACK_BOT_TOKEN,
+    signingSecret: process.env.SLACK_SIGNING_SECRET,
+  },
+});
+```
+
 For an app installed in several workspaces, pass a function as `botToken`. It receives the installation workspace as `{ teamId }`: `credentials: { botToken: ({ teamId }) => loadInstallationToken(teamId) }`. Reject a missing `teamId` instead of falling back to a default installation.
 
 ## How the channel handles inbound events
@@ -231,12 +244,15 @@ Post sensitive requests in conversations limited to the intended approvers. Re-c
 Use `onMessage` to answer explicit mentions and continue replies in threads that already have an eve session:
 
 ```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
+
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
   async onMessage(ctx, message) {
     if (message.author?.isBot) return null;
     return (await ctx.isDMOrPrivateChannel()) || ctx.isBotMentioned() || (await ctx.isSubscribed())
-      ? { auth: null }
+      ? { auth: defaultSlackAuth(message, ctx) }
       : null;
   },
 });
