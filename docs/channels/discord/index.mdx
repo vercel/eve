@@ -64,13 +64,13 @@ curl -X PUT "https://discord.com/api/v10/applications/$DISCORD_APPLICATION_ID/co
 
 ## Default channel behavior
 
-By default, the bot answers a slash command as the person who ran it, and replies to the command in the channel. Approvals and questions appear as buttons. With the [Gateway relay](#enable-dms-and-mentions), it also answers DMs, mentions, and replies.
+By default, the bot answers a slash command as the person who ran it, and replies to the command in the channel. Approvals and questions appear as buttons. To also answer DMs, mentions, and replies, [enable bot behavior](#enable-bot-behavior).
 
 To change who can run the agent, see [Dispatch](/docs/channels/discord/reference#dispatch). To change how replies are sent, see [Delivery](/docs/channels/discord/reference#delivery).
 
-## Enable DMs and mentions
+## Enable bot behavior
 
-Discord sends ordinary messages only over its Gateway WebSocket, so eve runs a relay that stays connected and forwards them to the agent. Gateway support is experimental.
+Answering DMs, mentions, and thread replies like a regular Discord bot takes some additional setup. Discord sends these messages only over its Gateway WebSocket, so eve runs a relay that stays connected and forwards them to the agent. Gateway support is experimental.
 
 <TabsWithChildren groupId="vercel" ariaLabel="How credentials are managed" tabs={["Vercel Connect", "Self-managed"]}>
 <TabContent order={1}>
