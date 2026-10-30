@@ -188,54 +188,68 @@ function chatConfig() {
   };
 }
 
-it("keeps each Chat SDK requirement on its own compiled route and omits undeclared adapters", async () => {
-  const { initialize, ...config } = chatConfig();
-  const { channel } = chatSdkChannel({
-    ...config,
-    route: "/webhooks",
-    routes: { discord: "/hooks/community" },
-    connect: {
-      slack: { connector: "slack/support", service: "slack", type: "slack" },
-      discord: {
-        connector: "discord/community",
-        service: "discord",
-        subjectTypes: ["app", "user"],
+it.each([false, true])(
+  "keeps each Chat SDK requirement on its own compiled route (wrapped: %s)",
+  async (wrap) => {
+    const { initialize, ...config } = chatConfig();
+    const { channel } = chatSdkChannel({
+      ...config,
+      route: "/webhooks",
+      routes: { discord: "/hooks/community" },
+      connect: {
+        slack: { connector: "slack/support", service: "slack", type: "slack" },
+        discord: {
+          connector: "discord/community",
+          service: "discord",
+          subjectTypes: ["app", "user"],
+        },
       },
-    },
-  });
-  const compiled = await compileChannels([["chat", { ...channel }]]);
-  const snapshot = buildExternalResourcesSnapshot({
-    generatorVersion: "test",
-    manifest: compiled,
-    publicRoutePrefix: "/app",
-  });
-  expect(snapshot.resources).toEqual([
-    {
-      kind: "channel",
-      name: "chat",
-      logicalPath: "channels/chat.ts",
-      credentials: {
-        reference: "connector:slack/support",
-        service: "slack",
-        method: "slack",
-        subjectTypes: ["app"],
+    });
+    const compiled = await compileChannels([
+      [
+        "chat",
+        {
+          ...channel,
+          routes: channel.routes.map((route) => ({
+            ...route,
+            path: wrap ? `/wrapped${route.path}` : route.path,
+          })),
+        },
+      ],
+    ]);
+    const snapshot = buildExternalResourcesSnapshot({
+      generatorVersion: "test",
+      manifest: compiled,
+      publicRoutePrefix: "/app",
+    });
+    expect(snapshot.resources).toEqual([
+      {
+        kind: "channel",
+        name: "chat",
+        logicalPath: "channels/chat.ts",
+        credentials: {
+          reference: "connector:slack/support",
+          service: "slack",
+          method: "slack",
+          subjectTypes: ["app"],
+        },
+        route: { path: `/app${wrap ? "/wrapped" : ""}/webhooks/slack` },
       },
-      route: { path: "/app/webhooks/slack" },
-    },
-    {
-      kind: "channel",
-      name: "chat",
-      logicalPath: "channels/chat.ts",
-      credentials: {
-        reference: "connector:discord/community",
-        service: "discord",
-        subjectTypes: ["app", "user"],
+      {
+        kind: "channel",
+        name: "chat",
+        logicalPath: "channels/chat.ts",
+        credentials: {
+          reference: "connector:discord/community",
+          service: "discord",
+          subjectTypes: ["app", "user"],
+        },
+        route: { path: `/app${wrap ? "/wrapped" : ""}/hooks/community` },
       },
-      route: { path: "/app/hooks/community" },
-    },
-  ]);
-  expect(initialize).not.toHaveBeenCalled();
-});
+    ]);
+    expect(initialize).not.toHaveBeenCalled();
+  },
+);
 
 it("rejects a declared and undeclared Chat SDK adapter sharing one route", () => {
   const { initialize: _, ...config } = chatConfig();
@@ -261,3 +275,13 @@ it.each([
   // Model JavaScript callers which do not have TypeScript's config checks.
   expect(() => chatSdkChannel({ ...config, connect: connect as never })).toThrow(message);
 });
+
+it.each([false, 1, "slack", null, [], new Map()])(
+  "rejects invalid Chat SDK connect containers %j",
+  (connect) => {
+    const { initialize: _, ...config } = chatConfig();
+    expect(() => chatSdkChannel({ ...config, connect: connect as never })).toThrow(
+      "connect declarations must be a plain object",
+    );
+  },
+);

@@ -110,7 +110,7 @@ export default channel;
 
 This declares a build dependency; it does not supply the adapter's credentials, create a provider app, or configure its webhooks. Keep the adapter's runtime credential setup in place. Only declare a connector that the adapter actually uses.
 
-The build associates each declaration with that adapter's webhook path, including `route` and `routes` overrides. Its GET and POST handlers produce one requirement. Undeclared adapters produce none. Unknown adapter keys, invalid declarations, and shared webhook paths fail the build. Connect's provider support determines whether it can configure and verify the resulting dependency.
+The build associates each declaration with that adapter's webhook path, including `route` and `routes` overrides and wrappers that spread a route before changing its path. Its GET and POST handlers produce one requirement. Undeclared adapters produce none. Unknown adapter keys, invalid declarations, and shared webhook paths fail the build. Connect's provider support determines whether it can configure and verify the resulting dependency.
 
 ## Dispatch
 

@@ -1,5 +1,9 @@
 import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
-import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
+import { isPlainRecord } from "#shared/guards.js";
+import {
+  extractVercelConnectMetadata,
+  type VercelConnectMetadata,
+} from "#shared/vercel-connect-metadata.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { failureNotice } from "#public/channels/reply.js";
 import { callLabel } from "#protocol/session-projection/selectors.js";
@@ -325,6 +329,11 @@ export interface ChatSdkChannelBridge<TAdapters extends ChatSdkAdapters = ChatSd
 export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
   config: ChatSdkChannelConfig<TAdapters>,
 ): ChatSdkChannelBridge<TAdapters> {
+  if (config.connect !== undefined && !isPlainRecord(config.connect)) {
+    throw new TypeError(
+      "Chat SDK connect declarations must be a plain object keyed by adapter name.",
+    );
+  }
   const bot = new Chat<TAdapters>(config as ChatConfig<TAdapters>);
   const inputActionPrefix = config.inputActionPrefix ?? DEFAULT_INPUT_ACTION_PREFIX;
   const streaming = config.streaming ?? true;
@@ -433,7 +442,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     events: mergedEvents,
   });
 
-  const connectRoutes: Record<string, { credentials: { vercelConnect: unknown } }> = {};
+  const connectRoutes: Record<string, { vercelConnect: VercelConnectMetadata }> = {};
   for (const adapterName of Object.keys(config.connect ?? {})) {
     if (!Object.hasOwn(config.adapters, adapterName)) {
       throw new TypeError(`Connect requirement names unknown Chat SDK adapter "${adapterName}".`);
@@ -442,7 +451,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
   for (const adapterName of adapterNames(config.adapters)) {
     const requirement = config.connect?.[adapterName];
     if (requirement === undefined) continue;
-    if (requirement === null || typeof requirement !== "object") {
+    if (!isPlainRecord(requirement)) {
       throw new TypeError(`Invalid Connect requirement for Chat SDK adapter "${adapterName}".`);
     }
     const metadata = extractVercelConnectMetadata({
@@ -458,7 +467,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
       throw new TypeError(`Invalid Connect requirement for Chat SDK adapter "${adapterName}".`);
     }
     const route = routeForAdapter(adapterName, config);
-    connectRoutes[route] = { credentials: { vercelConnect: metadata } };
+    connectRoutes[route] = { vercelConnect: metadata };
   }
   setChannelBuildMetadata(channel, { routes: connectRoutes });
 

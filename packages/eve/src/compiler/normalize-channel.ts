@@ -61,7 +61,7 @@ export async function compileChannelDefinition(
 
   return {
     definitions: definition.routes.map((route) => {
-      const buildMetadata = getChannelBuildMetadata(definition, channelName, route.path);
+      const buildMetadata = getChannelBuildMetadata(definition, channelName, route);
       return {
         kind: "channel" as const,
         name: channelName,
