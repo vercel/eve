@@ -120,7 +120,9 @@ eve's first-class channels handle webhooks, verification, event parsing, and thr
 
 Connect-backed Slack, GitHub, Linear, Discord, Teams, Linq, Photon, Telegram, and Twilio channels appear in `vercel-connect-manifest.json` with their connector reference and webhook route. The build does not fetch credentials.
 
-The non-Slack helpers need the paired [Connect SDK update](https://github.com/vercel/vercel/pull/17757). SDK releases without that change only declare Slack channels. Plain credentials and environment variables do not declare Connect requirements. Custom channels and arbitrary Chat SDK adapters need separate declarations. Telegram and Twilio need the corresponding Connect SDK helpers. Twilio retains three distinct event routes; Connect must support those routes before reporting delivery ready.
+GitHub, Linear, Discord, Teams, Linq, and Photon need the [Connect SDK metadata update](https://github.com/vercel/vercel/pull/17757). Telegram and Twilio use [`connectTelegramCredentials` and `connectTwilioCredentials`](https://github.com/vercel/vercel/pull/17758). Plain credentials and environment variables do not declare Connect requirements. Custom channels and arbitrary Chat SDK adapters need separate declarations.
+
+Twilio retains three distinct event routes. Connect must support those routes before reporting delivery ready.
 
 A declaration does not prove readiness. Connect must still verify the connector's grants and delivery configuration.
 

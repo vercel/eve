@@ -5,6 +5,7 @@ import {
   twilioSignatureBase,
   verifyTwilioRequest as verifyPrimitive,
   TwilioWebhookVerificationError,
+  type TwilioWebhookVerifier,
 } from "#compiled/@chat-adapter/twilio/webhook.js";
 
 /** Twilio auth token, materialized directly or from an async secret provider. */
@@ -17,12 +18,7 @@ export interface TwilioVerifiedRequest {
   readonly params: URLSearchParams;
 }
 
-/**
- * Verifies a forwarded webhook. A string supplies the verified body; another
- * truthy result accepts the original body. Rejected requests must pass native
- * Twilio signature verification, which also covers direct Gather callbacks.
- */
-export type TwilioWebhookVerifier = (request: Request, body: string) => unknown | Promise<unknown>;
+export type { TwilioWebhookVerifier };
 
 /** Options for verifying Twilio inbound webhooks. */
 export interface TwilioVerifyOptions {
@@ -30,6 +26,7 @@ export interface TwilioVerifyOptions {
   readonly authToken: TwilioAuthToken | undefined;
   /** Public URL Twilio signed. Set this when a proxy or tunnel rewrites `request.url`. */
   readonly webhookUrl?: TwilioWebhookUrl;
+  /** Accept forwarded webhooks; rejected requests must pass native signature verification. */
   readonly webhookVerifier?: TwilioWebhookVerifier;
 }
 
@@ -56,24 +53,17 @@ export async function verifyTwilioRequest(
   options: TwilioVerifyOptions,
 ): Promise<TwilioVerifiedRequest> {
   if (options.webhookVerifier !== undefined) {
-    // Gather actions also receive direct Twilio callbacks. Keep the request
-    // unread for native signature verification if the forwarder rejects it.
-    const originalBody = await request.clone().text();
-    let result: unknown;
+    // Gather actions receive direct Twilio callbacks even after a forwarded
+    // voice request. Leave the original body available for native verification.
     try {
-      result = await options.webhookVerifier(request, originalBody);
+      return await verifyPrimitive(request.clone(), { webhookVerifier: options.webhookVerifier });
     } catch (error) {
-      if (!request.headers.has("x-twilio-signature")) throw error;
+      if (!request.headers.has("x-twilio-signature")) {
+        if (error instanceof TwilioWebhookVerificationError)
+          throw new Error("twilioChannel: inbound webhook verifier rejected the request.");
+        throw error;
+      }
     }
-    if (result) {
-      const body = typeof result === "string" ? result : originalBody;
-      const params = new URLSearchParams(
-        request.method === "GET" ? new URL(request.url).search : body,
-      );
-      return { body, params };
-    }
-    if (!request.headers.has("x-twilio-signature"))
-      throw new Error("twilioChannel: inbound webhook verifier rejected the request.");
   }
   const signature = request.headers.get("x-twilio-signature");
   if (!signature) {
