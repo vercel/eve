@@ -81,6 +81,12 @@ export type HarnessNext =
    * model delivered.
    */
   | { readonly settle: { readonly output: JsonValue | null } }
+  /**
+   * Call tools: each through the gate a model's call goes through (approval, sign-in, the
+   * runtime's own tools), recorded in history as a call the agent made. eve decides again once
+   * they've settled.
+   */
+  | { readonly calls: readonly { readonly tool: string; readonly input?: JsonValue }[] }
   /** End the turn as failed, with `message` for the person. */
   | { readonly fail: { readonly message: string } };
 

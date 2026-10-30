@@ -288,6 +288,96 @@ describe.each([
     expect(summarizeTurnEvents(stages[1]!).message).toBe("Refunded.");
   });
 
+  it("calls a tool itself, through its approval, and settles without the model", async () => {
+    const runs: unknown[] = [];
+    const modelCalls: string[] = [];
+    const runtime = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamic(() => ({
+            model: model("gpt-5.5", () => {
+              modelCalls.push("model");
+              return textStreamResult("The model shouldn't answer.");
+            }),
+            modelContextWindowTokens: 200_000,
+          })),
+        }),
+        name: "harness-calls",
+      },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineHarness((ctx) => ({
+              agent: {
+                tools: {
+                  release: defineTool({
+                    approval: { request: always(), response: () => ({ status: "allowed" }) },
+                    description: "Release a version.",
+                    execute: async (input: { version: string }) => {
+                      runs.push(input);
+                      return { released: input.version };
+                    },
+                    inputSchema: {
+                      properties: { version: { type: "string" } },
+                      required: ["version"],
+                      type: "object",
+                    },
+                  }),
+                },
+              },
+              next: () => {
+                const release = ctx.calls.find((call) => call.tool === "release");
+                if (release === undefined) {
+                  return { calls: [{ input: { version: "1.2" }, tool: "release" }] };
+                }
+                return { settle: { output: `Released ${JSON.stringify(release.output)}.` } };
+              },
+            })),
+          }),
+          logicalPath: "harness.ts",
+        },
+      ],
+    });
+    const continuationToken = `http:harness-calls-${cold}`;
+    const stages = await runtime.run(async () => {
+      const run = await startSessionOwner(workflowEntry, [
+        {
+          input: { message: "/release 1.2" },
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          serializedContext: {
+            ...buildSerializedContext({ auth: ALICE, channelKind: "http", continuationToken }),
+            "eve.capabilities": { requestInput: true },
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const paused = await withTimeout(stream.nextTurn(), "approval");
+        const [opened] = filterEventsByType(paused, "interaction.opened");
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          auth: ALICE,
+          delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+          kind: "send",
+          payload: {
+            answers: [{ interactionId: opened!.data.interactionId, optionId: "approve" }],
+          },
+        });
+        return [paused, await withTimeout(stream.nextTurn(), "approved")];
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+
+    expect(filterEventsByType(stages[0]!, "call.requested")).toMatchObject([
+      { data: { capability: { name: "release" }, owner: { turnId: expect.any(String) } } },
+    ]);
+    expect(runs).toEqual([{ version: "1.2" }]);
+    expect(summarizeTurnEvents(stages[1]!).message).toBe('Released {"released":"1.2"}.');
+    expect(modelCalls).toEqual([]);
+  });
+
   it("offers only the tools it returns, from what the agent declares, and skips the agent's model when it picks one", async () => {
     const offered: string[][] = [];
     const agentModelRuns: string[] = [];

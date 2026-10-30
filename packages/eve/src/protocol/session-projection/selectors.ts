@@ -487,15 +487,27 @@ export function callRun(view: SessionView, entry: CallRow): string | undefined {
   while (current !== undefined && !seen.has(current.callId)) {
     seen.add(current.callId);
     if ("runId" in current.owner) return current.owner.runId;
+    if (!("callId" in current.owner)) return undefined;
     current = view.calls[current.owner.callId];
   }
   return undefined;
 }
 
-/** The turn a call belongs to: the turn of the run that made it. */
+/** The turn a call belongs to: the turn of the run that made it, or the turn that made it. */
 export function callTurn(view: SessionView, entry: CallRow): string | undefined {
   const runId = callRun(view, entry);
-  return runId === undefined || view.runs[runId] === undefined ? undefined : runTurn(view, runId);
+  if (runId !== undefined) {
+    return view.runs[runId] === undefined ? undefined : runTurn(view, runId);
+  }
+  const seen = new Set<string>();
+  let current: CallRow | undefined = entry;
+  while (current !== undefined && !seen.has(current.callId)) {
+    seen.add(current.callId);
+    if ("turnId" in current.owner) return current.owner.turnId;
+    if (!("callId" in current.owner)) return undefined;
+    current = view.calls[current.owner.callId];
+  }
+  return undefined;
 }
 
 /** The task serving a call, directly or through a call it was made inside. */
