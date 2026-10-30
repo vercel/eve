@@ -1,7 +1,8 @@
-// The decorative header above a channel docs page: a sample conversation in
-// the style of that channel. Adapted from the template card previews drafted
-// in vercel/eve#5133, keeping their measured app metrics and palettes. Slack
-// and GitHub are laid out at their real desktop sizes, then zoomed down.
+// The decorative visual under a channel docs page's intro: a sample
+// conversation in the style of that channel. Adapted from the template card
+// previews drafted in vercel/eve#5133, keeping their measured app metrics and
+// palettes. Slack and GitHub are laid out at their real desktop sizes, then
+// zoomed down.
 import { LogoEveSvg } from "@vercel/geistdocs/assets/logos/logo-eve-svg";
 import { Lato, Mona_Sans } from "next/font/google";
 import type { CSSProperties, ReactNode } from "react";
@@ -19,7 +20,11 @@ import {
   SLACK_COLORS,
   type TextSegment,
 } from "@/lib/channel-previews/kit";
-import type { ChannelPreview, ChannelScene, PreviewMessage } from "@/lib/channel-previews/scenes";
+import {
+  type ChannelScene,
+  channelPreviews,
+  type PreviewMessage,
+} from "@/lib/channel-previews/scenes";
 
 // Not preloaded: every docs page imports this module, but only channel pages use the fonts.
 const lato = Lato({
@@ -58,21 +63,23 @@ const APP_WINDOW: CSSProperties = { top: 16, bottom: -20, left: 20, right: 20 };
 const PHONE_FRAME = { top: 16, bottom: -40, width: 256 };
 
 /**
- * Rendered above the page title. It repeats nothing from the page and agents
- * never see it, so screen readers get a one-sentence description instead.
+ * Placed under a channel page's intro by `rehypeChannelPreview`, so agents
+ * never see it. Screen readers get a one-sentence description instead.
  */
-export const ChannelPreviewHeader = ({ preview }: { preview: ChannelPreview }) => {
+export const ChannelPreview = ({ slug }: { slug: string }) => {
+  const preview = channelPreviews[slug];
+  if (!preview) throw new Error(`No channel preview for "${slug}".`);
   const { scene } = preview;
   const user = pickPreviewUser(scene.agent + scene.surface);
   return (
     <div
       aria-label={preview.alt}
       // `light-dark()` in the palette variables follows the color scheme, so pin it to the site theme.
-      className="not-prose relative mb-8 h-52 overflow-hidden rounded-lg border border-gray-alpha-400 bg-background-200 [color-scheme:light] dark:[color-scheme:dark]"
+      className="not-prose relative my-8 h-52 overflow-hidden rounded-lg border border-gray-alpha-400 bg-background-200 [color-scheme:light] dark:[color-scheme:dark]"
       role="img"
       style={PALETTE_VARS}
     >
-      {/* Fade toward the title so the conversation reads as a hint, not competing text. */}
+      {/* Fade out at the bottom so the conversation reads as a hint, not competing text. */}
       <div
         aria-hidden="true"
         className="absolute inset-0"

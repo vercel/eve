@@ -1,7 +1,8 @@
-// Sample conversations shown above channel docs pages, one use case per
-// channel, drawn from the Use Cases page. They are decorative: the docs app
-// renders them from here (not from MDX), so the Markdown that agents read and
-// the docs packaged with `eve` stay free of them.
+// Sample conversations shown under a channel page's intro, one use case per
+// channel, drawn from the Use Cases page: business agents on Slack and GitHub,
+// customer-facing agents (AaaS) on iMessage. They are decorative and live
+// here, not in MDX, so the Markdown that agents read and the docs packaged
+// with `eve` stay free of them.
 
 export interface PreviewMessage {
   from: "agent" | "user";
@@ -68,26 +69,29 @@ export const channelPreviews: Record<string, ChannelPreview> = {
     },
   },
   "channels/photon": {
-    alt: "An iMessage conversation where someone asks an assistant agent for two movie tickets tonight, and it finds seats and asks to book them.",
+    alt: "An iMessage conversation where a customer asks a store's support agent about a late order, and it replies with the delivery status.",
     scene: {
       surface: "imessage",
-      agent: "Concierge",
+      agent: "Acme Support",
       messages: [
-        { from: "user", text: "Can you grab 2 tickets for Dune tonight, around 7?" },
-        { from: "agent", text: "Found a 7:15 showing, 2 seats in row G for $38. Book them?" },
+        { from: "user", text: "Where's my order? It was supposed to come today" },
+        {
+          from: "agent",
+          text: "Order #4821 is out for delivery and should arrive by 6 PM. Want a text when it's dropped off?",
+        },
         { from: "user", text: "yes please" },
       ],
     },
   },
   "channels/linq": {
-    alt: "An iMessage conversation where someone asks an assistant agent to book their usual dinner, and it remembers the restaurant and offers to confirm.",
+    alt: "An iMessage conversation where a patient asks a dental office's agent to move an appointment, and it offers two open times.",
     scene: {
       surface: "imessage",
-      agent: "Concierge",
+      agent: "Northside Dental",
       messages: [
-        { from: "user", text: "Book the usual for Friday?" },
-        { from: "agent", text: "Lupa, table for 2 at 7:30, like last time. Want me to confirm?" },
-        { from: "user", text: "perfect" },
+        { from: "user", text: "Can I move my cleaning to next week?" },
+        { from: "agent", text: "Sure. Tuesday at 10:30 or Thursday at 2:00?" },
+        { from: "user", text: "Thursday works" },
       ],
     },
   },

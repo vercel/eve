@@ -2,12 +2,10 @@ import { getPublicPath } from "@vercel/geistdocs/config";
 import { MobileDocsBar } from "@vercel/geistdocs/mobile-docs-bar";
 import { createDocsPage, createPageActions } from "@vercel/geistdocs/pages/docs";
 import type { MDXComponents } from "mdx/types";
-import { ChannelPreviewHeader } from "@/components/geistdocs/channel-preview";
 import { EditOnGithubAction } from "@/components/geistdocs/edit-on-github";
 import { JsonLd } from "@/components/geistdocs/json-ld";
 import { getMDXComponents } from "@/components/geistdocs/mdx-components";
 import { canonicalAlternates } from "@/lib/geistdocs/canonical";
-import { channelPreviews } from "@/lib/channel-previews/scenes";
 import { config } from "@/lib/geistdocs/config";
 import { defaultLanguage } from "@/lib/geistdocs/languages";
 import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
@@ -87,16 +85,12 @@ const docsPage = createDocsPage({
   tableOfContentPopover: {
     enabled: false,
   },
-  renderTop: ({ data, page }) => {
-    const channelPreview = channelPreviews[page.slugs.join("/")];
-    return (
-      <>
-        <DocsStructuredData page={page} />
-        <MobileDocsBar toc={data.toc} />
-        {channelPreview ? <ChannelPreviewHeader preview={channelPreview} /> : null}
-      </>
-    );
-  },
+  renderTop: ({ data, page }) => (
+    <>
+      <DocsStructuredData page={page} />
+      <MobileDocsBar toc={data.toc} />
+    </>
+  ),
 });
 
 export default docsPage.Page;
