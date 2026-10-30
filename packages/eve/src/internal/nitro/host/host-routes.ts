@@ -220,6 +220,16 @@ export interface HostNitroRoutes {
  * route module shares to `artifactsConfigPath` and the workflow handler file
  * beside the workflow bundle; everything else is a virtual module.
  */
+/**
+ * The virtual module ID serving one channel route. A path that ends in a file extension, such as
+ * `/.well-known/agent-card.json`, gets a `.mjs` suffix: the bundler infers a module's type from
+ * its ID's extension, and would otherwise parse the generated handler as JSON.
+ */
+export function channelVirtualId(routeKey: string): string {
+  const id = `#eve/channel/${routeKey}`;
+  return /\.[A-Za-z0-9]+$/u.test(routeKey) ? `${id}.mjs` : id;
+}
+
 export async function renderHostRoutes(
   table: HostRouteTable,
   input: {
@@ -263,7 +273,7 @@ export async function renderHostRoutes(
     switch (route.kind) {
       case "channel": {
         const routeKey = `${route.method} ${route.path}`;
-        const id = `#eve/channel/${routeKey}`;
+        const id = channelVirtualId(routeKey);
         const pattern = normalizeRoutePattern(route.path);
         if (route.method === "WEBSOCKET") {
           if (!httpGetPatterns.has(pattern)) {
@@ -290,7 +300,7 @@ export async function renderHostRoutes(
       }
       case "channel-preflight":
         addVirtualHandler(
-          `#eve/channel/OPTIONS ${route.path}`,
+          channelVirtualId(`OPTIONS ${route.path}`),
           renderChannelPreflightHandler({ cors: route.cors }),
           { method: "OPTIONS", route: route.path },
         );

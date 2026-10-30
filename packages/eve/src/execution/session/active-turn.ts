@@ -90,10 +90,14 @@ export class ActiveTurn {
     this.input = input;
     this.caller = owner.caller;
     this.#control = owner.control === true;
-    this.identity = { callerCallId: owner.caller?.callId, principal: owner.principal };
     this.expectedTurnId = activeTurnId(
       turnPosition(storedProjection(readDurableSession(input.cursor.sessionState).state)),
     );
+    this.identity = {
+      callerCallId: owner.caller?.callId,
+      principal: owner.principal,
+      turnId: this.expectedTurnId,
+    };
     this.unsubscribe = input.inbox.onInterrupt((payload) => {
       if (this.cancelsThisTurn(payload)) this.abort();
     });

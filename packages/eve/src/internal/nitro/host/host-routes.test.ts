@@ -4,7 +4,7 @@ import type { CompiledAgentManifest, CompiledChannelDefinition } from "#compiler
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
 import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN, EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import type { ScheduleRegistration } from "#runtime/schedules/register.js";
-import { createHostRouteTable } from "#internal/nitro/host/host-routes.js";
+import { channelVirtualId, createHostRouteTable } from "#internal/nitro/host/host-routes.js";
 import { EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH } from "#internal/schedules/consumer-route.js";
 import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-route.js";
 
@@ -240,4 +240,13 @@ describe("createHostRouteTable", () => {
       });
     },
   );
+});
+
+describe("channelVirtualId", () => {
+  it("keeps a route path's file extension out of its virtual module type", () => {
+    expect(channelVirtualId("GET /.well-known/agent-card.json")).toBe(
+      "#eve/channel/GET /.well-known/agent-card.json.mjs",
+    );
+    expect(channelVirtualId("POST /eve/v1/session")).toBe("#eve/channel/POST /eve/v1/session");
+  });
 });
