@@ -5,7 +5,7 @@ description: "Every value, option, and behavior of useEveAgent, shared by the Re
 
 This page lists every value, option, and behavior of `useEveAgent`. Use it when you need exact behavior. For a guided introduction, start with the [frontend overview](/docs/guides/frontend).
 
-React, [Vue](./use-eve-agent-vue), and [Svelte](./use-eve-agent-svelte) share the behavior described here. Their pages cover only how each binding exposes it.
+React, [Vue](/docs/guides/frontend/use-eve-agent-vue), and [Svelte](/docs/guides/frontend/use-eve-agent-svelte) share the behavior described here. Their pages cover only how each binding exposes it.
 
 ## Returned state
 
@@ -380,6 +380,6 @@ if (activity.status === "linked") {
 
 ### Without the hook
 
-- For headless capture, use [`SessionStore.observe()`](../client/streaming#observe-nested-traces-without-a-framework). Archive observed prefixes with their per-session cursors in your own versioned schema, and keep earlier archives when history expires.
+- For headless capture, use [`SessionStore.observe()`](/docs/guides/client/streaming#observe-nested-traces-without-a-framework). Archive observed prefixes with their per-session cursors in your own versioned schema, and keep earlier archives when history expires.
 - If you read child streams yourself, attribute work with the parent's `child.sent` events. Each one names the `callId` and the `childDeliveryId` on the child's stream. Don't count `delivery.consumed` on the child: answers to the child's questions are deliveries too.
-- With your own session, pass a `child.opened` event to [`session.agent()`](../client/streaming#follow-a-subagent) and follow the child with `stream()`. It reads local and remote children through the parent. See [What the parent sees](../../subagents#what-the-parent-sees).
+- With your own session, pass a `child.opened` event to [`session.agent()`](/docs/guides/client/streaming#follow-a-subagent) and follow the child with `stream()`. It reads local and remote children through the parent. See [What the parent sees](/docs/subagents#what-the-parent-sees).

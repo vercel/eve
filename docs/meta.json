@@ -32,9 +32,7 @@
     "---Reference---",
     "patterns",
     "guides/upgrade",
-    "guides/dev-tui",
-    "...reference",
-    "responsible-use",
+    "reference",
     "[Benchmarks](/benchmarks)"
   ]
 }

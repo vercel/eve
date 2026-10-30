@@ -1,4 +1,11 @@
 {
   "title": "Reference",
-  "pages": ["cli", "typescript-api", "../guides/session-context", "agent-files"]
+  "defaultOpen": false,
+  "pages": [
+    "cli",
+    "typescript-api",
+    "../guides/session-context",
+    "agent-files",
+    "../responsible-use"
+  ]
 }
