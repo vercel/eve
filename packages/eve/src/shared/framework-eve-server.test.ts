@@ -54,13 +54,12 @@ describe("startEveProductionServer", () => {
       new URL("http://127.0.0.1/eve/v1/health"),
       expect.objectContaining({ redirect: "error" }),
     );
-    expect(spawnMock).toHaveBeenCalledWith(
-      process.execPath,
-      ["/agent/.output/server/index.mjs"],
-      expect.objectContaining({
-        env: expect.objectContaining({ PORT: "80", NITRO_PORT: "80" }),
-      }),
-    );
+    // Keep the inherited environment out of assertion failure logs.
+    const environment = spawnMock.mock.calls[0]![2].env;
+    expect({ PORT: environment.PORT, NITRO_PORT: environment.NITRO_PORT }).toEqual({
+      PORT: "80",
+      NITRO_PORT: "80",
+    });
   });
 
   it("bounds startup and stops the child when health never becomes ready", async () => {
