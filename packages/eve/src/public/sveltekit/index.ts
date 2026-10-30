@@ -26,9 +26,9 @@ const EVE_SVELTEKIT_HOST: EveFrameworkHost = { label: "SvelteKit", slug: "svelte
  */
 export interface EveSvelteKitPluginOptions {
   /**
-   * Maximum time in milliseconds to wait for the eve development server to
-   * start, including waiting for another SvelteKit process to start it.
-   * Defaults to 180000 (three minutes).
+   * Timeout in milliseconds for each wait: another SvelteKit process starting
+   * eve, or a spawned eve server printing its URL. These waits have separate
+   * timeout budgets. Defaults to 180000 (three minutes).
    */
   readonly devServerTimeoutMs?: number;
   /**

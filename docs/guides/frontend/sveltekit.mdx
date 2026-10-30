@@ -42,10 +42,10 @@ export default defineConfig({
 
 All fields are optional.
 
-| Option               | Type     | Default                | Purpose                                                                                                                |
-| -------------------- | -------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `eveRoot`            | `string` | SvelteKit project root | eve project root, relative to the SvelteKit project root unless absolute.                                              |
-| `eveBuildCommand`    | `string` | generated              | Build command for the generated eve Vercel service.                                                                    |
+| Option               | Type     | Default                | Purpose                                                                                                  |
+| -------------------- | -------- | ---------------------- | -------------------------------------------------------------------------------------------------------- |
+| `eveRoot`            | `string` | SvelteKit project root | eve project root, relative to the SvelteKit project root unless absolute.                                |
+| `eveBuildCommand`    | `string` | generated              | Build command for the generated eve Vercel service.                                                      |
 | `devServerTimeoutMs` | `number` | `180000`               | Timeout for each wait: another SvelteKit process starting eve, or a spawned eve server printing its URL. |
 
 For slow cold starts, increase the development timeout:
