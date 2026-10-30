@@ -1,4 +1,4 @@
-import type { ModelMessage } from "ai";
+import type { ModelMessage, ToolCallPart } from "ai";
 
 import { extractToolResultCallIds } from "#harness/model-call/response.js";
 import { awaitedProviderToolCallIds } from "#harness/provider-tool-history.js";
@@ -64,6 +64,15 @@ export function repairToolHistory(input: {
 function closeProviderCalls(messages: readonly ModelMessage[], endsRequest: boolean) {
   const answered = extractToolResultCallIds(messages);
   const awaited = endsRequest ? awaitedProviderToolCallIds(messages) : new Set<string>();
+  const asked = new Set(
+    messages.flatMap((message) =>
+      message.role === "assistant" && Array.isArray(message.content)
+        ? message.content.flatMap((part) =>
+            part.type === "tool-approval-request" ? [part.toolCallId] : [],
+          )
+        : [],
+    ),
+  );
   return messages.map((message): ModelMessage => {
     if (message.role !== "assistant" || !Array.isArray(message.content)) return message;
     const parts = message.content;
@@ -72,7 +81,9 @@ function closeProviderCalls(messages: readonly ModelMessage[], endsRequest: bool
       part.type === "tool-call" &&
       part.providerExecuted === true &&
       !answered.has(part.toolCallId) &&
-      !awaited.has(part.toolCallId);
+      !awaited.has(part.toolCallId) &&
+      !asked.has(part.toolCallId) &&
+      !answered.has(anthropicCaller(part.providerOptions) ?? "");
     if (!local || !parts.some(dangling)) return message;
     return {
       ...message,
@@ -81,4 +92,13 @@ function closeProviderCalls(messages: readonly ModelMessage[], endsRequest: bool
       ),
     };
   });
+}
+
+/**
+ * The `code_execution` run an Anthropic programmatic call ran inside. Once that run has its
+ * result, the call belongs to it, whether or not the call has a result of its own.
+ */
+function anthropicCaller(options: ToolCallPart["providerOptions"]): string | undefined {
+  const caller = (options?.anthropic as { caller?: { toolId?: unknown } } | undefined)?.caller;
+  return typeof caller?.toolId === "string" ? caller.toolId : undefined;
 }

@@ -31,6 +31,21 @@ export default defineEval({
     answered.expectOk();
     turn.calledTool("reading_list", { status: "completed" });
     turn.calledTool("web_search", { status: "completed" });
+    // Only calls the model makes in one response defer the search result.
+    turn.eventsSatisfy("reading_list and web_search come from one model run", (events) => {
+      const runsOf = (name: string) =>
+        new Set(
+          events.flatMap((event) =>
+            event.type === "call.requested" &&
+            event.data.capability.name === name &&
+            "runId" in event.data.owner
+              ? [event.data.owner.runId]
+              : [],
+          ),
+        );
+      const searched = runsOf("web_search");
+      return [...runsOf("reading_list")].some((runId) => searched.has(runId));
+    });
     t.messageIncludes(/\b22\b/u).label("Bob's question gets an answer");
     t.noFailedCalls();
   },

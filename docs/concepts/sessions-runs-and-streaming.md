@@ -197,7 +197,7 @@ A call to a tool that runs as a task keeps working after the model gets a receip
 
 ### Failures and cancellation
 
-Before the next model request, eve repairs a local tool call in saved history that has no recorded result. It adds an error result that says the outcome is unknown, so the model checks external state before repeating side effects. The repair never runs the old call or closes work held by approvals, sign-in, workflows, or tasks. eve leaves provider-executed calls, SDK approvals, and duplicate call IDs unchanged.
+Before the next model request, eve repairs a local tool call in saved history that has no recorded result. It adds an error result that says the outcome is unknown, so the model checks external state before repeating side effects. The repair never runs the old call or closes work held by approvals, sign-in, workflows, or tasks. eve leaves SDK approvals and duplicate call IDs unchanged, and leaves provider-executed calls unchanged while their results can still arrive. Anthropic returns the result of a server tool called beside local tools, such as `web_search`, at the start of the next response. Once anything else follows those local results, such as a new message or a retry note, that result can't arrive, and eve repairs the server call like a local one.
 
 A failed model run, turn, or session carries `error: { code, message, id?, hint? }` on its `model.settled`, `turn.settled`, or `session.ended`. `id` is a support id that eve's server logs also carry, and `hint` is a remedy when eve recognizes the failure.
 

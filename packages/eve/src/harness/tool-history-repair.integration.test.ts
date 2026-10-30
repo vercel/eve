@@ -129,6 +129,8 @@ describe("saved tool history", () => {
     "duplicate-call",
     "late-result",
     "earlier-result",
+    "nested-provider-call",
+    "provider-approval",
   ])("leaves %s history untouched", (kind) => {
     let messages: ModelMessage[] = [calling, user];
     if (kind === "provider")
@@ -145,6 +147,34 @@ describe("saved tool history", () => {
     if (kind === "duplicate-call") messages.push(calling);
     if (kind === "late-result") messages.push({ role: "tool", content: [result] });
     if (kind === "earlier-result") messages.unshift({ role: "tool", content: [result] });
+    if (kind === "nested-provider-call") {
+      // An Anthropic programmatic run calls tools from inside `code_execution`; the run's result,
+      // which arrives a response late, covers what it called.
+      const run = { ...call, providerExecuted: true, toolCallId: "srvtoolu_run" };
+      const fromRun = {
+        anthropic: { caller: { toolId: run.toolCallId, type: "code_execution_20260120" } },
+      };
+      const nested = { ...run, providerOptions: fromRun, toolCallId: "srvtoolu_nested" };
+      messages = [
+        { role: "assistant", content: [run, { ...call, providerOptions: fromRun }, nested] },
+        { role: "tool", content: [result] },
+        { role: "assistant", content: [{ ...result, toolCallId: run.toolCallId }] },
+        user,
+      ];
+    }
+    if (kind === "provider-approval") {
+      const asked = { ...call, providerExecuted: true, toolCallId: "mcp_call" };
+      const request = {
+        type: "tool-approval-request" as const,
+        approvalId: "approval",
+        toolCallId: asked.toolCallId,
+      };
+      messages = [
+        { role: "assistant", content: [asked, request, call] },
+        { role: "tool", content: [result] },
+        user,
+      ];
+    }
     const original = structuredClone(messages);
     expect(repairToolHistory({ messages, insertionIndex: 1 })).toEqual({
       messages: original,

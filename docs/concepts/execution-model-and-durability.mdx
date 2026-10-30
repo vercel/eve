@@ -225,7 +225,7 @@ A handoff never leaves the session's addresses unclaimed. A delivery during a ha
 
 A message by session ID or by any claimed channel address wakes a waiting session and starts the next turn. Message sends default to `turnPolicy: "steer"`. Before assistant output begins, eve stops pending model generation and applies the new message within the same turn and turn ID. This includes model requests that run provider-managed search, and interrupted search work may run again. Reasoning and search progress don't count as assistant output.
 
-An executing eve tool finishes and keeps its result before steering reaches the next model request. Steering doesn't cancel the turn. After assistant output starts, steering applies at the next step boundary and keeps streamed text. A message that reaches the boundary after the turn ends starts another turn.
+An executing eve tool finishes and keeps its result before steering reaches the next model request. When the model also called a provider-executed tool beside it whose result hasn't arrived, such as Anthropic `web_search`, the message waits one more model request, because the provider returns that result at the start of the next response. Steering doesn't cancel the turn. After assistant output starts, steering applies at the next step boundary and keeps streamed text. A message that reaches the boundary after the turn ends starts another turn.
 
 Once eve starts recording a request for input or the turn's completion or failure, it finishes recording it before applying new messages.
 

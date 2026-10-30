@@ -5,9 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
 import { takeDeferredMessage } from "#harness/hitl/index.js";
 import { eventsOf } from "#harness/publication.js";
+import { cascade } from "#harness/session-machine/cascade.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createStreamChecker } from "#protocol/session-events/checker.js";
+import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 
 // The harness runs outside a workflow body here, where run attributes cannot be written.
 vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
@@ -68,12 +70,15 @@ function deferredHarness(later: (StreamPart[] | Error)[]) {
     name: "bash",
   };
   const checker = createStreamChecker();
+  const written = emptySessionView();
   const violations: unknown[] = [];
   const searchFacts: string[] = [];
   let position = 0;
   const runStep = createToolLoopHarness({
     handleEvent: async (publication) => {
-      const facts = [...eventsOf(publication)];
+      // As the session's writer stores them: an owner's end closes what it still holds.
+      const facts = cascade(written, eventsOf(publication));
+      for (const fact of facts) foldReceivedEvent(written, { ...fact, meta: { endOfLine: false } });
       violations.push(...checker.check({ at: "2026-10-21T00:00:00.000Z", facts }, position++));
       for (const fact of facts) {
         if ((fact.data as { callId?: string }).callId === searchId) searchFacts.push(fact.type);
@@ -91,6 +96,16 @@ function deferredHarness(later: (StreamPart[] | Error)[]) {
   };
   const prompts = () => model.doStreamCalls.map(({ prompt }) => prompt);
   return { prompts, runStep, searchFacts, session, violations };
+}
+
+type Prompt = ReturnType<ReturnType<typeof deferredHarness>["prompts"]>[number];
+
+/** The content parts of every message in a request's prompt. */
+function partsOf(prompt: Prompt) {
+  return prompt.flatMap(
+    (message): { type: string; toolCallId?: string; providerExecuted?: boolean }[] =>
+      Array.isArray(message.content) ? message.content : [],
+  );
 }
 
 /** Runs steps from `result` until the turn stops. */
@@ -140,6 +155,28 @@ describe("a provider result that arrives a step late", () => {
 
     expect(violations).toEqual([]);
     expect(searchFacts).toEqual(["call.requested", "call.started", "call.settled"]);
+  });
+
+  // Once the result arrives, the call keeps it: later requests replay both as the provider's.
+  it("leaves the answered call to the provider in later requests", async () => {
+    const run = deferredHarness([[searchResult, ...reply], reply]);
+    const first = await run.runStep(run.session, { message: start });
+    if (typeof first.next !== "function") throw new TypeError("Expected the turn to continue.");
+    const answered = await untilStopped(await first.next(first.session));
+
+    await untilStopped(
+      await run.runStep(answered.session, { message: "Thanks, Bob will use it." }),
+    );
+
+    const search = partsOf(run.prompts()[2]!).filter((part) => part.toolCallId === searchId);
+    expect(run.prompts()).toHaveLength(3);
+    expect(search).toEqual([
+      expect.objectContaining({ providerExecuted: true, type: "tool-call" }),
+      expect.objectContaining({
+        output: { type: "json", value: { tools: [] } },
+        type: "tool-result",
+      }),
+    ]);
   });
 
   it("settles it once when the step's first attempt fails after the result", async () => {
@@ -199,23 +236,19 @@ describe("input while a provider result is still to come", () => {
 // and its result can't come once anything else follows them. The next request answers the call
 // instead, so it reads the person's message first and the provider accepts it.
 describe("a provider result that can no longer come", () => {
+  // Fails the turn but keeps the session, as running out of credits does.
   const failure = new APICallError({
     isRetryable: false,
-    message: "The provider is unavailable.",
+    message: "The account is out of credits.",
     requestBodyValues: {},
-    statusCode: 400,
+    statusCode: 402,
     url: "https://provider.test",
   });
   const followUp = "Alice is back: which files were there?";
 
   /** Server calls the prompt sends without a result anywhere in it. */
-  function danglingServerCalls(
-    prompt: ReturnType<ReturnType<typeof deferredHarness>["prompts"]>[number],
-  ) {
-    const parts = prompt.flatMap(
-      (message): { type: string; toolCallId?: string; providerExecuted?: boolean }[] =>
-        Array.isArray(message.content) ? message.content : [],
-    );
+  function danglingServerCalls(prompt: Prompt) {
+    const parts = partsOf(prompt);
     const answered = new Set(
       parts.flatMap((part) => (part.type === "tool-result" ? [part.toolCallId] : [])),
     );
@@ -239,6 +272,8 @@ describe("a provider result that can no longer come", () => {
     expect(run.prompts()).toHaveLength(3);
     expect(request?.at(-1)).toMatchObject({ content: [{ text: followUp }], role: "user" });
     expect(danglingServerCalls(request!)).toEqual([]);
+    expect(run.violations).toEqual([]);
+    expect(run.searchFacts).toEqual(["call.requested", "call.started", "call.settled"]);
   });
 
   // A cancel during the step that waits for the result keeps the held message in history after
@@ -258,5 +293,7 @@ describe("a provider result that can no longer come", () => {
     expect(held.message).toBe(steer);
     expect(request.at(-1)).toMatchObject({ content: [{ text: followUp }], role: "user" });
     expect(danglingServerCalls(request)).toEqual([]);
+    expect(run.violations).toEqual([]);
+    expect(run.searchFacts).toEqual(["call.requested", "call.started", "call.settled"]);
   });
 });
