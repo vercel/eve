@@ -133,6 +133,13 @@ export const compatibilityRedirects: DocsRedirect[] = [
       ["typefully-eve-template", "eve-typefully-agent"],
       ["eve-sre-agent-template", "eve-incident-response-agent"],
       ["sanity-copilot-eve-template", "eve-sanity-copilot"],
+      ["eve-coding-agent-template", "eve-coding-agent-template"],
+      ["eve-voice-template", "eve-voice-template"],
+      ["eve-company-brain-template", "eve-company-brain-template"],
+      ["eve-discord-agent", "eve-discord-agent"],
+      ["bell-stack", "bell-stack"],
+      ["eve-design-template", "eve-design-template"],
+      ["personal-agent-template", "eve-personal-agent"],
     ].flatMap(([source, destination]) =>
       extensions.map((extension) => ({
         source: `${prefix}/templates/${source}${extension}`,

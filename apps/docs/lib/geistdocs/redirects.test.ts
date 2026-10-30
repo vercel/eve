@@ -179,18 +179,11 @@ describe("compatibilityRedirects", () => {
     "/templates",
     "/templates.md",
     "/templates.mdx",
-    "/templates/eve-voice-template",
-    "/templates/eve-discord-agent.md",
-    "/templates/eve-company-brain-template",
-    "/templates/eve-coding-agent-template",
-    "/templates/bell-stack",
-    "/templates/eve-design-template",
     "/templates/unknown-template.mdx",
     "/resources",
     "/en/templates",
     "/en/templates.md",
     "/en/templates.mdx",
-    "/en/templates/eve-voice-template.mdx",
     "/en/templates/unknown-template",
     "/en/resources",
   ])("falls back to the gallery for %s", async (source) => {
@@ -220,6 +213,13 @@ describe("compatibilityRedirects", () => {
     ["typefully-eve-template", "eve-typefully-agent"],
     ["eve-sre-agent-template", "eve-incident-response-agent"],
     ["sanity-copilot-eve-template", "eve-sanity-copilot"],
+    ["eve-coding-agent-template", "eve-coding-agent-template"],
+    ["eve-voice-template", "eve-voice-template"],
+    ["eve-company-brain-template", "eve-company-brain-template"],
+    ["eve-discord-agent", "eve-discord-agent"],
+    ["bell-stack", "bell-stack"],
+    ["eve-design-template", "eve-design-template"],
+    ["personal-agent-template", "eve-personal-agent"],
   ])("redirects %s directly to its matching Vercel listing", async (slug, destination) => {
     for (const prefix of ["", "/en"]) {
       for (const extension of ["", ".md", ".mdx"]) {
