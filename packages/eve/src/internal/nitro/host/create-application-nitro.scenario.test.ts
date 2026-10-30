@@ -14,7 +14,6 @@ import {
 } from "#compiler/artifacts.js";
 import type { CompiledSubagentNode } from "#compiler/manifest.js";
 import {
-  resolvePackageSourceDirectoryPath,
   resolvePackageRoot,
   resolveInstalledPackageInfo,
   resolveWorkflowModulePath,
@@ -390,22 +389,6 @@ describe("application Nitro creation", () => {
       moduleSideEffects: "no-treeshake",
     });
     expect(sideEffectsPlugin.resolveId?.("/tmp/other-module.mjs")).toBeNull();
-  });
-
-  it("limits step-surface scan directories to the package execution directory", async () => {
-    const nitroStub = createNitroStub();
-    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
-
-    const { createDevelopmentApplicationNitro } =
-      await import("#internal/nitro/host/create-application-nitro.js");
-    const preparedHost = await createPreparedHost();
-    await createDevelopmentApplicationNitro(preparedHost);
-
-    expect(createNitroMock).toHaveBeenCalledTimes(1);
-    expect(createNitroMock.mock.calls[0]?.[0]).toMatchObject({
-      rootDir: preparedHost.appRoot,
-      scanDirs: [resolvePackageSourceDirectoryPath("src/execution")],
-    });
   });
 
   it("pins Nitro's rolldown builder so a host app's Vite config is never built as eve", async () => {
@@ -904,7 +887,9 @@ describe("application Nitro creation", () => {
         buildDir: nitroBuildDir,
       });
 
-      expect(createNitroMock.mock.calls[0]?.[0].noExternals).toEqual(workflowStepTargets.value);
+      expect(createNitroMock.mock.calls[0]?.[0].noExternals).toEqual(
+        expect.arrayContaining(workflowStepTargets.value),
+      );
       const rollupBeforeHooks = nitroStub.hookHandlers.get("rollup:before") ?? [];
       const config = {
         plugins: [],

@@ -559,6 +559,16 @@ function configureNitroStepPlugins(nitro: Nitro, workflowArtifacts: WorkflowArti
   addNitroStepTransformPlugin(nitro, stepTransformTargets);
 }
 
+function createNitroNoExternals(workflowArtifacts: WorkflowArtifacts): string[] {
+  return [
+    // Nitro bundled eve's execution sources while they were a scan directory.
+    // Externalized, dev would load them natively beside the bundled copies of
+    // the eve modules they import.
+    `${resolvePackageSourceDirectoryPath("src/execution")}/`,
+    ...workflowArtifacts.stepTargets,
+  ];
+}
+
 async function buildWorkflowArtifacts(
   preparedHost: PreparedApplicationHost,
 ): Promise<WorkflowArtifacts> {
@@ -603,11 +613,12 @@ export async function createDevelopmentApplicationNitro(
     dev: true,
     features: { websocket: true },
     logLevel: 1,
-    noExternals: [...workflowArtifacts.stepTargets],
+    noExternals: createNitroNoExternals(workflowArtifacts),
     output: { dir: preparedHost.workspace.nitroOutputDir },
     plugins,
     publicAssets: [],
-    scanDirs: [resolvePackageSourceDirectoryPath("src/execution")],
+    // eve registers every handler, plugin, and task explicitly.
+    scanDirs: [],
     rolldownConfig: bundler.nitroRolldownConfig,
     rollupConfig: bundler.nitroRollupConfig,
     rootDir: preparedHost.appRoot,
@@ -681,12 +692,13 @@ export async function createProductionApplicationNitro(
     },
     // Gzipping every output file only annotates the build log's file tree.
     logging: { compressedSizes: false },
-    noExternals: [...workflowArtifacts.stepTargets],
+    noExternals: createNitroNoExternals(workflowArtifacts),
     output: { dir: options.outputDir },
     preset,
     plugins: nitroPlugins,
     publicAssets: [],
-    scanDirs: [resolvePackageSourceDirectoryPath("src/execution")],
+    // eve registers every handler, plugin, and task explicitly.
+    scanDirs: [],
     rolldownConfig: {
       ...bundler.nitroRolldownConfig,
       // Region comments contain invocation-random scratch paths, not runtime inputs.
