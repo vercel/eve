@@ -12,8 +12,6 @@ import {
 const SETUP_TIMEOUT_MS = 360_000;
 const TEST_TIMEOUT_MS = 60_000;
 const OPERATION_TIMEOUT_MS = 30_000;
-const INTERACTIONS_EXTENSION = "https://eve.dev/a2a/extensions/interactions/v1";
-
 const A2A_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {
     "agent/agent.ts": `import { defineAgent } from "eve";
@@ -164,9 +162,16 @@ describe("A2A channel", () => {
     async () => {
       const task = await sendTask("alice", { message: userMessage("ask-1", "A2A-ASK") });
       expect(task.status).toMatchObject({
-        message: { extensions: [INTERACTIONS_EXTENSION], role: "ROLE_AGENT" },
+        message: { role: "ROLE_AGENT" },
         state: "TASK_STATE_INPUT_REQUIRED",
       });
+      // The prompt is plain text any client can read and answer; eve's interaction JSON stays
+      // off the wire.
+      const promptParts = requiredRecord(requiredRecord(task.status, "status").message, "message")
+        .parts as Record<string, unknown>[];
+      expect(promptParts).toHaveLength(1);
+      expect(promptParts[0]?.text).toContain("Proceed with the delegated work?");
+      expect(promptParts[0]?.text).toContain("Yes");
       const taskId = requiredString(task.id, "task.id");
       const contextId = requiredString(task.contextId, "task.contextId");
 
@@ -218,42 +223,16 @@ describe("A2A channel", () => {
   );
 
   it(
-    "answers with the interactions extension, and lists a context's tasks newest first",
+    "answers a prompt by option number, and lists a context's tasks newest first",
     async () => {
       const first = await sendTask("alice", { message: userMessage("x-1", "A2A-ASK") });
       const contextId = requiredString(first.contextId, "contextId");
-      const interactionId = firstInteractionId(first);
 
-      const wrong = await rpc(
-        "alice",
-        "SendMessage",
-        {
-          message: {
-            ...userMessage("x-2", "answer"),
-            contextId,
-            parts: [{ data: { responses: [{ interactionId: "stale", optionId: "yes" }] } }],
-            taskId: first.id,
-          },
-        },
-        { extensions: INTERACTIONS_EXTENSION },
-      );
-      expect(rpcErrorCode(wrong)).toBe(-32602);
-
-      const answered = await rpc(
-        "alice",
-        "SendMessage",
-        {
-          message: {
-            ...userMessage("x-3", "answer"),
-            contextId,
-            parts: [{ data: { responses: [{ interactionId, optionId: optionId(first) }] } }],
-            taskId: first.id,
-          },
-        },
-        { extensions: INTERACTIONS_EXTENSION },
-      );
-      expect(answered.headers.get("a2a-extensions")).toBe(INTERACTIONS_EXTENSION);
-      expect(taskOf(answered)).toMatchObject({
+      const answered = await sendTask("alice", {
+        message: { ...userMessage("x-3", "1"), contextId, taskId: first.id },
+      });
+      expect(answered).toMatchObject({
+        artifacts: [{ parts: [{ text: "A2A-LIFECYCLE-COMPLETE" }] }],
         id: first.id,
         status: { state: "TASK_STATE_COMPLETED" },
       });
@@ -406,14 +385,13 @@ async function rpc(
   principal: string,
   method: string,
   params: Readonly<Record<string, unknown>>,
-  options: { readonly version?: string | null; readonly extensions?: string } = {},
+  options: { readonly version?: string | null } = {},
 ): Promise<RpcResult> {
   const headers: Record<string, string> = {
     "content-type": "application/json",
     "x-test-principal": principal,
   };
   if (options.version !== null) headers["a2a-version"] = options.version ?? "1.0";
-  if (options.extensions !== undefined) headers["a2a-extensions"] = options.extensions;
   const response = await fetch(new URL("/eve/v1/a2a", url()), {
     body: JSON.stringify({ id: crypto.randomUUID(), jsonrpc: "2.0", method, params }),
     headers,
@@ -443,26 +421,6 @@ async function sendTask(
 function taskState(event: Record<string, unknown> | undefined): unknown {
   const task = event?.task as { status?: { state?: unknown } } | undefined;
   return task?.status?.state;
-}
-
-function firstInteractionId(task: Record<string, unknown>): string {
-  return requiredString(promptInteractions(task)[0]?.interactionId, "interactionId");
-}
-
-function optionId(task: Record<string, unknown>): string {
-  const request = promptInteractions(task)[0]?.request as
-    | { options?: { id?: unknown }[] }
-    | undefined;
-  return requiredString(request?.options?.[0]?.id, "optionId");
-}
-
-function promptInteractions(task: Record<string, unknown>): Record<string, unknown>[] {
-  const message = requiredRecord(requiredRecord(task.status, "status").message, "message");
-  for (const part of message.parts as Record<string, unknown>[]) {
-    const data = part.data as { interactions?: Record<string, unknown>[] } | undefined;
-    if (data?.interactions !== undefined) return data.interactions;
-  }
-  throw new Error("Task has no interactions data part.");
 }
 
 /** Reads an SSE response to its end: one JSON-RPC result per event. */
