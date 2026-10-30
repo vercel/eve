@@ -588,7 +588,7 @@ Without `codeChannels`, eve treats a code channel like any other channel.
 
 #### Open a code channel from a thread
 
-Give the agent a tool that calls `openCodeChannel()` so it can move multi-step work out of a thread. The new code channel starts with the conversation so far, and the original thread stays available for quick follow-ups:
+You can give the agent a tool that calls `openCodeChannel()` so it can move multi-step work out of a thread. The new code channel starts with the conversation so far, and the original thread stays available for quick follow-ups:
 
 ```ts title="agent/tools/open_code_channel.ts"
 import { openCodeChannel } from "eve/channels/slack";
@@ -620,7 +620,7 @@ export default defineTool({
 - When Slack refuses, such as for a Slack Connect conversation, disabled code channels, or a missing scope, it throws Slack's error for the model to relay.
 - Like every [`ctx.to()`](/docs/tools#start-channel-sessions-ctxto), it works only in a tool on the root agent.
 
-For full control, skip the helper and send to the Slack channel with a `codeChannel` target. `codeChannel` takes the origin message's `originTs`, its thread's `originThreadTs`, and an optional `name`; `ctx.channel.metadata` holds the calling conversation's `channelId` and `threadTs`. Pass `history` to start the session with earlier messages:
+For full control, skip the helper and send to the Slack channel with a `codeChannel` target. `codeChannel` takes the origin message's `originTs`, its thread's `originThreadTs`, and an optional `name`. Pass `history` to start the session with earlier messages:
 
 ```ts
 const { channelId, threadTs } = ctx.channel.metadata ?? {};
@@ -655,20 +655,17 @@ export default slackChannel({
 });
 ```
 
-Unlike the tool, `ctx.openCodeChannel()` copies no conversation. Pass `history` to `send` to include earlier messages. It throws without `codeChannels: true`, inside a code channel, and when Slack refuses to create the channel.
+`ctx.openCodeChannel()` copies no conversation by default. Pass `history` to `send` to include earlier messages. It throws without `codeChannels: true`, inside a code channel, and when Slack refuses to create the channel.
 
 #### How eve serves code channels
 
-These details matter when you customize hooks, renderers, or proactive sends.
-
-- **Replies.** The agent replies top-level, or in a thread when someone writes in one. Every member can message the agent, with auth from each message's author.
-- **Status.** eve sets the Slack session status instead of the thread status line: `processing` while the agent works, `suspended` while it waits on a person, and `active` once it finishes or is stopped. Stopping the session in Slack cancels the running turn.
-- **Hooks.** Messages that don't mention the bot go to `onMessage` when you define it, else to `onAppMention`, else the default handler, so a mention handler that filters who reaches the agent also filters code channel messages. `ctx.isBotMentioned()` returns `true` only for real mentions; check `ctx.slack.codeChannel` instead.
-- **Session identity.** A code channel session has no single thread: `ctx.slack.threadTs` is empty, `SlackChannelState.threadTs` is `null`, and its Slack auth has no `thread_ts`. `ctx.slack.codeChannel`, `codeChannel: true` in state and in `ctx.channel.metadata`, and `channel.state.codeChannel` in [renderers](#customize-rendering) mark it. Target it with `{ channelId, codeChannel: true }` in `onEvent` operations, or build its continuation token with `slackCodeChannelContinuationToken(channelId)`.
-- **Channels opened from Slack.** A code channel opened from Slack's UI starts without the original conversation. eve skips the quote of the origin message that Slack posts. To carry the conversation over, open the channel with [`openCodeChannel()`](#open-a-code-channel-from-a-thread), or with [`ctx.openCodeChannel()`](#open-a-code-channel-from-a-message-hook) and `history`.
-- **Repeat opens.** One person gets one code channel per message. A retried tool call reaches the same channel and session once; a second call for the same message reaches the same channel and sends the conversation again.
-- **Privacy.** The new channel and its session's audience follow the origin's privacy. If Slack returns a public channel for a private origin, eve archives it and doesn't copy the conversation.
-- **Detection.** eve recognizes code channels with Slack's `conversations.info` API, which is why the app needs `channels:read` and `groups:read`. If the lookup fails, eve logs an error, serves the channel per thread, and retries a minute later.
+- **Replies.** The agent replies top-level, or in a thread when someone writes in one. Any member can message it.
+- **Status.** Slack shows `processing` while the agent works, `suspended` while it waits on a person, and `active` otherwise. Stopping the session in Slack cancels the running turn.
+- **Hooks.** Messages without a mention go to `onMessage`, else `onAppMention`, else the default handler, so mention filters apply in code channels too. Check `ctx.slack.codeChannel`, or `channel.state.codeChannel` in [renderers](#customize-rendering), to tell code channel messages apart.
+- **Proactive sends.** Target a code channel's session with `{ channelId, codeChannel: true }` or `slackCodeChannelContinuationToken(channelId)`.
+- **Channels opened from Slack.** A code channel opened from Slack's UI starts without the original conversation. Open it with [`openCodeChannel()`](#open-a-code-channel-from-a-thread) to carry the conversation over.
+- **Repeat opens.** Each person gets one code channel per message, so a retried tool call reaches the same channel.
+- **Detection.** If eve can't look the channel up with Slack's `conversations.info`, it serves the channel per thread and retries a minute later.
 
 ### Other Events API callbacks
 
