@@ -20,11 +20,13 @@ import type { HostRouteTable } from "#internal/nitro/host/host-routes.js";
 const SHARED_SERVER_FUNCTION = "eve/__server";
 
 /**
- * The namespaces a service build publishes. Its output merges with the host
- * app's, so a root route such as `/` or an authored channel path could shadow
- * the host's own; those stay reachable only through the host's routing.
+ * The namespaces a service build publishes, as function directories and route
+ * destinations without the leading `/`. Its output merges with the host app's,
+ * so a root route such as `/` or an authored channel path could shadow the
+ * host's own; those stay reachable only through the host's routing. The cron
+ * route lives under eve's prefix.
  */
-const SERVICE_NAMESPACES = [`${EVE_ROUTE_PREFIX}/`, "/.well-known/workflow/"];
+const SERVICE_NAMESPACES = [`${EVE_ROUTE_PREFIX.slice(1)}/`, ".well-known/workflow/"];
 
 /**
  * Publishes a Vercel service build through one eve-owned server function.
@@ -33,28 +35,21 @@ const SERVICE_NAMESPACES = [`${EVE_ROUTE_PREFIX}/`, "/.well-known/workflow/"];
  * Nitro emits a symlinked function and a route for every handler, all aimed
  * at the root `__server.func`, plus a `/(.*)` fallback to it. The root
  * function and its fallback would collide with the host's, so the shared
- * function moves to `eve/__server.func`. Functions and routes are classified
- * by the route table: a route with its own Vercel function, such as a queue
- * consumer, keeps that function, its route, and its trigger; other routes in
- * {@link SERVICE_NAMESPACES}, and the cron route, are served by the shared
- * function; everything else is pruned.
+ * function moves to `eve/__server.func`. A route with its own Vercel function,
+ * such as a queue consumer, keeps that function, its route, and its trigger;
+ * those routes are static, so the function directory is the path itself.
+ * Other functions and route destinations in {@link SERVICE_NAMESPACES} are
+ * served by the shared function; everything else is pruned.
  */
 export async function normalizeVercelServiceOutput(
   outputDir: string,
-  routeTable: Pick<HostRouteTable, "cronHandlerRoute" | "routes">,
+  routeTable: Pick<HostRouteTable, "routes">,
 ): Promise<void> {
-  const ownFunctions = new Set<string>();
-  const sharedFunctions = new Set<string>();
-  for (const route of routeTable.routes) {
-    if ("vercelFunction" in route) {
-      ownFunctions.add(vercelFunctionPath(route.path));
-    } else if (SERVICE_NAMESPACES.some((namespace) => route.path.startsWith(namespace))) {
-      sharedFunctions.add(vercelFunctionPath(route.path));
-    }
-  }
-  if (routeTable.cronHandlerRoute !== undefined) {
-    sharedFunctions.add(vercelFunctionPath(routeTable.cronHandlerRoute));
-  }
+  const ownFunctions = new Set(
+    routeTable.routes.flatMap((route) => ("vercelFunction" in route ? [route.path.slice(1)] : [])),
+  );
+  const isShared = (functionPath: string) =>
+    SERVICE_NAMESPACES.some((namespace) => functionPath.startsWith(namespace));
 
   const functionsDir = join(outputDir, "functions");
   const sharedFunctionDir = join(functionsDir, `${SHARED_SERVER_FUNCTION}.func`);
@@ -62,7 +57,7 @@ export async function normalizeVercelServiceOutput(
   for (const { path, functionPath } of await listFunctions(functionsDir)) {
     if (functionPath === SHARED_SERVER_FUNCTION || ownFunctions.has(functionPath)) continue;
     await rm(path, { force: true, recursive: true });
-    if (sharedFunctions.has(functionPath)) {
+    if (isShared(functionPath)) {
       await symlink(toPosix(relative(dirname(path), sharedFunctionDir)), path, "dir");
     }
   }
@@ -73,9 +68,7 @@ export async function normalizeVercelServiceOutput(
     if (route.dest === undefined) return [route];
     const functionPath = route.dest.slice(1);
     if (ownFunctions.has(functionPath)) return [route];
-    return sharedFunctions.has(functionPath)
-      ? [{ ...route, dest: `/${SHARED_SERVER_FUNCTION}` }]
-      : [];
+    return isShared(functionPath) ? [{ ...route, dest: `/${SHARED_SERVER_FUNCTION}` }] : [];
   });
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
 }
@@ -83,27 +76,6 @@ export async function normalizeVercelServiceOutput(
 interface VercelRoute {
   readonly dest?: string;
   readonly [key: string]: unknown;
-}
-
-/**
- * The function directory Nitro's Vercel preset gives a route, without
- * `.func`: `/eve/v1/session/:sessionId` becomes `eve/v1/session/[sessionId]`.
- */
-export function vercelFunctionPath(route: string): string {
-  return (
-    route
-      .split("/")
-      .slice(1)
-      .map((segment) => {
-        if (segment.startsWith("**")) return `[...${segment.replace(/[*:]/g, "")}]`;
-        if (segment === "*") return "[-]";
-        if (segment.startsWith(":")) return `[${segment.slice(1)}]`;
-        if (segment.includes(":")) return `[${segment.replace(/:/g, "_")}]`;
-        return segment;
-      })
-      .map((segment) => segment.replace(/[^a-zA-Z0-9_.[\]/]/g, "-"))
-      .join("/") || "index"
-  );
 }
 
 /** Every `.func` entry under `functionsDir`, without descending into one. */

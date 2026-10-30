@@ -132,14 +132,14 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
     routes.push({
       kind: "schedule-consumer",
       method: "POST",
-      path: EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
+      path: staticVercelFunctionPath(EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH),
       vercelFunction: "schedule-queue",
     });
   }
   routes.push({
     kind: "workflow",
     method: "ALL",
-    path: EVE_WORKFLOW_FLOW_ROUTE_PATH,
+    path: staticVercelFunctionPath(EVE_WORKFLOW_FLOW_ROUTE_PATH),
     vercelFunction: "workflow-queue",
     ...(hasDirectWorkflowQueue(input) && {
       directQueuePrefix: deriveEveWorkflowQueuePrefix(manifest.config.name),
@@ -184,6 +184,17 @@ function withHeadAllow(route: HostRoute, routes: readonly HostRoute[]): HostRout
  * user must set; the path itself is the secret here. Vercel reads it from the
  * deployment's `config.crons[]`, and it is never logged or served.
  */
+/**
+ * A route with its own Vercel function must be static: eve names that
+ * function's directory after the path instead of after Nitro's pattern rules.
+ */
+function staticVercelFunctionPath(path: string): string {
+  if (/[:*]/.test(path)) {
+    throw new Error(`A route with its own Vercel function must be static: ${path}`);
+  }
+  return path;
+}
+
 function createCronHandlerRoute(): string {
   return `${EVE_ROUTE_PREFIX}/cron/${randomBytes(32).toString("base64url")}`;
 }
