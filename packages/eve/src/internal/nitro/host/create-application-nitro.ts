@@ -60,7 +60,6 @@ const INSTRUMENTATION_ALIAS_PATHS = {
   "eve/instrumentation": "src/public/instrumentation/index.ts",
   "eve/instrumentation/otel": "src/public/instrumentation/otel.ts",
 } as const;
-const WORKFLOW_TRANSFORM_PATCHED = Symbol("eve.workflow-transform-patched");
 
 // Nitro picks the Vite builder when the app root has a `vite.config` that calls
 // `nitro(`, which is the case when a TanStack Start host shares its root with
@@ -172,15 +171,6 @@ export function shouldPruneLocalSandboxProviders(input: {
   );
 }
 
-function createDevelopmentWatchOptions(appRoot: string): { ignored: string[] } {
-  return {
-    // eve's authored-source watcher owns app code rebuilds. If Nitro/Rollup
-    // also watches those files it can reload the worker while a workflow
-    // stream is waiting on a tool result, which surfaces as ECONNRESET.
-    ignored: [appRoot, join(appRoot, "**")],
-  };
-}
-
 function normalizePath(path: string): string {
   return path.replaceAll("\\", "/");
 }
@@ -204,10 +194,6 @@ function resolveNitroModuleComparisonPath(rootDir: string, path: string): string
   }
 
   return normalizePath(stripPathQueryAndHash(resolve(rootDir, path)));
-}
-
-function isWorkflowBundlePath(path: string, normalizedWorkflowBuildDir: string): boolean {
-  return normalizePath(path).startsWith(normalizedWorkflowBuildDir);
 }
 
 function normalizeStepTransformComparisonPath(path: string): string {
@@ -315,7 +301,7 @@ function addWorkflowModuleSideEffectsPlugin(nitro: Nitro, workflowBuildDir: stri
           resolveNitroImportPath(nitro.options.rootDir, source, importer) ??
           resolveNitroModuleComparisonPath(nitro.options.rootDir, source);
 
-        if (!isWorkflowBundlePath(resolvedSource, workflowBundleDirectory)) {
+        if (!resolvedSource.startsWith(workflowBundleDirectory)) {
           return null;
         }
 
@@ -430,59 +416,6 @@ function addInstrumentationModuleSideEffectsPlugin(
         };
       },
     });
-  });
-}
-
-/**
- * Extends the Workflow Nitro transform exclusion list to include eve's
- * package-owned workflow cache directory.
- *
- * Without this patch, the Workflow transform can re-process the already-built
- * `steps.mjs` bundle and strip top-level step registrations from hosted output.
- */
-function patchWorkflowTransformExcludePath(nitro: Nitro, workflowBuildDir: string): void {
-  const normalizedWorkflowBuildDir = normalizePath(workflowBuildDir);
-
-  nitro.hooks.hook("rollup:before", (_nitro, config) => {
-    if (!Array.isArray(config.plugins)) {
-      return;
-    }
-
-    for (const plugin of config.plugins) {
-      if (plugin === null || plugin === undefined || typeof plugin !== "object") {
-        continue;
-      }
-
-      const workflowTransformPlugin = plugin as {
-        [WORKFLOW_TRANSFORM_PATCHED]?: true;
-        name?: string;
-        transform?: (this: unknown, code: string, id: string, ...rest: unknown[]) => unknown;
-      };
-      if (workflowTransformPlugin.name !== "workflow:transform") {
-        continue;
-      }
-      if (workflowTransformPlugin[WORKFLOW_TRANSFORM_PATCHED] === true) {
-        continue;
-      }
-      if (typeof workflowTransformPlugin.transform !== "function") {
-        continue;
-      }
-
-      const originalTransform = workflowTransformPlugin.transform;
-      workflowTransformPlugin.transform = function (
-        this: unknown,
-        code: string,
-        id: string,
-        ...rest: unknown[]
-      ): unknown {
-        if (isWorkflowBundlePath(id, normalizedWorkflowBuildDir)) {
-          return null;
-        }
-
-        return originalTransform.call(this, code, id, ...rest);
-      };
-      workflowTransformPlugin[WORKFLOW_TRANSFORM_PATCHED] = true;
-    }
   });
 }
 
@@ -607,7 +540,6 @@ function configureSharedApplicationNitro(
     nitro.options.alias[specifier] = resolvePackageSourceFilePath(sourcePath);
   }
   addWorkflowModuleSideEffectsPlugin(nitro, preparedHost.workflowBuildDir);
-  patchWorkflowTransformExcludePath(nitro, preparedHost.workflowBuildDir);
 
   // Dynamic capabilities are stamped while preparing the authored generation.
   // Repeating that transform here would parse the entire prebundled module map.
@@ -665,33 +597,28 @@ export async function createDevelopmentApplicationNitro(
   }
 
   const workflowArtifacts = await buildWorkflowArtifacts(preparedHost);
-  const nitro = await createNitro(
-    {
-      _cli: { command: "dev" },
-      builder: EVE_NITRO_BUILDER,
-      buildDir: nitroBuildDir,
-      dev: true,
-      features: { websocket: true },
-      logLevel: 1,
-      noExternals: [...workflowArtifacts.stepTargets],
-      output: { dir: preparedHost.workspace.nitroOutputDir },
-      plugins,
-      publicAssets: [],
-      scanDirs: [resolvePackageSourceDirectoryPath("src/execution")],
-      rolldownConfig: bundler.nitroRolldownConfig,
-      rollupConfig: bundler.nitroRollupConfig,
-      rootDir: preparedHost.appRoot,
-      serverDir: false,
-      traceDeps: bundler.tracedAppDependencies,
-      traceOpts: { nft: { paths: bundler.tracedAppDependencyPaths } },
-      vercel: createEveVercelOptions({
-        agentName: preparedHost.compileResult.manifest.config.name,
-        enabled: false,
-      }),
-      watchOptions: createDevelopmentWatchOptions(preparedHost.appRoot),
-    },
-    { watch: true },
-  );
+  const nitro = await createNitro({
+    builder: EVE_NITRO_BUILDER,
+    buildDir: nitroBuildDir,
+    dev: true,
+    features: { websocket: true },
+    logLevel: 1,
+    noExternals: [...workflowArtifacts.stepTargets],
+    output: { dir: preparedHost.workspace.nitroOutputDir },
+    plugins,
+    publicAssets: [],
+    scanDirs: [resolvePackageSourceDirectoryPath("src/execution")],
+    rolldownConfig: bundler.nitroRolldownConfig,
+    rollupConfig: bundler.nitroRollupConfig,
+    rootDir: preparedHost.appRoot,
+    serverDir: false,
+    traceDeps: bundler.tracedAppDependencies,
+    traceOpts: { nft: { paths: bundler.tracedAppDependencyPaths } },
+    vercel: createEveVercelOptions({
+      agentName: preparedHost.compileResult.manifest.config.name,
+      enabled: false,
+    }),
+  });
 
   configureSharedApplicationNitro(nitro, preparedHost);
   configureNitroStepPlugins(nitro, workflowArtifacts);
@@ -746,7 +673,6 @@ export async function createProductionApplicationNitro(
     ),
   });
   const nitro = await createNitro({
-    _cli: { command: "build" },
     builder: EVE_NITRO_BUILDER,
     buildDir: options.buildDir,
     dev: false,

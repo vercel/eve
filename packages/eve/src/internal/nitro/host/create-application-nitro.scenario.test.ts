@@ -348,7 +348,7 @@ describe("application Nitro creation", () => {
     }
   });
 
-  it("preserves workflow bundle side effects and skips workflow transform for its bundles", async () => {
+  it("preserves workflow bundle side effects", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
@@ -358,17 +358,7 @@ describe("application Nitro creation", () => {
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
     const rollupBeforeHooks = nitroStub.hookHandlers.get("rollup:before") ?? [];
-    const originalTransform = vi.fn((code: string, id: string) => `${code}:${id}:transformed`);
-    const workflowTransformPlugin: {
-      name: string;
-      transform: (code: string, id: string) => unknown;
-    } = {
-      name: "workflow:transform",
-      transform: originalTransform,
-    };
-    const config = {
-      plugins: [workflowTransformPlugin],
-    };
+    const config = { plugins: [] };
 
     for (const hook of rollupBeforeHooks) {
       await hook(nitroStub.nitro, config);
@@ -400,12 +390,6 @@ describe("application Nitro creation", () => {
       moduleSideEffects: "no-treeshake",
     });
     expect(sideEffectsPlugin.resolveId?.("/tmp/other-module.mjs")).toBeNull();
-
-    expect(workflowTransformPlugin.transform("code", bundledStepPath)).toBeNull();
-    expect(workflowTransformPlugin.transform("code", "/tmp/other-module.mjs")).toBe(
-      "code:/tmp/other-module.mjs:transformed",
-    );
-    expect(originalTransform).toHaveBeenCalledTimes(1);
   });
 
   it("limits step-surface scan directories to the package execution directory", async () => {
@@ -438,23 +422,6 @@ describe("application Nitro creation", () => {
       "rolldown",
       "rolldown",
     ]);
-  });
-
-  it("keeps Nitro dev watch off authored app sources", async () => {
-    const nitroStub = createNitroStub();
-    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
-
-    const { createDevelopmentApplicationNitro } =
-      await import("#internal/nitro/host/create-application-nitro.js");
-    const preparedHost = await createPreparedHost();
-    await createDevelopmentApplicationNitro(preparedHost);
-
-    expect(createNitroMock).toHaveBeenCalledTimes(1);
-    expect(createNitroMock.mock.calls[0]?.[0]).toMatchObject({
-      watchOptions: {
-        ignored: [preparedHost.appRoot, join(preparedHost.appRoot, "**")],
-      },
-    });
   });
 
   it("sets the eve framework version and flow function rules on Vercel build output config", async () => {
