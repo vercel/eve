@@ -154,6 +154,9 @@ function toNitroConfig(
     ),
     preset: spec.preset,
     publicAssets: [],
+    // Nitro would otherwise serve an app-root `index.html` and `server.*` as
+    // catch-alls in front of eve's routes.
+    renderer: false,
     rolldownConfig: {
       onLog: onNitroBundlerLog,
       // Keep dependency filtering out of Rolldown's JS callback bridge.
@@ -177,6 +180,7 @@ function toNitroConfig(
     scanDirs: [],
     serverAssets: built.serverAssets,
     serverDir: false,
+    serverEntry: false,
     traceDeps: [...spec.externals.traceDeps],
     vercel: spec.vercel,
   };
