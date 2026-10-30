@@ -1,7 +1,7 @@
 ---
 issue: "None (maintainer-requested research)"
 status: proposed
-last_updated: "2026-10-29"
+last_updated: "2026-10-30"
 ---
 
 # Session kernel and harness
@@ -12,7 +12,7 @@ eve's turn loop decides two kinds of things at once. Some are guarantees every a
 
 This plan splits the loop into a sealed **kernel**, which owns the guarantees and is the only code that emits facts, and a replaceable **harness**, a function that returns policy as data: `{ agent, history, next }`. eve's current behavior becomes the native harness, written in the same shape an author would use. Once the kernel takes its dependencies as input, it can also run outside eve's compiler and Workflow, which makes a local, embedded eve possible.
 
-The plan covers two things: internal refactors that change no observable behavior, and a sketch of how they could be exposed in a release after 1.0. Nothing here is part of 1.0. Code in this document is pseudocode; names follow the source, and signatures are simplified.
+The plan covers two things: internal refactors that change no observable behavior, and a sketch of how they could be exposed in a release after 1.0. Nothing here is part of 1.0. A draft implementation is GitHub stack #5683, #5638 through #5640, and names here follow it. Fields and options it doesn't have yet are marked as proposed. Code in this document is pseudocode, and signatures are simplified.
 
 ## The layers eve should have
 
@@ -171,15 +171,15 @@ switch (compare(step.session.history, proposed)) {
 }
 ```
 
-The kernel knows the model's context window, which is a physical limit. It does not know a compaction threshold, which is policy. `ctx.tokens` and `ctx.window` report the measured prompt and the limit, and `session.compact()` arrives as `ctx.compactRequest`. Today's compaction becomes a summarizer function whose model call the kernel announces and bills, and the threshold moves into the native harness, which compacts exactly when main does today.
+The kernel knows the model's context window, which is a physical limit. It does not know a compaction threshold, which is policy. `ctx.size` reports the next call's estimated tokens and the model's window, and `session.compact()` arrives as `ctx.compact`. Today's compaction becomes `ctx.summarize(history)`, whose model call the kernel announces and bills. The threshold moves into the native harness, which compacts exactly when main does today.
 
-The same shape gives provider overflow a place, as a later behavior change: when a provider rejects a prompt as too long, the kernel evaluates `history` once more with `ctx.tokens` at or above `ctx.window`, and fails the turn if the result still does not fit.
+The kernel doesn't react to a provider's context-overflow error. Providers don't share an error shape, and matching their wording is brittle; the AI SDK doesn't attempt it either. Compacting before the call is the policy's job.
 
 There is no separate per-call prompt. The session's history is exactly what the model reads about the past. Anything specific to one call belongs to `agent`, and provider encoding such as attachment hydration and cache markers stays in the kernel. The full record of what happened is the stream, and `history` never changes it.
 
 ### A kernel with explicit inputs
 
-The kernel is a step function. `createToolLoopHarness` becomes `createKernel`, and the state it reads ambiently becomes input:
+The kernel is a step function, `createKernel` (renamed from `createToolLoopHarness` in #5681). The state it still reads ambiently becomes input:
 
 ```ts
 const step = createKernel({ tools, resolveModel, harness, publish, abortSignal, ports });
@@ -188,7 +188,7 @@ let result = await step(session, { message });
 while (typeof result.next === "function") result = await result.next(result.session);
 ```
 
-The ports are identity, sandbox access, and the publication sink, which runs the fold so the kernel's view stays current. Workflow usage attributes move into the runtime's sink, and `execution/node-step.ts` keeps wrapping the same kernel in a durable step.
+The ports are identity, sandbox access, and the publication sink, which runs the fold so the kernel's view stays current. Workflow usage attributes already reach it as a sink the workflow wrapper passes, and guard rule 58 keeps Workflow imports out of `harness/` (#5682). `execution/node-step.ts` keeps wrapping the same kernel in a durable step.
 
 ### What collapses
 
@@ -216,17 +216,17 @@ The kernel evaluates the harness at fixed decision points:
 
 The harness reads the session as of its latest commit:
 
-| Field                                            | Meaning                                                                                                |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `ctx.history`                                    | The model history as of this decision                                                                  |
-| `ctx.input`                                      | The message that opened the turn                                                                       |
-| `ctx.calls`                                      | The turn's calls: tool, input, status, outcome, and output when small enough                           |
-| `ctx.lastStep`                                   | The model step that just ended: `text`, `output`, and `endsTurn`                                       |
-| `ctx.unread`                                     | History ends with tool results the model has not read                                                  |
-| `ctx.steps`, `ctx.continuations`                 | Model calls this turn, and notes the harness added                                                     |
-| `ctx.tokens`, `ctx.window`, `ctx.compactRequest` | The measured prompt, the model's window, and a manual compaction request                               |
-| `ctx.memo`                                       | A cache across evaluations. A crash or a deployment can run it again, so it is not a record of effects |
-| `ctx.session`, `ctx.signal`                      | Identity and session metadata, as dynamic values read them; the turn's abort signal                    |
+| Field                                      | Meaning                                                                                                |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `ctx.history`                              | The model history as of this decision                                                                  |
+| `ctx.input`                                | Proposed: the message that opened the turn                                                             |
+| `ctx.calls`                                | The turn's calls: tool, input, status, outcome, and output when small enough                           |
+| `ctx.lastStep`                             | The model step that just ended: `text`, `output`, and `endsTurn`                                       |
+| `ctx.unread`                               | Proposed: history ends with tool results the model has not read                                        |
+| `ctx.steps`, `ctx.continuations`           | Model calls this turn, and notes the harness added                                                     |
+| `ctx.size`, `ctx.compact`, `ctx.summarize` | The next call's tokens and the model's window; a `session.compact()` request; eve's summarizer         |
+| `ctx.memo`                                 | A cache across evaluations. A crash or a deployment can run it again, so it is not a record of effects |
+| `ctx.session`, `ctx.signal`                | Identity and session metadata, as dynamic values read them; the turn's abort signal                    |
 
 Whatever the harness returns, the kernel enforces:
 
@@ -246,8 +246,7 @@ The system prompt is the kernel's recovery note, when there is one, then exactly
 Skills show why rendering belongs to the author. eve's skills list mixes data (each skill's name and description), mechanism (load a skill with `eve__skill({ name })`), and policy ("activate the minimal set"). With skills as data, all three are the author's:
 
 ```ts title="agent/harness.ts"
-import { defineHarness } from "eve";
-import { declared } from "eve/harness";
+import { declared, defineHarness } from "eve";
 
 export default defineHarness((ctx) => ({
   agent: {
@@ -279,8 +278,8 @@ This is the whole native policy:
 ```ts
 export const native: Harness = (ctx) => ({
   history: () =>
-    ctx.compactRequest || ctx.tokens > compaction.threshold * ctx.window
-      ? summarize(ctx.history, { model: compaction.model, focus: ctx.compactRequest?.focus })
+    ctx.compact || ctx.size.tokens > compaction.threshold * ctx.size.window
+      ? ctx.summarize(ctx.history)
       : ctx.history,
 
   next: () => {
@@ -436,18 +435,17 @@ export default defineHarness((ctx) => ({
 
 ```ts title="agent/harness.ts"
 import { defineHarness } from "eve";
-import { summarize } from "eve/harness";
 
 export default defineHarness((ctx) => ({
   history: () => {
-    const due = ctx.compactRequest !== undefined || ctx.tokens > 0.5 * ctx.window;
-    if (!due) return ctx.history;
+    const { tokens, window = Infinity } = ctx.size ?? { tokens: 0 };
+    if (!ctx.compact && tokens <= 0.5 * window) return ctx.history;
 
-    return summarize(ctx.history, {
+    // Proposed options; `ctx.summarize` takes only `tokens` today.
+    return ctx.summarize(ctx.history, {
       keepTurns: 4,
       model: "openai/gpt-6-luna",
       instructions: "Keep ticket IDs, decisions with their reasons, and open questions.",
-      focus: ctx.compactRequest?.focus,
     });
   },
 }));
@@ -461,8 +459,7 @@ When to compact is a line of code, not a setting. The summarizer's model call is
 <summary><strong>Workspace-scoped agent:</strong> fail early for suspended workspaces, and fit tools to the plan.</summary>
 
 ```ts title="agent/harness.ts"
-import { defineHarness } from "eve";
-import { builtins, declared } from "eve/harness";
+import { builtins, declared, defineHarness } from "eve";
 import { loadWorkspace } from "./lib/workspaces";
 
 export default defineHarness((ctx) => {
@@ -565,7 +562,7 @@ After 1.0, the same structure could become public in steps, starting as experime
 
 - **`agent/harness.ts`** default-exports `defineHarness((ctx) => plan)`. Authors adopt one field at a time: `next` for a critic or a command, `history` for compaction or trimming, `agent` for per-call tools and models, or all three.
 - **Composition is a function call.** A harness that wants eve's compaction plus its own trimming calls eve's exported native pieces inside its own `history`. There is no ordered pipeline of processors.
-- **`declared(ctx)` and `builtins(ctx)`** from `eve/harness` give a harness what the files declare and what eve adds, as data, along with eve's renderers. A harness that sets `agent.instructions` or `agent.tools` gets exactly what it returns.
+- **`declared(ctx)` and `builtins(ctx)`** from `eve` give a harness what the files declare and what eve adds, as data, along with eve's renderers. A harness that sets `agent.instructions` or `agent.tools` gets exactly what it returns.
 - **`compaction` options in `agent.ts`** keep configuring the native harness. A harness that defines `history` owns compaction.
 - **`eve/embed`** exports `createSession` with explicit ports for identity, the sandbox, and storage, plus the protocol's selectors for hosts that render their own UI.
 - **What stays sealed** is the kernel's list above: the gate, tasks, input, caps, usage, history checks, output validation, and failures that reveal nothing internal.
