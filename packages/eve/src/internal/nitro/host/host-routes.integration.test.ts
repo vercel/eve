@@ -2,7 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { H3 } from "nitro/h3";
+import { getRouterParams, H3, type H3Event } from "nitro/h3";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CompiledAgentManifest, CompiledChannelDefinition } from "#compiler/manifest.js";
@@ -19,7 +19,7 @@ const routeModules = vi.hoisted(() => ({
   dispatchChannelRequest: vi.fn(
     async (_event: unknown, routeKey: string) => new Response(`channel ${routeKey}`),
   ),
-  dispatchChannelWebSocketRequest: vi.fn(async () => ({})),
+  dispatchChannelWebSocketRequest: vi.fn(async (_event: unknown) => ({})),
   dispatchScheduleTask: vi.fn(async (name: string) => `ran ${name}`),
   handleConnectionEventRequest: vi.fn(async () => new Response("connection")),
   handleDevScheduleDispatchRequest: vi.fn(async () => new Response("dev schedule")),
@@ -77,7 +77,7 @@ function manifest(world?: string): Parameters<typeof createHostRouteTable>[0]["m
         channel("GET", "/stream", {}),
         channel("POST", "/stream", {}),
         channel("GET", "/rooms/:id"),
-        channel("WEBSOCKET", "/rooms/:room"),
+        channel("WEBSOCKET", "/rooms/:id"),
         channel("GET", "/health"),
         channel("HEAD", "/health"),
         channel("WEBSOCKET", "/voice"),
@@ -220,16 +220,21 @@ describe("rendered host routes", () => {
   });
 
   it("answers upgrades and HTTP requests on a path with both from one GET handler", async () => {
-    // Parameter names don't distinguish paths, as for the router.
     const host = await serve({ mode: "production" });
+    let upgradeParams: Record<string, string> | undefined;
+    routeModules.dispatchChannelWebSocketRequest.mockImplementationOnce(async (event) => {
+      upgradeParams = getRouterParams(event as H3Event, { decode: true });
+      return {};
+    });
 
     const upgrade = await host.fetch("/rooms/1", { headers: { upgrade: "websocket" } });
     expect(upgrade.status).toBe(426);
     expect(routeModules.dispatchChannelWebSocketRequest).toHaveBeenCalledWith(
       expect.anything(),
-      "WEBSOCKET /rooms/:room",
+      "WEBSOCKET /rooms/:id",
       artifactsConfig,
     );
+    expect(upgradeParams).toEqual({ id: "1" });
     expect(routeModules.dispatchChannelRequest).not.toHaveBeenCalled();
 
     expect(await (await host.fetch("/rooms/1")).text()).toBe("channel GET /rooms/:id");

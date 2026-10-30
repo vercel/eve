@@ -17,7 +17,7 @@ import { createProgrammaticCompiledModuleMap } from "#compiler/module-map.js";
 import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
 import { defineAgent } from "#public/definitions/agent.js";
-import { defineChannel, GET, POST } from "#public/definitions/channel.js";
+import { defineChannel, GET, POST, WS } from "#public/definitions/channel.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
@@ -1146,6 +1146,52 @@ describe("compileAgentManifest source graph", () => {
     await expect(
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
     ).rejects.toThrow("compile/channel-route-duplicate");
+  });
+
+  it("rejects a GET and WS route on one path that name its parameters differently", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "channels/rooms.ts",
+        loadNamespace: async () => ({
+          default: defineChannel({
+            routes: [
+              GET("/rooms/:id", async () => new Response()),
+              WS("/rooms/:room", async () => ({})),
+            ],
+          }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      "compile/channel-websocket-params-mismatch: GET /rooms/:id and WS /rooms/:room match the same requests but name their parameters differently (id vs room). One handler serves both, so rename the parameters in one route to match the other.",
+    );
+  });
+
+  it("allows a GET and WS route on one path with the same parameter names", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "channels/rooms.ts",
+        loadNamespace: async () => ({
+          default: defineChannel({
+            routes: [
+              GET("/rooms/:id", async () => new Response()),
+              WS("/rooms/:id", async () => ({})),
+            ],
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+
+    expect(
+      compiled.channelRoutes.effective
+        .filter((route) => route.urlPath === "/rooms/:id")
+        .map((route) => route.method),
+    ).toEqual(["GET", "WEBSOCKET"]);
   });
 
   it("rejects conflicting CORS policies across overlapping route patterns", async () => {

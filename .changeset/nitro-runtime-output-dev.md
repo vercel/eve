@@ -8,7 +8,7 @@ Channel route `params` keep encoded path separators (`%2F` and `%5C`) encoded, s
 
 Agent text that mentions a Nitro build constant such as `import.meta.dev` now reaches production builds unchanged, instead of being rewritten to its value or failing the build. Skill files are embedded in the server bundle instead of Nitro server assets, so hosted output no longer ships Nitro's storage layer.
 
-A channel path that declares both `GET()` and `WS()` now accepts WebSocket upgrades, which the `GET` route used to answer as a plain HTTP request. WebSocket routes register for `GET` only, the method an upgrade uses.
+A channel path that declares both `GET()` and `WS()` now accepts WebSocket upgrades, which the `GET` route used to answer as a plain HTTP request. WebSocket routes register for `GET` only, the method an upgrade uses. Because one handler serves both, the two routes must name their path parameters the same way; `eve build` rejects a pair such as `GET("/rooms/:id")` and `WS("/rooms/:room")`.
 
 Vercel service builds keep the schedule consumer function and its queue trigger, so dynamic schedules deliver their occurrences.
 
