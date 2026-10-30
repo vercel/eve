@@ -73,7 +73,7 @@ Expect the sandbox template to rebuild once after the upgrade. See [Docker sandb
 | `eve/computer-use` and its subpaths                                                      | `eve/extensions/computer-use` and the matching subpaths                   |
 | `eve/self-modification`, `eve/self-modification/local`                                   | `eve/extensions/self-modification/local`                                  |
 | `eve/self-modification/remote`                                                           | `eve/extensions/self-modification/remote`                                 |
-| `Datadog` from `eve/evals`                                                               | `datadogReporter` from `eve/evals`                                        |
+| `Datadog` from `eve/evals`                                                               | `datadogReporter` from `eve/evals/reporters`                              |
 | `MessageResponse`, `MessageResult`                                                       | `Delivery`, `DeliveryResult` from `eve/sessions`                          |
 | `StreamOptions`, `GetEventStreamOptions`                                                 | `SessionStreamOptions` from `eve/sessions`                                |
 | `SpanProcessor`, `SpanExporter`, `SpanProcessorOrName` from OpenTelemetry                | `eve/instrumentation/otel`                                                |
@@ -156,7 +156,7 @@ import { start, getRun, resumeHook } from "eve/workflow/api"; // [!code ++]
 - `getHookByToken` is removed. Pass a deterministic `token` to `createHook({ token })`, then resume the hook with `resumeHook(token, payload)`, which resolves to `void`.
 - `start(workflow, args?)` takes a `"use workflow"` function, not a source string. It takes no options such as `deploymentId` or `world`, because eve runs the workflow on the agent's own queue and deployment.
 - `start` and `getRun` return a `WorkflowRun` with only `runId`, `status`, `returnValue`, and `cancel()`.
-- `agent` and `ask` aren't exported. Use `defineWorkflowTool()` from `eve/tools`, and call `ctx.agent(target, input)` or `ctx.ask(request)` in its executor.
+- `agent` and `ask` aren't exported. Use `defineWorkflowTool()` from `eve/tools`, and call `ctx.agent(name).send(message)` or `ctx.ask(request)` in its executor.
 
 ```ts
 const hook = await getHookByToken(token); // [!code --]

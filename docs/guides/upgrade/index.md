@@ -7,7 +7,7 @@ navTitle: "Overview"
 This guide moves a project from eve 0.83 or earlier to 1.0. Most of the work is mechanical: renamed APIs, moved imports, and stricter definitions that `eve build` and your typechecker point out. Two areas need more care, because mistakes there compile cleanly:
 
 - **Code that reads session events.** The session stream moves from format v26 to v27, and most event names change. A hook, dashboard, or stream reader that still matches v26 names builds without errors and then matches nothing.
-- **Session history your application stores.** Events saved before the upgrade are in v26 format. Re-read or convert them before you load them into a v27 client.
+- **Session history your application stores.** Events saved from eve 0.69 through 0.83 are in v26 format. Re-read or convert them before you load them into a v27 client.
 
 This page gives the order of work and links to a page for each part of a project. Read only the pages that apply to you. After the upgrade, the [stability policy](/docs/reference/typescript-api#stability-policy) tells you which APIs are stable and which are experimental.
 

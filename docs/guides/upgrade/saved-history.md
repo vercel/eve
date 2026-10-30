@@ -10,16 +10,17 @@ This page is part of [Upgrade to 1.0](/docs/guides/upgrade).
 
 ## Re-read or convert saved events
 
-The server's own copy of a stream needs no migration. A session that started on 0.83 or earlier keeps the lines it already stored, and new v27 lines are appended after them. The new deployment serves the whole stream as v27 events, and cursors you saved still point at the same lines.
+The server's own copy of a stream needs no migration. A session that started on eve 0.69 through 0.83 keeps the lines it already stored, and when it moves to the new deployment, new v27 lines are appended after them. The new deployment serves the whole stream as v27 events, and cursors you saved still point at the same lines.
 
-Copies your application saved itself are different. Events saved before the upgrade are v26 events, and `SessionStore` can't load them as `initialEvents`. Pick the path that matches what you have:
+Copies your application saved itself are different. Events saved from 0.69 through 0.83 are v26 events, and `SessionStore` can't load them as `initialEvents`. Pick the path that matches what you have:
 
-| What you have                                                          | Do this                                                                              |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| The session's stream is still available                                | Read it again from position 0 and replace what you saved.                            |
-| The saved array is the only copy                                       | Convert it once with `convertLegacyEvents` and store the result.                     |
-| A record with v26 events followed by v27 events, and an expired stream | Convert only the v26 prefix. Keep the later v27 events and their metadata unchanged. |
-| Message lists produced by v26 reducers                                 | Don't convert them. Re-read the stream, or render the lists as read-only records.    |
+| What you have                                                          | Do this                                                                                              |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| The session's stream is still available                                | Read it again from position 0 and replace what you saved.                                            |
+| The saved array is the only copy                                       | Convert it once with `convertLegacyEvents` and store the result.                                     |
+| A record with v26 events followed by v27 events, and an expired stream | Convert only the v26 prefix. Keep the later v27 events and their metadata unchanged.                 |
+| Message lists produced by v26 reducers                                 | Don't convert them. Re-read the stream, or render the lists as read-only records.                    |
+| Events saved from a release before 0.69                                | Keep them as read-only records. They aren't v26 events, so `convertLegacyEvents` can't convert them. |
 
 ```ts
 import { convertLegacyEvents } from "eve/internal/legacy-events";
@@ -74,7 +75,7 @@ Keep code that enforces your own rules. That includes archive storage and cursor
 
 - **Bind each outcome to its delivery.** Use `delivery.result()` or that delivery's own turn, not the session's latest turn or every event after a polling cursor. Otherwise a queued or concurrent turn can claim another turn's output.
 - **Follow child sessions by link.** For a child session that several calls reuse, follow the `child.sent` links from a call, for example with `agentCallActivity(state, callId)` from `eve/client`. Don't count `delivery.consumed` on the child's stream, because answers to the child's questions are deliveries too. See [Child agents](/docs/guides/frontend/use-eve-agent#child-agents).
-- **Identify runs by ID.** A steering message adds a run to the same turn, and a retry reuses its run ID. Use `turn.started` for once-per-turn work, and `runId` with `turnId` for a specific run.
+- **Identify runs by ID.** A steering message adds a run to the same turn. A model retry before any output reuses its run ID, but a retry after output starts a new run with a new ID. Use `turn.started` for once-per-turn work, and `runId` with `turnId` for a specific run.
 - **Treat acceptance as admission.** When an outcome is unconfirmed, read it again instead of resending after a timeout. Use `operationId` for create requests you retry; see [the eve channel](/docs/channels/eve).
 - **Read payloads by their documented shape.** `turn.settled.data.reply` lists the reply's part IDs, not its text. Use `reply(ctx.view, turnId)` in hooks and channels, or `messages` in the frontend.
 

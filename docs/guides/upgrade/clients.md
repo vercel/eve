@@ -88,7 +88,7 @@ if (SessionNotActiveError.is(error) && error.code === "session_not_active") { //
 
 ## Save the full session snapshot
 
-`session.snapshot()` returns the whole `ClientSessionState`, not only `sessionId` and `streamIndex`. It includes an opaque `inbox` value that lets later sends skip a server-side session lookup. Store the snapshot as is, and pass it back unchanged, for example with `client.sessions.attach(saved.sessionId, saved)`. See [Faster sends with `inbox`](/docs/guides/client/overview#faster-sends-with-inbox).
+`session.state` is the whole `ClientSessionState`, not only `sessionId` and `streamIndex`, and `session.snapshot()` returns the same state as `snapshot.session`. It includes an opaque `inbox` value that lets later sends skip a server-side session lookup. Save the complete state as is, and pass it back unchanged, for example with `client.sessions.attach(saved.sessionId, saved)`. See [Faster sends with `inbox`](/docs/guides/client/overview#faster-sends-with-inbox).
 
 In server code, `sessions.attach(id)` from `eve/server` returns a read-only `SessionReader` with `id` and `stream()`, not a handle that can send. Use `SessionInfo` from `eve/context` for the metadata in `ctx.session`. See [Read a session in process](/docs/concepts/sessions-runs-and-streaming#read-a-session-in-process).
 

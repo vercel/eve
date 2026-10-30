@@ -10,17 +10,17 @@ This page is part of [Upgrade to 1.0](/docs/guides/upgrade).
 
 ## What changed in the stream
 
-Session streams use stream version 27 (`x-eve-stream-version: 27`). The new deployment serves every stream in this format, including sessions that started on 0.83 or earlier.
+Session streams use stream version 27 (`x-eve-stream-version: 27`). The new deployment serves every stream in this format, including sessions that moved over from eve 0.69 through 0.83.
 
 The stream is still newline-delimited JSON, but its structure changed:
 
-- **A stored line holds a group of events.** One state change writes one line with all the events it produced, so a turn ending and the message it answered arrive together. Streamed text and tool-input deltas arrive separately, as progress records that are never part of a line.
+- **A stored line holds a group of events.** One state change writes one line with all the events it produced, so a turn ending and the message it answered arrive together. Streamed text and tool-input deltas arrive separately, each as a progress record on its own line.
 - **Positions replace event IDs.** Each event carries `meta.position`: the zero-based `line` it was stored in and its `index` within that line. `startIndex` and saved cursors count lines, not events. Store events keyed on `(sessionId, line, index)`, so reading a stream again doesn't create duplicates.
 - **Each event names what it belongs to.** An event's `scope` holds the IDs of its turn, run, or task.
 - **One event ends each item, with an `outcome`.** Instead of separate `turn.completed`, `turn.failed`, and `turn.cancelled` events, a turn ends with `turn.settled` and an `outcome` of `completed`, `failed`, or `cancelled`. Calls, tasks, deliveries, and requests for input follow the same pattern.
 - **Errors share one shape:** `error: { code, message, id?, hint? }`.
 - **Token usage has its own event.** Read it from `usage.recorded`, not from turn or session events.
-- **Only a person pauses a turn.** A turn that waits on background tasks keeps running. A turn pauses, with `turn.paused`, only while it waits for an approval, a question, or a sign-in.
+- **Only a person pauses a turn.** A turn that waits on background tasks keeps running. A turn pauses, with `turn.paused`, only while it waits for an approval, a question, a sign-in, or a budget prompt.
 - **New values can appear without a version change.** Keep a default branch when you switch on event types, kinds, or outcomes.
 
 See [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming) for the full stream format.
@@ -43,7 +43,7 @@ Use this table to rename handlers and filters. When a row says to check a field,
 | `input.resolved`, `authorization.completed`, `approval.settled`   | `interaction.settled` (check `outcome`)                                                                           |
 | `approval.candidate`                                              | `response.submitted`, `response.settled`                                                                          |
 | `compaction.requested`, `compaction.completed`, `context.cleared` | `context.started`, `context.settled` (check `kind`)                                                               |
-| `turn.waiting`, `turn.completed`, `turn.failed`, `turn.cancelled` | `turn.paused` (for approvals, questions, and sign-ins), `turn.settled` (check `outcome`)                          |
+| `turn.waiting`, `turn.completed`, `turn.failed`, `turn.cancelled` | `turn.paused` (for approvals, questions, sign-ins, and budget prompts), `turn.settled` (check `outcome`)          |
 | `session.waiting`, `session.completed`, `session.failed`          | `delivery.settled` for a request, `session.ended` for a finished session; `idle(view)` for current idleness       |
 
 v27 also adds events with no v26 equivalent:
@@ -81,19 +81,20 @@ export default defineHook({
 
 ## Approvals, questions, and sign-ins
 
-Approvals, questions, sign-ins, and budget prompts are all requests for input, and one `Interaction` type represents each of them. A person's reply to any of them is an `Answer`: `{ interactionId, optionId?, text? }`. Rename the input-request APIs as follows.
+Approvals, questions, sign-ins, and budget prompts are all requests for input, and one `Interaction` type represents each of them. A person answers an approval, question, or budget prompt with an `Answer`: `{ interactionId, optionId?, text? }`. A sign-in completes through its own callback and takes no `Answer`. Rename the input-request APIs as follows.
 
-| Before                                                                 | After                                                            |
-| ---------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `InputRequest`, `InputResponse`, `requestId`                           | `Interaction`, `Answer`, `interactionId`                         |
-| `send({ inputResponses })`, `respond(inputResponses)`                  | `send({ answers })`, `respond(answers)`                          |
-| `parseInputResponse(s)`, `isInputResponse`                             | `parseAnswer(s)`, `isAnswer`                                     |
-| Response `inputRequests` and `authorizations`                          | `interactions` (sign-ins included)                               |
-| `ConversationState.inputs`, `openConversationInputs(state)`            | `interactions(view)`, `openInteractions(view)` from `eve/events` |
-| Approval `request.requestId`                                           | `request.interactionId`                                          |
-| `onInputResponse` on Slack, Discord, and Teams                         | `onAnswers`                                                      |
-| Telegram `renderTelegramInputRequest`, `resolveTelegramInputResponses` | `renderTelegramInteraction`, `resolveTelegramAnswers`            |
-| Workflow `ToolInputRequest`, `ToolInputResponse`                       | `ToolQuestion`, `ToolAnswer`                                     |
+| Before                                                                 | After                                                                             |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `InputRequest`, `InputResponse`, `requestId`                           | `Interaction`, `Answer`, `interactionId`                                          |
+| `send({ inputResponses })`, `respond(inputResponses)`                  | `send({ answers })`, `respond(answers)`                                           |
+| `parseInputResponse(s)`, `isInputResponse`                             | `parseAnswer(s)`, `isAnswer`                                                      |
+| Response `inputRequests` and `authorizations`                          | `interactions` (sign-ins included)                                                |
+| `ConversationState.inputs`, `openConversationInputs(state)`            | `interactions(view)`, `openInteractions(view)` from `eve/events`                  |
+| Approval `request.requestId`                                           | `request.interactionId`                                                           |
+| `onInputResponse` on Slack, Discord, and Teams                         | `onAnswers`                                                                       |
+| Telegram `renderTelegramInputRequest`, `resolveTelegramInputResponses` | Removed; the built-in Telegram channel renders and resolves these requests itself |
+| Telegram `TelegramInputRequestMessage`                                 | `TelegramInteractionMessage`                                                      |
+| Workflow `ToolInputRequest`, `ToolInputResponse`                       | `ToolQuestion`, `ToolAnswer`                                                      |
 
 The approve and deny choices are `APPROVE_OPTION_ID` (`"approve"`) and `DENY_OPTION_ID` (`"deny"`) from `eve/events`, for approvals and budget prompts. Replace checks for a `"cancel"` decision with `"deny"`. Buttons that eve already posted to Slack or another platform keep working.
 
