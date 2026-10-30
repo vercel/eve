@@ -179,12 +179,6 @@ function withHeadAllow(route: HostRoute, routes: readonly HostRoute[]): HostRout
 }
 
 /**
- * An unguessable cron path under eve's protocol prefix. Vercel cron requests
- * otherwise hit the public `/_vercel/cron` and rely on a `CRON_SECRET` the
- * user must set; the path itself is the secret here. Vercel reads it from the
- * deployment's `config.crons[]`, and it is never logged or served.
- */
-/**
  * A route with its own Vercel function must be static: eve names that
  * function's directory after the path instead of after Nitro's pattern rules.
  */
@@ -195,6 +189,12 @@ function staticVercelFunctionPath(path: string): string {
   return path;
 }
 
+/**
+ * An unguessable cron path under eve's protocol prefix. Vercel cron requests
+ * otherwise hit the public `/_vercel/cron` and rely on a `CRON_SECRET` the
+ * user must set; the path itself is the secret here. Vercel reads it from the
+ * deployment's `config.crons[]`, and it is never logged or served.
+ */
 function createCronHandlerRoute(): string {
   return `${EVE_ROUTE_PREFIX}/cron/${randomBytes(32).toString("base64url")}`;
 }
