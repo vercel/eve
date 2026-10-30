@@ -49,7 +49,7 @@ function collectExternalResources(
   }
   for (const channel of manifest.channelRoutes.effective) {
     const credentials = channel.vercelConnect?.requirement;
-    if (credentials === undefined || channel.manifest === undefined) continue;
+    if (credentials === undefined) continue;
     resources.push({
       credentials,
       kind: "channel",

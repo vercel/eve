@@ -133,3 +133,11 @@ Where an eve agent communicates with people, the law may require you to disclose
 - [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): post to another platform without starting an agent turn
 - [Frontend](../guides/frontend/overview): browser chat on the eve channel with `useEveAgent`
 - [Integrations](/integrations): browse every built-in channel in one gallery using the Channels filter
+
+## Connect deployment requirements
+
+Connect-backed Slack, GitHub, Linear, Discord, Teams, Linq, and Photon channels preserve the credential helper's build metadata. eve emits each declared connector and its event destination in `vercel-connect-manifest.json`. Channels without native provider configuration still declare their credential and delivery requirements. The metadata is read without resolving credentials at build time.
+
+Use a Connect SDK release whose channel helper includes `vercelConnect.requirement`. Older helpers without that metadata do not declare a dependency. Plain credentials and environment variables remain outside Connect manifest setup. Telegram, Twilio, custom channels, and arbitrary Chat SDK adapters do not acquire Connect provisioning support from this change.
+
+A declaration does not prove readiness. Connect still needs to verify the connector's grants and delivery configuration; provider-specific setup may be required. A channel and connection using the same connector reference can share one requirement when the Connect manifest compiler supports that composition.

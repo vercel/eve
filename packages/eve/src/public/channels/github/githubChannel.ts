@@ -1,3 +1,4 @@
+import { setChannelCredentialMetadata } from "#channel/compiled-channel.js";
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
@@ -444,6 +445,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     events: mergedEvents,
   });
 
+  setChannelCredentialMetadata(channel, config.credentials);
   return channel;
 }
 

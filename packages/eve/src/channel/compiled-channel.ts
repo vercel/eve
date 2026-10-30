@@ -86,6 +86,17 @@ export function setChannelBuildMetadata(
   });
 }
 
+export function setChannelCredentialMetadata(channel: unknown, credentials: unknown): void {
+  if (
+    credentials === null ||
+    (typeof credentials !== "object" && typeof credentials !== "function")
+  )
+    return;
+  const externalCredentials: unknown = Reflect.get(credentials, "vercelConnect");
+  if (externalCredentials === undefined) return;
+  setChannelBuildMetadata(channel, () => ({ externalCredentials }));
+}
+
 export function getChannelInstrumentationKind(value: unknown): string | undefined {
   if (!isCompiledChannel(value)) {
     return undefined;
