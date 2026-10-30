@@ -161,11 +161,9 @@ if (userAuthEnabled) {
   });
 }
 
-export default defineDynamic({
-  events: {
-    "session.started": () => (userAuthEnabled ? defineMcpClientConnection(definition) : null),
-  },
-});
+export default defineDynamic(() =>
+  userAuthEnabled ? defineMcpClientConnection(definition) : null,
+);
 
 async function exchangeAuthorizationCode(input: {
   readonly callbackUrl: string;

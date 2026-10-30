@@ -3,6 +3,8 @@
 #   meta.json      leg identity and runner context
 #   expected.json  `eve eval --list --json` output, when the run got that far
 #   run/           the leg's single `.eve/evals/<timestamp>` tree, when one exists
+#   world/         the world probe ($RUNNER_TEMP/world), when the leg exported one
+#   probes/        run-level probes ($RUNNER_TEMP/probes), when the leg ran any
 # The publish job (scripts/eval-benchmark/records.mjs) reads this layout.
 set -euo pipefail
 
@@ -33,3 +35,9 @@ fi
 if [ "${#runs[@]}" -eq 1 ]; then
   cp -R "${runs[0]}" "$leg/run"
 fi
+
+for part in world probes; do
+  if [ -d "$RUNNER_TEMP/$part" ]; then
+    cp -R "$RUNNER_TEMP/$part" "$leg/$part"
+  fi
+done

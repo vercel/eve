@@ -1,8 +1,9 @@
-import type { UserContent } from "ai";
+import type { ChannelCors } from "#channel/cors.js";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { TrustedForwarders } from "#channel/forwarded-principal.js";
-import type { AuthFn } from "#public/channels/auth.js";
+import type { AuthFn, AuthResult } from "#public/channels/auth.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
 import type { FetchFileFunction } from "#shared/channel-definition.js";
 import type { JsonObject } from "#shared/json.js";
@@ -11,12 +12,29 @@ import type {
   Channel,
   ChannelContinuationOps,
   ChannelEvents,
-  ChannelMethod,
 } from "#public/definitions/channel.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 export type { ForwardedAssertion, TrustedForwarders } from "#channel/forwarded-principal.js";
+
+/** Verified caller identity and request-local permissions for the eve HTTP channel. */
+export interface EveAuthResult extends AuthResult {
+  /**
+   * Allows creating sessions with tool replacements and reading stub verification results.
+   * Omitted or false denies both operations. Never persisted or forwarded as session identity.
+   */
+  readonly allowToolStubs?: boolean;
+  /**
+   * Decides whether this request may read `GET /eve/v1/info`. `true` allows it, `false` denies
+   * it even for operator principals, and omitted serves only operators (`service`, `runtime`,
+   * and callers a configured `localDev()` admits). Never persisted or forwarded.
+   */
+  readonly allowAgentInfo?: boolean;
+}
+
+/** An eve-channel authenticator; ordinary identity-only authenticators also satisfy this type. */
+export type EveAuthFn = AuthFn<Request, EveAuthResult>;
 
 /**
  * Event-handler channel context exposed by `eveChannel({ events })`. The default eve HTTP channel
@@ -27,32 +45,6 @@ export type EveEventContext = ChannelContinuationOps;
 
 /** Runtime stream-event handlers supported by `eveChannel({ events })`. */
 export type EveChannelEvents = ChannelEvents<EveEventContext>;
-
-export interface EveChannelCorsOptions {
-  /**
-   * Allowed request origin. Pass a single origin string, an exact-origin list,
-   * `"null"`, or `"*"`. Omit for `"*"`.
-   */
-  readonly origin?: "*" | "null" | string | readonly string[];
-  /** Methods emitted on preflight responses. Omit for `"*"`. */
-  readonly methods?: "*" | readonly ChannelMethod[];
-  /** Request headers emitted on preflight responses. Omit for `"*"`. */
-  readonly allowedHeaders?: "*" | readonly string[];
-  /** Response headers exposed to browser callers. Omit for `"*"`. */
-  readonly exposedHeaders?: "*" | readonly string[];
-  /** Whether to emit `access-control-allow-credentials: true`. */
-  readonly credentials?: boolean;
-  /** Max age, in seconds, emitted on preflight responses. */
-  readonly maxAge?: number | false;
-  /** Preflight response status code. Defaults to 204. */
-  readonly preflightStatus?: number;
-}
-
-/**
- * Higher-level CORS policy for the default eve HTTP channel. Pass `true` for
- * fully permissive browser access, or pass an options object to narrow it.
- */
-export type EveChannelCors = boolean | EveChannelCorsOptions;
 
 /**
  * Turn-scoped context: a string, an array of strings, or a JSON object. The same
@@ -110,7 +102,7 @@ export type EveMessageResultOrPromise = EveMessageResult | Promise<EveMessageRes
 
 /**
  * Default `onMessage` auth projection: returns {@link EveHandle.caller} unchanged as the
- * runtime session auth when {@link EveChannelInput.onMessage} is omitted. Call it from a custom `onMessage` to inherit the default while adding `context`.
+ * runtime session auth when {@link EveChannelConfig.onMessage} is omitted. Call it from a custom `onMessage` to inherit the default while adding `context`.
  */
 export function defaultEveAuth(ctx: EveMessageContext): SessionAuthContext | null {
   return ctx.eve.caller;
@@ -120,13 +112,16 @@ export function defaultEveAuth(ctx: EveMessageContext): SessionAuthContext | nul
  * Configuration for {@link eveChannel}. Only {@link auth} is required;
  * `uploadPolicy`, `onMessage`, and `events` refine the default HTTP behavior.
  */
-export interface EveChannelInput {
+export interface EveChannelConfig {
   /**
-   * Route auth policy: a single {@link AuthFn} or an ordered array walked by {@link routeAuth}.
-   * The first entry returning a {@link SessionAuthContext} wins; `null` / `undefined` skips to
+   * Route auth policy: a single {@link EveAuthFn} or an ordered array walked by {@link routeAuth}.
+   * The first entry returning an {@link EveAuthResult} wins; `null` / `undefined` skips to
    * the next; exhaustion (including the empty array) rejects with 401. Include `none()` last for anonymous traffic.
+   * Ordinary authenticators grant no tool-replacement permission; return `allowToolStubs: true`
+   * from an eve-channel callback to grant it for that request. Return `allowAgentInfo` to
+   * override who reads `GET /eve/v1/info`.
    */
-  readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
+  readonly auth: EveAuthFn | readonly EveAuthFn[];
   /**
    * Conversation audience classification, fixed when the session is created.
    *
@@ -191,7 +186,7 @@ export interface EveChannelInput {
    * CORS untouched, pass `true` for fully permissive CORS, or pass an options
    * object to narrow the policy.
    */
-  readonly cors?: EveChannelCors;
+  readonly cors?: ChannelCors;
   /** Policy for follow-up messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
   /**
@@ -202,7 +197,7 @@ export interface EveChannelInput {
    */
   readonly onMessage?: (
     ctx: EveMessageContext,
-    message: string | UserContent,
+    message: MessageContent,
   ) => EveMessageResultOrPromise;
   /**
    * Runtime stream-event handlers for the default eve HTTP channel. Handlers receive

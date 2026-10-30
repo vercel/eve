@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createCompiledRuntimeModelCatalogLoader,
+  resolveCompiledRuntimeModelCatalogCachePath,
+} from "#compiler/model-catalog.js";
+import {
   catalogModelProviderSchema,
   catalogModelSchema,
-  createCompiledRuntimeModelCatalogLoader,
   modelCatalogResponseSchema,
-  resolveCompiledRuntimeModelCatalogCachePath,
   type CatalogModel,
-} from "#compiler/model-catalog.js";
+} from "#internal/model-catalog.js";
 
 const MOCK_MODELS: CatalogModel[] = [
   {
@@ -17,13 +19,11 @@ const MOCK_MODELS: CatalogModel[] = [
         provider: "anthropic",
         providerModelId: "claude-opus-4-7",
         contextWindowTokens: 200_000,
-        maxOutputTokens: 32_000,
       },
       {
         provider: "bedrock",
         providerModelId: "anthropic.claude-opus-4-7-v1",
         contextWindowTokens: 200_000,
-        maxOutputTokens: 32_000,
       },
     ],
   },
@@ -34,7 +34,6 @@ const MOCK_MODELS: CatalogModel[] = [
         provider: "openai",
         providerModelId: "gpt-5.4",
         contextWindowTokens: 400_000,
-        maxOutputTokens: 128_000,
       },
     ],
   },
@@ -45,7 +44,6 @@ const MOCK_MODELS: CatalogModel[] = [
         provider: "bfl",
         providerModelId: "flux-pro",
         contextWindowTokens: 1_000,
-        maxOutputTokens: 1_000,
       },
     ],
   },
@@ -56,7 +54,6 @@ const MOCK_MODELS: CatalogModel[] = [
         provider: "arcee-ai",
         providerModelId: "trinity-large-thinking",
         contextWindowTokens: 262_100,
-        maxOutputTokens: 80_000,
       },
     ],
   },
@@ -67,7 +64,6 @@ const MOCK_MODELS: CatalogModel[] = [
         provider: "moonshotai",
         providerModelId: "kimi-k2",
         contextWindowTokens: 131_072,
-        maxOutputTokens: 131_072,
       },
     ],
   },
@@ -78,7 +74,6 @@ const MOCK_MODELS: CatalogModel[] = [
         provider: "moonshotai",
         providerModelId: "kimi-k2-thinking",
         contextWindowTokens: 216_144,
-        maxOutputTokens: 216_144,
       },
     ],
   },
@@ -89,13 +84,11 @@ const MOCK_MODELS: CatalogModel[] = [
         provider: "providerA",
         providerModelId: "zero-model",
         contextWindowTokens: 0,
-        maxOutputTokens: 0,
       },
       {
         provider: "providerB",
         providerModelId: "zero-model",
         contextWindowTokens: 50_000,
-        maxOutputTokens: 8_000,
       },
     ],
   },
@@ -195,7 +188,7 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
     mockCatalogFetch();
     const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
     const limits = await loader.getModelLimits("anthropic/claude-opus-4.7");
-    expect(limits).toEqual({ contextWindowTokens: 200_000, maxOutputTokens: 32_000 });
+    expect(limits?.contextWindowTokens).toBe(200_000);
   });
 
   it("identifies eve when fetching the AI Gateway model catalog", async () => {
@@ -220,21 +213,21 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
     mockCatalogFetch();
     const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
     const limits = await loader.getModelLimits("anthropic/claude-opus-4.7-thinking");
-    expect(limits).toEqual({ contextWindowTokens: 200_000, maxOutputTokens: 32_000 });
+    expect(limits?.contextWindowTokens).toBe(200_000);
   });
 
   it("resolves a model whose canonical slug ends in -thinking", async () => {
     mockCatalogFetch();
     const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
     const limits = await loader.getModelLimits("arcee-ai/trinity-large-thinking");
-    expect(limits).toEqual({ contextWindowTokens: 262_100, maxOutputTokens: 80_000 });
+    expect(limits?.contextWindowTokens).toBe(262_100);
   });
 
   it("prefers the exact -thinking slug over its base model", async () => {
     mockCatalogFetch();
     const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
     const limits = await loader.getModelLimits("moonshotai/kimi-k2-thinking");
-    expect(limits).toEqual({ contextWindowTokens: 216_144, maxOutputTokens: 216_144 });
+    expect(limits?.contextWindowTokens).toBe(216_144);
   });
 
   it("resolves by provider and providerModelId", async () => {
@@ -242,7 +235,7 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
     const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
     const result = await loader.getByProviderModelId("anthropic", "claude-opus-4-7");
     expect(result?.slug).toBe("anthropic/claude-opus-4.7");
-    expect(result?.limits).toEqual({ contextWindowTokens: 200_000, maxOutputTokens: 32_000 });
+    expect(result?.contextWindowTokens).toBe(200_000);
   });
 
   it("strips dotted sub-path from provider before lookup", async () => {
@@ -277,7 +270,7 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
     mockCatalogFetch();
     const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
     const limits = await loader.getModelLimits("example/zero-first-provider");
-    expect(limits).toEqual({ contextWindowTokens: 50_000, maxOutputTokens: 8_000 });
+    expect(limits?.contextWindowTokens).toBe(50_000);
   });
 
   it("skips providers with zero contextWindowTokens in getByProviderModelId", async () => {
@@ -287,15 +280,33 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
     expect(result).toBeNull();
     const result2 = await loader.getByProviderModelId("providerB", "zero-model");
     expect(result2?.slug).toBe("example/zero-first-provider");
-    expect(result2?.limits).toEqual({ contextWindowTokens: 50_000, maxOutputTokens: 8_000 });
+    expect(result2?.contextWindowTokens).toBe(50_000);
   });
 
-  it("uses built-in limits without fetching the catalog", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
+  it("projects the catalog onto the snapshot a build ships", async () => {
+    mockCatalogFetch();
     const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
-    const limits = await loader.getModelLimits("openai/gpt-5.4");
-    expect(limits).toEqual({ contextWindowTokens: 400_000, maxOutputTokens: 128_000 });
-    expect(fetchSpy).not.toHaveBeenCalled();
+
+    const metadata = await loader.loadModelMetadata();
+
+    expect(metadata.fetchedAt).toEqual(expect.any(String));
+    expect(metadata.providerAliases).toEqual(MOCK_PROVIDER_ALIASES);
+    expect(metadata.models.find(({ slug }) => slug === "example/zero-first-provider")).toEqual({
+      slug: "example/zero-first-provider",
+      providers: [
+        { contextWindowTokens: 50_000, provider: "providerB", providerModelId: "zero-model" },
+      ],
+    });
+  });
+
+  it("ships an empty snapshot when the catalog is unavailable", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
+    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+
+    await expect(loader.loadModelMetadata()).resolves.toMatchObject({
+      fetchedAt: null,
+      models: [],
+    });
   });
 
   it("preserves the fetch error for an unknown model", async () => {

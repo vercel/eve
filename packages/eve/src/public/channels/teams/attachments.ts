@@ -1,4 +1,4 @@
-import type { FilePart, TextPart, UserContent } from "ai";
+import type { MessageContent, MessageFilePart, MessageTextPart } from "#shared/message-content.js";
 
 import type { FetchFileResult } from "#channel/adapter.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
@@ -78,10 +78,10 @@ export function normalizeTeamsFilesPolicy(config: TeamsFilesConfig | undefined):
 export function collectTeamsFileParts(
   attachments: readonly TeamsAttachment[],
   policy: TeamsFilesPolicy,
-): FilePart[] {
+): MessageFilePart[] {
   if (!policy.enabled || isUploadsDisabled(policy.uploadPolicy)) return [];
 
-  const parts: FilePart[] = [];
+  const parts: MessageFilePart[] = [];
   for (const attachment of attachments) {
     const part = toTeamsFilePart(attachment, parts.length, policy);
     if (part === null) continue;
@@ -97,15 +97,15 @@ export function collectTeamsFileParts(
   return parts;
 }
 
-/** Combines text + file parts into the UserContent shape expected by the harness. */
+/** Combines text + file parts into the MessagePart[] shape expected by the harness. */
 export function buildTeamsTurnMessage(
   text: string,
-  fileParts: readonly FilePart[],
-): string | UserContent {
+  fileParts: readonly MessageFilePart[],
+): MessageContent {
   if (fileParts.length === 0) return text;
   const trimmed = text.trim();
   if (trimmed.length === 0) return [...fileParts];
-  const textPart: TextPart = { type: "text", text };
+  const textPart: MessageTextPart = { type: "text", text };
   return [textPart, ...fileParts];
 }
 
@@ -186,7 +186,7 @@ function toTeamsFilePart(
   attachment: TeamsAttachment,
   index: number,
   policy: TeamsFilesPolicy,
-): FilePart | null {
+): MessageFilePart | null {
   const url = readAttachmentUrl(attachment);
   if (!url || !isAllowedUrl(url, policy.allowedHosts)) return null;
 

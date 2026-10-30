@@ -65,8 +65,8 @@ This runs the `eve` package build in watch mode alongside the [`apps/fixtures/we
 pnpm test               # unit + integration
 pnpm test:unit          # unit tests
 pnpm test:integration   # integration tests
-pnpm test:scenario      # scenario tests (requires pnpm build first)
-pnpm test:framework-fixtures # apps/frameworks smoke builds (requires pnpm build first)
+pnpm test:scenario      # scenario tests (Turbo builds prerequisites)
+pnpm test:framework-fixtures # apps/frameworks smoke builds (Turbo builds prerequisites)
 pnpm test:e2e           # fixture-owned eve eval suites
 pnpm test:tui           # TUI smoke scripts (not e2e)
 ```
@@ -115,35 +115,22 @@ pnpm docs:check    # docs frontmatter and nav validation
 
 All of these run in CI, so running them locally before pushing saves a round trip.
 
-### Extension capability contracts
+### Extension distribution compatibility
 
-The extension capabilities in
-[`extension-compatibility.ts`](./packages/eve/src/compiler/extension-compatibility.ts)
-have immutable API reports keyed by epoch. If an extension-facing type or
-signature changes, CI fails with the affected capability. Classify whether the
-new consumer retains the previous epoch while bumping it automatically:
+`eve extension build` records its exact eve build version and a distribution
+contract generation in `_manifest.json`. Build against the oldest eve release
+your extension intends to support, then test that same distribution against
+newer releases. A consumer rejects distributions built by a newer eve release
+or against an unsupported distribution generation before executing extension
+code. The first release of this manifest format rejects older epoch-based
+distributions. If the release candidate's distribution contract remains
+compatible, 1.0 continues to support its generation without a rebuild; a
+breaking change requires an explicit generation change and rebuild guidance.
 
-```bash
-pnpm update:extension-contracts --update hook
-```
-
-The command bumps changes it can prove structurally backward compatible,
-retains the previous epoch, and scaffolds the required fixture under
-`packages/eve/extension-contracts/compatibility/`. Replace the scaffold with a
-representative example of the retained authoring contract, then rerun
-`pnpm update:extension-contracts` to generate the new epoch report. If the
-change cannot be classified automatically, pass `--retain` after verifying
-runtime compatibility. To stop accepting the previous epoch, pass
-`--drop "why the old contract cannot run"`; this bumps the capability and
-records the reason.
-
-Every historical epoch must be classified exactly once as supported or dropped.
-Supported historical epochs require compiling fixtures. Each epoch also retains
-a readable `vN.api.md` declaration report and compact `vN.json` metadata; do not
-edit or delete either file after merge. The invariant guard verifies the support
-history, fixtures, report integrity, and assignment of every public authoring
-export to a capability. Reports and fixtures cover structural compatibility;
-behavior changes still need focused compatibility tests.
+Review changes to extension-facing APIs and runtime behavior for backwards
+compatibility within a supported generation. An API change does not require an
+epoch bump; a TypeScript-compatible signature alone does not prove an older
+prebuilt distribution still runs.
 
 ## Adding an integration to the registry
 
@@ -250,6 +237,28 @@ on when one exists. Do not create an issue solely to accompany a pull request.
    or decision behind the change before describing the solution.
 
 Releases are managed with [Changesets](https://github.com/changesets/changesets) by the maintainers.
+
+### Changeset summaries
+
+Start the changeset summary with one complete sentence:
+
+```md
+---
+"eve": patch
+---
+
+Restore the connection sign-in page after an authorization error.
+
+Thanks @octocat for reporting this in #1234.
+```
+
+For a PR with a changeset, start the PR title with `feat:`, `perf:`, or `fix:`. For documentation changes, use `docs(feature):` or `docs(bugfix):` to choose the release-note section. Use `chore:`, `refactor:`, `test:`, `ci:`, `build:`, or `internal:` for changes that should not appear in either section. Except for `docs`, these types also accept a scope, such as `fix(eve):`. A stacked PR prefix such as `[1/2]` is also allowed. GitHub uses the PR title as the squash-merge subject; keep the prefix in that subject, which selects the category. A `minor` or `major` changeset always appears under **Breaking Changes**, whatever its prefix. Put migration details and contributor credits in following paragraphs; release notes retain them. Use `Thanks @handle` to credit a contributor.
+
+Run `pnpm guard:invariants` to validate changeset summaries. CI also checks the actual PR title.
+
+The release workflow classifies from the immutable commit that introduced the changeset, not the editable PR title. Unrecognized commit subjects do not block the release; review them through the compare link under the version heading. That link compares with the newest earlier version that has a tag; without one, it opens the repository history at the new tag. To generate a release locally, run `pnpm version-packages` with `GITHUB_TOKEN` or `GH_TOKEN` set; use this command rather than `changeset version` so the release sections are assembled. The date is the UTC date when the release notes are generated, which can be earlier than the publication date.
+
+The published packages contain only their own release notes in `CHANGELOG.md`, with a link to the full changelog at that release's tag. Packing fails if the package version has no changelog entry. Git preview builds use the base version's notes, identify them as such, and link to the source commit when it contains that version's newest notes. Use `pnpm pack` in the package directory; the build stages the package without modifying the repository changelog.
 
 ## Developer Certificate of Origin (DCO)
 

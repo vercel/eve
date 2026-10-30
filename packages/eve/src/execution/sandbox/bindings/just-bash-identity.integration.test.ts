@@ -32,8 +32,10 @@ describe("just-bash persisted identities", () => {
 
     const plain = await createProvider().prepare({ appRoot });
     const customized = await createProvider({
-      customCommands: [new QueryCommand()],
-      filesystem: ({ defaultFilesystem }) => defaultFilesystem,
+      experimental: {
+        customCommands: [new QueryCommand()],
+        filesystem: ({ defaultFilesystem }) => defaultFilesystem,
+      },
     }).prepare({ appRoot });
 
     expect(customized).toEqual(plain);

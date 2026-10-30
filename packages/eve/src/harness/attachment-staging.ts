@@ -5,7 +5,7 @@ import type { FilePart, ModelMessage, TextPart, ToolResultPart, UserContent } fr
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import type { ChannelAdapterContext, FetchFileResult } from "#channel/adapter.js";
 import { getAdapterKind } from "#channel/adapter.js";
-import { buildSessionHandle } from "#channel/session.js";
+import { buildChannelContext } from "#channel/session.js";
 import { contextStorage, loadContext } from "#context/container.js";
 import { SandboxKey, SessionIdKey } from "#context/keys.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
@@ -14,7 +14,8 @@ import { isUnresolvedFileData, readFileData } from "#internal/attachments/data.j
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
 import { maxBytesOf } from "#internal/attachments/limited-read.js";
-import { readMediaMetadata, verifyMediaType } from "#internal/attachments/media-metadata.js";
+import { verifyMediaType } from "#internal/attachments/media-metadata.js";
+import { readMediaMetadata } from "#internal/attachments/read-media-metadata.js";
 import {
   DEFAULT_UPLOAD_POLICY,
   isMediaTypeAllowed,
@@ -145,7 +146,7 @@ export async function stageAttachmentsToSandbox(
     : {
         ctx: container,
         state: {},
-        session: buildSessionHandle(container),
+        session: buildChannelContext(container).session,
       };
 
   return stageAttachmentsForAdapter(message, sandbox, adapterCtx);
@@ -155,8 +156,8 @@ export async function stageAttachmentsToSandbox(
  * Moves inline file payloads in `content` tool outputs into the sandbox and
  * leaves `eve-sandbox:` refs in their place, so durable history never
  * carries tool-result bytes. {@link hydrateSandboxAttachments} restores the
- * bytes on every model call. Without an active sandbox, each file becomes a
- * note instead.
+ * bytes on every model call. Without an active sandbox, or when it rejects
+ * the write, each file becomes a note instead.
  */
 export async function stageToolResultMedia<T extends ModelMessage>(
   messages: readonly T[],
@@ -386,21 +387,29 @@ async function stageToolOutputFiles(
       if (!isInlineToolOutputFile(part) || part.data.type !== "data") return part;
       const data = readFileData(part.data.data);
       if (data.kind === "link") return part;
-      if (sandbox === null || data.kind !== "bytes") {
+      if (sandbox === null || data.kind !== "bytes") return unstoredFileNote(part);
+      try {
+        const ref = await writeSandboxRef(data.bytes, part.mediaType, part.filename, sandbox);
         return {
-          text: `Returned file ${part.filename ?? "file"} (${part.mediaType}) could not be stored.`,
-          type: "text",
+          ...part,
+          data: { type: "url" as const, url: encodeSandboxRef(ref) },
+          mediaType: ref.mediaType,
         };
+      } catch (error) {
+        // The step's model call and tools already ran, so a throw would replay them.
+        log.warn("sandbox write failed for a tool-result file, degrading it to text", { error });
+        return unstoredFileNote(part);
       }
-      const ref = await writeSandboxRef(data.bytes, part.mediaType, part.filename, sandbox);
-      return {
-        ...part,
-        data: { type: "url" as const, url: encodeSandboxRef(ref) },
-        mediaType: ref.mediaType,
-      };
     }),
   );
   return { ...output, value };
+}
+
+function unstoredFileNote(part: ToolOutputFilePart): ToolOutputContentPart {
+  return {
+    text: `Returned file ${part.filename ?? "file"} (${part.mediaType}) could not be stored.`,
+    type: "text",
+  };
 }
 
 /**

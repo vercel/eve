@@ -81,7 +81,7 @@ export async function dispatchScheduleTaskFromArtifacts(
 
   return {
     scheduleId: schedule.name,
-    sessionIds: result.sessions.map((session) => session.id),
+    sessionIds: result.sessions.map((session) => session.sessionId),
   };
 }
 

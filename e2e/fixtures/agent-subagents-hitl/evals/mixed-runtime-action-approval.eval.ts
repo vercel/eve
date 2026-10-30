@@ -23,31 +23,31 @@ export default defineEval({
 
     parked.calledTool("collision-gate", { count: 1, status: "pending" });
     parked.eventOrder([
-      { type: "actions.requested" },
-      { type: "input.requested" },
-      { type: "turn.waiting" },
+      { type: "call.requested" },
+      { data: { request: { kind: "approval" } }, type: "interaction.opened" },
+      { type: "turn.paused" },
     ]);
-    session.requireInputRequest({ display: "confirmation", toolName: "collision-gate" });
+    session.requireInteraction({ display: "confirmation", toolName: "collision-gate" });
 
     const resumed = await session.respondAll("approve");
     resumed.expectOk();
-    const completed = resumed.message?.includes(COLLISION_MARKER)
+    const completed = resumed.reply?.includes(COLLISION_MARKER)
       ? resumed
       : await waitForMessage(t, resumed.session, COLLISION_MARKER);
     completed.messageIncludes(COLLISION_MARKER);
 
     t.succeeded();
-    t.noFailedActions();
+    t.noFailedCalls();
     t.calledTool("collision-gate", { count: 1, status: "completed" });
-    t.calledSubagent("collision-child", { count: 1, status: "completed" });
-    t.event("task.settled", {
+    t.calledAgent("collision-child", { count: 1, status: "completed" });
+    t.event("call.settled", {
       count: 1,
-      data: { callId: "collision-child-call", status: "completed" },
+      data: { callId: "collision-child-call", outcome: "completed" },
     });
   },
 });
 
-type SessionCursor = Pick<EveEvalSession, "sessionId" | "state">;
+type SessionCursor = Pick<EveEvalSession, "id" | "state">;
 
 async function waitForMessage(
   t: EveEvalContext,
@@ -56,13 +56,13 @@ async function waitForMessage(
 ): Promise<EveEvalTurn> {
   let session = initialSession;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (session.sessionId === undefined || session.state === undefined) {
+    if (session.id === undefined || session.state === undefined) {
       throw new Error("Mixed approval completion wait has no parent session cursor.");
     }
-    const live = t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
+    const live = t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch();
     const turn = await live.result();
-    turn.noFailedActions();
-    if (turn.message?.includes(marker) === true) return turn;
+    turn.noFailedCalls();
+    if (turn.reply?.includes(marker) === true) return turn;
     session = live.session;
   }
   throw new Error("Mixed approval result did not reach the parent after five turns.");

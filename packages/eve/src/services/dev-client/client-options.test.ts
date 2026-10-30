@@ -17,7 +17,7 @@ afterEach(() => {
 describe("resolveDevelopmentClientOptions", () => {
   it("targets the given host without inferring credentials from locality", () => {
     const options = resolveDevelopmentClientOptions("http://localhost:3000");
-    expect(options.host).toBe("http://localhost:3000");
+    expect(options.baseUrl).toBe("http://localhost:3000");
     expect(options.auth).toBeUndefined();
     expect(options.headers).toBeUndefined();
 
@@ -43,7 +43,7 @@ describe("resolveDevelopmentClientOptions", () => {
 
     expect(options).toMatchObject({
       auth: { bearer: token },
-      host: "http://127.0.0.1:3000",
+      baseUrl: "http://127.0.0.1:3000",
       redirect: "manual",
     });
   });
@@ -112,7 +112,7 @@ describe("resolveDevelopmentClientOptions", () => {
       serverUrl: "https://verified.example.com",
     });
 
-    expect(options.host).toBe("https://verified.example.com");
+    expect(options.baseUrl).toBe("https://verified.example.com");
     expect(options.redirect).toBe("manual");
     expect(options.headers).toBe(credentials.resolveBypassHeaders);
     // The token flows through the higher-level vercelOidc auth, never headers.

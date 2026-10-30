@@ -60,7 +60,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 54;
+export const COMPILED_AGENT_MANIFEST_VERSION = 55;
 
 /**
  * Active compiled channel entry — backed by an authored `Channel` module.
@@ -133,9 +133,7 @@ export type CompiledRuntimeModelReference = InternalAgentModelDefinition & {
 /**
  * Dynamic model resolver source preserved in the compiled manifest.
  */
-export type CompiledDynamicModelDefinition = ModuleSourceRef & {
-  readonly eventNames: readonly string[];
-};
+export type CompiledDynamicModelDefinition = ModuleSourceRef;
 
 /**
  * Normalized hosted-build configuration preserved in the compiled manifest.
@@ -228,7 +226,6 @@ export type CompiledConnectionDefinition = z.infer<typeof compiledConnectionDefi
 
 /** Dynamic connection resolver source preserved for runtime evaluation. */
 export interface CompiledDynamicConnectionDefinition extends ModuleSourceRef {
-  readonly eventNames: readonly string[];
   /** Map results from extensions receive this mount namespace. */
   readonly extensionNamespace?: string;
   readonly slug: string;
@@ -257,8 +254,6 @@ export type CompiledToolDefinition = InternalToolDefinition &
  */
 export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
   readonly slug: string;
-  readonly eventNames: readonly string[];
-  readonly rebindMissingCallbacks?: boolean;
   /**
    * Mount namespace when this resolver comes from an extension. The runtime
    * prefixes the names of tools the resolver produces (`forecast` →
@@ -271,7 +266,6 @@ export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
 export interface CompiledMemoryDefinition extends ModuleSourceRef {
   readonly description?: string;
   readonly slot: string;
-  readonly visibility: "scope" | "session";
 }
 
 /**
@@ -281,7 +275,6 @@ export interface CompiledMemoryDefinition extends ModuleSourceRef {
  */
 export interface CompiledDynamicSkillDefinition extends ModuleSourceRef {
   readonly slug: string;
-  readonly eventNames: readonly string[];
   /**
    * Mount namespace when this resolver comes from an extension. Names of skills
    * a map resolver produces are prefixed with `${extensionNamespace}__`.
@@ -295,7 +288,6 @@ export interface CompiledDynamicSkillDefinition extends ModuleSourceRef {
  */
 export interface CompiledDynamicInstructionsDefinition extends ModuleSourceRef {
   readonly slug: string;
-  readonly eventNames: readonly string[];
 }
 
 /**
@@ -462,7 +454,6 @@ const agentSourceCompositionSchema: z.ZodType<AgentSourceComposition> = z
 
 const compiledDynamicModelDefinitionSchema: z.ZodType<CompiledDynamicModelDefinition> = z
   .object({
-    eventNames: z.array(z.string()).readonly(),
     exportName: z.string().optional(),
     sourceKind: z.literal("module"),
     logicalPath: z.string(),
@@ -576,7 +567,6 @@ const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReferen
   .object({
     contextWindowTokens: z.number().int().positive().optional(),
     id: z.string(),
-    maxOutputTokens: z.number().int().positive().optional(),
     source: moduleSourceRefSchema.optional(),
     sourceField: z.literal("compaction.model").optional(),
     promptCache: z
@@ -621,7 +611,7 @@ const sessionTimeoutSchema = z.union([z.number().int().positive(), z.literal(fal
 const compiledAgentLimitsDefinitionSchema = z
   .object({
     sessionTimeoutMs: sessionTimeoutSchema.optional(),
-    sessionUsage: z.literal(true).optional(),
+    sessionUsage: z.boolean().optional(),
   })
   .strict();
 
@@ -692,7 +682,7 @@ const compiledSkillBaseFields = {
   deferred: z.boolean().optional(),
   description: z.string(),
   license: z.string().optional(),
-  markdown: z.string(),
+  content: z.string(),
   metadata: z.record(z.string(), z.string()).optional(),
   sourceId: z.string(),
   logicalPath: z.string(),
@@ -833,7 +823,6 @@ const compiledConnectionDefinitionSchema = z
 
 const compiledDynamicConnectionDefinitionSchema: z.ZodType<CompiledDynamicConnectionDefinition> = z
   .object({
-    eventNames: z.array(z.string()).readonly(),
     exportName: z.string().optional(),
     extensionNamespace: z.string().optional(),
     logicalPath: z.string(),
@@ -907,11 +896,9 @@ const compiledToolDefinitionSchema = z
 
 const compiledDynamicToolDefinitionSchema: z.ZodType<CompiledDynamicToolDefinition> = z
   .object({
-    eventNames: z.array(z.string()).readonly(),
     exportName: z.string().optional(),
     extensionNamespace: z.string().optional(),
     logicalPath: z.string(),
-    rebindMissingCallbacks: z.boolean().optional(),
     slug: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
@@ -926,13 +913,11 @@ const compiledMemoryDefinitionSchema: z.ZodType<CompiledMemoryDefinition> = z
     slot: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
-    visibility: z.enum(["scope", "session"]),
   })
   .strict();
 
 const compiledDynamicSkillDefinitionSchema: z.ZodType<CompiledDynamicSkillDefinition> = z
   .object({
-    eventNames: z.array(z.string()).readonly(),
     exportName: z.string().optional(),
     extensionNamespace: z.string().optional(),
     logicalPath: z.string(),
@@ -945,7 +930,6 @@ const compiledDynamicSkillDefinitionSchema: z.ZodType<CompiledDynamicSkillDefini
 const compiledDynamicInstructionsDefinitionSchema: z.ZodType<CompiledDynamicInstructionsDefinition> =
   z
     .object({
-      eventNames: z.array(z.string()).readonly(),
       exportName: z.string().optional(),
       logicalPath: z.string(),
       slug: z.string(),
@@ -1040,8 +1024,6 @@ const compiledSubagentNodeBaseFields = {
 };
 const compiledDynamicSubagentDefinitionSchema = z
   .object({
-    build: compiledAgentBuildDefinitionSchema.optional(),
-    eventNames: z.array(z.string()).readonly(),
     exportName: z.string().optional(),
     logicalPath: z.string(),
     sourceId: z.string(),
@@ -1356,9 +1338,6 @@ function cloneCompiledRuntimeModelReference(
   };
   if (model.contextWindowTokens !== undefined) {
     clone.contextWindowTokens = model.contextWindowTokens;
-  }
-  if (model.maxOutputTokens !== undefined) {
-    clone.maxOutputTokens = model.maxOutputTokens;
   }
   if (model.providerOptions !== undefined) {
     clone.providerOptions = { ...model.providerOptions };

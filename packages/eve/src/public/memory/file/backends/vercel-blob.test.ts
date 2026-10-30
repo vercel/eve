@@ -91,7 +91,12 @@ describe("Vercel Blob file-memory backend", () => {
       token: undefined,
     });
 
-    await backend.write({ content: "next", expectedVersion: "etag-old", key: "mem_a", signal });
+    await backend.write({
+      content: "next",
+      expectedVersion: "etag-old",
+      key: "mem_a",
+      signal,
+    });
     expect(put).toHaveBeenNthCalledWith(2, "eve/memory/file/mem_a/MEMORY.md", "next", {
       abortSignal: signal,
       access: "private",
@@ -110,7 +115,12 @@ describe("Vercel Blob file-memory backend", () => {
     vi.mocked(put).mockRejectedValueOnce(new BlobPreconditionFailedError());
 
     await expect(
-      backend.write({ content: "next", expectedVersion: "stale", key: "mem_a", signal }),
+      backend.write({
+        content: "next",
+        expectedVersion: "stale",
+        key: "mem_a",
+        signal,
+      }),
     ).rejects.toSatisfy(MemoryDocumentConflictError.is);
 
     vi.mocked(put).mockRejectedValueOnce(new Error("already exists"));

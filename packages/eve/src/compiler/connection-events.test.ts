@@ -25,11 +25,11 @@ it("preserves the runtime bridge through repeated auth normalization but exclude
 });
 
 it.each([
-  { experimental_events: true },
-  { experimental_events: {} },
-  { experimental_events: { onEvent() {}, onGap: true } },
-  { auth: { getToken: auth.getToken }, experimental_events: { onEvent() {} } },
-  { auth: () => auth, experimental_events: { onEvent() {} } },
+  { experimental: { events: true } },
+  { experimental: { events: {} } },
+  { experimental: { events: { onEvent() {}, onGap: true } } },
+  { auth: { getToken: auth.getToken }, experimental: { events: { onEvent() {} } } },
+  { auth: () => auth, experimental: { events: { onEvent() {} } } },
 ])(
   "rejects event configurations without callbacks and a static events-capable provider: %j",
   (override) => {
@@ -43,14 +43,14 @@ it("accepts separate event/lifecycle callbacks without invoking them or allocati
   const onEvent = vi.fn();
   const callbacks = { onEvent, onGap: vi.fn(), onTerminated: vi.fn() };
   const normalized = normalizeMcpClientConnectionDefinition(
-    { ...definition, experimental_events: callbacks },
+    { ...definition, experimental: { events: callbacks } },
     "issues",
   );
-  expect(normalized.experimental_events).toEqual(callbacks);
+  expect(normalized.experimental?.events).toEqual(callbacks);
   expect(onEvent).not.toHaveBeenCalled();
   expect(backend.createAdapter).not.toHaveBeenCalled();
   expect(
-    normalizeMcpClientConnectionDefinition(definition, "issues").experimental_events,
+    normalizeMcpClientConnectionDefinition(definition, "issues").experimental?.events,
   ).toBeUndefined();
 });
 
@@ -58,7 +58,7 @@ it("rejects events on dynamic connections whose receiver cannot be mounted at bu
   const value = defineMcpClientConnection({
     ...definition,
     instanceKey: "issues",
-    experimental_events: { onEvent() {} },
+    experimental: { events: { onEvent() {} } },
   });
   expect(() =>
     resolveDynamicConnectionValue(value, {

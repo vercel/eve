@@ -1,10 +1,4 @@
-import type { DynamicResolveContext } from "#dynamic/definition.js";
-import {
-  defineAgent,
-  defineDynamic,
-  type DynamicSentinel,
-  type DynamicSubagentDefinition,
-} from "eve";
+import { defineAgent, defineDynamic } from "eve";
 
 import { DEFAULT_AGENT_MODEL_ID, DEFAULT_AGENT_REASONING } from "#shared/default-agent-model.js";
 
@@ -38,36 +32,27 @@ const description = renderDescription([
   effectiveEdits,
 ]);
 
-const resolve = async (_event: unknown, ctx: DynamicResolveContext) => {
+/** Offers the deployed self-modification child only to authorized principals outside `eve dev`. */
+export default defineDynamic(async (ctx) => {
   if (!isDeployedRuntime()) return null;
   const bound = selfModification.config;
   const config = resolveDeployedSelfModificationConfig(bound);
   if (config.credentials.kind === "pat" && !hasGitHubCredential()) return null;
-  try {
-    const authorized = await config.authorize({
-      channel: ctx.channel,
-      principal: ctx.session.auth.current,
-    });
-    if (!authorized) return null;
-  } catch {
-    return null;
-  }
-  const configuredModel = bound.model ?? ctx.model?.id;
+  const principal = ctx.session.auth.current;
+  // `authorize` reads the principal's attributes and the channel, so it's asked again each turn.
+  const authorized = await ctx.memo(["authorize", principal, ctx.turn?.id ?? null], async () => {
+    try {
+      return (await config.authorize({ channel: ctx.channel, principal })) === true;
+    } catch {
+      return false;
+    }
+  });
+  if (!authorized) return null;
+  const configuredModel = bound.model ?? ctx.model.id;
   return defineAgent({
     description,
     model: configuredModel ?? DEFAULT_AGENT_MODEL_ID,
     reasoning:
       bound.reasoning ?? (configuredModel === undefined ? DEFAULT_AGENT_REASONING : undefined),
   });
-};
-
-/** Offers the deployed self-modification child only to authorized principals outside `eve dev`. */
-const deployedSelfModificationAgent: DynamicSentinel<DynamicSubagentDefinition | null> =
-  defineDynamic({
-    events: {
-      "session.started": resolve,
-      "turn.started": resolve,
-    },
-  });
-
-export default deployedSelfModificationAgent;
+});

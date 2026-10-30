@@ -1,7 +1,7 @@
 ---
 issue: "1945"
 status: proposed
-last_updated: "2026-08-11"
+last_updated: "2026-10-27"
 ---
 
 # Dynamic agent configuration without fallbacks or placeholders
@@ -54,7 +54,8 @@ export default defineAgent({
 A dynamic model handler returns a model ID, a live AI SDK model, or
 `{ model, modelContextWindowTokens?, modelOptions? }`. Runtime validation still
 rejects `null`, `undefined`, malformed results, and unknown keys. When context
-metadata is omitted, eve resolves it from AI Gateway at selection time.
+metadata is omitted, eve resolves it from the model metadata the build recorded
+(see [build-time model metadata](./build-time-model-metadata.md)).
 Dynamic agents cannot set sibling `modelContextWindowTokens` or `modelOptions`
 fields because those would become implicit selection defaults.
 
@@ -116,12 +117,9 @@ It validates live models, serializes provider options, normalizes provider IDs,
 and produces a serializable runtime reference with the resolved model ID and
 metadata.
 
-Successful runtime catalog metadata is cached in durable workflow state for 24
-hours. Gateway models are keyed by normalized gateway ID; provider models are
-keyed by provider and provider model ID. Writes remove expired entries. Failed
-requests and missing models are never cached, and transport or authentication
-failures remain distinct from a missing-model result. A full catalog response
-may remain execution-local, but only metadata for selected models is durable.
+Context windows come from the snapshot of the AI Gateway catalog that the build
+recorded; the runtime never requests the catalog. See
+[build-time model metadata](./build-time-model-metadata.md).
 
 Dynamic model scope precedence is:
 
@@ -150,7 +148,6 @@ model-dependent work.
 - A malformed selection fails before model-dependent work.
 - An unknown model without explicit context metadata produces an actionable
   metadata error.
-- Catalog authentication and transport failures propagate and are not cached.
 - A dynamic subagent may return `null` to omit itself.
 - A dynamic subagent resolver exception or malformed selected config follows
   the existing capability policy: log the failure and omit the subagent.
@@ -165,11 +162,9 @@ model identity moves from session runtime metadata to step attribution. Add a
 minor changeset.
 
 Coverage must include public type rejection, exact unions and schemas, scope
-precedence, durable live-object rejection, shared normalization, metadata-cache
-hits and expiry, provider aliases, request errors without negative caching,
-placeholder-free manifests, dynamic subagent resource compilation, inspection
-output, subprocess build/boot coverage, deterministic failure behavior, and
-real-model catalog resolution and reuse.
+precedence, durable live-object rejection, shared normalization, provider
+aliases, placeholder-free manifests, dynamic subagent resource compilation, inspection
+output, subprocess build/boot coverage, and deterministic failure behavior.
 
 ## Invariants
 
@@ -180,8 +175,8 @@ real-model catalog resolution and reuse.
 - `DEFAULT_AGENT_MODEL_ID` is a product default, not a compiler escape hatch.
 - Every model call has one normalized concrete model reference before any
   model-dependent work.
-- Runtime-derived metadata is durable, serializable, TTL-bounded, and cached
-  only after successful lookup.
+- Runtime model metadata comes from the build, never from a runtime catalog
+  request.
 - TypeScript and runtime schemas enforce identical static and dynamic variants.
 - Missing selections, resolver failures, stale manifests, and inspection
   surfaces contain no hidden fallback behavior.

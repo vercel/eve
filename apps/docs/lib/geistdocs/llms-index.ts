@@ -1,3 +1,5 @@
+import { templateGalleryUrl } from "../templates/links";
+
 const EVE_ORIGIN = "https://eve.dev";
 
 export const createLlmsIndex = (): string => `# eve
@@ -64,6 +66,8 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Deployment Overview](${EVE_ORIGIN}/docs/guides/deployment/overview.md): Choose between Vercel and self-hosted infrastructure.
 - [Deploy to Vercel](${EVE_ORIGIN}/docs/guides/deployment/vercel.md): Build and deploy with Vercel Workflow and Vercel Sandbox.
 - [Self-Hosting](${EVE_ORIGIN}/docs/guides/deployment/self-hosting.md): Run eve as a Node service or container.
+- [Workflow Worlds](${EVE_ORIGIN}/docs/guides/deployment/workflow-worlds.md): Choose the local, Postgres, or another Workflow world for self-hosted sessions.
+- [Self-Hosted Operations](${EVE_ORIGIN}/docs/guides/deployment/self-hosted-operations.md): Upgrade, scale, and troubleshoot a self-hosted agent.
 - [Authentication](${EVE_ORIGIN}/docs/guides/auth-and-route-protection.md): Secure an agent's HTTP routes and establish caller identity.
 - [Instrumentation](${EVE_ORIGIN}/docs/observability/instrumentation.md): Configure lifecycle instrumentation and OpenTelemetry destinations.
 - [Terminal UI](${EVE_ORIGIN}/docs/guides/dev-tui.md): Work with a local or deployed agent from the interactive terminal UI.
@@ -89,7 +93,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [TypeScript API Reference](${EVE_ORIGIN}/docs/reference/typescript-api.md): Find public \`define*\` helpers, runtime context, and import paths.
 - [CLI Reference](${EVE_ORIGIN}/docs/reference/cli.md): Find every eve command and option.
 - [Responsible Use](${EVE_ORIGIN}/docs/responsible-use.md): Review deployer responsibilities and safeguards.
-- [Documentation Map](${EVE_ORIGIN}/sitemap.md): Browse every documentation, integration, and template page with type and summary metadata.
+- [Documentation Map](${EVE_ORIGIN}/sitemap.md): Browse every documentation and integration page with type and summary metadata.
 - [Agent Instructions](${EVE_ORIGIN}/agents.md): Read operational guidance for coding agents working with eve.
 - [Full Documentation Corpus](${EVE_ORIGIN}/llms-full.txt): Load all docs and integration content for offline indexing or a large context window.
 
@@ -97,7 +101,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 - [Changelog](${EVE_ORIGIN}/changelog.md): Read eve release notes, including breaking changes and fixes. Follow the next-page links for older releases.
 - [Integrations](${EVE_ORIGIN}/integrations): Browse official channels, connections, extensions, and observability integrations.
-- [Templates](${EVE_ORIGIN}/templates): Browse complete example projects and their source.
+- [Templates](${templateGalleryUrl}): Browse eve example projects on Vercel.
 - [Official eve Skill](https://github.com/vercel/eve/blob/main/skills/eve/SKILL.md): Install or inspect the coding-agent skill; its guidance defers to version-matched bundled docs.
 - [Source Repository](https://github.com/vercel/eve): Read source, releases, issues, and contribution guidance.
 `;

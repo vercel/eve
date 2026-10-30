@@ -123,7 +123,7 @@ function respondToFileTools(
   const steps = [
     { input: { content, filePath: path }, name: "write_file" },
     { input: { filePath: path }, name: "read_file" },
-    { input: { path: "notes", pattern: content }, name: "grep" },
+    { input: { outputMode: "content", path: "notes", pattern: content }, name: "grep" },
     { input: { command: `cat ${path}` }, name: "bash" },
   ];
   const next = steps[request.toolResults.length];

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
+import { resolveAgent } from "#runtime/resolve-agent.js";
+import { resolveSessionUsageLimit } from "#execution/effective-agent-config.js";
 import { compiledRemoteAgentNodeSchema } from "#compiler/remote-agent-node.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import {
@@ -37,6 +40,37 @@ describe("compiled agent manifest v50", () => {
     // runtime loads the function from the agent module.
     expect(parsed.config.limits?.sessionUsage).toBe(true);
     expect(() => validateCompiledAgentManifest(parsed)).not.toThrow();
+  });
+
+  it("preserves disabled usage limits and the fractional compaction threshold through compilation and runtime loading", async () => {
+    const { manifest, moduleMap } = await compileFromMemory({
+      agent: {
+        model: "openai/gpt-5.4",
+        compaction: { threshold: 0.75 },
+        limits: { sessionUsage: false },
+      },
+      model: "openai/gpt-5.4",
+    });
+    const parsed = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(manifest)));
+    expect(parsed.config.limits?.sessionUsage).toBe(false);
+    const resolvedAgent = await resolveAgent({ manifest: parsed, moduleMap });
+    expect(resolvedAgent.config?.compaction?.thresholdPercent).toBe(0.75);
+    expect(resolvedAgent.config?.limits?.sessionUsage).toBe(false);
+    const rootLimit = () => true;
+    const limit = resolveSessionUsageLimit({
+      resolvedAgent,
+      graph: {
+        nodesByNodeId: new Map([
+          [
+            ROOT_RUNTIME_AGENT_NODE_ID,
+            { agent: { config: { limits: { sessionUsage: rootLimit } } } },
+          ],
+        ]),
+      },
+    } as never);
+    expect(
+      limit?.({ total: { inputTokens: 50_000_000 }, window: { inputTokens: 50_000_000 } } as never),
+    ).toBe(false);
   });
 
   it("marks no session usage limit when the agent authors none", async () => {

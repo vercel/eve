@@ -11,7 +11,7 @@ const callContext: ScheduleBoundCallContext = {
   abortSignal: new AbortController().signal,
   application: "fixture",
   collection: "requests",
-  channel: {},
+  channel: { kind: "unknown", metadata: {} },
   session: {
     id: "session-alice",
     auth: {

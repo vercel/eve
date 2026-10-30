@@ -14,8 +14,9 @@ import { VercelSandbox } from "eve/sandbox/vercel";
  *
  * The default environment keeps this fixture portable between local providers
  * and Vercel Sandbox. Both run the published eve
- * base image: GHCR locally and VCR on Vercel. CI sets `EVE_SANDBOX_IMAGE_TAG`
- * to `latest` so release PRs can run before their versioned image exists. The
+ * base image: GHCR locally and VCR on Vercel. The image is tagged by its
+ * Dockerfile contents; CI falls back to `latest` only for a Dockerfile change
+ * that is not published yet. The
  * image ships Python, Node, and git; the preparation below assumes
  * that real-binary environment and is not meant to run against the
  * dependency-free `just-bash` fallback.

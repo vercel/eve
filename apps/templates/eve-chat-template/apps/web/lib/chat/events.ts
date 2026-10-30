@@ -1,10 +1,9 @@
-import type { MessageStreamEvent } from "eve/client";
+import { endsTurn, type SessionStreamEvent } from "eve/client";
 
-export function isChatTurnSettledEvent(event: MessageStreamEvent) {
-  return (
-    event.type === "authorization.required" ||
-    event.type === "session.completed" ||
-    event.type === "session.failed" ||
-    event.type === "session.waiting"
-  );
+/**
+ * Whether a read of the session's stream stops at `event`: the turn settled, the session ended,
+ * or the turn paused for a person, such as a sign-in.
+ */
+export function isChatTurnSettledEvent(event: SessionStreamEvent) {
+  return endsTurn(event);
 }

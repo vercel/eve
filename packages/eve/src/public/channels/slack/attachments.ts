@@ -1,4 +1,4 @@
-import type { FilePart, TextPart, UserContent } from "ai";
+import type { MessageContent, MessageFilePart, MessageTextPart } from "#shared/message-content.js";
 
 import type { FetchFileContext, FetchFileResult } from "#channel/adapter.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
@@ -36,7 +36,7 @@ const THREAD_LOOKBACK_MESSAGES = 10;
 const FILE_FETCH_TIMEOUT_MS = 30_000;
 
 /**
- * Emits one {@link FilePart} per attachment in the inbound message, with
+ * Emits one {@link MessageFilePart} per attachment in the inbound message, with
  * `data` set to a `URL` object pointing at the Slack file. URL-less and
  * policy-violating attachments are dropped so a single bad upload never
  * blocks the text portion.
@@ -47,8 +47,8 @@ const FILE_FETCH_TIMEOUT_MS = 30_000;
 export function collectSlackFileParts(
   attachments: readonly SlackAttachment[] | undefined,
   policy: UploadPolicy,
-): FilePart[] {
-  const parts: FilePart[] = [];
+): MessageFilePart[] {
+  const parts: MessageFilePart[] = [];
   for (const attachment of attachments ?? []) {
     const part = toSlackFilePart(attachment, parts.length);
     if (part === null) continue;
@@ -65,7 +65,7 @@ export function collectSlackFileParts(
   return parts;
 }
 
-function toSlackFilePart(attachment: SlackAttachment, index: number): FilePart | null {
+function toSlackFilePart(attachment: SlackAttachment, index: number): MessageFilePart | null {
   if (!attachment.url) {
     log.warn("dropped attachment — no url available", {
       name: attachment.name,
@@ -114,7 +114,7 @@ export async function collectInboundFileParts(input: {
     latest: string,
     size: number,
   ) => Promise<readonly SlackThreadMessage[] | undefined>;
-}): Promise<FilePart[]> {
+}): Promise<MessageFilePart[]> {
   const fromMention = collectSlackFileParts(input.mention.attachments, input.policy);
   if (fromMention.length > 0 || !input.isMentioned) return fromMention;
   if (isUploadsDisabled(input.policy)) return [];
@@ -182,14 +182,14 @@ function mentionsApp(text: string, botUserId: string | undefined): boolean {
 }
 
 /**
- * Combines text + file parts into the {@link UserContent} shape the
+ * Combines text + file parts into the {@link MessageContent} shape the
  * harness expects. Returns the raw text string when there are no
  * parts (the common path).
  */
 export function buildSlackTurnMessage(
   text: string,
-  fileParts: readonly FilePart[],
-): string | UserContent {
+  fileParts: readonly MessageFilePart[],
+): MessageContent {
   if (fileParts.length === 0) {
     return text;
   }
@@ -197,7 +197,7 @@ export function buildSlackTurnMessage(
   if (trimmed.length === 0) {
     return [...fileParts];
   }
-  const textPart: TextPart = { type: "text", text };
+  const textPart: MessageTextPart = { type: "text", text };
   return [textPart, ...fileParts];
 }
 

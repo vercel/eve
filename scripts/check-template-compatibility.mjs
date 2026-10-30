@@ -26,6 +26,16 @@ const run = (command, args, options = {}) => {
 };
 
 /**
+ * Deploy with Vercel clones a template from main and installs its committed lockfile, so the
+ * template must typecheck with the published eve release that lockfile pins, not only with the
+ * packed eve checked afterwards.
+ */
+const checkCommittedLockfile = (destination) => {
+  run("pnpm", ["install", "--frozen-lockfile"], { cwd: destination });
+  run("pnpm", ["typecheck"], { cwd: destination });
+};
+
+/**
  * Builds each authored `vercel.ts` service the way Vercel does: from the service root, where a
  * root-only pnpm install puts no framework binary on PATH. The template's own `pnpm build` runs
  * from the project root and cannot catch a service that only builds there.
@@ -108,8 +118,22 @@ try {
     if (!manifest.dependencies?.eve) {
       throw new Error(`Template "${template}" does not declare eve in dependencies`);
     }
+
+    process.stdout.write(`\nChecking ${template} with its committed lockfile\n`);
+    checkCommittedLockfile(destination);
+
     manifest.dependencies.eve = `file:${tarball}`;
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    // The shipped Discord template pins the old gateway API. Exercise its documented
+    // pre-1.0 migration only in the upgraded copy, after checking the lockfile unchanged.
+    if (template === "eve-discord-agent-template") {
+      const daemonPath = join(destination, "daemon", "main.ts");
+      const daemon = readFileSync(daemonPath, "utf8")
+        .replace('"eve/channels/discord/gateway"', '"eve/experimental/channels/discord/gateway"')
+        .replaceAll("experimental_runDiscordGatewayRelay", "runDiscordGatewayRelay");
+      writeFileSync(daemonPath, daemon);
+    }
 
     process.stdout.write(`\nChecking ${template} against ${tarballs[0]}\n`);
     run("pnpm", ["install", "--no-frozen-lockfile"], { cwd: destination });
