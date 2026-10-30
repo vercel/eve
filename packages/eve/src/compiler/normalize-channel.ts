@@ -51,8 +51,6 @@ export async function compileChannelDefinition(
     `Expected the channel export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
 
-  const buildMetadata = getChannelBuildMetadata(definition, channelName);
-
   for (const route of definition.routes) {
     if (readWorkflowFunctionId(route.handler) !== undefined) {
       throw new Error(
@@ -62,20 +60,23 @@ export async function compileChannelDefinition(
   }
 
   return {
-    definitions: definition.routes.map((route) => ({
-      kind: "channel" as const,
-      name: channelName,
-      logicalPath: source.logicalPath,
-      method: route.method.toUpperCase() as ChannelRouteMethod,
-      urlPath: route.path,
-      sourceId: source.sourceId,
-      sourceKind: "module" as const,
-      exportName: source.exportName,
-      adapterKind: extractAdapterKind(definition.adapter),
-      cors: definition.cors,
-      manifest: buildMetadata?.manifest,
-      vercelConnect: extractVercelConnectMetadata(buildMetadata?.externalCredentials),
-    })),
+    definitions: definition.routes.map((route) => {
+      const buildMetadata = getChannelBuildMetadata(definition, channelName, route.path);
+      return {
+        kind: "channel" as const,
+        name: channelName,
+        logicalPath: source.logicalPath,
+        method: route.method.toUpperCase() as ChannelRouteMethod,
+        urlPath: route.path,
+        sourceId: source.sourceId,
+        sourceKind: "module" as const,
+        exportName: source.exportName,
+        adapterKind: extractAdapterKind(definition.adapter),
+        cors: definition.cors,
+        manifest: buildMetadata?.manifest,
+        vercelConnect: extractVercelConnectMetadata(buildMetadata?.externalCredentials),
+      };
+    }),
     kind: "channel",
   };
 }

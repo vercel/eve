@@ -1,3 +1,5 @@
+import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
+import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { failureNotice } from "#public/channels/reply.js";
 import { callLabel } from "#protocol/session-projection/selectors.js";
@@ -207,6 +209,14 @@ export interface ChatSdkInputAnswer {
 export interface ChatSdkRespondOptions
   extends ChatSdkThreadOptions, Omit<ChannelRespondOptions, "auth" | "state"> {}
 
+/** A build-time Connect dependency for one adapter. Does not configure its runtime credentials. */
+export interface ChatSdkConnectRequirement {
+  readonly connector: string;
+  readonly service: string;
+  readonly type?: string;
+  readonly subjectTypes?: readonly ("app" | "user")[];
+}
+
 /**
  * Configuration for {@link chatSdkChannel}. It accepts normal Chat SDK
  * `ChatConfig` fields, plus eve route and event settings.
@@ -216,6 +226,8 @@ export interface ChatSdkChannelConfig<
 > extends Omit<ChatConfig<TAdapters>, "adapters"> {
   /** Map of Chat SDK adapter name to adapter instance. */
   readonly adapters: TAdapters;
+  /** Explicit Connect dependencies, keyed by adapter name. Unlisted adapters emit no requirement. */
+  readonly connect?: Partial<Record<Extract<keyof TAdapters, string>, ChatSdkConnectRequirement>>;
   /**
    * Base route for generated adapter webhooks. Defaults to `/eve/v1`, so an
    * adapter named `slack` mounts at `/eve/v1/slack`.
@@ -352,6 +364,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     ]);
   });
 
+  const webhookPaths = new Set<string>();
   const channel = defineChannel<
     ChatSdkChannelState,
     ChatSdkChannelContext<TAdapters>,
@@ -376,6 +389,10 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     // the adapter dispatches on request.method, so one handler serves both.
     routes: adapterNames(config.adapters).flatMap((adapterName) => {
       const path = routeForAdapter(adapterName, config);
+      if (webhookPaths.has(path)) {
+        throw new TypeError(`Multiple Chat SDK adapters use the route "${path}".`);
+      }
+      webhookPaths.add(path);
       const handler = async (
         request: Request,
         args: RouteHandlerArgs<ChatSdkChannelState>,
@@ -415,6 +432,35 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     },
     events: mergedEvents,
   });
+
+  const connectRoutes: Record<string, { credentials: { vercelConnect: unknown } }> = {};
+  for (const adapterName of Object.keys(config.connect ?? {})) {
+    if (!Object.hasOwn(config.adapters, adapterName)) {
+      throw new TypeError(`Connect requirement names unknown Chat SDK adapter "${adapterName}".`);
+    }
+  }
+  for (const adapterName of adapterNames(config.adapters)) {
+    const requirement = config.connect?.[adapterName];
+    if (requirement === undefined) continue;
+    if (requirement === null || typeof requirement !== "object") {
+      throw new TypeError(`Invalid Connect requirement for Chat SDK adapter "${adapterName}".`);
+    }
+    const metadata = extractVercelConnectMetadata({
+      connector: requirement.connector,
+      requirement: {
+        reference: `connector:${requirement.connector}`,
+        service: requirement.service,
+        method: requirement.type,
+        subjectTypes: requirement.subjectTypes ?? ["app"],
+      },
+    });
+    if (!metadata?.requirement) {
+      throw new TypeError(`Invalid Connect requirement for Chat SDK adapter "${adapterName}".`);
+    }
+    const route = routeForAdapter(adapterName, config);
+    connectRoutes[route] = { credentials: { vercelConnect: metadata } };
+  }
+  setChannelBuildMetadata(channel, { routes: connectRoutes });
 
   return {
     bot,

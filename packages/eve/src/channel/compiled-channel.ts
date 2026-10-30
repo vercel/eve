@@ -28,7 +28,10 @@ interface ChannelBuildMetadata {
   readonly manifest?: JsonObject;
 }
 
-type ChannelBuildMetadataFactory = (channelName: string) => ChannelBuildMetadata;
+type ChannelBuildMetadataFactory = (
+  channelName: string,
+  routePath?: string,
+) => ChannelBuildMetadata;
 
 /** Structural identity shared by public authored channels and compiled channels. */
 export interface ChannelReference<
@@ -64,31 +67,39 @@ export function isCompiledChannel(value: unknown): value is CompiledChannel {
 export function getChannelBuildMetadata(
   value: unknown,
   channelName: string,
+  routePath?: string,
 ): ChannelBuildMetadata | undefined {
   if (!isCompiledChannel(value)) return undefined;
   const factory = Reflect.get(value, CHANNEL_BUILD_METADATA);
   return typeof factory === "function"
-    ? (factory as ChannelBuildMetadataFactory)(channelName)
+    ? (factory as ChannelBuildMetadataFactory)(channelName, routePath)
     : undefined;
+}
+
+interface ChannelBuildMetadataInput {
+  readonly credentials?: unknown;
+  readonly manifest?: (channelName: string) => JsonObject;
 }
 
 export function setChannelBuildMetadata(
   channel: unknown,
-  input: {
-    readonly credentials?: unknown;
-    readonly manifest?: (channelName: string) => JsonObject;
+  input: ChannelBuildMetadataInput & {
+    readonly routes?: Readonly<Record<string, ChannelBuildMetadataInput>>;
   },
 ): void {
   if (!isCompiledChannel(channel)) throw new TypeError("Expected a compiled channel.");
-  const credentials = input.credentials;
-  const externalCredentials: unknown =
-    credentials !== null && (typeof credentials === "object" || typeof credentials === "function")
-      ? Reflect.get(credentials, "vercelConnect")
-      : undefined;
-  const factory: ChannelBuildMetadataFactory = (channelName) => ({
-    externalCredentials,
-    manifest: input.manifest?.(channelName),
-  });
+  const factory: ChannelBuildMetadataFactory = (channelName, routePath) => {
+    const selected = routePath ? (input.routes?.[routePath] ?? input) : input;
+    const credentials = selected.credentials;
+    return {
+      externalCredentials:
+        credentials !== null &&
+        (typeof credentials === "object" || typeof credentials === "function")
+          ? Reflect.get(credentials, "vercelConnect")
+          : undefined,
+      manifest: selected.manifest?.(channelName),
+    };
+  };
   // Enumerable so `{ ...channel, routes }` keeps build metadata when an app
   // wraps a channel's routes.
   Object.defineProperty(channel, CHANNEL_BUILD_METADATA, {
