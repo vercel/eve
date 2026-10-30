@@ -30,7 +30,7 @@ my-agent/
     │   └── get_weather.ts
     ├── skills/             # Optional: procedures loaded on demand
     │   └── plan_a_trip.md
-    ├── channels/           # Optional: message channels (HTTP, Slack, Discord)
+    ├── channels/           # Optional: message channels (HTTP, Slack, Discord, Teams, and more)
     │   └── slack.ts
     └── schedules/          # Optional: recurring cron jobs
         └── weekly_recap.ts
