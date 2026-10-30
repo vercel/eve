@@ -3,6 +3,10 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { Client } from "#client/client.js";
 import type { AgentInfoResult } from "#client/types.js";
 import { createEveDevDispatchSchedulePath } from "#protocol/routes.js";
+import {
+  formatAgentInfoForbiddenMessage,
+  isAgentInfoForbidden,
+} from "#shared/agent-info-access.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { stripNpmPackageScope } from "#shared/package-name.js";
 import { EvalSessionManager } from "#evals/session-manager.js";
@@ -23,8 +27,7 @@ export async function resolveEvalTargetHandle(input: {
   readonly url: string;
 }): Promise<EveEvalTargetHandle> {
   await waitForTargetHealth(input.client, input.url);
-  const info = await input.client.info();
-  assertAgentInfoShape(info, input.url);
+  const info = await readTargetInfo(input.client, input.url);
 
   if (
     input.expectedAgentName !== undefined &&
@@ -177,9 +180,14 @@ async function waitForTargetHealth(client: Client, url: string): Promise<void> {
   );
 }
 
-function assertAgentInfoShape(info: AgentInfoResult, url: string): void {
-  if (info.kind !== "eve-agent-info" || info.version !== 5) {
-    throw new Error(`Eval target ${url} returned an unrecognized /eve/v1/info payload.`);
+async function readTargetInfo(client: Client, url: string): Promise<AgentInfoResult> {
+  try {
+    return await client.info();
+  } catch (error) {
+    if (isAgentInfoForbidden(error)) {
+      throw new Error(formatAgentInfoForbiddenMessage(`Eval target ${url}`), { cause: error });
+    }
+    throw error;
   }
 }
 

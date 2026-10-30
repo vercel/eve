@@ -18,7 +18,12 @@ test("every extension tool advertises an object-root input schema without root u
   );
   assert.ok(files.length >= 1, `found ${files.join(", ")}`);
   extension({
-    github: { connector: "github/acme-bot", authorize: () => true, broker: async () => {} },
+    github: {
+      connector: "github/acme-bot",
+      authorize: () => true,
+      broker: async () => {},
+      principalType: "app",
+    },
   });
   for (const file of files) {
     const tool = await resolveTool((await import(new URL(file, toolsDir).href)).default);

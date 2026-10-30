@@ -129,6 +129,11 @@ export async function prepareTurnInput(
       ? await stageAttachmentsToSandbox(userContentOf(content))
       : undefined;
   if (staged !== undefined) {
+    if (isContinuation(step, input)) {
+      messages.push(
+        anchorToTurn(createFrameworkUserMessage("context.instruction", CONTINUATION_NOTE), turnId),
+      );
+    }
     messages.push(
       anchorToTurn(
         kind === undefined
@@ -148,6 +153,26 @@ export async function prepareTurnInput(
     storedClientContext,
     turnId,
   };
+}
+
+const CONTINUATION_NOTE =
+  "The next message was sent automatically after the last turn, not by a person.";
+
+/**
+ * Whether hooks' `ctx.continue()` sent all of the input, read from its deliveries' `source.hook`,
+ * which the admission commit recorded before the step. The note goes into history with the
+ * message, so the prompt the model reads matches what's stored.
+ */
+function isContinuation(step: Step, input: HarnessStepInput | undefined): boolean {
+  const deliveries = input?.deliveries ?? [];
+  const rows = step.view().projection.view.deliveries;
+  return (
+    deliveries.length > 0 &&
+    deliveries.every(({ deliveryId }) => {
+      const source = rows[deliveryId]?.source;
+      return source !== undefined && "hook" in source && source.hook !== undefined;
+    })
+  );
 }
 
 /** The turn's input as it follows tool results: a user message needs a boundary before it. */

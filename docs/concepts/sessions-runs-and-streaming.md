@@ -106,6 +106,8 @@ Facts are grouped into families. Lifecycle facts introduce, update, or settle an
 | `context`     | `context.started`, `context.settled`                                 | A context change: `kind` `"compaction"` or `"clear"`.                                                                                                                                                                                                                                                                  |
 | `usage`       | `usage.recorded`                                                     | Model spend, owned by the run, call, or context change that spent it.                                                                                                                                                                                                                                                  |
 
+The conversation is a chain of turns. Each `turn.started` names the turn it `follows`, the one whose conversation it continues, or `null` for a first turn. A completed `context.settled` can change the conversation with `selects`: `null` empties it, as a clear does, and `{ turnId }` makes that earlier turn its newest, leaving out the turns after it. The next turn then follows the selected one. Either can name any earlier turn, so read the conversation with `conversation(view)` instead of assuming it holds every turn in order.
+
 Progress records are `content.delta` (a text or reasoning delta for a `partId`), `call.input` (a raw tool-input delta for a `callId`), and `call.progress` (a preliminary output snapshot for a `callId`).
 
 Call labels use `capability.label` before execution, `call.progress.data.label` for a progress
@@ -132,7 +134,7 @@ Within stream version 27, a later minor release can add:
 - fact types that only add information: a new family, or an update to a row such as `model.retried`, never the only way an entity opens or ends;
 - progress record types;
 - optional fields;
-- outcomes, interaction kinds, displays, and option styles.
+- outcomes, interaction kinds, context-change kinds, displays, and option styles.
 
 It never removes or renames a fact or field, changes what a fact means or which role it plays in its entity's lifecycle, or adds a required field. Anything else is a new stream version, which readers refuse.
 
@@ -172,6 +174,8 @@ Everything that reaches a session arrives as a delivery: a message, an answer, a
 | `ignored`        | It had nothing to act on, or a cancel or clear ended its turn before the turn read it.              |
 | `refused`        | Its sender may not do what it asked; `reason` says why.                                             |
 | `failed`         | It couldn't be handled, such as when the session ended first.                                       |
+
+A control the session's eve version doesn't support, such as one added in a later release, settles `failed` with a `reason` that names it: a session keeps running on the deployment that started it, so it can receive controls newer than its code. Sessions started by earlier eve versions drop such a control instead, and its delivery never settles.
 
 `POST /eve/v1/session/:sessionId` returns the message's `deliveryId`, so a client resuming from an old cursor knows which `delivery.settled` ends its response. Steering and coalesced messages each keep their own delivery. The id is assigned before dispatch,
 not derived from stream position. An answer-only delivery stops on its own `delivery.settled`.
@@ -389,7 +393,7 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/end \
 
 Compaction summarizes context without adding a user message. User-role instructions are ordinary history and may be represented by the summary; system-role instructions remain outside it. Recalled [memory](../memory) stays outside history, so the summary never includes it, and a memory provider can capture the history before compaction rewrites it. If a turn is active, eve queues the request until that turn settles. A compaction is a context change: `context.started` and `context.settled` with `kind: "compaction"`, around the summary's model run. If summarization fails before a checkpoint, the change settles `failed` and the session keeps its previous history.
 
-Clear removes model-message history in place, including static and dynamic user-role instructions, while preserving the session identity, system-role instructions, tools, skills, application-defined durable state, limits, and sandbox. It does not delete data from a memory provider's external store, and the next turn recalls again. Unchanged user-role instructions are not inserted again. Approvals, the session-limit prompt, and sign-ins the cleared history asked for are withdrawn: each settles its interaction. Requests relayed from tasks that keep running stay answerable. The clear is a context change with `kind: "clear"`.
+Clear removes model-message history in place, including static and dynamic user-role instructions, while preserving the session identity, system-role instructions, tools, skills, application-defined durable state, limits, and sandbox. It does not delete data from a memory provider's external store, and the next turn recalls again. Unchanged user-role instructions are not inserted again. Approvals, the session-limit prompt, and sign-ins the cleared history asked for are withdrawn: each settles its interaction. Clear starts over: unlike a compaction, it doesn't wait for an active turn. It stops the running turn as an unguarded cancel does, so the turn settles `cancelled`, the calls it waits on stop, and working tasks end with `task.ended` facts, then clears. A stopped task never reports into the cleared conversation. The clear is a context change with `kind: "clear"`.
 
 A cancel stops turns, not a compaction or clear: one that arrives while either runs settles `ignored`, and the change finishes. A cancel, clear, or compact sent to a prewarmed session before its first message has nothing to act on, and settles `ignored` once the session starts.
 
@@ -450,9 +454,13 @@ A read reflects events that are already durable. A hook runs after its line is w
 
 ## Inspect the agent over HTTP
 
-`GET /eve/v1/info` returns agent-info version 6, a JSON inspection snapshot of the effective compiled agent. It reports the selected config; active tools, instructions, memory slots, skills, channels, schedules, sandbox, connections, hooks, and instrumentation with explicit source ownership; dynamic resolvers separately from their session-specific output; local and remote agents in separate collections; prepared built-in effects; and shadowed or disabled source diagnostics. Memory tool wrappers include their selected memory-source dependency. Channel routes appear in the same effective order used by the HTTP host. Static instructions remain an ordered array whose entries expose `content` and `role`. Sandbox inspection exposes the opaque `revisionHash` that identifies its compiler-discovered environment inputs.
+`GET /eve/v1/info` returns agent-info version 5, a JSON inspection snapshot of the effective compiled agent. It reports the selected config; active tools, instructions, memory slots, skills, channels, schedules, sandbox, connections, hooks, and instrumentation with explicit source ownership; dynamic resolvers separately from their session-specific output; local and remote agents in separate collections; prepared built-in effects; and shadowed or disabled source diagnostics. Memory tool wrappers include their selected memory-source dependency. Channel routes appear in the same effective order used by the HTTP host. Static instructions remain an ordered array whose entries expose `content` and `role`. Sandbox inspection exposes the opaque `revisionHash` that identifies its compiler-discovered environment inputs.
 
-The info route belongs to the selected `channels/eve.ts` source and uses its resolved auth policy. Without an authored replacement, eve selects the default channel source with Vercel OIDC, local development access, and the production placeholder. Replacing or disabling that source replaces or removes the info route too; no native fallback serves it.
+Because the payload includes authored text and server paths, the route serves only operator principals: `service` and `runtime` principals and, when the channel's auth includes `localDev()`, any caller it admits on a development server. Any other principal the channel admits, such as a `user` or `anonymous` principal, gets `403` with `{ "code": "info_forbidden", "ok": false }` and an `error` message. To give another credential access, return `principalType: "service"` or `allowAgentInfo: true` from its authenticator; see [Agent info access](../guides/auth-and-route-protection#agent-info-access).
+
+The version changes only for breaking reshapes. New fields and new enum values are added within a version, so readers should ignore unknown fields and tolerate unknown enum values. `kind` discriminants, such as an owner's, a model endpoint's, or a module's backing `kind`, are closed: a new variant comes with a version bump.
+
+The info route belongs to the selected `channels/eve.ts` source and uses its resolved auth policy before the operator check. Without an authored replacement, eve selects the default channel source with Vercel OIDC, local development access, and the production placeholder. Replacing or disabling that source replaces or removes the info route too; no native fallback serves it.
 
 ```bash
 curl http://127.0.0.1:2000/eve/v1/info

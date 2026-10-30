@@ -209,7 +209,7 @@ export function isPromptCommandAvailableFor(
 /**
  * Recognizes the slash commands the prompt accepts. `/new` (and `/reset`)
  * starts a fresh session and transcript; `/cancel` stops the running turn;
- * `/clear` clears context in place; `/compact` queues context compaction; `/exit` (and
+ * `/clear` stops the running turn and clears context in place; `/compact` queues context compaction; `/exit` (and
  * `/quit`) terminate the TUI like Ctrl+C; extension commands are dispatched
  * outside the runner. Anything else — including unknown `/text` — is a normal
  * message.

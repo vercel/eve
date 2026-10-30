@@ -64,8 +64,11 @@ describe("createV26HistoryReader", () => {
   it("reads a v26 conversation as v27 records it, without breaking a lifecycle rule", () => {
     const { events, violations } = read(KITCHEN_SINK);
     expect(violations).toEqual([]);
-    const state = conversationOf(events);
-    expect(state.messages.map(shown)).toEqual([
+    // A clear hides what came before it, so the turns before it read from the stream up to it.
+    const clear = events.findIndex(
+      (event) => event.type === "context.settled" && event.data.selects === null,
+    );
+    expect(conversationOf(events.slice(0, clear)).messages.map(shown)).toEqual([
       "user: hello there",
       "assistant: Echo: hello there",
       "user: what is the weather",
@@ -84,6 +87,9 @@ describe("createV26HistoryReader", () => {
       'assistant: [explode failed] | explode said: "Error: Kaboom"',
       "user: do both things",
       "assistant: [get_weather completed] | [gate completed (accepted)] | Both done.",
+    ]);
+    const state = conversationOf(events);
+    expect(state.messages.map(shown)).toEqual([
       "user: hello after clear",
       "assistant: Echo: hello after clear",
       "user: Earlier question from another system",

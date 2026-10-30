@@ -19,9 +19,13 @@ export class InvalidSessionHistoryError extends Error {
   override readonly name = "InvalidSessionHistoryError";
 }
 
+const HISTORY_FIELDS: readonly string[] = ["id", "role", "text"];
+
 /**
- * Validates `history` at the send boundary and returns a normalized copy that
- * carries only contract fields. Returns `undefined` when `history` is omitted.
+ * Validates `history` at the send boundary and returns a normalized copy.
+ * Returns `undefined` when `history` is omitted. An entry with a field outside
+ * the contract is rejected, not dropped, so no caller already sends a field a
+ * later release starts to read.
  */
 export function validateSessionHistory(
   history: unknown,
@@ -35,6 +39,7 @@ export function validateSessionHistory(
   return history.map((entry: unknown, index): SessionHistoryMessage => {
     const at = `history[${index}]`;
     if (!isObject(entry)) throw new InvalidSessionHistoryError(`${at} must be an object.`);
+    rejectUnknownFields(entry, at);
     const { id, role, text } = entry;
     if (role !== "user" && role !== "assistant") {
       throw new InvalidSessionHistoryError(`${at}.role must be "user" or "assistant".`);
@@ -51,4 +56,21 @@ export function validateSessionHistory(
     ids.add(id);
     return { ...message, id };
   });
+}
+
+function rejectUnknownFields(entry: Readonly<Record<string, unknown>>, at: string): void {
+  // An absent value names nothing a later release could read differently.
+  const unknown = Object.keys(entry).filter(
+    (key) => !HISTORY_FIELDS.includes(key) && entry[key] !== undefined,
+  );
+  if (unknown.length === 0) return;
+  const names = unknown
+    .slice(0, 8)
+    .sort()
+    .map((key) => JSON.stringify(key.length > 128 ? `${key.slice(0, 128)}…` : key));
+  const omitted = unknown.length > 8 ? " (and more)" : "";
+  throw new InvalidSessionHistoryError(
+    `${at} has unknown field${unknown.length === 1 ? "" : "s"} ${names.join(", ")}${omitted}. ` +
+      `Accepted fields: ${HISTORY_FIELDS.join(", ")}.`,
+  );
 }

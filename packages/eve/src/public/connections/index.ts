@@ -6,6 +6,7 @@ export type {
   AuthorizationCallback,
   AuthorizationDefinition,
   ConnectionAuthDefinition,
+  ConnectionCallbackContext,
   ConnectionAuthResolver,
   ConnectionPrincipal,
   HeadersDefinition,

@@ -13,8 +13,10 @@ const github = org && {
   connector: GITHUB_CONNECTOR,
   org,
   broker: brokerGitHubLease,
-  authorize: ({ repository }: { repository: string }) =>
-    repository.toLowerCase().startsWith(`${org.toLowerCase()}/`),
+  principalType: "app" as const,
+  // Older releases pass only `repository`; newer ones pass the installation `owner`.
+  authorize: ({ owner, repository }: { owner?: string; repository: string | null }) =>
+    (owner ?? repository?.split("/")[0])?.toLowerCase() === org.toLowerCase(),
 };
 
 export default git(github ? { github } : {});

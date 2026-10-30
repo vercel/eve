@@ -24,11 +24,11 @@ const LOOPBACK_REQUEST = new Request("http://localhost/eve/v1/info");
 // A request a real deployment sees on the wire. With no dev flag set,
 // `localDev()` skips it and the walk falls through to `vercelOidc()`.
 const DEPLOYED_REQUEST = new Request("https://weather-agent.vercel.app/eve/v1/info");
-const AUTHORIZED_DEPLOYED_REQUEST = new Request("https://weather-agent.vercel.app/eve/v1/info", {
-  headers: {
-    "x-eve-info-token": "issue-389",
-  },
-});
+function deployedInfoRequest(principalType: string): Request {
+  return new Request("https://weather-agent.vercel.app/eve/v1/info", {
+    headers: { "x-eve-info-principal": principalType, "x-eve-info-token": "issue-389" },
+  });
+}
 
 type MinimalAgentInfoH3Event = Pick<H3Event, "context" | "waitUntil"> & {
   readonly req: Request;
@@ -57,7 +57,7 @@ describe("eve agent info route", () => {
     vi.unstubAllEnvs();
   });
 
-  it("returns inspection JSON in a local dev environment", async () => {
+  it("returns inspection JSON to the local-dev principal in a local dev environment", async () => {
     vi.stubEnv("EVE_DEV", "1");
 
     const { agentRoot, appRoot } = await createAppRoot("eve-agent-info-route-", APP_ROOT_OPTIONS);
@@ -162,7 +162,7 @@ describe("eve agent info route", () => {
     expect(body).not.toMatch(/precise assistant/i);
   });
 
-  it("uses authored eve channel auth for public-hostname info requests", async () => {
+  it("serves only operator principals admitted by authored eve channel auth", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-agent-info-route-authored-auth-",
       APP_ROOT_OPTIONS,
@@ -174,9 +174,11 @@ describe("eve agent info route", () => {
       'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
     );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
+    // The caller picks its principal type so one channel exercises each class.
     await writeFile(
       join(agentRoot, "channels", "eve.mjs"),
-      `import { eveChannel } from "eve/channels/eve";
+      `import { localDev } from "eve/channels/auth";
+import { eveChannel } from "eve/channels/eve";
 
 function issue389Auth(request) {
   if (request.headers.get("x-eve-info-token") !== "issue-389") {
@@ -185,12 +187,12 @@ function issue389Auth(request) {
   return {
     attributes: { source: "agent/channels/eve.mjs" },
     authenticator: "issue-389",
-    principalId: "issue-389-user",
-    principalType: "user",
+    principalId: "issue-389-caller",
+    principalType: request.headers.get("x-eve-info-principal") ?? "user",
   };
 }
 
-export default eveChannel({ auth: issue389Auth });
+export default eveChannel({ auth: [issue389Auth, localDev()] });
 `,
     );
 
@@ -201,11 +203,32 @@ export default eveChannel({ auth: issue389Auth });
     const rejected = await requestAgentInfo(appRoot, DEPLOYED_REQUEST);
     expect(rejected.status).toBe(401);
 
-    const accepted = await requestAgentInfo(appRoot, AUTHORIZED_DEPLOYED_REQUEST);
-    expect(accepted.status).toBe(200);
+    for (const principalType of ["user", "anonymous", "unknown"]) {
+      const forbidden = await requestAgentInfo(appRoot, deployedInfoRequest(principalType));
+      expect(forbidden.status).toBe(403);
+      const body = await forbidden.text();
+      expect(JSON.parse(body)).toMatchObject({ code: "info_forbidden", ok: false });
+      expect(body).not.toMatch(/openai|gpt-5|precise assistant/i);
+    }
 
-    const payload = (await accepted.json()) as AgentInfoResponse;
-    expect(payload.kind).toBe("eve-agent-info");
-    expect(payload.agent.model.id).toBe("openai/gpt-5.4");
+    for (const principalType of ["service", "runtime"]) {
+      const accepted = await requestAgentInfo(appRoot, deployedInfoRequest(principalType));
+      expect(accepted.status).toBe(200);
+      const payload = (await accepted.json()) as AgentInfoResponse;
+      expect(payload.kind).toBe("eve-agent-info");
+      expect(payload.agent.model.id).toBe("openai/gpt-5.4");
+      expect(payload.instructions.static[0]?.content).toContain("precise assistant");
+    }
+
+    // On a development server, a caller the configured localDev() would admit
+    // is the developer even when an earlier strategy resolved them as a user.
+    vi.stubEnv("EVE_DEV", "1");
+    const localUser = await requestAgentInfo(
+      appRoot,
+      new Request("http://localhost/eve/v1/info", {
+        headers: { "x-eve-info-principal": "user", "x-eve-info-token": "issue-389" },
+      }),
+    );
+    expect(localUser.status).toBe(200);
   });
 });

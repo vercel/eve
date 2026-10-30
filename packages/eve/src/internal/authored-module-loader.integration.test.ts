@@ -1517,6 +1517,49 @@ export const result = true;
     }
   });
 
+  // Rolldown can host its runtime helpers in a shared chunk that imports back
+  // from a chunk needing them, so the source graph is acyclic but the chunks
+  // are not: rolldown/rolldown#11341.
+  it("evaluates authored modules whose shared chunks import each other", async () => {
+    const tool = (body: readonly string[]) =>
+      [...body, 'export default { description: "Read the schema.", execute() { return value; } };']
+        .join("\n")
+        .concat("\n");
+    const app = await createApp({
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/lib/look.ts": 'export const lookSchema = { type: "object" };\n',
+        "agent/lib/index.ts": 'export * from "./look";\n',
+        "agent/lib/loader.ts": [
+          'import { lookSchema } from "./index";',
+          'export const loaders = [lookSchema, () => import("./look")];',
+          "",
+        ].join("\n"),
+        "agent/tools/email.ts": tool([
+          'import { lookSchema } from "../lib/index";',
+          "const value = lookSchema.type;",
+        ]),
+        "agent/tools/load.ts": tool([
+          'import * as loader from "../lib/loader";',
+          'import { lookSchema } from "../lib/index";',
+          "const value = [loader, lookSchema];",
+        ]),
+        "agent/tools/list.ts": tool([
+          'import { loaders } from "../lib/loader";',
+          "const value = loaders;",
+        ]),
+      },
+      name: "authored-chunk-cycle",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+
+    await expect(compileAgentManifest(discovered.manifest)).resolves.toBeDefined();
+  });
+
   it("loads authored modules that use asset imports", async () => {
     const app = await createApp({
       files: {

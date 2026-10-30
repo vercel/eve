@@ -381,8 +381,8 @@ when its usage report or final outcome arrives.
 ## Workflow world
 
 By default, eve selects the Workflow SDK world for the host: Vercel Workflow on
-Vercel, and the SDK's local world in local development or `eve start`. Advanced
-self-hosted deployments can select the Workflow world package to use from the
+Vercel, and the SDK's local world in local development or `eve start`.
+Self-hosted deployments can select the Workflow world package to use from the
 root `agent.ts`:
 
 ```ts title="agent/agent.ts"
@@ -399,21 +399,22 @@ export default defineAgent({
 ```
 
 Install that package in your app. It should export a default factory or
-`createWorld()` function. Pin a version built against the same `@workflow/*`
-line as your eve release (currently the `5.0.0-beta` line):
+`createWorld()` function. Install a version built against the same
+`@workflow/*` major version as your eve release (currently `5.x`):
 
 ```bash
-pnpm add @workflow/world-postgres@5.0.0-beta.x
+pnpm add @workflow/world-postgres
 ```
 
-The npm `latest` tag can lag behind that line, so an unpinned install may pull
-an incompatible protocol version that the Workflow SDK rejects during initialization.
+At startup, eve fails with the version to install when the world targets a
+different major version.
 
 Put credentials and host-specific options in runtime environment variables read
 by the world package, not in `agent.ts`. For the Postgres world, that means
 putting the connection string or credentials in the env vars it reads. If the
 installed package must stay external in hosted output, list it in
-`build.externalDependencies`.
+`build.externalDependencies`. See [Workflow worlds](./guides/deployment/workflow-worlds)
+to choose a world and configure the Postgres world's database.
 
 ## Workflow checkpoint batching
 

@@ -1,5 +1,68 @@
 # eve
 
+## 0.90.0
+
+Released 2026-10-29 · [Compare with 0.89.0](https://github.com/vercel/eve/compare/eve%400.89.0...eve%400.90.0)
+
+### Breaking Changes
+
+- `GET /eve/v1/info` now serves only operator principals and returns 403 to end users.
+  The route answers `service` and `runtime` principals and callers a configured `localDev()` admits, and returns `403` with code `info_forbidden` to everyone else. To give another credential access, return `principalType: "service"` from its `AuthFn`, or `allowAgentInfo: true` from an `EveAuthFn`; `allowAgentInfo: false` denies a caller that would otherwise qualify. The payload stays at version 5 with every field, and `client.info()` now ignores unknown fields and reads unknown enum strings as `"unrecognized"`, so handle that value when switching on fields such as `mode` or `sourceKind`. `kind` discriminants stay closed, so a new variant needs a version bump. ([#5542](https://github.com/vercel/eve/pull/5542))
+- Tool-stub grants on Vercel OIDC subjects move from `vercelOidc` to the new `eveVercelOidc` helper in `eve/channels/eve`.
+  `vercelOidc` and `AuthResult` from `eve/channels/auth` now carry identity only. Rename grant-bearing `vercelOidc` calls to `eveVercelOidc`; the options are unchanged. `vercelOidc` now throws when a `subjects` entry is not a string. Type custom callbacks that return `allowToolStubs` as `EveAuthFn` from `eve/channels/eve`. ([#5542](https://github.com/vercel/eve/pull/5542))
+
+### Features
+
+- A connection's `headers` and `toolCall.providedArguments` callbacks now receive `ctx.approval.responder` while an approved tool call runs, so an MCP or OpenAPI server can act for the person who approved it.
+  As in a `defineTool` tool, `ctx.approval.responder.getToken(provider)` resolves the approver's token without starting a sign-in. The call still runs as the requester, and its `auth` token stays the requester's. `ctx.approval` is absent for calls that needed no approval and while eve lists the connection's tools. ([#5605](https://github.com/vercel/eve/pull/5605))
+
+### Bug Fixes
+
+- `eve build` no longer fails with `Cannot access '<name>' before initialization` while evaluating authored modules whose shared bundle chunks import each other.
+  Compile now keeps top-level evaluation in source order. Thanks @blaesild for reporting this and pinpointing the fix in #5514. ([#5516](https://github.com/vercel/eve/pull/5516))
+- Resumed sessions now fill in top-level channel `state` fields that a later deploy added to the `defineChannel` seed (or to a built-in channel's state), instead of leaving them `undefined`.
+  This runs at every step boundary, so a seed field a session deletes from `channel.state` comes back at the next step. Set the field to `null` (or `undefined`) to clear it instead. ([#5549](https://github.com/vercel/eve/pull/5549))
+- A connection tool call with an approval policy now runs once the sign-in it stopped for completes, instead of failing as if its connection had changed.
+  Thanks @exbald for reporting #5564. ([#5570](https://github.com/vercel/eve/pull/5570))
+- A connection tool call no longer fails with `Instance type "null" is invalid` when the model omits an argument whose schema declares a `null` default it does not allow, such as Pydantic's `{ "type": "string", "default": null }` for `x: str = None`. eve fills schema defaults once, when the call runs, instead of filling them before approval and rejecting them on the second check. ([#5510](https://github.com/vercel/eve/pull/5510))
+- The GitHub channel now applies the state a later webhook brings to an existing session, so a turn after a push (or a comment after a push) checks out the new PR head instead of the old one, and reacts to the comment that triggered it.
+  Thanks @blicksky for reporting this in #1554, and @haydenbleasel for reporting the reaction symptom. ([#4874](https://github.com/vercel/eve/pull/4874))
+- Messages a schedule sends with `to()` on Vercel now carry the deployment that ran the schedule, so an idle session they continue hands off to the new deployment like one a route reaches.
+  Thanks @dohooo for reporting this in #5598. ([#5599](https://github.com/vercel/eve/pull/5599))
+- `eve dev --agent <name>` in an agent workspace now uses the model connection saved by `/login`.
+  Previously the dev host looked for it under the member directory, so a Vercel account sign-in failed every model call with "The model connection is unavailable". Thanks @cnaccio for reporting this in #5505. ([#5506](https://github.com/vercel/eve/pull/5506))
+
+## 0.89.0
+
+Released 2026-10-29 · [Compare with 0.88.1](https://github.com/vercel/eve/compare/eve%400.88.1...eve%400.89.0)
+
+### Breaking Changes
+
+- Client `messages` now show only the session's current conversation, so messages from before a clear no longer appear.
+  `messages` and `transcriptOf()` follow each turn's `follows` and a completed context change's `selects`, as `conversation(view)` does, and leave out turns outside the conversation. The session `view` still holds every retained turn. ([#5597](https://github.com/vercel/eve/pull/5597))
+- The `gh` tool takes an optional `repository` instead of `permissions`, runs any `gh` or `git` subcommand, and leaves every access decision to `github.authorize`.
+  `github.principalType` is now required and decides what `authorize` receives: `{ argv, auth, owner, repository, token }` for `"app"`, and `{ argv, auth, repository, token }` for `"user"`, where `repository` may be `null`. eve no longer matches `--repo` and other explicit targets against the declared repository or limits `git` to `fetch`, `ls-remote`, `pull`, and `push`; check `argv` in `authorize` if your policy depends on them. ([#5595](https://github.com/vercel/eve/pull/5595))
+- `history` passed to `send()`, `create()`, or the eve channel's `onMessage` now rejects an entry with a field other than `id`, `role`, or `text` instead of dropping it.
+  `InvalidSessionHistoryError` names the entry and its unknown fields. Map stored messages to `{ id, role, text }` before passing them, so fields a later release accepts never change what an existing caller sends. ([#5597](https://github.com/vercel/eve/pull/5597))
+
+## 0.88.1
+
+Released 2026-10-29 · [Compare with 0.88.0](https://github.com/vercel/eve/compare/eve%400.88.0...eve%400.88.1)
+
+### Features
+
+- Approval spans now record who approved or denied the call as `agent.approval.responder.type` and `agent.approval.responder.id`, an approved call's tool span records its approver as `agent.tool.approver.type` and `agent.tool.approver.id`, and the `interaction.settled` instrumentation event carries the same `responder`.
+  An approved call runs as the requester, so until now traces showed only the requester and an audit had to read the session stream to find the approver. The responder's id follows the same rule as the turn's principal ids: it is recorded only when the trace policy records both inputs and outputs and the conversation is public or running in development. ([#5596](https://github.com/vercel/eve/pull/5596))
+- The MCP channel's `agent_get` now returns an optional `statusMessage` while an invocation is `working`.
+  It names the tool call that is running, using the tool's activity label when it has one, so MCP clients can show progress instead of a bare `working`. ([#5314](https://github.com/vercel/eve/pull/5314))
+
+### Bug Fixes
+
+- Release notes now list breaking changes first and use plain headings, one paragraph per change, and a single compare link.
+  A `minor` changeset always appears under Breaking Changes, so breaking changes merged with an internal PR title are no longer left out. The 0.86.0 and 0.87.0 notes now include the two breaking changes they missed. ([#5588](https://github.com/vercel/eve/pull/5588))
+- Upgrade `undici` to `8.12.3` for the security fixes published in `8.12.2`.
+  A TLS 1.2 server that renegotiates to a certificate for another host now fails the `web_fetch` request instead of crashing the process. Thanks @pedro757 for reporting this in #5589. ([#5591](https://github.com/vercel/eve/pull/5591))
+
 ## 0.88.0
 
 ### Release eve@0.88.0 | 2026-10-29 | minor

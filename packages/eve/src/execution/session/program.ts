@@ -516,6 +516,9 @@ async function runSessionLoop(
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "clear":
         case "compact":
+          // A clear that waited behind a compaction found no turn to cancel; its tasks stop here.
+          if (next.kind === "clear")
+            await cancelWorkingTasks(cursor, "turn-cancelled", { turnCalls: true });
           action = await runTurn(
             next.origin === undefined
               ? { control: next.kind }

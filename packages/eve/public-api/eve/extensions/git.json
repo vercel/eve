@@ -1,9 +1,11 @@
 [
+  "GitHubAppAuthorizeRequest",
   "GitHubAttribution",
   "GitHubAuthorize",
   "GitHubAuthorizeRequest",
   "GitHubCoAuthor",
   "GitHubLeaseBroker",
   "GitHubLeaseRule",
+  "GitHubUserAuthorizeRequest",
   "default"
 ]

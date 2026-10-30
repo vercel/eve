@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { StoredLine } from "#protocol/session-events/envelope.js";
+import type { StoredLine, UserPart } from "#protocol/session-events/envelope.js";
+import { turnInput } from "#reactions/turn.js";
 import {
   emptySessionView,
   emptyPreviews,
@@ -23,7 +24,10 @@ const at = "2026-10-09T00:00:00.000Z";
 const spent = { inputTokens: 10, outputTokens: 2 };
 
 /** One turn: the message `deliveryId` asks, a run that replies, and its usage. */
-function turnLines(index: number, options: { readonly opensSession?: boolean } = {}): StoredLine[] {
+function turnLines(
+  index: number,
+  options: { readonly opensSession?: boolean; readonly parts?: readonly UserPart[] } = {},
+): StoredLine[] {
   const turnId = `turn_${index}`;
   const runId = `run_${index}`;
   const deliveryId = `d_${index}`;
@@ -39,7 +43,7 @@ function turnLines(index: number, options: { readonly opensSession?: boolean } =
         scope: { turnId },
         type: "turn.started",
       },
-      { data: { deliveryId, parts: [], turnId }, type: "delivery.consumed" },
+      { data: { deliveryId, parts: options.parts ?? [], turnId }, type: "delivery.consumed" },
       { data: { owner: { turnId }, runId }, scope, type: "model.requested" },
     ),
     commit(
@@ -475,6 +479,60 @@ describe("the shared fold", () => {
     const view = folded(lines, "operational");
     expect(view.tasks.t_0?.status).toBe("running");
     expect(view.calls.c_0).toBeUndefined();
+  });
+
+  it("keeps a paused turn's input until the next turn starts", () => {
+    const parts: UserPart[] = [{ kind: "text", text: "Release version 1.2 for Alice." }];
+    const [admitted, started] = turnLines(0, { opensSession: true, parts });
+    const paused: StoredLine[] = [
+      admitted!,
+      started!,
+      {
+        at,
+        facts: [
+          {
+            data: {
+              interactionId: "approval",
+              subject: { turnId: "turn_0" },
+              request: { kind: "approval", prompt: "Release this version?" },
+            },
+            type: "interaction.opened",
+          },
+          { data: { outcome: "completed", runId: "run_0" }, type: "model.settled" },
+          {
+            data: { awaiting: [{ interactionId: "approval" }], turnId: "turn_0" },
+            type: "turn.paused",
+          },
+          {
+            data: { deliveryId: "d_0", outcome: "awaiting-input", turnId: "turn_0" },
+            type: "delivery.settled",
+          },
+        ],
+      },
+      { at, facts: [] },
+    ];
+    const view = folded(paused, "operational");
+    expect(turnInput(view, view.turns.turn_0!)).toEqual(parts);
+
+    const completed: StoredLine[] = [
+      ...paused,
+      {
+        at,
+        facts: [
+          { data: { interactionId: "approval", outcome: "accepted" }, type: "interaction.settled" },
+          { data: { outcome: "completed", turnId: "turn_0" }, type: "turn.settled" },
+        ],
+      },
+      { at, facts: [] },
+    ];
+    const latest = folded(completed, "operational");
+    expect(turnInput(latest, latest.turns.turn_0!)).toEqual(parts);
+
+    const next = folded(
+      [...completed, ...turnLines(1).slice(0, 2), { at, facts: [] }],
+      "operational",
+    );
+    expect(next.deliveries.d_0).toBeUndefined();
   });
 
   it("keeps the latest turn's rows until the next turn starts, withholding large values", () => {

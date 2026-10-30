@@ -3,6 +3,7 @@ import { contextStorage } from "#context/container.js";
 import { StaticModelReferenceKey } from "#context/keys.js";
 import { GenerationSteering } from "#harness/generation-steering.js";
 import { compactHistory, replaceSessionHistory } from "#harness/compaction/step.js";
+import { readTaskTable, takeTaskResults, writeTaskTable } from "#execution/tasks/table.js";
 import { runModelStep } from "#harness/model-call/run.js";
 import type { Publish } from "#harness/session-machine/commit.js";
 import {
@@ -226,12 +227,14 @@ async function turnInput(
 
 /**
  * `session.clear()`: the machine withdraws what the cleared history asked, and history empties.
- * The control is a delivery, applied in the same commit as the clear.
+ * Task results the cleared history never read are dropped with it. The control is a delivery,
+ * applied in the same commit as the clear.
  */
 async function clearContext(step: Step): Promise<StepResult> {
   const delivery = controlDeliveryFor(step.view(), step.config.controlDelivery);
   await step.apply(controlled(delivery, "clear", (cause) => clear(step.view(), { cause })));
-  return { next: null, session: replaceSessionHistory(step.session, []) };
+  const unread = takeTaskResults(readTaskTable(step.session.state)).table;
+  return { next: null, session: replaceSessionHistory(writeTaskTable(step.session, unread), []) };
 }
 
 /** The deliveries a step's input and the queue it took in carry, each once. */

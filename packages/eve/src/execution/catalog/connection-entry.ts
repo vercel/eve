@@ -23,8 +23,9 @@ import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { isApprovalRecheck, inheritApprovalContext } from "#approval/evaluation.js";
 import { approvalDecision } from "#approval/status.js";
-import type { AuthorizationSignal } from "#harness/authorization.js";
+import { isAuthorizationSignal, type AuthorizationSignal } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { withConnectionApproval } from "#runtime/connections/approval-scope.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import {
   connectionToolModelOutput,
@@ -55,10 +56,11 @@ const CONNECTION_CHANGED_MESSAGE =
   "The connection for this tool call changed or is unavailable. Request a new tool call and approval.";
 
 /**
- * Connection instance each parked call was sent for approval against, keyed by
- * call id. When a person approves the call, it runs only if its connection
- * still resolves to that instance; a changed instance or a missing pin (the map
- * is bounded) rejects it.
+ * Connection instance each parked call was sent for approval against or
+ * stopped for sign-in on, keyed by call id. When the call runs after a person
+ * approves it or the sign-in completes, it runs only if its connection still
+ * resolves to that instance; a changed instance or a missing pin (the map is
+ * bounded) rejects it.
  */
 const ConnectionApprovalPinsKey = new ContextKey<Readonly<Record<string, string>>>(
   "eve.connectionApprovalPins",
@@ -144,6 +146,21 @@ async function callConnectionTool(
   options: ToolExecuteOptions,
 ): Promise<unknown> {
   releaseApprovalPin(options.toolCallId, connection);
+  const result = await runConnectionTool(registry, connection, toolName, rawInput, options);
+  // The call runs again after the sign-in, and its approval recheck expects a pin.
+  if (connection.approval !== undefined && isAuthorizationSignal(result)) {
+    pinApprovedInstance(options.toolCallId, connection);
+  }
+  return result;
+}
+
+async function runConnectionTool(
+  registry: ConnectionRegistry,
+  connection: ResolvedConnectionDefinition,
+  toolName: string,
+  rawInput: unknown,
+  options: ToolExecuteOptions,
+): Promise<unknown> {
   const session = await completeConnectionSignIn(registry, connection);
   const { auth, client, scoped } = session;
   const listing = await listConnectionTools(connection, session);
@@ -153,18 +170,26 @@ async function callConnectionTool(
   }
   // Validation may have run before a sign-in made the tools listable.
   const isEventAction = client.eventActions?.ownsName(toolName) === true;
-  const checked = await checkCall(connection, listing.tools, toolName, rawInput, !isEventAction);
+  const modelInput = withoutProvidedArguments(connection, rawInput, !isEventAction);
+  const checked = await checkCall(connection, listing.tools, toolName, modelInput);
   if ("issues" in checked) throw new Error(issuesMessage(checked.issues));
   const { input, tool } = checked;
 
   let raw: unknown;
   try {
+    // Only the call itself sees the approver; the listing above stays the requester's.
+    const approved = <T>(fn: () => T) =>
+      withConnectionApproval(connection.connectionName, options.approval?.responder, fn);
     if (isEventAction)
-      return await client.eventActions!.execute(tool.name, input, {
-        abortSignal: options.abortSignal,
-        callId: options.toolCallId,
-      });
-    raw = await executeWithDeadline(connection.connectionName, client, tool.name, input, options);
+      return await approved(() =>
+        client.eventActions!.execute(tool.name, input, {
+          abortSignal: options.abortSignal,
+          callId: options.toolCallId,
+        }),
+      );
+    raw = await approved(() =>
+      executeWithDeadline(connection.connectionName, client, tool.name, input, options),
+    );
   } catch (error) {
     if (isConnectionAuthorizationRequiredError(error)) return await auth.handleError(error, scoped);
     throw error;
@@ -224,39 +249,44 @@ async function checkInput(
     if (isConnectionAuthorizationRequiredError(error)) return { value: input };
     return { issues: [{ message: listingFailureMessage(connection.connectionName, error) }] };
   }
-  const checked = await checkCall(
-    connection,
-    tools,
-    toolName,
-    input,
-    client.eventActions?.ownsName(toolName) !== true,
-  );
-  return "issues" in checked ? { issues: checked.issues } : { value: checked.input };
+  const remote = client.eventActions?.ownsName(toolName) !== true;
+  const modelInput = withoutProvidedArguments(connection, input, remote);
+  const checked = await checkCall(connection, tools, toolName, modelInput);
+  // The call validates this value again when it runs. Defaults are filled only there,
+  // because a filled default its own schema rejects, such as Pydantic's `null` for
+  // `x: str = None`, would fail that second check.
+  return "issues" in checked ? { issues: checked.issues } : { value: modelInput };
 }
 
 type CallCheck =
   | { readonly input: JsonObject; readonly tool: ConnectionToolMetadata }
   | { readonly issues: readonly StandardSchemaV1.Issue[] };
 
+/** Provided values replace these keys at execution, so a model value for one is dropped, not rejected. */
+function withoutProvidedArguments(
+  connection: ResolvedConnectionDefinition,
+  input: unknown,
+  remote: boolean,
+): Record<string, unknown> {
+  const provided = remote ? (connection.toolCall?.providedArguments ?? {}) : {};
+  return Object.fromEntries(
+    Object.entries(isObject(input) ? input : {}).filter(([key]) => !Object.hasOwn(provided, key)),
+  );
+}
+
 /** The tool a call runs and its input with schema defaults filled in, or why it cannot run. */
 async function checkCall(
   connection: ResolvedConnectionDefinition,
   tools: readonly ConnectionToolMetadata[],
   toolName: string,
-  input: unknown,
-  remote = true,
+  input: Record<string, unknown>,
 ): Promise<CallCheck> {
   const tool = tools.find((entry) => entry.name === toolName);
   if (tool === undefined) {
     return { issues: [{ message: unknownToolMessage(connection, toolName, tools) }] };
   }
-  // Provided values replace these keys at execution, so a model value for one is dropped, not rejected.
-  const provided = remote ? (connection.toolCall?.providedArguments ?? {}) : {};
-  const modelInput = Object.fromEntries(
-    Object.entries(isObject(input) ? input : {}).filter(([key]) => !Object.hasOwn(provided, key)),
-  );
   const result = await defineJsonSchema(tool.inputSchema as JsonObject)["~standard"].validate(
-    modelInput,
+    input,
   );
   if (result.issues === undefined) return { input: result.value as JsonObject, tool };
   return {
@@ -383,7 +413,7 @@ async function authorizeApprovalResponse(
   return await response(context);
 }
 
-/** Records the instance a parked call was first sent for approval against. */
+/** Records the instance a parked call was first sent for approval against or stopped on. */
 function pinApprovedInstance(callId: string, connection: ResolvedConnectionDefinition): void {
   const ctx = loadContext();
   if (ctx.get(ConnectionApprovalPinsKey)?.[callId] !== undefined) return;

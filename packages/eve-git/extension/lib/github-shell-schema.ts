@@ -1,14 +1,18 @@
 import { z } from "zod";
 
-const permissionSchema = z.object({
-  provider: z.literal("github"),
-  repositories: z.array(z.string().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/u)).length(1),
-  access: z.literal("write"),
-});
+/** An `owner` or `owner/name` GitHub target. */
+export const GITHUB_TARGET = /^([A-Za-z0-9][A-Za-z0-9-]*)(?:\/([A-Za-z0-9._-]+))?$/u;
 
 export const githubShellInputSchema = z.object({
   command: z.string().trim().min(1).max(20_000),
-  permissions: z.array(permissionSchema).length(1),
+  repository: z
+    .string()
+    .trim()
+    .regex(GITHUB_TARGET)
+    .optional()
+    .describe(
+      "the owner/name repository the command acts on, or an owner for discovery such as gh repo list <owner>; omit for commands tied to no owner",
+    ),
   description: z
     .string()
     .trim()

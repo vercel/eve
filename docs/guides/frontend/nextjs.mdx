@@ -375,7 +375,7 @@ With several agents, a root `eve build` doesn't build them for `next start`. Run
 
 ### Self-host
 
-- **Vercel services:** run the app and each agent with your own process manager and proxy. See [Self-host eve](../deployment/self-hosting#run-workspace-members).
+- **Vercel services:** run the app and each agent with your own process manager and proxy. See [Self-host eve](../deployment/self-hosted-operations#run-workspace-members).
 - **Next.js hosting:** `next start` runs the agent for you. To run the agent yourself instead, put it behind a proxy that serves it under the private path `/_eve_internal/eve` (the `servicePrefix` option), then set `EVE_NEXT_PRODUCTION_ORIGIN` to that proxy's address when you build and start Next.js.
 
 ## Troubleshooting

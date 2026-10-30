@@ -121,7 +121,7 @@ export default defineDynamic(async (ctx) => {
 
 The memo runs before the replacement's first model call, and the instruction enters the replacement's durable history once, ahead of the new message. In a session that replaced no other, `ctx.session.predecessor` is undefined and the instruction contributes nothing.
 
-`transcriptOf()` keeps the history each consumed delivery imported, the text of each consumed delivery, and each completed reply part, oldest first, as `{ role, text }` messages. Reasoning, narration, tool calls and results, attachments, interactions, and interrupted output are left out. A clear in the stranded session starts the transcript over, so text the user cleared is never returned. `sessions.attach()` also converts older session history to v27 events. That conversion reads from the beginning to reconstruct the conversation, even when `startIndex` requests a later position. `maxMessages` keeps only the newest messages in the resulting transcript.
+`transcriptOf()` keeps the history each consumed delivery imported, the text of each consumed delivery, and each completed reply part, oldest first, as `{ role, text }` messages. Reasoning, narration, tool calls and results, attachments, interactions, and interrupted output are left out. Only the session's current conversation is kept: a clear in the stranded session starts the transcript over, so text the user cleared is never returned. `sessions.attach()` also converts older session history to v27 events. That conversion reads from the beginning to reconstruct the conversation, even when `startIndex` requests a later position. `maxMessages` keeps only the newest messages in the resulting transcript.
 
 The read and the prompt are yours to bound:
 
@@ -172,7 +172,7 @@ restart affected sessions before rolling back.
 
 Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or the sandbox runtime. Those are separate adapters: Workflow uses the active world implementation, and Sandbox uses the backend from `agent/sandbox` or the default sandbox environment.
 
-For advanced self-hosted deployments, the root `agent.ts` can select the installed Workflow world package to use with `experimental.workflow.world`:
+For self-hosted deployments, the root `agent.ts` can select the installed Workflow world package to use with `experimental.workflow.world`:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -187,7 +187,7 @@ export default defineAgent({
 });
 ```
 
-The world package backs workflow state, queues, hooks, and streams. Keep secrets and deployment-specific options in runtime environment variables read by that package, not in `agent.ts`. Custom worlds must implement the runtime protocol expected by eve's vendored `@workflow/*` packages (currently the `5.0.0-beta` line); the Workflow SDK rejects incompatible protocol versions during initialization. See [Self-host eve](../guides/deployment/self-hosting#persist-workflow-state), [agent.ts](../agent-config#workflow-world), and [Workflow Worlds](https://workflow-sdk.dev/worlds).
+The world package backs workflow state, queues, hooks, and streams. Keep secrets and deployment-specific options in runtime environment variables read by that package, not in `agent.ts`. Custom worlds must implement the runtime protocol expected by eve's vendored `@workflow/*` packages (currently the `5.x` line); the Workflow SDK rejects incompatible protocol versions during initialization. See [Workflow worlds](../guides/deployment/workflow-worlds) to choose and configure a world, [agent.ts](../agent-config#workflow-world), and the Workflow SDK's [Workflow Worlds](https://workflow-sdk.dev/worlds).
 
 ## Agent loop and sandbox
 

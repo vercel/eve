@@ -22,6 +22,8 @@ import {
 } from "#internal/nitro/routes/channel-route-context.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/session-http.js";
 import {
+  AGENT_INFO_FORBIDDEN_CODE,
+  AGENT_INFO_FORBIDDEN_MESSAGE,
   EVE_CALLBACK_ROUTE_PATTERN,
   EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
   EVE_HEALTH_ROUTE_PATH,
@@ -51,7 +53,8 @@ import {
   formatTraceContentCeiling,
 } from "#shared/forwarded-trace-policy.js";
 import { sessionAuthFromResult } from "#channel/auth/result.js";
-import { routeAuth } from "#public/channels/auth.js";
+import { localDev, routeAuth } from "#public/channels/auth.js";
+import { isLocalDevAuth } from "#channel/auth/definitions.js";
 import { defaultEveAudience } from "#eve-channel/audience.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import { defineChannel, DELETE, GET, HEAD, PATCH, POST, PUT } from "#public/definitions/channel.js";
@@ -87,11 +90,44 @@ import {
   deliveryResponse,
   resolveTurnClientContext,
 } from "#eve-channel/support.js";
-import type { EveChannel, EveChannelConfig, EveEventContext } from "#eve-channel/types.js";
+import type {
+  EveAuthResult,
+  EveChannel,
+  EveChannelConfig,
+  EveEventContext,
+} from "#eve-channel/types.js";
 
 export * from "#eve-channel/types.js";
+export { eveVercelOidc, type EveVercelOidcOptions } from "#eve-channel/auth.js";
 
 const log = createLogger("eve.channel");
+
+/** Principals that may read `GET /eve/v1/info`; `"local-dev"` is what `localDev()` admits. */
+const AGENT_INFO_PRINCIPAL_TYPES: ReadonlySet<string> = new Set([
+  "service",
+  "runtime",
+  "local-dev",
+]);
+const localDevelopmentCaller = localDev();
+
+/**
+ * Agent info carries authored text and server paths, so only operators read it
+ * unless the request's auth result decides with `allowAgentInfo`. When the
+ * channel's auth includes `localDev()`, a caller it would admit is the
+ * developer at their own server even when an earlier strategy resolved them
+ * first, such as the TUI's development Vercel OIDC token resolving to a `user`
+ * on a linked project.
+ */
+async function canReadAgentInfo(
+  request: Request,
+  caller: EveAuthResult,
+  localDevConfigured: boolean,
+): Promise<boolean> {
+  if (caller.allowAgentInfo === true) return true;
+  if (caller.allowAgentInfo === false) return false;
+  if (AGENT_INFO_PRINCIPAL_TYPES.has(caller.principalType)) return true;
+  return localDevConfigured && Boolean(await localDevelopmentCaller(request));
+}
 
 /**
  * Builds the default eve HTTP channel: a {@link defineChannel} instance serving the
@@ -120,6 +156,9 @@ function createdSessionBody(sessionId: string, body: ParsedCreateBody, deliveryI
 
 export function eveChannel(input: EveChannelConfig): EveChannel {
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
+  const localDevConfigured = (Array.isArray(input.auth) ? input.auth : [input.auth]).some(
+    isLocalDevAuth,
+  );
 
   return defineChannel<undefined, EveEventContext>({
     cors: input.cors,
@@ -135,6 +174,12 @@ export function eveChannel(input: EveChannelConfig): EveChannel {
       GET(EVE_INFO_ROUTE_PATH, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);
         if (authResult instanceof Response) return authResult;
+        if (!(await canReadAgentInfo(req, authResult, localDevConfigured))) {
+          return Response.json(
+            { code: AGENT_INFO_FORBIDDEN_CODE, error: AGENT_INFO_FORBIDDEN_MESSAGE, ok: false },
+            { status: 403 },
+          );
+        }
 
         const respond = readAgentInfoRouteResponse(args);
         if (respond === undefined) {

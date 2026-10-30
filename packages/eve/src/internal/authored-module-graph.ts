@@ -92,6 +92,9 @@ async function writeAuthoredModuleGraph(
       entryFileNames: fileName,
       format: "esm",
       sourcemap,
+      // Shared chunks can import each other even when the source graph is
+      // acyclic; strict order keeps top-level evaluation in source order.
+      strictExecutionOrder: true,
     },
   });
   const directoryPath = join(packageRoot, AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH);

@@ -28,11 +28,11 @@ function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
   return endpoint;
 }
 
-/** Projects v4 exclusively from the effective compiled graph. */
+/** Projects agent info exclusively from the effective compiled graph. */
 export function buildAgentInfoResponse(
   data: AgentInfoManifestData,
   input: {
-    readonly mode: AgentInfoResponse["mode"];
+    readonly mode: "development" | "production";
     readonly gatewayCredentials: GatewayCredentialPresence;
     readonly chatgptAuth?: ChatGptAuthState;
   },
