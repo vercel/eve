@@ -25,7 +25,9 @@ Every model runs the same eve package: the workflow pins `main`'s package to one
 model starts. `scripts/publish-results.mjs` uploads each model's results tree and writes
 `records.jsonl` and `manifest.json` under `authoring/runs/<run-id>/<attempt>/`. A record is one run
 of one case on one model. It holds the outcome, timings, turns, tokens, estimated cost, and which
-docs pages the agent read. A planned run that produced no result is recorded as `missing`. Objects
+docs pages the agent read. A planned run that produced no result is recorded as `missing`, and so
+is a run whose project lockfile resolved some other eve (e.g. npm's release after `npx eve@0.86.0
+init`), with the reason in `missing_reason`. Objects
 are immutable, and the manifest is written last. PR runs execute branch code, so they publish under
 `authoring/pull-requests/<pr-number>/<run-id>/<attempt>/` instead, and their manifest and records
 set `pull_request` to the PR number (it is `null` for `main`). Dispatches on other branches are not
@@ -61,7 +63,8 @@ are not supported by the native runner.
 
 The runner uses agent-eval's native Gateway harnesses: OpenCode for other providers, Claude Code
 for Anthropic models, and Codex for OpenAI models. Each attempt starts an isolated Vercel Sandbox,
-then scaffolds the selected immutable canary with `npx` before the coding agent starts.
+then scaffolds the selected immutable canary with `npx` before the coding agent starts. The canary
+is also npm's global `eve` and the `eve` on `PATH`, so `eve init` and `npx eve init` use it.
 The starting workspace includes pinned `just-bash@3.6.0` for the local default sandbox provider and `vitest@5.0.2` for the grader.
 Scaffolded workspaces must pass typecheck and build before any model inference starts.
 
