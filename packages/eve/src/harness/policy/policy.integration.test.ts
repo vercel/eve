@@ -1,3 +1,5 @@
+import { always } from "#tools/approval/policies.js";
+import { jsonSchema } from "ai";
 import { attachClientContext } from "#internal/client-context.js";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -5,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { eventsOf } from "#harness/publication.js";
 import { createKernel } from "#harness/kernel.js";
-import type { HarnessSession, StepResult } from "#harness/types.js";
+import type { HarnessSession, HarnessToolMap, StepResult } from "#harness/types.js";
 import { foldingHandler } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { recordUsage } from "#harness/usage-sink.js";
@@ -95,6 +97,7 @@ async function runTurn(
     readonly threshold?: number;
     readonly compactOnly?: boolean;
     readonly clientContext?: readonly string[];
+    readonly tools?: HarnessToolMap;
     /** The session's context, with the bundle its dynamic values come from. */
     readonly ctx?: ContextContainer;
   } = {},
@@ -137,7 +140,7 @@ async function runTurn(
       },
       policy,
       resolveModel: async () => model,
-      tools: new Map(),
+      tools: options.tools ?? new Map(),
     })(
       session,
       options.compactOnly === true
@@ -485,6 +488,37 @@ function withHistory(
 ): Policy {
   return (ctx) => ({ ...nativePolicy(ctx), history: () => history(ctx) });
 }
+
+describe("a harness policy's own calls", () => {
+  it("fails the turn when it calls eve__tool, which would skip the tool's own gate", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const execute = vi.fn(async () => ({ deleted: true }));
+    const { result } = await runTurn(
+      () => ({
+        next: { calls: [{ input: { input: {}, name: "delete_rows" }, tool: "eve__tool" }] },
+      }),
+      [],
+      {
+        tools: new Map([
+          [
+            "delete_rows",
+            {
+              approval: { request: always() },
+              deferred: true,
+              description: "Delete Alice's rows.",
+              execute,
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "delete_rows",
+            },
+          ],
+        ]),
+      },
+    );
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.settledTurn).toEqual({ isError: true, output: "The agent's harness failed." });
+  });
+});
 
 describe("eve's own loop", () => {
   it("sends the client's context with the turn's first model call", async () => {

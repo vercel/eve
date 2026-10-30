@@ -11,6 +11,7 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ContextContainer } from "#context/container.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
 import { authoredPolicy } from "./authored.js";
+import { runPolicyCalls } from "./calls.js";
 import { failPolicy, invalid, HARNESS_FAILED } from "./failure.js";
 import { fact, turnSettled } from "#harness/facts.js";
 import { failTurnForReaction, prepareModelCall } from "#harness/step/context.js";
@@ -143,7 +144,7 @@ const MODEL = Symbol("model");
 /**
  * Readies a model call: the step's dynamic values are evaluated, then the turn's input joins
  * history, for every agent. Then a policy other than eve's own says what the turn does: at the
- * turn's start, after input joined. Right after it continued with a note, it
+ * turn's start, after calls settle, after input joined. Right after it continued with a note, it
  * has decided already. What it reads, and what it does, is the same here as after a model step.
  */
 export async function decideBeforeModel(step: Step, turn: TurnInput): Promise<BeforeModel> {
@@ -216,6 +217,7 @@ async function apply(
     }
     return await settleTurn(step, next.settle, { lastStep });
   }
+  if ("calls" in next) return await runPolicyCalls(step, next.calls);
   if ("fail" in next) return await failWith(step, next.fail.message);
   return await invalid(step, "returned a next step eve doesn't know");
 }
