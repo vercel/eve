@@ -127,4 +127,58 @@ describe("SessionInputQueue", () => {
     expect(queue.takeSteering(admitted, turn, { heldSince })?.sequences).toEqual([after]);
     expect(queue.takeNext()).toMatchObject({ sequences: [before] });
   });
+
+  it("steers only the turn a targeted delivery names, and gives an untargeted one its own turn", () => {
+    const queue = new SessionInputQueue([]);
+    const alice = "user:test:alice";
+    const turn = { callerCallId: undefined, principal: alice, turnId: "turn_1" };
+    const send = (message: string, turnTarget: string | null, turnPolicy: "queue" | "steer") =>
+      queue.enqueueDelivery({
+        kind: "deliver",
+        payloads: [{ message }],
+        turnPolicy,
+        turnTarget,
+      })!.sequence;
+
+    const steersTurn1 = send("Also cover the launch date.", "turn_1", "steer");
+    const steersTurn0 = send("This was for the earlier task.", "turn_0", "steer");
+    const ownTurn = send("A new task.", null, "queue");
+    const admitted = new Set([steersTurn1, steersTurn0, ownTurn]);
+
+    // Held on its person, a turn still takes only the delivery that names it.
+    expect(queue.takeSteering(admitted, turn, { heldSince: 0 })?.sequences).toEqual([steersTurn1]);
+    expect(queue.takeSteering(admitted, { ...turn, turnId: undefined })).toBeUndefined();
+    // Each one that missed its turn runs alone, never merged with its neighbors.
+    expect(queue.takeNext()).toMatchObject({ sequences: [steersTurn0] });
+    expect(queue.takeNext()).toMatchObject({ sequences: [ownTurn] });
+  });
+
+  it("never merges an own-turn delivery with the same person's queued messages", () => {
+    const alice = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "ALICE",
+      principalType: "user" as const,
+    };
+    const queue = new SessionInputQueue([]);
+    const send = (message: string, turnTarget?: null) =>
+      queue.enqueueDelivery({
+        auth: alice,
+        kind: "deliver",
+        payloads: [{ message }],
+        turnPolicy: "queue",
+        ...(turnTarget !== undefined && { turnTarget }),
+      })!.sequence;
+
+    const plain = send("first");
+    const plainToo = send("second");
+    const own = send("third", null);
+    const ownToo = send("fourth", null);
+    const last = send("fifth");
+
+    expect(queue.takeNext()).toMatchObject({ sequences: [plain, plainToo] });
+    expect(queue.takeNext()).toMatchObject({ sequences: [own] });
+    expect(queue.takeNext()).toMatchObject({ sequences: [ownToo] });
+    expect(queue.takeNext()).toMatchObject({ sequences: [last] });
+  });
 });
