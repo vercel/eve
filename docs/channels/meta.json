@@ -4,17 +4,17 @@
   "pages": [
     "overview",
     "eve",
-    "mcp",
     "slack",
-    "linq",
     "photon",
-    "discord",
-    "teams",
-    "telegram",
-    "twilio",
+    "linq",
     "github",
+    "discord",
+    "telegram",
     "linear",
+    "teams",
+    "twilio",
     "chat-sdk",
+    "mcp",
     "custom"
   ]
 }
