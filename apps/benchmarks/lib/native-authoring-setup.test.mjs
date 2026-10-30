@@ -61,20 +61,27 @@ test("bootstraps the selected source before a native agent starts", async () => 
   assert.match(commands[0].args[1], /rm -f \.eve-authoring-bootstrap\.json/u);
   assert.deepEqual(Object.keys(writes[0]), ["/usr/local/bin/eve"]);
   assert.match(writes[0]["/usr/local/bin/eve"], /pkg\.eve\.dev\/commit\/eve\.tgz/u);
-  assert.match(commands[1].args[1], /chmod \+x \/usr\/local\/bin\/eve/u);
+  assert.match(
+    commands[1].args[1],
+    /npm install --global .*pkg\.eve\.dev\/commit\/eve\.tgz.* && rm -f "\$\(npm prefix --global\)\/bin\/eve"/u,
+  );
   assert.match(
     commands[2].args[1],
-    /AI_AGENT=claude EVE_INIT_PACKAGE_SPEC=.* eve init \. --model openai\/gpt-5\.5/u,
+    /chmod \+x \/usr\/local\/bin\/eve && .*cp \/usr\/local\/bin\/eve/u,
   );
   assert.match(
     commands[3].args[1],
+    /AI_AGENT=claude EVE_INIT_PACKAGE_SPEC=.* eve init \. --model openai\/gpt-5\.5/u,
+  );
+  assert.match(
+    commands[4].args[1],
     /npm install --save-dev --save-exact just-bash@3\.6\.0 vitest@5\.0\.2/u,
   );
-  assert.match(commands[4].args[1], /mkdir -p agent\/lib/u);
-  assert.match(commands[5].args[1], /rm -f AGENTS\.md CLAUDE\.md GEMINI\.md/u);
-  assert.match(commands[6].args[1], /npm run typecheck && npm run build/u);
-  assert.match(commands[7].args[1], /opencode\.json/u);
-  assert.match(commands[8].args[1], /git add \. && git commit --amend --no-edit --quiet/u);
+  assert.match(commands[5].args[1], /mkdir -p agent\/lib/u);
+  assert.match(commands[6].args[1], /rm -f AGENTS\.md CLAUDE\.md GEMINI\.md/u);
+  assert.match(commands[7].args[1], /npm run typecheck && npm run build/u);
+  assert.match(commands[8].args[1], /opencode\.json/u);
+  assert.match(commands[9].args[1], /git add \. && git commit --amend --no-edit --quiet/u);
   assert.deepEqual(Object.keys(writes[1]), ["/workspace/agent/lib/inventory-openapi.ts"]);
   assert.match(writes[1]["/workspace/agent/lib/inventory-openapi.ts"], /getStock/u);
 });

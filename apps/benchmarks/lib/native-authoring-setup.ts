@@ -63,10 +63,26 @@ export function createNativeAuthoringSetup(options: {
       "rm -f .eve-authoring-bootstrap.json CASE.ts package.json package-lock.json PROMPT.md",
       "fixture cleanup",
     );
+    // `npx eve init` skips the wrapper below: npx looks for the package in the project, then in
+    // npm's global packages, and otherwise fetches npm's release. A global canary keeps it on
+    // the subject. `npx eve@<version>` still fetches that release; publishing flags those runs.
+    // Its bin is unlinked and replaced with the wrapper, since it may come first on PATH:
+    // launched directly, eve sees no npm user agent and installs with pnpm, whose
+    // `node_modules` layout breaks the npm installs that follow.
+    const globalBin = '"$(npm prefix --global)/bin/eve"';
+    await run(
+      sandbox,
+      `npm install --global --no-audit --no-fund ${shellQuote(options.packageSpec)} && rm -f ${globalBin}`,
+      "global eve canary",
+    );
     await sandbox.writeFiles({
       "/usr/local/bin/eve": `#!/bin/sh\nexec npx --yes --allow-remote=all --package=${shellQuote(options.packageSpec)} eve "$@"\n`,
     });
-    await run(sandbox, "chmod +x /usr/local/bin/eve", "eve canary wrapper");
+    await run(
+      sandbox,
+      `chmod +x /usr/local/bin/eve && { [ -e ${globalBin} ] || cp /usr/local/bin/eve ${globalBin}; }`,
+      "eve canary wrapper",
+    );
 
     if (bootstrap.startingPoint === "scaffolded") {
       await run(
