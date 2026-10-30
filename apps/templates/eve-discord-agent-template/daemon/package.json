@@ -3,6 +3,11 @@
   "type": "module",
   "dependencies": {
     "@vercel/connect": "^2.5.2",
-    "eve": "^0.83.0"
+    "eve": "^1.0.0-rc.0"
+  },
+  "overrides": {
+    "@vercel/connect": {
+      "eve": "$eve"
+    }
   }
 }

@@ -10,13 +10,13 @@ importers:
     dependencies:
       '@vercel/connect':
         specifier: ^2.5.5
-        version: 2.5.6(ai@7.0.140(zod@4.5.4))(eve@0.90.0)
+        version: 2.5.6(ai@7.0.140(zod@4.5.4))(eve@1.0.0-rc.0)
       ai:
         specifier: 7.0.140
         version: 7.0.140(zod@4.5.4)
       eve:
-        specifier: ^0.90.0
-        version: 0.90.0(@vercel/connect@2.5.6)(ai@7.0.140(zod@4.5.4))
+        specifier: ^1.0.0-rc.0
+        version: 1.0.0-rc.0(@vercel/connect@2.5.6)(ai@7.0.140(zod@4.5.4))
       zod:
         specifier: 4.5.4
         version: 4.5.4
@@ -347,8 +347,8 @@ packages:
     resolution: {integrity: sha512-S8EFBKyznRwPVwayK187cYjvnpgC92xy+q0BIF++V965pfjMVVRbQ/HoTYGA/1EHmZ7E68k6Heq+4WnvVhOL5w==}
     hasBin: true
 
-  eve@0.90.0:
-    resolution: {integrity: sha512-1z707TxmTokVbQAtpoIqoLBaNR0Xy2FY9+KkJLr8kud8JNLyVYqCJt2bpBt3jzRF6sl0Xxt2CG9Ecpa5LsxyHA==}
+  eve@1.0.0-rc.0:
+    resolution: {integrity: sha512-/GOeOMIgoohAP7xpTqOxrWO8H6Miiv6UN2dA04R+40RN9rpXoLQ4JEdqd5G4dyeEc2Ou6zK5krwcZOHfgpOObA==}
     engines: {node: '>=24'}
     hasBin: true
     peerDependencies:
@@ -704,12 +704,12 @@ snapshots:
     dependencies:
       execa: 5.1.1
 
-  '@vercel/connect@2.5.6(ai@7.0.140(zod@4.5.4))(eve@0.90.0)':
+  '@vercel/connect@2.5.6(ai@7.0.140(zod@4.5.4))(eve@1.0.0-rc.0)':
     dependencies:
       '@vercel/oidc': 4.0.4
     optionalDependencies:
       ai: 7.0.140(zod@4.5.4)
-      eve: 0.90.0(@vercel/connect@2.5.6)(ai@7.0.140(zod@4.5.4))
+      eve: 1.0.0-rc.0(@vercel/connect@2.5.6)(ai@7.0.140(zod@4.5.4))
 
   '@vercel/oidc@3.2.0': {}
 
@@ -749,13 +749,13 @@ snapshots:
       httpxy: 0.5.5
       srvx: 1.0.5
 
-  eve@0.90.0(@vercel/connect@2.5.6)(ai@7.0.140(zod@4.5.4)):
+  eve@1.0.0-rc.0(@vercel/connect@2.5.6)(ai@7.0.140(zod@4.5.4)):
     dependencies:
       ai: 7.0.140(zod@4.5.4)
       nitro: 3.0.260903-beta
       undici: 8.12.3
     optionalDependencies:
-      '@vercel/connect': 2.5.6(ai@7.0.140(zod@4.5.4))(eve@0.90.0)
+      '@vercel/connect': 2.5.6(ai@7.0.140(zod@4.5.4))(eve@1.0.0-rc.0)
 
   eventsource-parser@3.1.1: {}
 
