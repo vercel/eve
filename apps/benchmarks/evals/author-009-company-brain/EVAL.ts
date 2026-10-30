@@ -5,6 +5,206 @@ import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+// ---- grader-kit: copied from apps/benchmarks/lib/grader-kit.ts by `pnpm grader-kit:sync`. Edit it there. ----
+// How eve runs authored code, faked the same way in every authoring grader: tool calls with
+// their context and session state, approvals, dynamic definitions, and the project's own eve.
+// Most false failures in new graders came from a hand-rolled copy of one of these missing
+// something eve provides, so they live here once.
+//
+// agent-eval hides only files named EVAL.ts (and PROMPT.md) from the agent, so a grader can't
+// import a sibling module. `pnpm grader-kit:sync` copies this file between the grader-kit
+// markers of every EVAL.ts that has them, and `scripts/grader-kit.test.mjs` fails when a copy
+// drifts. Edit it here, never in an EVAL.ts.
+//
+// Imports are namespaced so they can't clash with a grader's own, and the file has no other
+// imports: a copy has to stand alone in the grader's workspace.
+import type { AsyncLocalStorage as GraderKitAsyncLocalStorage } from "node:async_hooks";
+import * as graderKitFs from "node:fs";
+import * as graderKitPath from "node:path";
+import * as graderKitUrl from "node:url";
+
+/** Whether an approval policy's decision asks a person first. */
+export function requiresApproval(decision: unknown): boolean {
+  if (decision === true || decision === "user-approval") return true;
+  return (
+    typeof decision === "object" &&
+    decision !== null &&
+    "type" in decision &&
+    decision.type === "user-approval"
+  );
+}
+
+/** Validates tool input the way eve does: Standard Schema first, then Zod's `safeParse`. */
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+export async function parseInput(
+  tool: any,
+  input: unknown,
+): Promise<{ success: boolean; data?: any }> {
+  const standard = tool.inputSchema?.["~standard"];
+  if (typeof standard?.validate === "function") {
+    const result = await standard.validate(input);
+    return result.issues ? { success: false } : { success: true, data: result.value };
+  }
+  if (typeof tool.inputSchema?.safeParse === "function") return tool.inputSchema.safeParse(input);
+  return { success: true, data: input };
+}
+
+/**
+ * Runs a call that may be refused, ignoring the refusal. A tool can refuse by rejecting or by
+ * throwing synchronously (a non-async `execute`); eve treats both as the call failing.
+ */
+export async function settle(call: () => unknown): Promise<void> {
+  try {
+    await call();
+  } catch {}
+}
+
+/**
+ * Imports an `eve` entry point as the authored modules resolve it, sharing their module
+ * instance. `projectRoot` is the directory whose `node_modules/eve` the project uses.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- eve's types aren't installed at the root.
+export async function importProjectEve(subpath: string, projectRoot = "."): Promise<any> {
+  const eveRoot = graderKitPath.join(projectRoot, "node_modules/eve");
+  const target = JSON.parse(
+    graderKitFs.readFileSync(graderKitPath.join(eveRoot, "package.json"), "utf8"),
+  ).exports[subpath];
+  return import(
+    graderKitUrl.pathToFileURL(graderKitPath.resolve(eveRoot, target.import ?? target.default)).href
+  );
+}
+
+/** A session's context values, as `defineState` reads and writes them. */
+export class SessionState {
+  private readonly values = new Map<string, unknown>();
+  get(key: { name: string }) {
+    return this.values.get(key.name);
+  }
+  require(key: { name: string }) {
+    if (!this.values.has(key.name)) throw new Error(`Context key "${key.name}" is not set.`);
+    return this.values.get(key.name);
+  }
+  has(key: { name: string }) {
+    return this.values.has(key.name);
+  }
+  set(key: { name: string }, value: unknown) {
+    const next = typeof value === "function" ? value(this.values.get(key.name)) : value;
+    this.values.set(key.name, next);
+    return next;
+  }
+  ensure(key: { name: string }, create: () => unknown) {
+    return this.has(key) ? this.values.get(key.name) : this.set(key, create());
+  }
+  delete(key: { name: string }) {
+    return this.values.delete(key.name);
+  }
+  setVirtualContext(key: { name: string }, value: unknown) {
+    this.values.set(key.name, value);
+  }
+  *entries() {}
+}
+
+/**
+ * The process-wide storage eve keeps its session context in, shared by every eve copy. eve
+ * creates it when its context module loads, and `eve/tools` and `eve/extension` don't load
+ * that module, so a solution that never imports `eve/context` would leave it missing. Load
+ * it from the project's eve first.
+ */
+export async function sessionStorage(
+  projectRoot = ".",
+): Promise<GraderKitAsyncLocalStorage<{ context: SessionState }>> {
+  await importProjectEve("./context", projectRoot);
+  const key = Symbol.for("eve.context-storage");
+  const global = globalThis as Record<
+    symbol,
+    GraderKitAsyncLocalStorage<{ context: SessionState }> | undefined
+  >;
+  const storage = global[key];
+  if (!storage) throw new Error("eve context storage is missing after loading eve/context.");
+  return storage;
+}
+
+/** The session eve hands tools, hooks, and approval policies: one conversation, in its first turn. */
+export const graderSession = {
+  id: "session-1",
+  auth: { current: null, initiator: null },
+  turn: { id: "turn-1", sequence: 0 },
+};
+
+/** The person who approves calls in the grader, as eve hands them to an approved call. */
+export const graderApprover = {
+  authenticator: "grader",
+  issuer: "grader",
+  principalId: "approver-1",
+  principalType: "user",
+  subject: "approver-1",
+  attributes: {},
+  getToken: async () => {
+    throw new Error("The grader has no provider tokens.");
+  },
+};
+
+/**
+ * Runs a tool call the way eve does: input validated, a call context with a fresh ID and the
+ * session, inside a session whose state the tools can read and write. Pass the same
+ * `SessionState` to calls that belong to one conversation. eve only runs a tool that asks for
+ * approval once a person approves, and tells the call who did, so those calls get an approver.
+ */
+export async function runTool(
+  // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+  tool: any,
+  input: unknown,
+  session = new SessionState(),
+  projectRoot = ".",
+): Promise<unknown> {
+  const parsed = tool.inputSchema?.parse ? tool.inputSchema.parse(input) : input;
+  const call: Record<string, unknown> = {
+    abortSignal: new AbortController().signal,
+    callId: `call-${Math.random().toString(36).slice(2)}`,
+    toolName: "graded",
+    messages: [],
+    channel: { kind: "eve" },
+    session: graderSession,
+  };
+  if (tool.approval !== undefined) call.approval = { responder: graderApprover };
+  return (await sessionStorage(projectRoot)).run({ context: session }, () =>
+    tool.execute(parsed, call),
+  );
+}
+
+/**
+ * The function behind a `defineDynamic()` value, or undefined for anything else. eve keeps it
+ * under a cross-instance brand; packages before the pre-1.0 cleanup exposed it as
+ * `{ kind: "eve:dynamic", evaluate }`.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+export function dynamicEvaluator(definition: any): ((context: unknown) => unknown) | undefined {
+  const evaluate =
+    definition?.[Symbol.for("eve.dynamic")] ??
+    (definition?.kind === "eve:dynamic" ? definition.evaluate : undefined);
+  return typeof evaluate === "function" ? evaluate : undefined;
+}
+
+/** The context eve resolves a dynamic definition with, for one session and channel. */
+export function dynamicContext(
+  session: unknown,
+  channel: unknown = { kind: "http", metadata: {} },
+) {
+  return {
+    session,
+    channel,
+    // eve's view is opaque; a gate has no reason to read it here.
+    view: {},
+    turn: null,
+    now: new Date(),
+    model: { id: "anthropic/claude-sonnet-5" },
+    memo: async (key: unknown, fn: (occurrence: unknown) => unknown) =>
+      fn({ idempotencyKey: JSON.stringify(key), abortSignal: new AbortController().signal }),
+    messages: async () => [],
+  };
+}
+// ---- end grader-kit ----
+
 // Each test grades one requirement from the prompt, independently of the others,
 // so the share of passing tests is a partial score for the run.
 
@@ -74,7 +274,10 @@ test("admits only company SSO tokens on the HTTP API", () => {
   expect(auth).toMatch(/\baudiences?\s*:/);
   expect(auth).toMatch(/["']atlas["']/);
   // localDev() never authenticates a production request; every other helper would.
-  expect(source).not.toMatch(/\b(?:placeholderAuth|vercelOidc|httpBasic|jwtHmac|none)\s*\(/);
+  // Comments may name the helpers they rule out.
+  expect(withoutComments(source)).not.toMatch(
+    /\b(?:placeholderAuth|vercelOidc|httpBasic|jwtHmac|none)\s*\(/,
+  );
 });
 
 test("run_sql sends read-only queries to the warehouse", async () => {
@@ -119,7 +322,7 @@ test("run_sql refuses writes without calling the warehouse", async () => {
     "INSERT INTO analytics.orders (id) VALUES (1)",
   ]) {
     const parsed = await parseInput(tool, { query });
-    if (parsed.success) await tool.execute(parsed.data, toolContext([])).catch(() => undefined);
+    if (parsed.success) await settle(() => tool.execute(parsed.data, toolContext([])));
     expect(requests, query).toHaveLength(1);
   }
 });
@@ -151,8 +354,8 @@ test("reads Notion as the signed-in employee through a narrow MCP connection", a
     resolvedSource(path).includes("mcp.notion.com/mcp"),
   );
   expect(file).toBeDefined();
-  const connection = await load(file!);
-  expect(connection.url).toBe("https://mcp.notion.com/mcp");
+  const connection = await notionConnection(file!);
+  expect(connection?.url).toBe("https://mcp.notion.com/mcp");
   expectOnlySearchAndFetch(connection.tools?.allow);
   expect(connection.tools?.block).toBeUndefined();
 
@@ -162,14 +365,14 @@ test("reads Notion as the signed-in employee through a narrow MCP connection", a
 });
 
 test("shows revenue_forecast only to the finance group", async () => {
-  const definition = await load(`${agentRoot}/tools/revenue_forecast.ts`);
+  const definition = await load(forecastFile());
   expect(forecastTool(await resolveDynamic(definition, ["eng", "finance"]))).toBeDefined();
   expect(forecastTool(await resolveDynamic(definition, ["eng"]))).toBeUndefined();
   expect(forecastTool(await resolveDynamic(definition, undefined))).toBeUndefined();
 });
 
 test("revenue_forecast reads the quarter's forecast", async () => {
-  const definition = await load(`${agentRoot}/tools/revenue_forecast.ts`);
+  const definition = await load(forecastFile());
   const tool = forecastTool(await resolveDynamic(definition, ["finance"]));
   expect(tool).toBeDefined();
   const requests = stubWarehouse();
@@ -188,7 +391,7 @@ test("revenue_forecast reads the quarter's forecast", async () => {
 });
 
 test("the weekly summary gets the revenue forecast", async () => {
-  const definition = await load(`${agentRoot}/tools/revenue_forecast.ts`);
+  const definition = await load(forecastFile());
   const tool = forecastTool(await resolveDynamic(definition, "schedule"));
   const requests = stubWarehouse();
   if (tool !== undefined) {
@@ -277,7 +480,7 @@ test("analyst queries the warehouse read-only and cannot read Notion", async () 
   expect(requests).toHaveLength(1);
   expect(requests[0].url).toBe(`${warehouse}/query`);
   const parsed = await parseInput(tool, { query: "DELETE FROM analytics.orders" });
-  if (parsed.success) await tool.execute(parsed.data, toolContext([])).catch(() => undefined);
+  if (parsed.success) await settle(() => tool.execute(parsed.data, toolContext([])));
   expect(requests).toHaveLength(1);
 
   const notion = sourceFiles("subagents/analyst", /\.ts$/).filter((file) =>
@@ -291,8 +494,8 @@ test("researcher reads Notion as the employee and cannot query the warehouse", a
     /mcp\.notion\.com\/mcp/.test(resolvedSource(path)),
   );
   expect(file).toBeDefined();
-  const connection = await load(file!);
-  expect(connection.url).toBe("https://mcp.notion.com/mcp");
+  const connection = await notionConnection(file!);
+  expect(connection?.url).toBe("https://mcp.notion.com/mcp");
   expectOnlySearchAndFetch(connection.tools?.allow);
   const auth = typeof connection.auth === "function" ? await connection.auth({}) : connection.auth;
   expect(auth?.vercelConnect?.connector).toBe("mcp.notion.com/atlas");
@@ -329,13 +532,16 @@ test("keeps metric definitions in a skill loaded on demand", async () => {
         };
       }),
   );
-  const skill = [...packaged, ...singleFile, ...defined].find(({ text }) => /one-time/i.test(text));
-  expect(skill).toBeDefined();
+  // One skill for all three definitions, or one skill per metric.
+  const skills = [...packaged, ...singleFile, ...defined].filter(({ text }) =>
+    /one-time|paid seat|retention/i.test(text),
+  );
+  expect(skills.some(({ text }) => /one-time/i.test(text))).toBe(true);
   // Only a packaged SKILL.md must describe itself; a single file falls back to its name.
-  if (skill!.file.endsWith("/SKILL.md")) {
-    expect(readFileSync(skill!.file, "utf8")).toMatch(/^---[\s\S]*?\bdescription\s*:[\s\S]*?---/);
+  for (const { file } of skills.filter(({ file }) => file.endsWith("/SKILL.md"))) {
+    expect(readFileSync(file, "utf8")).toMatch(/^---[\s\S]*?\bdescription\s*:[\s\S]*?---/);
   }
-  const reference = skill!.text;
+  const reference = skills.map(({ text }) => text).join("\n");
   expect(reference).toMatch(/ARR/);
   // Prose wraps and may spell numbers out: "active 12\nmonths ago", "twelve months".
   expect(reference).toMatch(/\b(?:30|thirty)\s+days\b/i);
@@ -404,6 +610,40 @@ test("ships an eve eval with run_sql stubbed", { timeout: 120_000 }, () => {
   });
   expect(listed.trim()).not.toBe("");
 });
+
+// Strips line and block comments, leaving URLs such as `https://` intact.
+function withoutComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
+}
+
+/**
+ * The Notion connection a signed-in employee gets: a static definition, or what a
+ * dynamic connection resolves to, either a single definition or a map containing it.
+ */
+// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+async function notionConnection(file: string): Promise<any> {
+  const definition = await load(file);
+  if (dynamicEvaluator(definition) === undefined) return definition;
+  // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+  const resolved: any = await resolveDynamic(definition, ["eng"]);
+  if (resolved === null || resolved === undefined) return undefined;
+  if (typeof resolved.url === "string") return resolved;
+  return Object.values(resolved).find(
+    // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
+    (entry: any) => typeof entry?.url === "string" && entry.url.includes("mcp.notion.com"),
+  );
+}
+
+/** `tools/revenue_forecast.ts`, or a dynamic tool map that defines `revenue_forecast`. */
+function forecastFile(): string {
+  const named = `${agentRoot}/tools/revenue_forecast.ts`;
+  if (existsSync(named)) return named;
+  const map = sourceFiles("tools", /\.ts$/).find(
+    (file) =>
+      dirname(file) === `${agentRoot}/tools` && /\brevenue_forecast\b/.test(resolvedSource(file)),
+  );
+  return map ?? named;
+}
 
 function instructionsSource(): string {
   for (const name of ["instructions.md", "instructions.ts"]) {
@@ -487,21 +727,6 @@ function stubWarehouse(): Array<{ url: string; init: RequestInit }> {
   return requests;
 }
 
-/**
- * Validates input the way eve does for any accepted schema: Standard Schema
- * (Zod and others), or a plain JSON Schema object, which eve does not validate here.
- */
-// oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
-async function parseInput(tool: any, input: unknown): Promise<{ success: boolean; data?: any }> {
-  const standard = tool.inputSchema?.["~standard"];
-  if (typeof standard?.validate === "function") {
-    const result = await standard.validate(input);
-    return result.issues ? { success: false } : { success: true, data: result.value };
-  }
-  if (typeof tool.inputSchema?.safeParse === "function") return tool.inputSchema.safeParse(input);
-  return { success: true, data: input };
-}
-
 // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
 async function sqlInput(tool: any, query: string) {
   const parsed = await parseInput(tool, { query });
@@ -509,33 +734,12 @@ async function sqlInput(tool: any, query: string) {
   return parsed.data;
 }
 
-function requiresApproval(decision: unknown): boolean {
-  if (decision === true || decision === "user-approval") return true;
-  return (
-    typeof decision === "object" &&
-    decision !== null &&
-    "type" in decision &&
-    decision.type === "user-approval"
-  );
-}
-
 // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
 async function resolveDynamic(definition: any, caller: Caller): Promise<unknown> {
-  // A defineDynamic() value is opaque; eve keeps its function under this cross-instance brand.
-  const evaluate = definition?.[Symbol.for("eve.dynamic")];
+  const evaluate = dynamicEvaluator(definition);
   expect(typeof evaluate).toBe("function");
-  return evaluate({
-    session: session(caller),
-    channel: { kind: caller === "schedule" ? "schedule" : "http", metadata: {} },
-    // eve's view is opaque; a gate has no reason to read it here.
-    view: {},
-    turn: null,
-    now: new Date(),
-    model: { id: "anthropic/claude-sonnet-5" },
-    memo: async (key: unknown, fn: (occurrence: unknown) => unknown) =>
-      fn({ idempotencyKey: JSON.stringify(key), abortSignal: new AbortController().signal }),
-    messages: async () => [],
-  });
+  const channel = { kind: caller === "schedule" ? "schedule" : "http", metadata: {} };
+  return evaluate!(dynamicContext(session(caller), channel));
 }
 
 function session(caller: Caller) {
