@@ -52,6 +52,11 @@ export function createEveVercelOptions(input: {
   }
 
   return {
+    // A named agent's HTTP routes build public URLs too, such as a board channel registering its
+    // wake route, and a variable exported only for the build never reaches the runtime.
+    ...(publicRoutePrefix !== undefined && {
+      functions: { environment: { [EVE_PUBLIC_ROUTE_PREFIX_ENV]: publicRoutePrefix } },
+    }),
     config: {
       version: 3 as const,
       framework: {
