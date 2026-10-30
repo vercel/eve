@@ -947,9 +947,7 @@ describe("verifyVercelOidc", () => {
   // tokens minted for the current Vercel project. The verifier fetches the
   // OIDC discovery document and JWKS to validate the JWT signature, so the
   // tests mock `globalThis.fetch` rather than rely on a live network. JWKS
-  // caching inside jose is keyed on the discovery URL, so each test uses a
-  // unique team slug (and therefore a unique issuer URL) to avoid bleeding
-  // state across cases.
+  // caching inside jose shares the same signing keys across all team issuers.
 
   it("authenticates a Vercel-issued token whose project_id matches VERCEL_PROJECT_ID", async () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");

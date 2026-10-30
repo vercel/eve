@@ -1,5 +1,5 @@
 import type { JWTPayload } from "#compiled/jose/index.js";
-import { createRemoteJWKSet, jwtVerify } from "#compiled/jose/index.js";
+import { createRemoteJWKSet, customFetch, jwtVerify } from "#compiled/jose/index.js";
 import { z } from "#compiled/zod/index.js";
 
 import {
@@ -18,9 +18,12 @@ const oidcDiscoveryDocumentSchema = z
     jwks_uri: z.string().url(),
   })
   .passthrough();
+const OIDC_FETCH_TIMEOUT_MS = 5_000;
+const OIDC_MAX_RESPONSE_BYTES = 64 * 1024;
+const OIDC_RETRY_DELAY_MS = 30_000;
 const oidcDiscoveryDocumentCache = new Map<
   string,
-  Promise<z.output<typeof oidcDiscoveryDocumentSchema>>
+  { expiresAt: number; promise: Promise<z.output<typeof oidcDiscoveryDocumentSchema>> }
 >();
 const oidcJwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
@@ -165,7 +168,14 @@ async function getOidcRemoteJwks(
     return existing;
   }
 
-  const remoteJwks = createRemoteJWKSet(new URL(discoveryDocument.jwks_uri));
+  let nextFetchAt = 0;
+  const remoteJwks = createRemoteJWKSet(new URL(discoveryDocument.jwks_uri), {
+    [customFetch]: async (url, init) => {
+      if (Date.now() < nextFetchAt) throw new Error("OIDC key retrieval is cooling down.");
+      nextFetchAt = Date.now() + OIDC_RETRY_DELAY_MS;
+      return await fetchOidcMetadata(url, init);
+    },
+  });
   oidcJwksCache.set(discoveryDocument.jwks_uri, remoteJwks);
 
   return remoteJwks;
@@ -176,30 +186,61 @@ async function getOidcDiscoveryDocument(
 ): Promise<z.output<typeof oidcDiscoveryDocumentSchema>> {
   const cached = oidcDiscoveryDocumentCache.get(discoveryUrl);
 
-  if (cached !== undefined) {
-    return await cached;
+  if (cached !== undefined && Date.now() < cached.expiresAt) {
+    return await cached.promise;
   }
 
-  const discoveryPromise = fetch(discoveryUrl, {
-    headers: {
-      accept: "application/json",
-    },
-  })
-    .then(async (response) => {
-      if (!response.ok) {
-        throw new Error(`Discovery route returned HTTP ${response.status}.`);
-      }
+  const entry = {
+    expiresAt: Infinity,
+    promise: fetchOidcMetadata(discoveryUrl)
+      .then(async (response) => {
+        const document = oidcDiscoveryDocumentSchema.parse(await response.json());
+        entry.expiresAt = Date.now() + 60 * 60 * 1_000;
+        return document;
+      })
+      .catch((error) => {
+        entry.expiresAt = Date.now() + OIDC_RETRY_DELAY_MS;
+        throw error;
+      }),
+  };
+  oidcDiscoveryDocumentCache.set(discoveryUrl, entry);
+  return await entry.promise;
+}
 
-      return oidcDiscoveryDocumentSchema.parse(await response.json());
-    })
-    .catch((error) => {
-      oidcDiscoveryDocumentCache.delete(discoveryUrl);
-      throw error;
+async function fetchOidcMetadata(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OIDC_FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, {
+      ...init,
+      headers: init?.headers ?? { accept: "application/json" },
+      redirect: "error",
+      signal: init?.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal,
     });
-
-  oidcDiscoveryDocumentCache.set(discoveryUrl, discoveryPromise);
-
-  return await discoveryPromise;
+    if (response.status !== 200) {
+      await response.body?.cancel();
+      throw new Error(`OIDC metadata route returned HTTP ${response.status}.`);
+    }
+    if (Number(response.headers.get("content-length")) > OIDC_MAX_RESPONSE_BYTES) {
+      await response.body?.cancel();
+      throw new Error("OIDC metadata exceeds the response limit.");
+    }
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    if (response.body !== null) {
+      for await (const chunk of response.body) {
+        size += chunk.byteLength;
+        if (size > OIDC_MAX_RESPONSE_BYTES) {
+          throw new Error("OIDC metadata exceeds the response limit.");
+        }
+        chunks.push(chunk);
+      }
+    }
+    return Response.json(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+  }
 }
 
 /**

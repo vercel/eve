@@ -117,6 +117,10 @@ Verifies a bearer JWT against the [Vercel OIDC issuer](https://vercel.com/docs/o
 
 Auth fails closed: routes reject unauthenticated traffic by default, and the OIDC user branch verifies `external_sub` against `VERCEL_PROJECT_ID` and the deployment environment, returning `false` when either is unset. An external-subject token cannot authenticate on a deployment that hasn't pinned its project.
 
+Vercel verification uses one fixed discovery endpoint shared by global and team-scoped issuers. The token must include the exact `https://vercel.com/<owner>` audience: `<owner>` comes from the team-scoped issuer, or the signed `owner` claim for global issuers. Tokens exchanged for another audience are rejected, even when their project matches.
+
+OIDC discovery and signing-key requests do not follow redirects. Each request, including its body, has a five-second timeout and a 64 KiB response limit. Failed metadata requests wait 30 seconds before retrying. Discovery metadata refreshes after one hour; signing keys retain their normal refresh behavior. Generic `oidc()` and `verifyOidc()` keep their author-configured issuer, audience, and discovery URL. Never derive that configuration from an incoming token.
+
 To also permit [stubbed eval sessions](../evals/tool-stubs), use `eveVercelOidc` from `eve/channels/eve`. It takes the same options, and its subject entries can grant [tool replacement permission](#tool-replacement-permission).
 
 #### `subjects` patterns and `vercelSubject(...)`
