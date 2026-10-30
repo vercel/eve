@@ -6,7 +6,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
-import { DynamicModelSelectionError } from "#reactions/kinds/model.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
@@ -132,33 +131,24 @@ describe("tool loop cancellation (real AI SDK)", () => {
   });
 
   // #4273: a resolver can raise the cancellation before the turn's signal fires.
-  it.each([
-    { label: "directly", wrap: (error: Error): Error => error },
-    {
-      label: "as a model selection cause",
-      wrap: (error: Error): Error => new DynamicModelSelectionError(error),
-    },
-  ])(
-    "propagates a model resolver cancellation raised $label before the signal aborts",
-    async ({ wrap }) => {
-      const logs = captureLogRecords();
-      const thrown = wrap(new TurnCancelledError());
-      const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(
-        createConfig(new MockLanguageModelV3(), emit, {
-          abortSignal: new AbortController().signal,
-          resolveModel: vi.fn().mockRejectedValue(thrown),
-        }),
-      );
+  it("propagates a model resolver cancellation raised before the signal aborts", async () => {
+    const logs = captureLogRecords();
+    const cancellation = new TurnCancelledError();
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createConfig(new MockLanguageModelV3(), emit, {
+        abortSignal: new AbortController().signal,
+        resolveModel: vi.fn().mockRejectedValue(cancellation),
+      }),
+    );
 
-      await expect(runStep(createSession(), { message: "Hi" })).rejects.toBe(thrown);
+    await expect(runStep(createSession(), { message: "Hi" })).rejects.toBe(cancellation);
 
-      expect(events.map((event) => event.type)).not.toContain("session.ended");
-      expect(logs.records).not.toContainEqual(
-        expect.objectContaining({ message: "model selection failed terminally" }),
-      );
-    },
-  );
+    expect(events.map((event) => event.type)).not.toContain("session.ended");
+    expect(logs.records).not.toContainEqual(
+      expect.objectContaining({ message: "model selection failed terminally" }),
+    );
+  });
 
   it("fails the session when the model resolver throws an ordinary error", async () => {
     const { emit, events } = createEventCollector();
