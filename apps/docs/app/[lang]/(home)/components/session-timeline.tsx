@@ -341,12 +341,15 @@ const WHATSAPP_BEATS: Beat[] = [
 const CONVERSATIONS: {
   id: Platform;
   label: string;
+  /** What starts the conversation, as the demo button reads. */
+  action: string;
   logo: (className: string) => ReactNode;
   beats: Beat[];
 }[] = [
   {
     id: "slack",
     label: "Software Factory",
+    action: "Trigger a PR",
     logo: (className) =>
       logos.slack({ "aria-hidden": true, className: cn(className, monochromeLogo) }),
     beats: SLACK_BEATS,
@@ -354,12 +357,14 @@ const CONVERSATIONS: {
   {
     id: "teams",
     label: "Operations",
+    action: "Trigger an alert",
     logo: (className) => <LogoIconMicrosoftTeamsSvg aria-hidden className={className} size={16} />,
     beats: TEAMS_BEATS,
   },
   {
     id: "whatsapp",
     label: "Customer Support",
+    action: "Message support",
     logo: (className) => <SiWhatsapp aria-hidden className={className} />,
     beats: WHATSAPP_BEATS,
   },
@@ -595,21 +600,18 @@ function Bubble({
 
 /**
  * An agent conversation, picked from Slack, Teams, and WhatsApp, each drawn in its
- * platform's way. It shows in full; "Play demo" replays it message by message and "Stop demo"
- * returns to the full conversation, as on vercel.com/sandbox.
+ * platform's way. It shows in full; its action, such as "Trigger a PR", replays it message by
+ * message and "Cancel demo" returns to the full conversation, as on vercel.com/sandbox.
  */
 export function SessionTimeline(): JSX.Element {
   const listRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLOListElement>(null);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  // The outgoing conversation while a channel switch slides it out, and which way it goes.
-  const leaving = useRef<{ node: HTMLElement; direction: 1 | -1 } | null>(null);
   const [platform, setPlatform] = useState<Platform>("slack");
   // While playing, how many beats are in; otherwise the whole conversation shows.
   const [playing, setPlaying] = useState(false);
   const [count, setCount] = useState(0);
-  // A replay that runs to the end stays at the end, clear of the dock; stopping it or switching
-  // channels returns to the conversation's start.
+  // A replay that runs to the end stays at the end, clear of the dock; stopping it returns to the
+  // conversation's start.
   const [ended, setEnded] = useState(false);
   // Which edges have messages scrolled past them, so only those edges fade.
   const [overflow, setOverflow] = useState({ above: false, below: false });
@@ -633,19 +635,27 @@ export function SessionTimeline(): JSX.Element {
       return;
     }
     setTyping(false);
-    const show = setTimeout(
-      () => {
-        setTypingAuthor(next.kind === "message" ? AUTHORS[next.author] : undefined);
-        setTyping(next.kind === "message");
-      },
-      Math.min(500, next.delay * 0.4),
+    // The first message opens the conversation on its own, shortly after the start: a typing
+    // indicator alone in an empty window reads as nothing happening.
+    const first = count === 0;
+    const show = first
+      ? undefined
+      : setTimeout(
+          () => {
+            setTypingAuthor(next.kind === "message" ? AUTHORS[next.author] : undefined);
+            setTyping(next.kind === "message");
+          },
+          Math.min(500, next.delay * 0.4),
+        );
+    const timer = setTimeout(
+      () => setCount((n) => n + 1),
+      first ? Math.min(300, next.delay) : next.delay,
     );
-    const timer = setTimeout(() => setCount((n) => n + 1), next.delay);
     return () => {
       clearTimeout(show);
       clearTimeout(timer);
     };
-  }, [playing, next]);
+  }, [playing, next, count]);
 
   // Before paint: the full conversation opens at its start; a replay snaps to its end, so the
   // newest line always settles clear of the dock, then glides there from where the content was
@@ -700,51 +710,13 @@ export function SessionTimeline(): JSX.Element {
     setEnded(false);
   };
 
-  // Switching channels pushes the current conversation out and the next one in, like moving
-  // between screens: toward the left when the channel is further down the picker, else right.
+  // Picking a channel swaps its conversation in and plays it from its start, since picking a
+  // channel asks to see it.
   const pick = (id: string) => {
     if (id === platform) return;
-    const list = listRef.current;
-    const body = bodyRef.current;
-    if (list && body && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      leaving.current?.node.remove();
-      const node = list.cloneNode(true) as HTMLElement;
-      node.setAttribute("aria-hidden", "true");
-      node.style.position = "absolute";
-      node.style.inset = "0";
-      node.style.pointerEvents = "none";
-      body.append(node);
-      node.scrollTop = list.scrollTop;
-      const order = CONVERSATIONS.map((c) => c.id);
-      leaving.current = {
-        node,
-        direction: order.indexOf(id as Platform) > order.indexOf(platform) ? 1 : -1,
-      };
-    }
     setPlatform(id as Platform);
-    stop();
+    play();
   };
-
-  useLayoutEffect(() => {
-    const out = leaving.current;
-    const list = listRef.current;
-    if (!out || !list) return;
-    leaving.current = null;
-    const timing = { duration: 300, easing: "ease-in-out" };
-    out.node
-      .animate(
-        [{ transform: "none" }, { transform: `translateX(${-100 * out.direction}%)` }],
-        timing,
-      )
-      .finished.then(
-        () => out.node.remove(),
-        () => out.node.remove(),
-      );
-    list.animate(
-      [{ transform: `translateX(${100 * out.direction}%)` }, { transform: "none" }],
-      timing,
-    );
-  }, [platform]);
 
   return (
     // Laid out like vercel.com/sandbox's hero: the conversation in a browser window, the channel
@@ -758,7 +730,7 @@ export function SessionTimeline(): JSX.Element {
       <AppWindow className="select-none" title={conversation.label}>
         {/* The conversation fades out over the outer 40px of an edge with messages scrolled past
             it. In full it opens at its start; a replay fills from the bottom like a chat. */}
-        <div className="relative overflow-hidden" ref={bodyRef}>
+        <div className="relative overflow-hidden">
           <div
             // Contain scrolling only while there is something to scroll: Chrome 144+ applies
             // overscroll-behavior to non-overflowing scroll containers, which would trap the
@@ -778,7 +750,7 @@ export function SessionTimeline(): JSX.Element {
               // Messages only animate in during a replay, including the last one as it ends;
               // shown in full, they're simply there.
               className={cn(
-                "m-0 flex min-h-full list-none flex-col p-0 pt-2 pb-28 [&>li:first-child]:mt-auto",
+                "m-0 flex min-h-full list-none flex-col p-0 pt-2 pb-4 md:pb-28 [&>li:first-child]:mt-auto",
                 !playing && !ended && "[&_*]:animate-none [&>*]:animate-none",
               )}
               ref={contentRef}
@@ -863,10 +835,11 @@ export function SessionTimeline(): JSX.Element {
           </div>
         </div>
       </AppWindow>
-      {/* The channel picker stays open, so every conversation is one click away. */}
+      {/* The channel picker stays open, so every conversation is one click away. Below md it
+          gives way to the logo tabs beside the demo control. */}
       <div
         aria-label="Channel"
-        className="absolute -bottom-6 -left-2 z-10 flex w-60 flex-col p-1.5 material-menu md:-left-6 lg:-bottom-12 lg:-left-12"
+        className="absolute -bottom-6 -left-6 z-10 hidden w-60 flex-col p-1.5 material-menu md:flex lg:-bottom-12 lg:-left-12"
         role="radiogroup"
       >
         {CONVERSATIONS.map((c) => {
@@ -887,11 +860,38 @@ export function SessionTimeline(): JSX.Element {
           );
         })}
       </div>
-      <DemoButton
-        className="absolute top-full right-0 mt-4"
-        onClick={playing ? stop : play}
-        playing={playing}
-      />
+      <div className="absolute inset-x-0 top-full mt-4 flex items-center justify-between md:justify-end">
+        {/* On small screens the channels are just their logos, as quiet tabs. */}
+        <div aria-label="Channel" className="flex gap-1 md:hidden" role="radiogroup">
+          {CONVERSATIONS.map((c) => {
+            const selected = c.id === platform;
+            return (
+              <button
+                aria-checked={selected}
+                aria-label={c.label}
+                className={cn(
+                  "flex size-9 cursor-pointer items-center justify-center rounded-md transition-colors [&>svg]:size-4",
+                  selected
+                    ? "bg-gray-alpha-200 text-gray-1000"
+                    : "text-gray-900 hover:bg-gray-alpha-100 hover:text-gray-1000",
+                )}
+                key={c.id}
+                onClick={() => pick(c.id)}
+                role="radio"
+                type="button"
+              >
+                {c.logo("size-4")}
+              </button>
+            );
+          })}
+        </div>
+        <DemoButton
+          action={conversation.action}
+          actions={CONVERSATIONS.map((c) => c.action)}
+          onClick={playing ? stop : play}
+          playing={playing}
+        />
+      </div>
     </figure>
   );
 }

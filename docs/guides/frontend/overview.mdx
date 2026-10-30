@@ -144,7 +144,7 @@ return pendingRequests.map(({ interactionId, request }) => (
 ```
 
 - For a free-text answer, send `{ interactionId, text }`.
-- A prompt stays `open` until eve settles it, not when you submit an answer. If the answer is refused, the prompt stays answerable.
+- A prompt stays `open` until eve decides it, not when you submit an answer. If the answer is refused, the prompt stays answerable.
 - To show how a prompt ended, read its `outcome`. Only `accepted` and `declined` mean a person decided; a prompt can also end because its turn was cancelled. See [Interactions](./use-eve-agent#interactions).
 - A prompt about a tool call also appears on that call's `tool` part as `part.interaction`. Other prompts appear as `interaction` message parts.
 

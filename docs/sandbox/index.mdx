@@ -3,11 +3,33 @@ title: "Sandbox"
 description: "Configure the isolated filesystem and command environment used by an eve agent."
 ---
 
-Every eve agent has one sandbox. Its workspace root, where commands start and relative paths resolve from, is `/workspace` on every built-in provider. The built-in `bash`, `read_file`, and `write_file` tools use it. Without an authored sandbox file, eve selects the best available environment automatically.
+The sandbox is the isolated filesystem and command environment of an eve agent. Each agent has one, and the built-in `bash`, `read_file`, and `write_file` tools run in it. Define it in `agent/sandbox.ts`, or omit the file to let eve select an environment automatically.
+
+## Define an environment
+
+```text
+agent/
+├── agent.ts
+└── sandbox.ts   # or agent/sandbox/sandbox.ts when agent/sandbox/ exists
+```
+
+```ts title="agent/sandbox.ts"
+import { DefaultSandbox, defineSandbox } from "eve/sandbox";
+
+// required: `eve build` prepares this export before any session exists
+export const environment = DefaultSandbox.environment();
+// required: the selector that opens the sandbox for a session
+export default defineSandbox(() => environment.open());
+```
+
+- Put the file at `agent/sandbox/sandbox.ts` when the agent also has [workspace seeds](#managed-workspace-and-skills) or a Docker `Dockerfile` in `agent/sandbox/`. When the `agent/sandbox/` folder exists, put the definition there. A root `agent/sandbox.ts` beside that folder is a build error.
+- `environment.open()` starts the sandbox for the current session.
+- The selector runs until it succeeds once. After that, later workflow steps and process restarts resume the same sandbox without running the selector again.
+- Commands start and relative paths resolve from the workspace root, `/workspace` on every built-in provider.
 
 ## Use the sandbox
 
-Authored tools and callbacks access the live sandbox with `ctx.getSandbox()`:
+Authored tools and callbacks get the live sandbox with `ctx.getSandbox()`:
 
 ```ts title="agent/tools/run_analysis.ts"
 import { defineTool } from "eve/tools";
@@ -19,6 +41,7 @@ export default defineTool({
   async execute({ script }, ctx) {
     const sandbox = await ctx.getSandbox();
     await sandbox.writeTextFile({ path: "analysis.py", content: script });
+    // run() doesn't throw on a nonzero exit code
     const result = await sandbox.run({ command: "python analysis.py" });
     if (result.exitCode !== 0) throw new Error(result.stderr);
     return result.stdout;
@@ -26,11 +49,11 @@ export default defineTool({
 });
 ```
 
-Relative paths resolve from the workspace root, and `sandbox.resolvePath(".")` returns its absolute path. `run()` returns `{ exitCode, stdout, stderr }`; a nonzero exit code does not throw automatically. Use `spawn()` for a long-running process. Pass `stdin: true` to get a writable `stdin` stream on the process, for example to talk to a stdio server; closing it sends EOF. The Vercel and Docker sandboxes support it.
+- `run()` returns `{ exitCode, stdout, stderr }`. `sandbox.resolvePath(".")` returns the workspace root's absolute path.
+- Use `spawn()` for a long-running process. On Vercel and Docker, pass `stdin: true` to get a writable `stdin` stream, for example to talk to a stdio server. Closing the stream sends EOF.
+- Built-in environments set `AI_AGENT=eve` on every `run()` and `spawn()` call, including the `bash` tool and `prepare`. Agent-aware CLIs such as `vercel` then skip interactive prompts. To override it, set `AI_AGENT` in the environment's `env` option or in one call's `env`.
 
-Built-in environments set `AI_AGENT=eve` on every `run()` and `spawn()` call, including the `bash` tool and `prepare`, so agent-aware CLIs such as `vercel` skip interactive prompts. To use a different value, set `AI_AGENT` in the environment's `env` option or pass it in the `env` of one `run()` or `spawn()` call.
-
-Pass the configured environment to preserve its specific session capabilities in authored runtime code:
+The handle from `ctx.getSandbox()` has only the methods every provider shares. Pass the configured environment to also get provider-specific methods, such as Vercel's `setNetworkPolicy()`:
 
 ```ts
 import { environment } from "../sandbox";
@@ -39,22 +62,22 @@ const sandbox = await ctx.getSandbox(environment);
 await sandbox.setNetworkPolicy("deny-all");
 ```
 
-For example, a Vercel environment returns a handle with `setNetworkPolicy()`. The common handle from `ctx.getSandbox()` does not expose provider-specific capabilities. The environment must match the one configured for the current sandbox.
+The environment you pass must match the one configured for the current sandbox.
 
-## Define an environment
+## Providers
 
-A sandbox module exports an environment and returns a sandbox from `defineSandbox()`. Put it at `agent/sandbox.ts`, or at `agent/sandbox/sandbox.ts` when the agent also has [workspace seeds](#managed-workspace-and-skills) or a Docker `Dockerfile` in `agent/sandbox/`. When the `agent/sandbox/` folder exists, put the definition at `agent/sandbox/sandbox.ts`. Keeping `agent/sandbox.ts` beside that folder is a build error, even when the folder only contains workspace seeds or a Dockerfile.
+| Provider                             | Use it for                                                                                  |
+| ------------------------------------ | ------------------------------------------------------------------------------------------- |
+| [Default](/docs/sandbox/default)     | Vercel Sandbox on Vercel, Docker when reachable, and just-bash in development.              |
+| [Vercel](/docs/sandbox/vercel)       | Persistent Vercel Sandboxes, prepared snapshots, domain network policies, and Drive mounts. |
+| [Docker](/docs/sandbox/docker)       | Local containers from the default image, an existing OCI image, or a Dockerfile.            |
+| [just-bash](/docs/sandbox/just-bash) | A pure-JavaScript shell and virtual filesystem without native process isolation.            |
 
-```ts title="agent/sandbox.ts"
-import { DefaultSandbox, defineSandbox } from "eve/sandbox";
+`DefaultSandbox` accepts only `autoInstall` and `prepare` for just-bash. Use the [experimental options](/docs/sandbox/just-bash#experimental-options) of `JustBashSandbox.environment()` from `eve/sandbox/just-bash` for custom commands or filesystems.
 
-export const environment = DefaultSandbox.environment();
-export default defineSandbox(() => environment.open());
-```
+## Initialize a session's sandbox
 
-`environment.open()` starts the persistent sandbox owned by the current eve session. The `defineSandbox()` selector runs until initialization succeeds, then eve checkpoints the selected provider and its state. Later workflow steps and process restarts call the provider's `resume()` directly without rerunning the selector or `environment.open()`. Once a session has recorded its sandbox, eve resumes it in the background when each turn starts, so a tool that uses the sandbox waits only for whatever remains of the resume.
-
-Pass options for the live sandbox to `open()`, then configure the returned sandbox before returning it. `open()` applies its options only when it creates the sandbox. Initialization can run more than once against the same sandbox, for example when a subagent that shares the sandbox opens it before the parent does, when a [workflow step](/docs/tools/workflows#use-the-session-sandbox-in-a-step) opens it before the session records it, when the first turn of a prewarmed session opens it while prewarming is still starting it, or on the next access after an initialization that failed. Make it safe to repeat:
+Pass live sandbox options to `open()`, then configure the sandbox before you return it. `open()` applies its options only when it creates the sandbox.
 
 ```ts
 import { defineSandbox } from "eve/sandbox";
@@ -69,13 +92,18 @@ export default defineSandbox(async ({ session }) => {
 });
 ```
 
-When a client prewarms a session, for example with `useEveAgent({ prewarm: true })`, eve runs the selector before the first message arrives. `session.auth` then describes the request that created the session, and the first message's `onMessage` hook can return a different identity. Do not derive per-user sandbox options or `defineState()` values from `session.auth` in an agent whose clients prewarm sessions: eve keeps both from the prewarming run. See [prewarming](/docs/guides/frontend/use-eve-agent#prewarming) for when eve prewarms a session.
+Make initialization safe to repeat, because it can run more than once against the same sandbox:
 
-The environment export is required because `eve build` prepares immutable environment inputs before a session exists.
+- A subagent that shares the sandbox opens it before the parent does.
+- A [workflow step](/docs/tools/workflows#use-the-session-sandbox-in-a-step) opens it before the session records it.
+- The first turn of a prewarmed session opens it while prewarming is still starting it.
+- A previous initialization failed.
 
-### Prepare a reusable environment
+A [prewarmed session](/docs/guides/frontend/use-eve-agent#prewarming), for example from `useEveAgent({ prewarm: true })`, runs the selector before the first message. The selector sees `session.auth` from the request that created the session. eve keeps the sandbox options and `defineState()` values from that run, even when the first message's `onMessage` hook returns a different identity. In an agent whose clients prewarm, don't derive either from `session.auth`.
 
-Use the environment's `prepare` option for setup every new sandbox inherits:
+## Prepare a reusable environment
+
+Use the environment's `prepare` option for setup that every new sandbox inherits:
 
 ```ts
 import { defineSandbox } from "eve/sandbox";
@@ -93,19 +121,19 @@ export const environment = VercelSandbox.environment({
 export default defineSandbox(() => environment.open());
 ```
 
-eve runs `prepare` while creating a reusable provider artifact, not once for each live session sandbox. Vercel captures a snapshot; Docker captures an image; and just-bash captures a filesystem template.
+`prepare` runs once per reusable template, not once per session. The template is a Vercel snapshot, a Docker image, or a just-bash filesystem template.
 
-During `eve dev`, startup and authored-source rebuilds do not prepare sandbox environments. The first sandbox access prepares all environments in that compiled generation before opening the requested sandbox. This includes environments declared by subagents and extensions, even if they use different providers. Concurrent requests share the preparation work; a failed preparation can be retried on a later access. Optional provider installation and setup can make that first access slow.
+`eve build` prepares every environment. During `eve dev`, the first sandbox access after startup or a rebuild prepares all environments in the build, including those of subagents and extensions. That access can be slow, and a later access retries a failed preparation.
 
-`eve build` still prepares environments eagerly. In production, eve passes the recorded artifact directly to the provider when it creates a live sandbox. Production runtime does not rebuild or repair a missing artifact. A missing image, snapshot, or template fails with rebuild or redeploy guidance. [Sandbox troubleshooting](/docs/sandbox/troubleshooting) lists these errors with their causes and fixes.
+Production creates sandboxes only from the templates the build recorded, and never rebuilds a missing one. A missing image, snapshot, or template fails with rebuild or redeploy guidance; see [Sandbox troubleshooting](/docs/sandbox/troubleshooting).
 
-### Reuse native resources across sessions
+## Reuse native resources across sessions
 
-Built-in environments do not expose cross-session sharing. To reuse native compute or storage across eve sessions, define a [custom provider](/docs/sandbox/custom-providers) whose connection is a session-owned logical sandbox view and that keeps shared resources outside the connection's `stop()` and the provider's `onSessionEnd()`. A session-specific path is not an isolation boundary; mutually untrusted sessions require separate native compute or stronger provider-owned isolation.
+Built-in environments don't share sandboxes across sessions. To reuse native compute or storage, define a [custom provider](/docs/sandbox/custom-providers) that gives each session its own view of the shared resources. Keep the shared resources out of its `stop()` and `onSessionEnd()`. A session-specific path is not an isolation boundary, so sessions that don't trust each other need separate native compute or stronger isolation from the provider.
 
-### Share a parent sandbox
+## Share a parent sandbox
 
-A declared subagent can use its dispatching parent's sandbox explicitly:
+A declared subagent can use the sandbox of the parent that called it:
 
 ```ts title="agent/subagents/reviewer/sandbox.ts"
 import { defineParentSandbox } from "eve/sandbox";
@@ -113,13 +141,14 @@ import { defineParentSandbox } from "eve/sandbox";
 export default defineParentSandbox();
 ```
 
-An inheriting subagent cannot declare its own managed workspace or skill files.
-
-The parent and every subagent that shares its sandbox, including children of the built-in `agent` tool, use one sandbox keyed by the parent's session. Whichever session opens it first runs the parent's `defineSandbox()` selector to create it. When the parent session ends, eve deletes the sandbox, even one that only a subagent opened.
+- The parent and every subagent that shares its sandbox, including children of the built-in `agent` tool, use one sandbox that belongs to the parent's session.
+- Whichever agent opens the sandbox first runs the parent's selector.
+- eve deletes the sandbox when the parent session ends, even if only a subagent opened it.
+- A subagent that shares its parent's sandbox can't declare its own managed workspace or skill files.
 
 ## Managed workspace and skills
 
-Use the sandbox directory for authored workspace seeds:
+Put workspace seed files in the sandbox directory:
 
 ```text
 agent/sandbox/
@@ -128,61 +157,64 @@ agent/sandbox/
     schema.sql
 ```
 
-Files under `agent/sandbox/workspace/` seed writable `/workspace`. eve copies the seed into the prepared environment when it prepares a new environment generation, and each new session sandbox starts from that copy. Existing live sandbox state is not overwritten by later seed changes.
+Files under `agent/sandbox/workspace/` seed writable `/workspace`. Each new session sandbox starts with a copy of them. Later changes to the seeds don't overwrite existing sandboxes.
 
-Agent skills are compiled into a separate resource tree and exposed at `$HOME/.agents/skills`. These are stable paths across every built-in provider, so instructions and tools can refer to `/workspace` and `$HOME/.agents/skills`. A [custom provider](/docs/sandbox/custom-providers) can declare a different workspace root, so prefer relative paths in code that runs on any provider. eve resolves `$HOME` by reading it inside the sandbox; when a sandbox has no usable home directory, skill paths fall back to `skills/` under the workspace root. Do not refer to a concrete home directory or `/eve/resources`, which is provider-internal staging.
+Agent skills appear at `$HOME/.agents/skills`, or at `skills/` under the workspace root when the sandbox has no usable home directory. Instructions and tools can refer to `/workspace` and `$HOME/.agents/skills` on every built-in provider. Don't refer to a concrete home directory or to `/eve/resources`, which is internal to providers.
 
-Docker mounts the compiled trees read-only under `/eve/resources` and copies them into place. Vercel Sandbox writes workspace and skill files into the build sandbox before capturing its snapshot. A custom provider seeds both trees with `ctx.populate()` when it prepares a template; see [Bake files into templates](/docs/sandbox/custom-providers#bake-files-into-templates).
+A [custom provider](/docs/sandbox/custom-providers#bake-files-into-templates) can declare a different workspace root, so prefer relative paths in code that runs on any provider.
 
 ## Inbound attachments
 
-eve writes byte-backed files that reach the agent into the sandbox under `.eve/attachments/` in the workspace root (`/workspace/.eve/attachments/` on built-in providers) and keeps only a reference in session history. This covers files attached to user messages and files that tools return to the model with `toolOutputPart.file` or as MCP image, audio, and blob content.
+eve copies files that reach the agent into `.eve/attachments/` in the workspace root, which is `/workspace/.eve/attachments/` on built-in providers. Session history keeps only a reference to each file. This covers:
 
-Files that tools return by URL with `toolOutputPart.fileUrl` are not staged: the model provider reads the URL directly. See [Send a file by URL](/docs/tools#send-a-file-by-url).
+- Files attached to user messages.
+- Files that tools return with `toolOutputPart.file`.
+- MCP image, audio, and blob content.
 
-Every file, whether attached to a message or returned by a tool, reaches the model on every call with a label that names its sandbox path, such as `Attached file /workspace/.eve/attachments/<hash>/report.csv (text/csv)`. The agent can open that path with `read_file` or `bash`. The file's bytes follow its label only when every major provider reads the format natively:
+Files returned by URL with `toolOutputPart.fileUrl` aren't copied, because the model provider reads the URL directly; see [Send a file by URL](/docs/tools#send-a-file-by-url).
+
+Every copied file reaches the model on every call with a label that names its sandbox path, such as `Attached file /workspace/.eve/attachments/<hash>/report.csv (text/csv)`. The agent can open that path with `read_file` or `bash`. The file's bytes follow the label only for formats every major provider reads natively:
 
 - A PNG, JPEG, GIF, or WebP image up to 3 MiB and at most 8000 pixels per side.
 - A PDF up to 20 MiB.
 
-Other files, such as CSV, HEIC, audio, and video, reach the model as the label alone. eve checks image and PDF media types against the file's bytes when it stages the file. A file whose bytes don't match its declared image or PDF type is staged as `application/octet-stream`, so a provider never receives bytes it would reject.
+Other files, such as CSV, HEIC, audio, and video, reach the model as the label alone. An image or PDF whose bytes don't match its declared type is stored as `application/octet-stream`, so a provider never receives bytes it would reject.
 
-To let the agent answer voice notes and other audio, add a tool that transcribes the staged file. See [Voice notes](/docs/patterns/voice-notes).
+To let the agent answer voice notes and other audio, add a tool that transcribes the copied file. See [Voice notes](/docs/patterns/voice-notes).
 
-eve keeps the bytes of recent images and PDFs it staged or read for a session in memory, so preparing a model call's attachments resumes the sandbox only when it needs bytes that eve doesn't already hold. If a file read back from the sandbox is missing, or its bytes no longer match what eve staged because something in the sandbox overwrote it, the model receives a `FileNotFound` note in its place.
+| What happens                                                           | What the model receives            |
+| ---------------------------------------------------------------------- | ---------------------------------- |
+| The copied file is missing from the sandbox, or something overwrote it | A `FileNotFound` note in its place |
+| A channel's `fetchFile` fails                                          | A note that names the file         |
+| A file part's `data` is not bytes, base64, a `data:` URL, or a URL     | A note that names the file         |
 
-A file that eve can't stage never enters session history. When a channel's `fetchFile` fails, or a file part's `data` is not bytes, base64, a `data:` URL, or a URL, the model receives a note that names the file instead.
+In the last two cases, the file never enters session history.
 
-Each call sends the same bytes for the same file, so the model still sees attachments from earlier turns and the provider's prompt cache stays valid. Compaction replaces files in older tool results with their text reference. The `read_file` tool shows the same images and PDFs to the model as files, so the agent can look at an attachment again after compaction, or open a PDF that a tool or `bash` wrote to the sandbox.
+The model keeps seeing attachments from earlier turns. Each call sends the same bytes, so the provider's prompt cache stays valid. Compaction replaces files in older tool results with their text reference. `read_file` returns images and PDFs to the model as files. The agent can use it to reopen an attachment after compaction, or to view a PDF that `bash` wrote.
 
 ## Custom providers
 
-To run sandboxes on a backend eve does not ship, define a provider with `defineSandboxProvider()` from `eve/sandbox/provider`. A provider implements a byte-level connection to one sandbox (`spawn`, `readFile`, `writeFiles`, `removePath`, and `stop`) and a lifecycle of `prepare`, `start`, `resume`, and `onSessionEnd`. eve derives the full sandbox session from the connection, seeds workspace and skill files into the provider's templates during `eve build`, and maps `sandbox.stop()`, `sandbox.delete()`, and server shutdown onto the lifecycle. [Custom sandbox providers](/docs/sandbox/custom-providers) has a complete example and the full contract.
-
-## Providers
-
-| Provider                             | Use it for                                                                                  |
-| ------------------------------------ | ------------------------------------------------------------------------------------------- |
-| [Default](/docs/sandbox/default)     | Vercel Sandbox on Vercel, Docker when reachable, and just-bash in development.              |
-| [Vercel](/docs/sandbox/vercel)       | Persistent Vercel Sandboxes, prepared snapshots, domain network policies, and Drive mounts. |
-| [Docker](/docs/sandbox/docker)       | Local containers from the default image, an existing OCI image, or a Dockerfile.            |
-| [just-bash](/docs/sandbox/just-bash) | A pure-JavaScript shell and virtual filesystem without native process isolation.            |
-
-For SDK-specific just-bash commands or filesystem factories, use the experimental options of
-`JustBashSandbox.environment()` from `eve/sandbox/just-bash`. `DefaultSandbox` keeps only
-`autoInstall` and `prepare` for its just-bash fallback.
+To run sandboxes on a backend eve doesn't ship, define a provider with `defineSandboxProvider()` from `eve/sandbox/provider`. It implements a connection to one sandbox (`spawn`, `readFile`, `writeFiles`, `removePath`, and `stop`) and the methods `prepare`, `start`, `resume`, and `onSessionEnd`. See [Custom sandbox providers](/docs/sandbox/custom-providers) for a complete example.
 
 ## Lifecycle
 
-Session-owned sandboxes persist across turns and deployments while their provider state remains available. `sandbox.stop()` stops compute without deleting persisted state; a later access resumes that state directly. `sandbox.delete()` deletes the sandbox and clears provider state, so the next `ctx.getSandbox()` reruns the selector, and the provider starts a fresh sandbox under the same session key from the current environment. If the native sandbox is gone when a session resumes, for example after a local daemon restart, a removed container, or a deleted just-bash session directory, eve does the same: the session continues in a fresh sandbox, without the lost sandbox's files. eve also starts a fresh sandbox when the recorded state belongs to another provider or state protocol than the current environment, for example after you change providers; the old sandbox is not deleted. When the durable session reaches a terminal outcome, eve calls the provider's `onSessionEnd()` hook to delete what remains under the session's key.
+Each session's sandbox persists across turns and deployments while the provider still has it.
 
-Before that cleanup, session end ends the session's task runs, and each run ends the subagent sessions it opened. eve does not wait for those subagents to stop. A subagent step that is still running at that moment can open the sandbox again after cleanup, and eve does not remove a sandbox created that late.
+| Event                                                                                                          | Result                                                                                                          |
+| -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `sandbox.stop()`                                                                                               | Compute stops and files persist. The next access resumes it.                                                    |
+| `sandbox.delete()`                                                                                             | The sandbox and its files are deleted. The next `ctx.getSandbox()` runs the selector again for a fresh sandbox. |
+| The native sandbox is gone on resume, such as after a removed container or deleted just-bash session directory | The session continues in a fresh sandbox, without the lost files.                                               |
+| The session's sandbox came from another provider or state version, such as after you change providers          | The session continues in a fresh sandbox. eve doesn't delete the old one.                                       |
+| The session ends                                                                                               | eve calls the provider's `onSessionEnd()` to delete the session's remaining sandbox.                            |
 
-Changing sandbox source, preparation code, Dockerfile content, environment options, workspace resources, or skills produces a new environment generation. Existing durable sessions keep their sandbox, because its identity comes from the session key alone; new sessions use the current generation.
+Session end doesn't wait for running subagent steps to stop. A subagent step still running at that moment can reopen the sandbox after cleanup, and eve doesn't remove a sandbox created that late.
+
+New sessions get a new environment when you change the sandbox source, `prepare` code, Dockerfile, environment options, workspace seeds, or skills. Existing sessions keep their sandbox.
 
 ## What to read next
 
 - [Sandbox troubleshooting](/docs/sandbox/troubleshooting) explains common sandbox errors and how to fix them.
-- [Subagents](/docs/subagents) explains delegation and sandbox ownership.
+- [Subagents](/docs/subagents) explains delegation and which agent's session a sandbox belongs to.
 - [Security model](/docs/concepts/security-model) describes the app-runtime and sandbox trust boundary.
 - [Vercel Sandbox](https://vercel.com/docs/sandbox) documents hosted sandbox behavior.

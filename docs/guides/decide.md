@@ -3,21 +3,14 @@ title: Automatic Model Selection
 description: "Choose agent models automatically or ask typed questions in your tools and application code."
 ---
 
-Use `auto` from `eve/models` to choose an agent model from an allowlist before
-inference begins. It uses the [AI SDK decision API](https://ai-sdk.dev/docs/ai-sdk-core/decisions),
-so the decider can be a Vercel AI Gateway model ID or a decision model from
-an installed provider. Use `decide` from `eve/ai` to ask typed questions in
-your own tools or application code.
+`auto` from `eve/models` chooses an agent model from an allowlist before each turn's inference. `decide` from `eve/ai` asks typed questions in your own tools or application code. Both use the [AI SDK decision API](https://ai-sdk.dev/docs/ai-sdk-core/decisions). The decider can be a Vercel AI Gateway model ID or a decision model from an installed provider.
 
 The AI SDK decision model specification is experimental and can change in
 patch releases.
 
 ## Choose from Gateway models
 
-By default, `auto` decides with `typesafe-ai/jev`, TypeSafe AI's
-[Jev decision model](https://vercel.com/i/what-is-jev). Like other AI SDK
-model strings, it uses Vercel AI Gateway unless the application has configured a
-different global default provider.
+Omit `model` to decide with `typesafe-ai/jev`, TypeSafe AI's [Jev decision model](https://vercel.com/i/what-is-jev). Like other AI SDK model strings, it resolves through Vercel AI Gateway unless the application configures a different global default provider.
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -33,17 +26,9 @@ export default defineAgent({
 });
 ```
 
-Configure Gateway authentication as you would for any other AI SDK model. eve
-does not add a TypeSafe credential or transport layer. During `eve dev`, a
-Gateway decider uses the same connection selected through `/login` as Gateway
-language models. A configured AI SDK default provider still owns string model
-resolution during development. The TUI footer displays `dynamic model` when the
-agent uses `auto`, then adds the resolved model for the current turn, such as
-`dynamic model · openai/gpt-6-luna`.
+Configure Gateway authentication as for any other AI SDK model; there is no separate TypeSafe credential. During `eve dev`, a Gateway decider uses the connection selected through `/login`, unless a configured AI SDK default provider resolves string models. The TUI footer shows `dynamic model` and then the turn's resolved model, such as `dynamic model · openai/gpt-6-luna`.
 
-Set `fallback` to keep the turn running when the decider is unavailable or
-returns an error. The fallback can be a Gateway model ID, an AI SDK language
-model instance, or an object with `model` and a `reasoning` override:
+Set `fallback` to keep the turn running when the decider is unavailable or returns an error. The fallback can be a Gateway model ID, an AI SDK language model instance, or an object with `model` and a `reasoning` override:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -60,16 +45,11 @@ export default defineAgent({
 });
 ```
 
-The fallback applies only to decider failures. eve logs a warning with the
-decider error and fallback identity when it switches models. Invalid prompts,
-including requests without user text or with a latest message over the routing
-limit, still fail before decider I/O. Cancelling the turn also aborts routing
-instead of selecting the fallback.
+The fallback applies only to decider failures. When eve switches, it logs a warning with the decider error and the fallback model. Invalid prompts and cancelled turns don't use the fallback; see [Runtime behavior](#runtime-behavior).
 
 ## Use a provider directly
 
-Install the provider package yourself and pass its decision model. The provider
-owns its credentials and settings.
+Install the provider package and pass its decision model. The provider owns its credentials and settings.
 
 ```sh
 pnpm add @ai-sdk/typesafe-ai
@@ -91,14 +71,11 @@ export default defineAgent({
 });
 ```
 
-Any provider that implements the AI SDK `Experimental_DecisionModel` contract
-works here.
+Any provider that implements the AI SDK `Experimental_DecisionModel` contract works.
 
 ## Route to provider models and set reasoning
 
-An option's key is the value shown to the decider. A string value describes a
-Gateway model whose ID is the key. Use the object form when the selected model is
-a provider instance, an alias, or needs a reasoning override.
+The decider sees each option's key. A string value describes the Gateway model whose ID is the key. Use the object form for a provider instance, an alias, or a reasoning override.
 
 ```ts title="agent/agent.ts"
 import { anthropic } from "@ai-sdk/anthropic";
@@ -120,22 +97,13 @@ export default defineAgent({
 });
 ```
 
-The decider sees option keys, descriptions, and recent text messages. It never
-receives provider credentials or serialized language model instances. When it
-selects `my_secret_model`, eve resolves the key back to the authored Anthropic
-model.
+The decider sees option keys, descriptions, and recent text messages, never provider credentials or model instances. When it selects `my_secret_model`, eve resolves the key back to the authored Anthropic model.
 
-Supported reasoning values are `"provider-default"`, `"none"`, `"minimal"`,
-`"low"`, `"medium"`, `"high"`, and `"xhigh"`. An omitted value inherits the
-agent's reasoning setting.
+Supported reasoning values are `"provider-default"`, `"none"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, and `"xhigh"`. Omit `reasoning` to inherit the agent's reasoning setting.
 
 ## Decide inside a tool
 
-Use `decide` to ask choice, score, or boolean questions about the state you pass to it.
-It defaults to `typesafe-ai/jev` and uses the same authentication as `auto`,
-including the Gateway connection selected through `/login` during `eve dev`.
-Pass `model` to use another decision model ID or a provider instance. A configured
-AI SDK default provider takes precedence over the local Gateway connection.
+`decide` asks choice, score, or boolean questions about the state you pass it. It defaults to `typesafe-ai/jev` with the same authentication as `auto`. Pass `model` to use another decision model ID or a provider instance.
 
 ```ts title="agent/tools/classify-request.ts"
 import { decide } from "eve/ai";
@@ -165,33 +133,21 @@ export default defineTool({
 });
 ```
 
-The choice above is typed as `"billing" | "support"`. Each question appears under
-its authored key in `result.answers`. Results also include normalized token usage in `usage`.
-To use that choice to delegate while keeping specialist subagents out of the parent model's tools, see [Route to a hidden subagent with Jev](/docs/tools/workflows#route-to-a-hidden-subagent-with-jev).
+The choice above is typed as `"billing" | "support"`. Each answer appears under its question's key in `result.answers`, and `usage` holds normalized token usage. To use that choice to delegate while keeping specialist subagents out of the parent model's tools, see [Route to a hidden subagent with Jev](/docs/tools/workflows#route-to-a-hidden-subagent-with-jev).
 
-`decide` accepts `model`, `state`, `questions`, `maxRetries`, and `signal`.
-Pass `signal: ctx.abortSignal` to cancel the request. Import `DecisionModel`, `DecisionState`,
-`DecisionStatePart`, `DecisionInput`, `DecisionQuestion`, `DecisionAnswer`, `DecisionOptions`,
-and `DecisionResult` from `eve/ai` to annotate reusable configs and handlers.
-Model instances must implement decision model specification `v4`, the version AI SDK 7 supports;
-a matching `provider`, `modelId`, and `specificationVersion` alone is not an implementation.
-If the installed `ai` package does not export a decision API, `decide` throws an error naming the
-missing export. Input and answer validation, retries, and provider errors follow AI SDK semantics.
+`decide` accepts `model`, `state`, `questions`, `maxRetries`, and `signal`; pass `signal: ctx.abortSignal` to cancel with the tool call. Import `DecisionModel`, `DecisionState`, `DecisionStatePart`, `DecisionInput`, `DecisionQuestion`, `DecisionAnswer`, `DecisionOptions`, and `DecisionResult` from `eve/ai` to type reusable configs and handlers.
 
-You can also call `decide` outside a tool; it does not require an active eve
-session. Each call performs its own decision. `auto` uses this function
-and adds the per-turn routing behavior described below.
+A model instance must implement decision model specification `v4`, the version AI SDK 7 supports. A matching `provider`, `modelId`, and `specificationVersion` alone is not enough. If the installed `ai` package does not export a decision API, `decide` throws an error that names the missing export. Validation, retries, and provider errors follow AI SDK semantics.
+
+`decide` also works outside a tool and doesn't need an active eve session.
 
 ## Judge eval results
 
-Eval authors can use `t.judge(...)` to turn decision answers into scored assertions, including batches of questions sharing one state. It uses this same `decide` implementation and default model. See [Judge](../evals/judge) for criteria, rubrics, and thresholds.
+Eval authors can use `t.judge(...)` to turn decision answers into scored assertions, including batches of questions sharing one state. It uses `decide` and its default model. See [Judge](../evals/judge) for criteria, rubrics, and thresholds.
 
 ## Decide tool approvals
 
-Use `auto({ model? })` when a decision model should decide whether a
-tool call can run automatically or needs human approval. It accepts the same
-AI SDK decision model strings and provider instances described above and
-defaults to `typesafe-ai/jev`:
+`auto({ model? })` from `eve/tools/approval` lets a decision model decide whether a tool call runs automatically or needs human approval. It accepts the same decision model strings and provider instances and defaults to `typesafe-ai/jev`:
 
 ```ts title="agent/tools/deploy.ts"
 import { defineTool } from "eve/tools";
@@ -206,8 +162,7 @@ export default defineTool({
 });
 ```
 
-The decision model reviews the tool name and input for dangerous effects. A
-caution, failed review, or incomplete input requires human approval. See
+The decision model reviews the tool name and input for dangerous effects. A caution, failed review, or incomplete input requires human approval. See
 [Human-in-the-loop approvals](/docs/human-in-the-loop#approvals) for classifier
 options and data handling, and the
 [Auto-approve tool calls with Jev](https://vercel.com/kb/guide/auto-approve-tool-calls-eve-jev)
@@ -215,18 +170,8 @@ guide for an end-to-end walkthrough.
 
 ## Runtime behavior
 
-`auto` decides before the first model call of each turn, after the incoming
-prompt is available and before the selected language model runs. eve keeps the
-choice in the session and reuses it for the turn's later model calls, including
-in a fresh process, without deciding again. A new turn makes a new choice, and
-child sessions route from their own prompts.
+`auto` decides once per turn, before the first model call. The choice holds for the turn's later model calls, including in a fresh process. A new turn makes a new choice, and child sessions route from their own prompts.
 
-The decider receives up to eight recent user and assistant text messages,
-capped at 16,000 characters. Requests without user text and latest messages over
-the limit fail before provider I/O.
+The decider receives up to eight recent user and assistant text messages, capped at 16,000 characters. A request without user text, or with a latest message over the limit, fails before provider I/O.
 
-Decision validation, retries, provider errors, and model resolution follow AI
-SDK semantics. Without `fallback`, a decider error fails the turn. With
-`fallback`, eve uses and retains that model for the rest of the turn. Cancelling
-the active turn aborts decision and prevents a routed or fallback choice from
-being retained.
+Without `fallback`, a decider error fails the turn; with it, eve uses the fallback model for the rest of the turn. Cancelling the turn aborts the decision and keeps no routed or fallback choice. Validation, retries, provider errors, and model resolution follow AI SDK semantics.

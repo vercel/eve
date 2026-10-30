@@ -3,7 +3,7 @@ title: "Agent Files"
 description: "Look up agent directory slots, path-derived names, subagent files, and filesystem discovery rules."
 ---
 
-eve builds an agent from files under its agent directory. Each supported path determines how eve loads the file. For recommended project layouts and when to split agents, read [Project Structure](/docs/concepts/project-structure).
+eve builds an agent from files in its agent directory, and each file's path determines how eve loads it. For recommended project layouts and when to split agents, read [Project Structure](/docs/concepts/project-structure).
 
 ## Agent directory layout
 
@@ -27,11 +27,11 @@ agent/
 └── subagents/
 ```
 
-Add only the files you need. Framework defaults use the same slots, so a file at the same path replaces the default when eve compiles the agent. Evals live beside `agent/`, not inside it.
+Add only the files you need. A file replaces the framework default at the same path. Evals live beside `agent/`, not inside it.
 
 ## Naming from paths
 
-eve derives capability names from file paths:
+eve derives names from file paths:
 
 | Path                                  | Resolves to           |
 | ------------------------------------- | --------------------- |
@@ -53,9 +53,9 @@ Paths below are relative to the agent directory. Root agents can use every path;
 | `instrumentation/`                                      | Telemetry providers and destinations      | No                     | One path-named provider per file. See [Instrumentation](/docs/observability/instrumentation).                                                                 |
 | `channels/`                                             | HTTP and messaging entry points           | No                     | See [Channels](/docs/channels/overview).                                                                                                                      |
 | `connections/`                                          | External MCP and OpenAPI services         | Yes                    | Static files define path-named connections; dynamic sources can resolve caller-specific connections.                                                          |
-| `extensions/`                                           | Mounted reusable capabilities             | Yes                    | File or directory mounts. See [Extensions](/docs/extensions).                                                                                                 |
-| `hooks/`                                                | Lifecycle and stream-event subscribers    | Yes                    | Module-backed only; recursive directories are supported.                                                                                                      |
-| `skills/`                                               | On-demand procedures and capability packs | Yes                    | Flat Markdown, module-backed skills, or packaged skills.                                                                                                      |
+| `extensions/`                                           | Mounted extension packages                | Yes                    | File or directory mounts. See [Extensions](/docs/extensions).                                                                                                 |
+| `hooks/`                                                | Handlers for session stream events        | Yes                    | Module-backed only; recursive directories are supported.                                                                                                      |
+| `skills/`                                               | On-demand procedures and supporting files | Yes                    | Flat Markdown, module-backed skills, or packaged skills.                                                                                                      |
 | `lib/`                                                  | Shared authored helper code               | Yes                    | Import-only; not copied into the sandbox. Helpers can import data files such as JSON from here.                                                               |
 | `memory.ts` or `memory/<name>.ts`                       | Cross-session memory                      | Yes                    | Provider-backed slots. See [Memory](/docs/memory).                                                                                                            |
 | `sandbox.ts` or `sandbox/sandbox.ts`                    | The agent's sandbox                       | Yes                    | The framework default applies when neither is authored. When `sandbox/` exists, use `sandbox/sandbox.ts`; a root `sandbox.ts` beside that folder is an error. |

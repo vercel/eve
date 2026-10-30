@@ -4,11 +4,10 @@ description: "Implement the recall, capture, and tools contract so any store or 
 ---
 
 A memory provider is an object with a `recall` handler and optional `capture`
-and `tools` handlers. eve calls those handlers at fixed points in the agent
-lifecycle and passes each one a locked scope key, the projected conversation,
-and a stable operation ID. Anything that can read and write under that key can
-be a provider. Package one as a library that exports a provider factory, or
-write one directly inside an agent.
+and `tools` handlers. eve calls the handlers at fixed points in each turn. Each
+handler receives the slot's scope key, the conversation, and an operation ID
+that stays the same when eve runs the handler again. Package a provider as a
+library that exports a factory, or write one inside an agent.
 
 ```ts title="agent/lib/notes-memory.ts"
 import { defineMemoryProvider } from "eve/memory";
@@ -74,15 +73,14 @@ prepended to its description.
 
 ## The provider contract
 
-`defineMemoryProvider()` accepts three surfaces. Omit any handler the provider
-does not need; `fileMemory()`, for example, implements recall and tools but no
-capture.
+`defineMemoryProvider()` accepts three surfaces. Omit any optional handler the
+provider doesn't need; `fileMemory()`, for example, has no capture.
 
-| Surface   | Handlers                                     | Responsibility                                           |
-| --------- | -------------------------------------------- | -------------------------------------------------------- |
-| `recall`  | `"turn.started"` (required)                  | Return messages to place in model context                |
-| `capture` | `"turn.completed"`, `"compaction.requested"` | Observe settled history and write to the store           |
-| `tools`   | one function                                 | Return model-facing operations bound to the locked scope |
+| Surface   | Handlers                                     | Responsibility                                        |
+| --------- | -------------------------------------------- | ----------------------------------------------------- |
+| `recall`  | `"turn.started"` (required)                  | Return messages to place in model context             |
+| `capture` | `"turn.completed"`, `"compaction.requested"` | Read the finished conversation and write to the store |
+| `tools`   | one function                                 | Return tools for the model, bound to the slot's scope |
 
 ### Operation context
 
@@ -94,7 +92,7 @@ Every handler receives a `MemoryOperationContext`:
 | `memory.scope.namespace` | The resolved namespace string                                                                              |
 | `memory.scope.value`     | The resolved scope string or tuple                                                                         |
 | `memory.slot`            | The path-derived slot name                                                                                 |
-| `messages`               | Projected conversation history for this phase                                                              |
+| `messages`               | Conversation history for this phase                                                                        |
 | `operationId`            | Stable per session, turn, step, phase, and slot. Use it as an idempotency key.                             |
 | `abortSignal`            | Cancellation for the operation                                                                             |
 | `session`                | Session ID, authentication, and other `SessionContext` fields                                              |
@@ -125,13 +123,12 @@ return {
 };
 ```
 
-eve adds each message to the model calls as a user-role message attributed to
-the slot. Provider content is never promoted to system instructions.
+eve adds each message to model calls as a user-role message attributed to the
+slot, never as system instructions.
 
-What a turn recalls stays for the rest of the session: each turn's recall sits
-just before that turn's input in every later model call, so the prompt prefix
-stays cached. The `id` decides what a later recall
-does with it:
+What a turn recalls stays for the rest of the session, just before that turn's
+input in every later model call. The `id` decides what a later recall does with
+it:
 
 | Message           | Effect                                                                                                                      |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
@@ -140,47 +137,44 @@ does with it:
 
 A result of `null`, `undefined`, or `{ messages: [] }` adds nothing and keeps
 what earlier turns recalled. Give every message a stable `id` when the provider
-returns its current state each turn, as `fileMemory()` does: without one, each
-turn adds another copy. Retrieval that returns different records each turn
-accumulates them for the session, and they count toward every model call's
-context. The `id` also identifies the record in
+returns its current state each turn, as `fileMemory()` does, or each turn adds
+another copy. Records that differ each turn accumulate for the session and
+count toward every model call's context. The `id` also identifies the record in
 [instrumentation](../observability/instrumentation).
 
 ### Tools
 
 `tools()` returns a `MemoryToolSet`, a map of `defineTool()` values, or `null`. eve qualifies each
-key as `<slot>__<key>`; the qualified name must start with a letter, contain
-only letters, digits, underscores, or dashes, and be at most 64 characters.
+key as `<slot>__<key>`. The qualified name must start with a letter, use only
+letters, digits, underscores, or dashes, and be at most 64 characters.
 Schemas, `approval`, `outputSchema`, and `toModelOutput` work as they do for
 authored tools.
 
-A tool closes over the locked scope, so it cannot be redirected to another
-tenant or caller by the model. Like recall, eve resolves the scope once per
-turn and principal and keeps it for that turn, so the tools and recall use the
-same scope. A new turn or principal resolves it again. A fresh process in the
-same turn, after a restart, calls `tools()` again with the kept scope rather
-than resolving it again.
+A tool keeps the scope it was created with, so the model can't point it at
+another tenant or caller. eve resolves the scope once per turn and caller, so
+tools and recall use the same scope. A new turn or a new caller resolves it
+again. After a restart within the same turn, eve calls `tools()` again with the
+same scope.
 
 ## Lifecycle
 
 | Phase                  | Handler                           | `messages` contains                                                           |
 | ---------------------- | --------------------------------- | ----------------------------------------------------------------------------- |
 | `turn.started`         | `recall["turn.started"]`          | The conversation the turn's first model call reads, with the turn's new input |
-| `turn.completed`       | `capture["turn.completed"]`       | Settled history after a successful turn                                       |
+| `turn.completed`       | `capture["turn.completed"]`       | The finished history after a successful turn                                  |
 | `compaction.requested` | `capture["compaction.requested"]` | The history compaction is about to rewrite                                    |
 
 eve recalls before the first model call of each turn, and again when the
-session's principal changes. Recalled messages stay outside history, so
+session's caller changes. Recalled messages stay outside history, so
 compaction never summarizes them. When compaction summarizes a turn, that
 turn's recalled messages move to just after the summary.
 
-Before automatic or requested compaction rewrites history, eve calls
-`capture["compaction.requested"]` with the history it is about to rewrite, so a
-provider can keep detail the summary will lose. The summary waits for it.
+Before compaction rewrites history, eve calls `capture["compaction.requested"]`
+and waits for it, so a provider can keep detail the summary will lose.
 
-Calling `clear()` on a session removes its history and what earlier turns
-recalled. It does not touch the provider's store; the next turn recalls again.
-A new scope, such as another principal's, also starts over.
+Calling `clear()` on a session removes its history and recalled messages but
+not the provider's store, so the next turn recalls again. A new scope, such as
+another caller's, also starts over.
 
 ## Failure behavior
 
@@ -225,5 +219,5 @@ provider:
 
 - [Memory overview](/docs/memory): slots, scope, and namespace.
 - [File memory](./file): the built-in provider as a reference implementation.
-- [Dynamic capabilities](../guides/dynamic-capabilities): how eve evaluates the dynamic tools provider tools run through.
+- [Dynamic capabilities](../guides/dynamic-capabilities): provider tools run as dynamic tools; see how eve evaluates them.
 - [Default harness](../concepts/default-harness): compaction in the built-in loop.

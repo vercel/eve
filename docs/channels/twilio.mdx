@@ -4,7 +4,7 @@ description: "Reach your agent over SMS and speech-transcribed phone calls with 
 type: integration
 ---
 
-The Twilio channel puts your agent on a phone number, so people can text it or call it. Inbound SMS arrives as a webhook. Inbound calls are answered with TwiML `<Gather input="speech">`, and the resulting transcript feeds the same eve session that SMS uses, so a caller and a texter look identical downstream. Every request is checked against `X-Twilio-Signature` before anything else runs. The raw continuation token is `From:To`. See [Channels](./overview) for the contract this builds on.
+The Twilio channel puts your agent on a phone number that people can text or call. It lives in `agent/channels/twilio.ts`. eve answers calls with TwiML `<Gather input="speech">`. The transcript joins the same eve session as SMS from that number, keyed by `From:To`. eve checks `X-Twilio-Signature` on every request first. See [Channels](./overview) for what every channel shares.
 
 ## Add the channel
 
@@ -22,25 +22,25 @@ TWILIO_ACCOUNT_SID=AC...   # required for default outbound SMS
 TWILIO_AUTH_TOKEN=...      # required for inbound signature verification
 ```
 
-To skip env vars, pass the same values via `credentials: { accountSid, authToken }`. The channel mounts three routes:
+Or pass them as `credentials: { accountSid, authToken }`. The channel mounts three routes:
 
 - `POST /eve/v1/twilio/messages`: Messaging webhook
 - `POST /eve/v1/twilio/voice`: inbound call webhook
 - `POST /eve/v1/twilio/voice/transcription`: speech transcript callback
 
-Point your Twilio number's Messaging webhook at `/messages` and Voice webhook at `/voice`, using the exact public URL Twilio will call.
+Point your Twilio number's Messaging webhook at `/messages` and Voice webhook at `/voice`, using the exact public URL Twilio calls.
 
 ## How the channel handles messages
 
 ### Dispatch
 
-`allowFrom` is required. It gates who can reach the inbound hooks. Pass a single number, a list, an async resolver, or `"*"`. The wildcard is dangerous; only use it with an explicit check inside `onText`/`onVoice`.
+`allowFrom` is required and decides which phone numbers reach `onText`, `onVoice`, and `onVoiceTranscription`. Pass a number, a list, an async resolver, or `"*"`. The wildcard admits any caller, so use it only with an explicit check in `onText` and `onVoice`.
 
 ```ts
 export default twilioChannel({ allowFrom: ["+15551234567", "+15557654321"] });
 ```
 
-`onText` and `onVoiceTranscription` decide dispatch and `auth`. Return `{ auth }` to proceed, `null` to drop the message, or `title` alongside `auth` to set the title when the dispatch starts a run. `onVoice` fires the moment a call comes in. Return `null` to reject it, or return an object to override the spoken prompt, language, `<Say voice>`, and speech-recognition options.
+`onText` and `onVoiceTranscription` decide whether a message runs the agent, and as whom. Return `{ auth }` to run it, optionally with `title` to set the run title, or `null` to ignore the message. `onVoice` fires when a call comes in. Return `null` to reject it, or an object to override the spoken prompt, language, `<Say voice>`, and speech-recognition options.
 
 ```ts
 export default twilioChannel({
@@ -58,27 +58,27 @@ export default twilioChannel({
 
 ### Delivery
 
-The default `content.completed` handler sends each reply part as SMS through Twilio's Messages API. A reply to an inbound message can reuse the webhook's `To` as the sender, but a proactive send has nothing to reuse, so it needs `messaging.from` or `messaging.messagingServiceSid`. Behind a proxy, set `webhookUrl` so signature verification matches the exact configured URL, and `publicBaseUrl` so voice TwiML can build absolute callback URLs.
+By default, the bot sends each reply as SMS through Twilio's Messages API. A reply to an inbound message can use the webhook's `To` as the sender; a proactive send needs `messaging.from` or `messaging.messagingServiceSid`. Behind a proxy, set `webhookUrl` so signature verification matches the configured URL, and `publicBaseUrl` so voice TwiML builds absolute callback URLs.
 
 ### Human-in-the-loop (HITL)
 
-SMS has no buttons or cards, so the default `interaction.opened` handler sends each question and tool approval as an SMS with its options numbered. A reply with an option's number or label answers the pending request, so `1` or `approve` runs an approval-gated tool and `2` or `cancel` stops it. If the question allows a custom answer, any other text is taken as that answer. Callers on a voice call get the question by SMS too. To render questions differently, declare your own `events["interaction.opened"]` handler.
+By default, each question and tool approval goes out as an SMS with numbered options, including to callers on a voice call. A reply with an option's number or label answers the request, so `1` or `approve` runs an approval-gated tool and `2` or `cancel` stops it. If the question allows a custom answer, any other text is taken as the answer. To render questions differently, set `events["interaction.opened"]`.
 
 ### Proactive sessions
 
-Start a session without an inbound message through `to(twilio, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(twilio, target).send(message, { auth })` from another channel. `target.phoneNumber` is required, and the channel needs `messaging.from` or `messaging.messagingServiceSid` for the outbound sender.
+To start a session without an incoming message, call `to(twilio, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(twilio, target).send(message, { auth })` from another channel. `target.phoneNumber` is required, and the channel needs `messaging.from` or `messaging.messagingServiceSid` as the sender.
 
 ### Attachments
 
-MMS media reaches the agent as file parts. eve downloads each media URL with the account SID and auth token, and only from the Twilio API origin (`https://api.twilio.com`, or `api.apiBaseUrl` when set). If a download fails, the agent gets a short note in place of the file and the text turn continues.
+MMS media reaches the agent as file parts. eve downloads each media URL with the account SID and auth token, only from the Twilio API origin (`https://api.twilio.com`, or `api.apiBaseUrl` when set). A failed download becomes a short note, and the turn continues.
 
 ## Disclaimer
 
 As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
 
-For example, you may be required to inform callers and texters that calls are recorded/transcribed and processed by an automated AI system, and obtain consent where required (including two-party-consent jurisdictions). For outbound SMS or calls you initiate, you may be required to get prior express consent, honor STOP/opt-out and quiet-hour rules, and complete required carrier registration.
+For example, you may need to tell callers and texters that an automated AI system records, transcribes, and processes their calls. You may also need their consent, including in two-party-consent jurisdictions. For outbound SMS or calls you start, you may need prior express consent. You may also need to honor STOP/opt-out and quiet-hour rules and complete carrier registration.
 
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
+- [Channels overview](./overview): what every channel shares, and every built-in channel
 - [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic

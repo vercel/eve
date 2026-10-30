@@ -2,11 +2,9 @@ import { EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV } from "#internal/application/b
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { createEveWorkflowQueueTrigger } from "#internal/workflow/queue-namespace.js";
-import {
-  createEveScheduleQueueTrigger,
-  EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
-} from "#internal/schedules/consumer-route.js";
-import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/eve-service-route-output.js";
+import type { HostRouteTable, HostRouteVercelFunction } from "#internal/nitro/host/host-routes.js";
+import { createEveScheduleQueueTrigger } from "#internal/schedules/consumer-route.js";
+import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-route.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,
@@ -14,20 +12,26 @@ import {
 
 export { EVE_WORKFLOW_FLOW_ROUTE_PATH };
 
+// Nitro emits `config.json` routes in `functionRules` key order; this order keeps it stable.
+const QUEUE_TRIGGERS = {
+  "workflow-queue": createEveWorkflowQueueTrigger,
+  "schedule-queue": createEveScheduleQueueTrigger,
+} satisfies Record<HostRouteVercelFunction, (agentName: string) => object>;
+
 /**
  * Builds eve's Vercel preset options.
  *
- * The flow route's `functionRules` entry makes Nitro emit a dedicated
- * `flow.func` from the same build output, carrying the agent's queue trigger,
- * an extended execution window, and the environment the deployed workflow
- * runtime needs. Every other function setting (runtime, memory, streaming) is
- * inherited from the base server function config.
+ * Each route that needs its own function gets a `functionRules` entry, so
+ * Nitro emits a dedicated `.func` from the same build output carrying the
+ * agent's queue trigger, an extended execution window, and the environment
+ * the deployed runtime needs. Every other function setting (runtime, memory,
+ * streaming) is inherited from the base server function config.
  */
 export function createEveVercelOptions(input: {
   agentName: string;
   enabled: boolean;
-  hasVercelScheduleCollections?: boolean;
   publicRoutePrefix?: string;
+  routeTable: Pick<HostRouteTable, "cronHandlerRoute" | "routes">;
   workspaceMember?: boolean;
 }) {
   if (!input.enabled) {
@@ -59,20 +63,22 @@ export function createEveVercelOptions(input: {
         version: resolveInstalledPackageInfo().version,
       },
     },
-    functionRules: {
-      [EVE_WORKFLOW_FLOW_ROUTE_PATH]: {
-        maxDuration: "max" as const,
-        experimentalTriggers: [createEveWorkflowQueueTrigger(input.agentName)],
-        environment,
-      },
-      // The consumer only exists when a collection stores its schedules in Vercel Schedules.
-      ...(input.hasVercelScheduleCollections === true && {
-        [EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH]: {
-          maxDuration: "max" as const,
-          experimentalTriggers: [createEveScheduleQueueTrigger(input.agentName)],
-          environment,
-        },
-      }),
-    },
+    ...(input.routeTable.cronHandlerRoute !== undefined && {
+      cronHandlerRoute: input.routeTable.cronHandlerRoute,
+    }),
+    functionRules: Object.fromEntries(
+      Object.entries(QUEUE_TRIGGERS).flatMap(([vercelFunction, createTrigger]) =>
+        input.routeTable.routes
+          .filter((route) => "vercelFunction" in route && route.vercelFunction === vercelFunction)
+          .map((route) => [
+            route.path,
+            {
+              maxDuration: "max" as const,
+              experimentalTriggers: [createTrigger(input.agentName)],
+              environment,
+            },
+          ]),
+      ),
+    ),
   };
 }

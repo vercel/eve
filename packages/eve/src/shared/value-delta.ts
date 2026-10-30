@@ -3,10 +3,11 @@
  *
  * `applyValueDelta(base, diffValue(base, next))` rebuilds `next` as a
  * serializer sees it: the same entries, in the same key order, including
- * entries whose value is `undefined`. Plain objects and arrays change entry by
- * entry, so the result shares every unchanged entry with `base`. Any other
- * value is compared by identity and carried whole when it differs, so such
- * values must be replaced rather than edited in place.
+ * entries whose value is `undefined`. Plain objects, null-prototype ones
+ * included, and arrays change entry by entry, so the result shares every
+ * unchanged entry with `base`. Any other value is compared by identity and
+ * carried whole when it differs, so such values must be replaced rather than
+ * edited in place.
  */
 export type ValueDelta =
   | { readonly kind: "value"; readonly value: unknown }
@@ -35,14 +36,19 @@ type PlainObject = Readonly<Record<string, unknown>>;
 export function snapshotValue<T>(value: T): T {
   if (Array.isArray(value)) return value.map((entry: unknown) => snapshotValue(entry)) as T;
   if (!isPlainObject(value)) return value;
-  return Object.fromEntries(Object.keys(value).map((key) => [key, snapshotValue(value[key])])) as T;
+  return objectLike(
+    value,
+    Object.keys(value).map((key) => [key, snapshotValue(value[key])]),
+  ) as T;
 }
 
 /** The delta from `base` to `next`, or `undefined` when they are equal. */
 export function diffValue(base: unknown, next: unknown): ValueDelta | undefined {
   if (Object.is(base, next)) return undefined;
   if (Array.isArray(base) && Array.isArray(next)) return diffArray(base, next);
-  if (isPlainObject(base) && isPlainObject(next)) return diffObject(base, next);
+  if (isPlainObject(base) && isPlainObject(next) && isDictionary(base) === isDictionary(next)) {
+    return diffObject(base, next);
+  }
   return { kind: "value", value: next };
 }
 
@@ -68,7 +74,8 @@ export function applyValueDelta<T>(base: T, delta: ValueDelta | undefined): T {
       const set = delta.set ?? {};
       const patch = delta.patch ?? {};
       const keys = delta.keys ?? impliedKeys(baseKeys, set);
-      return Object.fromEntries(
+      return objectLike(
+        base,
         keys.map((key) => {
           if (Object.hasOwn(set, key)) return [key, set[key]];
           if (Object.hasOwn(patch, key)) return [key, applyValueDelta(base[key], patch[key])];
@@ -151,12 +158,29 @@ function sameKeys(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((key, index) => key === right[index]);
 }
 
-/** Whether `value` is an object literal: its prototype is some realm's `Object.prototype`. */
+/**
+ * Whether `value` is an object literal or a dictionary: its prototype is some realm's
+ * `Object.prototype`, or null.
+ */
 function isPlainObject(value: unknown): value is PlainObject {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const prototype: unknown = Object.getPrototypeOf(value);
   // Not `=== Object.prototype`: workflow bodies run in their own VM context.
-  return prototype !== null && Object.getPrototypeOf(prototype) === null;
+  return prototype === null || Object.getPrototypeOf(prototype) === null;
+}
+
+/** Whether `value` has a null prototype, as the session projection's tables do. */
+function isDictionary(value: PlainObject): boolean {
+  return Object.getPrototypeOf(value) === null;
+}
+
+/** An object with `entries`, a dictionary when `like` is one. */
+function objectLike(
+  like: PlainObject,
+  entries: readonly (readonly [string, unknown])[],
+): PlainObject {
+  const object = Object.fromEntries(entries);
+  return isDictionary(like) ? Object.assign(Object.create(null) as PlainObject, object) : object;
 }
 
 function deltaMismatch(expected: string): Error {

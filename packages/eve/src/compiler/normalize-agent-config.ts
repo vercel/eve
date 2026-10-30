@@ -1,4 +1,4 @@
-import { isAbsolute, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
 
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
@@ -26,6 +26,7 @@ import {
 } from "#compiler/normalize-helpers.js";
 import type { AgentModuleBinding } from "#compiler/source-graph.js";
 import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -345,17 +346,11 @@ function resolveTopLevelAgentRoot(manifest: AgentSourceManifest): string {
   const nestedAgentRoot = resolve(appRoot, "agent");
   const agentRoot = resolve(manifest.agentRoot);
 
-  if (isPathInsideOrEqual(nestedAgentRoot, agentRoot)) {
+  if (isPathInsideOrEqual(agentRoot, nestedAgentRoot)) {
     return nestedAgentRoot;
   }
 
   return appRoot;
-}
-
-function isPathInsideOrEqual(parentPath: string, childPath: string): boolean {
-  const relativePath = relative(parentPath, childPath);
-
-  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
 
 async function withCompiledRuntimeModelLimits(

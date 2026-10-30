@@ -41,6 +41,7 @@ import type {
 import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { eventsOf } from "#harness/publication.js";
+import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
 const eveVersion = resolveInstalledPackageInfo().version;
@@ -141,8 +142,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (stopped !== undefined) return stopped;
     if (blocked(step.view(), step.session.state)) return park(step);
     // Read input held behind approved calls before the model can ask for more work. The step's
-    // own input waits as this step prepared it, its attachments already staged.
-    if (hasQueuedTurnInput(step.view())) {
+    // own input waits as this step prepared it, its attachments already staged. A provider tool's
+    // deferred result comes first: only the model's next response can bring it.
+    if (hasQueuedTurnInput(step.view()) && !awaitsProviderToolResult(step.session.history)) {
       const prepared = answered.input && { ...answered.input, message: turn.message };
       await step.apply(queueInput(step.view(), turnInputOnly(prepared)));
       return { next: step.runStep, session: step.session };
@@ -175,7 +177,10 @@ async function runtimeResults(step: Step, input: HarnessStepInput | undefined) {
 /**
  * The delivery's answers are admitted, then decide what they answer. The model reads what they
  * decided before the delivery's own input, as the AI SDK ran it, so that input waits a step; and
- * when nothing they decided can run, it waits, unreceived, behind them.
+ * when nothing they decided can run, it waits, unreceived, behind them. Input that steers a turn
+ * also waits a step while history ends on local results beside a provider tool's unanswered call:
+ * Anthropic opens the next response with that result, and rejects a request that adds anything
+ * after them. A new turn's input doesn't wait for a stale call; the prompt closes it instead.
  */
 async function answers(
   step: Step,
@@ -185,7 +190,12 @@ async function answers(
   if (intake.kind === "stop") return { ended: intake.result } as Ended;
   const decided = await settleHumanInput(step, intake);
   let { input, message } = intake;
-  if (decided.approved.length > 0 || decided.settledApprovals) {
+  if (
+    decided.approved.length > 0 ||
+    decided.settledApprovals ||
+    (awaitsProviderToolResult(step.session.history) &&
+      activeTurnIdOf(step.view().projection) !== undefined)
+  ) {
     await step.apply(queueInput(step.view(), turnInputOnly(input)));
     input = withoutTurnInput(input);
     message = undefined;

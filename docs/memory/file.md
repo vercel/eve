@@ -3,27 +3,25 @@ title: "File Memory"
 description: "Configure the built-in fileMemory() provider: a bounded, model-maintained document per scope with save and remove tools."
 ---
 
-`fileMemory()` from `eve/memory/file` is the memory provider built into eve.
-It keeps one small document per resolved scope, recalls that document before
-each turn, and gives the model two tools to maintain it.
-Use it when a short list of durable facts and preferences is enough; use
-[another provider](/docs/memory#choose-a-provider) when you need semantic
-retrieval or automatic capture.
+`fileMemory()` from `eve/memory/file` is the memory provider built into eve. It
+keeps one small document for each scope, such as each signed-in user, and gives
+the model tools to edit it. Use it for a short list of facts and preferences
+that later sessions need. For search over many records or automatic capture, use
+[another provider](/docs/memory#choose-a-provider).
 
-Add and provision file memory from an eve project:
+```text
+agent/
+  memory/
+    file.ts   # the "file" slot
+```
+
+Add file memory from an eve project:
 
 ```bash
 eve add memory/file
 ```
 
-After you choose **Install and set up**, eve creates or reuses one private
-Vercel Blob store for the linked project, connects it to production, preview,
-and development using OIDC, and pulls the updated environment. The connection
-sets `EVE_MEMORY_BLOB_STORE_ID` and `EVE_MEMORY_BLOB_WEBHOOK_PUBLIC_KEY`
-without adding a read-write token. It uses the project's first configured
-function region, falling back to `iad1`. Blob usage may incur charges.
-
-The registry writes:
+The command writes:
 
 ```ts title="agent/memory/file.ts"
 import { defineMemory } from "eve/memory";
@@ -31,47 +29,60 @@ import { byPrincipal } from "eve/memory/scope";
 import { fileMemory } from "eve/memory/file";
 
 export default defineMemory({
+  // optional: prepended to the save and remove tool descriptions
   description: "Remember stable facts and preferences about the caller.",
+  // omit options to use the defaults in the options table
   provider: fileMemory(),
+  // required: one document for each signed-in caller
   scope: byPrincipal,
 });
 ```
 
+Choose **Install and set up** to provision storage. eve creates or reuses one
+private Vercel Blob store for the linked project. It connects the store to
+production, preview, and development using OIDC, then pulls the updated
+environment. The store uses the project's first configured function region, or
+`iad1`. Blob usage may incur charges.
+
 ## How it behaves
 
-The provider implements recall and tools but no automatic capture. The model
-decides when to call `file__save_memory` and `file__remove_memory`, where
-`file` is the slot name. The slot `description` is prepended to both tool
-descriptions.
+Before each turn, the provider gives the model the whole document as one
+message. The model edits the document with two tools, `file__save_memory` and
+`file__remove_memory`, where `file` is the slot name. The provider saves nothing
+unless the model calls a tool.
 
-Each saved entry receives a permanent numeric index that the model uses to
-remove it later. The provider recalls the whole document as one message with a
-stable ID, so an updated or emptied document replaces the earlier recalled copy
-rather than accumulating beside it.
+- Each saved entry gets a permanent number. The model removes an entry by that
+  number.
+- An updated or emptied document replaces the copy the model saw earlier in the
+  session.
+- Saving text identical to an existing entry does nothing.
+- Saves and removals that run at the same time on one document don't overwrite
+  each other.
 
-The provider rejects writes that exceed its limits instead of truncating or
-evicting older entries:
+The provider rejects a save that exceeds a limit. It doesn't shorten the entry
+or delete older entries:
 
 | Limit            | Value                                            |
 | ---------------- | ------------------------------------------------ |
-| Recalled message | `maxCharacters`, default 4,000                   |
+| Recalled message | `maxCharacters` characters                       |
 | One entry        | 2,048 UTF-8 bytes after whitespace normalization |
 | Stored document  | 65,536 bytes                                     |
 
-`maxCharacters` caps the exact recalled message, including its heading and
-removal guidance:
+## Options
+
+| Option          | Default                                                          | Effect                                                                           |
+| --------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `maxCharacters` | `4_000`                                                          | Caps the full message the model sees, including its heading and removal guidance |
+| `backend`       | Chosen by environment; see [Storage backends](#storage-backends) | Where the document is stored                                                     |
 
 ```ts
 provider: fileMemory({ maxCharacters: 8_000 });
 ```
 
-Saving text identical to an existing entry is a no-op. Concurrent writes to the
-same document use optimistic versioning and retry on conflict.
-
 ## Storage backends
 
-The document lives in a backend, not in the agent's sandbox filesystem. With no
-`backend` option, `fileMemory()` selects one lazily on first use:
+The document lives in a backend, not in the agent's sandbox filesystem. Omit
+`backend` to let `fileMemory()` select one on first use:
 
 | Environment                                                       | Backend                                                                      |
 | ----------------------------------------------------------------- | ---------------------------------------------------------------------------- |
@@ -80,13 +91,13 @@ The document lives in a backend, not in the agent's sandbox filesystem. With no
 | `eve dev`                                                         | Shared process-local in-memory storage                                       |
 | Every other environment                                           | Error asking you for an explicit backend                                     |
 
-`NODE_ENV=development` alone does not select in-memory storage, and a Blob
-token outside Vercel does not select Blob.
+`NODE_ENV=development` alone does not select in-memory storage. A Blob token
+outside Vercel does not select Blob.
 
 ### In-memory
 
-Pass a fresh in-memory backend for tests or throwaway environments. It loses
-its contents when the backend instance or process is replaced:
+Pass an in-memory backend for tests or throwaway environments. It loses its
+contents when the backend instance or process is replaced:
 
 ```ts
 import { fileMemory, inMemory } from "eve/memory/file";
@@ -96,11 +107,11 @@ provider: fileMemory({ backend: inMemory() });
 
 ### Vercel Blob
 
-Provisioned bindings use the `EVE_MEMORY_BLOB_*` namespace so file memory does
-not take over an application's own Blob store. Vercel supplies the OIDC token;
-the Blob SDK resolves the current token for each operation and handles refresh.
-File-memory reads and writes need the store ID. The webhook public key is for upload callbacks
-and is not used by file memory.
+Setup connects the store with the `EVE_MEMORY_BLOB` prefix, so file memory
+doesn't use an application's own Blob store. The connection sets
+`EVE_MEMORY_BLOB_STORE_ID` and `EVE_MEMORY_BLOB_WEBHOOK_PUBLIC_KEY` without a
+read-write token. File memory needs only the store ID, because Vercel supplies
+the OIDC token. File memory doesn't use the webhook public key.
 
 `fileMemory()` checks Vercel configuration in this order:
 
@@ -109,30 +120,26 @@ and is not used by file memory.
 3. `BLOB_STORE_ID` with Vercel OIDC from the environment or request context
 4. `BLOB_READ_WRITE_TOKEN`
 
-Prefer OIDC on Vercel. You do not need to set a read-write token or copy
-`VERCEL_OIDC_TOKEN` into your configuration. Redeploy after connecting the
-store: changes to project environment variables apply to new deployments.
+Prefer OIDC on Vercel, which needs no read-write token or copied
+`VERCEL_OIDC_TOKEN`. Use the generic `BLOB_*` variables for a store you attach
+manually. Redeploy after you connect the store, because project environment
+variable changes apply only to new deployments.
 
-Generic `BLOB_*` variables remain supported for a store you attach manually.
-Run setup again without reinstalling the memory definition when a previous
-attempt stopped after creating or connecting the store:
+If setup stopped after it created or connected the store, run it again. This
+command doesn't reinstall the memory definition:
 
 ```bash
 eve integration setup file-memory
 ```
 
-Setup repairs the deterministic unconnected private store left by a partial
-run and reuses a complete `EVE_MEMORY_BLOB` connection. If an earlier setup
-created an `EVE_MEMORY_` connection, reconnect that same store with the
-`EVE_MEMORY_BLOB` prefix and OIDC in Vercel, then redeploy. Keep the existing
-store to preserve its memory documents. Setup does not adopt an arbitrary
-application store, change a `BLOB_*` connection, or replace a public
-or incompatible store. If the linked project later moves to another primary
-region, setup preserves the existing memory store and warns about the drift
-instead of risking data loss.
+Setup repairs the unconnected private store that a partial run left. It reuses
+a complete `EVE_MEMORY_BLOB` connection. It never adopts an arbitrary
+application store, changes a `BLOB_*` connection, or replaces a public or
+incompatible store. If the project moves to another primary region, setup keeps
+the existing store and warns about the difference.
 
-Use `vercelBlob()` from `eve/memory/file/vercel` to configure credentials or an
-object prefix explicitly instead of relying on environment detection:
+Use `vercelBlob()` from `eve/memory/file/vercel` to set credentials or an object
+prefix in code instead of from the environment:
 
 ```ts
 import { fileMemory } from "eve/memory/file";
@@ -143,11 +150,10 @@ provider: fileMemory({
 });
 ```
 
-`vercelBlob()` accepts `token`, `oidcToken`, `storeId`, and `prefix`. The
-default prefix is `eve/memory/file`; documents are stored privately under
-`<prefix>/<scope key>/MEMORY.md`. Passing these options continues to override
-the generic environment defaults directly. Leave `oidcToken` unset on Vercel
-so the Blob SDK can manage token refresh.
+`vercelBlob()` accepts `token`, `oidcToken`, `storeId`, and `prefix`, which
+override the environment defaults. Documents are stored privately under
+`prefix`. Omit `prefix` to use `eve/memory/file`. Leave `oidcToken` unset on
+Vercel so the token refreshes automatically.
 
 ### Custom backend
 
@@ -162,10 +168,12 @@ export function kvBackend(store: KvStore): MemoryDocumentBackend {
     async read({ key, signal }) {
       signal.throwIfAborted();
       const row = await store.get(key);
+      // null means the document doesn't exist yet
       return row ? { content: row.content, version: row.version } : null;
     },
     async write({ key, content, expectedVersion, signal }) {
       signal.throwIfAborted();
+      // write the complete document only if the stored version still matches
       const ok = await store.compareAndSet(key, content, expectedVersion);
       if (!ok) throw new MemoryDocumentConflictError(key);
       return { content, version: await store.version(key) };
@@ -174,17 +182,26 @@ export function kvBackend(store: KvStore): MemoryDocumentBackend {
 }
 ```
 
-`write()` replaces the complete document and must throw
-`MemoryDocumentConflictError` when `expectedVersion` no longer matches. An
-`expectedVersion` of `null` means the document must not exist yet.
+`write()` replaces the complete document. It must throw
+`MemoryDocumentConflictError` when the stored version doesn't match
+`expectedVersion`. An `expectedVersion` of `null` means the document must not
+exist yet.
 
-Both methods receive a `signal: AbortSignal`. Check it before starting work and
-pass it to storage operations that support cancellation. When upgrading from
-`eve@0.84.x`, rename the backend input's `abortSignal` property to `signal`.
-Backends written for `0.83.x` or earlier already use `signal` and need no change.
-Memory and tool execution contexts still expose `ctx.abortSignal`; pass that
-value as the backend's `signal`.
+Both methods receive a `signal: AbortSignal`. Check it before starting work, and
+pass it to storage calls that support cancellation. Memory and tool contexts
+expose the same signal as `ctx.abortSignal`.
 
-A backend changes only where the document is stored. It does not change file
-memory's recall format or tools. When you need different retrieval, capture, or
-tools, [build a memory provider](./custom-provider) instead.
+## Troubleshooting
+
+| What you see                                                            | What to do                                                                                                                      |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `fileMemory() requires Vercel Blob storage.`                            | Run `eve integration setup file-memory`, then redeploy. Or pass `fileMemory({ backend })`.                                      |
+| `fileMemory() requires an explicit backend outside Vercel and eve dev.` | Pass `fileMemory({ backend })`, because only Vercel and `eve dev` have a default backend.                                       |
+| `Memory would exceed the configured 4,000-character limit.`             | Have the model remove outdated entries, or raise `maxCharacters`.                                                               |
+| Setup reports that a store has an incompatible eve file-memory prefix   | Reconnect the store in Vercel with the `EVE_MEMORY_BLOB` prefix and OIDC, then redeploy. Keeping the store keeps its documents. |
+
+## Choose another provider
+
+A backend changes only where the document is stored, not the recall format or
+tools. For different retrieval, capture, or tools,
+[build a memory provider](./custom-provider) instead.

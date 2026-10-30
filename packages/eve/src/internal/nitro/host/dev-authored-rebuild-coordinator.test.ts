@@ -18,12 +18,14 @@ const mocks = vi.hoisted(() => ({
     workerData: {},
   })),
   computeDevelopmentHostFingerprint: vi.fn(async () => "host-1"),
-  createDevelopmentApplicationNitro: vi.fn(async () => ({})),
+  createDevelopmentGenerationPruner: vi.fn(),
+  createHostNitro: vi.fn(async () => ({})),
   discardDevelopmentGeneration: vi.fn(async () => undefined),
   environmentCommit: vi.fn(),
   environmentRollback: vi.fn(),
   prepareDevelopmentApplicationHost: vi.fn(),
   removeDevelopmentHostWorkspace: vi.fn(async () => undefined),
+  requestPrune: vi.fn(),
 }));
 
 vi.mock("#cli/dev/environment.js", () => ({
@@ -38,9 +40,10 @@ vi.mock("#internal/nitro/host/prepare-application-host.js", () => ({
 vi.mock("#internal/nitro/host/dev-host-fingerprint.js", () => ({
   computeDevelopmentHostFingerprint: mocks.computeDevelopmentHostFingerprint,
 }));
-vi.mock("#internal/nitro/host/create-application-nitro.js", () => ({
-  createDevelopmentApplicationNitro: mocks.createDevelopmentApplicationNitro,
+vi.mock("#internal/nitro/host/create-host-nitro.js", () => ({
+  createHostNitro: mocks.createHostNitro,
 }));
+vi.mock("#internal/nitro/host/host-spec.js", () => ({ createHostSpec: () => ({}) }));
 vi.mock("#internal/nitro/host/dev-host-candidate.js", () => ({
   buildDevelopmentHostCandidate: mocks.buildDevelopmentHostCandidate,
 }));
@@ -49,6 +52,7 @@ vi.mock("#internal/nitro/host/dev-host-workspace.js", () => ({
 }));
 vi.mock("#internal/nitro/development-generation.js", () => ({
   activateDevelopmentGeneration: mocks.activateDevelopmentGeneration,
+  createDevelopmentGenerationPruner: mocks.createDevelopmentGenerationPruner,
   discardDevelopmentGeneration: mocks.discardDevelopmentGeneration,
 }));
 vi.mock("#internal/nitro/host/artifacts-config.js", () => ({
@@ -125,28 +129,30 @@ const createRunner: DevelopmentRunnerFactory = () => {
   };
 };
 
-async function createCoordinatorWithServer(onRuntimePruned?: () => Promise<void>) {
+async function createCoordinatorWithServer() {
   const devServer = new DrainedNitroDevServer({ error: () => undefined }, createRunner);
   mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce("host-1");
   const coordinator = await createDevelopmentAuthoredRebuildCoordinator({
     builds: createDevelopmentBuilds(),
     devServer,
     initialHost: createHost("initial", "run-1"),
-    onRuntimePruned,
   });
   return { coordinator, devServer };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.createDevelopmentGenerationPruner.mockReturnValue({
+    close: async () => undefined,
+    request: mocks.requestPrune,
+  });
 });
 
 describe("transactional authored rebuild coordinator", () => {
   it.each(["host-1", "host-2"])(
-    "forwards reconciliation on activation with host fingerprint %s",
+    "activates the candidate generation with host fingerprint %s",
     async (fingerprint) => {
-      const onRuntimePruned = vi.fn(async () => undefined);
-      const { coordinator, devServer } = await createCoordinatorWithServer(onRuntimePruned);
+      const { coordinator, devServer } = await createCoordinatorWithServer();
       const candidate = createHost("candidate", "run-2");
       mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce(candidate);
       mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce(fingerprint);
@@ -155,7 +161,6 @@ describe("transactional authored rebuild coordinator", () => {
         expect(mocks.activateDevelopmentGeneration).toHaveBeenCalledWith({
           appRoot: candidate.appRoot,
           generation: candidate.generation,
-          onRuntimePruned,
         });
       } finally {
         await devServer.close();
@@ -211,6 +216,8 @@ describe("transactional authored rebuild coordinator", () => {
     expect(mocks.discardDevelopmentGeneration).toHaveBeenCalledWith(structuralHost.generation);
     expect(mocks.environmentCommit).toHaveBeenCalledOnce();
     expect(mocks.environmentRollback).not.toHaveBeenCalled();
+    // Only the coordinator's initial request: a failed activation prunes nothing.
+    expect(mocks.requestPrune).toHaveBeenCalledOnce();
 
     const retryHost = createHost("retry", "run-2");
     mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce(retryHost);
@@ -315,7 +322,7 @@ describe("transactional authored rebuild coordinator", () => {
       );
 
       expect(mocks.computeDevelopmentHostFingerprint).toHaveBeenCalledOnce();
-      expect(mocks.createDevelopmentApplicationNitro).not.toHaveBeenCalled();
+      expect(mocks.createHostNitro).not.toHaveBeenCalled();
       expect(mocks.buildDevelopmentHostCandidate).not.toHaveBeenCalled();
       expect(mocks.removeDevelopmentHostWorkspace).toHaveBeenCalledWith(candidate.workspace);
       expect(mocks.discardDevelopmentGeneration).toHaveBeenCalledWith(candidate.generation);

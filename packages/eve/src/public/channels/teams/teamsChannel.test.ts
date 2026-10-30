@@ -431,7 +431,9 @@ describe("teamsChannel", () => {
     const card = (update!.body as { attachments: { content: Record<string, unknown> }[] })
       .attachments[0]?.content;
     expect(card?.actions).toBeUndefined();
-    expect(card?.body).toEqual([expect.objectContaining({ text: "No longer active" })]);
+    expect(card?.body).toEqual([
+      { inlines: [{ text: "No longer active", type: "TextRun" }], type: "RichTextBlock" },
+    ]);
   });
 
   it("handles unmentioned message-form HITL responses before the mention gate", async () => {

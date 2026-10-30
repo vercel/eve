@@ -3,14 +3,9 @@ title: Photon
 description: Connect an eve agent to iMessage through Photon.
 ---
 
-Use `photonIMessageChannel` to receive and reply to iMessages through a Photon project.
+The Photon channel connects your agent to iMessage through a Photon project and `agent/channels/photon.ts`.
 
-Run `eve add channel/photon-imessage` to create or use a Photon project and register
-your phone number. It then asks whether to configure Vercel Connect or portable
-credentials. With Vercel Connect, eve signs you in and creates or links a Vercel
-project when needed, then creates the connector and configures Photon’s webhook
-through Connect. The channel resolves credentials lazily when
-the adapter first initializes:
+Run `eve add channel/photon-imessage` to create or use a Photon project and register your phone number, then choose Vercel Connect or portable credentials. With Vercel Connect, eve signs you in, creates or links a Vercel project, creates the connector, and configures Photon's webhook through Connect:
 
 ```ts title="agent/channels/photon.ts"
 import { connectPhotonCredentials } from "@vercel/connect/eve";
@@ -21,29 +16,15 @@ export default photonIMessageChannel({
 });
 ```
 
-The default webhook route is `/eve/v1/photon`. The channel verifies forwarded
-webhooks with Vercel OIDC from the same project and environment by default, derives user auth from each
-message author, marks accepted messages as read, and continues the same eve
-session for every message in an iMessage conversation. A new accepted message
-steers the active turn. Steering can interrupt pending model generation before
-answer output or local tool execution begins. Executing tools finish first;
-after answer output starts, steering waits for the next committed workflow
-boundary. See [Overlapping messages](./overview#overlapping-messages).
+The channel resolves credentials on first use. It receives webhooks at `/eve/v1/photon` and, by default, verifies them with Vercel OIDC from the same project and environment. It builds auth from the person who sent each message, marks accepted messages as read, and keeps one eve session per iMessage conversation.
 
-Set `turnPolicy: "queue"` when every response should finish before Photon starts the next message.
+A message that arrives during a turn joins that turn, so the agent can take the correction into account. Set `turnPolicy: "queue"` to let every reply finish before the next message starts. See [Overlapping messages](./overview#overlapping-messages) for when a new message can interrupt the model.
 
-Photon uses inbound message IDs as [delivery idempotency keys](./custom#retried-deliveries).
-Replicas that share a durable Workflow World ignore retries while the ID remains
-in the session's recent-key window.
+When Photon retries a webhook, eve accepts the message once, even across replicas that share a Workflow World. See [retried deliveries](./custom#retried-deliveries).
 
-Images and other files people send reach the agent as file parts. Photon's
-webhook lists each file without its bytes, so eve downloads it from Photon by
-its attachment id with the project's credentials. The webhook omits the id
-for voice notes, so eve refetches those messages from Photon to get it. A
-failed download, a file over 25 MB, or a file eve can't find an id for reaches
-the agent as a short note.
+Images and other files people send reach the agent as file parts. A failed download, a file over 25 MB, or a file without an attachment id reaches the agent as a short note instead.
 
-Customize inbound dispatch with `onMessage`. Return `null` to ignore a message, or return `title` alongside `auth` to set the title when the dispatch starts a run:
+Customize inbound handling with `onMessage`. Return `null` to ignore a message, or return `title` alongside `auth` to set the run title when the message starts a run:
 
 ```ts
 export default photonIMessageChannel({
@@ -58,18 +39,13 @@ export default photonIMessageChannel({
 });
 ```
 
-Set `route` to override the webhook path or `webhookVerifier` to use a different
-trusted-forwarder verifier. `eve/channels/photon` exports the `PhotonIMessageWebhookVerifier`,
-`PhotonIMessageChannelCredentials`, and `PhotonProjectCredentials` types for these options.
+Set `route` to change the webhook path, or `webhookVerifier` to use a different trusted-forwarder verifier. `eve/channels/photon` exports the `PhotonIMessageWebhookVerifier`, `PhotonIMessageChannelCredentials`, and `PhotonProjectCredentials` types for these options.
 
 ## Tapbacks
 
-`IMESSAGE_TAPBACKS` from `eve/channels/photon` lists the built-in tapback names.
-Use it to populate a picker or validate a named reaction. Tapback APIs can also
-accept a single emoji; the list does not enumerate those.
+`IMESSAGE_TAPBACKS` from `eve/channels/photon` lists the built-in tapback names. Use it to populate a picker or validate a named reaction. Tapback APIs also accept a single emoji, which the list does not include.
 
-eve ignores tapbacks people send unless you pass `onTapback`. It receives the
-tapback and returns the same result as `onMessage`, or `null` to ignore it:
+eve ignores tapbacks people send unless you pass `onTapback`. It receives the tapback and returns the same result as `onMessage`, or `null` to ignore it:
 
 ```ts title="agent/channels/photon.ts"
 import { connectPhotonCredentials } from "@vercel/connect/eve";
@@ -84,17 +60,18 @@ export default photonIMessageChannel({
 });
 ```
 
-The agent reads an accepted tapback as a message in the form iMessage uses when
-it shows a tapback as text, such as `Tapback: Loved “See you at 7”`. Photon
-reports only added tapbacks, so `tapback.added` is always `true` and removing a
-tapback never reaches `onTapback`. The quoted text appears when Photon can return the message the tapback is on. `tapback.tapback` is `love`,
-`like`, `dislike`, `laugh`, `emphasize`, or `question`, or the emoji itself for
-an emoji tapback. `tapback.messageId` and `tapback.author` identify the message
-and the person. An accepted tapback starts or steers a turn like any other
-message, following `turnPolicy`. The agent's own tapbacks never reach `onTapback`. `onTapback` runs instead of `onMessage` for tapbacks, so repeat any sender checks from `onMessage` there.
+| Field               | Value                                                                                          |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| `tapback.tapback`   | `love`, `like`, `dislike`, `laugh`, `emphasize`, `question`, or the emoji for an emoji tapback |
+| `tapback.messageId` | The message the tapback is on                                                                  |
+| `tapback.author`    | The person who sent it                                                                         |
+| `tapback.added`     | Always `true`, because Photon reports only added tapbacks                                      |
 
-To let the agent send tapbacks, export the channel's tapback tool from a file in
-`agent/tools/`. The file name becomes the tool name:
+The agent reads an accepted tapback as iMessage's text form, such as `Tapback: Loved “See you at 7”`. The quoted text appears when Photon can return the original message. An accepted tapback starts or steers a turn like any other message, following `turnPolicy`.
+
+`onTapback` runs instead of `onMessage` for tapbacks, so repeat any sender checks from `onMessage` there. The agent's own tapbacks never reach it.
+
+To let the agent send tapbacks, export the channel's tapback tool from a file in `agent/tools/`. The file name becomes the tool name:
 
 ```ts title="agent/tools/tapback.ts"
 import photon from "../channels/photon";
@@ -102,11 +79,13 @@ import photon from "../channels/photon";
 export default photon.tapbackTool();
 ```
 
-The model calls it with a standard tapback, such as `{ "tapback": "love" }`, or any single emoji, such as `{ "tapback": "🎉" }`, and eve reacts to the latest message someone sent in the conversation. A standard tapback's own emoji, such as `👍`, sends that tapback. The model can send a tapback alongside a reply. To let a tapback be the whole answer, also add [`no_reply`](../concepts/built-in-tools#no_reply). The tool is never added on its own, and subagents don't receive it. In a session that didn't come through this channel, such as a web chat, or before anyone has sent a message, the call fails with an error the model reads.
+The model calls it with a standard tapback, such as `{ "tapback": "love" }`, or any single emoji, such as `{ "tapback": "🎉" }`. eve reacts to the latest message someone sent in the conversation. A standard tapback's own emoji, such as `👍`, sends that tapback.
+
+The model can send a tapback alongside a reply; to let a tapback be the whole answer, also add [`no_reply`](../concepts/built-in-tools#no_reply). Subagents don't receive the tool. In a session from another channel, such as web chat, or before anyone has sent a message, the call returns an error to the model.
 
 ### Answer approvals with a tapback
 
-Return `answer` from `onTapback` to answer the input request eve posted in the message the tapback is on. A [tool approval](/docs/human-in-the-loop#approvals) offers the options `approve` and `cancel`, so a like or dislike on the approval prompt can approve or cancel it:
+Return `answer` from `onTapback` to answer the approval or question in the message the tapback is on. A [tool approval](/docs/human-in-the-loop#approvals) offers the options `approve` and `deny`, so a like or dislike on the approval prompt can approve or deny it:
 
 ```ts title="agent/channels/photon.ts"
 import { connectPhotonCredentials } from "@vercel/connect/eve";
@@ -124,22 +103,21 @@ export default photonIMessageChannel({
 });
 ```
 
-`answer` settles only the request posted in that message, and only while it is still waiting and offers that option. A tapback on any other message, or on a prompt that was already answered, reaches the agent as an ordinary tapback, such as `Tapback: Liked “Got it”`. The approval's response policy still decides whether the person who sent the tapback may answer. For a [question](/docs/human-in-the-loop#questions), return one of its option ids. To replace the text the agent receives for a tapback, return `message`. Don't set `message` to an option's id, label, or number: eve reads that text like a typed reply, which answers the first waiting approval no matter which message the tapback is on.
+`answer` answers only the request posted in that message, and only while that request is still open and offers that option. A tapback on any other message, or on an answered prompt, reaches the agent as an ordinary tapback, such as `Tapback: Liked “Got it”`. The approval's response policy still decides whether the sender may answer. For a [question](/docs/human-in-the-loop#questions), return one of its option ids.
+
+Return `message` to replace the text the agent receives for a tapback. Don't set `message` to an option's id, label, or number, because eve reads that text like a typed reply. A typed reply answers the first waiting approval, no matter which message the tapback is on.
 
 ## Other hosts
 
-For a host without Vercel Connect, choose **Use portable credentials** during
-`eve add channel/photon-imessage`. eve scaffolds the channel and writes
-`IMESSAGE_PROJECT_ID` and `IMESSAGE_PROJECT_SECRET` to `.env.local`.
+On a host without Vercel Connect, choose **Use portable credentials** during `eve add channel/photon-imessage`. eve scaffolds the channel and writes `IMESSAGE_PROJECT_ID` and `IMESSAGE_PROJECT_SECRET` to `.env.local`.
 
 After deploying the agent:
 
 1. Create a Photon webhook for your public `https://…/eve/v1/photon` URL.
 2. Copy its signing secret into `IMESSAGE_WEBHOOK_SECRET`.
-3. Set `IMESSAGE_PROJECT_ID`, `IMESSAGE_PROJECT_SECRET`, and
-   `IMESSAGE_WEBHOOK_SECRET` in the host’s encrypted environment variables.
+3. Set `IMESSAGE_PROJECT_ID`, `IMESSAGE_PROJECT_SECRET`, and `IMESSAGE_WEBHOOK_SECRET` in the host’s encrypted environment variables.
 
-To configure the channel by hand, use lazy environment-backed credentials:
+To configure the channel by hand, resolve credentials from the environment:
 
 ```ts title="agent/channels/photon.ts"
 import { photonIMessageChannel } from "eve/channels/photon";
@@ -155,6 +133,4 @@ export default photonIMessageChannel({
 });
 ```
 
-For direct Photon webhooks, pass `webhookSecret` or set
-`IMESSAGE_WEBHOOK_SECRET`; the signing secret takes precedence over the default
-OIDC verifier.
+For direct Photon webhooks, pass `webhookSecret` or set `IMESSAGE_WEBHOOK_SECRET`. The signing secret takes precedence over the default OIDC verifier.

@@ -38,7 +38,7 @@ function getWorkflowBuildCacheKey(appRoot: string): string {
  * deployment. Vercel sets `VERCEL` in both build and runtime environments, so
  * this is the canonical signal for "managed by Vercel" versus self-hosted.
  */
-export function isVercelBuildEnvironment(): boolean {
+function isVercelBuildEnvironment(): boolean {
   return Boolean(process.env.VERCEL);
 }
 
@@ -51,10 +51,8 @@ export function isVercelBuildEnvironment(): boolean {
  *
  * Each application root receives a unique hash-keyed subdirectory so parallel
  * builds targeting different app roots never collide. The key is derived from
- * `appRoot` alone — version-keyed dirs are intentionally avoided so every code
- * path that resolves a cache directory converges on the same location and
- * `prepareEveVersionedCacheDirectory` remains the single source of truth for
- * version-based invalidation.
+ * `appRoot` alone, so every code path that resolves a cache directory
+ * converges on the same location.
  */
 export function resolveWorkflowBuildDirectory(appRoot: string): string {
   const workflowCacheRoot = join(resolvePackageRoot(), ".eve", "workflow-cache");

@@ -2,6 +2,7 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { isExtensionModule } from "#internal/bundler/extension-mount-plugin.js";
+import { exactRegex, prefixRegex } from "#internal/bundler/filters.js";
 
 /**
  * One extension's on-disk source root paired with its logical mount identity.
@@ -17,8 +18,14 @@ const VIRTUAL_PREFIX = "\0eve-ext-scope:";
 /** The subset of the rolldown/rollup plugin shape this plugin implements. */
 export interface ExtensionScopeBundlerPlugin {
   readonly name: string;
-  resolveId(source: string, importer: string | undefined): string | undefined;
-  load(id: string): { code: string; moduleType: "js" } | undefined;
+  readonly resolveId: {
+    readonly filter: { readonly id: RegExp };
+    handler(source: string, importer: string | undefined): string | undefined;
+  };
+  readonly load: {
+    readonly filter: { readonly id: RegExp };
+    handler(id: string): { code: string; moduleType: "js" } | undefined;
+  };
 }
 
 function canonicalize(path: string): string {
@@ -56,23 +63,29 @@ function scopeHooks(
 ): ExtensionScopeBundlerPlugin {
   return {
     name,
-    resolveId(source: string, importer: string | undefined) {
-      if (source !== "eve/context" || importer === undefined || importer.startsWith("\0")) {
-        return undefined;
-      }
-      const mountId = mountFor(importer);
-      if (mountId === undefined) return undefined;
-      return `${VIRTUAL_PREFIX}context:${encodeURIComponent(mountId)}`;
+    resolveId: {
+      filter: { id: exactRegex("eve/context") },
+      handler(source: string, importer: string | undefined) {
+        if (source !== "eve/context" || importer === undefined || importer.startsWith("\0")) {
+          return undefined;
+        }
+        const mountId = mountFor(importer);
+        if (mountId === undefined) return undefined;
+        return `${VIRTUAL_PREFIX}context:${encodeURIComponent(mountId)}`;
+      },
     },
-    load(id: string) {
-      if (!id.startsWith(VIRTUAL_PREFIX)) {
-        return undefined;
-      }
-      const descriptor = id.slice(VIRTUAL_PREFIX.length);
-      const separatorIndex = descriptor.indexOf(":");
-      if (descriptor.slice(0, separatorIndex) !== "context") return undefined;
-      const mountId = decodeURIComponent(descriptor.slice(separatorIndex + 1));
-      return { code: shimSource(mountId), moduleType: "js" as const };
+    load: {
+      filter: { id: prefixRegex(VIRTUAL_PREFIX) },
+      handler(id: string) {
+        if (!id.startsWith(VIRTUAL_PREFIX)) {
+          return undefined;
+        }
+        const descriptor = id.slice(VIRTUAL_PREFIX.length);
+        const separatorIndex = descriptor.indexOf(":");
+        if (descriptor.slice(0, separatorIndex) !== "context") return undefined;
+        const mountId = decodeURIComponent(descriptor.slice(separatorIndex + 1));
+        return { code: shimSource(mountId), moduleType: "js" as const };
+      },
     },
   };
 }

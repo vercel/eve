@@ -13,6 +13,7 @@ type InlineToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 import type { AssistantStepFinishReason } from "#harness/finish-reason.js";
 import { announcedKind, callRequested, callSettledFrom } from "#harness/call-facts.js";
 import type { SessionEvent } from "#protocol/session-event.js";
+import type { CallRow } from "#protocol/session-projection/tables.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import type { JsonObject } from "#shared/json.js";
 import {
@@ -54,6 +55,8 @@ interface StreamActionEmissionOptions {
   readonly held?: boolean;
   /** A child or schedule's caller reads only the final reply, including at an explicit task wait. */
   readonly finalReplyOnly?: boolean;
+  /** The session's call with this id, as its view holds it now. */
+  readonly sessionCall: (callId: string) => CallRow | undefined;
   readonly tools: HarnessToolLookup;
   /** A deliberate turn cancel or steering interrupt, not a provider failure/retry. */
   readonly interruptSignal?: AbortSignal;
@@ -235,6 +238,22 @@ async function consumeStreamContent(
     providerActionBatch.observe(resolved.request);
   };
 
+  /**
+   * Settles a provider call with its result or error. A provider can answer a call an earlier run
+   * introduced at the start of a later response: that call isn't introduced again, and once an
+   * abandoned attempt settled it, the retry's copy of the answer publishes nothing.
+   */
+  const settleProviderCall = async (
+    toolCall: Parameters<typeof collectProviderToolCall>[0],
+    result: RuntimeToolResultActionResult,
+  ): Promise<void> => {
+    const held = options?.sessionCall(toolCall.toolCallId);
+    if (held?.status === "settled") return;
+    if (held === undefined) await collectProviderToolCall(toolCall);
+    await providerActionBatch.flush();
+    await emitActionResult(result);
+  };
+
   /** A call whose input didn't validate is introduced with its error, and fails at once. */
   const emitInvalidCall = async (
     action: Parameters<typeof callRequested>[0]["action"],
@@ -398,21 +417,20 @@ async function consumeStreamContent(
           const providerResult = part as TypedToolResult<ToolSet>;
           if (providerResult.providerExecuted !== true || providerResult.preliminary === true)
             break;
-          await collectProviderToolCall({
-            input: "input" in providerResult ? providerResult.input : undefined,
-            toolCallId: providerResult.toolCallId,
-            toolName: providerResult.toolName,
-          });
-          await providerActionBatch.flush();
-          await emitActionResult(createRuntimeToolResultFromStepResult(providerResult));
+          await settleProviderCall(
+            {
+              input: "input" in providerResult ? providerResult.input : undefined,
+              toolCallId: providerResult.toolCallId,
+              toolName: providerResult.toolName,
+            },
+            createRuntimeToolResultFromStepResult(providerResult),
+          );
           break;
         }
         case "tool-error": {
           const toolError = part as TypedToolError<ToolSet>;
           if (toolError.providerExecuted !== true) break;
-          await collectProviderToolCall(toolError);
-          await providerActionBatch.flush();
-          await emitActionResult(createRuntimeToolResultFromToolError(toolError));
+          await settleProviderCall(toolError, createRuntimeToolResultFromToolError(toolError));
           break;
         }
         case "finish-step":

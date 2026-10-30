@@ -3,11 +3,9 @@ title: "Extensions"
 description: "Package reusable eve capabilities and mount them from npm or a monorepo workspace."
 ---
 
-Extensions package eve tools, channels, connections, skills, schedules, subagents, instruction fragments, and hooks. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a package registry or kept private inside a monorepo workspace.
+An extension is a package of eve tools, channels, connections, skills, schedules, subagents, instruction fragments, and hooks. An agent installs the package as a dependency and mounts it with a file under `agent/extensions/`. Use an extension to share the same tools and skills across agents, from npm or from a monorepo workspace.
 
-Ready-made extensions can also be distributed through an eve integration registry. See [Add Integrations](./install-integrations) to discover and add one with `eve add`; this page explains how extension packages are authored, mounted, configured, and overridden.
-
-This enables sharing many different capability sets. A browser extension might include several tools for navigating a site. A self-improving extension could pair hooks with dynamic instructions.
+To add a ready-made extension with `eve add`, see [Add Integrations](./install-integrations).
 
 ## Author: create an extension
 
@@ -19,9 +17,7 @@ Start with the extension scaffold:
 npx eve@latest extension init my-crm
 ```
 
-The command creates the package, installs dependencies, and initializes Git. It includes `extension/extension.ts`, TypeScript configuration, and the package metadata required to build and publish.
-
-An extension uses the same file conventions as an agent for its contributions:
+The command creates the package with `extension/extension.ts`, TypeScript configuration, and build and publish metadata. It also installs dependencies and initializes Git. Files under `extension/` follow the same layout as an agent:
 
 ```
 @acme/crm/
@@ -39,19 +35,19 @@ An extension uses the same file conventions as an agent for its contributions:
     lib/http.ts
 ```
 
-Each listed slot accepts the same authored forms as its agent counterpart. Static and dynamic tools, connections, skills, and instructions all work in an extension: `extension/instructions.ts` is as valid as `extension/instructions.md`, and `extension/connections/` can contain `defineDynamic(...)`.
+Each directory accepts the same static and dynamic forms as in an agent. For example, `extension/instructions.ts` works like `extension/instructions.md`, and `extension/connections/` can contain `defineDynamic(...)`. Keep shared code in `extension/lib/`.
 
-Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. The same prefix applies to channel, schedule, and parent-visible subagent IDs, while channel route paths and schedule cron expressions stay unchanged. Keep shared code in `extension/lib/`.
+Names come from paths, so call the tool `search`, not `crm_search`. The agent's mount adds a prefix such as `crm__`; see [Mount it](#mount-it).
 
-The extension root cannot declare agent configuration, instrumentation,
-[memory](./memory), a sandbox, or nested extensions. Those agent-level concerns
-belong to the consuming application. A subagent contributed under
-`extension/subagents/` owns its own agent configuration, memory, and sandbox
-like any other [declared subagent](./subagents).
+The extension root can't declare agent configuration, instrumentation,
+[memory](./memory), a sandbox, or nested extensions, because the agent that
+mounts the extension decides those. A subagent under `extension/subagents/` has
+its own agent configuration, memory, and sandbox like any other
+[declared subagent](./subagents).
 
 ### Add configuration and contributions
 
-The author's `extension/extension.ts` default-exports a `defineExtension` handle. Give it a [Standard Schema](https://standardschema.dev) when consumers need to provide settings:
+`extension/extension.ts` default-exports a `defineExtension` handle. Give it a [Standard Schema](https://standardschema.dev) when the agent that mounts it provides settings:
 
 ```ts title="extension/extension.ts"
 import { defineExtension } from "eve/extension";
@@ -65,7 +61,7 @@ export default defineExtension({
 });
 ```
 
-Contributions, including schedule handlers, can import that handle to read the validated configuration. Defaults have already been applied:
+Any file in the extension, including a schedule handler, can import that handle to read the validated configuration, with defaults applied:
 
 ```ts title="extension/tools/search.ts"
 import { defineTool } from "eve/tools";
@@ -83,17 +79,15 @@ export default defineTool({
 });
 ```
 
-If no configuration is needed, export `defineExtension()` and let consumers re-export it directly. Config schemas must validate synchronously.
+If no configuration is needed, export `defineExtension()` and let agents re-export it directly. Config schemas must validate synchronously.
 
-`defineState` uses a durable key scoped to the logical mount path and the authored state name. Two mounts of the same package can use the same state name without sharing a slot in one context. Contributed subagents use their parent extension's mount identity, but retain their own runtime contexts.
+`defineState` keys belong to the mount path and state name, so two mounts of the same package don't share state; see [Mount it](#mount-it).
 
 ### Add a subagent
 
-Author a subagent under `extension/subagents/<id>/` using the same files as a subagent declared by an agent. Mounting the extension as `crm` exposes `extension/subagents/reviewer/` to the consuming agent node as `crm__reviewer`. The subagent's own tools, connections, skills, hooks, instructions, sandbox, and nested subagents remain isolated inside its node and keep their path-derived names.
+Author a subagent under `extension/subagents/<id>/` with the same files as an agent's [declared subagent](./subagents). Mounting the extension as `crm` exposes `extension/subagents/reviewer/` as `crm__reviewer`. The subagent's own tools, connections, skills, hooks, instructions, sandbox, and nested subagents stay inside it and keep their path-derived names. The subagent uses the extension's mount path for its state keys, but keeps its own state.
 
-Modules inside the contributed subagent can import the extension handle. For example, a tool under `extension/subagents/reviewer/tools/` can read the configuration bound by the consumer's `agent/extensions/crm.ts` mount.
-
-A contributed subagent can mount another extension under `extension/subagents/<id>/extensions/` and derive that mount's configuration from its own extension's configuration:
+Files inside the subagent can import the extension handle. A tool under `extension/subagents/reviewer/tools/` reads the configuration from the agent's `agent/extensions/crm.ts` mount. The subagent can also mount another extension under `extension/subagents/<id>/extensions/`, with configuration taken from its own extension's configuration:
 
 ```ts
 // extension/subagents/reviewer/extensions/search.ts
@@ -162,23 +156,26 @@ Build the package with `eve extension build`:
 eve extension build
 ```
 
-`eve extension build` writes an agent-shaped `dist/extension` tree, copies skill assets, emits declarations, and records compatibility metadata. It also manages the package exports for the mount factory (`@acme/crm`) and tool definitions (`@acme/crm/tools`). Publish `dist/`; consumers do not need the author's TypeScript source.
+`eve extension build` writes an agent-shaped `dist/extension` tree with skill assets, type declarations, and the eve version that built it. It also manages the package exports for the mount factory (`@acme/crm`) and tool definitions (`@acme/crm/tools`). Publish `dist/`; agents don't need the TypeScript source.
 
-The exact `eve` development pin controls the extension authoring API and build tooling. The wildcard peer lets the consumer provide the runtime copy of eve. At consumption time, eve checks generated metadata, not the npm peer range. Do not add eve to regular `dependencies`.
+| Package entry                        | What to put there                                                                                                                       |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `devDependencies.eve`                | An exact version, which pins the authoring API and build tools                                                                          |
+| `peerDependencies.eve`               | `*`, so the agent provides eve at runtime. eve checks the build's recorded version, not this range.                                     |
+| `dependencies`                       | Runtime packages such as `zod` or an SDK. Most are bundled into the agent. Don't add eve here.                                          |
+| `eve.extension.externalDependencies` | Packages that must keep a normal Node.js package layout at runtime, such as a native addon or an SDK that loads package-relative assets |
 
-Put runtime packages such as `zod` or an SDK in `dependencies`. Most dependencies are bundled into the consuming agent automatically.
+Each package in `externalDependencies` must also appear in `dependencies`, `optionalDependencies`, or `peerDependencies`. The agent keeps it external with its complete package tree. The agent author doesn't edit `agent.ts` or install the package directly.
 
-When a package must keep normal Node.js package layout at runtime, add it to `eve.extension.externalDependencies`. Common cases include native addons and SDKs that load package-relative assets. `eve extension build` requires each listed package to also appear in `dependencies`, `optionalDependencies`, or `peerDependencies`, and records the requirement in the generated compatibility manifest. The consuming eve keeps the package external and preserves its complete package tree; consumers do not need to edit `agent.ts` or install the transitive package directly.
-
-Consumers can now add the built package to an agent. A workspace-only extension uses the same package contract but does not need to be published; see [Use an extension in a workspace](#use-an-extension-in-a-workspace).
+A workspace-only extension uses the same package contract without publishing; see [Use an extension in a workspace](#use-an-extension-in-a-workspace).
 
 ## Consumer: install and mount an extension
 
-A mount gives the extension's contributions a namespace. Updating the package updates the mounted extension; nothing is copied into the consumer's agent.
+A mount gives the extension's tools, channels, and other files a name prefix in your agent. eve copies nothing into your agent, so updating the package updates the mounted extension.
 
 ### Install the package
 
-Install the extension with the package manager already used by the consumer's agent project. For example, in a pnpm project:
+Install the extension with the agent project's package manager, for example pnpm:
 
 ```bash
 pnpm add @acme/crm
@@ -194,11 +191,11 @@ import crm from "@acme/crm";
 export default crm({ apiKey: process.env.CRM_API_KEY! });
 ```
 
-Set `CRM_API_KEY` in the consumer's environment, such as `.env.local` for local development.
+Set `CRM_API_KEY` in the agent's environment, such as `.env.local` for local development.
 
-The mount adds `crm__` to named contributions: `tools/search.ts` becomes `crm__search`, `channels/webhook.ts` becomes `crm__webhook`, `schedules/sync.ts` becomes `crm__sync`, `connections/api.ts` becomes `crm__api`, and `subagents/reviewer/` becomes `crm__reviewer`. Channels keep their declared route paths, and schedules keep their cron expressions.
+The mount adds `crm__` to each name: `tools/search.ts` becomes `crm__search`, `channels/webhook.ts` becomes `crm__webhook`, `schedules/sync.ts` becomes `crm__sync`, `connections/api.ts` becomes `crm__api`, and `subagents/reviewer/` becomes `crm__reviewer`. Channels keep their route paths, and schedules keep their cron expressions.
 
-Do not mount an extension under the name of one of the agent's connections. A [connection owns](/docs/connections) every name that starts with `<name>__`, so the compiler rejects the mounted tools and subagents. Nor can a mount be named `eve`: eve reserves that namespace for its [built-in tools](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill).
+Don't name a mount after one of the agent's connections. A [connection reserves](/docs/connections) every name that starts with `<name>__`, so the compiler rejects the mounted tools and subagents. The name `eve` is reserved for [built-in tools](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill).
 
 For an extension with no configuration, mount its default export directly:
 
@@ -206,25 +203,13 @@ For an extension with no configuration, mount its default export directly:
 export { default } from "@acme/gizmo";
 ```
 
-The same mount shape works with an npm package, a workspace dependency, or a linked local package. Each mount binds its own configuration, even when two mounts use the same package. Moving or renaming a mount creates a new instance.
+The same mount shape works with an npm package, a workspace dependency, or a linked local package. Each mount binds its own configuration, even when two mounts use the same package.
 
-Extension state belongs to the logical mount path (for example, `extensions/crm` or `subagents/research/extensions/crm`). A flat `crm.ts` mount and a directory `crm/extension.ts` mount have the same identity; moving or renaming the mount changes its state keys. Application-defined state keys are unchanged.
-
-### Upgrade from package-scoped extension state
-
-Deployments before eve 0.69 stored extension state under package-prefixed keys, such as `acme-crm.requests`. When a session from one of those deployments hands off to a newer deployment, eve moves each package-prefixed value to the mount that uses that package.
-
-- The value moves when exactly one mount of that package defines that state name.
-- When no mount of that package defines that state name, for example because the extension removed it or the package was renamed, eve drops the value. The target deployment's runtime logs show a `dropping unknown context key during deserialization` warning with the key.
-- When two or more mounts use the package and define that state name, eve cannot tell which mount owns the value, so the handoff is rejected and the session stays on its current deployment. Keep that deployment available until the session finishes, or start a new session on the deployment you want to use.
-- Older deployments cannot read sessions saved by a newer release, so a session that already moved does not hand back after a rollback.
-- Local context snapshots follow the same rules.
+Extension state belongs to the mount path, such as `extensions/crm` or `subagents/research/extensions/crm`. A flat `crm.ts` mount and a directory `crm/extension.ts` mount share a path. Moving or renaming a mount creates a new instance with new state keys. The agent's own state keys don't change.
 
 ### Use an extension in a workspace
 
-A workspace extension is a regular extension package kept in the same monorepo as its consumers. It is useful when several agents need the same capabilities, or when a private capability should evolve alongside the agents that use it.
-
-For example, a pnpm workspace can keep one extension next to two independently deployable agents:
+A workspace extension is a regular extension package in the same monorepo as the agents that use it. Use one when several agents need the same tools and skills, or when private tools should change together with their agents. For example, a pnpm workspace can keep one extension next to two independently deployable agents:
 
 ```text
 acme-agents/
@@ -254,14 +239,14 @@ packages:
   - "packages/*"
 ```
 
-You can scaffold the extension from a directory already covered by the workspace configuration:
+Scaffold the extension from a directory the workspace configuration covers:
 
 ```bash
 cd packages
 npx eve@latest extension init shared-capabilities
 ```
 
-Give the generated package the name consumers will import. Add `"private": true` if it should never be published:
+Give the generated package the name agents will import. Add `"private": true` if it should never be published:
 
 ```jsonc title="packages/shared-capabilities/package.json"
 {
@@ -276,7 +261,7 @@ Give the generated package the name consumers will import. Add `"private": true`
 }
 ```
 
-Each consuming agent declares its own workspace dependency:
+Each agent declares its own workspace dependency:
 
 ```jsonc title="agents/support/package.json"
 {
@@ -292,19 +277,17 @@ Then each agent mounts the package:
 export { default } from "@acme/shared-capabilities";
 ```
 
-The mount is intentionally per agent. Each consumer chooses its own mount namespace and, for a configured extension, passes its own configuration. For example, `shared.ts` contributes `shared__search`, while mounting the same package as `company.ts` in another agent contributes `company__search`.
+Each agent chooses its own mount name and configuration. For example, `shared.ts` contributes `shared__search`, while mounting the same package as `company.ts` in another agent contributes `company__search`.
 
 #### Develop from source
 
-When `eve dev` starts a consuming agent, it builds mounted, source-backed extensions found inside the same workspace before compiling the agent. It watches the extension source and relevant package and TypeScript configuration, then rebuilds only the affected extension. If an extension edit fails to build, the previous successful development generation keeps running.
+`eve dev` builds mounted workspace extensions from source before it compiles the agent. It watches each extension's source, `package.json`, and TypeScript configuration, and rebuilds only the extension you changed. If an edit fails to build, the last successful build keeps running.
 
-Production builds build the same extensions from source. `eve build` builds each mounted, source-backed workspace extension before it compiles the agent, and `withEve` does the same for its agents during `next build`. Production builds therefore do not depend on the extension package's `prepare` script, which package managers skip for no-op installs and with `--ignore-scripts`. eve skips an extension whose distribution was built by the same eve version and is newer than the extension's source, `package.json`, and TypeScript configuration.
-
-If an extension fails to build, the agent build stops with an error that names the extension package and its directory. Fix the reported error, or run `eve extension build` in that package directory to build it on its own.
+`eve build`, and `withEve` during `next build`, also build these extensions from source first, and skip an extension that is already up to date. Production builds don't need the package's `prepare` script, which package managers skip for no-op installs and with `--ignore-scripts`.
 
 ### Override a contribution
 
-Use a directory mount to keep overrides beside the mount declaration. Put the declaration in `extension.ts` and add overrides beside it:
+Use a directory mount to keep overrides beside the mount declaration in `extension.ts`:
 
 ```
 agent/extensions/crm/
@@ -318,7 +301,7 @@ import crm from "@acme/crm";
 export default crm({ apiKey: process.env.CRM_API_KEY! });
 ```
 
-A same-named consumer channel, tool, connection, skill, schedule, or subagent wins. To adjust an extension tool, import it from the package's `./tools` export and define it again:
+A channel, tool, connection, skill, schedule, or subagent in your mount directory with the same name replaces the extension's. To adjust an extension tool, import it from the package's `./tools` export and define it again:
 
 ```ts title="agent/extensions/crm/tools/search.ts"
 import { search } from "@acme/crm/tools";
@@ -336,9 +319,9 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
-Hooks and instruction fragments are additive, so they cannot be replaced. To replace a dynamic tool, use a dynamic definition in the same slot; dynamic tools win over same-named static tools at runtime. `disableTool()` removes either kind.
+Hooks and instruction fragments add to the agent's own, so you can't replace them. A dynamic tool wins over a static tool with the same name, so replace a dynamic tool with a dynamic definition in the same file. `disableTool()` removes either kind.
 
-You can also place an override in the corresponding agent-root slot by using the final qualified name. For example, `agent/tools/crm__search.ts` replaces `tools/search.ts` from the extension package or its directory override. Application sources have the highest precedence, so an agent-root override wins when both forms exist.
+You can also override from the agent root with the prefixed name. `agent/tools/crm__search.ts` replaces the extension's `tools/search.ts`, and wins over a directory-mount override.
 
 ### Computer-use overrides
 
@@ -354,7 +337,7 @@ the managed display and driver after opening each session sandbox.
 
 ### Use an extension tool result in a hook
 
-To retain an extension tool's result type in a consumer hook, import its definition from `./tools` and pass it to [`toolResultFrom`](/docs/guides/hooks#narrowing-tool-results):
+To keep an extension tool's result type in your hook, import its definition from `./tools` and pass it to [`toolResultFrom`](/docs/guides/hooks#narrowing-tool-results):
 
 ```ts title="agent/hooks/narrow-crm.ts"
 import { defineHook } from "eve/hooks";
@@ -372,17 +355,27 @@ export default defineHook({
 });
 ```
 
-`toolResultFrom` recognizes the mounted `crm__search` result from the original definition, not the namespaced string. Publishers should keep descriptions distinct across different tool definitions so eve can assign each definition an unambiguous identity. Re-exporting the same definition, such as from a subagent's `tools/` directory, does not conflict.
+`toolResultFrom` matches the mounted `crm__search` result by its original definition, not by the prefixed name. Extension authors should give each tool definition a distinct description so eve can tell the tools apart. Re-exporting the same definition, such as from a subagent's `tools/` directory, doesn't conflict.
 
 ### Bundled development extensions
 
-Local `eve dev` also mounts bundled development extensions without creating a project mount. The self-modification extension is included by default when `eve dev` starts a local server. Bundled development extensions are not included in production builds. See [Self-Modification](./guides/self-modification) for the local workflow.
+Local `eve dev` mounts the bundled self-modification extension by default, without a file under `agent/extensions/`. Production builds don't include it. See [Self-Modification](./guides/self-modification).
 
 ### Compatibility
 
-`eve extension build` records the eve version used to build the extension. When you mount a package, eve checks its distribution before loading extension code. A distribution built with a newer eve release needs that release or later; build with the oldest eve release you want to support and test the same distribution with newer consumers. An unsupported distribution generation needs a rebuilt extension or a compatible release. npm peer ranges do not replace this check.
+eve checks the eve version that built an extension before it loads the extension's code. A built extension needs that eve release or a later one. Build with the oldest release you want to support, and test with newer agents. An agent can't rebuild an installed extension that ships without source.
 
-**Extensions built with the old epoch-based manifest need a rebuild** when you upgrade to the first eve release that uses the new format. Upgrade to a compatible extension release, or rebuild a source-backed workspace extension with that eve release. An installed, source-free extension cannot be rebuilt by the consuming app.
+Sessions saved by eve 0.68 or earlier store extension state per package, not per mount. When such a session moves to a newer deployment, eve gives each value to the one mount that defines it. It drops values that no mount defines.
+
+### Troubleshooting
+
+| What you see                                                                                 | What to do                                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Extension "<package>" was built with eve <version>.`                                        | Upgrade eve to that version or later, or install an extension built with your eve version.                                                                                                            |
+| `Extension "<package>" requires distribution contract <n>, which this eve does not support.` | Rebuild the extension with your eve version, or install a compatible extension release.                                                                                                               |
+| `Extension "<package>" has no valid compatibility manifest`                                  | Rebuild or reinstall the extension.                                                                                                                                                                   |
+| The agent build stops with an error that names an extension package and its directory        | Fix the reported error, or run `eve extension build` in that package directory to build it on its own.                                                                                                |
+| `Incompatible context state layout for key "<key>".`                                         | Continue the session on its original deployment, or start a new session. The session stays on its deployment because two or more mounts of one package define that state, so eve can't pick an owner. |
 
 ## What to read next
 

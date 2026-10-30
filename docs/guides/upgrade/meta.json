@@ -1,0 +1,13 @@
+{
+  "title": "Upgrade to 1.0",
+  "defaultOpen": false,
+  "pages": [
+    "index",
+    "agent-files",
+    "session-events",
+    "clients",
+    "channels",
+    "evals-and-cli",
+    "saved-history"
+  ]
+}

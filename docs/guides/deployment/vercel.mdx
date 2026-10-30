@@ -3,33 +3,33 @@ title: "Deploy to Vercel"
 description: "Deploy an eve agent with Vercel Workflow, Sandbox, Cron, and project credentials."
 ---
 
-Deploy eve to Vercel when you want the framework’s managed build and runtime integrations. Vercel runs the web service, workflows, sandboxes, schedules, and deployment observability.
+On Vercel, eve builds to Vercel Build Output, and Vercel runs the agent’s web service, workflows, sandboxes, schedules, and observability.
 
 ## Prepare the Vercel project
 
-Run this from the project root to link it to a Vercel project. For an eve agent workspace, use the workspace root, not a member directory:
+Link the project from its root, or from the workspace root for an eve agent workspace:
 
 ```bash
 eve link
 ```
 
-The command links an existing project or creates one, then pulls its environment variables. For non-interactive use, name the project instead of picking it:
+`eve link` links an existing project or creates one, then pulls its environment variables. For non-interactive use, name the project:
 
 ```bash
 eve link --project your_project_name --non-interactive
 ```
 
-Use `--team` as well when the account has access to more than one team. `eve link` creates the project if it doesn't exist yet.
+Add `--team` when the account has access to more than one team.
 
 ## Configure credentials and auth
 
-A string model ID routes requests through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). The deployment authenticates through project OpenID Connect (OIDC), so you don’t need a provider API key for that path.
+A string model ID routes requests through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). The deployment authenticates to it through project OpenID Connect (OIDC), so it needs no provider API key.
 
-Add credentials for direct model providers, tools, and connections to the Vercel project environment. Add any signing keys or passwords required by your [route authentication policy](../auth-and-route-protection). Replace `placeholderAuth()` before a browser sends a production request.
+Add credentials for direct model providers, tools, and connections to the Vercel project environment. Also add any signing keys or passwords your [route authentication policy](../auth-and-route-protection) requires. Replace `placeholderAuth()` before a browser sends a production request.
 
 ## Select the sandbox environment
 
-The default environment selects Vercel Sandbox on Vercel. To select it explicitly:
+On Vercel, the default sandbox environment selects Vercel Sandbox. To select it explicitly:
 
 ```typescript
 import { defineSandbox } from "eve/sandbox";
@@ -39,25 +39,25 @@ export const environment = VercelSandbox.environment();
 export default defineSandbox(() => environment.open());
 ```
 
-See [Sandbox](../../sandbox) for preparation, resource limits, network policy, and lifecycle.
+See [Sandbox](../../sandbox) for preparation, resource limits, network policy, and sandbox lifetime.
 
 <Callout type="info" title="Sandbox prewarming">
   During a Vercel build, eve creates or reuses a snapshot-backed template when an environment uses
   `VercelSandbox.environment({prepare})` or has seed files. A prewarm failure stops the deployment.
-  See the [sandbox lifecycle](../../sandbox#lifecycle).
+  See [how long a sandbox lasts](../../sandbox#lifecycle).
 </Callout>
 
 ## Deploy the agent
 
-For a single-agent project without a frontend, use `eve build`. For an agent-only workspace, run it from the workspace root: eve generates a separately built service and a `/<name>/eve/v1/*` transport route for each member. All members deploy together in one Vercel project. See [Project Structure](../../concepts/project-structure) for workspace membership and layout rules.
+For a single-agent project without a frontend, use `eve build`. For an agent-only workspace, run it from the workspace root. Each member gets a separately built service and an `/eve/<name>/v1/*` transport route, and all members deploy together in one Vercel project. See [Project Structure](../../concepts/project-structure) for workspace layout rules.
 
-A Next.js-centered project uses [`withEve` in `next.config.ts`](../frontend/nextjs) and its Next.js build command. If you author the project's broader service graph in `vercel.ts`, use the configuration below instead.
+A Next.js-centered project uses [`withEve` in `next.config.ts`](../frontend/nextjs) and its Next.js build command. To author the project's service graph in `vercel.ts`, use the configuration below instead.
 
 ### Compose agents with other Vercel services
 
-Use `withEve` from `eve/vercel` when the agents and other applications are peer services. The helper contributes workspace agents to a Vercel service graph; it does not manage or require a particular frontend framework. Unlike `eve/next`, this keeps the project lifecycle separate from Next.js. Both integrations deploy the agent services together in one Vercel project.
+`withEve` from `eve/vercel` adds eve agents to a Vercel service graph as peers of your other applications, with no frontend framework required. Unlike `eve/next`, it doesn't depend on a Next.js build. Both deploy the agent services together in one Vercel project.
 
-For a standalone agent or workspace with a peer Next.js frontend under `apps/web/`, replace `vercel.json` with a root `vercel.ts`. The frontend uses an ordinary Next.js config without `eve/next`:
+For a standalone agent or workspace with a peer Next.js frontend under `apps/web/`, replace `vercel.json` with a root `vercel.ts`. The frontend keeps an ordinary Next.js config without `eve/next`:
 
 ```typescript title="vercel.ts"
 import { withEve } from "eve/vercel";
@@ -79,15 +79,21 @@ export default await withEve({
 });
 ```
 
-Vercel evaluates `vercel.ts` before resolving the service graph. `withEve` adds the root agent, or every direct workspace member, as an independently built service and returns a plain Vercel configuration. Named workspace agents mount at `/eve/<name>/v1/*`; a root agent mounts at `/eve/v1/*`. Vercel then builds the frontend and each eve agent separately. The frontend does not need `withEve` in its framework configuration or a build script that builds the agents.
+`withEve` adds the root agent, or every direct workspace member, as an independently built service and returns a plain Vercel configuration. Named workspace agents mount at `/eve/<name>/v1/*`; a root agent mounts at `/eve/v1/*`. Vercel builds the frontend and each agent separately, so the frontend needs neither `withEve` in its framework configuration nor a script that builds the agents.
 
 The Web Chat installer can generate this composition for a standalone agent or a selected workspace agent. Configure authentication for every exposed agent. To self-host the same source layout, replace Vercel composition with your own [process and proxy configuration](./self-hosted-operations#run-workspace-members).
 
-Run Vercel CLI 59.16.0 or newer with `vercel dev --local` to start the complete service graph locally without linking a Vercel project. A generated Vercel Web Chat project exposes this as `pnpm dev:all`. When the directory is linked, Vercel also loads its development environment and settings. Use `pnpm dev` or `pnpm dev:eve` when you want one agent and the eve terminal UI, or `pnpm dev:web` when you want the frontend without its agent services. Named agents use the same `/eve/<name>/v1/*` routes in development, and default `defineWorkspaceAgent` transports can call peers without deployment credentials. Import the experimental helper from `eve/experimental/workspace`; see [Vercel workspace peers](../../subagents#vercel-workspace-peers). The workspace layout and `eve/vercel` integration are not experimental.
+Run `vercel dev --local` with Vercel CLI 59.16.0 or newer to start the whole service graph locally without linking a project. A linked directory also loads its development environment and settings. A generated Vercel Web Chat project exposes the scripts below. Named agents use the same `/eve/<name>/v1/*` routes in development, and default `defineWorkspaceAgent` transports can call peers without deployment credentials. Import that helper from `eve/experimental/workspace`; see [Vercel workspace peers](../../subagents#vercel-workspace-peers). The workspace layout and `eve/vercel` integration are not experimental.
 
-Generated transport routes are inserted before a filesystem handler or, when no filesystem handler exists, before authored routes. `withEve` throws instead of overwriting an authored service key or exact transport route that belongs to a generated agent. Remove the authored route, and remove or rename the authored service; `withEve` adds both automatically. Names in the array form of `services` must also be unique. Other service names, routes, bindings, and Cron Jobs remain authored in `vercel.ts`.
+| Script                       | Starts                                            |
+| ---------------------------- | ------------------------------------------------- |
+| `pnpm dev:all`               | The whole service graph, via `vercel dev --local` |
+| `pnpm dev` or `pnpm dev:eve` | One agent and the eve terminal UI                 |
+| `pnpm dev:web`               | The frontend without its agent services           |
 
-Custom agent channel endpoints are not published automatically. Expose one explicitly by routing it to the generated service:
+Generated transport routes go before a filesystem handler, or before authored routes when there is none. `withEve` throws instead of overwriting an authored service key or exact transport route that belongs to a generated agent. Remove that route, and remove or rename that service, because `withEve` adds both. Names in the array form of `services` must be unique. Other services, routes, bindings, and Cron Jobs stay authored in `vercel.ts`.
+
+Custom agent channel endpoints aren’t published automatically. Route each one to the generated service:
 
 ```typescript title="vercel.ts"
 import { withEve } from "eve/vercel";
@@ -109,9 +115,9 @@ export default await withEve({
 });
 ```
 
-A Vercel project can use only one configuration source, so remove `vercel.json` when adopting `vercel.ts`. Keep `eve` in the root package dependencies so Vercel can import `eve/vercel` while evaluating the configuration. `withEve` discovers the workspace containing its evaluation directory, including Vercel's temporary `.vercel` configuration directory. Pass `{ root: "/absolute/workspace/path" }` as the second argument only when you need to select a specific workspace root.
+A Vercel project uses only one configuration source, so remove `vercel.json` when adopting `vercel.ts`. Keep `eve` in the root package dependencies so Vercel can import `eve/vercel`. `withEve` discovers the workspace containing its evaluation directory; pass `{ root: "/absolute/workspace/path" }` as the second argument to select a different workspace root.
 
-An authored eve service routed at `/eve/v1` already uses the protocol path; callbacks remain at `/eve/v1/callback/*`. A named mount such as `/eve/support` adds that mount before the protocol path, giving `/eve/support/v1/callback/*`.
+Callbacks follow the mount: a root agent at `/eve/v1` receives them at `/eve/v1/callback/*`, and a named mount such as `/eve/support` at `/eve/support/v1/callback/*`.
 
 ### Deploy the project
 
@@ -121,9 +127,9 @@ Deploy the linked project to production from its root:
 eve deploy
 ```
 
-`eve deploy` installs dependencies, runs `vercel deploy --prod --logs` to show build logs, and pulls the project environment after deployment. You can also push to a Git-connected Vercel project. Hosted Vercel builds set `VERCEL`, so `eve build` writes the deployment bundle under `.vercel/output`.
+`eve deploy` installs dependencies, runs `vercel deploy --prod --logs`, and pulls the project environment afterward. You can also push to a Git-connected Vercel project. Hosted Vercel builds set `VERCEL`, so `eve build` writes the deployment bundle under `.vercel/output`.
 
-When `eve deploy` creates a new Vercel project, it configures trace sampling so traces appear in Agent Runs automatically. See [Agent Runs](../../observability/agent-runs) for details. Pass `--no-trace-sampling` to skip this setting.
+When `eve deploy` creates a new Vercel project, it configures trace sampling so traces appear in [Agent Runs](../../observability/agent-runs). Pass `--no-trace-sampling` to skip this.
 
 For non-interactive use, confirm the production deploy up front. `--project` links first, so a new project needs no separate `eve link`:
 
@@ -131,10 +137,10 @@ For non-interactive use, confirm the production deploy up front. `--project` lin
 eve deploy --project your_project_name --non-interactive --yes
 ```
 
-Vercel uses the generated output to configure these services:
+Vercel configures these services from the build output:
 
 - **Web runtime**: serves health, session, stream, channel, callback, and schedule routes
-- **Vercel Workflow**: persists and resumes durable runs, with optimistic replay preconditions enabled so stale event-log snapshots reload before they can commit
+- **Vercel Workflow**: stores and resumes agent runs
 - **Vercel Cron**: invokes authored schedules
 - **Vercel Sandbox**: runs sandbox sessions selected by the default sandbox environment
 
@@ -147,7 +153,7 @@ curl https://your_agent.vercel.app/eve/v1/health
 eve remote connect --url https://your_agent.vercel.app
 ```
 
-For a workspace agent, include its public `/eve/<name>` mount. For example:
+For a workspace agent, include its `/eve/<name>` mount:
 
 ```bash
 curl https://your_agent.vercel.app/eve/support/v1/health
@@ -163,8 +169,6 @@ inspect conversation traces. See [Agent Runs](../../observability/agent-runs)
 for beta access, pricing, retention, and tracing setup.
 
 ## Continue configuring production
-
-Use these guides to secure and observe the deployed agent:
 
 - [Authentication](../auth-and-route-protection): configure who can call the deployed agent
 - [Instrumentation](../../observability/instrumentation): export traces and diagnose runtime failures

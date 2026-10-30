@@ -87,6 +87,13 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/getting-started/first-agent", "/tutorial/first-agent"),
   ...createDocsRedirects("/guides/evaluate", "/guides/decide"),
   ...createDocsRedirects("/sandbox/microsandbox", "/sandbox"),
+  ...createDocsRedirects("/tools/tasks-upgrade", "/tools/tasks"),
+  ...createDocsRedirects("/guides/prepare-for-1-0", "/guides/upgrade"),
+  ...createDocsRedirects("/concepts/upgrade-to-v27-events", "/guides/upgrade/session-events"),
+  ...createDocsRedirects(
+    "/observability/instrumentation-migration",
+    "/observability/instrumentation",
+  ),
 ];
 
 export const rootMarkdownRedirects: DocsRedirect[] = [
@@ -116,6 +123,12 @@ export const compatibilityRedirects: DocsRedirect[] = [
       ["eve-chat-template", "eve-chat-template"],
       ["eve-agent-with-python", "eve-agent-with-python"],
       ["eve-slack-agent", "eve-slack-agent"],
+      ["eve-voice-template", "eve-voice-template"],
+      ["eve-discord-agent", "eve-discord-agent"],
+      ["eve-company-brain-template", "eve-company-brain-template"],
+      ["eve-coding-agent-template", "eve-coding-agent-template"],
+      ["bell-stack", "bell-stack"],
+      ["eve-design-template", "eve-design-template"],
       ["eve-data-analyst-template", "eve-data-analyst"],
       ["eve-contentful-agent-template", "eve-contentful-agent"],
       ["eve-vercel-drives-starter", "eve-vercel-drives-starter"],

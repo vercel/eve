@@ -3,7 +3,7 @@ title: "Default Sandbox"
 description: "Let eve select the sandbox provider when it prepares the sandbox."
 ---
 
-`DefaultSandbox.environment()` selects a sandbox provider when eve prepares the sandbox, records the choice, and uses that provider for every session the build serves.
+`DefaultSandbox.environment()` lets eve pick the sandbox provider for you. eve picks once, when it prepares the sandbox, and every session the build serves uses that provider. It's also what eve uses when the agent has no sandbox file.
 
 ```ts
 import { DefaultSandbox, defineSandbox } from "eve/sandbox";
@@ -12,35 +12,28 @@ export const environment = DefaultSandbox.environment();
 export default defineSandbox(() => environment.open());
 ```
 
-On Vercel, it selects [Vercel Sandbox](/docs/sandbox/vercel). Elsewhere, it selects [Docker](/docs/sandbox/docker) when a Docker daemon is reachable, and [just-bash](/docs/sandbox/just-bash) only during `eve dev` and `eve eval`.
-
 ## How eve selects the provider
 
-eve selects the provider when it prepares the sandbox: during `eve build`, or during `eve dev` the first time a session opens the sandbox. It checks in this order:
+eve prepares the sandbox during `eve build`, or during `eve dev` the first time a session opens the sandbox. It takes the first row that matches:
 
-1. If the `VERCEL` environment variable is set, it selects Vercel.
-2. Otherwise, if `docker version` reports a running Linux Docker daemon within five seconds, it selects Docker.
-3. Otherwise, during `eve dev` and `eve eval`, it selects just-bash.
-4. Otherwise, in a production `eve build`, it selects no provider.
+| Where eve prepares the sandbox                                               | Selected provider                             |
+| ---------------------------------------------------------------------------- | --------------------------------------------- |
+| The `VERCEL` environment variable is set (`vercel build` or a Vercel deploy) | [Vercel Sandbox](/docs/sandbox/vercel)        |
+| `docker version` reports a running Linux Docker daemon within five seconds   | [Docker](/docs/sandbox/docker)                |
+| `eve dev` or `eve eval`                                                      | [just-bash](/docs/sandbox/just-bash)          |
+| A production `eve build`                                                     | None: opening the sandbox fails with an error |
 
-| Where eve prepares the sandbox                    | Selected provider                             |
-| ------------------------------------------------- | --------------------------------------------- |
-| On Vercel (`vercel build` or a Vercel deploy)     | [Vercel Sandbox](/docs/sandbox/vercel)        |
-| Anywhere a Linux Docker daemon is reachable       | [Docker](/docs/sandbox/docker)                |
-| `eve dev` or `eve eval` without Docker            | [just-bash](/docs/sandbox/just-bash)          |
-| A production `eve build` without Vercel or Docker | None: opening the sandbox fails with an error |
-
-Production builds never fall back to just-bash, because just-bash runs no native processes and provides no network isolation. When no provider is available, `eve build` still succeeds and logs that no provider is available. The first session that opens the sandbox fails with an error that asks you to start Docker and rebuild, deploy to Vercel, or select a provider explicitly in your sandbox file. See [Sandbox troubleshooting](/docs/sandbox/troubleshooting).
+Production builds never fall back to just-bash, because just-bash runs no native processes and provides no network isolation. Without a provider, `eve build` succeeds and logs that no provider is available. The first session that opens the sandbox then fails. The error asks you to start Docker and rebuild, deploy to Vercel, or select a provider in your sandbox file. See [Sandbox troubleshooting](/docs/sandbox/troubleshooting#defaultsandbox-has-no-sandbox-provider-for-this-build).
 
 ## The build records the choice
 
-`eve build` stores the selected provider in the build's prepared sandbox artifact. At runtime, `DefaultSandbox` reads the recorded provider and does not check for Vercel or Docker again, so the build and the server it produces always use the same provider, even when the server runs on a different host. To change the provider, rebuild where the provider you want is available.
+`eve build` records the selected provider. The server always uses that provider, even on a different host, and doesn't check for Vercel or Docker again. To change the provider, rebuild where the provider you want is available.
 
-Each session also records the provider that created its sandbox. If a later build selects a different provider, a session that resumes on the new build starts a fresh sandbox from the new provider, without the old sandbox's files. eve does not delete the old sandbox: a Vercel Sandbox stays in your Vercel project, and a Docker container stays on the Docker host until you remove it.
+When a session continues on a build with a different provider, it starts a fresh sandbox without the old sandbox's files. eve doesn't delete the old sandbox. A Vercel Sandbox stays in your Vercel project, and a Docker container stays on the Docker host until you remove it.
 
 ## Environment options
 
-`DefaultSandbox.environment()` accepts options for each provider it might select. eve passes only the selected provider's options and ignores the rest:
+`DefaultSandbox.environment()` accepts options for each provider it might select. It passes on only the selected provider's options:
 
 ```ts
 import { DefaultSandbox, defineSandbox } from "eve/sandbox";
@@ -64,13 +57,13 @@ export default defineSandbox(() => environment.open());
 | `vercel`   | Vercel is selected    | The options of [`VercelSandbox.environment()`](/docs/sandbox/vercel), such as `region`, `resources`, and credentials.                                               |
 | `justBash` | just-bash is selected | `autoInstall` and `prepare`. Use [`JustBashSandbox.environment()`](/docs/sandbox/just-bash#experimental-options) for experimental `customCommands` or `filesystem`. |
 
-Keep a shared `prepare` callback portable, because it runs on whichever provider eve selects. just-bash runs no native binaries, so commands such as `apt-get` fail there during `eve dev`.
+Keep a shared `prepare` callback portable, because it runs on whichever provider eve selects. Commands such as `apt-get` fail on just-bash, which runs no native binaries.
 
-On Vercel, when the environment has no `prepare` callback, workspace seed, skill files, or `source`, eve skips the snapshot and creates each session sandbox directly from the configured `image`, or from eve's base image when none is set. See [Vercel Sandbox](/docs/sandbox/vercel#snapshot-preparation).
+On Vercel, eve skips the snapshot when the environment has no `prepare` callback, workspace seed, skill files, or `source`. Each session sandbox then starts directly from the configured `image`, or from eve's base image when none is set. See [Vercel Sandbox](/docs/sandbox/vercel#snapshot-preparation).
 
 ## Network policy
 
-Pass `networkPolicy` to `open()`, or call `setNetworkPolicy()` on the session from `ctx.getSandbox(environment)`. eve forwards the policy to the selected provider:
+To set a network policy on the selected provider, pass `networkPolicy` to `open()`. You can also call `setNetworkPolicy()` on the sandbox from `ctx.getSandbox(environment)`.
 
 ```ts
 import { DefaultSandbox, defineSandbox } from "eve/sandbox";
@@ -79,6 +72,12 @@ export const environment = DefaultSandbox.environment();
 export default defineSandbox(() => environment.open({ networkPolicy: "deny-all" }));
 ```
 
-Vercel Sandbox accepts every network policy, including domain allow-lists and credential transforms. Docker accepts only `"allow-all"` and `"deny-all"` and rejects any other policy with an error. just-bash always allows network access, so it accepts only `"allow-all"` and rejects any other policy with an error. Use [Vercel Sandbox](/docs/sandbox/vercel) directly when you need domain-level policies in every environment.
+| Provider  | Accepted policies                                                    |
+| --------- | -------------------------------------------------------------------- |
+| Vercel    | Every policy, including domain allow-lists and credential transforms |
+| Docker    | `"allow-all"` and `"deny-all"`                                       |
+| just-bash | `"allow-all"` only, because it always allows network access          |
 
-Use a provider directly when you need its other `open()` options, such as Vercel compute resources or Drive `mounts`.
+Other policies throw an error.
+
+Use a provider directly when you need domain-level policies in every environment, or its other `open()` options, such as Vercel compute resources or Drive `mounts`. See [Vercel Sandbox](/docs/sandbox/vercel) and [Docker Sandbox](/docs/sandbox/docker).

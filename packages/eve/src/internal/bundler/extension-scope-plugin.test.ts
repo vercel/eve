@@ -22,7 +22,7 @@ describe("createExtensionScopePlugin (path containment)", () => {
   });
 
   it("redirects eve/context to a namespaced shim for extension-owned importers", () => {
-    const id = pathPlugin().resolveId("eve/context", "/pkg/crm/extension/tools/budget.ts");
+    const id = pathPlugin().resolveId.handler("eve/context", "/pkg/crm/extension/tools/budget.ts");
     expect(id).toBe("\0eve-ext-scope:context:extensions%2Fcrm");
   });
 
@@ -32,14 +32,14 @@ describe("createExtensionScopePlugin (path containment)", () => {
       { ...SCOPES[0]!, mountId: "subagents/research/extensions/crm" },
     ])!;
     expect(
-      plugin.resolveId(
+      plugin.resolveId.handler(
         "eve/context",
         "/pkg/crm/extension/tools/budget.ts?eve-mount=subagents%2Fresearch%2Fextensions%2Fcrm",
       ),
     ).toBe("\0eve-ext-scope:context:subagents%2Fresearch%2Fextensions%2Fcrm");
-    expect(() => plugin.resolveId("eve/context", "/pkg/crm/extension/tools/budget.ts")).toThrow(
-      "Ambiguous extension scope",
-    );
+    expect(() =>
+      plugin.resolveId.handler("eve/context", "/pkg/crm/extension/tools/budget.ts"),
+    ).toThrow("Ambiguous extension scope");
   });
 
   it("scopes a shared chunk emitted beside the source root to its tagged mount", () => {
@@ -48,7 +48,7 @@ describe("createExtensionScopePlugin (path containment)", () => {
       { ...SCOPES[0]!, mountId: "subagents/research/extensions/crm" },
     ])!;
     expect(
-      plugin.resolveId(
+      plugin.resolveId.handler(
         "eve/context",
         "/pkg/crm/_chunks/budget-abc123.mjs?eve-mount=subagents%2Fresearch%2Fextensions%2Fcrm",
       ),
@@ -56,23 +56,29 @@ describe("createExtensionScopePlugin (path containment)", () => {
   });
 
   it("leaves eve/extension unscoped for extension-owned importers", () => {
-    const id = pathPlugin().resolveId("eve/extension", "/pkg/crm/extension/config.ts");
+    const id = pathPlugin().resolveId.handler("eve/extension", "/pkg/crm/extension/config.ts");
     expect(id).toBeUndefined();
   });
 
   it("ignores importers outside every extension source root", () => {
-    expect(pathPlugin().resolveId("eve/context", "/app/agent/tools/local.ts")).toBeUndefined();
+    expect(
+      pathPlugin().resolveId.handler("eve/context", "/app/agent/tools/local.ts"),
+    ).toBeUndefined();
   });
 
   it("does not redirect a sibling directory that shares the source-root prefix", () => {
-    expect(pathPlugin().resolveId("eve/context", "/pkg/crm/extras/tool.ts")).toBeUndefined();
+    expect(
+      pathPlugin().resolveId.handler("eve/context", "/pkg/crm/extras/tool.ts"),
+    ).toBeUndefined();
   });
 
   it("only intercepts the scoped framework modules", () => {
     expect(
-      pathPlugin().resolveId("eve/tools", "/pkg/crm/extension/tools/budget.ts"),
+      pathPlugin().resolveId.handler("eve/tools", "/pkg/crm/extension/tools/budget.ts"),
     ).toBeUndefined();
-    expect(pathPlugin().resolveId("zod", "/pkg/crm/extension/tools/budget.ts")).toBeUndefined();
+    expect(
+      pathPlugin().resolveId.handler("zod", "/pkg/crm/extension/tools/budget.ts"),
+    ).toBeUndefined();
   });
 });
 
@@ -80,28 +86,28 @@ describe("createFixedMountScopePlugin (dev per-module)", () => {
   it("scopes every non-virtual importer to the fixed namespace", () => {
     const plugin = createFixedMountScopePlugin("extensions/crm");
     // The importer path is irrelevant in fixed mode.
-    expect(plugin.resolveId("eve/context", "/anywhere/on/disk/tool.ts")).toBe(
+    expect(plugin.resolveId.handler("eve/context", "/anywhere/on/disk/tool.ts")).toBe(
       "\0eve-ext-scope:context:extensions%2Fcrm",
     );
-    expect(plugin.resolveId("eve/extension", "/anywhere/config.ts")).toBeUndefined();
+    expect(plugin.resolveId.handler("eve/extension", "/anywhere/config.ts")).toBeUndefined();
   });
 
   it("never re-enters through virtual shim importers", () => {
     const plugin = createFixedMountScopePlugin("extensions/crm");
     expect(
-      plugin.resolveId("eve/context", "\0eve-ext-scope:context:extensions%2Fcrm"),
+      plugin.resolveId.handler("eve/context", "\0eve-ext-scope:context:extensions%2Fcrm"),
     ).toBeUndefined();
   });
 
   it("only intercepts the scoped framework modules", () => {
     const plugin = createFixedMountScopePlugin("extensions/crm");
-    expect(plugin.resolveId("eve/tools", "/anywhere/tool.ts")).toBeUndefined();
+    expect(plugin.resolveId.handler("eve/tools", "/anywhere/tool.ts")).toBeUndefined();
   });
 });
 
 describe("shim baking (shared)", () => {
   it("bakes the namespace into the defineState shim", () => {
-    const shim = createFixedMountScopePlugin("extensions/crm").load(
+    const shim = createFixedMountScopePlugin("extensions/crm").load.handler(
       "\0eve-ext-scope:context:extensions%2Fcrm",
     );
     expect(shim?.code).toContain(`import { defineMountedState } from "eve/internal/mount-state"`);
@@ -109,6 +115,6 @@ describe("shim baking (shared)", () => {
   });
 
   it("passes through non-shim ids in load", () => {
-    expect(pathPlugin().load("/pkg/crm/extension/tools/budget.ts")).toBeUndefined();
+    expect(pathPlugin().load.handler("/pkg/crm/extension/tools/budget.ts")).toBeUndefined();
   });
 });

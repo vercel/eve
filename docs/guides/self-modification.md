@@ -3,9 +3,9 @@ title: "Self-Modification"
 description: "Ask your agent to update its own authored files during local development, or let a deployed agent propose changes as draft pull requests."
 ---
 
-When `eve dev` starts a local server, it mounts the bundled self-modification extension by default. Ask your agent to change its instructions, tools, skills, or other files under `agent/`; eve delegates the source work to the `self-modification__agent` subagent. Connecting to an existing server with `eve remote connect --url <url>` does not add the bundled extension to that server.
+Self-modification lets you ask your agent to change its own instructions, tools, skills, or other files under `agent/`. When `eve dev` starts a local server, it mounts the bundled `eve/extensions/self-modification/local` extension, which delegates the source work to the `self-modification__agent` subagent. `eve remote connect --url <url>` doesn't add it to the server it connects to.
 
-The bundled extension is `eve/extensions/self-modification/local`. It is for local development and is not included in production builds. To let a deployed agent propose source changes, mount the separate [`eve/extensions/self-modification/remote`](#propose-changes-from-a-deployed-agent) extension.
+The local extension is not included in production builds. To let a deployed agent propose source changes, mount the separate [`eve/extensions/self-modification/remote`](#propose-changes-from-a-deployed-agent) extension.
 
 ```bash
 eve dev
@@ -17,11 +17,11 @@ For example, ask the agent to add a reusable action:
 Add a tool that converts temperatures between Celsius and Fahrenheit.
 ```
 
-The self-modification subagent changes the authored files in your project. Review the diff and test the new behavior as you would for any other source change. `eve dev` reloads changes while you work.
+The subagent edits the authored files in your project, and `eve dev` reloads them. Review the diff and test the change as you would any other source change.
 
-The subagent is offered only to sessions authenticated by [`localDev()`](./auth-and-route-protection#localdev) or by the Vercel development token the dev TUI sends for a linked project. Sessions authenticated as Slack users or by your own authenticators, including HTTP Basic operator credentials, do not see it. The local mount has no `authorize` override; edit the authored files directly when using those authenticators.
+The subagent is offered only to sessions authenticated by [`localDev()`](./auth-and-route-protection#localdev) or by the Vercel development token the dev TUI sends for a linked project. Sessions authenticated any other way, such as Slack users or HTTP Basic operator credentials, don't see it, and the local mount has no `authorize` override.
 
-A tunnel or reverse proxy running on the same machine can forward callers that `localDev()` accepts as the synthetic local developer. Those callers can use the editor. Before exposing `eve dev` through a tunnel, require authentication at the tunnel or proxy, or remove `localDev()` from the exposed channel's auth chain. Putting another authenticator before `localDev()` does not reject callers that it skips: they can still fall through to `localDev()`.
+A tunnel or reverse proxy on the same machine can forward callers that `localDev()` accepts as the local developer. Those callers can use the subagent. Before exposing `eve dev` through a tunnel, require authentication at the tunnel or proxy, or remove `localDev()` from the exposed channel's auth chain. Another authenticator placed before `localDev()` doesn't help, because callers it skips still fall through to `localDev()`.
 
 ## Change the self-modification model
 
@@ -31,7 +31,7 @@ The subagent uses your agent's model by default. To give it a different model or
 Switch the self-modification subagent to openai/gpt-6-sol with low reasoning.
 ```
 
-The first time, this creates `agent/extensions/self-modification/extension.ts` with those settings. After that file exists, later changes edit it. You can also edit the file yourself: it accepts `model`, `reasoning`, and `local.enabled` options.
+This creates or edits `agent/extensions/self-modification/extension.ts`. You can also edit the file yourself; it accepts `model`, `reasoning`, and `local.enabled`.
 
 ```ts
 // agent/extensions/self-modification/extension.ts
@@ -43,19 +43,13 @@ export default selfModification({
 });
 ```
 
-The bare `eve/self-modification` entry is removed. Mount `eve/extensions/self-modification/local` for development or `eve/extensions/self-modification/remote` for deployed source changes. The local mount does not accept a `deployed` option. If your mount sets `deployed`, eve rejects it and asks you to move that configuration to an `eve/extensions/self-modification/remote` mount.
-
-## Migrate a retired scaffold
-
-The scaffold under `agent/subagents/self-modification/` is no longer supported. The disabled agent helper, including `eve/internal/self-modification/agent`, has been removed. Do not use the old `@eve/self-modification` compatibility package for new installations.
-
-Preserve any authored changes, then remove the old scaffold directory. Run `eve add eve/self-modification` to create the supported local extension mount. Setup rejects the old directory rather than deleting it. The bundled local extension and the separate remote extension remain supported.
+The local mount rejects a `deployed` option with an error; configure deployed source changes on a separate `eve/extensions/self-modification/remote` mount.
 
 ## Propose changes from a deployed agent
 
-`eve/extensions/self-modification/remote` is a separate extension for deployed agents. It adds a subagent that checks out your repository in a sandbox, edits the authored source, and opens a draft pull request against a target branch. It never changes the running deployment. Changes take effect only after you review, merge, and redeploy.
+`eve/extensions/self-modification/remote` adds a source-change subagent to a deployed agent. The subagent checks out your repository in a sandbox, edits the authored source, and opens a draft pull request against a target branch. It never changes the running deployment; changes take effect after you review, merge, and redeploy.
 
-Mount it under its own namespace so it does not replace the local extension:
+Mount it under its own namespace so it doesn't replace the local extension:
 
 ```ts
 // agent/extensions/self-modification-remote/extension.ts
@@ -84,17 +78,23 @@ export default selfModification({
 | `credentials`           | Required. An object with a `resolve({ capability, repository })` function that returns a GitHub token, or `{ pat: true }` to read `EVE_SELF_MODIFICATION_GITHUB_TOKEN` from the deployment environment. |
 | `model`, `reasoning`    | Optional model and reasoning level for the deployed subagent. It defaults to the parent agent's model.                                                                                                  |
 
-The deployed subagent is never offered during `eve dev`. It requires deploying on Vercel, where Vercel Sandbox provides the runtime credential transforms that keep the GitHub token out of the sandbox. Builds succeed on any host, but in a deployment outside Vercel the deployed subagent fails with an error that names this requirement when it opens its sandbox. Don't mount `eve/extensions/self-modification/remote` in self-hosted deployments. eve applies the GitHub token as a sandbox network credential only while it checks out or publishes, so commands in the sandbox cannot read it.
+The deployed subagent is never offered during `eve dev`. It requires Vercel, because Vercel Sandbox keeps the GitHub token out of the sandbox. eve applies the token only while it checks out or publishes, so sandbox commands can't read it. Builds succeed on any host. Outside Vercel, the subagent fails with an error naming this requirement when it opens its sandbox, so don't mount it in self-hosted deployments.
 
 ## Run without self-modification
 
-Pass `--no-default-extensions` when you do not want `eve dev` to mount bundled development extensions:
+Pass `--no-default-extensions` to stop `eve dev` from mounting its bundled development extensions:
 
 ```bash
 eve dev --no-default-extensions
 ```
 
-This disables the complete bundled default set for that server, including self-modification. It does not remove files from your project or disable extensions that you have explicitly mounted under `agent/extensions/`.
+This disables every bundled default extension for that server, including self-modification. Extensions you mount under `agent/extensions/` still load.
+
+## Troubleshooting
+
+| What you see                                                                             | What to do                                                                                                                                                                                    |
+| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `The legacy agent/subagents/self-modification layout is no longer supported.` from setup | Keep any authored changes, remove `agent/subagents/self-modification/`, then run `eve add eve/self-modification` to mount the extension at `agent/extensions/self-modification/extension.ts`. |
 
 ## What to read next
 

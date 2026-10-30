@@ -3,9 +3,9 @@ title: "Cases"
 description: "Author single-turn and multi-turn evals with test(t), and fan one file out over a dataset."
 ---
 
-Each eval file is one graded case by default, and a single file can fan out over a dataset by default-exporting an array (covered below). The runner executes each `test(t)` function against the target, captures every event, and computes a verdict from the [assertions](./assertions) you recorded. Every eval shares one shape, whether single-turn, multi-turn, human-in-the-loop (HITL), or dataset-driven: one `async test(t)` function that drives the agent and asserts inline.
+A case is one `async test(t)` function that sends messages to the agent and records [assertions](./assertions) as it goes. A case can send one message or several, answer approvals, or run once per row of a [dataset](#datasets-exporting-an-array). Each eval file exports one case, or an array of cases.
 
-Before adding a case, create the required config at the root of `evals/`. An empty config is enough when you do not need shared judge, reporter, concurrency, or timeout settings:
+Every `evals/` directory needs an `evals.config.ts` at its root. An empty config works when you don't need shared settings:
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
@@ -15,7 +15,7 @@ export default defineEvalConfig({});
 
 ## Single-turn evals
 
-The common case sends one turn and asserts on the reply. `t.send(input)` resolves once the turn settles, and the returned turn’s `.reply` is the assistant reply:
+A single-turn eval sends one message and asserts on the reply. `t.send(input)` resolves when the agent finishes its turn, and the returned turn's `.reply` holds the reply:
 
 ```ts title="evals/weather/brooklyn-forecast.eval.ts"
 import { defineEval } from "eve/evals";
@@ -30,7 +30,7 @@ export default defineEval({
 });
 ```
 
-Some evals only care about behavior, not text. Assert on the run and skip the content check entirely:
+To test behavior rather than text, assert on the run and skip the content check:
 
 ```ts title="evals/weather/no-tools-for-greetings.eval.ts"
 import { defineEval } from "eve/evals";
@@ -46,7 +46,7 @@ export default defineEval({
 
 ## Organizing with directories
 
-Identity is the file path, so directories are the grouping mechanism. `evals/weather/brooklyn-forecast.eval.ts` gets the id `weather/brooklyn-forecast`, and `eve eval weather` runs everything under `evals/weather/`. Shared constants and helpers live in sibling non-eval files (any name that doesn't end in `.eval.ts`):
+The file path is the eval's id, so directories group evals. `evals/weather/brooklyn-forecast.eval.ts` gets the id `weather/brooklyn-forecast`, and `eve eval weather` runs everything under `evals/weather/`. Put shared constants and helpers in sibling files whose names don't end in `.eval.ts`:
 
 ```text
 evals/
@@ -60,7 +60,7 @@ evals/
 
 ## Multi-turn evals
 
-Drive several turns in sequence for branching, HITL approvals, structured output, attachments, or multiple sessions. Because assertions live in the function, an intermediate value is a local variable. Keep each turn in a local variable and continue through its `.session`.
+Send several messages in order to test branching, approvals, structured output, attachments, or more than one conversation. Keep each turn in a variable and send the next message through its `.session`:
 
 ```ts title="evals/draft-then-send.eval.ts"
 import { defineEval } from "eve/evals";
@@ -78,7 +78,7 @@ export default defineEval({
 });
 ```
 
-Use scoped assertions for intermediate turns. When later control flow depends on a value-level check, `t.require` records a gate and stops the script if it fails:
+Use scoped assertions on turns in the middle of the conversation. When later code depends on a value check, `t.require` records a gate and stops the eval if it fails:
 
 ```ts title="evals/session-continuity.eval.ts"
 import { defineEval } from "eve/evals";
@@ -103,24 +103,32 @@ export default defineEval({
 
 ## The drive API
 
-Every `t.session()` or `t.send()` creates a new independent conversation. Continue an existing conversation through its session handle. Events from all sessions feed the same run-level assertions.
+Every `t.session()` or `t.send()` call starts a new, separate conversation (a session). Send more messages through its session handle. The run-level assertions on `t` see the events from every session.
 
-- `t.session(options?)` creates a session without starting a turn or consuming its stream. It resolves on `202 Accepted` with an `EveEvalSession` whose `.id` and `.state` are available. Options accept per-request `headers` and `signal`; creation uses the eval timeout signal by default.
-- `t.send(message, options?)` creates a new session with its first message in one request and waits for the turn to settle. The returned turn carries `.session`, `.reply`, and `.expectOk()`.
-- `session.send(message, options?)` sends a follow-up on that session and waits for it to settle.
-- `session.start(message, options?)` starts a text turn and returns as soon as the server accepts it. The live turn exposes `.session`, `.sessionId`, `.waitForEvent(...)`, `.cancel()`, and `.result()`.
-- `session.cancel()` returns a delivery for cooperative cancellation. A live idle session also accepts a no-op cancellation; an inactive session throws `SessionNotActiveError`.
-- `session.compact()` compacts that session's history between turns and waits for it to finish. It resolves to the captured events of the compaction, a context change, so assertions such as `.event("context.settled", { data: { kind: "compaction", outcome: "completed" } })` work on the result. It throws when the session is no longer active.
-- `session.sendFile(text, path, mediaType?)` attaches a local file as a data URL.
-- `session.agent(opened).stream(options?)` follows a delegated child's stream through the parent with the eval client's credentials. Pass a `child.opened` event from that session. It also reaches children on another deployment, which `t.target.attach(...).watch()` cannot address.
-- `session.requireInteraction(filter?)` records a gate, requires exactly one pending request, and returns it. Filters match tool name, action input, prompt, display, and option ids.
-- `session.respond(responses, options?)` answers specific pending input requests and sends them as the next turn. `session.startRespond(...)` returns a live turn for the same operation.
-- `session.respondAll(optionId)` answers every pending input request with the same option and sends the responses as the next turn.
-- `session.events` contains the events captured for that session. `session.transcript` formats its observed user and assistant messages in turn order.
+| Method                                     | Does                                                                                                    |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `t.session(options?)`                      | Creates an empty session and resolves on `202 Accepted`, with `.id` and `.state` set                    |
+| `t.send(message, options?)`                | Creates a session with its first message and waits for the turn to finish                               |
+| `session.send(message, options?)`          | Sends a follow-up and waits for the turn to finish                                                      |
+| `session.start(message, options?)`         | Starts a turn and returns once the server accepts it; see [In-flight turns](#in-flight-turns)           |
+| `session.cancel()`                         | Asks the agent to stop and returns a `Delivery`; a no-op when idle                                      |
+| `session.compact()`                        | Compacts the conversation history between turns and resolves to a turn with the compaction's events     |
+| `session.sendFile(text, path, mediaType?)` | Sends a message with a local file attached as a data URL                                                |
+| `session.agent(opened).stream(options?)`   | Follows a subagent's event stream, given a `child.opened` event from that session                       |
+| `session.requireInteraction(filter?)`      | Records a gate that exactly one approval or question is pending, and returns it                         |
+| `session.respond(responses, options?)`     | Answers specific pending requests as the next turn; `session.startRespond(...)` returns without waiting |
+| `session.respondAll(optionId)`             | Answers every pending request with the same option as the next turn                                     |
+| `session.events`, `session.transcript`     | The session's recorded events, and its user and assistant messages as text                              |
 
-The transcript uses `User:` and `Assistant:` labels separated by blank lines. It excludes reasoning, tool calls, tool results, and messages from other sessions. It updates after each turn settles, so read it after `await session.send(...)`, `await session.respond(...)`, or `await live.result()`.
+`t.session()` and `t.send()` options accept per-request `headers` and `signal`. Omit `signal` to use the eval's timeout signal.
 
-Each `send` (and `respond`/`respondAll`) resolves to a turn with `.reply`, `.data`, `.events`, `.interactions`, `.toolCalls`, `.session`, `.sessionId`, `.status`, and `.expectOk()`. Turn results retain their captured output and events; `.session` references the live conversation handle. `expectOk()` throws only when the turn ended failed; a session left open for a next message is the normal end state of a successful turn.
+`session.cancel()` throws `SessionNotActiveError` when the session is no longer active, and `session.compact()` also throws. Assert on a compaction with `.event("context.settled", { data: { kind: "compaction", outcome: "completed" } })`.
+
+`session.agent(...)` uses the eval's credentials, so unlike `t.target.attach(...).watch()`, it also reaches subagents on another deployment. `requireInteraction` filters match tool name, tool input, prompt, display, and option ids.
+
+The transcript uses `User:` and `Assistant:` labels separated by blank lines. It leaves out reasoning, tool calls, tool results, and other sessions' messages. It updates when a turn finishes, so read it after `await session.send(...)`, `await session.respond(...)`, or `await live.result()`.
+
+Each `send`, `respond`, and `respondAll` resolves to a turn, which doesn't change after it returns. The turn has `.reply`, `.data`, `.events`, `.interactions`, `.toolCalls`, `.session`, `.sessionId`, `.status`, and `.expectOk()`. `.session` is the conversation handle for sending more messages. `expectOk()` throws only when the turn failed.
 
 ## Prewarming a session
 
@@ -142,23 +150,11 @@ export default defineEval({
 });
 ```
 
-Acceptance is not an initialization barrier. The first message runs session initialization;
-the TypeScript client handles bounded retries if the workflow inbox is still starting.
-Creation failures reject `t.session()` without returning a handle. Each call creates an
-independent session, including concurrent calls. Accepted sessions appear in eval results
-and participate in timeout cleanup even when no message was sent.
-
-## Migrating existing evals
-
-Replace `t.newSession()` and `t.prewarm()` with `const session = await t.session()`.
-Replace consecutive `t.send()` calls with `session.send()` calls, or continue the first
-returned turn through `turn.session.send()`. Read identity, cursor, events, and transcript
-from `session`; read replies from `turn.reply`. Session operations such as `respond()`,
-`requireInteraction()`, and `cancel()` also move from `t` to `session`.
+The agent sets up the session when the first message arrives. If eve can't create the session, `t.session()` rejects. A created session appears in eval results and is cleaned up on timeout, even when no message was sent.
 
 ## In-flight turns
 
-Use `start()` when the eval must observe or affect a turn before it settles. A live turn owns one stream consumer: `waitForEvent()` reads typed events from its buffer, and `result()` waits for the boundary and records the same buffered stream as an immutable turn. Event data matchers use the same partial-deep matcher language as `t.event(...)`.
+Use `start()` when the eval must watch or change a turn before it finishes. The returned live turn has `.session`, `.sessionId`, `.waitForEvent(...)`, `.cancel()`, and `.result()`. `waitForEvent()` resolves with the first matching event, including one that arrived before the call. `result()` waits for the turn to end and returns it. Event data matchers use the same partial matching as `t.event(...)`.
 
 ```ts title="evals/cancel-running-tool.eval.ts"
 import { defineEval } from "eve/evals";
@@ -179,19 +175,19 @@ export default defineEval({
 });
 ```
 
-`waitForEvent()` rejects if the stream fails or reaches its turn boundary before the requested event. Call `result()` after any coordination to settle the stream and make its events available to run-level assertions.
+`waitForEvent()` rejects if the stream fails or the turn ends before the event arrives. Call `result()` afterward so the run-level assertions see the turn's events.
 
-Use `expectOk()` only when the next operation depends on that intermediate turn succeeding. A final `t.succeeded()` already records a complete-run gate.
+Use `expectOk()` only when the next step depends on an earlier turn succeeding; a final `t.succeeded()` already gates the whole run.
 
-To intentionally omit an eval for the current target, call `t.skip(reason)` before creating sessions, sending messages, or recording assertions. Skipped evals are reported separately and do not affect the exit code.
+To omit an eval for the current target, call `t.skip(reason)` before creating sessions, sending messages, or recording assertions. Skipped evals are reported separately and don't affect the exit code.
 
-Events from every session are captured in the result and artifacts. `t.log(message)` records debug lines into the eval artifact; `--verbose` also streams them to stdout as evals run. `t.abortSignal` is an `AbortSignal` that fires on timeout.
+`t.log(message)` writes debug lines to the eval artifact, and `--verbose` also streams them to stdout. `t.abortSignal` fires on timeout.
 
 For driving sessions created outside the eval, by a channel webhook or a schedule, see [Targets](./targets).
 
 ## Datasets: exporting an array
 
-To fan one file out over a dataset, default-export an array of `defineEval(...)` values. Eval modules are ESM, so top-level `await` can load anything. Ids derive from the file name plus a zero-padded index in array order (`sql/0000`, `sql/0001`, and so on). The loaders (`loadJson`, `loadYaml` from `eve/evals/loaders`) parse fixture files relative to the app root:
+To run one file once per dataset row, default-export an array of `defineEval(...)` values. Eval modules are ESM, so top-level `await` works. Each id is the file name plus a zero-padded index: `sql/0000`, `sql/0001`, and so on. `loadJson` and `loadYaml` from `eve/evals/loaders` parse data files relative to the app root:
 
 ```ts title="evals/sql.eval.ts"
 import { defineEval } from "eve/evals";
@@ -213,7 +209,7 @@ export default rows.map((row) =>
 );
 ```
 
-The loaders are meant for fixtures, not runtime agent code.
+Use the loaders in evals, not in runtime agent code.
 
 ## What to read next
 

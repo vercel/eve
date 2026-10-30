@@ -3,9 +3,9 @@ title: "just-bash Sandbox"
 description: "Use a pure-JavaScript shell and virtual filesystem."
 ---
 
-`JustBashSandbox.environment()` provides a shell and filesystem without starting a container or VM.
+`JustBashSandbox.environment()` gives each session a pure-JavaScript shell and a virtual filesystem that keeps its files between turns. It starts no container or VM.
 
-```ts
+```ts title="agent/sandbox.ts"
 import { defineSandbox } from "eve/sandbox";
 import { JustBashSandbox } from "eve/sandbox/just-bash";
 
@@ -13,21 +13,21 @@ export const environment = JustBashSandbox.environment();
 export default defineSandbox(() => environment.open());
 ```
 
-just-bash can prepare and persist its virtual filesystem. It cannot use OCI images or Dockerfiles, does not run native processes, and provides no network isolation. The session does not expose `setNetworkPolicy()`.
+just-bash can't use OCI images or Dockerfiles, runs no native processes, and provides no network isolation. Its session has no `setNetworkPolicy()`.
 
 ## Automatic installation
 
-When an environment uses just-bash during `eve dev`, eve installs the package into your application if it is missing, unless you set `autoInstall: false` in the environment options. `DefaultSandbox` selects only one provider, but another environment, such as local self-modification, can use just-bash independently. Other environments require you to install the package yourself.
+During `eve dev`, eve installs the `just-bash` package into your application when an environment uses it and it's missing. Set `autoInstall: false` in the environment options to skip this. Other commands require you to install the package yourself.
 
-For pnpm projects, automatic installation adds `@mongodb-js/zstd` and `node-liblzma` to `ignoredOptionalDependencies` in the owning `pnpm-workspace.yaml` when they have no explicit package policy. These optional native codecs are not needed for basic shell and filesystem operations. Commands that require those codecs may be unavailable without them. eve preserves existing package-specific build decisions and does not automatically approve build scripts.
+With pnpm, automatic installation skips the optional native codecs `@mongodb-js/zstd` and `node-liblzma` unless they have an explicit package policy. It adds them to `ignoredOptionalDependencies` in the `pnpm-workspace.yaml` of the workspace that contains your app. Basic shell and filesystem operations don't need them, but commands that do may be unavailable. eve keeps your existing per-package build settings and doesn't approve build scripts.
 
 ## Experimental options
 
-`experimental.customCommands` and `experimental.filesystem` follow just-bash's own command and filesystem contracts, so they are experimental and have no compatibility promise. Their types, such as `JustBashCommand` and `JustBashFilesystem`, come from `eve/experimental/sandbox/just-bash`. `autoInstall` and `prepare` are stable.
+`experimental.customCommands` and `experimental.filesystem` follow just-bash's own command and filesystem contracts, so they have no compatibility promise. Import their types, such as `JustBashCommand` and `JustBashFilesystem`, from `eve/experimental/sandbox/just-bash`. `autoInstall` and `prepare` are stable.
 
 ### Custom commands
 
-`experimental.customCommands` registers your own functions as commands in each live just-bash shell, where they work in pipelines and redirections:
+`experimental.customCommands` adds your own functions as commands in each live shell. They work in pipelines and redirections:
 
 ```ts
 import { defineSandbox } from "eve/sandbox";
@@ -47,13 +47,19 @@ export const environment = JustBashSandbox.environment({
 export default defineSandbox(() => environment.open());
 ```
 
-A `JustBashCommand` receives `cwd`, `env`, `fs`, and `signal` in its context. When a command needs standard input or the rest of just-bash's command context, create it with `defineCommand()` from `just-bash`; `customCommands` accepts the result.
+A `JustBashCommand` receives `cwd`, `env`, `fs`, and `signal` in its context. When a command needs standard input or the rest of just-bash's command context, create it with `defineCommand()` from `just-bash`. `experimental.customCommands` accepts the result.
 
-Custom commands run as application code in the app runtime process, outside the virtual filesystem. They are not available while eve prepares the template.
+Custom commands run as app code in the app runtime process, outside the virtual filesystem. They aren't available while eve prepares the template.
 
 ### Custom filesystem
 
-`experimental.filesystem` composes the filesystem of each live sandbox. eve calls it with `defaultFilesystem`, the session's durable filesystem that holds `/workspace`, and `justBash`, the loaded `just-bash` module. Return a `JustBashFilesystem` that keeps `defaultFilesystem` as its base, such as a just-bash `MountableFs`:
+`experimental.filesystem` builds the filesystem of each live sandbox. eve calls it with:
+
+- `defaultFilesystem`: the session's saved filesystem that holds `/workspace`.
+- `justBash`: the loaded `just-bash` module.
+- `resolveProjectPath`: resolves a path relative to your app.
+
+Return a `JustBashFilesystem` that keeps `defaultFilesystem` as its base, such as a just-bash `MountableFs`:
 
 ```ts
 import { defineSandbox } from "eve/sandbox";
@@ -82,6 +88,6 @@ export const environment = JustBashSandbox.environment({
 export default defineSandbox(() => environment.open());
 ```
 
-eve does not call `filesystem` while it prepares the template, so files under a mount are not part of the template.
+eve does not call `experimental.filesystem` while it prepares the template, so files under a mount are not part of the template.
 
 See the [sandbox overview](/docs/sandbox) for managed workspace, skills, parent inheritance, and custom providers.

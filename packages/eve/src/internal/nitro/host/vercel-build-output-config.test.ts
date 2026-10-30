@@ -10,13 +10,31 @@ import { deriveEveWorkflowQueueTopic } from "#internal/workflow/queue-namespace.
 import { EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH } from "#internal/schedules/consumer-route.js";
 import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
 
+const FLOW_ROUTE = {
+  kind: "workflow",
+  method: "ALL",
+  path: EVE_WORKFLOW_FLOW_ROUTE_PATH,
+  vercelFunction: "workflow-queue",
+} as const;
+const CONSUMER_ROUTE = {
+  kind: "schedule-consumer",
+  method: "POST",
+  path: EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
+  vercelFunction: "schedule-queue",
+} as const;
+const routeTable = { routes: [FLOW_ROUTE] };
+
 describe("createEveVercelOptions", () => {
   it("returns undefined when the Vercel build output is disabled", () => {
-    expect(createEveVercelOptions({ agentName: "test-agent", enabled: false })).toBeUndefined();
+    expect(
+      createEveVercelOptions({ agentName: "test-agent", enabled: false, routeTable }),
+    ).toBeUndefined();
   });
 
   it("emits both framework slug and version so the proxy keeps the framework object", () => {
-    expect(createEveVercelOptions({ agentName: "test-agent", enabled: true })?.config).toEqual({
+    expect(
+      createEveVercelOptions({ agentName: "test-agent", enabled: true, routeTable })?.config,
+    ).toEqual({
       version: 3,
       framework: {
         slug: EVE_PACKAGE_NAME,
@@ -26,7 +44,7 @@ describe("createEveVercelOptions", () => {
   });
 
   it("declares the queue-triggered workflow flow function through functionRules", () => {
-    const options = createEveVercelOptions({ agentName: "test-agent", enabled: true });
+    const options = createEveVercelOptions({ agentName: "test-agent", enabled: true, routeTable });
 
     expect(options?.functionRules).toEqual({
       [EVE_WORKFLOW_FLOW_ROUTE_PATH]: {
@@ -47,15 +65,16 @@ describe("createEveVercelOptions", () => {
     });
   });
 
-  it("conditionally declares the private schedule collection consumer", () => {
+  it("declares a queue function for each route the table assigns one", () => {
     const withoutCollections = createEveVercelOptions({
       agentName: "test-agent",
       enabled: true,
+      routeTable,
     });
     const withCollections = createEveVercelOptions({
       agentName: "test-agent",
       enabled: true,
-      hasVercelScheduleCollections: true,
+      routeTable: { routes: [CONSUMER_ROUTE, FLOW_ROUTE] },
     });
 
     expect(withoutCollections?.functionRules).not.toHaveProperty(
@@ -74,6 +93,25 @@ describe("createEveVercelOptions", () => {
       ],
       environment: { WORKFLOW_PRECONDITION_GUARD: "1" },
     });
+    expect(Object.keys(withCollections?.functionRules ?? {})).toEqual([
+      EVE_WORKFLOW_FLOW_ROUTE_PATH,
+      EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
+    ]);
+  });
+
+  it("sets the cron path only when the table has one", () => {
+    const cronHandlerRoute = "/eve/v1/cron/token";
+
+    expect(
+      createEveVercelOptions({
+        agentName: "test-agent",
+        enabled: true,
+        routeTable: { cronHandlerRoute, routes: [FLOW_ROUTE] },
+      })?.cronHandlerRoute,
+    ).toBe(cronHandlerRoute);
+    expect(
+      createEveVercelOptions({ agentName: "test-agent", enabled: true, routeTable }),
+    ).not.toHaveProperty("cronHandlerRoute");
   });
 
   it("omits the public route prefix from the flow environment when none is set", () => {
@@ -81,6 +119,7 @@ describe("createEveVercelOptions", () => {
       const options = createEveVercelOptions({
         agentName: "test-agent",
         enabled: true,
+        routeTable,
         publicRoutePrefix,
       });
       expect(options?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH]!.environment).not.toHaveProperty(
@@ -93,6 +132,7 @@ describe("createEveVercelOptions", () => {
     const options = createEveVercelOptions({
       agentName: "test-agent",
       enabled: true,
+      routeTable,
       publicRoutePrefix: "eve/support/",
     });
 
@@ -106,11 +146,13 @@ describe("createEveVercelOptions", () => {
     const standalone = createEveVercelOptions({
       agentName: "test-agent",
       enabled: true,
+      routeTable,
       publicRoutePrefix: "/support",
     });
     const workspaceMember = createEveVercelOptions({
       agentName: "test-agent",
       enabled: true,
+      routeTable,
       publicRoutePrefix: "/support",
       workspaceMember: true,
     });

@@ -4,43 +4,11 @@ description: "Configure OpenTelemetry destinations, content capture, and third-p
 url: "/observability/otel"
 ---
 
-`eve dev` records local traces by default. Use `otel()` for process-wide
-settings and `otelIntegration()` for third-party destinations.
-
-## Session handover events
-
-Existing Workflow step spans include these events when tracing is active:
-
-- `eve.session.handover.forwarding_started`: the previous owner starts submitting its buffered messages, including an empty buffer.
-- `eve.session.handover.part_submitted`: a buffered part was durably submitted.
-- `eve.session.handover.final_submitted`: the final marker was durably submitted. This does not confirm that the successor has processed it.
-- `eve.session.handover.inbox_unblocked`: an existing turn step observes that the inbox applied every buffered part and the final marker.
-
-Join both owners with `eve.session.id` and `eve.handoff.attempt_key`.
-`workflow.run.id` identifies the emitting owner; submission events also include
-`eve.handoff.destination_run_id`. Counts and part indexes describe the transfer
-without recording message content. Step IDs and `eve.handoff.step_attempt`
-distinguish retries; these events are not exactly-once counters.
-
-The receiver records `eve.handoff.applied_at_ms` using Workflow's replay-stable
-clock, identified by `eve.handoff.applied_at_clock: workflow`. This is logical
-event time, not the host time when replay applied the marker. The event's own
-timestamp is when the next turn step exports the observation. No receiver
-observation is exported if no subsequent turn step runs. An abandoned handover
-does not emit a successful receipt. No additional Workflow steps or writes are
-created for tracing.
+eve emits OpenTelemetry traces for agent turns, and `eve dev` records them locally by default. Configure OpenTelemetry with files under `agent/instrumentation/`: `otel()` for process-wide settings, and `otelIntegration()` for each third-party destination.
 
 ## Configure OpenTelemetry
 
-`otel()` and `otelIntegration()` are optional:
-
-- Use `otel()` only when you need process-wide settings such as the resource,
-  sampler, propagators, or trace capture policy. Declare it at most once.
-- Use `otelIntegration()` only when adding a third-party OpenTelemetry
-  destination. Declare one file per exporter or processor chain.
-
-Add `agent/instrumentation/otel.ts` when you need process-wide settings or
-want to control the content eve writes to OpenTelemetry spans:
+Both are optional. Declare `otel()` at most once, in `agent/instrumentation/otel.ts`, for settings such as the resource, sampler, propagators, or trace capture policy. Declare `otelIntegration()` in one file per third-party exporter or processor chain.
 
 ```ts title="agent/instrumentation/otel.ts"
 import { otel } from "eve/instrumentation/otel";
@@ -55,21 +23,84 @@ export default otel({
 });
 ```
 
-The OpenTelemetry `tracePolicy` is a capture ceiling shared by every OTel
-destination. A destination cannot restore content excluded by this policy. It
-does not affect lifecycle instrumentation created with `defineInstrumentation()`.
-See [Audience](../channels/overview#audience) for how channels classify the
-conversation passed to this policy.
+`otel({ tracePolicy })` sets the most content any OTel destination can receive. No destination can add back content it excludes. It doesn't affect instrumentation files created with `defineInstrumentation()`. See [Audience](../channels/overview#audience) for how channels classify the conversation passed to this policy.
 
-The session's resolved capture decision also selects its default
-[Workflow run-data retention](/docs/agent-config#run-data-retention). Allowing
-both inputs and outputs uses the World's default; dropping the trace or excluding
-either direction requests deletion of durable payloads and streams when the run
-ends. This makes completed private and unknown-audience transcripts unreadable
-under the default policy outside development. Set
-`experimental.workflow.retention: "default"` on the agent to retain completed
-sessions independently of tracing. Destination `exportPolicy` filters do not
-change Workflow retention, and Workflow deletion does not delete exported traces.
+The same capture decision sets the session's default [Workflow run-data retention](/docs/agent-config#run-data-retention):
+
+- Allowing both inputs and outputs keeps the World's default retention.
+- Dropping the trace or excluding either direction deletes stored payloads and streams when the run ends.
+
+So under the default policy, completed private and unknown-audience transcripts are unreadable outside development. Set `experimental.workflow.retention: "default"` on the agent to keep completed sessions regardless of tracing. Destination `exportPolicy` filters don't change Workflow retention, and Workflow deletion doesn't delete exported traces.
+
+## Add an OpenTelemetry destination
+
+To send traces to a third-party destination, install `@vercel/otel` for its exporters:
+
+```bash
+pnpm add @vercel/otel
+```
+
+```ts title="agent/instrumentation/honeycomb.ts"
+import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
+import { otelIntegration } from "eve/instrumentation/otel";
+
+export default otelIntegration({
+  exportPolicy: {
+    span: () => ({ redact: true, inputs: true, outputs: true }),
+  },
+  traceExporter: new OTLPHttpProtoTraceExporter({
+    url: "https://api.honeycomb.io/v1/traces",
+    headers: {
+      "x-honeycomb-team": process.env.HONEYCOMB_API_KEY!,
+    },
+  }),
+});
+```
+
+The example's `exportPolicy` keeps span metadata but removes inputs and outputs from this destination. Pass `spanProcessors` to `otelIntegration()` when a custom destination needs filtering or transformation. Processors and exporters from any `@opentelemetry/*` build satisfy the `SpanProcessor` and `SpanExporter` types from `eve/instrumentation/otel`. `SpanProcessorOrName` also accepts `"auto"`.
+
+## Filter a destination
+
+`otelIntegration()` and `localTraces()` accept one `exportPolicy` object or an array applied in order. Each policy filters spans and attributes before that destination's processors receive them:
+
+```ts title="agent/instrumentation/local.ts"
+import { localTraces } from "eve/instrumentation/otel";
+
+export default localTraces({
+  exportPolicy: {
+    span: ({ name }) => ({ emit: name !== "internal.cache.refresh" }),
+    attribute: ({ key }) => (key === "customer.id" ? { emit: false } : { emit: true }),
+  },
+});
+```
+
+| Callback    | Return                                                           | Effect                                 |
+| ----------- | ---------------------------------------------------------------- | -------------------------------------- |
+| `span`      | `{ emit: true }`                                                 | Keep the span unchanged.               |
+| `span`      | `{ emit: false }`                                                | Omit the span from this destination.   |
+| `span`      | `{ redact: true }` with `inputs: true`, `outputs: true`, or both | Keep the span and remove that content. |
+| `span`      | Throws                                                           | Drop the span from this destination.   |
+| `attribute` | `{ emit: true }`                                                 | Keep the attribute.                    |
+| `attribute` | `{ emit: false }`                                                | Remove the attribute.                  |
+| `attribute` | `{ replace: true, value }`                                       | Change the attribute's value.          |
+
+A redaction decision implies emission and needs at least one direction.
+
+## Local traces
+
+Omit `agent/instrumentation/local.ts` to keep `eve dev`'s local traces. Export
+`localTraces(...)` from that file to reconfigure them, or `disableInstrumentation()` to turn them off:
+
+```ts title="agent/instrumentation/local.ts"
+import { disableInstrumentation } from "eve/instrumentation";
+
+export default disableInstrumentation();
+```
+
+## Enable tracing on Vercel
+
+For Agent Runs sampling defaults and existing-deployment setup, see
+[Enable tracing on Vercel](./agent-runs#enable-tracing-on-vercel).
 
 ## Instrument Node.js dependencies
 
@@ -101,38 +132,6 @@ export default defineAgent({
 });
 ```
 
-## Add an OpenTelemetry destination
-
-Use this section when sending traces to a third-party destination. Install
-`@vercel/otel` before using its exporters:
-
-```bash
-pnpm add @vercel/otel
-```
-
-```ts title="agent/instrumentation/honeycomb.ts"
-import { OTLPHttpProtoTraceExporter } from "@vercel/otel";
-import { otelIntegration } from "eve/instrumentation/otel";
-
-export default otelIntegration({
-  exportPolicy: {
-    span: () => ({ redact: true, inputs: true, outputs: true }),
-  },
-  traceExporter: new OTLPHttpProtoTraceExporter({
-    url: "https://api.honeycomb.io/v1/traces",
-    headers: {
-      "x-honeycomb-team": process.env.HONEYCOMB_API_KEY!,
-    },
-  }),
-});
-```
-
-Pass `spanProcessors` to `otelIntegration()` when a custom destination needs
-filtering or transformation. Processors and exporters from any `@opentelemetry/*` build
-satisfy the `SpanProcessor` and `SpanExporter` types from `eve/instrumentation/otel`;
-`SpanProcessorOrName` also accepts `"auto"`. The example's `exportPolicy` preserves span
-metadata while removing inputs and outputs from this destination.
-
 ## Add runtime context
 
 Use `runtimeContext` to add JSON values to AI SDK spans for each model attempt.
@@ -157,20 +156,13 @@ export default otelIntegration({
 });
 ```
 
-The resolver receives the channel, session, final model input, `run: { id, attempt }`, and
-optional turn. Its input type is `InstrumentationModelStartedInput` from `eve/instrumentation`.
-Model input content is `unknown`; narrow provider-specific messages before reading them.
-Keys beginning with `eve.` are reserved. Content excluded by
-`otel({ tracePolicy })` is not available to the resolver.
+The resolver receives the channel, session, final model input, `run: { id, attempt }`, and optional turn. Its input type is `InstrumentationModelStartedInput` from `eve/instrumentation`. Model input content is `unknown`, so narrow provider-specific messages before you read them. Content that `otel({ tracePolicy })` excludes isn't available to the resolver.
 
-Authored values appear under `ai.settings.context.*`. Framework channel, session,
-step, turn, and version identifiers use structural span attributes instead of
-runtime-context copies. `ai.settings.context.eve.environment` remains available.
+Your values appear under `ai.settings.context.*`, next to `ai.settings.context.eve.environment`. Keys that begin with `eve.` are reserved. Channel, session, step, turn, and version IDs are regular span attributes, not runtime context.
 
 ## Trace topology
 
-OpenTelemetry destinations receive the following trace topology for an ordinary
-agent turn:
+An ordinary agent turn produces this trace:
 
 ```text
 invoke_agent <agent>
@@ -179,53 +171,28 @@ invoke_agent <agent>
         └── execute_tool <tool>
 ```
 
-Each root agent turn starts a new trace. If eve receives a local caller's trace
-context, the first local subagent turn uses that trace. Its span is a
-child of the dispatch span and has a different span ID. Without caller trace
-context, the first subagent turn starts a new trace. Later turns in the child
-session start new traces. They do not use the original dispatch span as their
-parent.
+Each root agent turn starts a new trace. A local subagent's first turn joins the caller's trace, as a child of the dispatch span, when eve receives the caller's trace context. Otherwise it starts a new trace. Later turns in the child session start new traces without the dispatch span as parent.
 
-Use `gen_ai.tool.call.id` to correlate tool and approval spans. Tool failures use
-`error.type`. These attributes replace the duplicate `agent.action.call_id` and
-`agent.action.error.code` fields without changing trace schema version 4.
+A remote child starts a separate trace with a root `invoke_agent` span. Its first turn links to the caller with `eve.link.type=agent.dispatch`, and the receiving deployment applies its own sampler. Local dispatches have no dispatch link, so query them by `parentSpanId`, or by `agent.parent_run.id` and `agent.parent_call.id`.
 
-Model and activation spans record token counts under `gen_ai.usage.*`, without
-duplicate `agent.usage.*` token fields. Step and tool spans retain `agent.usage.*`.
-Cost values remain unchanged.
+| Attribute                | Use                                                         |
+| ------------------------ | ----------------------------------------------------------- |
+| `gen_ai.conversation.id` | Find the root session and its child sessions across traces. |
+| `agent.run.id`           | Identify one agent session, not the full conversation.      |
+| `gen_ai.tool.call.id`    | Match tool spans with their approval spans.                 |
+| `error.type`             | Classify tool failures.                                     |
+| `gen_ai.usage.*`         | Token counts on model and activation spans.                 |
+| `agent.usage.*`          | Token counts on step and tool spans.                        |
 
-A remote child starts a separate trace with a root `invoke_agent` span. Its first
-turn links to the caller with `eve.link.type=agent.dispatch`. The receiving
-deployment applies its sampler. Queries for local dispatches must use
-`parentSpanId` or `agent.parent_run.id` and `agent.parent_call.id` instead of a
-dispatch link.
+The trace schema is version 4.
 
-Use `gen_ai.conversation.id` to find the root session and its child sessions
-across traces. eve adds this ID to spans created during model, tool, and memory
-execution. This includes spans from third-party instrumentation. `agent.run.id`
-identifies one agent session, not the full conversation.
+eve adds `gen_ai.conversation.id` to spans created during model, tool, and memory work, including spans from third-party instrumentation. The conversation ID grants no access to message history, agent state, or credentials, and no authorization. Remote requests carry it in W3C Baggage. `trustedForwarders` controls whether the receiver accepts parent session data and the trace-content policy. See [Remote agents](../guides/remote-agents#preserving-trace-content).
 
-The shared conversation ID does not give access to message history, agent state,
-or credentials. It does not give authorization or require the same worker for
-each turn. Remote requests carry the conversation ID in W3C Baggage.
-`trustedForwarders` controls whether the receiver accepts parent session data
-and the trace-content policy. See
-[Remote agents](../guides/remote-agents#preserving-trace-content).
-Gateway-routed model calls propagate the configured OpenTelemetry context at
-each provider request. Eve-owned baggage is removed before forwarding. Gateway
-controls whether its spans are sampled and which destinations receive them.
+Gateway-routed model calls pass the configured OpenTelemetry context on each provider request. eve removes its own baggage first. AI Gateway decides whether its spans are sampled and which destinations receive them.
 
-When AI Gateway reports
-[session affinity](https://vercel.com/docs/ai-gateway/models-and-providers/session-affinity)
-for a model call, the `agent.step` span records it. These attributes appear even
-when the trace content policy omits outputs.
+When AI Gateway reports [session affinity](https://vercel.com/docs/ai-gateway/models-and-providers/session-affinity) for a model call, the `agent.step` span records it, even when the trace content policy omits outputs.
 
-`vercel.ai_gateway.client_session_id` is the session ID AI Gateway used for
-affinity. It is not the eve session ID that `vercel.session_id` records. It
-equals `gen_ai.conversation.id` unless you set `gateway.sessionId` yourself or
-the ID is longer than 256 characters, in which case AI Gateway hashes it. An
-authored `gateway.sessionId` is recorded verbatim, so don't put personal data in
-it.
+`vercel.ai_gateway.client_session_id` is the session ID AI Gateway used for affinity. It isn't the eve session ID, which `vercel.session_id` records. Unless you set `gateway.sessionId` yourself, it equals `gen_ai.conversation.id`. AI Gateway hashes a conversation ID longer than 256 characters. eve records an authored `gateway.sessionId` exactly as written, so don't put personal data in it.
 
 | Attribute                                       | Value                                                           |
 | ----------------------------------------------- | --------------------------------------------------------------- |
@@ -235,54 +202,21 @@ it.
 | `vercel.ai_gateway.affinity.pinned_provider`    | Provider the session's pin named                                |
 | `vercel.ai_gateway.affinity.displaced_provider` | Provider that would have gone first, when the pin moved it      |
 
-## Local traces
+## Session handover events
 
-`eve dev` records local traces by default. Omitting
-`agent/instrumentation/local.ts` preserves that default. Export
-`localTraces(...)` from that file to reconfigure it, or disable it explicitly:
+When a session moves to a new workflow run, after a deployment change or [compaction](../concepts/execution-model-and-durability#compaction-handoff), Workflow step spans include these events:
 
-```ts title="agent/instrumentation/local.ts"
-import { disableInstrumentation } from "eve/instrumentation";
+- `eve.session.handover.forwarding_started`: the previous run starts sending its buffered messages, even when the buffer is empty.
+- `eve.session.handover.part_submitted`: eve saved one buffered part for the new run.
+- `eve.session.handover.final_submitted`: eve saved the final marker. The new run may not have processed it yet.
+- `eve.session.handover.inbox_unblocked`: a turn step in the new run sees that every buffered part and the final marker were applied.
 
-export default disableInstrumentation();
-```
+Join the two runs with `eve.session.id` and `eve.handoff.attempt_key`. `workflow.run.id` identifies the run that emitted the event, and submission events also include `eve.handoff.destination_run_id`. Counts and part indexes describe the transfer without message content. Step retries can repeat events, so tell them apart by step ID and `eve.handoff.step_attempt` instead of counting events.
 
-## Enable tracing on Vercel
-
-For Agent Runs sampling defaults and existing-deployment setup, see
-[Enable tracing on Vercel](./agent-runs#enable-tracing-on-vercel).
-
-## Filter a destination
-
-`otelIntegration()` and `localTraces()` accept one
-`exportPolicy` object or an array applied in order. Each policy filters spans
-and attributes before that destination's processors receive them:
-
-```ts title="agent/instrumentation/local.ts"
-import { localTraces } from "eve/instrumentation/otel";
-
-export default localTraces({
-  exportPolicy: {
-    span: ({ name }) => ({ emit: name !== "internal.cache.refresh" }),
-    attribute: ({ key }) => (key === "customer.id" ? { emit: false } : { emit: true }),
-  },
-});
-```
-
-Return `{ emit: true }` from `span` to retain a span unchanged, or
-`{ emit: false }` to omit it from this destination. To retain the span while
-redacting content, return `{ redact: true }` with `inputs: true`,
-`outputs: true`, or both. A redaction decision implies emission and requires
-at least one direction. For example, return
-`{ redact: true, inputs: true, outputs: true }` to redact both directions.
-A throwing `span` callback drops the span from this destination. Return
-`{ emit: true }`, `{ emit: false }`, or
-`{ replace: true, value }` from `attribute` to retain, remove, or change
-one attribute.
+The new run records `eve.handoff.applied_at_ms` on Workflow's replay-stable clock (`eve.handoff.applied_at_clock: workflow`). That value is logical event time, not host time. The event's own timestamp is when the next turn step exports it, so the new run emits no event until a later turn step runs. An abandoned handover emits no success event.
 
 ## What to read next
 
 - [Instrumentation](/docs/observability/instrumentation): handle eve lifecycle events.
 - [Agent Runs](./agent-runs): configure Vercel's built-in trace destination.
-- [Migrate instrumentation](/docs/observability/instrumentation-migration): replace `agent/instrumentation.ts`.
 - [Local development](../guides/dev-tui): inspect local traces in the TUI.

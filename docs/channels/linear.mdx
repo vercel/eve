@@ -4,7 +4,9 @@ description: "Reach your agent through Linear Agent Sessions, with native Agent 
 type: integration
 ---
 
-The Linear channel uses Linear's Agent Session surface rather than ordinary comments. Users delegate work to the agent from Linear, eve receives `AgentSessionEvent` webhooks at `/eve/v1/linear`, and the channel replies with native Agent Activities, including `thought`, `action`, `elicitation`, `response`, and `error`. Credentials can run through [Vercel Connect](../guides/auth-and-route-protection), which manages the Linear app, its access token, and inbound webhook verification, so there's no API key or webhook secret for you to hold. See [Channels](./overview) for the contract this builds on.
+The Linear channel lets people delegate issues to your agent, or mention it, in Linear. It lives in `agent/channels/linear.ts` and uses Linear Agent Sessions. The agent shows its progress and answers as native Agent Activities: `thought`, `action`, `elicitation`, `response`, and `error`.
+
+[Vercel Connect](../guides/auth-and-route-protection) can manage the Linear app, its token, and webhook checks, so you hold no API key or webhook secret. See [Channels](./overview) for what all channels share.
 
 ## Guided Connect setup
 
@@ -20,11 +22,7 @@ To let the agent search and update Linear through MCP, install the separate Line
 eve add connection/linear
 ```
 
-The channel setup flow signs you in to Vercel when needed, creates or links a Vercel project, reuses a compatible existing connector when available or provisions an app-scoped Linear Connect client, and registers `/eve/v1/linear` as a trigger destination. It then installs `@vercel/connect` and writes `agent/channels/linear.ts` with the connector UID.
-
-Vercel Connect creates the Linear app with the `app:assignable` and `app:mentionable` scopes required for Agent Sessions, receives and verifies `AgentSessionEvent` webhooks, and forwards them to the deployed agent. After deploying, open the Linear app in the Connect dashboard and install it in the workspace where you want to delegate work. Then delegate an issue or mention the agent in a Linear Agent Session.
-
-The generated channel uses Connect-managed credentials:
+The channel command signs you in to Vercel, links a project, and reuses or creates an app-scoped Linear Connect client that sends webhooks to `/eve/v1/linear`. It then installs `@vercel/connect` and writes the channel file:
 
 ```ts title="agent/channels/linear.ts"
 import { connectLinearCredentials } from "@vercel/connect/eve";
@@ -35,11 +33,11 @@ export default linearChannel({
 });
 ```
 
-`connectLinearCredentials` returns `{ accessToken, webhookVerifier }`: eve uses the Connect-managed app token for Linear GraphQL calls and verifies Connect-forwarded webhooks by their Vercel OIDC signature instead of a Linear webhook secret. Token rotation, refresh, and multi-workspace tenancy stay inside Connect, so there is no `LINEAR_AGENT_ACCESS_TOKEN` or `LINEAR_WEBHOOK_SECRET` to manage.
+Connect creates the Linear app with the `app:assignable` and `app:mentionable` scopes that Agent Sessions require. Connect forwards the app's webhooks, and eve checks their Vercel OIDC signature. Connect also handles token rotation and multiple workspaces. After you deploy, open the Linear app in the Connect dashboard and install it in your workspace. Then delegate an issue or mention the agent.
 
 ### Bring your own Linear app
 
-To run a Linear OAuth app you manage yourself, pass its credentials directly instead:
+To run a Linear OAuth app you manage yourself, pass its credentials directly:
 
 ```ts title="agent/channels/linear.ts"
 import { linearChannel } from "eve/channels/linear";
@@ -52,14 +50,12 @@ export default linearChannel({
 });
 ```
 
-Direct webhook verification accepts timestamps within 60 seconds by default, as Linear recommends. Set `maxSkewMs` to a larger number of milliseconds only when you intentionally accept delayed retries. Use the narrowest window that fits your retry policy.
-
 ```bash
 LINEAR_AGENT_ACCESS_TOKEN=lin_api_... # posts Agent Activities and creates proactive sessions
 LINEAR_WEBHOOK_SECRET=...             # verifies Linear-Signature
 ```
 
-The sample passes credentials explicitly. To rely on env vars instead, drop the `credentials` block: the access token falls back to `LINEAR_AGENT_ACCESS_TOKEN`, `LINEAR_ACCESS_TOKEN`, `LINEAR_API_KEY`, or `LINEAR_API_TOKEN`, and the webhook secret falls back to `LINEAR_WEBHOOK_SECRET`. Both fields also accept lazy resolver functions.
+Omit `credentials` to read the access token from `LINEAR_AGENT_ACCESS_TOKEN`, `LINEAR_ACCESS_TOKEN`, `LINEAR_API_KEY`, or `LINEAR_API_TOKEN`. The webhook secret then comes from `LINEAR_WEBHOOK_SECRET`. Both fields also accept a function.
 
 Create the Linear OAuth app, enable Agent Session events, and point the webhook URL at:
 
@@ -67,39 +63,45 @@ Create the Linear OAuth app, enable Agent Session events, and point the webhook 
 https://<deployment>/eve/v1/linear
 ```
 
-For Linear's agent surface, configure the OAuth authorize URL with `actor=app` and grant the app scopes that let it appear as an agent in Linear, including `app:assignable` and `app:mentionable`. Subscribe to the `AgentSessionEvent` webhook category so Linear sends `created` events when the agent is delegated or mentioned and `prompted` events when the user continues the session.
+Configure the OAuth authorize URL with `actor=app` and grant the scopes that let the app appear as an agent, including `app:assignable` and `app:mentionable`. Subscribe to the `AgentSessionEvent` webhook category. Linear then sends `created` when someone delegates to or mentions the agent, and `prompted` when the user replies.
 
-Linear sends webhook signatures in `Linear-Signature`; eve verifies the HMAC over the raw body and rejects stale `webhookTimestamp` values. If a trusted gateway verifies Linear before the request reaches eve, pass `credentials.webhookVerifier` instead of a webhook secret. Your custom verifier must enforce its timestamp policy because `maxSkewMs` does not apply.
+eve checks the `Linear-Signature` HMAC over the raw body. It rejects a `webhookTimestamp` older than 60 seconds, as Linear recommends. Raise `maxSkewMs` (milliseconds) only to accept delayed retries, and keep it as small as your retry policy allows.
+
+If a trusted gateway verifies Linear webhooks first, pass `credentials.webhookVerifier` instead of a webhook secret. `maxSkewMs` doesn't apply to a verifier, so the verifier must check timestamps itself.
 
 ## How the channel handles messages
 
 ### Dispatch
 
-The default hook dispatches `created` and `prompted` Agent Session events. The Linear context includes `app_user_id` when available, plus the agent session, issue, comment, and organization identifiers. The session continues with `agent-session:<id>`.
+By default, `created` and `prompted` Agent Session events start a turn. The model sees the agent session, issue, comment, and organization ids, plus `app_user_id` when known. Each Linear Agent Session maps to one eve session, keyed `agent-session:<id>`.
 
 ### Delivery
 
-Turn start posts an ephemeral `thought`, tool calls post ephemeral `action` activities, final assistant text posts a durable `response`, and failures post `error` activities. When the model emits text before a tool call, eve buffers the first non-empty line and uses it as the next ephemeral Linear `thought`, mirroring Slack's typing-status behavior.
+| Turn event              | Agent Activity                                     |
+| ----------------------- | -------------------------------------------------- |
+| Turn starts             | Ephemeral `thought`                                |
+| Text before a tool call | Ephemeral `thought`, from its first non-empty line |
+| Tool call               | Ephemeral `action`                                 |
+| Final assistant text    | `response`, not ephemeral                          |
+| Failure                 | `error`                                            |
 
 ### Human-in-the-loop (HITL)
 
-Human-in-the-loop (HITL) input requests render as Linear `elicitation` activities. When the user replies to the Agent Session, the channel resolves that prompt back to the pending eve input request and resumes with `answers`.
+Approvals and questions post as `elicitation` activities. The user's reply in the Agent Session answers the open one, and the turn continues.
 
 ### Connection authorization
 
-When a user-scoped connection needs authorization, the default channel posts Linear's native `auth` elicitation with the provider's sign-in URL, targeted to the Linear user who started the session. URL-less device flows render their instructions and user code as a plain elicitation. After authorization finishes, the channel posts a thought with the outcome; successful authorization indicates that the parked turn is resuming.
-
-### Proactive sessions
-
-Start a session without an inbound webhook with `receive(linear, { target })`. See [Proactive sessions](#proactive-sessions) below for the target shape and examples.
+When a connection needs the user to sign in, the channel posts Linear's native `auth` elicitation with the provider's sign-in URL. It goes to the user who started the session. A device flow without a URL posts its instructions and user code as a plain elicitation. When sign-in ends, the channel posts a `thought` with the result, and a successful sign-in continues the turn.
 
 ### Attachments
 
-Files uploaded to Linear and referenced in an Agent Session prompt, whether as markdown images (`![name](url)`) or file links (`[name](url)`) hosted at `https://uploads.linear.app`, are fetched with the resolved Linear access token and included as file parts. eve sends the bearer token only to that exact HTTPS origin; images and links from other hosts remain markdown text. If a Linear upload fails, an image reference returns non-image content, or a file link returns an HTML page, the reference becomes its label in the text, the agent gets a short note that the file couldn't be retrieved, and the text turn continues.
+Markdown images (`![name](url)`) and file links (`[name](url)`) in an Agent Session prompt reach the model as files. This works only for links to `https://uploads.linear.app`, which eve downloads with the Linear access token. eve sends the token only to that exact HTTPS origin, and links to other hosts stay Markdown text.
+
+A file fails when the download fails, an image link returns non-image content, or a file link returns an HTML page. The link then becomes its label, and the agent gets a note that the file couldn't be retrieved. The turn continues.
 
 ### API handle
 
-Event handlers receive `channel.linear`, which exposes `createActivity`, `listActivities`, and `updateSession` for custom Agent Activity delivery and Agent Session metadata.
+Event handlers receive `channel.linear`. Use its `createActivity`, `listActivities`, and `updateSession` methods to post your own Agent Activities and update the Agent Session.
 
 ### Low-level API helpers
 
@@ -114,7 +116,7 @@ channel context's API handle when it already has the configured credentials.
 
 ## Custom hooks
 
-Return `{ auth }` to dispatch, or `null` to acknowledge without waking the agent. Return `title` alongside `auth` to set the title when the dispatch starts a run.
+Return `{ auth }` to start a turn, or `null` to accept the webhook without waking the agent. Add `title` to set the run title when the event starts a run.
 
 ```ts
 import { defaultLinearAuth, linearChannel } from "eve/channels/linear";
@@ -127,7 +129,7 @@ export default linearChannel({
 });
 ```
 
-Restrict dispatch to a subset of Linear teams or projects by inspecting `event.agentSession.issue` in `onAgentSession`. Add extra context by returning `context` alongside `auth`.
+To restrict the agent to some Linear teams or projects, inspect `event.agentSession.issue`. Return `context` alongside `auth` to add background:
 
 ```ts
 import { defaultLinearAuth, linearChannel } from "eve/channels/linear";
@@ -143,7 +145,7 @@ export default linearChannel({
 });
 ```
 
-Override event delivery when you want more specific Agent Activities.
+Override event handlers to post your own Agent Activities:
 
 ```ts
 import { linearChannel } from "eve/channels/linear";
@@ -167,7 +169,7 @@ export default linearChannel({
 });
 ```
 
-Add session-level links when your agent creates an external artifact.
+Add session links when your agent creates an external artifact:
 
 ```ts
 await channel.linear.updateSession({
@@ -177,7 +179,7 @@ await channel.linear.updateSession({
 
 ## Proactive sessions
 
-Use the channel's proactive target to continue an existing Agent Session or create one from a Linear issue or root comment. The target accepts an existing `agentSessionId`, or an `issueId` or root `commentId` to create a new session before sending the message. The example below runs from a schedule; a route handler uses the same target shape through `ctx.to(...)`.
+To start a session without a webhook, call `to(linear, target).send(message, { auth })`. The target continues an existing Agent Session by `agentSessionId`, or creates one from an `issueId` or root `commentId`. This example runs from a schedule; a route handler passes the same target to `ctx.to(...)`.
 
 ```ts
 import { defineSchedule } from "eve/schedules";
@@ -198,8 +200,6 @@ export default defineSchedule({
   },
 });
 ```
-
-For issue or comment targets, the channel calls Linear's proactive Agent Session mutations before starting the eve turn. For an existing `agentSessionId`, it skips session creation and only seeds the continuation token.
 
 ## What to read next
 

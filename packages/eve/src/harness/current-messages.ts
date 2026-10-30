@@ -8,6 +8,7 @@ import {
   type HarnessModelMessage,
   turnAnchorOf,
 } from "#harness/messages.js";
+import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 
 interface AddCurrentMessageOptions {
   readonly cacheFriendly?: boolean;
@@ -113,6 +114,9 @@ export function createCurrentMessages(
       userInsertionIndex += shift;
     },
     addAnnouncements(announcements) {
+      // A provider tool's pending result must open the next response, directly after the local
+      // results. The announcements stay unrecorded, so the next request carries them.
+      if (awaitsProviderToolResult(nonSystemMessages)) return;
       for (const key of Object.keys(announcements).sort()) {
         const announcement = announcements[key]!;
         const previous = historyState.announcements?.[key];

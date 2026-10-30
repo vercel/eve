@@ -1,3 +1,5 @@
+import { exactRegex, prefixRegex } from "#internal/bundler/filters.js";
+
 // Marker packages that only assert which React environment imports them. eve
 // bundles run on the server outside React's module graph, so each loads as an
 // empty module instead of resolving: `server-only` throws without the
@@ -16,15 +18,13 @@ const PSEUDO_PACKAGE_ID_PREFIX = "\0eve-pseudo-package:";
 export function createPseudoPackagePlugin() {
   return {
     name: "eve-pseudo-packages",
-    resolveId(source: string) {
-      return PSEUDO_PACKAGES.has(source)
-        ? { id: `${PSEUDO_PACKAGE_ID_PREFIX}${source}` }
-        : undefined;
+    resolveId: {
+      filter: { id: [...PSEUDO_PACKAGES].map((packageName) => exactRegex(packageName)) },
+      handler: (source: string) => ({ id: `${PSEUDO_PACKAGE_ID_PREFIX}${source}` }),
     },
-    load(id: string) {
-      return id.startsWith(PSEUDO_PACKAGE_ID_PREFIX)
-        ? { code: "", moduleType: "js" as const }
-        : undefined;
+    load: {
+      filter: { id: prefixRegex(PSEUDO_PACKAGE_ID_PREFIX) },
+      handler: () => ({ code: "", moduleType: "js" as const }),
     },
   };
 }

@@ -3,7 +3,7 @@ title: "useEveAgent (Svelte)"
 description: "Use the eve Svelte binding and its Svelte-specific reactive interface."
 ---
 
-`useEveAgent()` from `eve/svelte` exposes the shared eve frontend client through Svelte 5 reactive getters and methods. Read the [frontend overview](./overview) for session behavior, messages, human input, authorization, callbacks, and persistence. This page covers the Svelte-specific interface.
+`useEveAgent()` from `eve/svelte` exposes the shared eve frontend client through Svelte 5 reactive getters and methods. See the [frontend overview](./overview) for session behavior, messages, human input, authorization, callbacks, and persistence.
 
 On SvelteKit, register the [`eveSvelteKit` Vite plugin](./sveltekit) to mount the agent routes on the application origin.
 
@@ -45,26 +45,25 @@ Call the binding once for a conversation and read its reactive getters directly.
 
 The state fields are reactive getters; the commands are ordinary methods:
 
-| Property                                                                                  | Svelte shape                                       |
-| ----------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `messages`, `agents`                                                                      | Reactive getters for each projected snapshot field |
-| `view`                                                                                    | `SessionView`                                      |
-| `status`                                                                                  | `UseEveAgentStatus`                                |
-| `error`                                                                                   | `Error \| undefined`                               |
-| `events`                                                                                  | `readonly SessionStreamEvent[]`                    |
-| `session`                                                                                 | `ClientSessionState \| undefined`                  |
-| `send`, `respond`, `prewarm`, `resume`, `cancel`, `clear`, `compact`, `end`, `newSession` | Methods                                            |
+| Property                                                                                            | Svelte shape                             |
+| --------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `messages`, `agents`                                                                                | Reactive getters for the snapshot fields |
+| `view`                                                                                              | `SessionView`                            |
+| `status`                                                                                            | `UseEveAgentStatus`                      |
+| `error`                                                                                             | `Error \| undefined`                     |
+| `events`                                                                                            | `readonly SessionStreamEvent[]`          |
+| `session`                                                                                           | `ClientSessionState \| undefined`        |
+| `send`, `respond`, `prewarm`, `resume`, `follow`, `cancel`, `clear`, `compact`, `end`, `newSession` | Methods                                  |
 
 Read the getters directly in templates, `$derived`, or `$effect`. The [`useEveAgent` reference](./use-eve-agent#returned-state) describes what each value and command does.
 
 ## Send a message
 
-Call `agent.send(text)` for text or pass content parts for attachments. The API and transport behavior match the [sending reference](./use-eve-agent#sending); only reactive access differs in Svelte. `send()` and `respond()` resolve with a `Delivery` receipt when accepted, without waiting for execution to finish. Read its `sessionId` and `deliveryId`, or use the receipt's [delivery reads](../client/messages#reusable-delivery-reads).
+Call `agent.send(text)` for text or pass content parts for attachments. The API and streaming behavior match the [sending reference](./use-eve-agent#sending). `send()` and `respond()` resolve with a `Delivery` receipt when the server accepts the request, before the agent finishes. Read the receipt's `sessionId` and `deliveryId`, or use its [`stream()` and `result()` reads](../client/messages#reusable-delivery-reads).
 
 ## Human-in-the-loop prompts
 
-Read requests from the shared `view` and answer them with `respond()`. Submission does not settle
-an interaction; its response rows and eventual settlement are authoritative.
+Read requests from the shared `view` and answer them with `respond()`. A request stays open until `interaction.settled`, even after you submit an answer.
 
 ```svelte
 <script lang="ts">
@@ -95,16 +94,17 @@ See [Human-in-the-loop prompts](./overview#human-in-the-loop-prompts) for reques
 
 ## Cancel, end, and resume
 
-Pass `prewarm: true` to prepare an owned workflow on mount and after `newSession()`. It defaults
-to `false`, so the first send creates the session. The binding waits for create acceptance,
-retries while the inbox starts, and keeps the session stream open across turns. See [Prewarming](./use-eve-agent#prewarming) for creation, failure, and
-connection behavior.
+Pass `prewarm: true` to create the session on mount and after `newSession()`. Omit it to create the session on the first send. The binding keeps the session stream open across turns. See [Prewarming](./use-eve-agent#prewarming) for creation and failure behavior, and [Stream lifetime](./use-eve-agent#stream-lifetime) for connection behavior.
 
-Call `agent.cancel()` to stop the durable server-side turn while the binding remains attached through settlement. Offer it while `activeTurn(agent.view)` from `eve/events` returns a turn: `agent.status` reports outstanding work, so it is `"idle"` while a turn waits only on a person. Destroying the component only disconnects its local stream; it does not cancel server execution. Call `agent.newSession()` to clear local state and start a new session. `agent.end()` instead retires the server-side session. Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow an in-flight turn. During bounded catch-up, `agent.status` is `"resuming"`; keep the hydrated conversation visible, disable submission, and wait for `"idle"` or `"busy"`, and inspect the separate `error` field. Use `agent.resume()` directly when restoration is controlled imperatively. See [Resumable sessions](./use-eve-agent#resume-a-saved-session) for the persistence contract and [Cancelling](./use-eve-agent#cancelling) for cancellation behavior.
+Call `agent.cancel()` to stop the turn on the server; the binding stays attached until the turn ends. Offer it while `activeTurn(agent.view)` from `eve/events` returns a turn, because `agent.status` reports outstanding work and is `"idle"` while a turn waits only on a person. Destroying the component only disconnects its local stream, and the turn keeps running on the server.
+
+Call `agent.newSession()` to clear local state and start a new session; `agent.end()` instead ends the session on the server.
+
+Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow a turn that is still running. During catch-up, `agent.status` is `"resuming"`. Keep the restored conversation visible, and disable submission until it changes to `"idle"` or `"busy"`. Failures appear in the separate `error` field. Call `agent.resume()` directly to control restoration imperatively. See [Resume a saved session](./use-eve-agent#resume-a-saved-session) for the persistence contract and [Cancelling](./use-eve-agent#cancelling) for cancellation behavior.
 
 ## Custom host and credentials
 
-Pass `baseUrl`, `auth`, or `headers` to the binding using the same options as the other frontend bindings. See [Custom hosts and headers](./overview#custom-hosts-and-headers).
+Pass `baseUrl`, `auth`, or `headers` to the binding, as with the other frontend bindings. See [Custom hosts and headers](./overview#custom-hosts-and-headers).
 
 ## Attach page context per turn
 
@@ -112,11 +112,11 @@ Pass `clientContext` to `send()` or `respond()`, or use `prepareSend` to add con
 
 ## Lifecycle callbacks
 
-Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` when the application needs lifecycle notifications. See [Lifecycle callbacks](./use-eve-agent#lifecycle-callbacks) for callback timing and optimistic projection behavior.
+Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` to react to events, errors, finished turns, and session changes. See [Lifecycle callbacks](./use-eve-agent#lifecycle-callbacks) for when each one fires and how optimistic messages behave.
 
 ## Derive your own state
 
-Use `agent.view` and selectors from `eve/events` for lifecycle state, and `agent.messages` for rendering. See [Derive your own state](./overview#derive-your-own-state).
+Use `agent.view` and selectors from `eve/events` for session state, and `agent.messages` for rendering. See [Derive your own state](./overview#derive-your-own-state).
 
 ## What to read next
 

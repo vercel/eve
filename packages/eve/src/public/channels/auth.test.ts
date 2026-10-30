@@ -82,8 +82,8 @@ describe("verifyHttpBasic", () => {
     }
   });
 
-  it("rejects mismatched credentials", () => {
-    const result = verifyHttpBasic(`Basic ${Buffer.from("ops:wrong", "utf8").toString("base64")}`, {
+  it.each(["ops:wrong", "other:top-secret"])("rejects mismatched credentials %s", (credentials) => {
+    const result = verifyHttpBasic(`Basic ${Buffer.from(credentials, "utf8").toString("base64")}`, {
       username: "ops",
       password: "top-secret",
     });

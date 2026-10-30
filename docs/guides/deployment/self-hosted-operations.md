@@ -19,9 +19,7 @@ When the eve version is unchanged, the new build resumes runs that were active w
 
 ### Recover a stranded session
 
-A session is **stranded** when another eve version built the workflow run that owns it, so the current deployment cannot replay it. Its recorded history stays readable, but it cannot process new work. A new message to its channel address starts a replacement session whose `ctx.session.predecessor` names the stranded one.
-
-See [Stranded sessions](../../concepts/execution-model-and-durability#stranded-sessions) for when a session is stranded in each world, how it ends, and how a replacement session can read the earlier conversation.
+A session is **stranded** when another eve version built its workflow run, so the current deployment cannot replay it. Its history stays readable, but it cannot process new work. A new message to its channel address starts a replacement session, and `ctx.session.predecessor` names the stranded one. See [Stranded sessions](../../concepts/execution-model-and-durability#stranded-sessions) for behavior in each world and how the replacement reads the earlier conversation.
 
 ## Run replicas
 
@@ -34,13 +32,13 @@ Configure each replica the same way, with two differences:
 
 ## Run schedules
 
-The standard `eve build && eve start` path starts Nitro’s schedule runner. If you adapt the output to a custom HTTP-only host or preset, run Nitro scheduled tasks or invoke the same work from your scheduler.
+`eve start` runs every authored schedule. On a custom HTTP-only host or preset, run Nitro scheduled tasks or invoke the same work from your scheduler.
 
-Each `eve start` process runs every authored schedule. When you run several replicas, start one normally and start the others with `eve start --no-schedules`, or set `EVE_SCHEDULES_DISABLED=1` in their environment. See [`eve start`](../../reference/cli#eve-start).
+When you run several replicas, start one normally and start the others with `eve start --no-schedules`, or set `EVE_SCHEDULES_DISABLED=1` in their environment. See [`eve start`](../../reference/cli#eve-start).
 
 ## Run workspace members
 
-An [agent workspace](../../concepts/project-structure#several-root-agents) does not require Vercel or a frontend at runtime. Build each member from its own directory: root `eve build` produces a Vercel workspace deployment, not a group of self-hosted Node servers.
+An [agent workspace](../../concepts/project-structure#several-root-agents) needs neither Vercel nor a frontend at runtime. Build each member from its own directory, because a root `eve build` produces a Vercel workspace deployment.
 
 For a workspace containing `support` and `research`, run these from the workspace root, outside a Vercel build environment:
 
@@ -56,7 +54,7 @@ Start each built agent in a separate terminal, or configure these commands in yo
 (cd agents/research && npx eve start --host 127.0.0.1 --port 3002)
 ```
 
-For example, this Caddy configuration gives each agent its own origin and forwards both `/eve/` and `/.well-known/workflow/` without changing their paths. Point the example hostnames at your server and run Caddy on the same machine:
+This Caddy configuration gives each agent its own origin and forwards all paths unchanged. Point the hostnames at your server and run Caddy on the same machine:
 
 ```text
 support.example.com {
@@ -68,15 +66,17 @@ research.example.com {
 }
 ```
 
-Apply the [authentication, Workflow world, and sandbox configuration](./self-hosting) to each member. With the default local Workflow world, persist each member's own `.eve/.workflow-data` directory. If agents delegate to one another, configure an explicit [workspace-peer transport](../../subagents#vercel-workspace-peers) with the peer's URL and credentials; the default transport requires Vercel. Ensure callback URLs are reachable from the services that call them. Remote agent callbacks must reach a public address: outside `eve dev`, eve refuses callback hosts that are loopback, private, link-local, or reserved addresses, or that resolve to one. Callbacks between services over a private network or `127.0.0.1` don't work. See [How remote dispatch and callbacks work](../remote-agents#how-remote-dispatch-and-callbacks-work) and [Set the public callback origin](./self-hosting#set-the-public-callback-origin).
+Apply the [authentication, Workflow world, and sandbox configuration](./self-hosting) to each member. With the default local Workflow world, persist each member's own `.eve/.workflow-data` directory.
+
+If agents delegate to one another, configure an explicit [workspace-peer transport](../../subagents#vercel-workspace-peers) with the peer's URL and credentials, because the default transport requires Vercel. Remote agent callbacks must reach a public address. Outside `eve dev`, eve refuses callback hosts that are, or resolve to, loopback, private, link-local, or reserved addresses. So callbacks between services over a private network or `127.0.0.1` don't work. See [How remote dispatch and callbacks work](../remote-agents#how-remote-dispatch-and-callbacks-work) and [Set the public callback origin](./self-hosting#set-the-public-callback-origin).
 
 ### Add a peer frontend
 
-A frontend under `apps/web/` is another service managed by your host, not by `eve start`. Build and start it using its framework commands. A browser client can use `useEveAgent({ baseUrl: "https://support.example.com" })`; configure [CORS](../../channels/eve#cors) and browser credentials for that deployment. Alternatively, mount each agent on the frontend's origin through your reverse proxy.
+A frontend under `apps/web/` is a separate service that runs with its framework commands, not `eve start`. A browser client can call an agent origin directly with `useEveAgent({ baseUrl: "https://support.example.com" })`. Configure [CORS](../../channels/eve#cors) and browser credentials for that deployment. Alternatively, mount each agent on the frontend's origin through your reverse proxy.
 
-For path-based mounts, strip the public prefix before forwarding requests to the agent and set `EVE_PUBLIC_ROUTE_PREFIX` in that agent's build and runtime environments. Forward its workflow callback routes as well as its eve routes. Keep the browser client, callback URLs, and peer transports consistent with the public mounts.
+For path-based mounts, strip the public prefix before forwarding to the agent. Set `EVE_PUBLIC_ROUTE_PREFIX` in that agent's build and runtime environments. Forward its workflow callback routes as well as its eve routes. Keep the browser client, callback URLs, and peer transports consistent with the public mounts.
 
-You can instead use [`eve/next`](../frontend/nextjs#self-host) if you want Next.js to start built agent processes and provide the browser-facing proxy routes. That integration is optional; `eve/vercel` configuration is not used by a self-hosted process manager.
+To have Next.js start the built agent processes and provide the browser-facing proxy routes, use [`eve/next`](../frontend/nextjs#self-host). A self-hosted process manager ignores `eve/vercel` configuration.
 
 ## Manage run data
 

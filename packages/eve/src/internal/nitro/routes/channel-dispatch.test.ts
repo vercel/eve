@@ -113,6 +113,7 @@ function createEvent(input?: {
   readonly body?: string;
   readonly headers?: Record<string, string>;
   readonly method?: string;
+  readonly params?: Record<string, string>;
   readonly requestIp?: string;
   readonly url?: string;
   readonly waitUntil?: (task: Promise<unknown>) => void;
@@ -128,7 +129,7 @@ function createEvent(input?: {
 
   return {
     context: {
-      params: {},
+      params: input?.params ?? {},
     },
     req: request,
     waitUntil: input?.waitUntil,
@@ -794,6 +795,103 @@ describe("dispatchChannelRequest", () => {
     expect(logged).toBeDefined();
     expect(logged![1]).toMatchObject({ channel: "slack" });
     errorSpy.mockRestore();
+  });
+
+  it("accepts a non-promise value passed to waitUntil", async () => {
+    const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [
+        {
+          fetch: async (_req, ctx: { waitUntil: (t: Promise<unknown>) => void }) => {
+            // Untyped authored code can pass any value.
+            ctx.waitUntil("not a promise" as never);
+            return new Response("ok");
+          },
+          logicalPath: "agent/channels/slack.ts",
+          method: "POST",
+          name: "slack",
+          sourceId: "channel-slack",
+          sourceKind: "module",
+          urlPath: "/slack",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ waitUntil }),
+      "POST /slack",
+      {} as never,
+    );
+
+    expect(await response.text()).toBe("ok");
+    await expect(waitUntil.mock.calls[0]?.[0]).resolves.toBe("not a promise");
+  });
+
+  it("hands Nitro background work a streamed body registers after the handler returns", async () => {
+    const deferred = createDeferred<void>();
+    const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
+
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [
+        slackChannel(
+          async (_request, ctx: { waitUntil: (t: Promise<unknown>) => void }) =>
+            new Response(
+              // No eager pull: the body starts only once the response is read.
+              new ReadableStream(
+                {
+                  pull(controller) {
+                    ctx.waitUntil(deferred.promise);
+                    controller.enqueue(new TextEncoder().encode("ok"));
+                    controller.close();
+                  },
+                },
+                { highWaterMark: 0 },
+              ),
+            ),
+        ),
+      ],
+      runtime,
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ waitUntil }),
+      "POST /slack",
+      {} as never,
+    );
+    await expect(response.text()).resolves.toBe("ok");
+
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    let settled = false;
+    const backgroundWork = waitUntil.mock.calls[0]![0].then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    deferred.resolve();
+    await backgroundWork;
+    expect(settled).toBe(true);
+  });
+
+  it("decodes route params but keeps encoded path separators encoded", async () => {
+    const handler = vi.fn(async (_request: Request, args: RouteHandlerArgs) =>
+      Response.json(args.params),
+    );
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [slackChannel(async () => new Response("unused"), { handler })],
+      runtime: createRuntime(),
+    });
+
+    const response = await dispatchChannelRequest(
+      createEvent({ params: { file: "notes%2Fcaf%C3%A9.md", user: "a%5Cb" }, waitUntil: vi.fn() }),
+      "POST /slack",
+      {} as never,
+    );
+
+    await expect(response.json()).resolves.toEqual({ file: "notes%2Fcafé.md", user: "a%5Cb" });
   });
 
   it("does not call waitUntil when no background work is registered", async () => {
