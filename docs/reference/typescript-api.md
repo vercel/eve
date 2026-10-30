@@ -168,7 +168,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/channels`                                                                    | `defineChannel`, `disableRoute`, route verbs, `isChannel`, channel metadata types                                 |
 | `eve/channels/eve`                                                                | `eveChannel`                                                                                                      |
 | `eve/channels/auth`                                                               | `localDev`, `vercelOidc`, `placeholderAuth`                                                                       |
-| `eve/channels/{slack,discord,teams,telegram,twilio,github}`                       | platform channel factories                                                                                        |
+| `eve/channels/{slack,discord,teams,telegram,twilio,resend,github}`                | platform channel factories                                                                                        |
 | `eve/hooks`                                                                       | `defineHook`                                                                                                      |
 | `eve/schedules`                                                                   | `defineSchedule`                                                                                                  |
 | `eve/skills`                                                                      | `defineSkill`, `defineDynamic`                                                                                    |

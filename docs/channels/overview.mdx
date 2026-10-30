@@ -111,6 +111,7 @@ eve's first-class channels handle webhooks, verification, event parsing, and thr
 | Microsoft Teams messages + Adaptive Cards   | [Teams](./teams)                                           |
 | Telegram bot messages                       | [Telegram](./telegram)                                     |
 | SMS or speech-transcribed phone calls       | [Twilio](./twilio)                                         |
+| Email threads                               | [Resend](./resend)                                         |
 | GitHub @mentions, PR review with checkout   | [GitHub](./github)                                         |
 | Linear issue delegation and Agent Sessions  | [Linear](./linear)                                         |
 | Another Chat SDK-supported service          | [Chat SDK adapters](./chat-sdk)                            |
@@ -127,7 +128,7 @@ Where an eve agent communicates with people, the law may require you to disclose
 - [eve HTTP channel](./eve): the default session API behind the TUI, SDK clients, and browser UIs
 - [Slack](./slack): the most common platform channel, end to end
 - [MCP](./mcp): let MCP clients hand long-running work to the agent
-- [Linq](./linq), [Photon](./photon), [Discord](./discord), [Teams](./teams), [Telegram](./telegram), [Twilio](./twilio), [GitHub](./github), and [Linear](./linear): the other first-class platform channels
+- [Linq](./linq), [Photon](./photon), [Discord](./discord), [Teams](./teams), [Telegram](./telegram), [Twilio](./twilio), [Resend](./resend), [GitHub](./github), and [Linear](./linear): the other first-class platform channels
 - [Chat SDK adapters](./chat-sdk): reach services eve has no first-class channel for
 - [Custom channels](./custom): build a channel for any surface with `defineChannel`
 - [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): post to another platform without starting an agent turn
