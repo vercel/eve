@@ -214,22 +214,8 @@ const eveNuxtModule: EveNuxtModule = defineNuxtModule<EveNuxtModuleOptions>({
             filename: "eve-production-server.mjs",
             write: true,
             getContents:
-              () => `import { ensureEveProductionServer } from "eve/nuxt/production-server";
-import { send, setResponseStatus } from "h3";
-export default function (nitroApp) {
-  if (import.meta.prerender) return;
-  const ready = ensureEveProductionServer(${JSON.stringify(config)}).then(() => true, (error) => {
-    console.error("[eve] failed to start the eve production server.", error);
-    return false;
-  });
-  nitroApp.hooks.hook("request", async (event) => {
-    const path = event.path.split("?")[0];
-    if (path !== "/eve/v1" && !path.startsWith("/eve/v1/")) return;
-    if (await ready) return;
-    setResponseStatus(event, 503);
-    await send(event, "eve production server is unavailable.");
-  });
-}
+              () => `import createEveProductionServerPlugin from "eve/nuxt/production-server";
+export default import.meta.prerender ? () => {} : createEveProductionServerPlugin(${JSON.stringify(config)});
 `,
           });
           addServerPlugin(plugin.dst);

@@ -25,11 +25,13 @@ before spawning a child. Neither prerendering nor static generation starts eve.
 
 ## Runtime boundary
 
-The generated Nitro plugin imports `ensureEveProductionServer` from
-`eve/nuxt/production-server`. This entry exists for production code, not as an
-authoring API or test seam. Its configuration carries the fixed `origin` and
-portable `relativeRoot`; startup is deduplicated per process through the existing
-shared process manager.
+The generated Nitro plugin only imports and configures the plugin factory from
+`eve/nuxt/production-server`, with Nitro's prerender guard. All startup,
+readiness, and failure handling lives in that eve-owned runtime entry, not in
+generated code. This entry exists for production code, not as an authoring API
+or test seam. Its configuration carries the fixed `origin` and portable
+`relativeRoot`; startup is deduplicated per process through the shared process
+manager.
 
 Keep the import literal. Ship this runtime entry as a self-contained bundle
 with only Node.js builtin imports, and inline it into Nitro's output. Nitro's
