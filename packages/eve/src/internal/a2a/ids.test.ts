@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   decodePageToken,
   decodeTaskId,
+  deliveryIdForMessage,
   encodePageToken,
   encodeTaskId,
+  messageIdOfDelivery,
   messageIdempotencyKey,
 } from "./ids.js";
 
@@ -17,6 +19,18 @@ describe("A2A ids", () => {
     expect(decodeTaskId("not a task")).toBeUndefined();
     expect(decodeTaskId(Buffer.from("only-a-session").toString("base64url"))).toBeUndefined();
     expect(decodeTaskId(Buffer.from("a\nb\nc").toString("base64url"))).toBeUndefined();
+  });
+
+  it("names a message's delivery after its messageId, reversibly", () => {
+    for (const messageId of ["m-1", "with\nnewline", "x".repeat(256), "名".repeat(256)]) {
+      const deliveryId = deliveryIdForMessage(messageId);
+      expect(messageIdOfDelivery(deliveryId)).toBe(messageId);
+      // Even the longest message ID leaves a task ID the request schemas accept.
+      expect(encodeTaskId({ deliveryId, sessionId: "wrun_01ABC" }).length).toBeLessThan(2048);
+    }
+    expect(deliveryIdForMessage("m-1")).not.toBe(deliveryIdForMessage("m-2"));
+    expect(messageIdOfDelivery("8a8f7c62-1d2e-4c3b-9f4a-5b6c7d8e9f00")).toBeUndefined();
+    expect(messageIdOfDelivery("a2a_bS0x=")).toBeUndefined();
   });
 
   it("scopes a message's idempotency key to its owner", () => {

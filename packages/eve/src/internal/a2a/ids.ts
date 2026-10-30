@@ -4,6 +4,7 @@
  * - `contextId` is the eve session ID: one A2A context is one eve session.
  * - `taskId` names the delivery that started the task, plus its session. The task is the turn that
  *   delivery opened or joined (`DeliveryRow.turnId`).
+ * - A message's delivery ID encodes its `messageId`, so history echoes the client's IDs.
  *
  * Both are opaque to clients. Neither is a capability: every read re-checks that the session
  * belongs to the authenticated caller (see `readOwnedInvocationRun`).
@@ -32,6 +33,25 @@ export function decodeTaskId(taskId: string): TaskRef | undefined {
   if (rest.length > 0 || !sessionId || !deliveryId) return undefined;
   // Reject non-canonical encodings so one task has exactly one ID.
   return encodeTaskId({ deliveryId, sessionId }) === taskId ? { deliveryId, sessionId } : undefined;
+}
+
+const DELIVERY_PREFIX = "a2a_";
+
+/**
+ * The delivery ID a `messageId` delivers under: reversible, so history can echo it. A context is
+ * one owner's session and A2A message IDs are unique per message, so within a session it names one
+ * message, and a retry names the same delivery. The prefix keeps it apart from minted UUIDs.
+ */
+export function deliveryIdForMessage(messageId: string): string {
+  return `${DELIVERY_PREFIX}${Buffer.from(messageId, "utf8").toString("base64url")}`;
+}
+
+/** The `messageId` an A2A delivery ID encodes; undefined for any other delivery. */
+export function messageIdOfDelivery(deliveryId: string): string | undefined {
+  if (!deliveryId.startsWith(DELIVERY_PREFIX)) return undefined;
+  const encoded = deliveryId.slice(DELIVERY_PREFIX.length);
+  const messageId = Buffer.from(encoded, "base64url").toString("utf8");
+  return deliveryIdForMessage(messageId) === deliveryId ? messageId : undefined;
 }
 
 /**

@@ -31,16 +31,60 @@ export const A2A_JSON_RPC_ERRORS = {
   versionNotSupported: -32009,
 } as const;
 
+/** `ErrorInfo.reason` for each A2A error: the type name in UPPER_SNAKE_CASE, without "Error". */
+const A2A_ERROR_REASONS: Readonly<Record<number, string>> = {
+  [A2A_JSON_RPC_ERRORS.taskNotFound]: "TASK_NOT_FOUND",
+  [A2A_JSON_RPC_ERRORS.taskNotCancelable]: "TASK_NOT_CANCELABLE",
+  [A2A_JSON_RPC_ERRORS.pushNotificationNotSupported]: "PUSH_NOTIFICATION_NOT_SUPPORTED",
+  [A2A_JSON_RPC_ERRORS.unsupportedOperation]: "UNSUPPORTED_OPERATION",
+  [A2A_JSON_RPC_ERRORS.contentTypeNotSupported]: "CONTENT_TYPE_NOT_SUPPORTED",
+  [A2A_JSON_RPC_ERRORS.invalidAgentResponse]: "INVALID_AGENT_RESPONSE",
+  [A2A_JSON_RPC_ERRORS.extendedAgentCardNotConfigured]: "EXTENDED_AGENT_CARD_NOT_CONFIGURED",
+  [A2A_JSON_RPC_ERRORS.extensionSupportRequired]: "EXTENSION_SUPPORT_REQUIRED",
+  [A2A_JSON_RPC_ERRORS.versionNotSupported]: "VERSION_NOT_SUPPORTED",
+};
+
+/** One `error.data` entry: a ProtoJSON `Any`, such as a `google.rpc.ErrorInfo` (spec 9.5). */
+export type A2aErrorDetail = { readonly "@type": string } & { readonly [key: string]: JsonValue };
+
+export interface A2aErrorOptions {
+  /** `ErrorInfo.metadata`, for A2A errors. */
+  readonly metadata?: Readonly<Record<string, string>>;
+  /** Further detail entries, after the `ErrorInfo`. */
+  readonly details?: readonly A2aErrorDetail[];
+}
+
 /** A protocol error the dispatcher renders as a JSON-RPC error object. */
 export class A2aError extends Error {
   readonly code: number;
-  readonly data?: JsonValue;
+  readonly #options: A2aErrorOptions;
 
-  constructor(code: number, message: string, data?: JsonValue) {
+  constructor(code: number, message: string, options: A2aErrorOptions = {}) {
     super(message);
     this.name = "A2aError";
     this.code = code;
-    this.data = data;
+    this.#options = options;
+  }
+
+  /**
+   * `error.data`: an array of typed details. An A2A error (`-32001`..`-32009`) leads with the
+   * `google.rpc.ErrorInfo` the spec requires; a JSON-RPC error carries only what it was given.
+   */
+  get data(): readonly A2aErrorDetail[] | undefined {
+    const reason = A2A_ERROR_REASONS[this.code];
+    const info: A2aErrorDetail[] =
+      reason === undefined
+        ? []
+        : [
+            {
+              "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+              domain: "a2a-protocol.org",
+              reason,
+              ...(this.#options.metadata !== undefined && { metadata: this.#options.metadata }),
+            },
+          ];
+    const data = [...info, ...(this.#options.details ?? [])];
+    return data.length === 0 ? undefined : data;
   }
 
   static taskNotFound(): A2aError {
@@ -85,6 +129,8 @@ export function isSettledForBlocking(state: TaskState): boolean {
 // ---------------------------------------------------------------------------------------------
 
 const MAX_ID_CHARS = 256;
+/** A task ID embeds its context's ID and its first message's (`ids.ts`), so it runs longer. */
+const MAX_TASK_ID_CHARS = 2048;
 const MAX_PARTS = 64;
 
 const metadataSchema = z.record(z.string(), z.json());
@@ -129,13 +175,13 @@ export interface Part {
 export const messageSchema = z.object({
   messageId: z.string().min(1).max(MAX_ID_CHARS),
   contextId: z.string().min(1).max(MAX_ID_CHARS).optional(),
-  taskId: z.string().min(1).max(MAX_ID_CHARS).optional(),
+  taskId: z.string().min(1).max(MAX_TASK_ID_CHARS).optional(),
   // ProtoJSON omits a default enum, so an unset role arrives absent; it reads as the user's.
   role: z.enum(["ROLE_USER", "ROLE_AGENT", "ROLE_UNSPECIFIED"]).default("ROLE_UNSPECIFIED"),
   parts: z.array(partSchema).min(1).max(MAX_PARTS),
   metadata: metadataSchema.optional(),
   extensions: z.array(z.string()).optional(),
-  referenceTaskIds: z.array(z.string().max(MAX_ID_CHARS)).optional(),
+  referenceTaskIds: z.array(z.string().max(MAX_TASK_ID_CHARS)).optional(),
 });
 
 export type Message = Omit<z.infer<typeof messageSchema>, "parts"> & {
@@ -230,13 +276,13 @@ export const sendMessageRequestSchema = z.object({
 
 export const getTaskRequestSchema = z.object({
   tenant: tenantSchema,
-  id: z.string().min(1).max(MAX_ID_CHARS),
+  id: z.string().min(1).max(MAX_TASK_ID_CHARS),
   historyLength: historyLengthSchema,
 });
 
 export const cancelTaskRequestSchema = z.object({
   tenant: tenantSchema,
-  id: z.string().min(1).max(MAX_ID_CHARS),
+  id: z.string().min(1).max(MAX_TASK_ID_CHARS),
   metadata: metadataSchema.optional(),
 });
 
@@ -254,7 +300,7 @@ export const listTasksRequestSchema = z.object({
 
 export const subscribeToTaskRequestSchema = z.object({
   tenant: tenantSchema,
-  id: z.string().min(1).max(MAX_ID_CHARS),
+  id: z.string().min(1).max(MAX_TASK_ID_CHARS),
 });
 
 export type SendMessageRequest = z.infer<typeof sendMessageRequestSchema>;
