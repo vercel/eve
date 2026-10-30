@@ -147,6 +147,11 @@ the coding agent creates. A setup can seed an existing app instead, as `lib/setu
 from `fixtures/tally/`; pin its eve dependency to the setup context's `packageSpec`. Put reusable setup under `lib/setups/`. Native runs support one-turn
 cases; the iMessage case remains local-only. Prefer source assertions over an LLM judge.
 
+Published records also carry a `case_digest`: a hash of every file in the case directory plus the
+ids of its starting point and setups. It changes whenever the prompt, grader, or setup does, so
+results graded differently aren't compared. Shared setup code and fixtures live outside the case
+directory, so bump the setup's `id` when you change its behavior or fixtures.
+
 ## Partial credit
 
 A run passes only when every grader test passes. Each run's `result.json` also records
