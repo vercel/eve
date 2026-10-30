@@ -135,6 +135,28 @@ describe("createHostRouteTable", () => {
     ]);
   });
 
+  it("matches a path's methods across parameter names", () => {
+    const { routes } = table({
+      manifest: manifest({
+        effective: [
+          channel("GET", "/items/:id"),
+          channel("HEAD", "/items/:itemId"),
+          channel("GET", "/orders/:id"),
+          channel("POST", "/orders/:orderId"),
+        ],
+      }),
+    });
+
+    expect(
+      routes
+        .filter((route) => route.method === "GET")
+        .map((route) => [route.path, "allow" in route ? route.allow : undefined]),
+    ).toEqual([
+      ["/items/:id", undefined],
+      ["/orders/:id", ["GET", "POST"]],
+    ]);
+  });
+
   it("mounts only opted-in connection receivers and rejects one that collides with a route", () => {
     expect(
       summarize(

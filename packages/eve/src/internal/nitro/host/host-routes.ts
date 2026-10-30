@@ -5,6 +5,7 @@ import { dirname, join, relative } from "node:path";
 import type { NitroEventHandler } from "nitro/types";
 
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
+import { normalizeRoutePattern } from "#compiler/channel-route-plan.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { ChannelRouteMethod } from "#public/definitions/channel.js";
 import { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN, EVE_ROUTE_PREFIX } from "#protocol/routes.js";
@@ -165,8 +166,10 @@ function hasDirectWorkflowQueue(input: HostRouteTableInput): boolean {
 
 function withHeadAllow(route: HostRoute, routes: readonly HostRoute[]): HostRoute {
   if (route.kind !== "channel" || route.method !== "GET") return route;
+  // Match as the router does: parameter names don't distinguish paths.
+  const pattern = normalizeRoutePattern(route.path);
   const methods = routes
-    .filter((candidate) => candidate.path === route.path)
+    .filter((candidate) => normalizeRoutePattern(candidate.path) === pattern)
     .map((candidate) => candidate.method)
     .filter((method) => method !== "WEBSOCKET" && method !== "ALL");
   if (methods.includes("HEAD")) return route;

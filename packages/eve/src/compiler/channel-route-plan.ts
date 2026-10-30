@@ -151,7 +151,8 @@ function routePatternsOverlap(left: string, right: string): boolean {
   );
 }
 
-function normalizeRoutePattern(path: string): string {
+/** A route's identity for matching: `/items/:id` and `/items/:itemId` are one route. */
+export function normalizeRoutePattern(path: string): string {
   return splitRoute(path)
     .map((segment) => (isParameter(segment) ? ":" : segment))
     .join("/");
