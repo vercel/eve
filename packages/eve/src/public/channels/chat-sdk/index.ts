@@ -3,6 +3,7 @@ export {
   type ChatSdkChannel,
   type ChatSdkChannelBridge,
   type ChatSdkChannelConfig,
+  type ChatSdkConnectRequirement,
   type ChatSdkChannelContext,
   type ChatSdkChannelEvents,
   type ChatSdkChannelState,

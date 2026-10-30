@@ -1,4 +1,7 @@
 import { expect, it, vi } from "vitest";
+import type { Adapter } from "#compiled/chat/index.js";
+import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
+import { chatSdkChannel } from "#public/channels/chat-sdk/index.js";
 import { createAgentSourceManifest } from "#discover/manifest.js";
 import {
   createAgentSourceRegistry,
@@ -79,38 +82,7 @@ it("preserves Connect dependencies through channel compilation without resolving
     ],
     ["unmanaged", githubChannel({ credentials: { installationToken: token } })],
   ] as const;
-  const compiled = await compileAgentManifest(
-    createAgentSourceManifest({
-      agentId: "coverage",
-      appRoot: "/virtual/coverage",
-      agentRoot: "/virtual/coverage/agent",
-    }),
-    {
-      sourceRegistries: [
-        createAgentSourceRegistry([
-          {
-            applyTo: "root",
-            source: defineProgrammaticAgentSource({
-              id: "test:channels",
-              revision: "v1",
-              modules: [
-                {
-                  logicalPath: "agent.ts",
-                  loadNamespace: async () => ({
-                    default: defineAgent({ model: "openai/gpt-5.4" }),
-                  }),
-                },
-                ...channels.map(([name, channel]) => ({
-                  logicalPath: `channels/${name}.ts`,
-                  loadNamespace: async () => ({ default: { ...channel } }),
-                })),
-              ],
-            }),
-          },
-        ]),
-      ],
-    },
-  );
+  const compiled = await compileChannels(channels);
   const snapshot = buildExternalResourcesSnapshot({
     generatorVersion: "test",
     manifest: compiled,
@@ -162,3 +134,154 @@ it("preserves Connect dependencies through channel compilation without resolving
   }
   expect(token).not.toHaveBeenCalled();
 });
+
+async function compileChannels(channels: readonly (readonly [string, object])[]) {
+  return compileAgentManifest(
+    createAgentSourceManifest({
+      agentId: "coverage",
+      appRoot: "/virtual/coverage",
+      agentRoot: "/virtual/coverage/agent",
+    }),
+    {
+      sourceRegistries: [
+        createAgentSourceRegistry([
+          {
+            applyTo: "root",
+            source: defineProgrammaticAgentSource({
+              id: "test:channels",
+              revision: "v1",
+              modules: [
+                {
+                  logicalPath: "agent.ts",
+                  loadNamespace: async () => ({
+                    default: defineAgent({ model: "openai/gpt-5.4" }),
+                  }),
+                },
+                ...channels.map(([name, channel]) => ({
+                  logicalPath: `channels/${name}.ts`,
+                  loadNamespace: async () => ({ default: { ...channel } }),
+                })),
+              ],
+            }),
+          },
+        ]),
+      ],
+    },
+  );
+}
+
+function chatConfig() {
+  const initialize = vi.fn(() => {
+    throw new Error("build must not initialize adapters");
+  });
+  // Build declarations do not need runtime adapter operations.
+  const adapter = (name: string) => ({ name, initialize }) as unknown as Adapter;
+  return {
+    userName: "test",
+    adapters: {
+      slack: adapter("slack"),
+      discord: adapter("discord"),
+      unmanaged: adapter("unmanaged"),
+    },
+    state: createMemoryState(),
+    initialize,
+  };
+}
+
+it.each([false, true])(
+  "keeps each Chat SDK requirement on its own compiled route (wrapped: %s)",
+  async (wrap) => {
+    const { initialize, ...config } = chatConfig();
+    const { channel } = chatSdkChannel({
+      ...config,
+      route: "/webhooks",
+      routes: { discord: "/hooks/community" },
+      connect: {
+        slack: { connector: "slack/support", service: "slack", type: "slack" },
+        discord: {
+          connector: "discord/community",
+          service: "discord",
+          subjectTypes: ["app", "user"],
+        },
+      },
+    });
+    const compiled = await compileChannels([
+      [
+        "chat",
+        {
+          ...channel,
+          routes: channel.routes.map((route) => ({
+            ...route,
+            path: wrap ? `/wrapped${route.path}` : route.path,
+          })),
+        },
+      ],
+    ]);
+    const snapshot = buildExternalResourcesSnapshot({
+      generatorVersion: "test",
+      manifest: compiled,
+      publicRoutePrefix: "/app",
+    });
+    expect(snapshot.resources).toEqual([
+      {
+        kind: "channel",
+        name: "chat",
+        logicalPath: "channels/chat.ts",
+        credentials: {
+          reference: "connector:slack/support",
+          service: "slack",
+          method: "slack",
+          subjectTypes: ["app"],
+        },
+        route: { path: `/app${wrap ? "/wrapped" : ""}/webhooks/slack` },
+      },
+      {
+        kind: "channel",
+        name: "chat",
+        logicalPath: "channels/chat.ts",
+        credentials: {
+          reference: "connector:discord/community",
+          service: "discord",
+          subjectTypes: ["app", "user"],
+        },
+        route: { path: `/app${wrap ? "/wrapped" : ""}/hooks/community` },
+      },
+    ]);
+    expect(initialize).not.toHaveBeenCalled();
+  },
+);
+
+it("rejects a declared and undeclared Chat SDK adapter sharing one route", () => {
+  const { initialize: _, ...config } = chatConfig();
+  expect(() =>
+    chatSdkChannel({
+      ...config,
+      routes: { slack: "/shared", unmanaged: "/shared" },
+      connect: { slack: { connector: "slack/support", service: "slack" } },
+    }),
+  ).toThrow('Multiple Chat SDK adapters use the route "/shared"');
+});
+
+it.each([
+  [{ missing: { connector: "slack/support", service: "slack" } }, "unknown Chat SDK adapter"],
+  [{ slack: { connector: "", service: "slack" } }, "Invalid Connect requirement"],
+  [
+    { slack: { connector: "slack/support", service: "slack", subjectTypes: [] } },
+    "Invalid Connect requirement",
+  ],
+  [{ slack: null }, "Invalid Connect requirement"],
+])("rejects invalid Chat SDK Connect declarations %j", (connect, message) => {
+  const { initialize: _, ...config } = chatConfig();
+  // Model JavaScript callers which do not have TypeScript's config checks.
+  expect(() => chatSdkChannel({ ...config, connect: connect as never })).toThrow(message);
+});
+
+it.each([false, 1, "slack", null, [], new Map()])(
+  "rejects invalid Chat SDK connect containers %j",
+  (connect) => {
+    const { initialize: _, ...config } = chatConfig();
+    expect(() => chatSdkChannel({ ...config, connect: connect as never })).toThrow(
+      "connect declarations must be a plain object",
+    );
+  },
+);
