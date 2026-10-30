@@ -1,8 +1,14 @@
+import type { SortedResult } from "fumadocs-core/search";
 import { describe, expect, it } from "vitest";
 import { rankTitleMatches } from "./search-ranking";
 
-const page = (title: string) => ({ content: title, type: "page", url: `/${title}` });
-const hit = (content: string) => ({ content, type: "text", url: "#" });
+const page = (title: string): SortedResult => ({
+  content: title,
+  id: title,
+  type: "page",
+  url: `/${title}`,
+});
+const hit = (content: string): SortedResult => ({ content, id: content, type: "text", url: "#" });
 
 describe("rankTitleMatches", () => {
   it("puts the page titled with the query ahead of pages that only mention it", () => {
@@ -29,21 +35,26 @@ describe("rankTitleMatches", () => {
     ]);
   });
 
-  it("ranks a whole-word title match above a partial one and keeps search order otherwise", () => {
-    const results = [page("Slackware"), page("Tools"), page("Use Slack"), page("Hooks")];
+  it("ranks a title by where the whole word appears and keeps search order otherwise", () => {
+    const results = [
+      page("Slackware"),
+      page("Slackware and Slack"),
+      page("Tools"),
+      page("Use Slack"),
+    ];
 
     expect(rankTitleMatches(results, "slack").map((result) => result.content)).toEqual([
+      "Slackware and Slack",
       "Use Slack",
       "Slackware",
       "Tools",
-      "Hooks",
     ]);
   });
 
   it("doesn't promote integration pages", () => {
     const results = [
       page("Custom Channels"),
-      { content: "Slack", type: "page", url: "/integrations/slack" },
+      { ...page("Slack"), url: "/integrations/slack" },
       page("Slack"),
     ];
 
