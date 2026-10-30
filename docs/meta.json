@@ -30,11 +30,11 @@
     "evals",
     "guides/instrumentation",
     "---Reference---",
+    "patterns",
     "guides/upgrade",
     "guides/dev-tui",
     "...reference",
     "responsible-use",
-    "[Benchmarks](/benchmarks)",
-    "patterns"
+    "[Benchmarks](/benchmarks)"
   ]
 }
