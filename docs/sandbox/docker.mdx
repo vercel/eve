@@ -36,7 +36,7 @@ eve's default image runs Ubuntu with Node.js 24, npm, Python 3, git, ripgrep, jq
 The default image doesn't include pnpm or pip, so install them in `prepare` when your agent needs them:
 
 - `npm install -g pnpm` installs pnpm for the `vercel-sandbox` user.
-- Ubuntu's system Python refuses `pip install`, so run `sudo apt-get install -y python3-venv` and use the pip inside a virtual environment. The [analysis tutorial](/docs/tutorial/run-analysis#install-the-chart-dependencies) shows the Python setup.
+- Ubuntu's system Python refuses `pip install`, so run `sudo apt-get install -y python3-venv` and use the pip inside a virtual environment.
 
 Preparation runs when eve builds the template, so it needs network access to the package registries.
 

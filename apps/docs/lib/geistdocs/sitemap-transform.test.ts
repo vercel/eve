@@ -22,7 +22,6 @@ describe("transformSitemapMarkdown", () => {
     ["/docs/guides/hooks", "Guide", "How-to"],
     ["/docs/observability/instrumentation", "Guide", "How-to"],
     ["/docs/protocols/acp", "Guide", "How-to"],
-    ["/docs/tutorial/first-agent", "Conceptual", "How-to"],
     ["/docs/concepts/context-control", "Conceptual", "Conceptual"],
     ["/docs/reference/cli", "Reference", "Reference"],
   ])("classifies %s as %s", (url, inputType, expectedType) => {

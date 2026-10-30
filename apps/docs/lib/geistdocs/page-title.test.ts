@@ -8,7 +8,6 @@ describe("resolveDocsPageTitle", () => {
     ["/docs/getting-started", "Get started with eve: durable AI agents in TypeScript"],
     ["/docs/guides/frontend", "Build an AI agent chat UI with useEveAgent"],
     ["/docs/reference/typescript-api", "TypeScript API reference"],
-    ["/docs/tutorial/first-agent", "Build your first agent"],
   ])("uses the explicit SEO title for %s", (pageUrl, expected) => {
     expect(resolveDocsPageTitle({ pageTitle: "Visible title", pageUrl })).toBe(expected);
   });

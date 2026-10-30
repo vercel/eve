@@ -9,7 +9,6 @@ const docsSeoTitles: Readonly<Record<string, string>> = {
   "/docs/getting-started": "Get started with eve: durable AI agents in TypeScript",
   "/docs/guides/frontend": "Build an AI agent chat UI with useEveAgent",
   "/docs/reference/typescript-api": "TypeScript API reference",
-  "/docs/tutorial/first-agent": "Build your first agent",
 };
 
 export const resolveDocsPageTitle = ({
