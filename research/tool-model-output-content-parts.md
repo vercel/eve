@@ -152,7 +152,7 @@ than a hard cap.
 - `packages/eve/src/public/tools/output-builders.ts` — `toolOutput` and `toolOutputPart` builders, exported from `eve/tools`.
 - `packages/eve/src/harness/tools.ts` — `ToolModelOutputValue` widening and
   the `content` normalization case.
-- `docs/tools/overview.mdx` — extend the `toModelOutput` section with the
+- `docs/tools/index.mdx` — extend the `toModelOutput` section with the
   `content` variant and payload-size guidance.
 - Changeset: `patch` (additive public API).
 

@@ -103,8 +103,8 @@ describe("createIntegrationRedirects", () => {
 
 describe("docsRedirects", () => {
   it.each([
-    ["/docs/channels", "/docs/channels/overview"],
-    ["/docs/guides/deployment.md", "/docs/guides/deployment/overview.md"],
+    ["/docs/channels/overview", "/docs/channels"],
+    ["/docs/guides/deployment/overview.md", "/docs/guides/deployment.md"],
     ["/docs/guides/frontend/add-a-web-app", "/docs/guides/frontend/nextjs"],
     ["/docs/guides/frontend/add-a-web-app.mdx", "/docs/guides/frontend/nextjs.mdx"],
     ["/docs/introduction.md", "/docs/getting-started.md"],
@@ -131,7 +131,9 @@ describe("docsRedirects", () => {
     ["/docs/guides/acp.md", "/docs/protocols/acp.md"],
     ["/docs/guides/ucp", "/docs/protocols/ucp"],
     ["/docs/guides/ucp.mdx", "/docs/protocols/ucp.mdx"],
-    ["/docs/evals", "/docs/evals/overview"],
+    ["/docs/evals/overview", "/docs/evals"],
+    ["/docs/guides/frontend/overview", "/docs/guides/frontend"],
+    ["/docs/guides/client/overview.md", "/docs/guides/client.md"],
     ["/docs/guides/evaluate", "/docs/guides/decide"],
     ["/docs/guides/evaluate.md", "/docs/guides/decide.md"],
     ["/docs/sandbox/microsandbox", "/docs/sandbox"],

@@ -150,7 +150,7 @@ export function Chat() {
 }
 ```
 
-A real chat also needs to show tool calls, approvals, questions, and sign-ins. Without them, a turn that waits on the user can't continue. The generated chat handles all of these. To build your own, see [Human-in-the-loop prompts](./overview#human-in-the-loop-prompts) and [Sign-ins](./overview#sign-ins-and-other-interactions).
+A real chat also needs to show tool calls, approvals, questions, and sign-ins. Without them, a turn that waits on the user can't continue. The generated chat handles all of these. To build your own, see [Human-in-the-loop prompts](/docs/guides/frontend#human-in-the-loop-prompts) and [Sign-ins](/docs/guides/frontend#sign-ins-and-other-interactions).
 
 ## Give each conversation a URL
 
@@ -308,7 +308,7 @@ export async function POST(request: Request) {
 - The token identifies your app, not a user. To act as the signed-in user, forward their cookie in `headers` instead.
 - Without an incoming request, as in a cron job, use `https://${process.env.VERCEL_URL}` as the domain.
 
-See [Client SDK](../client/overview) for more.
+See [Client SDK](/docs/guides/client) for more.
 
 ## Use multiple agents
 
@@ -414,7 +414,7 @@ Options for `withEve` from `eve/next`. All are optional.
 
 ## What to read next
 
-- [Frontend overview](./overview): everything the chat hook can do
+- [Frontend overview](/docs/guides/frontend): everything the chat hook can do
 - [Authentication](../auth-and-route-protection): checking who's calling
 - [Deploy to Vercel](../deployment/vercel): services, credentials, and sandboxes
-- [Client SDK](../client/overview): calling the agent from server code
+- [Client SDK](/docs/guides/client): calling the agent from server code

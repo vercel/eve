@@ -1,13 +1,14 @@
 ---
 title: "Dynamic Capabilities"
 description: "Compute models, subagents, connections, tools, skills, and instructions from the session with defineDynamic."
+url: /guides/dynamic-capabilities
 ---
 
 `defineDynamic(fn)` builds a model, subagent, connection, tool, skill, or instructions from the caller, the conversation, or external data. The function returns the definition, or `null` to leave it out. Import `defineDynamic` from `eve` or from the entry point of what you define, such as `eve/tools`.
 
 eve runs the function before every ordinary model call, including when a turn continues after steering, a sign-in, or an approval. It doesn't run for compaction's summary call or `auto()`'s routing call. Introspection reads the values it last returned.
 
-The module's top-level code runs at build time and at runtime, so keep caller-specific work inside the function. See [Authored module lifecycle](../reference/typescript-api#authored-module-lifecycle).
+The module's top-level code runs at build time and at runtime, so keep caller-specific work inside the function. See [Authored module lifecycle](/docs/reference/typescript-api#authored-module-lifecycle).
 
 ## Context and memoization
 
@@ -72,7 +73,7 @@ The key sets a lifetime, not a dependency list. A change in context that the cal
 - Memos can run concurrently with `Promise.all`, but cannot nest. Await every memo before returning.
 - Memo results are saved privately with the session and never appear on the stream.
 
-A memo callback receives `{ idempotencyKey, abortSignal }`. Pass `idempotencyKey` to an external service that supports idempotency, because an interrupted step can run again before eve saves its result. The key is stable per session, definition, and memo key. It repeats when a deployment change or skipped branch runs the memo again, so send your own key when a run needs a fresh response. Perform side effects in [hooks](./hooks) or tool execution, not while computing a definition.
+A memo callback receives `{ idempotencyKey, abortSignal }`. Pass `idempotencyKey` to an external service that supports idempotency, because an interrupted step can run again before eve saves its result. The key is stable per session, definition, and memo key. It repeats when a deployment change or skipped branch runs the memo again, so send your own key when a run needs a fresh response. Perform side effects in [hooks](/docs/guides/hooks) or tool execution, not while computing a definition.
 
 ## Dynamic models
 
@@ -97,7 +98,7 @@ export default defineAgent({
 });
 ```
 
-Changing models can reduce prompt-cache reuse. Use a session- or turn-keyed memo for a decision that should stay fixed. See [Choose the model dynamically](../agent-config#choose-the-model-dynamically).
+Changing models can reduce prompt-cache reuse. Use a session- or turn-keyed memo for a decision that should stay fixed. See [Choose the model dynamically](/docs/agent-config#choose-the-model-dynamically).
 
 ## Dynamic subagents
 
@@ -115,7 +116,7 @@ export default defineDynamic((ctx) =>
 
 The child's tools, instructions, skills, and nested subagents still build from the filesystem; the returned config supplies runtime settings. A local child config requires a string model ID. Put build settings such as `build.externalDependencies` on the root agent, because build and Workflow world settings can't be chosen at runtime.
 
-A single-file remote subagent returns `defineRemoteAgent(...)` or `null`. Compute the URL string in the function. Credentials can use memo results, and later requests to the same child rebuild them from the session as it was when the child opened. See [Dynamic remote agents](./remote-agents#dynamic-remote-agents) for the rebuild rules.
+A single-file remote subagent returns `defineRemoteAgent(...)` or `null`. Compute the URL string in the function. Credentials can use memo results, and later requests to the same child rebuild them from the session as it was when the child opened. See [Dynamic remote agents](/docs/guides/remote-agents#dynamic-remote-agents) for the rebuild rules.
 
 Hiding a subagent doesn't authorize anything: sensitive child tools still need authorization and approval checks.
 
@@ -150,7 +151,7 @@ export default defineDynamic(async (ctx) => {
 
 The memo saves account metadata, not tokens; auth and header callbacks run when needed. Set `instanceKey` to a stable, non-secret account identifier, and change it when the endpoint, account, or auth provider changes. eve rejects a waiting sign-in callback if its connection's name, URL, or `instanceKey` changed.
 
-Dynamic connections take the same filtering, provided arguments, and approval options as static [MCP](../connections/mcp) and [OpenAPI](../connections/openapi) connections. Each run refreshes connection callbacks and may replace clients, so don't rely on a dynamic MCP protocol session surviving between model calls. Models discover connection tools through `eve__search` and call them through `eve__tool`.
+Dynamic connections take the same filtering, provided arguments, and approval options as static [MCP](/docs/connections/mcp) and [OpenAPI](/docs/connections/openapi) connections. Each run refreshes connection callbacks and may replace clients, so don't rely on a dynamic MCP protocol session surviving between model calls. Models discover connection tools through `eve__search` and call them through `eve__tool`.
 
 ## Dynamic tools
 
@@ -162,7 +163,7 @@ Build callbacks and schemas with ordinary code. Save observations in memos when 
 
 ### Create dynamic tools in a package
 
-Packages can return ordinary `defineTool` values, including callbacks made by factories. Prefer an [extension](../extensions) when distributing a namespaced collection of capabilities.
+Packages can return ordinary `defineTool` values, including callbacks made by factories. Prefer an [extension](/docs/extensions) when distributing a namespaced collection of capabilities.
 
 ### Identity and redeploys
 
@@ -190,7 +191,7 @@ Because eve runs dynamic functions before every model call, they see a steering 
 
 Hooks finish first, then model selection, then connections, subagents, tools, skills, and instructions. Don't depend on the order in which files run; each definition computes its own value.
 
-A tool with `deferred: true` stays out of the model's tool list. It is found with `eve__search` and called with `eve__tool`, like a [static deferred tool](../tools#keep-a-tool-out-of-the-tool-list).
+A tool with `deferred: true` stays out of the model's tool list. It is found with `eve__search` and called with `eve__tool`, like a [static deferred tool](/docs/tools#keep-a-tool-out-of-the-tool-list).
 
 ## Dynamic skills
 
@@ -241,8 +242,8 @@ With `EVE_LOG_LEVEL=debug`, eve logs each memo run with its file, key digest, re
 
 ## What to read next
 
-- [Hooks](./hooks) for effects and cancellation
-- [Subagents](../subagents) and [Remote agents](./remote-agents)
-- [Connections](../connections), [Tools](../tools), and [Skills](../skills)
-- [State](../concepts/state) for durable application state
-- [Memory](../memory) for cross-session recall and provider tools
+- [Hooks](/docs/guides/hooks) for effects and cancellation
+- [Subagents](/docs/subagents) and [Remote agents](/docs/guides/remote-agents)
+- [Connections](/docs/connections), [Tools](/docs/tools), and [Skills](/docs/skills)
+- [State](/docs/concepts/state) for durable application state
+- [Memory](/docs/memory) for cross-session recall and provider tools
