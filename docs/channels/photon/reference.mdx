@@ -53,7 +53,7 @@ For direct Photon webhooks, pass `webhookSecret` or set `IMESSAGE_WEBHOOK_SECRET
 
 The channel resolves credentials on first use. It receives webhooks at `/eve/v1/photon` and, by default, verifies them with Vercel OIDC from the same project and environment. It builds auth from the person who sent each message, marks accepted messages as read, and keeps one eve session per iMessage conversation.
 
-A message that arrives during a turn joins that turn, so the agent can take the correction into account. Set `turnPolicy: "queue"` to let every reply finish before the next message starts. See [Overlapping messages](/docs/channels/overview#overlapping-messages) for when a new message can interrupt the model.
+A message that arrives during a turn joins that turn, so the agent can take the correction into account. Set `turnPolicy: "queue"` to let every reply finish before the next message starts. See [Overlapping messages](/docs/channels#overlapping-messages) for when a new message can interrupt the model.
 
 When Photon retries a webhook, eve accepts the message once, even across replicas that share a Workflow World. See [retried deliveries](/docs/channels/custom#retried-deliveries).
 
@@ -166,5 +166,5 @@ Return `message` to replace the text the agent receives for a tapback. Don't set
 
 ## What to read next
 
-- [Channels overview](/docs/channels/overview): the channel contract and every built-in channel
+- [Channels overview](/docs/channels): the channel contract and every built-in channel
 - [Linq](/docs/channels/linq): iMessage and SMS through Linq

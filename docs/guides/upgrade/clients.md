@@ -25,7 +25,7 @@ Import `idle` and `activeTurn` from `eve/events`. The `followIdle: false` replac
 
 `messages` shows only the current conversation, so messages from before a clear don't appear. `view` still holds every retained turn.
 
-Save events and the cursor as they arrive, not only when a turn ends, so a turn paused for an approval survives a page reload. See [Frontend](/docs/guides/frontend/overview).
+Save events and the cursor as they arrive, not only when a turn ends, so a turn paused for an approval survives a page reload. See [Frontend](/docs/guides/frontend).
 
 ## Replace `reset()` with `end()`
 
@@ -55,7 +55,7 @@ const { session } = await client.sessions.create();
 await session.send("Start a new conversation.");
 ```
 
-See [Session controls](/docs/guides/client/overview#sessions).
+See [Session controls](/docs/guides/client#sessions).
 
 ## Read results from a delivery
 
@@ -88,7 +88,7 @@ if (SessionNotActiveError.is(error) && error.code === "session_not_active") { //
 
 ## Save the full session snapshot
 
-`session.state` is the whole `ClientSessionState`, not only `sessionId` and `streamIndex`, and `session.snapshot()` returns the same state as `snapshot.session`. It includes an opaque `inbox` value that lets later sends skip a server-side session lookup. Save the complete state as is, and pass it back unchanged, for example with `client.sessions.attach(saved.sessionId, saved)`. See [Faster sends with `inbox`](/docs/guides/client/overview#faster-sends-with-inbox).
+`session.state` is the whole `ClientSessionState`, not only `sessionId` and `streamIndex`, and `session.snapshot()` returns the same state as `snapshot.session`. It includes an opaque `inbox` value that lets later sends skip a server-side session lookup. Save the complete state as is, and pass it back unchanged, for example with `client.sessions.attach(saved.sessionId, saved)`. See [Faster sends with `inbox`](/docs/guides/client#faster-sends-with-inbox).
 
 In server code, `sessions.attach(id)` from `eve/server` returns a read-only `SessionReader` with `id` and `stream()`, not a handle that can send. Use `SessionInfo` from `eve/context` for the metadata in `ctx.session`. See [Read a session in process](/docs/concepts/sessions-runs-and-streaming#read-a-session-in-process).
 
@@ -96,7 +96,7 @@ In server code, `sessions.attach(id)` from `eve/server` returns a read-only `Ses
 
 - The eve channel rejects unknown top-level fields on session creation, message, and control requests with `400`, naming the fields it accepts. Fix misspelled or unsupported options instead of relying on them being ignored. See [the eve channel](/docs/channels/eve).
 - `history` passed to `send()` or `create()` accepts only `id`, `role`, and `text` on each entry, and an unknown field throws `InvalidSessionHistoryError`. Map stored messages to that shape before you pass them.
-- Clients reject redirects by default. Point `baseUrl` at the final destination, or set `redirect: "manual"`. See [Authentication](/docs/guides/client/overview#authentication).
+- Clients reject redirects by default. Point `baseUrl` at the final destination, or set `redirect: "manual"`. See [Authentication](/docs/guides/client#authentication).
 - `ctx.agent().send()` file parts must be HTTP(S) URLs, not inline bytes or base64.
 
 ## Flatten reconnect options

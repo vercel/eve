@@ -15,7 +15,7 @@ Authored channels also use channel-local continuation tokens. A token addresses 
 
 A session completes after 30 idle days by default. Set `limits.sessionTimeoutMs` in `agent.ts` to change the window, or `false` to disable it. The idle window restarts each time a turn ends. A session never expires while a turn is open. At expiration, eve emits `session.ended` with `outcome: "completed"` and releases the session's channel addresses. The next qualifying channel message then starts a fresh session. Stored data follows the session's [run-data retention policy](../agent-config#run-data-retention). Outside development, the default policy requests deletion when private and unknown-audience sessions end, if the Workflow world supports deletion. See [Agent config](../agent-config#runtime-limits).
 
-React, Vue, and Svelte apps use [`useEveAgent()`](../guides/frontend/overview) instead of calling these routes directly. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
+React, Vue, and Svelte apps use [`useEveAgent()`](/docs/guides/frontend) instead of calling these routes directly. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
 
 ## Start a session
 
@@ -407,7 +407,7 @@ Requests without the parameter get no header. `follow=false` instead bounds the 
 
 ## Use the client from TypeScript
 
-`eve/client` wraps these routes in a typed client for scripts, server-to-server calls, tests, evals, and custom UIs. Start with the [Client SDK](../guides/client/overview) guide, which covers sending messages, session state, streaming, and per-turn `outputSchema` results.
+`eve/client` wraps these routes in a typed client for scripts, server-to-server calls, tests, evals, and custom UIs. Start with the [Client SDK](/docs/guides/client) guide, which covers sending messages, session state, streaming, and per-turn `outputSchema` results.
 
 ## Read a session in process
 
@@ -468,6 +468,6 @@ Channels and hooks observe what was written and can't change it.
 ## What to read next
 
 - [Execution model & durability](./execution-model-and-durability): how a session survives restarts and how parked work resumes.
-- [Channels](../channels/overview): how platform addresses map to sessions.
-- [Client SDK](../guides/client/overview): call these routes from scripts and server-side code.
-- [Frontend](../guides/frontend/overview): `useEveAgent` instead of raw routes.
+- [Channels](/docs/channels): how platform addresses map to sessions.
+- [Client SDK](/docs/guides/client): call these routes from scripts and server-side code.
+- [Frontend](/docs/guides/frontend): `useEveAgent` instead of raw routes.

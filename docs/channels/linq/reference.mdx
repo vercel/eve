@@ -49,7 +49,7 @@ A supplied `webhookVerifier` takes precedence over `signingSecret`.
 
 The channel receives webhooks at `/eve/v1/linq` and, by default, verifies them with Vercel OIDC from the same project and environment. It builds auth from the person who sent each message, marks accepted messages as read, and keeps one eve session per Linq conversation.
 
-A message that arrives during a turn joins that turn, so the agent can take the correction into account. Set `turnPolicy: "queue"` to let every reply finish before the next message starts. See [Overlapping messages](/docs/channels/overview#overlapping-messages) for when a new message can interrupt the model.
+A message that arrives during a turn joins that turn, so the agent can take the correction into account. Set `turnPolicy: "queue"` to let every reply finish before the next message starts. See [Overlapping messages](/docs/channels#overlapping-messages) for when a new message can interrupt the model.
 
 ## Attachments
 
@@ -160,5 +160,5 @@ Return `message` to replace the text the agent receives for a tapback. Don't set
 
 ## What to read next
 
-- [Channels overview](/docs/channels/overview): the channel contract and every built-in channel
+- [Channels overview](/docs/channels): the channel contract and every built-in channel
 - [Auth & route protection](/docs/guides/auth-and-route-protection): authenticating inbound traffic

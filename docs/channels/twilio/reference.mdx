@@ -6,7 +6,7 @@ type: reference
 
 This page documents every part of `twilioChannel` from `eve/channels/twilio`. For setup and common tasks, start with [Twilio](/docs/channels/twilio).
 
-The Twilio channel puts your agent on a phone number that people can text or call. It lives in `agent/channels/twilio.ts`. eve answers calls with TwiML `<Gather input="speech">`. The transcript joins the same eve session as SMS from that number, keyed by `From:To`. eve verifies each request before dispatch, using `X-Twilio-Signature` or your configured forwarded-webhook verifier. See [Channels](/docs/channels/overview) for what every channel shares.
+The Twilio channel puts your agent on a phone number that people can text or call. It lives in `agent/channels/twilio.ts`. eve answers calls with TwiML `<Gather input="speech">`. The transcript joins the same eve session as SMS from that number, keyed by `From:To`. eve verifies each request before dispatch, using `X-Twilio-Signature` or your configured forwarded-webhook verifier. See [Channels](/docs/channels) for what every channel shares.
 
 ## Add the channel
 
@@ -110,5 +110,5 @@ For example, you may need to tell callers and texters that an automated AI syste
 
 ## What to read next
 
-- [Channels overview](/docs/channels/overview): what every channel shares, and every built-in channel
+- [Channels overview](/docs/channels): what every channel shares, and every built-in channel
 - [Auth & route protection](/docs/guides/auth-and-route-protection): authenticating inbound traffic

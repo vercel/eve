@@ -8,7 +8,7 @@ This page documents every part of `linearChannel` from `eve/channels/linear`. Fo
 
 The Linear channel lets people delegate issues to your agent, or mention it, in Linear. It lives in `agent/channels/linear.ts` and uses Linear Agent Sessions. The agent shows its progress and answers as native Agent Activities: `thought`, `action`, `elicitation`, `response`, and `error`.
 
-[Vercel Connect](/docs/guides/auth-and-route-protection) can manage the Linear app, its token, and webhook checks, so you hold no API key or webhook secret. See [Channels](/docs/channels/overview) for what all channels share.
+[Vercel Connect](/docs/guides/auth-and-route-protection) can manage the Linear app, its token, and webhook checks, so you hold no API key or webhook secret. See [Channels](/docs/channels) for what all channels share.
 
 ## Guided Connect setup
 
@@ -220,5 +220,5 @@ export default defineSchedule({
 
 ## What to read next
 
-- [Channels overview](/docs/channels/overview): the channel contract and every built-in channel
+- [Channels overview](/docs/channels): the channel contract and every built-in channel
 - [MCP connections](/docs/connections/mcp): use the Linear MCP connection when the agent needs to inspect or edit Linear data from another channel
