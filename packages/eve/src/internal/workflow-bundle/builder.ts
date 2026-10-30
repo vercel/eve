@@ -43,10 +43,6 @@ import {
   writeNitroStepEntrypoint,
 } from "#internal/workflow-bundle/nitro-step-entry.js";
 import {
-  WORKFLOW_BUILDER_DEFERRED_PACKAGES,
-  WORKFLOW_STEP_EXTERNAL_PACKAGES,
-} from "#internal/workflow-bundle/vercel-workflow-output.js";
-import {
   findWorkflowPatterns,
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
@@ -79,9 +75,7 @@ export class WorkflowBundleBuilder {
       dirs.push(resolvePackageSourceDirectoryPath("src/internal/testing"));
     }
     this.config = {
-      buildTarget: "standalone",
       dirs,
-      externalPackages: [...WORKFLOW_STEP_EXTERNAL_PACKAGES, ...WORKFLOW_BUILDER_DEFERRED_PACKAGES],
       // Keep package-version workflow ids stable across bundling targets.
       projectRoot: options.appRoot,
       workingDir: options.rootDir,

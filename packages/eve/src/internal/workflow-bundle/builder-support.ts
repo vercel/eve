@@ -66,9 +66,7 @@ const IGNORED_INPUT_DIRECTORIES = new Set([
 ]);
 
 export interface WorkflowBundleBuilderConfig {
-  readonly buildTarget: "standalone";
   readonly dirs: readonly string[];
-  readonly externalPackages: readonly string[];
   readonly projectRoot: string;
   readonly workingDir: string;
 }
