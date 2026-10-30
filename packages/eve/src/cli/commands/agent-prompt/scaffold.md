@@ -6,19 +6,19 @@ an existing one, ask for the directory.
 
 For a new project, run:
 
-    npx {{evePackage}} init <name>
+    npx eve@latest init <name>
 
 This creates the project, installs its dependencies, and initializes Git. Since a
 coding agent launched init, it prints a development handoff instead of starting
 the interactive terminal UI.
 
 If the user wants a reusable extension package instead of an agent, run
-`npx {{evePackage}} extension init <name>` and follow that command's next steps.
+`npx eve@latest extension init <name>` and follow that command's next steps.
 
-For an existing app, run `npx {{evePackage}} init` from its directory, or pass its
-path with `npx {{evePackage}} init path/to/app`. This adds the agent and missing
+For an existing app, run `npx eve@latest init` from its directory, or pass its
+path with `npx eve@latest init path/to/app`. This adds the agent and missing
 dependencies while leaving the existing Git repository and app scripts alone.
 Append `--model provider/model-id` or `--reasoning effort` to either init command
 when the user chose those settings. If init cannot be used,
 install by hand with
-`npm install {{evePackage}} ai zod`; manual installation does not add package scripts.
+`npm install eve@latest ai zod`; manual installation does not add package scripts.

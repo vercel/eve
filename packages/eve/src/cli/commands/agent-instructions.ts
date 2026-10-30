@@ -3,7 +3,6 @@ import { join } from "node:path";
 
 import pc from "#compiled/picocolors/index.js";
 
-import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 
 // The two coding-agent prompts are one onboarding flow in two phases, composed
@@ -35,14 +34,6 @@ export const HANDOFF_SECTIONS = [
   "build-and-verify.md",
 ] as const;
 
-// A prerelease CLI, such as 1.0.0-rc.2, points `npx` at its own dist-tag so the
-// coding agent stays on that release line instead of `latest`.
-function evePackageSpecifier(): string {
-  const { version } = resolveInstalledPackageInfo();
-  const tag = /^\d+\.\d+\.\d+-([A-Za-z][0-9A-Za-z-]*)/u.exec(version)?.[1];
-  return `eve@${tag ?? "latest"}`;
-}
-
 function compose(
   sections: readonly string[],
   options: { devCommand: string; workingDirectory?: string },
@@ -52,8 +43,7 @@ function compose(
       readFileSync(new URL(`./agent-prompt/${section}`, import.meta.url), "utf8").trim(),
     )
     .join("\n\n")
-    .replaceAll("{{devCommand}}", () => options.devCommand)
-    .replaceAll("{{evePackage}}", evePackageSpecifier);
+    .replaceAll("{{devCommand}}", () => options.devCommand);
   const { workingDirectory } = options;
   if (workingDirectory === undefined) {
     return prompt;
@@ -106,7 +96,7 @@ export function initExtensionInstructions(): string {
     "",
     "Ask the user for a package directory name, then run:",
     "",
-    `    npx ${evePackageSpecifier()} extension init <name>`,
+    "    npx eve@latest extension init <name>",
     "",
     "That creates the package, installs dependencies, and initializes Git. It",
     "prints what was set up and how to author, build, and mount the extension —",
