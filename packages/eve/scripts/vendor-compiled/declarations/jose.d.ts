@@ -29,7 +29,11 @@ export type GetKeyFunction = (
   token?: unknown,
 ) => KeyLike | Promise<KeyLike>;
 
-export declare function createRemoteJWKSet(url: URL): GetKeyFunction;
+export declare const customFetch: unique symbol;
+export declare function createRemoteJWKSet(
+  url: URL,
+  options?: { [customFetch]?: (url: string, options: RequestInit) => Promise<Response> },
+): GetKeyFunction;
 export declare function decodeJwt(jwt: string): JWTPayload;
 export declare function importJWK(jwk: unknown, alg?: string): Promise<KeyLike>;
 export declare function importSPKI(spki: string, alg: string): Promise<KeyLike>;

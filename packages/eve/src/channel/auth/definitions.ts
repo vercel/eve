@@ -30,7 +30,6 @@ import {
   type ResolvedOidcAuthStrategy,
   type RouteStrategyAuthenticationResult,
 } from "#channel/auth/types.js";
-import { isVercelOidcIssuer } from "#shared/vercel-project.js";
 
 const vercelOidcLog = createLogger("auth.vercel-oidc");
 import {
@@ -892,17 +891,9 @@ const LOCAL_DEV_SESSION_AUTH_CONTEXT: SessionAuthContext = {
   principalType: "local-dev",
 };
 
-/**
- * Expected prefix for the `aud` claim of a Vercel-minted OIDC token
- * (`https://vercel.com/<owner-slug>`). Requiring it gives a real audience
- * binding: `verifyVercelOidc` otherwise verifies the token only against its
- * own `aud` (a tautology), so a token the project minted for a foreign
- * federation audience (e.g. AWS STS) — same `project_id`, different `aud` —
- * could be replayed against the agent. Foreign audiences lack this prefix and
- * are rejected; every owner's Vercel audience carries it, so the cross-project
- * `subjects` path is unaffected.
- */
-const VERCEL_OIDC_AUDIENCE_PREFIX = "https://vercel.com/";
+const VERCEL_OIDC_ISSUER = "https://oidc.vercel.com";
+// Global and team-scoped project issuers publish the same signing keys.
+const VERCEL_OIDC_DISCOVERY_URL = `${VERCEL_OIDC_ISSUER}/.well-known/openid-configuration`;
 
 /**
  * Options for verifying a Vercel OIDC token with {@link verifyVercelOidc}.
@@ -966,27 +957,20 @@ export async function verifyVercelOidc(
     return { ok: false };
   }
 
-  if (!isVercelOidcIssuer(claims.issuer)) {
-    vercelOidcLog.debug("Rejected token whose issuer is not a Vercel OIDC issuer.", {
-      issuer: claims.issuer,
-    });
+  const owner =
+    claims.issuer === VERCEL_OIDC_ISSUER
+      ? claims.owner
+      : claims.issuer.startsWith(`${VERCEL_OIDC_ISSUER}/`)
+        ? claims.issuer.slice(VERCEL_OIDC_ISSUER.length + 1)
+        : undefined;
+  if (owner === undefined || !/^[a-zA-Z0-9_-]+$/.test(owner)) {
+    vercelOidcLog.debug("Rejected token without a recognized Vercel OIDC issuer and owner.");
     return { ok: false };
   }
 
-  if (claims.audiences.length === 0) {
-    vercelOidcLog.debug("Rejected token with no audience claim.", { issuer: claims.issuer });
-    return { ok: false };
-  }
-
-  // Bind the audience: the token must carry a Vercel audience. The verifier
-  // below otherwise checks the token's `aud` against itself (a tautology), so
-  // without this a token minted for a foreign federation audience would still
-  // authenticate on a matching `project_id`.
-  if (!claims.audiences.some((audience) => audience.startsWith(VERCEL_OIDC_AUDIENCE_PREFIX))) {
-    vercelOidcLog.debug("Rejected token whose audience is not a Vercel audience.", {
-      audiences: claims.audiences,
-      issuer: claims.issuer,
-    });
+  const audience = `https://vercel.com/${owner}`;
+  if (!claims.audiences.includes(audience)) {
+    vercelOidcLog.debug("Rejected token without its owner's Vercel audience.");
     return { ok: false };
   }
 
@@ -998,8 +982,9 @@ export async function verifyVercelOidc(
   const currentVercelProject = resolveCurrentVercelProject(opts);
   const result = await runOidcVerification(token, {
     acceptCurrentVercelProject: true,
-    audiences: claims.audiences,
+    audiences: [audience],
     currentVercelProject,
+    discoveryUrl: VERCEL_OIDC_DISCOVERY_URL,
     issuer: claims.issuer,
     subjects: opts.subjects ?? [],
   });
@@ -1275,9 +1260,11 @@ export function oidc(config: VerifyOidcConfig): AuthFn<Request> {
  * audience baked into Vercel-issued tokens before running full
  * verification.
  */
-function decodeUnverifiedJwtClaims(
-  token: string,
-): { readonly issuer: string; readonly audiences: readonly string[] } | null {
+function decodeUnverifiedJwtClaims(token: string): {
+  readonly issuer: string;
+  readonly audiences: readonly string[];
+  readonly owner: string | undefined;
+} | null {
   let payload: ReturnType<typeof decodeJwt>;
   try {
     payload = decodeJwt(token);
@@ -1296,5 +1283,9 @@ function decodeUnverifiedJwtClaims(
         ? payload.aud.filter((value): value is string => typeof value === "string")
         : [];
 
-  return { audiences, issuer: payload.iss };
+  return {
+    audiences,
+    issuer: payload.iss,
+    owner: typeof payload.owner === "string" ? payload.owner : undefined,
+  };
 }
