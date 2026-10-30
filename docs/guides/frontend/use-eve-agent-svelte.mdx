@@ -3,7 +3,7 @@ title: "useEveAgent (Svelte)"
 description: "Use the eve Svelte binding and its Svelte-specific reactive interface."
 ---
 
-`useEveAgent()` from `eve/svelte` exposes the shared eve frontend client through Svelte 5 reactive getters and methods. See the [frontend overview](./overview) for session behavior, messages, human input, authorization, callbacks, and persistence.
+`useEveAgent()` from `eve/svelte` exposes the shared eve frontend client through Svelte 5 reactive getters and methods. See the [frontend overview](/docs/guides/frontend) for session behavior, messages, human input, authorization, callbacks, and persistence.
 
 On SvelteKit, register the [`eveSvelteKit` Vite plugin](./sveltekit) to mount the agent routes on the application origin.
 
@@ -88,7 +88,7 @@ Read requests from the shared `view` and answer them with `respond()`. A request
 {/each}
 ```
 
-See [Human-in-the-loop prompts](./overview#human-in-the-loop-prompts) for request semantics and rendering guidance.
+See [Human-in-the-loop prompts](/docs/guides/frontend#human-in-the-loop-prompts) for request semantics and rendering guidance.
 
 <a id="cancel-reset-and-resume" />
 
@@ -104,11 +104,11 @@ Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved co
 
 ## Custom host and credentials
 
-Pass `baseUrl`, `auth`, or `headers` to the binding, as with the other frontend bindings. See [Custom hosts and headers](./overview#custom-hosts-and-headers).
+Pass `baseUrl`, `auth`, or `headers` to the binding, as with the other frontend bindings. See [Custom hosts and headers](/docs/guides/frontend#custom-hosts-and-headers).
 
 ## Attach page context per turn
 
-Pass `clientContext` to `send()` or `respond()`, or use `prepareSend` to add context before every turn. See [Attach page context per turn](./overview#attach-page-context-per-turn).
+Pass `clientContext` to `send()` or `respond()`, or use `prepareSend` to add context before every turn. See [Attach page context per turn](/docs/guides/frontend#attach-page-context-per-turn).
 
 ## Lifecycle callbacks
 
@@ -116,10 +116,10 @@ Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` to react to events, 
 
 ## Derive your own state
 
-Use `agent.view` and selectors from `eve/events` for session state, and `agent.messages` for rendering. See [Derive your own state](./overview#derive-your-own-state).
+Use `agent.view` and selectors from `eve/events` for session state, and `agent.messages` for rendering. See [Derive your own state](/docs/guides/frontend#derive-your-own-state).
 
 ## What to read next
 
 - [SvelteKit](./sveltekit): register the Vite plugin and mount the eve runtime.
-- [Frontend overview](./overview): use the shared frontend API.
+- [Frontend overview](/docs/guides/frontend): use the shared frontend API.
 - [Sessions, runs, and streaming](../../concepts/sessions-runs-and-streaming): understand the underlying session protocol.

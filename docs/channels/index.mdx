@@ -1,5 +1,5 @@
 ---
-title: "Overview"
+title: "Channels"
 description: "How users reach your agent: the channel contract, the base eve HTTP channel, and authoring custom channels."
 ---
 
@@ -19,13 +19,13 @@ Every channel runs the same agent, so tools and instructions need no channel-spe
 
 The agent doesn't have to reply where an event arrived. A webhook, for example, can start a conversation in a team chat without replying to the webhook's source.
 
-Use a [cross-channel hand-off](./custom#cross-channel-hand-off) when the conversation belongs elsewhere. The destination channel handles the session, replies, and follow-up messages. To post a notification without running the agent, use the platform's API instead.
+Use a [cross-channel hand-off](/docs/channels/custom#cross-channel-hand-off) when the conversation belongs elsewhere. The destination channel handles the session, replies, and follow-up messages. To post a notification without running the agent, use the platform's API instead.
 
 ## Audience
 
 When a channel creates a session, it sets the session's audience: `public`, `private`, or `unknown`. The audience controls what traces capture, not who may call the channel. Each channel decides from what it knows about the conversation, and falls back to `unknown`.
 
-Route auth decides who may call the channel and identifies the caller. See [Auth & route protection](../guides/auth-and-route-protection) for caller types and authorization. See the [default eve HTTP channel](./eve#audience) for its mapping, or [custom channels](./custom#conversation-audience) to classify your own.
+Route auth decides who may call the channel and identifies the caller. See [Auth & route protection](/docs/guides/auth-and-route-protection) for caller types and authorization. See the [default eve HTTP channel](/docs/channels/eve#audience) for its mapping, or [custom channels](/docs/channels/custom#conversation-audience) to classify your own.
 
 ## Sign-ins
 
@@ -70,7 +70,7 @@ Each channel has its own provider terms, data flow, auth model, and user-consent
 
 ## Where channels live
 
-Channel files live under `agent/channels/` in the root agent or come from an [extension](../extensions) mounted there. The file stem is the channel id: `agent/channels/intake.ts` is addressed as `intake`. An extension mount prefixes its channel IDs but not their route paths. Local subagents don't declare channels.
+Channel files live under `agent/channels/` in the root agent or come from an [extension](/docs/extensions) mounted there. The file stem is the channel id: `agent/channels/intake.ts` is addressed as `intake`. An extension mount prefixes its channel IDs but not their route paths. Local subagents don't declare channels.
 
 ```text
 agent/
@@ -85,36 +85,36 @@ Install a channel from the registry with `eve add channel/<name>`, such as `eve 
 
 ## The eve HTTP channel (default)
 
-The eve channel is the default HTTP session API that the terminal UI, [`useEveAgent`](../guides/frontend/overview), and `curl` call. It serves the health, agent info, callback, task input, and session routes, which you replace together. eve supplies it when no `agent/channels/eve.ts` exists. Author that file to replace it, most often to change route auth. See [HTTP channel](./eve) for routes, auth, replacement, and disablement.
+The eve channel is the default HTTP session API that the terminal UI, [`useEveAgent`](/docs/guides/frontend), and `curl` call. It serves the health, agent info, callback, task input, and session routes, which you replace together. eve supplies it when no `agent/channels/eve.ts` exists. Author that file to replace it, most often to change route auth. See [HTTP channel](/docs/channels/eve) for routes, auth, replacement, and disablement.
 
 ## Custom channels
 
-Build a channel with `defineChannel` from `eve/channels` when you need your own HTTP or WebSocket endpoint. Its routes can start conversations on that channel or hand work to another one. See [Custom channels](./custom) for examples and the authoring API.
+Build a channel with `defineChannel` from `eve/channels` when you need your own HTTP or WebSocket endpoint. Its routes can start conversations on that channel or hand work to another one. See [Custom channels](/docs/channels/custom) for examples and the authoring API.
 
 ## Relationship to the Chat SDK
 
-eve uses the [Chat SDK's card-builder components](https://chat-sdk.dev/docs/api/cards) (Cards, Buttons, Actions, etc.) to compose rich Slack messages. Cards you build with the [Slack channel](./slack) are converted to Slack Block Kit at post time.
+eve uses the [Chat SDK's card-builder components](https://chat-sdk.dev/docs/api/cards) (Cards, Buttons, Actions, etc.) to compose rich Slack messages. Cards you build with the [Slack channel](/docs/channels/slack) are converted to Slack Block Kit at post time.
 
-eve's first-class channels handle webhooks, verification, event parsing, and threads themselves. The optional [Chat SDK channel](./chat-sdk) instead accepts a Chat SDK adapter and exposes its `Chat` and `Thread` primitives. Use `slackChannel` for eve's Slack integration, `defineChannel(...)` for an eve-native custom channel, or `chatSdkChannel` when you want a Chat SDK adapter and runtime.
+eve's first-class channels handle webhooks, verification, event parsing, and threads themselves. The optional [Chat SDK channel](/docs/channels/chat-sdk) instead accepts a Chat SDK adapter and exposes its `Chat` and `Thread` primitives. Use `slackChannel` for eve's Slack integration, `defineChannel(...)` for an eve-native custom channel, or `chatSdkChannel` when you want a Chat SDK adapter and runtime.
 
 ## Which channel?
 
-| You want…                                   | Use                                                        |
-| ------------------------------------------- | ---------------------------------------------------------- |
-| A web app / browser chat UI                 | eve channel + [`useEveAgent`](../guides/frontend/overview) |
-| Local tooling, SDK clients, `curl`          | [eve HTTP channel](./eve) (default)                        |
-| MCP clients handing off long-running work   | [MCP](./mcp)                                               |
-| Slack mentions, DMs, buttons                | [Slack](./slack)                                           |
-| iMessage and SMS                            | [Linq](./linq)                                             |
-| iMessage                                    | [Photon](./photon)                                         |
-| Discord messages, DMs, slash commands       | [Discord](./discord)                                       |
-| Microsoft Teams messages + Adaptive Cards   | [Teams](./teams)                                           |
-| Telegram bot messages                       | [Telegram](./telegram)                                     |
-| SMS or speech-transcribed phone calls       | [Twilio](./twilio)                                         |
-| GitHub @mentions, PR review with checkout   | [GitHub](./github)                                         |
-| Linear issue delegation and Agent Sessions  | [Linear](./linear)                                         |
-| Another Chat SDK-supported service          | [Chat SDK adapters](./chat-sdk)                            |
-| Anything else (internal webhook, WebSocket) | [Custom channel](./custom) (`defineChannel`, above)        |
+| You want…                                   | Use                                                              |
+| ------------------------------------------- | ---------------------------------------------------------------- |
+| A web app / browser chat UI                 | eve channel + [`useEveAgent`](/docs/guides/frontend)             |
+| Local tooling, SDK clients, `curl`          | [eve HTTP channel](/docs/channels/eve) (default)                 |
+| MCP clients handing off long-running work   | [MCP](/docs/channels/mcp)                                        |
+| Slack mentions, DMs, buttons                | [Slack](/docs/channels/slack)                                    |
+| iMessage and SMS                            | [Linq](/docs/channels/linq)                                      |
+| iMessage                                    | [Photon](/docs/channels/photon)                                  |
+| Discord messages, DMs, slash commands       | [Discord](/docs/channels/discord)                                |
+| Microsoft Teams messages + Adaptive Cards   | [Teams](/docs/channels/teams)                                    |
+| Telegram bot messages                       | [Telegram](/docs/channels/telegram)                              |
+| SMS or speech-transcribed phone calls       | [Twilio](/docs/channels/twilio)                                  |
+| GitHub @mentions, PR review with checkout   | [GitHub](/docs/channels/github)                                  |
+| Linear issue delegation and Agent Sessions  | [Linear](/docs/channels/linear)                                  |
+| Another Chat SDK-supported service          | [Chat SDK adapters](/docs/channels/chat-sdk)                     |
+| Anything else (internal webhook, WebSocket) | [Custom channel](/docs/channels/custom) (`defineChannel`, above) |
 
 ## Connect deployment requirements
 
@@ -130,16 +130,16 @@ A declaration does not prove readiness. Connect must still verify the connector'
 
 As the deployer, you are responsible for ensuring your agent complies with applicable laws.
 
-Where an eve agent communicates with people, the law may require you to disclose that they are interacting with an automated AI system. eve doesn't add this disclosure; configure it in your instructions or channel responses. See [Responsible use](../responsible-use) for the full deployer responsibilities.
+Where an eve agent communicates with people, the law may require you to disclose that they are interacting with an automated AI system. eve doesn't add this disclosure; configure it in your instructions or channel responses. See [Responsible use](/docs/responsible-use) for the full deployer responsibilities.
 
 ## What to read next
 
-- [eve HTTP channel](./eve): the default session API behind the TUI, SDK clients, and browser UIs
-- [Slack](./slack): the most common platform channel, end to end
-- [MCP](./mcp): let MCP clients hand long-running work to the agent
-- [Linq](./linq), [Photon](./photon), [Discord](./discord), [Teams](./teams), [Telegram](./telegram), [Twilio](./twilio), [GitHub](./github), and [Linear](./linear): the other first-class platform channels
-- [Chat SDK adapters](./chat-sdk): reach services eve has no first-class channel for
-- [Custom channels](./custom): build a channel for any surface with `defineChannel`
-- [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): post to another platform without starting an agent turn
-- [Frontend](../guides/frontend/overview): browser chat on the eve channel with `useEveAgent`
+- [eve HTTP channel](/docs/channels/eve): the default session API behind the TUI, SDK clients, and browser UIs
+- [Slack](/docs/channels/slack): the most common platform channel, end to end
+- [MCP](/docs/channels/mcp): let MCP clients hand long-running work to the agent
+- [Linq](/docs/channels/linq), [Photon](/docs/channels/photon), [Discord](/docs/channels/discord), [Teams](/docs/channels/teams), [Telegram](/docs/channels/telegram), [Twilio](/docs/channels/twilio), [GitHub](/docs/channels/github), and [Linear](/docs/channels/linear): the other first-class platform channels
+- [Chat SDK adapters](/docs/channels/chat-sdk): reach services eve has no first-class channel for
+- [Custom channels](/docs/channels/custom): build a channel for any surface with `defineChannel`
+- [Durable cross-channel notifications](/docs/patterns/durable-cross-channel-notifications): post to another platform without starting an agent turn
+- [Frontend](/docs/guides/frontend): browser chat on the eve channel with `useEveAgent`
 - [Integrations](/integrations): browse every built-in channel in one gallery using the Channels filter

@@ -99,4 +99,4 @@ minimumReleaseAgeExclude:
   - "@stripe/link-sdk@0.9.0"
   - "chat@4.42.0"
 patchedDependencies:
-  "@vercel/geistdocs@2.14.1": patches/@vercel__geistdocs@2.14.1.patch
+  "@vercel/geistdocs@2.14.2": patches/@vercel__geistdocs@2.14.2.patch

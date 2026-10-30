@@ -356,7 +356,7 @@ export function WhyEve(): JSX.Element {
         </FeatureCard>
         <FeatureCard
           className="md:col-span-6 lg:col-span-4"
-          href="/docs/guides/frontend/overview"
+          href="/docs/guides/frontend"
           icon={<IconMessage aria-hidden size={16} />}
           title="Own your agent UI"
           visual={<AgentUi />}

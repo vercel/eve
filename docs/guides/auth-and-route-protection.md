@@ -497,4 +497,4 @@ Inline providers derive a stable auth key from Vercel Connect metadata when avai
 - [Security model](../concepts/security-model): trust boundaries and the pre-production checklist
 - [Connections](../connections): connection auth shapes (`connect()` vs static token)
 - [Multi-tenant outbound auth](../patterns/multi-tenant-auth): select tenant-scoped outbound credentials from the verified inbound identity
-- [Deployment](./deployment/overview): where route-auth secrets live in production
+- [Deployment](/docs/guides/deployment): where route-auth secrets live in production
