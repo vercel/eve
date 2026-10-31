@@ -5,6 +5,7 @@
   "ChatSdkChannelContext",
   "ChatSdkChannelEvents",
   "ChatSdkChannelState",
+  "ChatSdkConnectRequirement",
   "ChatSdkEventContext",
   "ChatSdkInputAnswer",
   "ChatSdkInstrumentationMetadata",

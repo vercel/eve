@@ -85,6 +85,33 @@ export const { bot, channel, send } = chatSdkChannel({
 
 Use `routes` when a provider requires a fixed URL, or to keep an existing endpoint without changing the provider's settings.
 
+## Declare Connect dependencies
+
+If an adapter uses a Connect connector, declare it under `connect` using the same key as `adapters`:
+
+```ts
+export const { bot, channel, send } = chatSdkChannel({
+  userName: "Support Bot",
+  adapters: { slack: createSlackAdapter() },
+  state: createMemoryState(),
+  connect: {
+    slack: {
+      connector: "slack/support",
+      service: "slack",
+      type: "slack",
+    },
+  },
+});
+
+export default channel;
+```
+
+`connector` is the connector UID used by your adapter's credential setup. `service` identifies the provider, and optional `type` selects its Connect authentication type. `subjectTypes` defaults to `["app"]`.
+
+This declares a build dependency; it does not supply the adapter's credentials, create a provider app, or configure its webhooks. Keep the adapter's runtime credential setup in place. Only declare a connector that the adapter actually uses.
+
+The build associates each declaration with that adapter's webhook path, including `route` and `routes` overrides and wrappers that spread a route before changing its path. Its GET and POST handlers produce one requirement. Undeclared adapters produce none. Unknown adapter keys, invalid declarations, and shared webhook paths fail the build. Connect's provider support determines whether it can configure and verify the resulting dependency.
+
 ## Dispatch
 
 A turn starts when a handler you register on `bot` calls `send`:
@@ -260,20 +287,21 @@ Workspace-visible threads are `public`, DMs and private or external threads are 
 
 ## Options
 
-| Option                    | Default      | Purpose                                                                  |
-| ------------------------- | ------------ | ------------------------------------------------------------------------ |
-| `adapters`                | —            | Map of adapter name to Chat SDK adapter instance. One webhook per entry. |
-| `state`                   | —            | Chat SDK state adapter for subscriptions, locks, and dedupe.             |
-| `userName`                | —            | Display name for the bot (a standard Chat SDK `ChatConfig` field).       |
-| `route`                   | `/eve/v1`    | Base path for generated adapter webhooks (`{route}/{adapter}`).          |
-| `routes`                  | —            | Per-adapter path overrides for fixed or migrated webhook URLs.           |
-| `turnPolicy`              | `"steer"`    | `"steer"` or `"queue"`. `send(...)` can override it per message.         |
-| `streaming`               | `true`       | Post-then-edit streaming. Set `false` for one-message-per-turn surfaces. |
-| `streamingEditIntervalMs` | `1000`       | Minimum interval between streaming edits.                                |
-| `events`                  | built-in     | Per-event handlers. A supplied handler replaces that built-in default.   |
-| `inputActionPrefix`       | `eve_input:` | Prefix for default HITL button action ids.                               |
-| `resolveInputAuth`        | `null`       | Auth resolver applied when a HITL button click resumes a session.        |
-| `webhook`                 | —            | Extra Chat SDK webhook options (eve owns `waitUntil`).                   |
+| Option                    | Default      | Purpose                                                                   |
+| ------------------------- | ------------ | ------------------------------------------------------------------------- |
+| `adapters`                | —            | Map of adapter name to Chat SDK adapter instance. One webhook per entry.  |
+| `connect`                 | —            | Explicit Connect dependencies keyed by adapter name; build metadata only. |
+| `state`                   | —            | Chat SDK state adapter for subscriptions, locks, and dedupe.              |
+| `userName`                | —            | Display name for the bot (a standard Chat SDK `ChatConfig` field).        |
+| `route`                   | `/eve/v1`    | Base path for generated adapter webhooks (`{route}/{adapter}`).           |
+| `routes`                  | —            | Per-adapter path overrides for fixed or migrated webhook URLs.            |
+| `turnPolicy`              | `"steer"`    | `"steer"` or `"queue"`. `send(...)` can override it per message.          |
+| `streaming`               | `true`       | Post-then-edit streaming. Set `false` for one-message-per-turn surfaces.  |
+| `streamingEditIntervalMs` | `1000`       | Minimum interval between streaming edits.                                 |
+| `events`                  | built-in     | Per-event handlers. A supplied handler replaces that built-in default.    |
+| `inputActionPrefix`       | `eve_input:` | Prefix for default HITL button action ids.                                |
+| `resolveInputAuth`        | `null`       | Auth resolver applied when a HITL button click resumes a session.         |
+| `webhook`                 | —            | Extra Chat SDK webhook options (eve owns `waitUntil`).                    |
 
 Any other Chat SDK `ChatConfig` field (for example `concurrency`) is accepted and passed through.
 
