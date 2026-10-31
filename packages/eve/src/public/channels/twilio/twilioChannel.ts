@@ -1,3 +1,4 @@
+import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { TwilioChannelCredentials } from "#public/channels/twilio/credentials.js";
 export type { TwilioChannelCredentials } from "#public/channels/twilio/credentials.js";
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
@@ -284,7 +285,7 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
   const voice = handleTwilioVoice({ config, onVoice, routes });
   const transcription = handleTwilioTranscription({ config, onVoiceTranscription, routes });
 
-  return defineChannel<
+  const channel = defineChannel<
     TwilioChannelState,
     TwilioChannelContext,
     TwilioReceiveTarget,
@@ -342,6 +343,8 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
 
     events: mergedEvents,
   });
+  setChannelBuildMetadata(channel, { credentials: config.credentials });
+  return channel;
 }
 
 function handleTwilioMessages(input: {

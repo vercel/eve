@@ -92,3 +92,52 @@ describe("twilioChannel voice", () => {
     expect(twiml).not.toContain("<wait>");
   });
 });
+
+describe("twilioChannel forwarded verification", () => {
+  it.each([true, false])(
+    "honors the configured verifier before dispatch (accepted: %s)",
+    async (accepted) => {
+      const request = call(ALICE);
+      request.headers.delete("x-twilio-signature");
+      const webhookVerifier = vi.fn(() => accepted);
+      const authToken = vi.fn(() => AUTH_TOKEN);
+      const { response } = await post(
+        channel({ credentials: { authToken, webhookVerifier } }),
+        request,
+      );
+      expect(response.status).toBe(accepted ? 200 : 401);
+      if (accepted) expect(await response.text()).toContain('<Gather input="speech"');
+      expect(authToken).not.toHaveBeenCalled();
+      expect(webhookVerifier).toHaveBeenCalledOnce();
+    },
+  );
+});
+
+it("accepts a direct signed transcription after a Connect-forwarded voice call", async () => {
+  const webhookVerifier = vi.fn(() => {
+    throw new Error("No Connect authorization");
+  });
+  const configured = channel({
+    credentials: { accountSid: "AC123", authToken: AUTH_TOKEN, webhookVerifier },
+  });
+  const { response } = await post(
+    configured,
+    signed("voice/transcription", {
+      AccountSid: "AC123",
+      CallSid: "CA1",
+      From: ALICE,
+      To: AGENT,
+    }),
+  );
+  expect(response.status).toBe(200);
+  expect(await response.text()).toContain('<Gather input="speech"');
+
+  const invalid = signed("voice/transcription", {
+    AccountSid: "AC123",
+    CallSid: "CA1",
+    From: ALICE,
+    To: AGENT,
+  });
+  invalid.headers.set("x-twilio-signature", "invalid");
+  expect((await post(configured, invalid)).response.status).toBe(401);
+});

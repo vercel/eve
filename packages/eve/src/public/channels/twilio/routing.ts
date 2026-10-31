@@ -31,6 +31,7 @@ export async function verifyTwilioInbound(
   try {
     return await verifyTwilioRequest(req, {
       authToken: config.credentials?.authToken,
+      webhookVerifier: config.credentials?.webhookVerifier,
       webhookUrl: config.webhookUrl,
     });
   } catch (error) {
