@@ -45,7 +45,7 @@ Install the packages for each integration entry you import. They are optional pe
 | Chat SDK, Linq, and Photon channels                           | `chat` 4.42 or later in v4                            |
 | `eve/channels/linq`                                           | Also `@linqapp/sdk` 0.47.1 or later in v0.47          |
 | `eve/sandbox/just-bash`, `eve/experimental/sandbox/just-bash` | `just-bash` 3.6 or later in v3                        |
-| `@vercel/connect/eve` with eve connections                    | `@vercel/connect` 2.5.2 or later in v2                |
+| `@vercel/connect/eve` with eve connections                    | `@vercel/connect` 2.7.0 or later in v2                |
 
 Connections with `experimental.events` require a static Connect auth provider with its events bridge.
 SDK-backed handles use the SDK classes installed in your app, not copies bundled with eve.
