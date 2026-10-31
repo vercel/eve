@@ -18,7 +18,7 @@ interface HostedServer {
 describe("channel routes", () => {
   // vercel/eve#5742: the bundler typed each route's handler module by the
   // extension its path ends in.
-  it.fails("builds and serves paths that end in a file extension", async () => {
+  it("builds and serves paths that end in a file extension", async () => {
     const paths = ["/.well-known/agent-card.json", "/robots.txt", "/legacy.cjs", "/theme.css"];
     const { appRoot } = await createAppRoot("eve-channel-route-extension-", {
       files: {
