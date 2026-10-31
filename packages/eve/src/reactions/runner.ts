@@ -23,6 +23,7 @@ import type {
 } from "./reaction.js";
 import { requireHistory } from "./reaction.js";
 import { openMemos } from "./records.js";
+import { withUsageInReaction } from "#harness/usage-sink.js";
 import {
   clearLive,
   digestOf,
@@ -89,7 +90,7 @@ export async function runReactions(ctx: ContextContainer, input: RunReactionsInp
     // Streamed progress reaches the hooks that handle it, and nothing else.
     if (reaction.kind !== "hook" && input.written.every(({ progress }) => progress)) continue;
     try {
-      await reaction.onCommit(context);
+      await withUsageInReaction(() => reaction.onCommit(context));
     } catch (error) {
       reportReactionFailure(ctx, reaction, error);
     }
