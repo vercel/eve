@@ -1844,7 +1844,7 @@ describe("deliveries a child session reads", () => {
 
   // #5736: a task resumed by its id in a later turn reads the message the resuming call sent, so
   // the child's prompt is about that call, not the one that opened the task a turn earlier.
-  it.fails("relays a resumed task's prompt on the call that resumed it", async () => {
+  it("relays a resumed task's prompt on the call that resumed it", async () => {
     // Only the child's second turn spends past the limit: the parent asks for it together with
     // the wait, so the parent's own gate runs again only after the child replies.
     let childLimited = false;

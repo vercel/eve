@@ -253,7 +253,7 @@ class RunAgentSession implements AgentSession {
       ({ receipt } = await opening);
     } else {
       const opened = await this.#opened;
-      receipt = await sendAgentSessionMessageStep({ ...message, ...opened });
+      receipt = await sendAgentSessionMessageStep({ ...message, ...opened, callId: from.callId });
       if (receipt.sessionId !== opened.address.sessionId) {
         // The replacement is announced once, before any delivery is linked to it; later
         // messages are delivered to it.

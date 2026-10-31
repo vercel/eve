@@ -99,6 +99,7 @@ const session = {
 const message = {
   ...session,
   auth: { current: null, initiator: null },
+  callId: "call-1",
   message: "Bob asks for a second look at the plan.",
   replyTo: "reply-1",
 } as const;
