@@ -205,20 +205,21 @@ async function normalizeRuntimeOverrides({
 
 /**
  * Sends a later message; it joins the session's running turn or starts the
- * next. It keeps the session's lineage and carries its own auth.
+ * next. It keeps the session's lineage and carries its own auth and the call
+ * its turn reports and asks on.
  */
 export async function sendAgentSessionMessageStep(
-  input: AgentSessionMessage & OpenedAgentSession,
+  input: AgentSessionMessage & OpenedAgentSession & { readonly callId: string },
 ): Promise<AgentSessionReceipt> {
   "use step";
 
-  const { address, context } = input;
+  const { address, callId, context } = input;
   if (address.kind === "remote") {
     const remote = await resolveSessionRemote(context, address);
     return await continueRemoteAgentSession({
       auth: input.auth.current,
       callback: {
-        callId: context.parent.callId,
+        callId,
         subagentName: address.name,
         token: input.replyTo,
         url: createWorkflowCallbackUrl(
@@ -242,7 +243,7 @@ export async function sendAgentSessionMessageStep(
       auth: input.auth.current,
       schedule: context.schedule,
       caller: {
-        callId: context.parent.callId,
+        callId,
         replyTo: { kind: "hook", token: input.replyTo },
         subagentName: address.name,
       },

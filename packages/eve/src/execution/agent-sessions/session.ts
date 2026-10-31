@@ -90,6 +90,8 @@ class RunAgentSession implements AgentSession {
   readonly #usage: RunUsageTally;
   #opened: Promise<OpenedAgentSession> | undefined;
   #opener: WorkflowToolRunContext["from"] | undefined;
+  /** The call the agent's latest turn reports on: the call whose message started that turn. */
+  #turnCallId: string | undefined;
   /** Oldest first: the order the messages were sent, which is the order the agent admits them. */
   readonly #awaited: AwaitedReply[] = [];
   /**
@@ -138,7 +140,7 @@ class RunAgentSession implements AgentSession {
       outputSchema,
       replyTo: reply.hook.token,
     };
-    const delivery = this.#delivered.then(() => this.#deliver(sending, sender));
+    const delivery = this.#delivered.then(() => this.#deliver(sending, sender, reply));
     // A failed delivery fails only its own send; the next message is still delivered.
     this.#delivered = delivery.catch(() => undefined);
     try {
@@ -242,8 +244,15 @@ class RunAgentSession implements AgentSession {
    * delivery for the call it was sent for. Serialized sends behave as sequential ones: a send
    * queued behind a failed open opens the session itself.
    */
-  async #deliver(message: AgentSessionMessage, sender: AgentSessionSender): Promise<void> {
+  async #deliver(
+    message: AgentSessionMessage,
+    sender: AgentSessionSender,
+    reply: AwaitedReply,
+  ): Promise<void> {
     const { from } = sender;
+    // A message sent while an earlier one still awaits its reply joins that turn, so it reports
+    // on the turn's call; any other message starts the next turn, which reports on its own call.
+    if (this.#awaited.indexOf(reply) <= 0) this.#turnCallId = from.callId;
     let receipt: AgentSessionReceipt;
     if (this.#opened === undefined) {
       const opening = this.#open(message, sender);
@@ -253,7 +262,11 @@ class RunAgentSession implements AgentSession {
       ({ receipt } = await opening);
     } else {
       const opened = await this.#opened;
-      receipt = await sendAgentSessionMessageStep({ ...message, ...opened });
+      receipt = await sendAgentSessionMessageStep({
+        ...message,
+        ...opened,
+        callId: this.#turnCallId ?? from.callId,
+      });
       if (receipt.sessionId !== opened.address.sessionId) {
         // The replacement is announced once, before any delivery is linked to it; later
         // messages are delivered to it.
