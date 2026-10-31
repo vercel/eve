@@ -702,7 +702,7 @@
     "@nuxt/kit": "^4.0.0",
     "@nuxt/schema": "^4.0.0",
     "@opentelemetry/api": "^1.0.0",
-    "@vercel/connect": "^2.5.2",
+    "@vercel/connect": "^2.7.0",
     "ai": "catalog:",
     "braintrust": "^3.0.0",
     "chat": "^4.42.0",
