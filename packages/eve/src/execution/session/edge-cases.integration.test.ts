@@ -1842,6 +1842,77 @@ describe("deliveries a child session reads", () => {
     expect(ofType(childEvents, "delivery.admitted")).toHaveLength(2);
   });
 
+  // #5736: a task resumed by its id in a later turn reads the message the resuming call sent, so
+  // the child's prompt is about that call, not the one that opened the task a turn earlier.
+  it.fails("relays a resumed task's prompt on the call that resumed it", async () => {
+    // Only the child's second turn spends past the limit: the parent asks for it together with
+    // the wait, so the parent's own gate runs again only after the child replies.
+    let childLimited = false;
+    const { events } = await withSession(
+      "edge-child-resumed-budget",
+      {
+        message: "Ask the child.",
+        sessionUsage: () => childLimited,
+        model: scriptedModel((_prompt, raw) => {
+          const prompt = JSON.stringify(raw);
+          const called = (callId: string) => prompt.includes(`"toolCallId":"${callId}"`);
+          const first = raw.find((message) => message.role === "user");
+          if (JSON.stringify(first?.content).includes("CHILD:")) {
+            childLimited = false;
+            return "Child done.";
+          }
+          if (!prompt.includes("Ask again.")) {
+            if (!called("call_one"))
+              return [
+                { input: { message: "CHILD: first" }, toolName: "agent", toolCallId: "call_one" },
+              ];
+            if (!called("call_wait_one"))
+              return [{ input: {}, toolName: "eve__task_wait", toolCallId: "call_wait_one" }];
+            return "Asked once.";
+          }
+          const taskId = /Started task ([\w-]+)/u.exec(prompt)?.[1];
+          if (!called("call_two")) {
+            childLimited = true;
+            return [
+              {
+                input: { message: "CHILD: second", taskId },
+                toolName: "agent",
+                toolCallId: "call_two",
+              },
+              { input: {}, toolName: "eve__task_wait", toolCallId: "call_wait_two" },
+            ];
+          }
+          return "Asked twice.";
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.next("first turn");
+        await session.send("Ask again.");
+        const asked = await session.until(
+          "the child's budget prompt",
+          (event) =>
+            (event.type === "interaction.opened" && event.data.request.kind === "budget") ||
+            event.type === "session.ended",
+        );
+        expect(ofType(asked, "session.ended").map((event) => event.data)).toEqual([]);
+        const [prompt] = ofType(asked, "interaction.opened");
+        await session.answer(prompt!.data.interactionId, "approve");
+        await session.until(
+          "second turn",
+          (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
+        );
+      },
+    );
+
+    const [relayed] = ofType(events, "interaction.opened");
+    expect(relayed?.data).toMatchObject({
+      request: { kind: "budget" },
+      subject: { callId: "call_two" },
+    });
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
+  });
+
   it("replies to the latest forwarded caller when a cancel leaves its queued message unread", async () => {
     const name = "edge-cancel-unread-forward";
     const { events } = await withSession(
