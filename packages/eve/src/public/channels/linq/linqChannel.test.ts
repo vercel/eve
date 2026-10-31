@@ -36,7 +36,7 @@ vi.mock("#public/channels/chat-sdk/index.js", () => ({
       onNewMessage: newMessage,
       onReaction: reaction,
     },
-    channel: { routes: [] },
+    channel: { __kind: "eve:channel", routes: [] },
     send,
   }),
   messageContentOf: (message: Message) => message.text,
