@@ -1572,7 +1572,7 @@ describe("work delegated to a child session", () => {
 
   // #5726: Slack sends its responder as `state` with every button answer. That field stays
   // with the parent, and the child still has to admit the answer forwarded to it.
-  it.fails("runs the child's call when its relayed approval's answer also carries channel state", async () => {
+  it("runs the child's call when its relayed approval's answer also carries channel state", async () => {
     const { events, ran } = await withSession(
       "edge-child-approval-state",
       {
