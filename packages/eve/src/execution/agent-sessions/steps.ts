@@ -205,8 +205,8 @@ async function normalizeRuntimeOverrides({
 
 /**
  * Sends a later message; it joins the session's running turn or starts the
- * next. It keeps the session's lineage and carries its own auth and call: the
- * turn it starts reports and asks on the call that sent it.
+ * next. It keeps the session's lineage and carries its own auth and the call
+ * its turn reports and asks on.
  */
 export async function sendAgentSessionMessageStep(
   input: AgentSessionMessage & OpenedAgentSession & { readonly callId: string },

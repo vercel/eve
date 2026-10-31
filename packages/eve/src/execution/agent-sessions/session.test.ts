@@ -241,6 +241,34 @@ it("leaves a message the child admitted after the turn ended pending for the nex
   await expect(pending.result()).resolves.toMatchObject({ reply: "second turn" });
 });
 
+it("sends a message on the running turn's call, and one that starts a turn on its own", async () => {
+  const { sessions, serve } = serveRun();
+  const reviewer = sessions.open("reviewer");
+  const seed = await reviewer.send("Alice opens the review.");
+  // Bob's call corrects the running turn, so it joins that turn and reports on its call.
+  serve("call-2", "bob");
+  const correction = reviewer.send("Bob corrects the plan.");
+  await landNewestFirst();
+  await correction;
+  endChildTurn("first turn");
+  await seed.result();
+  // A later call resumes the task after that turn ended, so the next turn reports on it.
+  serve("call-3", "bob");
+  const resumed = reviewer.send("Bob asks for a second look.");
+  await landNewestFirst();
+  await resumed;
+
+  const { sendAgentSessionMessageStep } = await import("#execution/agent-sessions/steps.js");
+  expect(
+    vi
+      .mocked(sendAgentSessionMessageStep)
+      .mock.calls.map(([input]) => [input.message, input.callId]),
+  ).toEqual([
+    ["Bob corrects the plan.", "call-1"],
+    ["Bob asks for a second look.", "call-3"],
+  ]);
+});
+
 it("delivers and records each message for the call and auth it was sent with", async () => {
   const { sessions, sent, serve } = serveRun();
   const reviewer = sessions.open("reviewer");
