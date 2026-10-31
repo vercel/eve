@@ -20,6 +20,7 @@
     "---Integrate---",
     "install-integrations",
     "extensions",
+    "loops-extension",
     "protocols/acp",
     "guides/client",
     "guides/frontend",
