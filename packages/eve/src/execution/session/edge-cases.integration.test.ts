@@ -841,7 +841,7 @@ describe("calls in flight", () => {
 
   // A workflow tool's question sent just before a cancel stopped its run can reach the session
   // after the turn settled. Nobody can answer it then, so the next message must start a turn.
-  it.fails("drops a workflow tool's question that arrives after its turn was cancelled", async () => {
+  it("drops a workflow tool's question that arrives after its turn was cancelled", async () => {
     const earlierRuns = await workflowToolRunIds();
     const { events } = await withSession(
       "edge-cancel-late-workflow-question",
