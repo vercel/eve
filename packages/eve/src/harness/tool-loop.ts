@@ -5,6 +5,7 @@ import { GenerationSteering } from "#harness/generation-steering.js";
 import { compactHistory, replaceSessionHistory } from "#harness/compaction/step.js";
 import { readTaskTable, takeTaskResults, writeTaskTable } from "#execution/tasks/table.js";
 import { runModelStep } from "#harness/model-call/run.js";
+import { withUsageSink } from "#harness/usage-sink.js";
 import type { Publish } from "#harness/session-machine/commit.js";
 import {
   saveProjection,
@@ -124,6 +125,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       session: initialSession,
     });
 
+    // Model calls the step's own code makes (decide()) count as the step's usage.
+    return await withUsageSink(publish, () => runStages(step, input, generation));
+  }
+
+  async function runStages(
+    step: Step,
+    input: HarnessStepInput | undefined,
+    generation: GenerationSteering,
+  ): Promise<StepResult> {
     if (config.clearOnly === true) return clearContext(step);
     if (config.compactOnly === true) return compactHistory(step);
 
