@@ -84,7 +84,7 @@ function assertKeeps(previous: readonly ModelMessage[], next: readonly ModelMess
  * answered twice. A provider rejects either. Results count wherever they are, including a
  * provider-executed result inline in its assistant message.
  */
-export function answersFollowCalls(history: readonly ModelMessage[]): string | undefined {
+function answersFollowCalls(history: readonly ModelMessage[]): string | undefined {
   const calls = new Set<string>();
   const answered = new Set<string>();
   for (const [index, message] of history.entries()) {
