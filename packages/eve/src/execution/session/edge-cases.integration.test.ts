@@ -966,11 +966,11 @@ describe("approvals off the happy path", () => {
   const deployModel = () =>
     scriptedModel(({ results, said }) => {
       if (said("Never mind")) return "Okay, stopping.";
+      if (results.length > 0) return `Deploy finished: ${JSON.stringify(results[0]?.output)}`;
       // A stale answer reaches the model as the person's text, naming the request it answered.
       // An answer to a request the session never made: the model asks for the deploy again.
       if (said("interaction_missing")) return [{ toolName: "deploy", toolCallId: "call_deploy" }];
       if (said("requestId")) return "That was already done.";
-      if (results.length > 0) return `Deploy finished: ${JSON.stringify(results[0]?.output)}`;
       return [{ toolName: "deploy", toolCallId: "call_deploy" }];
     });
   const deployTools: ToolSpec[] = [{ approval: true, name: "deploy" }];

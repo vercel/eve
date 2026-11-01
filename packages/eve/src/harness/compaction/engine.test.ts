@@ -964,6 +964,33 @@ describe("compactMessages: forced summary", () => {
     expect(summarize).toHaveBeenCalledOnce();
     expect(result).toContainEqual({ content: "forced checkpoint", role: "assistant" });
   });
+
+  it("replays nothing between turns, where every request already has its answer", async () => {
+    const messages = [
+      user("old notes ".repeat(400)),
+      assistant("Noted."),
+      user("Did QA pass?"),
+      assistant("QA passed."),
+    ];
+
+    const between = await compactMessages(
+      messages,
+      { recentWindowSize: 1, threshold: ROOMY },
+      summarizeWith("checkpoint"),
+      true,
+      undefined,
+      false,
+    );
+    const during = await compactMessages(
+      messages,
+      { recentWindowSize: 1, threshold: ROOMY },
+      summarizeWith("checkpoint"),
+      true,
+    );
+
+    expect(between.at(-1)).toEqual(assistant("QA passed."));
+    expect(during.at(-1)).toEqual(user("Did QA pass?"));
+  });
 });
 
 describe("compactMessages: deferred provider tool results", () => {

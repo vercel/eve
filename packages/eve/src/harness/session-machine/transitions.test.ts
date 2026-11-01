@@ -683,6 +683,72 @@ describe("routing answers", () => {
     }
   });
 
+  it("mirrors a child's request only about a call this session still runs", () => {
+    const parent = runningCall();
+    const asks = (callId: string) =>
+      relay(viewOf(parent), {
+        payload: {
+          kind: "subagent-interaction",
+          callId,
+          childSessionId: "child-1",
+          subagentName: "deployer",
+          events: [
+            {
+              type: "interaction.opened",
+              data: {
+                interactionId: "remote",
+                request: { kind: "question", prompt: "Continue?" },
+                subject: { turnId: "child-turn" },
+              },
+            },
+          ],
+        },
+      }).events;
+    expect(asks("probe")).toMatchObject([
+      {
+        data: {
+          origin: { interactionId: "remote", sessionId: "child-1" },
+          subject: { callId: "probe" },
+        },
+        type: "interaction.opened",
+      },
+    ]);
+    expect(asks("never-made")).toEqual([]);
+  });
+
+  it("keeps mirroring a settled call while its serving task is running", () => {
+    const replied = withPublished(busyTurn(), [
+      { type: "call.settled", data: { callId: "agent", outcome: "completed", output: {} } },
+    ]);
+    const asks = (session: HarnessSession) =>
+      relay(viewOf(session), {
+        payload: {
+          kind: "subagent-interaction",
+          callId: "agent",
+          childSessionId: "child-1",
+          subagentName: "helper",
+          events: [
+            {
+              type: "interaction.opened",
+              data: {
+                interactionId: "remote",
+                request: { kind: "question", prompt: "Continue?" },
+                subject: { turnId: "child-turn" },
+              },
+            },
+          ],
+        },
+      }).events;
+
+    expect(asks(replied)).toMatchObject([
+      { type: "interaction.opened", data: { subject: { callId: "agent" } } },
+    ]);
+    const ended = withPublished(replied, [
+      { type: "task.ended", data: { taskId: "task-1", outcome: "completed" } },
+    ]);
+    expect(asks(ended)).toEqual([]);
+  });
+
   it("submits a forwarded answer only for an open request and a delivery it knows", () => {
     const session = waitingTurn();
     const { events } = routeAnswer(viewOf(session), {

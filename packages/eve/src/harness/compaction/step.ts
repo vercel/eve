@@ -266,6 +266,7 @@ async function summarizeHistory(
       summarize,
       input.compact === true,
       rewrite.historyTokens,
+      input.betweenTurns !== true,
     )) as HarnessModelMessage[];
     // Capping old tool output alone rewrites the history without a summary call.
     if (!isDeepStrictEqual(messages, before)) await change.open();

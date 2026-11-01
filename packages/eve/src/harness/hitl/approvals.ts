@@ -11,14 +11,13 @@ import type { ResponderCheck } from "./responders.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
 import { signInAttemptKey, supersededChallenges, withSignIns } from "./sign-ins.js";
-import { renderPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 import {
   failedCall,
   resolveApprovalOutcome,
   TOOL_EXECUTION_DENIED_MESSAGE,
   unavailableToolMessage,
 } from "#harness/approval-outcome.js";
-import { coalesceTurnInputs, createFrameworkUserMessage } from "#harness/messages.js";
+import { coalesceTurnInputs } from "#harness/messages.js";
 import { limitDecision, type LimitAsk } from "#harness/hitl/budget-request.js";
 import type { HarnessStepInput, SubmittedAnswer } from "#harness/types.js";
 import { callSettledFrom } from "#harness/call-facts.js";
@@ -102,7 +101,6 @@ export function askApprovals(
   // Results of work resumed in this step stay ahead of the notice; the rest waits for approval.
   const pendingStart = input.messages.findIndex((message) => message.role !== "tool");
   const committed = pendingStart === -1 ? input.messages : input.messages.slice(0, pendingStart);
-  const snippet = renderPendingApprovalsSnippet(input.requests);
   const turn = suspend(view.turn, {
     event: input.event,
     messages: input.messages.slice(committed.length),
@@ -112,12 +110,9 @@ export function askApprovals(
     tasks: input.tasks,
   });
   return transition({
-    history: {
-      append: [
-        ...committed,
-        ...(snippet === undefined ? [] : [createFrameworkUserMessage("context.state", snippet)]),
-      ],
-    },
+    // What still waits is told to each later model call from the session, not written into
+    // history, where it would outlive the approval it describes.
+    history: { append: committed },
     events: input.tasks.length > 0 ? [] : input.requests.map((ask) => approvalOpened(ask)),
     turn,
   });
