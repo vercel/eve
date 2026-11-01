@@ -1,6 +1,6 @@
 import { gateway, type LanguageModel, type LanguageModelMiddleware, wrapLanguageModel } from "ai";
 
-import type { CompactionConfig, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import type { CompactionConfig, HarnessSession, KernelConfig } from "#harness/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { contextStorage } from "#context/container.js";
 import { getEffectiveModelSelection } from "#reactions/kinds/model.js";
@@ -13,7 +13,7 @@ import { appendPackageUserAgent } from "#internal/user-agent.js";
  */
 export function buildGatewayAttributionHeaders(
   profile: ModelProfile,
-  runtimeIdentity: ToolLoopHarnessConfig["runtimeIdentity"],
+  runtimeIdentity: KernelConfig["runtimeIdentity"],
 ): Record<string, string> | undefined {
   if (!profile.gateway) return undefined;
 
@@ -50,7 +50,7 @@ export function withGatewayTraceContext(
 }
 
 export async function resolveEffectiveRuntimeModel(input: {
-  readonly config: ToolLoopHarnessConfig;
+  readonly config: KernelConfig;
   readonly ctx: ReturnType<typeof contextStorage.getStore>;
   readonly session: HarnessSession;
 }): Promise<{

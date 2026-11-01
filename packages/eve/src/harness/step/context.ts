@@ -38,7 +38,7 @@ import type {
   StepFn,
   HarnessStepInput,
   StepResult,
-  ToolLoopHarnessConfig,
+  KernelConfig,
 } from "#harness/types.js";
 import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
@@ -54,7 +54,7 @@ const log = createLogger("harness.step");
 export interface Step {
   session: HarnessSession;
   frameworkToolNames: ReadonlySet<string>;
-  readonly config: ToolLoopHarnessConfig;
+  readonly config: KernelConfig;
   /** The step's context; direct harness tests may run without one. */
   readonly ctx: AlsContext | undefined;
   readonly runStep: StepFn;
@@ -79,7 +79,7 @@ export interface Step {
 }
 
 export function createStep(input: {
-  readonly config: ToolLoopHarnessConfig;
+  readonly config: KernelConfig;
   readonly ctx: AlsContext | undefined;
   readonly emit: HarnessEmitFn | undefined;
   readonly instrumentation: InstrumentationStepScope<HarnessSession> | undefined;
