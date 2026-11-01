@@ -29,7 +29,6 @@ describe("resolveEffectiveAgentRuntime", () => {
         },
         turnAgent: {
           id: "researcher",
-          instructions: ["Research carefully."],
           model: { id: "openai/gpt-5.5" },
           tools,
           workspaceSpec: {} as never,
@@ -47,7 +46,6 @@ describe("resolveEffectiveAgentRuntime", () => {
         reasoning: "high",
       },
     });
-    expect(effective.turnAgent.instructions).toEqual(["Research carefully."]);
     expect(effective.turnAgent.tools).toBe(tools);
   });
 
@@ -73,7 +71,6 @@ describe("resolveEffectiveAgentRuntime", () => {
         turnAgent: {
           configResolver: true,
           id: "researcher",
-          instructions: ["Research carefully."],
           tools: [{ name: "search" }],
           workspaceSpec: {} as never,
         },
@@ -86,7 +83,6 @@ describe("resolveEffectiveAgentRuntime", () => {
       thresholdPercent: 0.75,
       turnAgent: {
         compactionModel: { id: "anthropic/claude-haiku-4.5" },
-        instructions: ["Research carefully."],
         model: { id: "openai/gpt-5.5", reasoning: "low" },
         reasoning: "high",
         tools: [{ name: "search" }],

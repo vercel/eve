@@ -17,8 +17,8 @@ interface CatalogState {
   readonly tools?: readonly HarnessToolDefinition[];
 }
 
-function announce(state: CatalogState, announced?: Readonly<Record<string, string>>) {
-  const { catalog } = catalogContext({
+async function announce(state: CatalogState, announced?: Readonly<Record<string, string>>) {
+  const { catalog } = await catalogContext({
     connections: (state.connections ?? []).map((connection) =>
       fakeConnection({ ...connection, tools: [] }),
     ),
@@ -29,17 +29,17 @@ function announce(state: CatalogState, announced?: Readonly<Record<string, strin
 }
 
 /** The listing a session's first step appends. */
-function baseline(state: CatalogState): string | undefined {
-  return announce(state).catalog?.render(undefined);
+async function baseline(state: CatalogState): Promise<string | undefined> {
+  return (await announce(state)).catalog?.render(undefined);
 }
 
 /**
  * What the model reads when the catalog goes from `previous` to `next`. Like
  * the harness, nothing is appended while the recorded value stays the same.
  */
-function appended(previous: CatalogState, next: CatalogState): string | undefined {
-  const before = announce(previous).catalog!.value;
-  const after = announce(next, { catalog: before }).catalog;
+async function appended(previous: CatalogState, next: CatalogState): Promise<string | undefined> {
+  const before = (await announce(previous)).catalog!.value;
+  const after = (await announce(next, { catalog: before })).catalog;
   return after === undefined || after.value === before ? undefined : after.render(before);
 }
 
@@ -80,8 +80,8 @@ const INK: CatalogState = {
 };
 
 describe("catalogAnnouncements", () => {
-  it("names the kinds, namespaces, and connections, but no deferred entry", () => {
-    const listing = baseline(INK);
+  it("names the kinds, namespaces, and connections, but no deferred entry", async () => {
+    const listing = await baseline(INK);
 
     expect(listing).toBe(
       [
@@ -136,16 +136,16 @@ describe("catalogAnnouncements", () => {
       { connections: [{ description: "Linear issues", name: "linear" }] },
       `Your connections have more tools ${HEADER_GUIDANCE} Call them with eve__tool({ name, input }).`,
     ],
-  ])("names only the kinds present: %s", (_case, state: CatalogState, header) => {
-    expect(baseline(state)?.split("\n")[0]).toBe(header);
+  ])("names only the kinds present: %s", async (_case, state: CatalogState, header) => {
+    expect((await baseline(state))?.split("\n")[0]).toBe(header);
   });
 
-  it("lists the 20 largest namespaces by name, then 'and more', and a connection's namespace only as the connection", () => {
+  it("lists the 20 largest namespaces by name, then 'and more', and a connection's namespace only as the connection", async () => {
     const large = Array.from(
       { length: 20 },
       (_, index) => `ns${String(index + 1).padStart(2, "0")}`,
     );
-    const listing = baseline({
+    const listing = await baseline({
       connections: [{ description: "Linear issues", name: "linear" }],
       tools: [
         // Smaller than every listed namespace, though first by name.
@@ -160,12 +160,12 @@ describe("catalogAnnouncements", () => {
     expect(listing).toContain("- linear: Linear issues");
   });
 
-  it("caps connections at 20 by name, then 'and more'", () => {
+  it("caps connections at 20 by name, then 'and more'", async () => {
     const connections = Array.from({ length: 21 }, (_, index) => ({
       name: `svc${String(index + 1).padStart(2, "0")}`,
     }));
 
-    const lines = baseline({ connections })!.split("\n");
+    const lines = (await baseline({ connections }))!.split("\n");
 
     expect(lines.slice(2)).toEqual([
       ...connections.slice(0, 20).map(({ name }) => `- ${name}: ${name} service`),
@@ -173,24 +173,26 @@ describe("catalogAnnouncements", () => {
     ]);
   });
 
-  it("renders the same value for the same catalog, whatever order entries arrive in", () => {
+  it("renders the same value for the same catalog, whatever order entries arrive in", async () => {
     const reordered = {
       ...INK,
       connections: [...INK.connections!].reverse(),
       tools: [...INK.tools!].reverse(),
     };
 
-    expect(announce(reordered).catalog?.value).toBe(announce(INK).catalog?.value);
+    expect((await announce(reordered)).catalog?.value).toBe((await announce(INK)).catalog?.value);
   });
 
-  it("announces nothing for a catalog that is empty and was never announced", () => {
-    expect(announce({ skills: [{ name: "house-rules" }], tools: [inlineTool("add")] })).toEqual({});
+  it("announces nothing for a catalog that is empty and was never announced", async () => {
+    expect(
+      await announce({ skills: [{ name: "house-rules" }], tools: [inlineTool("add")] }),
+    ).toEqual({});
   });
 
   describe("changes", () => {
-    it("appends nothing when an entry joins a listed namespace or has no namespace", () => {
+    it("appends nothing when an entry joins a listed namespace or has no namespace", async () => {
       expect(
-        appended(INK, {
+        await appended(INK, {
           ...INK,
           skills: [...INK.skills!, { deferred: true, name: "sre__postmortem" }],
           tools: [...INK.tools!, deferred("sre__ack_alert"), deferred("export_ledger")],
@@ -204,25 +206,25 @@ describe("catalogAnnouncements", () => {
         "a connection",
         { ...INK, connections: [...INK.connections!, { description: "CRM", name: "crm" }] },
       ],
-    ])("appends the full listing again when %s appears", (_case, next: CatalogState) => {
-      const message = appended(INK, next);
+    ])("appends the full listing again when %s appears", async (_case, next: CatalogState) => {
+      const message = await appended(INK, next);
 
-      expect(message).toBe(`The catalog changed.\n${baseline(next)}`);
+      expect(message).toBe(`The catalog changed.\n${await baseline(next)}`);
     });
 
-    it("names a namespace or connection that is gone", () => {
+    it("names a namespace or connection that is gone", async () => {
       const next: CatalogState = {
         ...INK,
         connections: INK.connections!.filter(({ name }) => name !== "linear"),
         tools: INK.tools!.filter(({ name }) => !name.startsWith("d0__")),
       };
 
-      expect(appended(INK, next)).toBe(
-        `The catalog changed.\n${baseline(next)}\nNo longer available: d0, linear`,
+      expect(await appended(INK, next)).toBe(
+        `The catalog changed.\n${await baseline(next)}\nNo longer available: d0, linear`,
       );
     });
 
-    it("does not call a namespace or connection gone when it only falls past the cap", () => {
+    it("does not call a namespace or connection gone when it only falls past the cap", async () => {
       const twenty = Array.from(
         { length: 20 },
         (_, index) => `ns${String(index + 1).padStart(2, "0")}`,
@@ -237,30 +239,32 @@ describe("catalogAnnouncements", () => {
         tools: [...namespace("top", 3), ...previous.tools!],
       };
 
-      const message = appended(previous, next);
+      const message = await appended(previous, next);
 
       expect(message).toContain(", and more");
       expect(message).toContain("- and more");
       expect(message).not.toContain("No longer available");
     });
 
-    it("says when an announced catalog becomes empty, and lists it in full when entries return", () => {
-      const synced = announce({ tools: [deferred("tenant__sync")] }).catalog!.value;
-      const empty = announce({ tools: [inlineTool("add")] }, { catalog: synced }).catalog!;
+    it("says when an announced catalog becomes empty, and lists it in full when entries return", async () => {
+      const synced = (await announce({ tools: [deferred("tenant__sync")] })).catalog!.value;
+      const empty = (await announce({ tools: [inlineTool("add")] }, { catalog: synced })).catalog!;
 
       expect(empty.render(synced)).toBe(
         "The catalog changed. It is empty now: eve__search finds nothing.",
       );
       const returned = { tools: [deferred("tenant__export")] };
-      expect(announce(returned, { catalog: empty.value }).catalog?.render(empty.value)).toBe(
-        baseline(returned),
-      );
+      expect(
+        (await announce(returned, { catalog: empty.value })).catalog?.render(empty.value),
+      ).toBe(await baseline(returned));
     });
 
-    it("treats an unreadable recorded value as a fresh baseline", () => {
+    it("treats an unreadable recorded value as a fresh baseline", async () => {
       const recorded = "not json";
 
-      expect(announce(INK, { catalog: recorded }).catalog?.render(recorded)).toBe(baseline(INK));
+      expect((await announce(INK, { catalog: recorded })).catalog?.render(recorded)).toBe(
+        await baseline(INK),
+      );
     });
   });
 });

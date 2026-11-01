@@ -6,7 +6,7 @@ import { prepareActionDispatch } from "#execution/coordination-dispatch-shared.j
 import { hydrateDurableSession } from "#execution/session.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { withPublished } from "#internal/testing/session-machine.js";
-import { ReactionsStateKey } from "#reactions/state.js";
+import { DefinitionsStateKey } from "#definitions/state.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 it("binds dynamic remote credentials to the dispatch checkpoint's parent view", async () => {
@@ -18,7 +18,7 @@ it("binds dynamic remote credentials to the dispatch checkpoint's parent view", 
     turnAgent: { id: "parent", tools: [], system: "Help Alice.", model: { id: "test/model" } },
     subagentRegistry: { subagentsByName: new Map() },
   } as never);
-  ctx.set(ReactionsStateKey, {
+  ctx.set(DefinitionsStateKey, {
     latest: {},
     slots: {
       "subagent:subagents/reviewer": {

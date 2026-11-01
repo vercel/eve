@@ -179,7 +179,7 @@ Names use ASCII letters, digits, underscores, and dashes, start with a letter, a
 
 ### Conflicts
 
-A dynamic tool, connection, or skill overrides a static one of the same kind and name. Two dynamic connection definitions can't emit the same name. For tools and skills, the earlier definition keeps a duplicate name and eve logs an error for the other. Dynamic tools can't take workflow-tool or subagent names. Other invalid results and name conflicts fail the turn.
+A dynamic connection or skill overrides a static one of the same kind and name. Two dynamic connection definitions can't emit the same name. A tool name belongs to one tool: when a dynamic tool returns the name of a static tool or of another dynamic tool, the first keeps it and eve logs an error for the other. Static tools come first. The same rule applies to duplicate dynamic skill names. To replace a built-in or extension tool, add `agent/tools/<name>.ts` instead. Dynamic tools can't take workflow-tool or subagent names. Other invalid results and name conflicts fail the turn.
 
 <span id="events"></span>
 

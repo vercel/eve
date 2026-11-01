@@ -51,7 +51,7 @@ async function runTurn(doStream: MockLanguageModelV3["doStream"]): Promise<Sessi
   vi.spyOn(console, "warn").mockImplementation(() => {});
   const events: SessionEvent[] = [];
   const session: HarnessSession = {
-    agent: { modelReference: { id: "m" }, system: "You help Alice.", tools: [] },
+    agent: { modelReference: { id: "m" }, tools: [] },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "http:attempts",
     history: [],
@@ -143,7 +143,7 @@ describe("run attributes", () => {
       ]),
     })(
       {
-        agent: { modelReference: { id: "m" }, system: "You help Alice.", tools: [] },
+        agent: { modelReference: { id: "m" }, tools: [] },
         compaction: { recentWindowSize: 10, threshold: 100_000 },
         continuationToken: "http:attributes",
         history: [],

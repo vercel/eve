@@ -15,7 +15,6 @@ type StaticRuntimeTurnAgent = Extract<RuntimeTurnAgent, { readonly model: unknow
 function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): RuntimeTurnAgent {
   return {
     id: "test-agent",
-    instructions: ["You are a helpful assistant.", "Be concise."],
     compactionModel: {
       id: "summary-model",
     },
@@ -88,7 +87,6 @@ describe("createSession", () => {
     expect(session.agent.modelReference).toEqual({ id: "test-model" });
     expect(session.agent.reasoning).toBe("high");
     expect(session.outputSchema).toEqual(outputSchema);
-    expect(session.agent.system).toBe("You are a helpful assistant.\n\nBe concise.");
     expect(session.agent.tools).toEqual([
       {
         description: "Adds two numbers",
@@ -99,24 +97,6 @@ describe("createSession", () => {
         name: "add",
       },
     ]);
-  });
-
-  it("renders canonical symbolic paths for static skills", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({
-        listedSkills: [{ description: "Research topics.", name: "research" }],
-      }),
-    });
-
-    expect(session.agent.system).toContain("`$HOME/.agents/skills/<skill>/`");
-    expect(session.agent.system).toContain(
-      "`skills/<skill>/` under the workspace root as the fallback",
-    );
-    expect(session.agent.system).toContain(
-      "- research: Research topics. (path: $HOME/.agents/skills/research/SKILL.md)",
-    );
   });
 
   it("starts with empty history and stores the continuation token verbatim", () => {
@@ -288,7 +268,7 @@ describe("createSession", () => {
       turnAgent: createTestTurnAgent({ reasoning: "high" }),
     });
 
-    expect(durable.agent).toEqual({ system: session.agent.system });
+    expect(durable).not.toHaveProperty("agent");
     expect(hydrated.agent.reasoning).toBe("high");
   });
 });
@@ -318,7 +298,6 @@ describe("refreshSessionFromTurnAgent", () => {
         history: [{ content: "previous message", kind: "user", role: "user" }],
       },
       turnAgent: createTestTurnAgent({
-        instructions: ["Completely different system prompt."],
         model: { contextWindowTokens: 200_000, id: "updated-model" },
         tools: [
           {
@@ -347,7 +326,6 @@ describe("refreshSessionFromTurnAgent", () => {
       contextWindowTokens: 200_000,
       id: "updated-model",
     });
-    expect(refreshed.agent.system).toBe("Completely different system prompt.");
     expect(refreshed.agent.tools).toEqual([
       {
         description: "Echoes text",
@@ -411,18 +389,15 @@ describe("refreshSessionFromTurnAgent", () => {
     });
   });
 
-  it("refreshes the system prompt when turnAgent instructions differ", () => {
+  it("refreshes the model from the current deployment", () => {
     const session = createSession({
       continuationToken: "root-token",
       sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({
-        instructions: ["Original session-start prompt."],
-      }),
+      turnAgent: createTestTurnAgent({}),
     });
     const refreshed = refreshSessionFromTurnAgent({
       session,
       turnAgent: createTestTurnAgent({
-        instructions: ["Updated prompt from the current deployment."],
         model: { contextWindowTokens: 200_000, id: "updated-model" },
       }),
     });
@@ -431,6 +406,5 @@ describe("refreshSessionFromTurnAgent", () => {
       contextWindowTokens: 200_000,
       id: "updated-model",
     });
-    expect(refreshed.agent.system).toBe("Updated prompt from the current deployment.");
   });
 });

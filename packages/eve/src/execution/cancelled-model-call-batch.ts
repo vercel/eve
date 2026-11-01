@@ -1,7 +1,7 @@
 import { contextStorage, type ContextContainer } from "#context/container.js";
 import { createLogger } from "#internal/logging.js";
 import { AuthKey, OfferedCatalogToolsKey, SandboxKey, TurnDeliveryIdsKey } from "#context/keys.js";
-import { ReactionsStateKey } from "#reactions/state.js";
+import { DefinitionsStateKey } from "#definitions/state.js";
 import { withContextScope } from "#context/run-step.js";
 import { serializeContext } from "#context/serialize.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
@@ -94,7 +94,7 @@ export async function createCancelledModelCallBatchResult(input: {
     [OfferedCatalogToolsKey.name]: interruptedContext[OfferedCatalogToolsKey.name],
     [TurnDeliveryIdsKey.name]: interruptedContext[TurnDeliveryIdsKey.name],
     // Reactions saw every commit the stream kept.
-    [ReactionsStateKey.name]: interruptedContext[ReactionsStateKey.name],
+    [DefinitionsStateKey.name]: interruptedContext[DefinitionsStateKey.name],
   };
 
   return {

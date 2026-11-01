@@ -33,11 +33,9 @@ const moduleBacking = z.discriminatedUnion("kind", [
     sourcePath: z.string(),
   }),
   z.object({
-    dependencies: z.record(z.string(), z.string()).optional(),
     kind: z.literal("programmatic"),
     mountId: z.string().optional(),
     moduleId: z.string(),
-    parameters: z.record(z.string(), z.unknown()).optional(),
     registryId: z.string(),
     revision: z.string(),
     semanticRevision: z.string().optional(),

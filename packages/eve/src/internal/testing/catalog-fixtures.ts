@@ -13,7 +13,9 @@ import {
   type OfferedCatalogTools,
 } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import { buildStepCatalog } from "#execution/catalog/step-catalog.js";
+import type { StepCatalog } from "#execution/catalog/step-catalog.js";
+import { stepCatalog } from "#definitions/step.js";
+import type { HarnessToolMap } from "#harness/types.js";
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
@@ -122,8 +124,8 @@ export function catalogBundle(
     resolvedAgent: {
       config: { name: "test-agent" },
       connections: input.connections ?? [],
-      dynamicSkillResolvers: [],
-      dynamicToolResolvers: [],
+      definitions: [],
+      instructions: [],
       skills: (input.skills ?? []).map((skill) => ({
         deferred: skill.deferred,
         description: skill.description ?? `${skill.name} skill`,
@@ -137,7 +139,7 @@ export function catalogBundle(
       subagentsByName: new Map(),
     } as never,
     toolRegistry: { toolsByName: new Map() } as never,
-    turnAgent: undefined as never,
+    turnAgent: { tools: [] } as never,
   };
 }
 
@@ -254,7 +256,7 @@ export function connectionTool(
  * Alice's session with `tools`, `skills`, and `connections`, and the step
  * catalog built from it. `run` runs code inside the session's context.
  */
-export function catalogContext(
+export async function catalogContext(
   input: {
     readonly connections?: readonly FakeConnection[];
     readonly dynamicSubagents?: readonly string[];
@@ -286,7 +288,7 @@ export function catalogContext(
     ctx.set(ConnectionRegistryKey, connectionRegistry(input.connections));
   }
   if (input.offered !== undefined) ctx.set(OfferedCatalogToolsKey, input.offered);
-  const catalog = buildStepCatalog({
+  const catalog = await nativeCatalog({
     agentTools: toolMap(...(input.tools ?? [])),
     ctx,
     endsTurn: true,
@@ -315,3 +317,21 @@ export const NAMES_OUTSIDE_EVE_NAMESPACE = [
 
 /** How every reserved-name error explains the rule. */
 export const EVE_NAMESPACE_RESERVATION = 'eve reserves the "eve" namespace for its built-in tools';
+
+/** The catalog eve's own harness gives a step with `agentTools` in `ctx`. */
+export async function nativeCatalog(input: {
+  readonly agentTools: HarnessToolMap;
+  readonly ctx: ContextContainer;
+  readonly endsTurn: boolean;
+  readonly session: { readonly rootSessionId?: string };
+}): Promise<StepCatalog> {
+  return await stepCatalog(
+    {
+      config: { tools: input.agentTools },
+      ctx: input.ctx,
+      finalReplyOnly: false,
+      session: input.session,
+    },
+    { endsTurn: input.endsTurn },
+  );
+}

@@ -154,21 +154,6 @@ function assertDynamicFunction(value: unknown, subject: string): void {
   throw new Error(`${subject} takes a function: defineDynamic(async (ctx) => value).`);
 }
 
-const FRAMEWORK_DEFINITION = Symbol.for("eve.framework-definition");
-
-/**
- * Marks a definition eve generates, such as a memory slot's tools: its function receives eve's
- * own evaluation context, with the step's state.
- */
-export function asFrameworkDefinition<T extends object>(definition: T): T {
-  Object.defineProperty(definition, FRAMEWORK_DEFINITION, { value: true });
-  return definition;
-}
-
-export function isFrameworkDefinition(value: unknown): boolean {
-  return typeof value === "object" && value !== null && FRAMEWORK_DEFINITION in value;
-}
-
 export function isDynamicSentinel(value: unknown): value is DynamicSentinel {
   return typeof value === "object" && value !== null && DYNAMIC_SENTINEL in value;
 }

@@ -40,7 +40,6 @@ type StaticRuntimeTurnAgent = Extract<RuntimeTurnAgent, { readonly model: unknow
 function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): RuntimeTurnAgent {
   return {
     id: "test-agent",
-    instructions: ["You are a test agent."],
     model: { id: "test-model" },
     tools: [],
     workspaceSpec: { rootEntries: [] },

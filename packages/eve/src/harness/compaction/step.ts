@@ -29,7 +29,7 @@ import {
   getInputTokenCount,
   shouldCompact,
 } from "#harness/compaction/engine.js";
-import { takeCompactionCaptureFailure } from "#reactions/kinds/memory.js";
+import { takeBlockingFailure } from "#definitions/kernel.js";
 import { isDeepStrictEqual } from "node:util";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
@@ -199,9 +199,9 @@ function lazyChange(
       if (opened) return;
       opened = true;
       await step.publish(startChange({ changeId: input.changeId, ...input.started }), input.prompt);
-      // A memory capture before compaction ran in the commit that started it. When it failed, the
-      // compaction fails before it rewrites the history the capture couldn't keep.
-      const captureFailure = takeCompactionCaptureFailure(step.ctx);
+      // What blocks a compaction, such as a memory capture, ran in the commit that started it.
+      // When it failed, the compaction fails before it rewrites the history.
+      const captureFailure = takeBlockingFailure(step.ctx);
       if (captureFailure !== undefined) throw captureFailure;
     },
   };

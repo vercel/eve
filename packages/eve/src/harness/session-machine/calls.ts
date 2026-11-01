@@ -3,7 +3,7 @@ import type { Commit } from "#harness/types.js";
 import type { Clearance } from "#harness/clearance.js";
 import { commitOf } from "./commit.js";
 
-// The call family's commits: a call the model or a harness asked for, that one started, and how
+// The call family's commits: a call the model asked for, that one started, and how
 // one settled. The step decides when each happens; the kernel builds what it commits.
 
 type Requested = Parameters<typeof callRequested>[0];

@@ -9,14 +9,12 @@
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { connectionToolName } from "#connections/ownership.js";
-import { dynamicConnectionVersions } from "#reactions/kinds/connection.js";
-import { buildDynamicSubagentTools } from "#reactions/kinds/subagent.js";
-import { dynamicTools } from "#reactions/kinds/tool.js";
+import { dynamicConnectionVersions } from "#definitions/connections.js";
+import type { ToolTable } from "#definitions/definition.js";
 import type { ContextAccessor, ContextReader } from "#context/key.js";
 import { OfferedCatalogToolsKey, type OfferedCatalogTools } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { startsTasks } from "#execution/tasks/tool-entry-point.js";
-import { withTaskTools } from "#execution/tasks/model-step.js";
 import { runEntryCall } from "#harness/execute-call.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { checkToolCallInput } from "#harness/tool-call-io.js";
@@ -45,12 +43,7 @@ import { connectionEntry, connectionSignInEntry } from "./connection-entry.js";
 import { closestNames } from "./rank.js";
 import { createSearchTool } from "./search.js";
 import { entrySignature } from "./signatures.js";
-import {
-  createSkillLoader,
-  sessionSkills,
-  unknownSkillMessage,
-  type CatalogSkill,
-} from "./skills.js";
+import { createSkillLoader, unknownSkillMessage, type CatalogSkill } from "./skills.js";
 
 /** Appended to the model-facing description of every tool with `endsTurn: true`. */
 const ENDS_TURN_TOOL_NOTE =
@@ -112,12 +105,6 @@ export interface StepCatalog extends HarnessToolLookup {
   readonly skills: ReadonlyMap<string, CatalogSkill>;
   /** The catalog tools the tool list offers; see {@link recordOfferedCatalogTools}. */
   readonly offered: OfferedCatalogTools;
-  /**
-   * Whether the session offers tasks: one of the agent's own tools it sees
-   * starts them, or the agent resolves subagents at runtime. Both are fixed by
-   * the deployment, so the task tools and system block change only on upgrade.
-   */
-  readonly offersTasks: boolean;
   /** An entry's description as the model reads it, with the notes eve appends. */
   describe(definition: HarnessToolDefinition): string;
   /**
@@ -131,25 +118,23 @@ export interface StepCatalog extends HarnessToolLookup {
 }
 
 /**
- * Builds the catalog for one step from the agent's tools, the dynamic tools and
- * subagents resolved for it, and its skills, keeping only what the session sees.
+ * Builds the catalog for one step from the table of what its definitions offer it, keeping only what
+ * the session sees.
  */
 export function buildStepCatalog(input: {
-  readonly agentTools: HarnessToolMap;
+  /** What the step's definitions offer: tools by name, connections, and skills. */
+  readonly table: ToolTable;
   readonly ctx: ContextReader | undefined;
   /** Whether `endsTurn` applies: a root turn without an output schema. */
   readonly endsTurn: boolean;
   readonly session: Pick<HarnessSession, "rootSessionId">;
 }): StepCatalog {
-  const visible = (definition: HarnessToolDefinition) => isVisible(definition, input.session);
-  const bundle = input.ctx?.get(BundleKey);
-  const offersTasks =
-    (bundle?.subagentRegistry.dynamicResolvers.length ?? 0) > 0 ||
-    [...input.agentTools.values()].some(
-      (definition) => visible(definition) && startsTasks(definition),
-    );
-  const ownEntries = stepEntries(input, visible);
-  const entries = offersTasks ? withTaskTools(ownEntries) : ownEntries;
+  const { table } = input;
+  const entries = new Map(
+    [...table.entries]
+      .filter(([, entry]) => isVisible(entry.definition, input.session))
+      .map(([name, entry]) => [name, entry.definition]),
+  );
   const direct = new Map<string, HarnessToolDefinition>();
   const deferred = new Map<string, HarnessToolDefinition>();
   for (const [name, definition] of entries) {
@@ -158,9 +143,8 @@ export function buildStepCatalog(input: {
   // Read once here: validation runs while the SDK parses the stream, where the
   // context store may not be active.
   const registry = input.ctx?.get(ConnectionRegistryKey);
-  const connections = registry?.getConnections() ?? [];
+  const { connections, skills } = table;
   const connectionVersions = dynamicConnectionVersions(input.ctx);
-  const skills = sessionSkills(input.ctx);
   // Entries hold only what this session sees, so a delegated session of the
   // same agent doesn't search for root-only entries it can't reach.
   const catalogTools = catalogToolsFor({
@@ -189,7 +173,6 @@ export function buildStepCatalog(input: {
     entries,
     get: (name) => (name === SKILL_ENTRY_NAME ? skillLoader : toolEntry(name)),
     offered,
-    offersTasks,
     resolve: (toolCall) => {
       if (toolCall.toolName === CALL_TOOL_NAME && catalogTools.tools) {
         const name = targetName(toolCall.input);
@@ -234,6 +217,23 @@ export function buildStepCatalog(input: {
 }
 
 /**
+ * Whether the session offers tasks: one of the agent's own tools it sees starts them, or the agent
+ * resolves subagents at runtime. Both are fixed by the deployment.
+ */
+export function sessionOffersTasks(input: {
+  readonly ctx: ContextReader | undefined;
+  readonly session: Pick<HarnessSession, "rootSessionId">;
+  readonly tools: readonly HarnessToolDefinition[];
+}): boolean {
+  return (
+    (input.ctx?.get(BundleKey)?.subagentRegistry.dynamicResolvers.length ?? 0) > 0 ||
+    input.tools.some(
+      (definition) => isVisible(definition, input.session) && startsTasks(definition),
+    )
+  );
+}
+
+/**
  * Keeps the catalog tools `catalog` offers for every later step of the
  * session. The step that calls the model records them; a step rebuilt to
  * resume a parked call only reads them.
@@ -260,21 +260,6 @@ function describeEntry(definition: HarnessToolDefinition, endsTurn: boolean): st
   return endsTurn && definition.endsTurn === true
     ? `${definition.description}\n\n${ENDS_TURN_TOOL_NOTE}`.trimStart()
     : definition.description;
-}
-
-function stepEntries(
-  input: Parameters<typeof buildStepCatalog>[0],
-  visible: (definition: HarnessToolDefinition) => boolean,
-): Map<string, HarnessToolDefinition> {
-  const entries = new Map([...input.agentTools].filter(([, definition]) => visible(definition)));
-  if (input.ctx === undefined) return entries;
-
-  for (const subagent of buildDynamicSubagentTools(input.ctx).filter(visible)) {
-    entries.set(subagent.name, subagent);
-  }
-  // Dynamic tools override a same-named authored tool.
-  for (const tool of dynamicTools(input.ctx).filter(visible)) entries.set(tool.name, tool);
-  return entries;
 }
 
 /** Root-only tools and tools unavailable in subagents are hidden from delegated sessions. */

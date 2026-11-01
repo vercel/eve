@@ -18,7 +18,7 @@ import type {
   StepResult,
 } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { ApprovalAsk, StepCoordinates } from "#harness/session-machine/view.js";
+import type { ApprovalAsk, SessionView, StepCoordinates } from "#harness/session-machine/view.js";
 import { renderPendingApprovalsInstruction } from "./approval-prompt.js";
 import {
   askApprovals,
@@ -130,21 +130,16 @@ export async function enforceBudget(
   return { next: { done: true, output: "" }, session: step.session };
 }
 
-/**
- * What a model call needs from the approvals: what their policies remember, and
- * a note on the calls still awaiting approval, which a message may revise.
- */
-export function humanInputContext(step: Step): {
-  readonly approvalMemory: ApprovalMemory;
-  readonly pendingApprovalsNote?: string;
-} {
-  const view = step.view();
-  return {
-    approvalMemory: approvalMemory(view),
-    pendingApprovalsNote: renderPendingApprovalsInstruction(
-      view.turn.suspended.flatMap((parked) => pendingApprovals(view, parked)),
-    ),
-  };
+/** eve's note on the calls still awaiting approval, from the session's current approvals. */
+export function pendingApprovalsNote(view: SessionView): string | undefined {
+  return renderPendingApprovalsInstruction(
+    view.turn.suspended.flatMap((parked) => pendingApprovals(view, parked)),
+  );
+}
+
+/** What a model call needs from the approvals: what their policies remember. */
+export function humanInputContext(step: Step): { readonly approvalMemory: ApprovalMemory } {
+  return { approvalMemory: approvalMemory(step.view()) };
 }
 
 /**

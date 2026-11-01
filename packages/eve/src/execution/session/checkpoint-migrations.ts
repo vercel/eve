@@ -38,7 +38,19 @@ type CheckpointRecord = Record<string, unknown>;
  */
 const CHECKPOINT_UPGRADES: Readonly<
   Record<number, (checkpoint: CheckpointRecord) => CheckpointRecord>
-> = {};
+> = {
+  // 19 renders the system prompt from the deployment's files on every model call, so the session
+  // no longer stores the prompt it last rendered. An owner that reads 18 or less refuses 19.
+  18: (checkpoint) => withoutStoredPrompt(checkpoint),
+};
+
+function withoutStoredPrompt(checkpoint: CheckpointRecord): CheckpointRecord {
+  const state = checkpoint.sessionState;
+  if (!isObject(state) || !isObject(state.snapshot) || !isObject(state.snapshot.session))
+    return checkpoint;
+  const { agent: _agent, ...session } = state.snapshot.session;
+  return { ...checkpoint, sessionState: { ...state, snapshot: { ...state.snapshot, session } } };
+}
 
 /**
  * Upgrades a checkpoint written by an older eve build to the current shape.

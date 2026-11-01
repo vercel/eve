@@ -63,7 +63,9 @@ function listCatalog(catalog: StepCatalog): CatalogListing {
   if (deferred.some((definition) => !isAgentTool(definition))) kinds.push("tools");
   if (deferred.some(isAgentTool)) kinds.push("agents");
   // Skills that aren't deferred are announced with their descriptions elsewhere.
-  if ([...catalog.skills.values()].some(({ deferred }) => deferred)) kinds.push("skills");
+  if ([...catalog.skills.values()].some(({ deferred }) => deferred)) {
+    kinds.push("skills");
+  }
   // The largest namespaces make the cut, rendered by name, so an entry joining or leaving one
   // only changes the text when it moves a namespace across the cap.
   const namespaces = capped(
@@ -152,9 +154,8 @@ function renderListing({ connections, kinds, namespaces }: CatalogListing): stri
     : kinds.length === 1 && connections.items.length === 0
       ? `Load them with ${SKILL_TOOL_NAME}({ name }).`
       : `Call tools with ${CALL_TOOL_NAME}({ name, input }) and load skills with ${SKILL_TOOL_NAME}({ name }).`;
-  const lines = [
-    `${subject} than are loaded here. Before saying you have no tool for a task, look for one with ${SEARCH_TOOL_NAME}, which searches your own catalog, not the web. ${call}`,
-  ];
+  const search = ` Before saying you have no tool for a task, look for one with ${SEARCH_TOOL_NAME}, which searches your own catalog, not the web.`;
+  const lines = [`${subject} than are loaded here.${search} ${call}`];
   if (namespaces.items.length > 0) {
     const listed = [...namespaces.items, ...(namespaces.more ? ["and more"] : [])];
     lines.push(

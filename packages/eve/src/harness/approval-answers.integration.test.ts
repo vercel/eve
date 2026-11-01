@@ -61,7 +61,6 @@ function setup(tools: readonly HarnessToolDefinition[]) {
   const session: HarnessSession = {
     agent: {
       modelReference: { id: "approval-model" },
-      system: "Help Alice ship her release.",
       tools: [],
     },
     compaction: { recentWindowSize: 10, threshold: 100_000 },

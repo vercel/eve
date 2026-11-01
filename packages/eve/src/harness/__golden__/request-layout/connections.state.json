@@ -153,9 +153,6 @@
     "sessionId": "wrun_<ulid0>",
     "snapshot": {
       "session": {
-        "agent": {
-          "system": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nTool execution\nTool calls in one response run in parallel, so batch only calls that don't depend on each other."
-        },
         "compaction": {
           "lastKnownInputTokens": 1,
           "lastKnownPromptMessageCount": 4,

@@ -39,6 +39,26 @@ describe("migrateSessionCheckpoint", () => {
     },
   );
 
+  it("drops the system prompt an 18 stored with its session", () => {
+    const session = { continuationToken: "http:alice", sessionId: "session-1" };
+    const stored = {
+      ...checkpoint(18),
+      sessionState: {
+        sessionId: "session-1",
+        snapshot: { session: { ...session, agent: { system: "Help Alice." } } },
+        version: 2,
+      },
+    };
+    expect(migrateSessionCheckpoint(stored)).toEqual({
+      checkpoint: {
+        ...stored,
+        sessionState: { ...stored.sessionState, snapshot: { session } },
+        version: SESSION_CHECKPOINT_VERSION,
+      },
+      kind: "current",
+    });
+  });
+
   it.each([9, SESSION_CHECKPOINT_VERSION + 1])("refuses checkpoint version %s", (version) => {
     expect(migrateSessionCheckpoint({ ...eve069Checkpoint(), version })).toMatchObject({
       kind: "incompatible",

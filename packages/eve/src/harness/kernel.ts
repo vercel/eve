@@ -30,7 +30,7 @@ import {
   join,
 } from "#harness/session-machine/transitions.js";
 import { turnPosition } from "#harness/session-machine/view.js";
-import { createStep, failTurnForReaction, openTurn, type Step } from "#harness/step/context.js";
+import { createStep, failTurnForEffect, openTurn, type Step } from "#harness/step/context.js";
 import { prepareTurnInput, settleRuntimeWork } from "#harness/step/intake.js";
 import type {
   HarnessSession,
@@ -146,7 +146,7 @@ export function createKernel(config: KernelConfig): StepFn {
     if ("ended" in answered) return answered.ended;
     const turn = await turnInput(step, input, answered);
     if ("ended" in turn) return turn.ended;
-    const hookFailure = await failTurnForReaction(step);
+    const hookFailure = await failTurnForEffect(step);
     if (hookFailure !== undefined) return hookFailure;
     const stopped = await applyHumanDecisions(step, answered.decided);
     if (stopped !== undefined) return stopped;

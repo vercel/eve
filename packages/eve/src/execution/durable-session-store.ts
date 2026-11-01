@@ -44,9 +44,8 @@ export interface DurableSessionState {
  * {@link import("#execution/session.js").hydrateDurableSession}.
  * Omits `history` too: the session workflow carries it as its own value, so
  * only the steps that read or change it receive it as input.
- * `agent.system` is the last applied prompt snapshot. Before each model step,
- * the execution layer replaces it from the current deployment's
- * `bundle.turnAgent`.
+ * The system prompt isn't stored: each model step renders it from the
+ * current deployment's bundle.
  */
 export interface DurableSession {
   readonly sessionId: string;
@@ -61,9 +60,6 @@ export interface DurableSession {
   readonly outputSchema?: JsonObject;
   readonly state?: SessionStateMap;
   readonly sandboxState?: SandboxState;
-  readonly agent: {
-    readonly system: string;
-  };
   readonly compaction?: CompactionState;
 }
 

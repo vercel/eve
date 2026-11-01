@@ -33,7 +33,7 @@ import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
 import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
-import type { DynamicRemoteBinding } from "#reactions/remote.js";
+import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import type { SandboxAccess, SandboxSessionEndReason } from "#sandbox/state.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
