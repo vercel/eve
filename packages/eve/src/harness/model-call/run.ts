@@ -21,7 +21,7 @@ import {
 } from "#harness/step/context.js";
 import type { TurnInput } from "#harness/step/intake.js";
 import {
-  buildPrompt,
+  commitTurnInput,
   previewPrompt,
   projectPrompt,
   type Prompt,
@@ -53,9 +53,10 @@ export interface ModelResponse {
  * One model step of the open turn: the prompt it reads, the model that serves it, and the call
  * with its retries and recoveries. The response handler applies what it returned.
  *
- * The budget gate passes first, after the session's dynamic values are evaluated with the
- * conversation the call reads, which fixes its model, tools, and context. Then the turn requests
- * a model run, and the run starts as its provider call begins.
+ * The session's dynamic values are evaluated first, with the conversation the call reads, which
+ * fixes its model, tools, and context. Then the turn's input joins history, so a call that fails
+ * keeps it, and the budget gate passes. Then the turn requests a model run, and the run starts as
+ * its provider call begins.
  */
 export async function runModelStep(
   step: Step,
@@ -67,7 +68,7 @@ export async function runModelStep(
   const { generation } = input;
   const failed = await prepareModelCall(step, previewPrompt(step, input.turn));
   if (failed !== undefined) return failed;
-  const prompt = await buildPrompt(step, input.turn);
+  const prompt = await commitTurnInput(step, input.turn);
   // Over budget, the model doesn't run: the step's messages park with the prompt.
   const overBudget = await enforceBudget(step, prompt.messages);
   if (overBudget !== undefined) return overBudget;

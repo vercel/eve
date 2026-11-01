@@ -54,7 +54,7 @@ import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { requireSessionModelReference, type StepResult } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
-import { compactedTurnInput, compactIfDue } from "#harness/compaction/step.js";
+import { compactedTurnInput, historyBeforeCall } from "#harness/compaction/step.js";
 import { reportCompactionFailure, reportModelCallFailure } from "./failure.js";
 import { buildGatewayAttributionHeaders, withGatewayTraceContext } from "./model.js";
 import {
@@ -309,12 +309,12 @@ export class ModelCaller {
     return tools;
   }
 
-  /** Compacts the prompt when it's over the threshold, then rebuilds what depends on it. */
+  /** Asks for the history this call reads, then rebuilds what depends on it. */
   private async compact(options: ModelCallOptions, tools: ToolSet): Promise<ToolSet> {
     const { step, prompt } = this;
     let compacted: HarnessModelMessage[] | undefined;
     try {
-      compacted = await compactIfDue(step, {
+      compacted = await historyBeforeCall(step, {
         messages: prompt.messages,
         model: this.input.model,
         promptMessages: withClientContext(prompt),
