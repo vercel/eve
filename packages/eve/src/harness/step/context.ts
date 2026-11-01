@@ -1,3 +1,4 @@
+import { changeHistory } from "#harness/session-machine/history.js";
 import type { ModelMessage } from "ai";
 
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -176,12 +177,7 @@ export async function prepareModelCall(
     return failTurn(step, error, "REACTION_FAILED");
   }
   const instructionMessages = takeUserInstructionMessages(ctx);
-  if (instructionMessages.length > 0) {
-    step.session = {
-      ...step.session,
-      history: validateHarnessModelMessages([...step.session.history, ...instructionMessages]),
-    };
-  }
+  step.session = changeHistory(step.session, { append: instructionMessages });
   return undefined;
 }
 
