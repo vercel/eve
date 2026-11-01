@@ -6,8 +6,8 @@ import type { ApprovalContext } from "#approval/definition.js";
 import { contextStorage } from "#context/container.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { runtimeWait } from "#harness/session-machine/view.js";
-import { createKernel } from "#harness/kernel.js";
-import type { HarnessSession, KernelConfig } from "#harness/types.js";
+import { createTestKernel, type TestKernelConfig } from "#internal/testing/kernel.js";
+import type { HarnessSession } from "#harness/types.js";
 import {
   createApprovalContext,
   textStreamResult,
@@ -52,7 +52,8 @@ function setup(
     provider: "eve-integration-mock",
   });
   const recorder = createProjectionRecorder();
-  const config: KernelConfig = {
+  const config: TestKernelConfig = {
+    agent: { model: { id: "approval-model" } },
     capabilities: { requestInput: true },
     // Each publication commits as one line, as the session's sink writes it.
     handleEvent: async (publication) => {
@@ -63,18 +64,17 @@ function setup(
     tools: new Map([tool, ...(options.tools ?? [])].map((entry) => [entry.name, entry])),
   };
   const session: HarnessSession = {
-    agent: {
-      modelReference: { id: "approval-model" },
-      tools: [],
-    },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: "http:approved-call-recheck",
     history: [],
     sessionId: "approved-call-recheck",
   };
-  const step = (current: HarnessSession, input?: Parameters<ReturnType<typeof createKernel>>[1]) =>
+  const step = (
+    current: HarnessSession,
+    input?: Parameters<ReturnType<typeof createTestKernel>>[1],
+  ) =>
     contextStorage.run(recorder.enter(createApprovalContext()), () =>
-      createKernel(config)(current, recorder.admit(input)),
+      createTestKernel(config)(current, recorder.admit(input)),
     );
   return { events, session, step };
 }

@@ -42,8 +42,7 @@ function withUsage(session: HarnessSession, inputTokens: number): HarnessSession
 
 function baseSession(): HarnessSession {
   return {
-    agent: { modelReference: { id: "unused" }, tools: [] },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: "detector",
     history: [],
     sessionId: "detector",

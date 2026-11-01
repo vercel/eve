@@ -19,14 +19,11 @@ import type { Usage } from "#protocol/session-events/envelope.js";
 import type { ToolSignIn } from "#harness/call-executor.js";
 import type { TurnPosition } from "#harness/session-machine/view.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { applyConversationCacheControl, mergeGatewayAutoCaching } from "#harness/prompt-cache.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
-import {
-  type HarnessEmitFn,
-  type HarnessSession,
-  requireSessionModelReference,
-} from "#harness/types.js";
+import { type HarnessEmitFn, type HarnessSession } from "#harness/types.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
@@ -70,6 +67,8 @@ export type HarnessStepResult = Pick<
  */
 interface StepHooksInput {
   readonly auth?: import("#channel/types.js").SessionAuthContext | null;
+  /** The model the call runs. */
+  readonly model: RuntimeModelReference;
   readonly profile: ModelProfile;
   /**
    * Starts the model step the SDK is about to run. Omitted when the step already started, as
@@ -162,11 +161,10 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
         : messages,
     };
 
-    const modelReference = requireSessionModelReference(session);
     const providerOptions = resolveCallProviderOptions({
       auth: input.auth ?? contextStorage.getStore()?.get(AuthKey) ?? null,
       profile,
-      providerOptions: modelReference.providerOptions,
+      providerOptions: input.model.providerOptions,
       session,
     });
     if (profile.gateway) {

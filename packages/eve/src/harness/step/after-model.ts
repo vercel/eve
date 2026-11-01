@@ -174,24 +174,23 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       : responseTail;
   step.session = changeHistory(step.session, { extend: [...promptMessages, ...historyTail] });
 
+  const delivered = calledFinalOutput && !finalOutputRejected;
   const endsTurn = await stepEndsTurn(result, responseMessages, input.endsTurnTools);
+  // The model reads what it hasn't yet: its calls' results, unless every call ended the turn; a
+  // provider-run call's outcome; and input that joined the turn while it ran.
   const continueLoop =
-    (!calledFinalOutput || finalOutputRejected) &&
+    !delivered &&
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
       normalizedProviderHistory.outcomeEndsResponse ||
       hasQueuedTurnInput(step.view()));
   if (continueLoop) return { next: step.runStep, session: step.session };
-  // The turn rule: no turn ends while its tasks work. The session waits for
-  // one to settle, then calls the model again in the same turn.
+  // No turn ends while its tasks work: the session waits for one to settle, then calls the model
+  // again in the same turn.
   if (workingTasks.length > 0) {
     return { held: { kind: "tasks", taskIds: workingTasks }, next: null, session: step.session };
   }
-
-  return settleTurn(step, {
-    result,
-    // Text written before an `endsTurn` call was narration, not the reply.
-    stepOutput: endsTurn ? null : stepOutput,
-  });
+  // Text written before an `endsTurn` call was narration, not the reply.
+  return settleTurn(step, { result, stepOutput: endsTurn ? null : stepOutput });
 }
 
 /**

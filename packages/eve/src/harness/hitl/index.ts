@@ -162,7 +162,7 @@ function responsePolicyRequestIds(
 
 /** The caller whose turn parks a step. */
 function currentRequester(step: Step): SessionAuthContext | null {
-  return step.ctx?.get(AuthKey) ?? step.ctx?.get(SessionKey)?.auth.current ?? null;
+  return step.ctx.get(AuthKey) ?? step.ctx.get(SessionKey)?.auth.current ?? null;
 }
 
 /**

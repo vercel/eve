@@ -2,7 +2,7 @@ import type { ModelMessage } from "ai";
 
 import type { ContextContainer } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
-import type { HistoryState } from "#context/keys.js";
+import type { HistoryState, LiveDynamicModelSelection as ModelChoice } from "#context/keys.js";
 import type { DynamicContext } from "#dynamic/definition.js";
 import type { CatalogSkill } from "#execution/catalog/skills.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
@@ -53,8 +53,8 @@ export interface ContributionValues {
   readonly context: readonly AnchoredEntry[];
   /** Collected: what to do about the commit, after it. */
   readonly effects: readonly Effect[];
-  /** Decided: the model, by its ID. The latest definition that answers chooses it. */
-  readonly model: string | undefined;
+  /** Decided: the model the call runs. The latest definition that answers chooses it. */
+  readonly model: ModelChoice | undefined;
 }
 
 /** What a definition adds. Every field is optional, and read only where eve needs it. */

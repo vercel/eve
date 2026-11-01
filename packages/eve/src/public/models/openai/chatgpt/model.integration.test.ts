@@ -2,7 +2,7 @@ import { jsonSchema } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDurableSessionValues } from "#execution/durable-session-store.js";
-import { createKernel } from "#harness/kernel.js";
+import { createTestKernel } from "#internal/testing/kernel.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createCodexSubscriptionModel } from "./model.js";
 
@@ -34,7 +34,8 @@ describe("ChatGPT streamed reasoning replay", () => {
       },
     );
     const execute = vi.fn(async () => ({ id: "invoice-1", total: 42 }));
-    const runStep = createKernel({
+    const runStep = createTestKernel({
+      agent: { model: { id: "chatgpt-reasoning-test" } },
       handleEvent: async () => {},
       resolveModel: async () => model,
       tools: new Map([
@@ -50,17 +51,7 @@ describe("ChatGPT streamed reasoning replay", () => {
       ]),
     });
     const session: HarnessSession = {
-      agent: {
-        modelReference: { id: "chatgpt-reasoning-test" },
-        tools: [
-          {
-            name: "get_invoice",
-            description: "Read the invoice.",
-            inputSchema: { type: "object", properties: {} },
-          },
-        ],
-      },
-      compaction: { recentWindowSize: 10, threshold: 100_000 },
+      compaction: {},
       continuationToken: "http:chatgpt-reasoning-test",
       history: [],
       sessionId: "chatgpt-reasoning-test",

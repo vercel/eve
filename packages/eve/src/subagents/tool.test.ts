@@ -11,11 +11,7 @@ type BuildSubagentRunInput = Parameters<typeof buildSubagentRunInput>[0];
 
 function makeSession(): HarnessSession {
   return {
-    agent: {
-      modelReference: { id: "test-model" },
-      tools: [],
-    },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: "parent-token",
     history: [],
     sessionId: "parent-session",

@@ -6,8 +6,8 @@ import type { ApprovalResponsePolicy } from "#approval/definition.js";
 import { contextStorage } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { createKernel } from "#harness/kernel.js";
-import type { HarnessSession, HarnessStepInput, KernelConfig } from "#harness/types.js";
+import { createTestKernel, type TestKernelConfig } from "#internal/testing/kernel.js";
+import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
 import {
   createApprovalContext,
   textStreamResult,
@@ -49,7 +49,8 @@ function setup(tools: readonly HarnessToolDefinition[]) {
     provider: "eve-integration-mock",
   });
   const recorder = createProjectionRecorder();
-  const config: KernelConfig = {
+  const config: TestKernelConfig = {
+    agent: { model: { id: "approval-model" } },
     capabilities: { requestInput: true },
     handleEvent: eachEvent(async (event) => {
       recorder.record(event);
@@ -59,11 +60,7 @@ function setup(tools: readonly HarnessToolDefinition[]) {
     tools: new Map(tools.map((tool) => [tool.name, tool])),
   };
   const session: HarnessSession = {
-    agent: {
-      modelReference: { id: "approval-model" },
-      tools: [],
-    },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: "http:approval-answers",
     history: [],
     sessionId: "approval-answers",
@@ -72,7 +69,7 @@ function setup(tools: readonly HarnessToolDefinition[]) {
   const sandbox = mockSandbox();
   ctx.set(SandboxKey, sandbox.access);
   const step = (current: HarnessSession, input?: HarnessStepInput) =>
-    contextStorage.run(ctx, () => createKernel(config)(current, recorder.admit(input)));
+    contextStorage.run(ctx, () => createTestKernel(config)(current, recorder.admit(input)));
   /** The approval the step asked for `toolName`'s call. */
   const approvalOf = (toolName: string): string => {
     const opened = events.find(

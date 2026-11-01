@@ -10,8 +10,7 @@ import type { HarnessSession } from "#harness/types.js";
 import { subagentTool } from "#internal/testing/catalog-fixtures.js";
 
 const session: HarnessSession = {
-  agent: { modelReference: { id: "test-model" }, tools: [] },
-  compaction: { recentWindowSize: 10, threshold: 100_000 },
+  compaction: {},
   continuationToken: "http:test-session",
   history: [],
   sessionId: "test-session",

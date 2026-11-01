@@ -206,39 +206,24 @@ export interface StepProjection {
   record(publication: SessionPublication): void;
 }
 
-/**
- * A step's projection: the context's live one, which the publish sink folds, or, for a step
- * that runs without a context, a detached one the step folds itself.
- */
+/** A step's projection: the context's live one, which the publish sink folds. */
 export function stepProjection(
-  ctx: ContextReader | undefined,
+  ctx: ContextReader,
   state: SessionStateMap | undefined,
 ): StepProjection {
-  if (ctx !== undefined) {
-    ensureSessionProjection(ctx, state);
-    return {
-      read: () => currentProjection(ctx),
-      record: (publication) => {
-        const events = cascade(currentProjection(ctx).view, eventsOf(publication));
-        for (const line of linesOf(events, new Date().toISOString())) {
-          const events = "facts" in line ? line.facts : [line.progress];
-          checkFoldedLine(currentView(ctx), line, nextLinePosition(ctx));
-          recordPublishedLine(ctx, line, nextLinePosition(ctx), events);
-        }
-      },
-    };
-  }
-  let projection = storedProjection(state);
+  ensureSessionProjection(ctx, state);
   return {
-    read: () => projection,
-    record(publication) {
-      // No publisher writes this step's lines, so the detached step is its own writer.
-      const events = cascade(projection.view, eventsOf(publication));
-      for (const line of linesOf(events, new Date().toISOString())) {
-        const events = "facts" in line ? line.facts : [line.progress];
-        checkFoldedLine(projection.view, line, projection.view.position);
-        projection = advance(projection, line, projection.view.position, events);
-      }
-    },
+    read: () => currentProjection(ctx),
+    record: (publication) => foldPublication(ctx, publication),
   };
+}
+
+/** Folds a publication into the step's live projection, as the publish sink does. */
+export function foldPublication(ctx: ContextReader, publication: SessionPublication): void {
+  const events = cascade(currentProjection(ctx).view, eventsOf(publication));
+  for (const line of linesOf(events, new Date().toISOString())) {
+    const events = "facts" in line ? line.facts : [line.progress];
+    checkFoldedLine(currentView(ctx), line, nextLinePosition(ctx));
+    recordPublishedLine(ctx, line, nextLinePosition(ctx), events);
+  }
 }

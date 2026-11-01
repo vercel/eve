@@ -2,7 +2,7 @@ import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createKernel } from "#harness/kernel.js";
+import { createTestKernel } from "#internal/testing/kernel.js";
 import type { HarnessSession } from "#harness/types.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -51,13 +51,13 @@ async function runTurn(doStream: MockLanguageModelV3["doStream"]): Promise<Sessi
   vi.spyOn(console, "warn").mockImplementation(() => {});
   const events: SessionEvent[] = [];
   const session: HarnessSession = {
-    agent: { modelReference: { id: "m" }, tools: [] },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: "http:attempts",
     history: [],
     sessionId: "attempts",
   };
-  await createKernel({
+  await createTestKernel({
+    agent: { model: { id: "m" } },
     handleEvent: eachEvent(async (event) => {
       events.push(event);
     }),
@@ -125,7 +125,8 @@ describe("model attempts", () => {
 describe("run attributes", () => {
   it("tags the turn's run with what its model call spent, through the sink it's given", async () => {
     const setAttributes = vi.fn(async () => {});
-    await createKernel({
+    await createTestKernel({
+      agent: { model: { id: "m" } },
       handleEvent: async () => {},
       resolveModel: async () =>
         new MockLanguageModelV3({ doStream: async () => streamOf(reply("Here it is.")) }),
@@ -143,8 +144,7 @@ describe("run attributes", () => {
       ]),
     })(
       {
-        agent: { modelReference: { id: "m" }, tools: [] },
-        compaction: { recentWindowSize: 10, threshold: 100_000 },
+        compaction: {},
         continuationToken: "http:attributes",
         history: [],
         sessionId: "attributes",

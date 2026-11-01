@@ -29,7 +29,6 @@ import {
   ChannelInstrumentationKey,
   HandleEventKey,
   ToolChannelKey,
-  StaticModelReferenceKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -96,12 +95,9 @@ import {
 } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
-import {
-  resolveEffectiveAgentRuntime,
-  resolveSessionUsageLimit,
-} from "#execution/effective-agent-config.js";
+import { resolveSessionUsageLimit } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
-import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
+import { hydrateDurableSession } from "#execution/session.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { runModelCallBatch } from "#execution/model-call-batching.js";
@@ -180,7 +176,6 @@ async function runSessionStepBody(
   }
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
-  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
 
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.
@@ -246,17 +241,11 @@ async function runSessionStepBody(
       : undefined;
   if (requester !== undefined) ctx.set(AuthKey, requester);
   let initialSession: HarnessSession = {
-    ...hydrateDurableSession({
-      compactionOverrides: {
-        thresholdPercent: effectiveAgent.thresholdPercent,
-      },
-      durable: durableSession,
-      turnAgent: effectiveAgent.turnAgent,
-    }),
+    ...hydrateDurableSession(durableSession),
     history: validateHarnessModelMessages(input.history),
   };
   const instrumentation = bindSessionInstrumentation({
-    agentName: effectiveAgent.turnAgent.id,
+    agentName: bundle.turnAgent.id,
     ctx,
     rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
     sessionId: initialSession.sessionId,
@@ -304,7 +293,7 @@ async function runSessionStepBody(
       ? hookCancellation.signal
       : AbortSignal.any([input.abortSignal, hookCancellation.signal]);
   try {
-    const effectiveNode = { ...bundle.graph.root, turnAgent: effectiveAgent.turnAgent };
+    const effectiveNode = { ...bundle.graph.root, turnAgent: bundle.turnAgent };
     const sessionUsageLimit = resolveSessionUsageLimit(bundle);
     let compacted = false;
     const emitTurnEvent = createTurnEventHandler({
@@ -542,7 +531,6 @@ async function runSessionStepBody(
     const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
     let restoration: Promise<void> | undefined;
     const prepareDefinitions = (session: HarnessSession): Promise<void> => {
-      ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
       return (restoration ??= (async () => {
         try {
           const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
@@ -622,15 +610,6 @@ async function runSessionStepBody(
       stepInput: HarnessStepInput | undefined,
       signInCompletions: readonly AuthorizationChallenge[] | undefined,
     ): Promise<StepResult> => {
-      const refreshedSession = refreshSessionFromTurnAgent({
-        compactionOverrides: {
-          thresholdPercent: effectiveAgent.thresholdPercent,
-        },
-        session: lifecycleSession,
-        turnAgent: effectiveAgent.turnAgent,
-      });
-      const modelSession = refreshedSession;
-
       const step = createExecutionNodeStep({
         steeringSignal: input.steeringSignal,
         abortSignal,
@@ -655,7 +634,7 @@ async function runSessionStepBody(
           await setEveAttributes(attributes);
         },
       });
-      return step(modelSession, stepInput);
+      return step(lifecycleSession, stepInput);
     };
 
     let completedModelCall: CompletedModelCallCheckpoint | undefined;
@@ -677,7 +656,6 @@ async function runSessionStepBody(
               startSessionPrewarmers(ctx, "turn");
             }
             ctx.setVirtualContext(HandleEventKey, handleEvent);
-            ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
             ctx.setVirtualContext(ToolChannelKey, {
               channel: channelOf(ctx),
               to: createToolChannelTo({

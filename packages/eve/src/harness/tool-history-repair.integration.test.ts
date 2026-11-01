@@ -6,7 +6,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { createUserMessage } from "#harness/messages.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { repairToolHistory } from "#harness/tool-history-repair.js";
-import { createKernel } from "#harness/kernel.js";
+import { createTestKernel } from "#internal/testing/kernel.js";
 import { setTurnClientContextState } from "#harness/turn-client-context.js";
 import type { HarnessSession } from "#harness/types.js";
 import { foldingHandler, withOpenTurn } from "#internal/testing/session-machine.js";
@@ -66,7 +66,8 @@ describe("saved tool history", () => {
         inputSchema: jsonSchema({ type: "object" }),
         execute,
       };
-      const step = createKernel({
+      const step = createTestKernel({
+        agent: { model: { id: "repair-test" } },
         handleEvent: foldingHandler(),
         resolveModel: async () => new MockLanguageModelV4({ doStream }),
         tools: new Map([["work", tool]]),
@@ -79,8 +80,7 @@ describe("saved tool history", () => {
       const initial = setTurnClientContextState(
         withOpenTurn(
           {
-            agent: { modelReference: { id: "repair-test" }, tools: [] },
-            compaction: { recentWindowSize: 10, threshold: 100_000 },
+            compaction: {},
             continuationToken: "http:repair-test",
             sessionId: "repair-test",
             history,

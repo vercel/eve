@@ -14,20 +14,11 @@ import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { Principal } from "#protocol/session-events/envelope.js";
-import type { InternalToolDefinition } from "#tools/definition.js";
-import type { AgentReasoningDefinition, SessionUsageLimit } from "#shared/agent-definition.js";
+import type { SessionUsageLimit } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
-
-/**
- * Serializable tool definition stored on the session.
- *
- * Carries schema but no execute function so the session stays serializable
- * across workflow step boundaries.
- */
-export type SessionToolDefinition = Readonly<InternalToolDefinition>;
 
 /** Authored-key → opaque-value map stored on `session.state`. */
 export type SessionStateMap = Readonly<Record<string, unknown>>;
@@ -40,7 +31,7 @@ export interface CompactionState {
   readonly requestEnvelopeTokens?: number;
 }
 
-/** Compaction configuration stored on the session. */
+/** How one model call's history compacts: the session's observations, and the model's limit. */
 export interface CompactionConfig extends CompactionState {
   readonly recentWindowSize: number;
   readonly threshold: number;
@@ -48,39 +39,12 @@ export interface CompactionConfig extends CompactionState {
 }
 
 /**
- * Serializable agent configuration stored on the session.
- */
-interface SessionAgentBase {
-  /**
-   * Optional model used only for compaction summaries.
-   *
-   * When omitted, the harness uses the active turn model for compaction.
-   */
-  readonly compactionModelReference?: RuntimeModelReference;
-  readonly reasoning?: AgentReasoningDefinition;
-  readonly tools: readonly SessionToolDefinition[];
-}
-
-export type SessionAgent = SessionAgentBase &
-  (
-    | {
-        readonly dynamicModel?: never;
-        readonly modelReference: RuntimeModelReference;
-      }
-    | {
-        readonly dynamicModel: true;
-        readonly modelReference?: RuntimeModelReference;
-      }
-  );
-
-/**
  * A {@link HarnessSession} without its conversation history. Session steps
  * that only publish events or change `state` rebuild this, so the history
  * never becomes part of their Workflow step input.
  */
 export interface HarnessSessionBase {
-  readonly agent: SessionAgent;
-  readonly compaction: CompactionConfig;
+  readonly compaction: CompactionState;
   readonly continuationToken: string;
   readonly outputSchema?: JsonObject;
   /**
@@ -105,14 +69,6 @@ export interface HarnessSessionBase {
  */
 export interface HarnessSession extends HarnessSessionBase {
   readonly history: HarnessModelMessage[];
-}
-
-export function requireSessionModelReference(session: HarnessSession): RuntimeModelReference {
-  const reference = session.agent.modelReference;
-  if (reference === undefined) {
-    throw new Error("Expected a concrete model selection for the active model call.");
-  }
-  return reference;
 }
 
 /** The delivery a control arrived as: its id, and who sent it, as the wire names them. */

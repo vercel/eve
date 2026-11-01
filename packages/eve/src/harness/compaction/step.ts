@@ -5,18 +5,15 @@ import { estimateTokens } from "#harness/token-estimate.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey } from "#context/keys.js";
 import { changeHistory } from "#harness/session-machine/history.js";
-import {
-  type CompactionConfig,
-  type HarnessSession,
-  requireSessionModelReference,
-  type StepResult,
-} from "#harness/types.js";
+import { type CompactionConfig, type StepResult } from "#harness/types.js";
 import {
   type HarnessModelMessage,
   isUserModelMessage,
   validateHarnessModelMessages,
 } from "#harness/messages.js";
-import type { Step } from "#harness/step/context.js";
+import { type Step, stepReference } from "#harness/step/context.js";
+import { agentSettings } from "#execution/effective-agent-config.js";
+import { compactionConfig } from "#harness/compaction/config.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import {
   buildGatewayAttributionHeaders,
@@ -96,12 +93,8 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   });
   let outcome: "applied" | "failed" = "applied";
   try {
-    const resolvedModel = await resolveEffectiveRuntimeModel({
-      config,
-      ctx: step.ctx,
-      session: step.session,
-    });
-    step.session = resolvedModel.session;
+    const resolvedModel = await resolveEffectiveRuntimeModel(step);
+    step.model = resolvedModel.choice;
     await summarizeHistory(step, {
       betweenTurns: true,
       change,
@@ -142,17 +135,12 @@ export async function historyBeforeCall(
   },
 ): Promise<HarnessModelMessage[] | undefined> {
   const prompt = validateHarnessModelMessages(input.promptMessages);
-  const { compaction } = step.session;
-  const previousEnvelope = compaction.requestEnvelopeTokens;
-  if (!shouldCompact(prompt, compaction, input.requestEnvelopeTokens, previousEnvelope)) {
+  const previousEnvelope = step.session.compaction.requestEnvelopeTokens;
+  const config = compactionConfig(step);
+  if (!shouldCompact(prompt, config, input.requestEnvelopeTokens, previousEnvelope)) {
     return undefined;
   }
-  const tokens = getInputTokenCount(
-    prompt,
-    compaction,
-    input.requestEnvelopeTokens,
-    previousEnvelope,
-  );
+  const tokens = getInputTokenCount(prompt, config, input.requestEnvelopeTokens, previousEnvelope);
   const { projection } = step.view();
   const turnId = step.position().turnId;
   const change = lazyChange(step, {
@@ -228,6 +216,7 @@ async function summarizeHistory(
 ): Promise<HarnessModelMessage[] | undefined> {
   const { change } = input;
   const before = validateHarnessModelMessages(input.messages);
+  const compaction = compactionConfig(step);
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
   let executor: Awaited<ReturnType<typeof summaryExecutor>> | undefined;
   let runOpen = false;
@@ -256,10 +245,7 @@ async function summarizeHistory(
 
   let messages: HarnessModelMessage[];
   try {
-    const rewrite = historyContext(step.session, {
-      ...input,
-      threshold: step.session.compaction.threshold,
-    });
+    const rewrite = historyContext(compaction, { ...input, threshold: compaction.threshold });
     messages = (await compactMessages(
       before,
       rewrite.config,
@@ -326,7 +312,7 @@ async function settleChange(
  * room like the envelope.
  */
 function historyContext(
-  session: HarnessSession,
+  compaction: CompactionConfig,
   input: {
     readonly messages: readonly HarnessModelMessage[];
     readonly promptMessages: readonly HarnessModelMessage[];
@@ -335,7 +321,6 @@ function historyContext(
     readonly threshold: number;
   },
 ): { readonly config: CompactionConfig; readonly historyTokens?: number } {
-  const { compaction } = session;
   const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
   const protectedTokens = Math.max(
     0,
@@ -384,8 +369,8 @@ async function summaryExecutor(
   summarize(prompt: CompactionSummaryPrompt): ReturnType<typeof streamCompactionSummary>;
 }> {
   const { config, session } = step;
-  const turnReference = requireSessionModelReference(session);
-  const reference = session.agent.compactionModelReference ?? turnReference;
+  const turnReference = stepReference(step);
+  const reference = agentSettings(step).compactionModel ?? turnReference;
   const model = reference === turnReference ? input.model : await config.resolveModel(reference);
   const profile = resolveModelProfile(model);
   const call = {
@@ -397,7 +382,7 @@ async function summaryExecutor(
       step.instrumentation?.gatewayTraceContextHeaders,
     ),
     providerOptions: resolveCallProviderOptions({
-      auth: step.ctx?.get(AuthKey) ?? null,
+      auth: step.ctx.get(AuthKey) ?? null,
       profile,
       providerOptions: reference.providerOptions,
       session,

@@ -8,7 +8,7 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import { sessionDefinitions } from "./agent.js";
-import { decideModel, draftOf } from "./combine.js";
+import { draftOf } from "./combine.js";
 import {
   type CallInput,
   type CallRecord,
@@ -18,22 +18,14 @@ import {
 } from "./definition.js";
 import { contributionsOf } from "./kernel.js";
 import { placeAnchored } from "./messages.js";
-import { keepsParentModel } from "./model.js";
+import { chooseModel, type ModelChoice } from "./model.js";
 
 // Where a step asks its agent's definitions, and renders what it needs from what they make.
-
-const NO_CONTEXT: ContextReader = {
-  get: () => undefined,
-  has: () => false,
-  require: () => {
-    throw new Error("This step has no context.");
-  },
-};
 
 /** What a step's definitions read: a `Step`, or the parts of one a test builds. */
 export interface StepSource {
   readonly config: { readonly tools: HarnessToolMap };
-  readonly ctx: ContextReader | undefined;
+  readonly ctx: ContextReader;
   readonly finalReplyOnly: boolean;
   readonly session: Pick<HarnessSession, "rootSessionId">;
   readonly view?: () => SessionView;
@@ -50,9 +42,8 @@ function stepInfo(step: StepSource): StepInfo {
 
 /** The step's model call as its definitions make it. */
 export async function stepDraft(step: StepSource, call?: CallInput): Promise<Draft> {
-  const container = step.ctx ?? NO_CONTEXT;
-  const definitions = await sessionDefinitions(container);
-  return draftOf(contributionsOf(definitions, container, { call, step: stepInfo(step) }), call);
+  const definitions = await sessionDefinitions(step.ctx);
+  return draftOf(contributionsOf(definitions, step.ctx, { call, step: stepInfo(step) }), call);
 }
 
 /** What a model call's values evaluate with: the conversation it reads. */
@@ -67,8 +58,7 @@ export interface ValueRun {
  * part of the call a later definition replaces evaluates nothing under it.
  */
 export async function evaluateStepValues(step: StepSource, run: ValueRun): Promise<void> {
-  const container = step.ctx as ContextContainer | undefined;
-  if (container === undefined) return;
+  const container = step.ctx as ContextContainer;
   const definitions = await sessionDefinitions(container);
   const contributions = contributionsOf(
     definitions,
@@ -76,11 +66,21 @@ export async function evaluateStepValues(step: StepSource, run: ValueRun): Promi
     { history: run.conversation, signal: run.abortSignal, step: stepInfo(step) },
     "evaluate",
   );
-  if (!keepsParentModel(container)) await decideModel(contributions);
+  await chooseModel(contributions, container);
   const draft = draftOf(contributions);
   await draft.tools();
   await draft.system();
   await draft.context();
+}
+
+/** The model the step's call runs, as its definitions last chose it. */
+export async function stepModel(step: StepSource): Promise<ModelChoice | undefined> {
+  const container = step.ctx as ContextContainer;
+  const definitions = await sessionDefinitions(container);
+  return await chooseModel(
+    contributionsOf(definitions, container, { step: stepInfo(step) }),
+    container,
+  );
 }
 
 /** Evaluates a session's dynamic values as its next model call would, outside a step. */
@@ -110,12 +110,11 @@ export async function stepCatalog(
   });
 }
 
-/** The step's system prompt: a string, or parts. A step without a context has none. */
+/** The step's system prompt: a string, or parts. */
 export async function stepSystem(
   step: StepSource,
   draft?: Draft,
 ): Promise<string | readonly string[]> {
-  if (step.ctx === undefined) return "";
   return renderSystem(await (draft ?? (await stepDraft(step))).system());
 }
 

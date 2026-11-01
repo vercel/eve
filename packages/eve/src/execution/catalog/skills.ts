@@ -29,9 +29,9 @@ export interface CatalogSkill {
 }
 
 /** The session's skills by name; a dynamic skill overrides a same-named authored one. */
-export function sessionSkills(ctx: ContextReader | undefined): ReadonlyMap<string, CatalogSkill> {
+export function sessionSkills(ctx: ContextReader): ReadonlyMap<string, CatalogSkill> {
   const skills = new Map<string, CatalogSkill>();
-  for (const skill of ctx?.get(BundleKey)?.resolvedAgent.skills ?? []) {
+  for (const skill of ctx.get(BundleKey)?.resolvedAgent.skills ?? []) {
     skills.set(skill.name, {
       deferred: skill.deferred === true,
       description: skill.description,

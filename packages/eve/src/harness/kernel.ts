@@ -1,6 +1,5 @@
 import { activeTurnIdOf } from "#protocol/session-projection.js";
-import { contextStorage } from "#context/container.js";
-import { StaticModelReferenceKey } from "#context/keys.js";
+import { type AlsContext, contextStorage } from "#context/container.js";
 import { GenerationSteering } from "#harness/generation-steering.js";
 import { compactHistory } from "#harness/compaction/step.js";
 import { readTaskTable, takeTaskResults, writeTaskTable } from "#execution/tasks/table.js";
@@ -63,14 +62,16 @@ export function createKernel(config: KernelConfig): StepFn {
   ): Promise<StepResult> {
     const executeStep = async (scope?: InstrumentationStepScope<HarnessSession>) => {
       const current = scope?.session ?? initialSession;
-      const live = stepProjection(contextStorage.getStore(), current.state);
+      const ctx = contextStorage.getStore();
+      if (ctx === undefined) throw new Error("A session step runs inside its session's context.");
+      const live = stepProjection(ctx, current.state);
       const generation = new GenerationSteering({
         abortSignal: config.abortSignal,
         steeringSignal: config.steeringSignal,
         outputStarted: turnPosition(live.read()).assistantOutputStarted,
       });
       try {
-        const result = await executeStepBody(current, generation, live, input, scope);
+        const result = await executeStepBody(ctx, current, generation, live, input, scope);
         // The step saves the lifecycle it published with the state that follows it.
         return { ...result, session: saveProjection(result.session, live.read()) };
       } finally {
@@ -86,21 +87,13 @@ export function createKernel(config: KernelConfig): StepFn {
   }
 
   async function executeStepBody(
+    ctx: AlsContext,
     initialSession: HarnessSession,
     generation: GenerationSteering,
     live: StepProjection,
     input: HarnessStepInput | undefined,
     instrumentation: InstrumentationStepScope<HarnessSession> | undefined,
   ): Promise<StepResult> {
-    const ctx = contextStorage.getStore();
-    if (ctx !== undefined && !ctx.has(StaticModelReferenceKey)) {
-      ctx.setVirtualContext(
-        StaticModelReferenceKey,
-        initialSession.agent.dynamicModel === true
-          ? null
-          : (initialSession.agent.modelReference ?? null),
-      );
-    }
     const emit =
       instrumentation?.createHandleEvent({
         isFrameworkTool: (name) => step.frameworkToolNames.has(name),
@@ -112,7 +105,7 @@ export function createKernel(config: KernelConfig): StepFn {
       // The publish sink folds what it publishes; without a sink, the step does, so lifecycle
       // never depends on whether a caller listens.
       if (emit !== undefined) await emit(publication, messages);
-      if (emit === undefined || ctx === undefined) live.record(publication);
+      if (emit === undefined) live.record(publication);
     };
     const step = createStep({
       config,

@@ -17,7 +17,6 @@ import {
   type DurableSession,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
-import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import {
@@ -254,12 +253,7 @@ async function publishInSessionScope<T>(
     position: nextLinePosition(ctx),
     sessionWritable: step.sessionWritable,
   });
-  const effectiveAgent = resolveEffectiveAgentRuntime(ctx.require(BundleKey), ctx);
-  const hydrated = hydrateDurableSession({
-    compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
-    durable: step.durableSession,
-    turnAgent: effectiveAgent.turnAgent,
-  });
+  const hydrated = hydrateDurableSession(step.durableSession);
   const session =
     step.history === undefined
       ? hydrated
@@ -267,7 +261,7 @@ async function publishInSessionScope<T>(
   const instrumentation =
     publication.origin === "own"
       ? bindSessionInstrumentation({
-          agentName: effectiveAgent.turnAgent.id,
+          agentName: ctx.require(BundleKey).turnAgent.id,
           ctx,
           rootSessionId: session.rootSessionId ?? session.sessionId,
           sessionId: session.sessionId,

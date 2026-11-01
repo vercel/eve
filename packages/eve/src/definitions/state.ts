@@ -74,10 +74,8 @@ export const DefinitionsStateKey = new ContextKey<DefinitionsState>(REACTIONS_ST
 
 const EMPTY_STATE: DefinitionsState = { latest: {}, slots: {} };
 
-export function readDefinitionsState(
-  ctx: Pick<ContextReader, "get"> | undefined,
-): DefinitionsState {
-  return ctx?.get(DefinitionsStateKey) ?? EMPTY_STATE;
+export function readDefinitionsState(ctx: Pick<ContextReader, "get">): DefinitionsState {
+  return ctx.get(DefinitionsStateKey) ?? EMPTY_STATE;
 }
 
 export function writeDefinitionsState(ctx: AlsContext, state: DefinitionsState): void {
@@ -240,10 +238,9 @@ export function forgetSessionLive(sessionId: string): void {
  * process has them.
  */
 export function slotsOf(
-  ctx: Pick<ContextReader, "get"> | undefined,
+  ctx: Pick<ContextReader, "get">,
   kind: string,
 ): readonly { readonly id: string; readonly slot: Slot; readonly live?: unknown }[] {
-  if (ctx === undefined) return [];
   const prefix = `${kind}:`;
   return Object.entries(readDefinitionsState(ctx).slots)
     .filter(([id]) => id.startsWith(prefix))
@@ -265,9 +262,6 @@ export function entryVersions(
   return (offered) => digestOf({ memos, offered });
 }
 
-export function readSlot(
-  ctx: Pick<ContextReader, "get"> | undefined,
-  id: string,
-): Slot | undefined {
+export function readSlot(ctx: Pick<ContextReader, "get">, id: string): Slot | undefined {
   return readDefinitionsState(ctx).slots[id];
 }

@@ -85,6 +85,12 @@
       }
     },
     "eve.initiatorAuth": null,
+    "eve.model": {
+      "reference": {
+        "contextWindowTokens": 200000,
+        "id": "eve-test/layout"
+      }
+    },
     "eve.offeredCatalogTools": {
       "connections": true,
       "searchableSkills": false,

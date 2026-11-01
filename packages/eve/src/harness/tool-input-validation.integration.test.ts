@@ -2,9 +2,9 @@ import { jsonSchema, type LanguageModel, type ModelMessage } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
-import { createKernel } from "#harness/kernel.js";
+import { createTestKernel, type TestKernelConfig } from "#internal/testing/kernel.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
-import type { HarnessSession, KernelConfig } from "#harness/types.js";
+import type { HarnessSession } from "#harness/types.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 
 const usage = {
@@ -79,22 +79,19 @@ describe("framework tool input validation (real AI SDK)", () => {
       modelId: "final-output-validation-model",
       provider: "eve-integration-mock",
     });
-    const config: KernelConfig = {
+    const config: TestKernelConfig = {
+      agent: { model: { id: "final-output-validation-model" } },
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map(),
     };
     const session: HarnessSession = {
-      agent: {
-        modelReference: { id: "final-output-validation-model" },
-        tools: [],
-      },
-      compaction: { recentWindowSize: 10, threshold: 100_000 },
+      compaction: {},
       continuationToken: "task:final-output-validation-session",
       history: [],
       outputSchema,
       sessionId: "final-output-validation-session",
     };
-    const runStep = createKernel(config);
+    const runStep = createTestKernel(config);
 
     const invalidStep = await runStep(session, { message: "Finish the task." });
 
@@ -144,7 +141,8 @@ describe("framework tool input validation (real AI SDK)", () => {
       provider: "eve-integration-mock",
     });
     const execute = vi.fn(async () => ({ text: "Meeting moved to Friday." }));
-    const runStep = createKernel({
+    const runStep = createTestKernel({
+      agent: { model: { id: "output-limit-model" } },
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map([
         [
@@ -163,11 +161,7 @@ describe("framework tool input validation (real AI SDK)", () => {
       ]),
     });
     const session: HarnessSession = {
-      agent: {
-        modelReference: { id: "output-limit-model" },
-        tools: [],
-      },
-      compaction: { recentWindowSize: 10, threshold: 100_000 },
+      compaction: {},
       continuationToken: "task:output-limit-session",
       history: [],
       sessionId: "output-limit-session",
@@ -215,7 +209,8 @@ describe("framework tool input validation (real AI SDK)", () => {
       provider: "eve-integration-mock",
     });
     const events: string[] = [];
-    const runStep = createKernel({
+    const runStep = createTestKernel({
+      agent: { model: { id: "output-limit-model" } },
       handleEvent: eachEvent((event) => {
         if (event.type === "call.requested") events.push(`call.requested:${event.data.callId}`);
         if (event.type === "call.settled") {
@@ -241,11 +236,7 @@ describe("framework tool input validation (real AI SDK)", () => {
 
     await runStep(
       {
-        agent: {
-          modelReference: { id: "output-limit-model" },
-          tools: [],
-        },
-        compaction: { recentWindowSize: 10, threshold: 100_000 },
+        compaction: {},
         continuationToken: "task:output-limit-stream-session",
         history: [],
         sessionId: "output-limit-stream-session",

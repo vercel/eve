@@ -185,8 +185,6 @@ describe("getInputTokenCount", () => {
     const result = getInputTokenCount(messages, {
       lastKnownInputTokens: 43_895,
       lastKnownPromptMessageCount: prompt.length,
-      recentWindowSize: 2,
-      threshold: 200_000,
     });
 
     expect(result).toBeGreaterThan(43_895 + 2 * 1296);

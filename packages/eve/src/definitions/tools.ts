@@ -89,7 +89,7 @@ export function toolsDefinition(
 }
 
 /** The names of the dynamic tools the session keeps, live or not. */
-export function dynamicToolNames(ctx: Pick<ContextReader, "get"> | undefined): readonly string[] {
+export function dynamicToolNames(ctx: Pick<ContextReader, "get">): readonly string[] {
   return slotsOf(ctx, "tool").flatMap(({ slot }) =>
     Array.isArray(slot.value) ? slot.value.map((tool) => (tool as { name: string }).name) : [],
   );

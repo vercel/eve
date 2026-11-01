@@ -51,12 +51,16 @@ describe("draftOf", () => {
 describe("decideModel", () => {
   it("takes the latest answer, and asks earlier definitions only when it passes", async () => {
     const asked: string[] = [];
-    const answers = (name: string, answer: string | undefined): Contribution => ({
-      model: () => (asked.push(name), answer),
+    const answers = (name: string, id: string | undefined): Contribution => ({
+      model: () => (asked.push(name), id === undefined ? undefined : { reference: { id } }),
     });
 
-    expect(await decideModel([answers("agent", "a"), answers("harness", "h")])).toBe("h");
+    expect(await decideModel([answers("agent", "a"), answers("harness", "h")])).toEqual({
+      reference: { id: "h" },
+    });
     expect(asked).toEqual(["harness"]);
-    expect(await decideModel([answers("agent", "a"), answers("harness", undefined)])).toBe("a");
+    expect(await decideModel([answers("agent", "a"), answers("harness", undefined)])).toEqual({
+      reference: { id: "a" },
+    });
   });
 });

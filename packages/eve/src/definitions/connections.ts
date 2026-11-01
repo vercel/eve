@@ -116,11 +116,11 @@ export function sessionConnectionNames(ctx: Pick<ContextReader, "get">): readonl
 
 /** The version of each dynamic connection, by name: what it reaches, and its memo results. */
 export function dynamicConnectionVersions(
-  ctx: Pick<ContextReader, "get"> | undefined,
+  ctx: Pick<ContextReader, "get">,
 ): ReadonlyMap<string, string> {
   const versions = new Map<string, string>();
   for (const { id, slot } of slotsOf(ctx, "connection")) {
-    const versionOf = entryVersions(ctx!, id);
+    const versionOf = entryVersions(ctx, id);
     for (const target of Array.isArray(slot.value) ? slot.value : []) {
       const name = (target as { readonly name?: unknown } | null)?.name;
       if (typeof name === "string" && !versions.has(name)) versions.set(name, versionOf(target));

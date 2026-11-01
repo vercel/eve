@@ -1,125 +1,26 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
-import type {
-  CompactionConfig,
-  CompactionState,
-  HarnessSession,
-  HarnessSessionBase,
-  SessionAgent,
-  SessionToolDefinition,
-} from "#harness/types.js";
-import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
+import type { HarnessSession, HarnessSessionBase } from "#harness/types.js";
 
-const DEFAULT_COMPACTION_RECENT_WINDOW_SIZE = 10;
-const DEFAULT_COMPACTION_THRESHOLD_PERCENT = 0.9;
-const FALLBACK_COMPACTION_THRESHOLD = 100_000;
-
-/**
- * Creates the durable compaction configuration used by one harness session.
- */
-export function createCompactionConfig(
-  input: {
-    readonly contextWindowTokens?: number;
-    readonly previous?: CompactionState;
-    readonly thresholdPercent?: number;
-  } = {},
-): CompactionConfig {
-  const thresholdPercent = input.thresholdPercent ?? DEFAULT_COMPACTION_THRESHOLD_PERCENT;
-  const threshold =
-    input.contextWindowTokens === undefined
-      ? FALLBACK_COMPACTION_THRESHOLD
-      : Math.max(1, Math.floor(input.contextWindowTokens * thresholdPercent));
-
-  return {
-    ...input.previous,
-    recentWindowSize: DEFAULT_COMPACTION_RECENT_WINDOW_SIZE,
-    threshold,
-    thresholdPercent,
-  };
-}
-
-interface CreateSessionInput {
+/** Creates a fresh {@link HarnessSession}, which starts with the agent's initial messages. */
+export function createSession(input: {
   readonly continuationToken: string;
-  readonly compactionOverrides?: {
-    readonly thresholdPercent?: number;
-  };
+  readonly initialMessages?: readonly HarnessModelMessage[];
+  readonly outputSchema?: HarnessSession["outputSchema"];
   /**
-   * Optional root session id passed in by the runtime when this
-   * session is a delegated subagent child. `undefined` for top-level
-   * sessions — `sessionId` is the root for those.
+   * The top session's id, for a delegated subagent child. `undefined` for top-level sessions:
+   * `sessionId` is the root for those.
    */
   readonly rootSessionId?: string;
   readonly sessionId: string;
-  readonly turnAgent: RuntimeTurnAgent;
-  readonly outputSchema?: HarnessSession["outputSchema"];
-}
-
-/** Creates a fresh {@link HarnessSession} from the current `turnAgent`. */
-export function createSession(input: CreateSessionInput): HarnessSession {
-  const { turnAgent } = input;
-  const tools = createSessionToolDefinitions(turnAgent);
-
-  const session: {
-    -readonly [K in keyof HarnessSession]: HarnessSession[K];
-  } = {
-    agent: createSessionAgent(turnAgent, tools),
-    compaction: createCompactionConfig({
-      contextWindowTokens: turnAgent.model?.contextWindowTokens,
-      thresholdPercent: input.compactionOverrides?.thresholdPercent,
-    }),
-    continuationToken: input.continuationToken,
-    history: [...(turnAgent.initialMessages ?? [])],
-    sessionId: input.sessionId,
-  };
-
-  if (input.rootSessionId !== undefined) {
-    session.rootSessionId = input.rootSessionId;
-  }
-  if (input.outputSchema !== undefined) {
-    session.outputSchema = input.outputSchema;
-  }
-
-  return session;
-}
-
-function createSessionAgent(
-  turnAgent: RuntimeTurnAgent,
-  tools: readonly SessionToolDefinition[],
-): SessionAgent {
-  const base = {
-    compactionModelReference: turnAgent.compactionModel,
-    reasoning: turnAgent.reasoning,
-    tools,
-  };
-
-  if (turnAgent.model !== undefined) {
-    return { ...base, modelReference: turnAgent.model };
-  }
-  if (turnAgent.dynamicModel !== undefined) {
-    return { ...base, dynamicModel: true };
-  }
-  throw new Error("Cannot create a session before dynamic subagent config is selected.");
-}
-
-/**
- * Refreshes a session with the latest `turnAgent` — replaces the system
- * prompt, model/tool metadata, and compaction thresholds while preserving
- * conversation history and state.
- */
-export function refreshSessionFromTurnAgent(input: {
-  readonly session: HarnessSession;
-  readonly turnAgent: RuntimeTurnAgent;
-  readonly compactionOverrides?: {
-    readonly thresholdPercent?: number;
-  };
 }): HarnessSession {
   return {
-    ...input.session,
-    agent: createSessionAgent(input.turnAgent, createSessionToolDefinitions(input.turnAgent)),
-    compaction: createCompactionConfig({
-      contextWindowTokens: input.turnAgent.model?.contextWindowTokens,
-      previous: input.session.compaction,
-      thresholdPercent: input.compactionOverrides?.thresholdPercent,
-    }),
+    compaction: {},
+    continuationToken: input.continuationToken,
+    history: [...(input.initialMessages ?? [])],
+    sessionId: input.sessionId,
+    ...(input.rootSessionId !== undefined && { rootSessionId: input.rootSessionId }),
+    ...(input.outputSchema !== undefined && { outputSchema: input.outputSchema }),
   };
 }
 
@@ -135,16 +36,10 @@ export function mintSubagentContinuationToken(suffix?: string): string {
 /**
  * Projects a {@link HarnessSessionBase} to {@link DurableSession}.
  *
- * Drops fields rebuilt every turn from `bundle.turnAgent`; keeps
- * `compaction.lastKnown*` so compaction stays informed after rehydration.
+ * Keeps `compaction.lastKnown*` so compaction stays informed after rehydration.
  */
 export function projectToDurableSession(session: HarnessSessionBase): DurableSession {
-  const {
-    threshold: _threshold,
-    thresholdPercent: _percent,
-    recentWindowSize: _size,
-    ...measured
-  } = session.compaction;
+  const measured = session.compaction;
   return {
     continuationToken: session.continuationToken,
     sessionId: session.sessionId,
@@ -156,36 +51,8 @@ export function projectToDurableSession(session: HarnessSessionBase): DurableSes
   };
 }
 
-/**
- * Rehydrates a {@link HarnessSessionBase} from a {@link DurableSession}
- * plus the current `turnAgent`, rebuilding the runtime-only agent and
- * compaction fields the durable shape omits.
- */
-export function hydrateDurableSession(input: {
-  readonly durable: DurableSession;
-  readonly turnAgent: RuntimeTurnAgent;
-  readonly compactionOverrides?: {
-    readonly thresholdPercent?: number;
-  };
-}): HarnessSessionBase {
-  const { durable, turnAgent } = input;
+/** Rehydrates a {@link HarnessSessionBase} from a {@link DurableSession}. */
+export function hydrateDurableSession(durable: DurableSession): HarnessSessionBase {
   const { compaction, ...saved } = durable;
-  return {
-    ...saved,
-    agent: createSessionAgent(turnAgent, createSessionToolDefinitions(turnAgent)),
-    compaction: createCompactionConfig({
-      contextWindowTokens: turnAgent.model?.contextWindowTokens,
-      previous: compaction,
-      thresholdPercent: input.compactionOverrides?.thresholdPercent,
-    }),
-  };
-}
-
-function createSessionToolDefinitions(turnAgent: RuntimeTurnAgent): SessionToolDefinition[] {
-  return turnAgent.tools.map((tool) => ({
-    description: tool.description ?? "",
-    inputSchema: tool.inputSchema,
-    name: tool.name,
-    outputSchema: tool.outputSchema,
-  }));
+  return { ...saved, compaction: compaction ?? {} };
 }

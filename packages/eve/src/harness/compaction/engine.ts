@@ -15,7 +15,7 @@ import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/mes
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import { estimateTokens } from "#harness/token-estimate.js";
-import type { CompactionConfig } from "#harness/types.js";
+import type { CompactionConfig, CompactionState } from "#harness/types.js";
 
 /**
  * Most of the conversation kept word for word next to a compaction summary.
@@ -46,7 +46,7 @@ const COMPACTION_PROMPT_OVERHEAD_TOKENS = estimateTokens([
  */
 export function getInputTokenCount(
   messages: readonly ModelMessage[],
-  config: CompactionConfig,
+  config: CompactionState,
   requestEnvelopeTokens = 0,
   previousEnvelopeTokens = 0,
 ): number {
@@ -72,7 +72,7 @@ export function getInputTokenCount(
 }
 
 /** The settings without the last measured prompt, which a rewritten history no longer matches. */
-export function withoutPromptMeasurement(config: CompactionConfig): CompactionConfig {
+export function withoutPromptMeasurement(config: CompactionState): CompactionState {
   const { lastKnownInputTokens: _input, lastKnownPromptMessageCount: _count, ...rest } = config;
   return rest;
 }
@@ -82,13 +82,13 @@ export function withoutPromptMeasurement(config: CompactionConfig): CompactionCo
  * usable measurement, the next count is an estimate, and no envelope baseline applies.
  */
 export function withPromptMeasurement(
-  config: CompactionConfig,
+  config: CompactionState,
   measured: {
     readonly inputTokens?: number;
     readonly promptMessageCount?: number;
     readonly requestEnvelopeTokens?: number;
   },
-): CompactionConfig {
+): CompactionState {
   const { requestEnvelopeTokens: _envelope, ...next } = withoutPromptMeasurement(config);
   if (measured.inputTokens === undefined || measured.promptMessageCount === undefined) return next;
   return {

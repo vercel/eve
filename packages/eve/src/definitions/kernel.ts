@@ -28,7 +28,7 @@ import {
   writeLive,
   writeDefinitionsState,
 } from "#definitions/state.js";
-import { collectEffects, decideModel, draftOf } from "./combine.js";
+import { collectEffects, draftOf } from "./combine.js";
 import {
   type CommitInput,
   type Contribution,
@@ -39,7 +39,7 @@ import {
   type Kept,
   requireHistory,
 } from "./definition.js";
-import { effectiveModelId, keepsParentModel } from "./model.js";
+import { chooseModel, effectiveModelId } from "./model.js";
 import { sessionDefinitions } from "./agent.js";
 import { bindOpeningCancel, settleHookCommands } from "./hooks.js";
 
@@ -189,8 +189,8 @@ const blockingFailures = new WeakMap<object, unknown>();
  * Takes what a blocking effect threw after the commit that started an operation: the operation
  * then fails before it goes further.
  */
-export function takeBlockingFailure(ctx: object | undefined): unknown {
-  if (ctx === undefined || !blockingFailures.has(ctx)) return undefined;
+export function takeBlockingFailure(ctx: object): unknown {
+  if (!blockingFailures.has(ctx)) return undefined;
   const error = blockingFailures.get(ctx);
   blockingFailures.delete(ctx);
   return error ?? new Error("A blocking effect failed.");
@@ -244,7 +244,7 @@ export async function restoreDefinitions(
     history: input.conversation,
     signal: input.abortSignal,
   });
-  if (!keepsParentModel(ctx)) await decideModel(contributions);
+  await chooseModel(contributions, ctx);
   const draft = draftOf(contributions);
   await draft.tools();
   await draft.system();
