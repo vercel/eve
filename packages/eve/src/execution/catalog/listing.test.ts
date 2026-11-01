@@ -25,7 +25,13 @@ async function announce(state: CatalogState, announced?: Readonly<Record<string,
     skills: state.skills,
     tools: state.tools,
   });
-  return catalogAnnouncements(catalog, announced);
+  // What the harness would announce: a key it never announced stays quiet at its initial value.
+  return Object.fromEntries(
+    Object.entries(catalogAnnouncements(catalog)).filter(
+      ([key, announcement]) =>
+        announced?.[key] !== undefined || announcement.value !== announcement.initial,
+    ),
+  );
 }
 
 /** The listing a session's first step appends. */

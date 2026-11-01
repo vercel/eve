@@ -1,11 +1,9 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
-import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession, HarnessSessionBase } from "#harness/types.js";
 
-/** Creates a fresh {@link HarnessSession}, which starts with the agent's initial messages. */
+/** Creates a fresh {@link HarnessSession}, with an empty history. */
 export function createSession(input: {
   readonly continuationToken: string;
-  readonly initialMessages?: readonly HarnessModelMessage[];
   readonly outputSchema?: HarnessSession["outputSchema"];
   /**
    * The top session's id, for a delegated subagent child. `undefined` for top-level sessions:
@@ -17,7 +15,7 @@ export function createSession(input: {
   return {
     compaction: {},
     continuationToken: input.continuationToken,
-    history: [...(input.initialMessages ?? [])],
+    history: [],
     sessionId: input.sessionId,
     ...(input.rootSessionId !== undefined && { rootSessionId: input.rootSessionId }),
     ...(input.outputSchema !== undefined && { outputSchema: input.outputSchema }),

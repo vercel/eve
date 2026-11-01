@@ -67,7 +67,7 @@ async function settleHistory(
     const taskContext = await appendTaskContext({
       messages,
       session: step.session,
-      tools: await stepCatalog(step, { endsTurn: false }),
+      tools: await stepCatalog(step),
     });
     step.session = taskContext.session;
     // A turn a task's result starts brings no input of its own: what eve adds for the turn

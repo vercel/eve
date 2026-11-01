@@ -325,13 +325,11 @@ export async function nativeCatalog(input: {
   readonly endsTurn: boolean;
   readonly session: { readonly rootSessionId?: string };
 }): Promise<StepCatalog> {
-  return await stepCatalog(
-    {
-      config: { tools: input.agentTools },
-      ctx: input.ctx,
-      finalReplyOnly: false,
-      session: input.session,
-    },
-    { endsTurn: input.endsTurn },
-  );
+  return await stepCatalog({
+    config: { tools: input.agentTools },
+    ctx: input.ctx,
+    endsTurn: input.endsTurn,
+    finalReplyOnly: false,
+    session: input.session,
+  });
 }

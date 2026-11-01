@@ -19,7 +19,7 @@ Keep this file to stable behavior such as identity, tone, and standing rules.
 
 System-role instructions stay outside the conversation history, and eve includes them on every model call. When you deploy a new version, or `eve dev` reloads, existing sessions use the current system instructions.
 
-eve adds static user-role instructions to a new session's history once, in source order. A newer deployment doesn't add them again or replace them.
+eve adds user-role instructions to the conversation history once, in source order, ahead of the next turn's input. It adds one again when its content changes, including when a newer deployment changes a static one, and after a compaction or clear rewrites the history.
 
 ## Markdown vs TypeScript
 
@@ -63,11 +63,11 @@ A session that replaced a [stranded session](./concepts/execution-model-and-dura
 
 ## History controls and prompt caching
 
-[Compaction](./concepts/sessions-runs-and-streaming#compact-clear-and-end) treats user-role instructions like any other history, so a summary can replace their text. Clear removes them with the rest of the conversation history and doesn't run static or dynamic instructions again. System-role instructions remain, because they are outside history.
+[Compaction](./concepts/sessions-runs-and-streaming#compact-clear-and-end) and clear rewrite the conversation history, user-role instructions with it, and eve adds each user-role instruction again before the next model call. System-role instructions remain, because they are outside history.
 
 Keep system-role content stable and ahead of frequently changing context when you can, so providers can reuse the prompt prefix. Cache behavior and billing depend on the provider, and eve doesn't promise a cache hit.
 
-User-role instructions only append, so they keep the earlier prompt prefix the same. eve's notes about available skills and parked agents are user-role history too. A changed note appends after earlier steps. eve skips an unchanged note until history is cleared or compacted.
+User-role instructions only append, so they keep the earlier prompt prefix the same. eve's notes about available skills and parked agents follow the same rule: a changed note appends after earlier steps, and eve skips an unchanged one until history is cleared or compacted.
 
 ## Instructions vs skills
 
@@ -76,7 +76,7 @@ Instructions and [skills](./skills) both add text to the model's context, at dif
 |                          | Loaded                                                | Use for                                                  |
 | ------------------------ | ----------------------------------------------------- | -------------------------------------------------------- |
 | System-role instructions | Outside history on every model call                   | Permanent identity and standing rules                    |
-| User-role instructions   | Once for static ones; on each change for dynamic ones | Application context that belongs in conversation history |
+| User-role instructions   | Once, and again on each change                        | Application context that belongs in conversation history |
 | `agent/skills/*`         | On demand, when the model loads one with `eve__skill` | Optional procedures that should not bloat every turn     |
 
 Keep instructions short and stable. Put long or situational procedures in [skills](./skills). Put typed behavior that runs code in a [tool](./tools), because static instructions never run code at runtime.

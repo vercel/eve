@@ -17,7 +17,7 @@ import {
   type StepInfo,
 } from "./definition.js";
 import { contributionsOf } from "./kernel.js";
-import { placeAnchored } from "./messages.js";
+import { announce, placeAnchored } from "./messages.js";
 import { chooseModel, type ModelChoice } from "./model.js";
 
 // Where a step asks its agent's definitions, and renders what it needs from what they make.
@@ -27,6 +27,8 @@ export interface StepSource {
   readonly config: { readonly tools: HarnessToolMap };
   readonly ctx: ContextReader;
   readonly finalReplyOnly: boolean;
+  /** A tool's `endsTurn` applies, which its description then says; `false` where omitted. */
+  readonly endsTurn?: boolean;
   readonly session: Pick<HarnessSession, "rootSessionId">;
   readonly view?: () => SessionView;
 }
@@ -34,6 +36,7 @@ export interface StepSource {
 function stepInfo(step: StepSource): StepInfo {
   return {
     agentTools: step.config.tools,
+    endsTurn: step.endsTurn ?? false,
     finalReplyOnly: step.finalReplyOnly,
     session: step.session,
     ...(step.view !== undefined && { view: () => step.view!() }),
@@ -43,7 +46,7 @@ function stepInfo(step: StepSource): StepInfo {
 /** The step's model call as its definitions make it. */
 export async function stepDraft(step: StepSource, call?: CallInput): Promise<Draft> {
   const definitions = await sessionDefinitions(step.ctx);
-  return draftOf(contributionsOf(definitions, step.ctx, { call, step: stepInfo(step) }), call);
+  return draftOf(contributionsOf(definitions, step.ctx, { call, step: stepInfo(step) }));
 }
 
 /** What a model call's values evaluate with: the conversation it reads. */
@@ -71,6 +74,7 @@ export async function evaluateStepValues(step: StepSource, run: ValueRun): Promi
   await draft.tools();
   await draft.system();
   await draft.context();
+  await draft.announcements();
 }
 
 /** The model the step's call runs, as its definitions last chose it. */
@@ -97,14 +101,11 @@ export async function evaluateValues(ctx: ContextContainer, run: ValueRun): Prom
 }
 
 /** The step's catalog: what its definitions offer, as the model's tools and what each call runs. */
-export async function stepCatalog(
-  step: StepSource,
-  input: { readonly endsTurn: boolean; readonly draft?: Draft },
-): Promise<StepCatalog> {
-  const draft = input.draft ?? (await stepDraft(step));
+export async function stepCatalog(step: StepSource): Promise<StepCatalog> {
+  const draft = await stepDraft(step);
   return buildStepCatalog({
     ctx: step.ctx,
-    endsTurn: input.endsTurn,
+    endsTurn: step.endsTurn ?? false,
     session: step.session,
     table: await draft.tools(),
   });
@@ -119,8 +120,9 @@ export async function stepSystem(
 }
 
 /**
- * The call's messages: the record the step commits, and what the model reads, which is the record
- * as `project` shows it with each context entry ahead of its turn's input.
+ * The call's messages: the record the step commits, with what the definitions and the call's
+ * tools announce, and what the model reads, which is the record as `project` shows it with each
+ * context entry ahead of its turn's input.
  */
 export async function stepMessages(
   draft: Draft,
@@ -129,10 +131,14 @@ export async function stepMessages(
     readonly project: (record: readonly HarnessModelMessage[]) => HarnessModelMessage[];
   },
 ): Promise<CallRecord & { readonly view: readonly HarnessModelMessage[] }> {
-  const record = (await draft.record()) ?? {
-    historyState: input.call.historyState,
-    record: input.call.record,
-  };
+  const drafted = { historyState: input.call.historyState, record: input.call.record };
+  // What the definitions announce, then what the call's tools do.
+  const announcements = { ...(await draft.announcements()) };
+  for (const { announcements: own } of (await draft.tools()).entries.values()) {
+    for (const [key, announcement] of Object.entries(own ?? {}))
+      announcements[key] ??= announcement;
+  }
+  const record = announce(drafted, input.call.currentInput, announcements);
   return {
     ...record,
     view: placeAnchored(input.project(record.record), await draft.context()),

@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  announcedNext,
   beforeModelCall,
   evaluationError,
   definitionSession,
 } from "#internal/testing/definition-session.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { stepSystem } from "#definitions/step.js";
-import { takeUserInstructionMessages } from "./instructions.js";
+import { restoreDefinitions } from "#definitions/kernel.js";
+import { contextStorage } from "#context/container.js";
+import { createFrameworkUserMessage } from "#harness/messages.js";
+import { readDefinitionsState, writeDefinitionsState } from "#definitions/state.js";
 
 /** The system prompt's parts after its first: the dynamic system instructions. */
 const system = async (ctx: ReturnType<typeof definitionSession>["ctx"]) => {
@@ -51,13 +55,48 @@ describe("dynamic instructions", () => {
         { evaluate: () => defineInstructions({ content: "\n", role: "user" }), slug: "blank" },
       ],
     });
-    await beforeModelCall(ctx);
-
+    expect(await announcedNext(ctx)).toEqual(["Alice prefers tables."]);
     expect(await system(ctx)).toEqual([]);
-    expect(takeUserInstructionMessages(ctx).map(({ content }) => content)).toEqual([
-      "Alice prefers tables.",
-    ]);
   });
+
+  it("announces static user instructions once, as it does dynamic ones", async () => {
+    const { ctx } = definitionSession({ userInstructions: ["  Pinned policy.  ", " \n "] });
+    expect(await announcedNext(ctx)).toEqual(["Pinned policy."]);
+    expect(await announcedNext(ctx)).toEqual([]);
+  });
+
+  it("doesn't announce a static user instruction a session from before holds in its history", async () => {
+    const { ctx } = definitionSession({ userInstructions: ["Pinned policy."] });
+    const conversation = [createFrameworkUserMessage("context.instruction", "Pinned policy.")];
+    await contextStorage.run(ctx, () => restoreDefinitions(ctx, { conversation }));
+    expect(await announcedNext(ctx)).toEqual([]);
+  });
+
+  it.each([false, true])(
+    "migrates a legacy dynamic digest only if its instruction remains in history (retained: %s)",
+    async (retained) => {
+      const content = "Alice prefers tables.";
+      const { ctx } = definitionSession({
+        instructions: [
+          {
+            evaluate: () => defineInstructions({ content, role: "user" }),
+            slug: "prefs",
+          },
+        ],
+      });
+      await beforeModelCall(ctx);
+      const state = readDefinitionsState(ctx);
+      const id = "instructions:prefs";
+      writeDefinitionsState(ctx, { ...state, appended: { [id]: state.slots[id]!.digest } });
+      const conversation = retained
+        ? [createFrameworkUserMessage("context.instruction", content)]
+        : [];
+
+      await contextStorage.run(ctx, () => restoreDefinitions(ctx, { conversation }));
+
+      expect(await announcedNext(ctx)).toEqual(retained ? [] : [content]);
+    },
+  );
 
   it("rejects a value without defineInstructions()", async () => {
     const { ctx } = definitionSession({

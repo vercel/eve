@@ -266,7 +266,6 @@ export class ModelCaller {
   private async buildRequest(): Promise<void> {
     const { prompt, step } = this;
     const call = {
-      catalog: this.input.catalog,
       currentInput: new Set(this.turnMessages),
       historyState: step.ctx.get(HistoryStateKey) ?? {},
       record: prompt.messages,

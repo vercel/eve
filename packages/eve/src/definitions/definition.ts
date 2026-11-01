@@ -1,24 +1,25 @@
 import type { ModelMessage } from "ai";
 
+import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { ContextContainer } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
 import type { HistoryState, LiveDynamicModelSelection as ModelChoice } from "#context/keys.js";
 import type { DynamicContext } from "#dynamic/definition.js";
 import type { CatalogSkill } from "#execution/catalog/skills.js";
-import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
+import type { Announcement } from "#harness/announcements.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
-import type { JsonValue } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 
 // An agent is one function of its session. Each file it declares is a definition, eve's own
 // features are definitions, and the agent is all of them together. A definition reads where eve
-// is and says what it adds: parts of the system prompt, tools, context for the model call, what to
-// do about a commit, or the model. eve collects what every definition adds, lets each arrange the
-// call in turn, and takes the latest choice of model.
+// is and says what it adds: parts of the system prompt, tools, context for the model call, what it
+// announces, what to do about a commit, or the model. eve collects what every definition adds,
+// lets each arrange the call in turn, and takes the latest choice of model.
 
 /** A value, or a function eve calls only where it needs the value. */
 export type Lazy<T> = T | (() => T | Promise<T>);
@@ -39,7 +40,12 @@ export interface Definition {
   /** Names it in errors and logs: a file's path, or `eve.<feature>`. */
   readonly label: string;
   readonly contribute: (ctx: DefinitionContext) => Contribution;
-  /** Applies what it keeps to the step's process, such as a registry: as a step starts, and after it changes. */
+  /**
+   * Applies what its kind's definitions keep to the step's process or sandbox, such as the
+   * connection registry or skill files: as a step starts, and after what it keeps changes. Every
+   * definition of a kind names the same function, which reads the kind's kept values with
+   * `slotsOf`, and runs once per step start.
+   */
   readonly install?: (ctx: ContextContainer) => Promise<void>;
 }
 
@@ -47,10 +53,12 @@ export interface Definition {
 export interface ContributionValues {
   /** Collected: parts of the system prompt, which sort by their `order`. */
   readonly system: readonly Section[];
-  /** Collected: what the model can reach. A later definition's tool takes a name from an earlier one's. */
+  /** Collected: what the model can reach. The first definition to offer a name keeps it. */
   readonly tools: ToolContribution;
   /** Collected: context for this call only, each entry ahead of its turn's input. */
   readonly context: readonly AnchoredEntry[];
+  /** Collected: what the model is told once, and again each time it changes, by key. */
+  readonly announcements: Readonly<Record<string, Announcement>>;
   /** Collected: what to do about the commit, after it. */
   readonly effects: readonly Effect[];
   /** Decided: the model the call runs. The latest definition that answers chooses it. */
@@ -65,13 +73,41 @@ export type Contribution = {
   readonly arrange?: (draft: Draft) => Partial<Draft>;
 };
 
+/**
+ * What makes a tool a route: its call becomes the call to the entry it names, which every gate
+ * then sees as that entry's own. Only an entry the step can run is reachable, not another route;
+ * the model's history names the route.
+ */
+export interface Route {
+  /** The route's own input, which reaches the entry's. */
+  readonly inputSchema: JsonObject;
+  /** The entry the route's input reaches, or what the model should fix. */
+  target(input: unknown): RouteTarget | RouteMiss;
+  /** What the model reads when the entry's own schema rejects its input. */
+  explain?(entry: HarnessToolDefinition, issues: readonly RouteIssue[]): readonly RouteIssue[];
+}
+
+export interface RouteTarget {
+  readonly name: string;
+  readonly input: unknown;
+  /** Where the entry's input sits in the route's, which issues with it report under. */
+  readonly at?: string;
+}
+
+export interface RouteMiss {
+  readonly issue: string;
+  /** The route input's field at fault. */
+  readonly path: string;
+}
+
+export type RouteIssue = StandardSchemaV1.Issue;
+
 /** The model call as definitions make it, each part made when it's first read. */
 export interface Draft {
   readonly system: () => Promise<readonly Section[]>;
   readonly tools: () => Promise<ToolTable>;
   readonly context: () => Promise<readonly AnchoredEntry[]>;
-  /** The call's record: what the step commits to history. Absent where eve asks for no call. */
-  readonly record: () => Promise<CallRecord | undefined>;
+  readonly announcements: () => Promise<Readonly<Record<string, Announcement>>>;
 }
 
 /** What a definition keeps: its JSON form, which the session holds, and code that form can't carry. */
@@ -113,6 +149,8 @@ export interface DefinitionContext {
 export interface StepInfo {
   /** The agent's `defineTool()` tools, as the step runs them. */
   readonly agentTools: HarnessToolMap;
+  /** A tool's `endsTurn` applies: a root turn without an output schema. */
+  readonly endsTurn: boolean;
   /** The session's reader sees only its final reply: a child's caller or a schedule. */
   readonly finalReplyOnly: boolean;
   readonly session: Pick<HarnessSession, "rootSessionId">;
@@ -146,8 +184,6 @@ export interface CallInput {
   /** The turn's input among the record's messages: what eve adds for the turn goes before it. */
   readonly currentInput: ReadonlySet<HarnessModelMessage>;
   readonly historyState: HistoryState;
-  /** The step's catalog: what its tools reach. */
-  readonly catalog: StepCatalog;
 }
 
 export interface CallRecord {
@@ -188,11 +224,16 @@ export function section(
   return { key, order: options.order, part: options.part ?? "base", text };
 }
 
-/** `static` entries are the agent's own files; `dynamic` ones are made per session. */
+/** A tool the model can call: one that runs, or a route to one. */
 export interface ToolEntry {
+  /** For a route, what the model sees: its name, description, and input schema. */
   readonly definition: HarnessToolDefinition;
   /** The definition that added it, for errors. */
   readonly source?: string;
+  /** Its calls become calls to the entry its input names. */
+  readonly route?: Route;
+  /** What the model is told about it while the call offers it, by key. */
+  readonly announcements?: Readonly<Record<string, Announcement>>;
 }
 
 /** Everything a model call can reach: tools by name, connections, and skills. */
@@ -204,11 +245,7 @@ export interface ToolTable {
 
 export type ToolContribution = Partial<ToolTable>;
 
-export const EMPTY_TOOLS: ToolTable = {
-  connections: [],
-  entries: new Map(),
-  skills: new Map(),
-};
+export const EMPTY_TOOLS: ToolTable = { connections: [], entries: new Map(), skills: new Map() };
 
 /** Context for one call only, ahead of the input its turn brought. */
 export interface AnchoredEntry {

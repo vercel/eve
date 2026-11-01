@@ -20,6 +20,9 @@ import {
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
 import { writeDefinitionsState } from "#definitions/state.js";
+import { evaluateStepValues } from "#definitions/step.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
@@ -201,20 +204,30 @@ describe("buildStepCatalog", () => {
       ]);
     });
 
-    it("keeps the catalog tools earlier steps offered, unchanged, once nothing reaches them", async () => {
-      const reachingEverything = (
-        await catalogContext({
-          connections: [fakeConnection({ name: "linear", tools: [] })],
-          skills: [{ deferred: true, name: "pdf-forms" }],
-          tools: [inlineTool("refund_invoice", { deferred: true })],
-        })
-      ).catalog;
-      const later = (
-        await catalogContext({
-          offered: reachingEverything.offered,
-          tools: [inlineTool("add")],
-        })
-      ).catalog;
+    it("keeps the catalog tools a model call offered, unchanged, once nothing reaches them", async () => {
+      const { catalog: reachingEverything, ctx } = await catalogContext({
+        connections: [fakeConnection({ name: "linear", tools: [] })],
+        skills: [{ deferred: true, name: "pdf-forms" }],
+        tools: [inlineTool("refund_invoice", { deferred: true })],
+      });
+      enterSessionProjection(ctx, undefined);
+      await evaluateStepValues(
+        {
+          config: { tools: toolMap(inlineTool("refund_invoice", { deferred: true })) },
+          ctx,
+          finalReplyOnly: false,
+          session: {},
+        },
+        { conversation: [] },
+      );
+      ctx.set(BundleKey, catalogBundle({}));
+      ctx.delete(ConnectionRegistryKey);
+      const later = await nativeCatalog({
+        agentTools: toolMap(inlineTool("add")),
+        ctx,
+        endsTurn: true,
+        session: {},
+      });
       const catalogTools = (catalog: StepCatalog) =>
         [SEARCH_TOOL_NAME, CALL_TOOL_NAME, SKILL_TOOL_NAME].map((tool) => shape(catalog, tool));
 
@@ -225,6 +238,20 @@ describe("buildStepCatalog", () => {
         SKILL_TOOL_NAME,
       ]);
       expect(catalogTools(later)).toEqual(catalogTools(reachingEverything));
+    });
+
+    it("keeps the catalog tools a session's record from an earlier deployment offered", async () => {
+      const { catalog } = await catalogContext({
+        offered: { connections: false, searchableSkills: false, skills: true, tools: true },
+        tools: [inlineTool("add")],
+      });
+
+      expect(names(catalog.advertised)).toEqual([
+        "add",
+        SEARCH_TOOL_NAME,
+        CALL_TOOL_NAME,
+        SKILL_TOOL_NAME,
+      ]);
     });
   });
 

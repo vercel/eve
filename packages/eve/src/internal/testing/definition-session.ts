@@ -4,13 +4,14 @@
  */
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionIdKey, SessionKey } from "#context/keys.js";
+import { HistoryStateKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import type { DynamicContext } from "#dynamic/definition.js";
 import type { DynamicDefinitionKind } from "#runtime/types.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { createModelMetadata } from "#internal/model-catalog.js";
-import { evaluateValues, stepDraft } from "#definitions/step.js";
+import { evaluateValues, stepDraft, stepMessages } from "#definitions/step.js";
+import type { CatalogSkill } from "#execution/catalog/skills.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -55,6 +56,8 @@ function resolver<K extends DynamicDefinitionKind>(kind: K, source: DynamicSourc
 export function definitionSession(
   input: {
     /** Authored skills, which a dynamic skill of the same name overrides. */
+    /** The agent's static user instructions. */
+    readonly userInstructions?: readonly string[];
     readonly authoredSkills?: readonly {
       readonly content: string;
       readonly description: string;
@@ -104,6 +107,11 @@ export function definitionSession(
         ...(input.skills ?? []).map((source) => resolver("skill", source)),
         ...(input.connections ?? []).map((source) => resolver("connection", source)),
       ],
+      instructions: (input.userInstructions ?? []).map((content, index) => ({
+        content,
+        name: `instructions/user-${index}`,
+        role: "user",
+      })),
       skills: input.authoredSkills ?? [],
     },
     subagentRegistry: {
@@ -132,6 +140,28 @@ export async function beforeModelCall(ctx: ContextContainer): Promise<void> {
   await contextStorage.run(ctx, () => evaluateValues(ctx, { conversation: [] }));
 }
 
+/**
+ * The messages the session's next model call announces, after evaluating its values as eve does
+ * before one; records them as announced, as the call's commit would.
+ */
+export async function announcedNext(ctx: ContextContainer): Promise<readonly string[]> {
+  await beforeModelCall(ctx);
+  return await contextStorage.run(ctx, async () => {
+    const call = {
+      currentInput: new Set<never>(),
+      historyState: ctx.get(HistoryStateKey) ?? {},
+      record: [],
+    };
+    const draft = await stepDraft(
+      { config: { tools: new Map() }, ctx, finalReplyOnly: false, session: { rootSessionId: "" } },
+      call,
+    );
+    const { historyState, record } = await stepMessages(draft, { call, project: (r) => [...r] });
+    ctx.set(HistoryStateKey, historyState);
+    return record.map(({ content }) => (typeof content === "string" ? content : ""));
+  });
+}
+
 /** The message of the error the session's next evaluation fails with. */
 export async function evaluationError(ctx: ContextContainer): Promise<string> {
   try {
@@ -140,6 +170,21 @@ export async function evaluationError(ctx: ContextContainer): Promise<string> {
     return error instanceof Error ? error.message : String(error);
   }
   throw new Error("Expected the evaluation to fail.");
+}
+
+/** The skills the session's next model call can load, as its definitions contribute them. */
+export async function callSkills(
+  ctx: ContextContainer,
+): Promise<ReadonlyMap<string, CatalogSkill>> {
+  return await contextStorage.run(ctx, async () => {
+    const draft = await stepDraft({
+      config: { tools: new Map() },
+      ctx,
+      finalReplyOnly: false,
+      session: { rootSessionId: "" },
+    });
+    return (await draft.tools()).skills;
+  });
 }
 
 /** The dynamic tools the session's next model call offers, as its definitions kept them. */

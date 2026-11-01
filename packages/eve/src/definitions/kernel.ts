@@ -2,7 +2,7 @@ import type { ModelMessage } from "ai";
 
 import type { ContextContainer } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
-import { SessionIdKey } from "#context/keys.js";
+import { HistoryStateKey, SessionIdKey } from "#context/keys.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
@@ -42,6 +42,7 @@ import {
 import { chooseModel, effectiveModelId } from "./model.js";
 import { sessionDefinitions } from "./agent.js";
 import { bindOpeningCancel, settleHookCommands } from "./hooks.js";
+import { staticUserInstructions } from "./instructions.js";
 
 // The kernel asks definitions what they add, on two schedules. Before each model call it evaluates
 // what they keep, with the conversation that call reads; everything else reads what that left,
@@ -222,6 +223,7 @@ export async function restoreDefinitions(
     readonly revision?: string;
   } = {},
 ): Promise<void> {
+  migrateAnnounced(ctx, input.conversation);
   const before = readDefinitionsState(ctx);
   if (input.revision !== undefined && input.revision !== before.revision) {
     const moved = before.revision !== undefined && before.memos !== undefined;
@@ -248,6 +250,55 @@ export async function restoreDefinitions(
   const draft = draftOf(contributions);
   await draft.tools();
   await draft.system();
+}
+
+/**
+ * Sessions from before user instructions were announced: dynamic ones recorded what each added
+ * under its definition, and static ones started the history. The history's announcements record
+ * both now, under the same key and digest, so the same content doesn't join again.
+ */
+function migrateAnnounced(
+  ctx: ContextContainer,
+  conversation: readonly ModelMessage[] | undefined,
+): void {
+  const { appended, ...state } = readDefinitionsState(ctx);
+  const history = ctx.get(HistoryStateKey) ?? {};
+  const said = new Set(
+    (conversation ?? []).flatMap((message) =>
+      message.role === "user" &&
+      (message as { readonly kind?: string }).kind === "context.instruction" &&
+      typeof message.content === "string"
+        ? [message.content]
+        : [],
+    ),
+  );
+  const held = Object.fromEntries(
+    staticUserInstructions(ctx).flatMap(({ content, key }) =>
+      history.announcements?.[key] === undefined && said.has(content)
+        ? [[key, digestOf(content)]]
+        : [],
+    ),
+  );
+  if (appended === undefined && Object.keys(held).length === 0) return;
+  const retained = Object.fromEntries(
+    Object.entries(appended ?? {}).filter(([id]) => {
+      const value = state.slots[id]?.value;
+      return (
+        value !== null &&
+        typeof value === "object" &&
+        "role" in value &&
+        "content" in value &&
+        value.role === "user" &&
+        typeof value.content === "string" &&
+        said.has(value.content)
+      );
+    }),
+  );
+  ctx.set(HistoryStateKey, {
+    ...history,
+    announcements: { ...retained, ...held, ...history.announcements },
+  });
+  if (appended !== undefined) writeDefinitionsState(ctx, state);
 }
 
 /**
@@ -339,6 +390,10 @@ async function evaluate(
         ),
     );
     memos.close();
+  }
+  // Nothing kept, and nothing before: the session holds no slot for it.
+  if (value === null && previous === undefined && result.live === undefined) {
+    return { changed: false, kept: { value } };
   }
   const unchanged = previous?.digest === digest;
   if (!unchanged && previous !== undefined && run.mode === "restore") {

@@ -366,7 +366,8 @@ export function withdrawUnavailable(
   view: SessionView,
   input: {
     readonly interactionIds: readonly string[];
-    readonly searchable: (request: ApprovalAsk) => boolean;
+    /** The step offers `eve__search`, which an unavailable tool's message points to. */
+    readonly searchable: boolean;
   },
 ): Transition {
   const tables = view.projection.view;
@@ -378,7 +379,7 @@ export function withdrawUnavailable(
     for (const request of pendingApprovals(view, step)) {
       if (!gone.has(request.interactionId)) continue;
       const { callId, toolName } = request.call;
-      const message = unavailableToolMessage(toolName, input.searchable(request));
+      const message = unavailableToolMessage(toolName, input.searchable);
       const failed = failedCall({ callId, message, toolName });
       messages = withResult(messages, failed.part);
       responses.closeOthers(request.interactionId, undefined);

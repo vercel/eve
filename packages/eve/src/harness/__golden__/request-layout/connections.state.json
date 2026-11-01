@@ -91,12 +91,6 @@
         "id": "eve-test/layout"
       }
     },
-    "eve.offeredCatalogTools": {
-      "connections": true,
-      "searchableSkills": false,
-      "skills": false,
-      "tools": true
-    },
     "eve.otelTraceEnabled": false,
     "eve.reactions": {
       "at": "<time>",
@@ -129,6 +123,16 @@
               "url": "https://mcp.notion.example/mcp"
             }
           ]
+        },
+        "eve.catalog": {
+          "digest": "KrH36F1Zk9OV4Q_e0rW8Vz",
+          "since": 1,
+          "value": {
+            "connections": true,
+            "searchableSkills": false,
+            "skills": false,
+            "tools": true
+          }
         },
         "model:agent": {
           "digest": "1qJ47UPfGIJVLn1ESASMhk",

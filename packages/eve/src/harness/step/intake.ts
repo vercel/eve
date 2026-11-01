@@ -48,7 +48,7 @@ export async function settleRuntimeWork(
   const finished = forgetFinishedRuns(step.session, ready, runtime.event.turnId);
   step.session = finished.session;
   await step.apply(finishRun(step.view(), { requestIds: finished.requestIds }));
-  const results = await runtimeResultCalls(ready, await stepCatalog(step, { endsTurn: false }));
+  const results = await runtimeResultCalls(ready, await stepCatalog(step));
   const staged = await stageToolResultMedia([
     { role: "tool", content: results.map(({ part }) => part) },
   ]);

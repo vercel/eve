@@ -1,4 +1,4 @@
-import type { DynamicSkillManifest } from "#context/keys.js";
+import type { CatalogSkill } from "#execution/catalog/skills.js";
 import type { Announcement } from "#harness/announcements.js";
 import { SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { MODEL_SKILL_ROOT } from "#shared/skill-paths.js";
@@ -11,6 +11,7 @@ export interface AvailableSkillDescription {
 }
 
 const ANNOUNCEMENT_KEY = "skills";
+const NO_SKILLS = "Available skills: none";
 
 /**
  * Formats the "Available skills" section: every skill that isn't deferred,
@@ -49,26 +50,22 @@ export function formatAvailableSkillsSection(
 
 /**
  * Announces the dynamic skills that aren't deferred, in full whenever they
- * change. Nothing is announced until the first one resolves. `announced` holds
- * the values announced so far.
+ * change. Nothing is announced until the first one resolves.
  */
 export function dynamicSkillAnnouncements(
-  manifest: DynamicSkillManifest | undefined,
-  announced: Readonly<Record<string, string>> | undefined,
+  dynamic: readonly CatalogSkill[],
 ): Readonly<Record<string, Announcement>> {
-  const skills = Object.values(manifest ?? {})
-    .flat()
-    .filter((skill) => skill.deferred !== true);
-  if (skills.length === 0 && announced?.[ANNOUNCEMENT_KEY] === undefined) return {};
   const text =
     formatAvailableSkillsSection(
-      skills.map(({ description, name, revision }) => ({
-        description,
-        hasFiles: revision !== undefined,
-        name,
-      })),
-    ) ?? "Available skills: none";
-  return { [ANNOUNCEMENT_KEY]: { value: text, render: () => text } };
+      dynamic
+        .filter((skill) => !skill.deferred)
+        .map(({ description, name, path }) => ({
+          description,
+          hasFiles: path !== undefined,
+          name,
+        })),
+    ) ?? NO_SKILLS;
+  return { [ANNOUNCEMENT_KEY]: { initial: NO_SKILLS, value: text, render: () => text } };
 }
 
 function formatAvailableSkillLine(skill: AvailableSkillDescription): string {

@@ -34,7 +34,10 @@ export interface DefinitionsState {
   readonly memos?: Readonly<Record<string, Readonly<Record<string, JsonValue>>>>;
   /** Memo scopes a deployment change discarded, until each succeeds again: for diagnostics. */
   readonly discarded?: readonly string[];
-  /** For user-role instructions: the digest of the content each definition last added. */
+  /**
+   * Sessions from before user-role instructions were announced: the digest of the content each
+   * definition last added. Restoring moves it to the history's announcements.
+   */
   readonly appended?: Readonly<Record<string, string>>;
   /** The latest line of each event type, plus `"*"` for the latest fact. */
   readonly latest: Readonly<Record<string, number>>;
@@ -235,7 +238,9 @@ export function forgetSessionLive(sessionId: string): void {
 
 /**
  * The slots of one kind, in the order each was first written, with their live values where this
- * process has them.
+ * process has them. A model call reads what definitions contribute, never another's slot; this is
+ * for what applies a kind to the process or sandbox, and for readers outside a model call, such as
+ * a dispatch step that needs the subagent a session selected.
  */
 export function slotsOf(
   ctx: Pick<ContextReader, "get">,

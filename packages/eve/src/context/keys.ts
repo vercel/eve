@@ -125,7 +125,8 @@ export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
 /**
  * The catalog tools a session's tool list has offered. Each stays offered for
  * the rest of the session, so the tool list never drops a catalog tool that
- * earlier calls named. Compaction keeps it, unlike {@link HistoryStateKey}.
+ * earlier calls named. eve's catalog definition keeps it now; sessions an
+ * earlier deployment ran kept it under this key, which seeds it.
  */
 export interface OfferedCatalogTools {
   /** `eve__tool` mentions connected services, and `eve__search` their sign-in entries. */
@@ -251,8 +252,6 @@ export interface DurableDynamicSkillMetadata {
    */
   readonly revision?: string;
 }
-
-export type DynamicSkillManifest = Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>;
 
 /**
  * Durable map from dynamic skill name to the serialized sandbox session state

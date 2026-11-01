@@ -19,6 +19,16 @@
       "role": "assistant"
     },
     {
+      "content": "Release brief: v2.3 ships Friday.",
+      "kind": "context.instruction",
+      "role": "user"
+    },
+    {
+      "content": "Alice is on the release team.",
+      "kind": "context.instruction",
+      "role": "user"
+    },
+    {
       "content": "Did it ship?",
       "kind": "user",
       "metadata": {
@@ -75,7 +85,12 @@
       "principalType": "anonymous"
     },
     "eve.conversationId": "wrun_<ulid0>",
-    "eve.historyState": {},
+    "eve.historyState": {
+      "announcements": {
+        "eve.instructions:instructions/brief": "XDMXPTYCDRpXGjgnW-3Fg_",
+        "instructions:viewer": "BatRFpAm4Wx_y9qb1kLiB-"
+      }
+    },
     "eve.initiatorAuth": null,
     "eve.model": {
       "reference": {
@@ -83,17 +98,8 @@
         "id": "eve-test/layout"
       }
     },
-    "eve.offeredCatalogTools": {
-      "connections": false,
-      "searchableSkills": false,
-      "skills": true,
-      "tools": false
-    },
     "eve.otelTraceEnabled": false,
     "eve.reactions": {
-      "appended": {
-        "instructions:viewer": "BatRFpAm4Wx_y9qb1kLiB-"
-      },
       "at": "<time>",
       "latest": {
         "*": 51,
@@ -122,6 +128,16 @@
       },
       "revision": "bundled",
       "slots": {
+        "eve.catalog": {
+          "digest": "Vl4VfY1ZgBF_IG2QfAX8kn",
+          "since": 1,
+          "value": {
+            "connections": false,
+            "searchableSkills": false,
+            "skills": true,
+            "tools": false
+          }
+        },
         "instructions:today": {
           "digest": "qXZ_qqKCYJMmYUfqNAkNMG",
           "since": 1,
@@ -169,7 +185,7 @@
       "session": {
         "compaction": {
           "lastKnownInputTokens": 1,
-          "lastKnownPromptMessageCount": 4,
+          "lastKnownPromptMessageCount": 6,
           "requestEnvelopeTokens": 2429
         },
         "continuationToken": "http:layout-release",

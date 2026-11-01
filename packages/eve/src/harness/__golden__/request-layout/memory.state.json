@@ -153,11 +153,6 @@
               "id": "eve-test/layout"
             }
           }
-        },
-        "tool::team": {
-          "digest": "dCNOmK_nSY-12vHzasLXis",
-          "since": 1,
-          "value": null
         }
       }
     },

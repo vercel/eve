@@ -4,6 +4,7 @@ import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-contex
 import { declared } from "#runtime/types.js";
 import { approvals } from "./approvals.js";
 import { builtins } from "./builtins.js";
+import { catalog } from "./catalog.js";
 import { connectionDefinition, connections } from "./connections.js";
 import type { Definition } from "./definition.js";
 import { hookDefinition } from "./hooks.js";
@@ -15,8 +16,8 @@ import { staticTools, toolDefinition, toolsDefinition } from "./tools.js";
 import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
 import type { ResolvedScheduleCollection } from "#runtime/types.js";
 
-// eve's own harness: a definition for each file the agent declares, then eve's builtins, which
-// see everything the agent declares, and the model the session's parent gave it.
+// eve's own harness: a definition for each file the agent declares, then eve's builtins and
+// catalog, which see everything the agent declares, and the model the session's parent gave it.
 
 const built = new WeakMap<CompiledBundle, Promise<readonly Definition[]>>();
 
@@ -59,12 +60,13 @@ async function buildAgentDefinitions(bundle: CompiledBundle): Promise<readonly D
     ...declared(agent, "schedules")
       .filter((collection) => collection.offersTools === true)
       .map(scheduleToolsDefinition),
-    skills,
     ...declared(agent, "skill").map(skillDefinition),
+    skills,
     connections,
     ...declared(agent, "connection").map(connectionDefinition),
     approvals,
     builtins,
+    catalog,
     // Last, so a parent's choice is the one the session runs: nothing of the session's evaluates for it.
     parentModel,
   ];
