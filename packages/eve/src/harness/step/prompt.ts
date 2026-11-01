@@ -1,3 +1,4 @@
+import { changeHistory } from "#harness/session-machine/history.js";
 import { appendTaskContext } from "#execution/tasks/model-step.js";
 import {
   anchorToTurn,
@@ -35,8 +36,9 @@ export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> 
     messages: step.session.history,
     insertionIndex: turn.storedClientContext?.insertionIndex,
   });
-  const messages = validateHarnessModelMessages(repaired.messages);
-  step.session = { ...step.session, history: [...messages] };
+  step.session = changeHistory(step.session, { repaired: repaired.messages });
+  // Its own copy: task results join it below.
+  const messages = [...step.session.history];
   if (turn.storedClientContext !== undefined && repaired.insertionIndex !== undefined) {
     const storedClientContext = {
       ...turn.storedClientContext,

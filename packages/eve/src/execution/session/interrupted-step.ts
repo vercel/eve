@@ -17,7 +17,7 @@ import {
 } from "#harness/session-machine/commit.js";
 import { currentProjection, saveSessionProjection } from "#harness/session-machine/current.js";
 import { fail, receive, stopInterruptedSteps } from "#harness/session-machine/transitions.js";
-import { replaceSessionHistory } from "#harness/compaction/step.js";
+import { changeHistory } from "#harness/session-machine/history.js";
 import { controlAdmitted, fact } from "#harness/facts.js";
 import type {
   ControlDelivery,
@@ -195,13 +195,12 @@ export async function recoverInterruptedStep(input: {
     // A control applies once: a clear the attempt finished empties history now, and a control
     // it left unsettled settles failed rather than run again.
     if (attempt.cleared) {
-      const cleared = saveTransition(session, {
-        clearsHistory: true,
+      session = saveTransition(session, {
         events: [],
+        history: { rewrite: [] },
         signIns: [],
         turn: { remembered: view().turn.remembered, suspended: [] },
       });
-      session = replaceSessionHistory(cleared, []);
     }
     const { delivery, kind } = input.control;
     const status =
@@ -224,19 +223,14 @@ export async function recoverInterruptedStep(input: {
   const { settledTurn } = attempt;
   if (settledTurn !== undefined && activeTurnIdOf(currentProjection(ctx)) === undefined) {
     // The checkpoint predates the step, so the history its input imported is not in it yet.
-    session = {
-      ...session,
-      history: [
-        ...session.history,
-        ...createImportedHistoryMessages(input.stepInput?.history ?? []),
-      ],
-    };
+    session = changeHistory(session, {
+      append: createImportedHistoryMessages(input.stepInput?.history ?? []),
+    });
     session = await preserveStoppedTurnMessage(ctx, session, input.stepInput);
     if (settledTurn.text !== undefined) {
-      session = {
-        ...session,
-        history: [...session.history, { content: settledTurn.text, role: "assistant" }],
-      };
+      session = changeHistory(session, {
+        append: [{ content: settledTurn.text, role: "assistant" }],
+      });
     }
     return finish({
       next: null,
@@ -273,7 +267,7 @@ export async function recoverInterruptedStep(input: {
   const interruptions = turnId === undefined ? 0 : turnInterruptions(session.state, turnId) + 1;
   session = saveTransition(session, stop);
   const note = interruptedAttemptNote(attempt.calls);
-  if (note !== undefined) session = { ...session, history: [...session.history, note] };
+  if (note !== undefined) session = changeHistory(session, { append: [note] });
   if (input.failed === undefined && interruptions <= MAX_TURN_INTERRUPTIONS) {
     // The answers the attempt applied leave the input.
     const { settledInteractions } = attempt;
