@@ -8,7 +8,7 @@ import { announceWaiting } from "#harness/session-machine/waiting.js";
 
 const turnId = "turn_0";
 
-function viewOf(...lines: SessionEvent[][]): SessionView {
+function viewOf(...lines: (readonly SessionEvent[])[]): SessionView {
   const view = emptySessionView();
   for (const facts of lines)
     foldLine(view, { at: "2026-01-01T00:00:00.000Z", facts }, view.position);

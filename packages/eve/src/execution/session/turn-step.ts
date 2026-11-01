@@ -3,7 +3,7 @@ import { createToolChannelTo } from "#execution/tools/channel-to.js";
 import { channelOf } from "#reactions/frame.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
-import type { HandleEventFn } from "#harness/types.js";
+import type { Commit, HandleEventFn } from "#harness/types.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
@@ -50,7 +50,12 @@ import {
   recordAppliedSession,
   saveSessionProjection,
 } from "#harness/session-machine/current.js";
-import { saveTransition, dropClosedRecords, sessionView } from "#harness/session-machine/commit.js";
+import {
+  commitTransitions,
+  saveTransition,
+  dropClosedRecords,
+  sessionView,
+} from "#harness/session-machine/commit.js";
 import { matchSignIns, receive } from "#harness/session-machine/transitions.js";
 import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
@@ -75,10 +80,9 @@ import {
 } from "#execution/session/interrupted-step.js";
 import { stepDisagreement } from "#execution/session/step-decision-check.js";
 import { createLogger } from "#internal/logging.js";
-import { admitDeliveries, type DeliveryAdmission } from "#execution/session/delivery-facts.js";
+import { planAdmission, type DeliveryAdmission } from "#execution/session/delivery-facts.js";
 import { getAdapterKind } from "#channel/adapter.js";
-import type { SessionEvent } from "#protocol/session-event.js";
-import { fact } from "#harness/facts.js";
+import { admitDeliveries } from "#harness/session-machine/deliveries.js";
 import { eventsOf } from "#harness/publication.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
 import { applyReactionEffects, restoreReactions } from "#reactions/runner.js";
@@ -357,7 +361,7 @@ async function runSessionStepBody(
         await instrumentation?.flush();
         throw error;
       }
-      admission = admitDeliveries({
+      admission = planAdmission({
         channelKind: ctx.get(ChannelInstrumentationKey)?.kind ?? getAdapterKind(adapter),
         delivery: rawDelivery ?? delivery,
         status: (deliveryId) => currentProjection(ctx).view.deliveries[deliveryId]?.status,
@@ -437,25 +441,23 @@ async function runSessionStepBody(
 
     /** Whether the admission changed the session: its history or its sandbox. */
     let admissionChangedSession = false;
-    /** The admission's facts: the session's start if it hasn't, then each delivery admitted. */
-    const admissionFacts = (runtime: ReturnType<typeof buildRuntimeIdentity>): SessionEvent[] => {
-      if (admission === undefined || admission.facts.length === 0) return [];
-      const facts: SessionEvent[] = [];
-      if (!turnPosition(currentProjection(ctx)).sessionStarted) {
-        const parent = ctx.get(ParentSessionKey);
-        const predecessor = ctx.get(SessionPredecessorKey);
-        facts.push(
-          fact("session.started", {
-            parent:
-              parent === undefined
-                ? undefined
-                : { callId: parent.callId, sessionId: parent.sessionId },
-            predecessor,
-            runtime,
-          }),
-        );
-      }
-      return [...facts, ...admission.facts];
+    /** The admission's commit: the session's start if it hasn't, then each delivery admitted. */
+    const admissionFacts = (runtime: ReturnType<typeof buildRuntimeIdentity>): Commit => {
+      if (admission === undefined || admitDeliveries(admission.deliveries).length === 0)
+        return admitDeliveries([]);
+      const parent = ctx.get(ParentSessionKey);
+      return admitDeliveries(admission.deliveries, {
+        start: turnPosition(currentProjection(ctx)).sessionStarted
+          ? undefined
+          : {
+              parent:
+                parent === undefined
+                  ? undefined
+                  : { callId: parent.callId, sessionId: parent.sessionId },
+              predecessor: ctx.get(SessionPredecessorKey),
+              runtime,
+            },
+      });
     };
     /** The admission commit, with the session's providers its hooks read. */
     const publishAdmission = async (runtime: ReturnType<typeof buildRuntimeIdentity>) => {
@@ -502,9 +504,9 @@ async function runSessionStepBody(
         ({ deliveryId }) => projection.view.deliveries[deliveryId]?.status === "admitted",
       );
       if (waiting.length === 0) return;
-      const { events } = receive(sessionView(projection, initialSession.state), {
-        deliveries: waiting,
-      });
+      const received = commitTransitions([
+        receive(sessionView(projection, initialSession.state), { deliveries: waiting }),
+      ]);
       // The turn is already stopping, so this commit's hooks have nothing left to cancel.
       const emit = createTurnEventHandler({
         abortSignal,
@@ -514,7 +516,7 @@ async function runSessionStepBody(
         publisher,
       });
       const publish = instrumentation?.createHandleEvent({ handleEvent: emit }) ?? emit;
-      await contextStorage.run(ctx, () => publish(events));
+      await contextStorage.run(ctx, () => publish(received));
     };
 
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {

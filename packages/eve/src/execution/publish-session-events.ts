@@ -1,4 +1,3 @@
-import { checksSessionEvents } from "#shared/dev-checks.js";
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 import { readSessionStreamTailIndex, streamSessionLines } from "#execution/session-event-stream.js";
 import type { ControlDelivery } from "#harness/types.js";
@@ -22,13 +21,15 @@ import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import {
+  commitTransitions,
+  joinCommits,
   saveTransition,
   sessionView,
   type Transition,
   dropClosedRecords,
 } from "#harness/session-machine/commit.js";
 import { announceWaiting } from "#harness/session-machine/waiting.js";
-import { cascade } from "#harness/session-machine/cascade.js";
+import { createLineCommitter } from "#harness/session-machine/lines.js";
 import { copyView } from "#protocol/session-projection/fold.js";
 import {
   advance,
@@ -46,8 +47,8 @@ import {
   type SessionView as MachineView,
 } from "#harness/session-machine/view.js";
 import { validateHarnessModelMessages, type HarnessModelMessage } from "#harness/messages.js";
-import { eventsOf } from "#harness/publication.js";
 import type {
+  Commit,
   HandleEventFn,
   HarnessSession,
   HarnessSessionBase,
@@ -55,18 +56,14 @@ import type {
 } from "#harness/types.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
-import { eventsOfLine, linesOf } from "#protocol/session-lines.js";
+import { eventsOfLine } from "#protocol/session-lines.js";
 import type { SessionEvent, SessionStreamEvent } from "#protocol/session-event.js";
-import {
-  encodeLineBytes,
-  type FactPosition,
-  type StoredLine,
-} from "#protocol/session-events/envelope.js";
+import type { FactPosition, StoredLine } from "#protocol/session-events/envelope.js";
 import { FACT_CATALOG, isFactType } from "#protocol/session-events/catalog.js";
 import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import type { Cause, ErrorInfo } from "#protocol/session-events/envelope.js";
-import { sessionEndedFacts, type ControlSettlement } from "#harness/facts.js";
-import { createStreamChecker, type StreamChecker } from "#protocol/session-events/checker.js";
+import type { ControlSettlement } from "#harness/facts.js";
+import { endSession } from "#harness/session-machine/deliveries.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -111,14 +108,14 @@ export interface PublishedSessionEvents {
  */
 export async function publishSessionEvents(
   target: SessionStepState,
-  events: readonly SessionEvent[],
+  publications: readonly SessionPublication[],
   options?: { readonly canCancelTurn?: boolean },
 ): Promise<PublishedSessionEvents & { readonly cancelled: boolean }> {
   let cancelled = false;
   const published = await publishEventsFromStep(
     target,
     "own",
-    events,
+    joinCommits(publications),
     options?.canCancelTurn
       ? () => {
           cancelled = true;
@@ -131,21 +128,23 @@ export async function publishSessionEvents(
 async function publishEventsFromStep(
   target: SessionStepState,
   origin: SessionEventOrigin,
-  events: readonly SessionEvent[],
+  publications: readonly SessionPublication[],
   cancelTurn?: () => void,
 ): Promise<PublishedSessionEvents> {
-  if (events.length === 0) {
+  const published = publications.filter((entry) => !Array.isArray(entry) || entry.length > 0);
+  if (published.length === 0) {
     return { serializedContext: target.serializedContext, sessionState: target.sessionState };
   }
   const restored = await restoreSessionStep(target);
-  const { published } = await publishFromSessionStep(restored, {
-    cancelTurn,
-    origin,
-    async publish(emit) {
-      await emit(events);
-    },
-  });
-  return published;
+  return (
+    await publishFromSessionStep(restored, {
+      cancelTurn,
+      origin,
+      async publish(emit) {
+        for (const publication of published) await emit(publication);
+      },
+    })
+  ).published;
 }
 
 /** A session step's context and session, restored so the step can publish. */
@@ -523,38 +522,15 @@ export function openSessionEventPublisher(input: {
   // Opened after the dispatcher, so a context that cannot build one leaves the
   // stream unlocked for the terminal event's fallback write.
   const writer = openSessionEventWriter(input.sessionWritable);
-  let checker: StreamChecker | undefined;
+  const committing = createLineCommitter();
   // The tables as the step's first publication found them, for what its end announces.
   let before: SessionView | undefined;
   const emitOne = async (publication: SessionPublication): Promise<readonly WrittenEvent[]> => {
-    if (checker === undefined && checksSessionEvents()) {
-      const { schemaViolation } = await import("#protocol/session-events/schemas.js");
-      checker = createStreamChecker({
-        seed: currentProjection(ctx).view,
-        validate: schemaViolation,
-      });
-    }
+    const committer = await committing;
     if (before === undefined) before = copyView(currentView(ctx));
-    const events = cascade(currentView(ctx), eventsOf(publication));
     const at = new Date().toISOString();
     const written: WrittenEvent[] = [];
-    // Preflight every line before the first write: an oversize progress record must not leave
-    // an earlier part of the publication durably written.
-    const lines = linesOf(events, at).map((line) => ({ line, bytes: encodeLineBytes(line) }));
-    lines.forEach(({ line }, index) => {
-      const violations = checker?.check(line, nextLinePosition(ctx) + index);
-      if (violations !== undefined && violations.length > 0) {
-        checker = undefined;
-        throw new Error(
-          `Session event contract: ${violations
-            .map(
-              (violation) =>
-                `${violation.rule} at ${violation.position}:${violation.index ?? "progress"}: ${violation.message}`,
-            )
-            .join("; ")}`,
-        );
-      }
-    });
+    const lines = committer.commit(currentView(ctx), publication, nextLinePosition(ctx), at);
     for (const { line, bytes } of lines) {
       const position = nextLinePosition(ctx);
       const earlier = orphaned[0];
@@ -576,7 +552,7 @@ export function openSessionEventPublisher(input: {
       await writer.write(bytes).catch((error: unknown) => {
         // Validation ran ahead of the write. A failed write must not leave the checker ahead
         // of the checkpoint; a later publication reseeds it from what actually committed.
-        checker = undefined;
+        committer.reset();
         throw error;
       });
       const lineEvents = eventsOfLine(line, position, at);
@@ -617,9 +593,9 @@ export function openSessionEventPublisher(input: {
     async finish(options) {
       if (before === undefined) return;
       const announced =
-        options?.announce === false ? [] : announceWaiting(before, currentView(ctx));
+        options?.announce === false ? undefined : announceWaiting(before, currentView(ctx));
       before = undefined;
-      if (announced.length > 0) await publish(announced);
+      if (announced !== undefined && announced.length > 0) await publish(announced);
     },
   };
 }
@@ -773,8 +749,8 @@ export async function publishTerminalSessionEvent(input: {
       }
       return;
     }
-    const closed = cascade(projection.view, sessionEndedFacts(projection, input.ending));
-    await writeUnroutedSessionEvent(input.sessionWritable, closed).catch((writeError) =>
+    const ended = endSession(projection, input.ending);
+    await writeUnroutedSessionEvent(input.sessionWritable, projection, ended).catch((writeError) =>
       log.error(`failed to write terminal ${type} event`, { ...fields, error: writeError }),
     );
     return;
@@ -821,7 +797,7 @@ export async function publishTerminalSessionEvent(input: {
   }
   const emit = instrumentation?.createHandleEvent({ handleEvent: publish }) ?? publish;
   try {
-    await contextStorage.run(ctx, () => emit(sessionEndedFacts(projection, input.ending)));
+    await contextStorage.run(ctx, () => emit(endSession(projection, input.ending)));
   } catch (error) {
     log.error(`failed to publish terminal ${type} event`, { ...fields, error });
   } finally {
@@ -839,12 +815,17 @@ export async function publishTerminalSessionEvent(input: {
 
 async function writeUnroutedSessionEvent(
   sessionWritable: WritableStream<Uint8Array>,
-  facts: readonly SessionEvent[],
+  projection: SessionProjection,
+  commit: Commit,
 ): Promise<void> {
+  const lines = (await createLineCommitter()).commit(
+    projection.view,
+    commit,
+    projection.view.position,
+  );
   const writer = openSessionEventWriter(sessionWritable);
   try {
-    const lines = linesOf(facts, new Date().toISOString()).map(encodeLineBytes);
-    for (const bytes of lines) await writer.write(bytes);
+    for (const { bytes } of lines) await writer.write(bytes);
     await writer.close();
   } finally {
     writer.release();
@@ -900,8 +881,8 @@ async function commit(
     origin: options.origin,
     async publish(emit) {
       // One commit: the batch's events are one atomic line.
-      const events = transitions.flatMap((transition) => transition.events);
-      if (events.length > 0) await emit(events);
+      const committed = commitTransitions(transitions);
+      if (committed.length > 0) await emit(committed);
     },
     // Save onto the session the scope committed, which carries what its providers captured.
     updateSession: (session) => ({

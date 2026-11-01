@@ -45,5 +45,6 @@
   ],
   "rule59_nitroVirtualIdAllowlist": [
     "packages/eve/src/internal/nitro/host/nitro-routing-import-specifier-plugin.ts"
-  ]
+  ],
+  "rule51_factBuildersByFile": {}
 }

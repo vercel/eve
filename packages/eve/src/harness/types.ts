@@ -1,5 +1,5 @@
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
-import type { SessionEvent } from "#protocol/session-event.js";
+import type { Fact, Progress } from "#protocol/session-events/facts.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { LanguageModel } from "ai";
@@ -271,11 +271,17 @@ export interface ResolvedCall<T extends ToolCallLike> {
 /** Resolves a model tool call to the entry it runs, if it reaches one. */
 export type CallResolver = <T extends ToolCallLike>(toolCall: T) => ResolvedCall<T> | undefined;
 
+declare const committedBrand: unique symbol;
+
 /**
- * What one publish writes: one event, or every event of one transition, which the writer commits
- * as one line so readers never see half of it.
+ * The facts of one kernel transition, which the writer commits as one line so readers never see
+ * half of it. Only the kernel (`harness/session-machine/`, `harness/hitl/`) builds one: the sink
+ * takes no other facts.
  */
-export type SessionPublication = SessionEvent | readonly SessionEvent[];
+export type Commit = readonly Fact[] & { readonly [committedBrand]: true };
+
+/** What one publish writes: one transition's facts, or one transient progress record. */
+export type SessionPublication = Commit | Progress;
 
 /** The sink the harness emits to: see {@link HandleEventFn}. */
 export type HarnessEmitFn = HandleEventFn;

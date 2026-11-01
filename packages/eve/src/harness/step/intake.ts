@@ -13,7 +13,7 @@ import {
   type UserModelMessage,
 } from "#harness/messages.js";
 import { finishRun, settle } from "#harness/session-machine/transitions.js";
-import { delegatedUsageFact } from "#harness/facts.js";
+import { recordLateSpend as recordLateSpendFact } from "#harness/session-machine/runs.js";
 import { activeTurnId, runtimeWait } from "#harness/session-machine/view.js";
 import { getTurnClientContextState } from "#harness/turn-client-context.js";
 import type { HarnessStepInput } from "#harness/types.js";
@@ -80,8 +80,7 @@ async function recordLateSpend(
   settled: ReadonlySet<string>,
 ): Promise<void> {
   const late = Object.entries(usage ?? {}).filter(([callId]) => !settled.has(callId));
-  if (late.length > 0)
-    await step.publish(late.map(([, spent]) => delegatedUsageFact(undefined, spent)));
+  if (late.length > 0) await step.publish(recordLateSpendFact(late.map(([, spent]) => spent)));
 }
 
 /** The turn's input as the model reads it. */

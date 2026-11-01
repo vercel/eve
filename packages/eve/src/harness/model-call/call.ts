@@ -33,7 +33,8 @@ import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.j
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import { estimateRequestEnvelope } from "#harness/request-envelope.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
-import { fact, usageOf } from "#harness/facts.js";
+import { usageOf } from "#harness/facts.js";
+import { retryRun } from "#harness/session-machine/runs.js";
 import { discardAttempt } from "#harness/session-machine/transitions.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import type { Step } from "#harness/step/context.js";
@@ -212,7 +213,7 @@ export class ModelCaller {
       return;
     }
     if (attempt === undefined) return;
-    await step.apply([fact("model.retried", { attempt, error: modelCallErrorInfo(error), runId })]);
+    await step.apply(retryRun({ attempt, error: modelCallErrorInfo(error), runId }));
   }
 
   /**

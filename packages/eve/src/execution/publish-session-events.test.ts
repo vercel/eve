@@ -1,3 +1,4 @@
+import { transition } from "#harness/session-machine/commit.js";
 import { expect, it } from "vitest";
 import { commitSessionStep } from "#execution/publish-session-events.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
@@ -12,8 +13,8 @@ it("rejects overlapping turn snapshots before restoring or publishing", async ()
     commitSessionStep(
       target(),
       (view) => [
-        { turn: { ...view.turn }, events: [] },
-        { turn: { ...view.turn }, events: [] },
+        transition({ turn: { ...view.turn }, events: [] }),
+        transition({ turn: { ...view.turn }, events: [] }),
       ],
       { origin: "relayed" },
     ),
@@ -24,8 +25,8 @@ it("rejects overlapping sign-in snapshots before restoring or publishing", async
     commitSessionStep(
       target(),
       (view) => [
-        { turn: view.turn, events: [], signIns: [] },
-        { turn: view.turn, events: [], signIns: [] },
+        transition({ turn: view.turn, events: [], signIns: [] }),
+        transition({ turn: view.turn, events: [], signIns: [] }),
       ],
       { origin: "relayed" },
     ),
@@ -37,8 +38,8 @@ it("allows a batch of unchanged transitions", async () => {
     commitSessionStep(
       state,
       (view) => [
-        { turn: view.turn, events: [] },
-        { turn: view.turn, events: [] },
+        transition({ turn: view.turn, events: [] }),
+        transition({ turn: view.turn, events: [] }),
       ],
       { origin: "relayed" },
     ),
@@ -53,8 +54,8 @@ it("rejects a changed turn followed by the original turn snapshot", async () => 
     commitSessionStep(
       target(),
       (view) => [
-        { turn: { ...view.turn }, events: [] },
-        { turn: view.turn, events: [] },
+        transition({ turn: { ...view.turn }, events: [] }),
+        transition({ turn: view.turn, events: [] }),
       ],
       { origin: "relayed" },
     ),

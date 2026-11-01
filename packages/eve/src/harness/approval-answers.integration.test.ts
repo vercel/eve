@@ -73,7 +73,7 @@ function setup(tools: readonly HarnessToolDefinition[]) {
   const sandbox = mockSandbox();
   ctx.set(SandboxKey, sandbox.access);
   const step = (current: HarnessSession, input?: HarnessStepInput) =>
-    contextStorage.run(ctx, () => createKernel(config)(current, input));
+    contextStorage.run(ctx, () => createKernel(config)(current, recorder.admit(input)));
   /** The approval the step asked for `toolName`'s call. */
   const approvalOf = (toolName: string): string => {
     const opened = events.find(

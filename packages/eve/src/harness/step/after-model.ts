@@ -15,8 +15,7 @@ import type { ModelResponse } from "#harness/model-call/run.js";
 import type { EndsTurnTools } from "#harness/model-call/tools.js";
 import type { JsonValue } from "#shared/json.js";
 import { failTurnForReaction, type Step } from "#harness/step/context.js";
-import { turnSettled } from "#harness/facts.js";
-import { fail, suspendStep } from "#harness/session-machine/transitions.js";
+import { complete, fail, suspendStep } from "#harness/session-machine/transitions.js";
 import { type ToolResultPart, withResult } from "#harness/session-machine/suspended-steps.js";
 import { clearTurnClientContextState } from "#harness/turn-client-context.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
@@ -137,7 +136,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       messages: answerCallsThatWontRun(responseMessages, result),
       tasks: dispatched.workflowRequests.map((task) => ({
         ...task,
-        clearedBy: result.policyApprovals?.[task.callId],
+        clearedBy: result.policyApprovals?.[task.callId]?.clearedBy,
       })),
     };
     if (approvalRequests.length > 0) {
@@ -327,10 +326,7 @@ async function settleTurn(
   step.session = clearTurnClientContextState(step.session);
 
   if (schema === undefined) {
-    await step.apply(
-      turnSettled(step.view().projection, { outcome: "completed" }),
-      step.session.history,
-    );
+    await step.apply(complete(step.view()), step.session.history);
     return { next: null, session: step.session, settledTurn: { output: stepOutput ?? "" } };
   }
 
@@ -348,9 +344,6 @@ async function settleTurn(
   }
 
   step.session = { ...step.session, outputSchema: undefined };
-  await step.apply(
-    turnSettled(step.view().projection, { outcome: "completed" }),
-    step.session.history,
-  );
+  await step.apply(complete(step.view()), step.session.history);
   return { next: null, session: step.session, settledTurn: { output: structured } };
 }

@@ -1,3 +1,4 @@
+import { transition } from "#harness/session-machine/commit.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import type { ApprovalMemory } from "#approval/evaluation.js";
 import type { ModelMessage } from "ai";
@@ -181,10 +182,13 @@ export function takeDeferredMessage<T extends HarnessSessionBase>(
   const { message, ...rest } = queued;
   return {
     message,
-    session: saveTransition(session, {
-      events: [],
-      turn: isEmptyInput(rest) ? turn : { ...turn, queued: rest },
-    }),
+    session: saveTransition(
+      session,
+      transition({
+        events: [],
+        turn: isEmptyInput(rest) ? turn : { ...turn, queued: rest },
+      }),
+    ),
   };
 }
 
