@@ -18,6 +18,7 @@ import {
   recordPublishedLine,
 } from "#harness/session-machine/current.js";
 import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
+import { instrumentationScope } from "#instrumentation/scope.js";
 import {
   createInstrumentationHandleEvent,
   type CreateInstrumentationHandleEventInput,
@@ -90,11 +91,21 @@ function session(
   })!;
   return {
     commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => handle(facts)),
+    hook: otel.hook,
     async spans(): Promise<readonly ReadableSpan[]> {
       await provider.forceFlush();
       return exporter.getFinishedSpans();
     },
   };
+}
+
+/** Delivers an instrumentation event straight to the provider, as the AI SDK bridge does. */
+function emit(
+  hook: { readonly events?: Record<string, ((event: never, ctx: never) => unknown) | undefined> },
+  type: string,
+  event: unknown,
+): unknown {
+  return hook.events?.[type]?.(event as never, {} as never);
 }
 
 const at = "2026-10-09T00:00:00.000Z";
@@ -261,6 +272,78 @@ describe("a session's spans, from its committed lines", () => {
       "    execute_tool deploy completed",
       "      agent.approval approved",
     ]);
+  });
+
+  it("records the end user, Gateway cost, and reasoning tokens on the model call's span", async () => {
+    const { commit, hook, spans } = session();
+    await commit(...opening);
+    const scope = instrumentationScope(
+      { attempt: 0, runId: "run_0", sessionId: "s", turnId: "turn_0" },
+      0,
+    );
+    const runtimeContext = { "enduser.id": "slack:T1:U1" };
+    await emit(hook, "model.started", {
+      idempotencyKey: "model-run:s:run_0:0",
+      operation: {
+        modelId: "anthropic/claude-sonnet-4.6",
+        operationId: "ai.streamText",
+        provider: "gateway",
+      },
+      runtimeContext,
+      scope,
+      type: "model.started",
+    } as never);
+    const idempotencyKey = "model:s:run_0:0:0:0";
+    await emit(hook, "model.call.started", {
+      idempotencyKey,
+      model: { modelId: "anthropic/claude-sonnet-4.6", provider: "gateway" },
+      runtimeContext,
+      scope,
+      type: "model.call.started",
+    } as never);
+    await emit(hook, "model.call.settled", {
+      finishReason: "stop",
+      idempotencyKey,
+      outcome: "completed",
+      providerMetadata: {
+        gateway: {
+          cost: "0.0123",
+          generationId: "gen_1",
+          inputInferenceCost: "0.01",
+          outputInferenceCost: "0.0023",
+        },
+      },
+      responseModelId: "claude-sonnet-4-6",
+      scope,
+      type: "model.call.settled",
+      usage: { inputTokens: 100, outputTokens: 40, outputTokenDetails: { reasoningTokens: 12 } },
+    } as never);
+    await commit({
+      data: { outcome: "completed", runId: "run_0" },
+      scope: run,
+      type: "model.settled",
+    } as SessionEvent);
+    await commit(turnSettled({ outcome: "completed" }));
+
+    const chat = (await spans()).find(
+      (span) => span.attributes["gen_ai.operation.name"] === "chat",
+    );
+    expect(chat?.attributes).toMatchObject({
+      "gen_ai.usage.cost.amount": 0.0123,
+      "gen_ai.usage.cost.currency": "USD",
+      "gen_ai.usage.cost.input": 0.01,
+      "gen_ai.usage.cost.output": 0.0023,
+      "gen_ai.usage.cost.source": "provider",
+      "gen_ai.usage.reasoning.output_tokens": 12,
+      "vercel.ai_gateway.generation.id": "gen_1",
+      "vercel.user_id": "slack:T1:U1",
+    });
+    const step = (await spans()).find((span) => span.name === "agent.step");
+    expect(step?.attributes).toMatchObject({
+      "gen_ai.generation.id": "gen_1",
+      "gen_ai.usage.cost": 0.0123,
+      "vercel.user_id": "slack:T1:U1",
+    });
   });
 
   it.each([

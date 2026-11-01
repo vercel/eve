@@ -49,6 +49,28 @@ export function gatewayCostAttributes(input: {
     "gen_ai.generation.id": input.generationId,
   };
 }
+
+/**
+ * The same Gateway cost under the OTel GenAI cost names, for the model call's own span. The
+ * Gateway priced the request, so the cost source is `provider`.
+ */
+export function gatewayModelCallCostAttributes(input: {
+  cost?: number;
+  gatewayCost?: number;
+  inputCost?: number;
+  outputCost?: number;
+  generationId?: string;
+}): Attributes {
+  const amount = input.gatewayCost ?? input.cost;
+  return {
+    "gen_ai.usage.cost.amount": amount,
+    "gen_ai.usage.cost.currency": amount === undefined ? undefined : "USD",
+    "gen_ai.usage.cost.source": amount === undefined ? undefined : "provider",
+    "gen_ai.usage.cost.input": input.inputCost,
+    "gen_ai.usage.cost.output": input.outputCost,
+    "vercel.ai_gateway.generation.id": input.generationId,
+  };
+}
 export function readGatewayCostData(
   providerMetadata: Readonly<Record<string, unknown>> | undefined,
 ) {

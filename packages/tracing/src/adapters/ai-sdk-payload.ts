@@ -5,11 +5,13 @@ interface Result {
     inputTokens?: number;
     outputTokens?: number;
     inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number };
+    outputTokenDetails?: { reasoningTokens?: number };
   };
   content: readonly unknown[];
 }
 
 export function modelUsage(usage: Result["usage"]): Usage {
+  const reasoningTokens = usage.outputTokenDetails?.reasoningTokens;
   return Object.freeze({
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
@@ -17,6 +19,9 @@ export function modelUsage(usage: Result["usage"]): Usage {
       cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens,
       cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,
     }),
+    ...(reasoningTokens === undefined
+      ? {}
+      : { outputTokenDetails: Object.freeze({ reasoningTokens }) }),
   });
 }
 
