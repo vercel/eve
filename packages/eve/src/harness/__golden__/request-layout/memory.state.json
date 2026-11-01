@@ -1,0 +1,326 @@
+{
+  "history": [
+    {
+      "content": "Summary of our conversation so far:",
+      "kind": "context.compaction",
+      "role": "user"
+    },
+    {
+      "content": "Alice asked about QA; it passed.",
+      "role": "assistant"
+    },
+    {
+      "content": [
+        {
+          "text": "QA passed.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    },
+    {
+      "content": "Did QA pass?",
+      "kind": "user",
+      "metadata": {
+        "eve.turn": "turn_0"
+      },
+      "role": "user"
+    },
+    {
+      "content": "Is it out?",
+      "kind": "user",
+      "metadata": {
+        "eve.turn": "turn_1"
+      },
+      "role": "user"
+    },
+    {
+      "content": [
+        {
+          "text": "Yes.",
+          "type": "text"
+        }
+      ],
+      "role": "assistant"
+    }
+  ],
+  "serializedContext": {
+    "eve.auth": null,
+    "eve.bundle": {
+      "source": {
+        "kind": "bundled"
+      }
+    },
+    "eve.callbackBaseUrl": "http://localhost:3000",
+    "eve.capabilities": {
+      "requestInput": true
+    },
+    "eve.channel": {
+      "kind": "http",
+      "state": {}
+    },
+    "eve.channelDelivery": {
+      "channelKind": "channel:http",
+      "channelName": "http",
+      "deliveryId": "<uuid0>"
+    },
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {}
+    },
+    "eve.continuationHookTokens": [
+      "http:layout-memory"
+    ],
+    "eve.continuationToken": "http:layout-memory",
+    "eve.conversation": {
+      "audience": "unknown",
+      "channel": {
+        "kind": "channel:http",
+        "name": "http"
+      },
+      "environment": "production",
+      "principalType": "anonymous"
+    },
+    "eve.conversationId": "wrun_<ulid0>",
+    "eve.historyState": {},
+    "eve.initiatorAuth": null,
+    "eve.otelTraceEnabled": false,
+    "eve.reactions": {
+      "at": "<time>",
+      "latest": {
+        "*": 20,
+        "content.completed": 18,
+        "content.delta": 17,
+        "context.settled": 11,
+        "context.settled:compaction": 11,
+        "context.started": 9,
+        "context.started:compaction": 9,
+        "delivery.admitted": 13,
+        "delivery.consumed": 14,
+        "delivery.settled": 20,
+        "model.requested": 15,
+        "model.settled": 19,
+        "model.started": 16,
+        "session.started": 0,
+        "turn.settled": 20,
+        "turn.started": 14,
+        "usage.recorded": 19
+      },
+      "memos": {
+        "memory:team:recall": {
+          "vgwb_PJlsAJUva0VtMYUPM": {
+            "cleared": null,
+            "result": {
+              "messages": [
+                {
+                  "content": "Alice prefers short answers.",
+                  "id": "pref"
+                }
+              ]
+            },
+            "scope": "memscope1_gB-Q20CyNj9UuMAvVK83ig3tR6Vx16U8XYPz8OFlIgc",
+            "turnId": "turn_1"
+          }
+        }
+      },
+      "revision": "bundled",
+      "slots": {
+        "memory:team:recall": {
+          "digest": "cz-yMCAjCTREml52ys43ke",
+          "since": 1,
+          "value": {
+            "batches": [
+              {
+                "messages": [
+                  {
+                    "content": "Alice prefers short answers.",
+                    "id": "memitem1_l_0g5ejyTqm90lIwFg1_WAIPpUfKBNzG7A8WBk9IgH8"
+                  }
+                ],
+                "turnId": "turn_0"
+              }
+            ],
+            "cleared": null,
+            "scope": "memscope1_gB-Q20CyNj9UuMAvVK83ig3tR6Vx16U8XYPz8OFlIgc"
+          }
+        },
+        "model:agent": {
+          "digest": "1qJ47UPfGIJVLn1ESASMhk",
+          "live": true,
+          "since": 1,
+          "value": {
+            "reference": {
+              "contextWindowTokens": 200000,
+              "id": "eve-test/layout"
+            }
+          }
+        },
+        "tool::team": {
+          "digest": "dCNOmK_nSY-12vHzasLXis",
+          "since": 1,
+          "value": null
+        }
+      }
+    },
+    "eve.sessionId": "wrun_<ulid0>",
+    "eve.sessionInbox": {
+      "sessionId": "wrun_<ulid0>"
+    },
+    "eve.sessionTitle": "Did QA pass?",
+    "eve.stateLayout": 1,
+    "eve.turnDeliveryIds": [
+      "<uuid1>"
+    ]
+  },
+  "sessionState": {
+    "continuationToken": "http:layout-memory",
+    "hasProxyInputRequests": false,
+    "sessionId": "wrun_<ulid0>",
+    "snapshot": {
+      "session": {
+        "agent": {
+          "system": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nTool execution\nTool calls in one response run in parallel, so batch only calls that don't depend on each other."
+        },
+        "compaction": {
+          "lastKnownInputTokens": 1,
+          "lastKnownPromptMessageCount": 6,
+          "requestEnvelopeTokens": 2046
+        },
+        "continuationToken": "http:layout-memory",
+        "sandboxState": {
+          "session": null
+        },
+        "sessionId": "wrun_<ulid0>",
+        "state": {
+          "eve.harness.reportedSessionUsage": {
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0,
+            "inputTokens": 3,
+            "outputTokens": 3
+          },
+          "eve.harness.sessionProjection": {
+            "counters": {
+              "changes": 1,
+              "runs": 3
+            },
+            "outputStarted": "turn_1",
+            "view": {
+              "calls": {},
+              "changes": {},
+              "children": {},
+              "deliveries": {
+                "<uuid1>": {
+                  "closedAt": "<closedAt>",
+                  "consumedAt": "<consumedAt>",
+                  "deliveryId": "<uuid1>",
+                  "endedAt": "<time>",
+                  "introducedAt": "<introducedAt>",
+                  "outcome": "handled",
+                  "parts": [
+                    {
+                      "kind": "text",
+                      "text": "Is it out?"
+                    }
+                  ],
+                  "source": {
+                    "channel": "channel:http"
+                  },
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "turnId": "turn_1"
+                }
+              },
+              "interactions": {},
+              "parts": {
+                "run_2.0": {
+                  "introducedAt": "<introducedAt>",
+                  "kind": "text",
+                  "partId": "run_2.0",
+                  "phase": "reply",
+                  "runId": "run_2",
+                  "startedAt": "<time>",
+                  "value": "Yes."
+                }
+              },
+              "position": 21,
+              "responses": {},
+              "runs": {
+                "run_2": {
+                  "attempt": 0,
+                  "closedAt": "<closedAt>",
+                  "endedAt": "<time>",
+                  "finishReason": "stop",
+                  "introducedAt": "<introducedAt>",
+                  "modelId": "eve-test/layout",
+                  "outcome": "completed",
+                  "owner": {
+                    "turnId": "turn_1"
+                  },
+                  "runId": "run_2",
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "step": 0,
+                  "usage": {
+                    "cacheReadTokens": 0,
+                    "cacheWriteTokens": 0,
+                    "inputTokens": 1,
+                    "outputTokens": 1
+                  }
+                }
+              },
+              "session": {
+                "latestTurnId": "turn_1",
+                "runtime": {
+                  "agentId": "layout-memory",
+                  "agentName": "layout-memory",
+                  "eveVersion": "<eveVersion>"
+                },
+                "startedAt": "<time>",
+                "status": "open",
+                "turnCount": 2
+              },
+              "tasks": {},
+              "turns": {
+                "turn_1": {
+                  "cause": {
+                    "deliveryId": "<uuid1>"
+                  },
+                  "closedAt": "<closedAt>",
+                  "endedAt": "<time>",
+                  "follows": "turn_0",
+                  "introducedAt": "<introducedAt>",
+                  "outcome": "completed",
+                  "reply": [
+                    "run_2.0"
+                  ],
+                  "runs": 1,
+                  "startedAt": "<time>",
+                  "status": "settled",
+                  "turnId": "turn_1"
+                }
+              },
+              "usage": {
+                "byKind": {
+                  "model": {
+                    "cacheReadTokens": 0,
+                    "cacheWriteTokens": 0,
+                    "inputTokens": 3,
+                    "outputTokens": 3
+                  }
+                },
+                "total": {
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0,
+                  "inputTokens": 3,
+                  "outputTokens": 3
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "version": 2
+  }
+}
