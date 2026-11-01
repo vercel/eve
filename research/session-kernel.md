@@ -152,14 +152,16 @@ A definition has a stable id and contributes to a model call:
 ```ts
 interface Definition {
   readonly id: string; // what it keeps across steps lives under this id
+  readonly decides?: true; // it owns the turn's reply; see `next`
   contribute(ctx): Contribution;
 }
 
 interface Contribution {
   // Collected: every definition's are added, in list order.
   system?: Lazy<Section[]>;
-  tools?: Lazy<Tools>;
+  tools?: Lazy<Tools>; // tool entries, and the skills and connections calls can reach
   context?: Lazy<Anchored[]>; // messages for this call only, placed by turn
+  announcements?: Lazy<Record<string, Announcement>>; // told once, again when they change
   effects?: () => Effect[]; // what to do after a commit
 
   // Decided: the latest definition with an answer wins.
@@ -178,16 +180,28 @@ The agent is an ordered list of definitions. Later ones have more authority:
 flowchart LR
   Defaults["eve's defaults<br/>history, next"] --> Files["the agent's files<br/>model, instructions, tools,<br/>skills, connections, memory, hooks"]
   Files --> Builtins["eve's built-ins<br/>prompt notes, task tools"]
-  Builtins --> Harness["agent/harness.ts"]
+  Builtins --> Catalog["tool search<br/>eve__search, eve__tool, eve__skill"]
+  Catalog --> Harness["agent/harness.ts"]
 ```
 
 The three ways a field combines are the whole composition model:
 
-- **Collected.** A tool is just a tool. Every definition's tools, system sections, context, and effects are added together. Most features need nothing else.
+- **Collected.** A tool is just a tool. Every definition's tools, system sections, context, announcements, and effects are added together. Most features need nothing else. Names don't stack: the first definition to offer a tool name keeps it, and a collision is logged. A definition that means to replace a tool arranges instead.
 - **Decided.** Some questions have one answer: which model, what the history is, what happens next. The latest definition that answers wins. Returning `undefined` means no opinion, so the question falls through to the definition before it, down to eve's defaults.
-- **Arranged.** Some features need the whole call to decide what to do. An arrangement receives the draft, with lazy `system`, `tools`, and `context`, and returns replacements. A replacement can wrap what it received, so a later arrangement can add to everything before it, or ignore what it received and replace it outright.
+- **Arranged.** Some features need the whole call to decide what to do. An arrangement receives the draft, with lazy `system`, `tools`, `context`, and `announcements`, and returns replacements. A replacement can wrap what it received, so a later arrangement can add to everything before it, or ignore what it received and replace it outright.
 
 Every field is lazy. The kernel asks for a value only when the call needs it, and each value is computed at most once per call. A part that nothing asks for never runs, so a harness that replaces the system prompt never runs the agent's dynamic instructions.
+
+Text reaches the model in four places, which differ only in how long the model has it:
+
+| Placement       | The model has it                                                | For example                                   |
+| --------------- | --------------------------------------------------------------- | --------------------------------------------- |
+| `system`        | On every call; its base sections form the cached prefix         | Instructions, the parallel-calls note         |
+| `context`       | On this call only, just ahead of its turn's input               | Memory's recall, the pending-approvals note   |
+| `announcements` | Once, as a message in history; again when its value changes     | User-role instructions, the catalog's listing |
+| `history`       | What the model remembers about the past; decided, not collected | Compaction, a harness's summary               |
+
+An announcement is said again after the history is rewritten, by compaction or `session.clear()`, since the model may no longer have it. That's one rule for every announcement, including user-role instructions, whose static text now also follows the deployment the way the system prompt does.
 
 ### Static and dynamic are the same kind
 
@@ -199,13 +213,17 @@ A static tool contributes a constant. A `defineDynamic` file contributes a funct
 
 `ctx.memo` is a cache, not a record of effects. A crash or a deployment can run its function again.
 
+What a definition adds to the call is what it contributes. A dynamic skill file contributes its skills, and the agent's own skills join after it, so a dynamic skill can take an authored skill's name. Two things read kept values directly instead, by the kind of definition that kept them. The first is what applies a kind to the process or the sandbox: the connection registry, whose clients run a connection's calls, and the skill files a sandbox needs. Every definition of a kind names the same `install`, and the kernel runs it as a step starts and after what the definition keeps changes. The second is a reader outside a model call, such as the dispatch step that needs the subagent a session selected. Dynamic connections are reached through the registry, so the call's connections are the registry's.
+
 ### From one tool to tool search
 
 Features differ in how many parts of the shape they use, not in kind.
 
-**A tool** collects into `tools`. So do instructions into `system`, a skill into the skills list, and a connection into the tools it offers.
+**A tool** collects into `tools`. So do system instructions into `system`, a skill into the skills list, and a connection into the tools it offers.
 
-**The model** is decided. `agent.ts`'s `model` answers it, and a harness's `model` answers later, so it wins. A harness that returns `null` falls through to the agent's model.
+**The model** is decided. `agent.ts`'s `model` answers it, a dynamic model answers later, and a harness's `model` later still, so it wins. A harness that returns `null` falls through to the agent's model. A caller's model, and a subagent's configured model, still take precedence over every definition. The kernel records the choice, so readers outside the call, such as memory and a subagent's parent, see the model the call ran.
+
+**Instructions** collect too. System instructions are `system` sections. User-role instructions, static or dynamic, are announcements, so a change reaches existing sessions once, as a message, without invalidating the cached system prompt.
 
 **A hook** contributes only effects: after each commit, it runs its handler for each matching fact.
 
@@ -219,7 +237,7 @@ const memory: Definition = {
     // Recall once per turn and keep it, then show each turn's recall just ahead of that
     // turn's input on every call, so the prompt before it stays cached.
     context: async () => anchored(await ctx.keep(recallOncePerTurn)),
-    // Offer the provider's tools. Proposed: today a generated tool file offers them.
+    // Offer the provider's tools, under the tool id an authored tools/<slot>.ts would have.
     tools: async () => entries(await ctx.keep(memoryTools)),
     effects: () => [
       // Save what history is about to lose. Blocking: if it fails, the rewrite doesn't happen.
@@ -247,9 +265,16 @@ const builtins: Definition = {
 };
 ```
 
-**Tool search** goes further. With deferred tools, connections, and loadable skills, eve decides from the whole table which tools reach the model directly, which are reached through `eve__search` and `eve__tool`, and which skills load through `eve__skill`. In this model that's an arrangement over `tools` with every tool in view. Today the step's catalog does it after the definitions combine, and moving it into an arrangement is proposed.
+**Tool search** goes further. With deferred tools, connections, and loadable skills, eve decides from the whole table which tools reach the model directly, which are reached through `eve__search` and `eve__tool`, and which skills load through `eve__skill`. It's an arrangement placed after the built-ins, so it sees every tool the call would offer. Two properties of a tool entry are all it needs:
 
-**The harness** is eve's last say: its `model` is the latest answer, its `system` and `tools` replace the arranged draft, and its `history` and `next` are the latest decisions.
+- A **route**: a tool whose calls become calls to the tool its input names. `eve__tool` and `eve__skill` are routes. The model's history names the route, but approval, authorization, and the version check see the target, and a route can't name another route.
+- **Announcements** a tool carries while it's offered. `eve__search` carries the listing of what it can find, and `eve__skill` the dynamic skills. A definition that replaces the tools removes what they announce without computing it.
+
+Tool search remembers which tools the model has found, so the reach it gave earlier holds when the table changes.
+
+**The reply** is the caller's. When a turn has an output schema, eve offers `eve__reply` under any tools, a harness's included. A turn without one settles with the model's text, so an ordinary chat turn never needs a tool to finish.
+
+**The harness** is eve's last say: its `model` is the latest answer, its `system` and `tools` replace the arranged draft, and its `history` and `next` are the latest decisions. It `decides`, so it owns the turn's reply.
 
 ### Your files are definitions
 
@@ -267,27 +292,45 @@ The rest of `agent.ts`, such as `limits`, `reasoning`, and `compaction`, configu
 
 So a feature like `defineMemory` isn't a privilege of the framework. It's a convenient way to write one definition. Someone writing a definition directly could build memory that recalls on a schedule instead of per turn, a retriever that keeps only the latest turn's results, or a store that captures only rewritten tool results. Two powers memory uses are internal today, and would have to be decided before definitions become public: blocking effects, and the full tool table that tool search reads.
 
+### The whole model
+
+Someone building an agent framework on eve's kernel, with its own `defineTool`, `defineSkill`, memory, tool search, and commands, needs to learn these concepts:
+
+- A **definition**: an id, what it contributes, and whether it owns the reply.
+- Three ways a field combines: **collected**, **decided**, **arranged**. Every field is lazy.
+- A **tool**: an entry, listed or deferred, which may be a route and may carry announcements. Connections and skills are lookups beside the entries.
+- Four **placements** for text: `system`, `context`, `announcements`, and `history`.
+- **`keep`** for what a definition keeps between steps, as JSON plus code rebuilt from it, and **`memo`** for what it learned from outside.
+- **Effects** after each commit, at least once.
+- The kernel's rules, which no definition changes.
+
+Everything else in this section is one of these. Some concepts eve has today aren't on the list and are proposed to go; [Status](#status) lists them.
+
 ### What you could build
 
 These are definitions in the shape above. The definition API is internal; this shows what the shape expresses.
 
 <details>
-<summary><strong>A plan the model keeps:</strong> a tool and a prompt section, with the history as its only storage.</summary>
+<summary><strong>A plan the model keeps:</strong> a tool, and an announcement of the plan.</summary>
 
 ```ts
 const planning: Definition = {
   id: "eve.planning",
-  contribute: ({ history }) => ({
+  contribute: (ctx) => ({
     tools: () => ({ update_plan }), // its execute returns "ok"
-    system: () => {
-      const plan = latestInput(history, "update_plan");
-      return plan === undefined ? [] : [section(`Current plan:\n${render(plan)}`)];
+    announcements: async () => {
+      // The latest update_plan call, or the plan kept before it.
+      const kept = await ctx.keep((e, previous) => {
+        const plan = latestInput(e.history, "update_plan") ?? previous;
+        return plan === undefined ? null : { value: plan };
+      });
+      return kept === null ? {} : { plan: announcement(`Current plan:\n${render(kept.value)}`) };
     },
   }),
 };
 ```
 
-The plan is the latest `update_plan` call, so it survives restarts with the history and needs no storage of its own. A summary that drops the call drops the plan, so a definition like this would keep the call verbatim through compaction.
+The model hears the plan when it changes, not on every call, so the cached prompt stays the same. If a compaction drops the call, the definition still has the plan, and announces it again after the rewrite. One gap remains: a plan updated and compacted away between two evaluations is missed. Folding the facts committed since the last evaluation, proposed in [Status](#status), closes it.
 
 </details>
 
@@ -382,7 +425,7 @@ Each field is a value or a function the kernel calls only when it needs the valu
 | `history` | What the model remembers, saved as the session's history     | Before each model call, and on `session.compact()`                         |
 | `next`    | What the turn does next                                      | At turn start, after each model step, and after the harness's calls settle |
 
-A harness is the last definition in the list. Its `system` and `tools` replace everything before them. It doesn't add to them, because a harness that adds is better written as a definition. Its `model`, `history`, and `next` are the latest answers, so returning `undefined` falls through.
+A harness is the last definition in the list. Its `system` and `tools` replace everything before them. It doesn't add to them, because a harness that adds is better written as a definition. Replacing `system` also replaces eve's user-role instructions, and replacing `tools` replaces eve's tool search and what it announces. `eve__reply` stays whenever the caller asked for an output schema, because the reply belongs to the caller's contract. Its `model`, `history`, and `next` are the latest answers, so returning `undefined` falls through.
 
 ### `next`
 
@@ -396,7 +439,7 @@ type Next =
 
 A harness's `calls` pass the same gate as the model's. Approvals, sign-ins, and workflow and task tools park the same way, and history records the calls as the agent's.
 
-When a harness decides the reply, the model's text streams as a draft until the turn settles. Channels such as Slack post only the reply, so a critic can reject a draft before any channel posts it.
+A definition that `decides`, such as the harness, owns the reply: the model's text streams as a draft, and the reply is what `next` settles with. Channels such as Slack post only the reply, so a critic can reject a draft before any channel posts it. Without such a definition, eve's own `next` settles with the model's text, so there's no draft to hold back.
 
 eve's own `next` is the default the harness falls through to:
 
@@ -514,7 +557,7 @@ export default defineHarness((ctx) => {
 });
 ```
 
-`null` leaves the model to `agent.ts` for every plan but enterprise. Because `system` and `tools` replace eve's, the agent's dynamic instructions and tools never run, skills don't load, and the model can't wait on tasks. The turn still waits for them.
+`null` leaves the model to `agent.ts` for every plan but enterprise. Because `system` and `tools` replace eve's, the agent's instructions aren't sent, its dynamic instructions and tools never run, skills don't load, and the model can't wait on tasks. The turn still waits for them.
 
 </details>
 
@@ -549,7 +592,7 @@ eve's threshold is a number from `agent.ts`, so the proposal reports it as data 
 
 The kernel checks the new history's structure, not whether a summary is faithful. Clients still show every call's full output from the stream, because the stream records what happened and the history is only what the model remembers.
 
-Trimming a result before the model reads it isn't a rewrite: the trimmed result joins the history, and the model never sees the full one. Trimming results the model has already read is a rewrite. Showing the model something different for one call while leaving the history alone is per-call context, which is how memory's recall works. That view isn't part of the harness today; a public definition API would make it available.
+Trimming a result before the model reads it isn't a rewrite: the trimmed result joins the history, and the model never sees the full one. Trimming results the model has already read is a rewrite, after which every announcement is made again. Adding something for one call while leaving the history alone is per-call context, which is how memory's recall works. Showing one call a different view of the history itself, such as shorter tool outputs, is a separate field, to add when a strategy needs it. An earlier draft had an arrangeable call record for it that nothing used, and it was removed.
 
 ### Before history loses messages
 
@@ -679,18 +722,39 @@ The same handle could back a web chat in a small worker. The worker still needs 
 
 ## Status
 
-None of this is merged. The harness's first form is drafted in stack #5638, #5566, #5604, #5609, #5621, and #5640, which nests the call's fields under `agent`. The rest is drafted on follow-up branches:
+None of this is merged. The harness's first form is drafted in stack #5638, #5566, #5604, #5609, #5621, and #5640, which nests the call's fields under `agent`. The rest is drafted on follow-up branches.
 
-- **Drafted:** the sealed kernel's fact ownership; hosts and the in-process runtime; `createSession` in `eve/experimental/embed`; the flat harness; every runtime file compiled to one ordered list of definitions, replacing per-kind reactions and layer composition with collected, decided, and arranged fields. Stored sessions, checkpoints, and the stream's wire format read as before; compiled manifests must be rebuilt.
-- **Proposed, internal:**
-  - The model in `agent.ts` as one definition, static or dynamic, instead of a fallback the model call reads separately.
-  - Each static tool file as its own constant definition, instead of one definition for every static tool.
-  - User-role instructions as a collected `notices` field the kernel adds to history when their text changes, removing the harness special case.
-  - The pending-approvals note as its own definition that reads session state.
-  - Tool search's `eve__search`, `eve__tool`, and `eve__skill` as an arrangement, instead of being built after the definitions combine.
-  - Client context as per-call context, if usage accounting and its position stay exact.
-  - Memory's tools contributed by the memory definition. An authored `agent/tools/<slot>.ts` or `disableTool()` still overrides them: the compiler decides the slot, and the runtime acts on its outcome by contributor, never by tool name.
-- **Proposed, public:** `ctx.size.threshold`; `session.compact()` settling `unchanged`.
-- **Later decisions:** a public way to write definitions, including whether blocking effects and the full tool table become public, and with which guardrails; a public host interface for other stores, queues, and timers once the Workflow and in-process hosts have proven it.
+**Drafted:**
+
+- The sealed kernel's fact ownership; hosts and the in-process runtime; `createSession` in `eve/experimental/embed`; the flat harness.
+- Every runtime file compiled to one ordered list of definitions, replacing per-kind reactions and layer composition with collected, decided, and arranged fields.
+- The model as one decision: `agent.ts`, a dynamic model, and the harness answer in order, and the kernel records the choice for readers outside the call. A session holds what it observed, not its agent's configuration.
+- `eve__reply` offered for any output schema, under any harness.
+- Tool search as an arrangement after eve's built-ins, with routes and announcements as properties of tool entries. This replaces a separate presentation step.
+- Announcements replacing three mechanisms: the catalog's notes, dynamic user instructions' notices, and static user instructions seeded into a new session's history. User-role instructions now follow deployments and are announced again after a rewrite.
+- `Definition.decides` replacing the check for a harness file.
+- Memory's tools contributed by the memory definition, under the id an authored `agent/tools/<slot>.ts` would have, so an authored file or `disableTool()` still overrides them.
+- The pending-approvals note as its own definition that reads session state.
+- Dynamic skills contributing their skills to the call.
+
+Stored sessions, checkpoints, and the stream's wire format read as before, and compiled manifests must be rebuilt. Approvals parked before the change run after it, and the reverse, for memory's tools and for `eve__tool`. Rolling back past tool search's arrangement is imperfect: the older deployment can't read where the newer one records which tools the model found, so a session that reached a tool only through that record loses `eve__search` and `eve__tool` on its next call.
+
+**Not pursued:**
+
+- Each static tool file as its own definition. eve's static tools stay one definition over the same tool map that calls outside a turn use.
+- Client context as per-call context. It would need its usage accounting and position kept exact, and nothing needs it to move yet.
+- Moving `install` to one definition per kind. Run after every change, it repeated a failed sandbox write within the step, and run once after evaluation, it would leave the registry stale for that evaluation's draft.
+
+**Proposed, internal:**
+
+- One context: the evaluation context `keep` receives extends the context `contribute` receives, so the rule is that `contribute` must be cheap and `keep` may use `memo`.
+- Effects that return requests, such as cancel, continue, or fail, instead of hooks' commands reaching the kernel separately.
+- One visibility field on tools, instead of three ways to hide a tool from delegated sessions.
+- The turn's input in the context `history` and `next` read, as [What a harness reads](#what-a-harness-reads) shows. The draft doesn't pass it yet, and a command such as `/deploy staging` needs it to answer `next` at the turn's start.
+- State folded from the facts committed since a definition's last evaluation, so features such as `/goal` and `/todo` don't depend on what compaction keeps.
+
+**Proposed, public:** `ctx.size.threshold`; `session.compact()` settling `unchanged`.
+
+**Later decisions:** a public way to write definitions, including whether blocking effects and the full tool table become public, and with which guardrails; a public host interface for other stores, queues, and timers once the Workflow and in-process hosts have proven it.
 
 The kernel stays sealed: both its rules and its authorship of every fact. Before any of this becomes stable, it needs docs pages, e2e evals for each `next` value and its failure modes, and a changeset.
