@@ -12,8 +12,14 @@ import {
 } from "../common.js";
 import type { Cause, Envelope, ErrorInfo, JsonValue, ValueReference } from "../envelope.js";
 
-/** What a call belongs to: the model run that made it, or the call it runs inside. */
-export type CallOwner = { readonly runId: string } | { readonly callId: string };
+/**
+ * What made a call: a model run, another call, or the turn itself, when its harness made it. A
+ * newer eve can add one.
+ */
+export type CallOwner =
+  | { readonly runId: string }
+  | { readonly callId: string }
+  | { readonly turnId: string };
 
 /**
  * What a call can invoke: a tool, an agent, a skill to load, or `control`, the model managing its
@@ -94,7 +100,9 @@ export type CallSettled = Envelope<"call.settled", CallSettledData>;
 export type CallFact = CallRequested | CallStarted | CallSettled;
 export type CallProgressRecord = CallInput | CallProgress;
 
-const owner = conforming<CallOwner>()(z.union([z.object({ runId: id }), z.object({ callId: id })]));
+const owner = conforming<CallOwner>()(
+  z.union([z.object({ runId: id }), z.object({ callId: id }), z.object({ turnId: id })]),
+);
 
 export const clearedBySchema = conforming<ClearedBy>()(
   z.union([z.object({ policy: z.string() }), z.object({ interactionId: id })]),

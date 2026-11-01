@@ -122,6 +122,8 @@ After a reconnect, `foldEvents` skips positions it has already seen. It ignores 
 
 `content.delta` and `call.input` carry only new text; accumulate them in stream order per `partId` or `callId`. eve may merge adjacent deltas for the same part or call without changing the text or its order. `content.completed` carries each finished part's final value. A reader that reconnects without its accumulated text can wait for it instead of replaying deltas.
 
+A call's `owner` on `call.requested` says who made it: the model run that asked for it (`{ runId }`), the call it runs inside, such as a connection tool's call (`{ callId }`), or, for a call an experimental [`agent/harness.ts`](../experimental/harness) makes itself, its turn (`{ turnId }`). A reader that switches on the owner keeps a default branch.
+
 A streamed tool input's `call.input` records precede its `call.requested`. The client shows the possibly incomplete JSON as a `tool` part with `state: "streaming"` and its `inputText`, then as `state: "requested"` with the validated `input`.
 
 `call.progress` carries one complete preliminary output snapshot from an authored async-generator tool. Treat snapshots for a `callId` as last-write-wins; `call.settled` carries the final output. Provider-executed tool progress and MCP progress notifications don't appear as `call.progress`.

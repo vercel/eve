@@ -448,6 +448,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const { capability, owner } = data;
     const counts = !("callId" in owner) && capability.kind !== "control";
     if (!narration && !counts) return;
+    // A call the agent's harness made has no run to count it with: it shows its own label.
+    if ("turnId" in owner) {
+      await showStatus(channel, callLabel(data));
+      return;
+    }
     if (!("runId" in owner)) return;
     const stream = stepStream(channel.state, owner.runId);
     const label = callLabel(data);

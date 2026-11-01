@@ -13,6 +13,7 @@ import {
   refOf,
   rowOf,
 } from "#protocol/session-projection/tree.js";
+import type { CallOwner } from "#protocol/session-events/families/call.js";
 import type { InteractionSubject } from "#protocol/session-events/families/interaction.js";
 import type {
   CallRow,
@@ -482,20 +483,32 @@ export function activity(view: SessionView, filter: { readonly turnId?: string }
 
 /** The run that made a call, directly or through the calls it was made inside. */
 export function callRun(view: SessionView, entry: CallRow): string | undefined {
+  const owner = callOwnerRoot(view, entry);
+  return owner !== undefined && "runId" in owner ? owner.runId : undefined;
+}
+
+/**
+ * What made a call in the end: past the calls it runs inside, the run or turn that made the
+ * outermost one. `undefined` when the chain breaks or loops.
+ */
+function callOwnerRoot(view: SessionView, entry: CallRow): CallOwner | undefined {
   const seen = new Set<string>();
   let current: CallRow | undefined = entry;
   while (current !== undefined && !seen.has(current.callId)) {
     seen.add(current.callId);
-    if ("runId" in current.owner) return current.owner.runId;
+    if (!("callId" in current.owner)) return current.owner;
     current = view.calls[current.owner.callId];
   }
   return undefined;
 }
 
-/** The turn a call belongs to: the turn of the run that made it. */
+/** The turn a call belongs to: the turn of the run that made it, or the turn that made it. */
 export function callTurn(view: SessionView, entry: CallRow): string | undefined {
-  const runId = callRun(view, entry);
-  return runId === undefined || view.runs[runId] === undefined ? undefined : runTurn(view, runId);
+  const owner = callOwnerRoot(view, entry);
+  if (owner === undefined) return undefined;
+  if ("turnId" in owner) return owner.turnId;
+  if (!("runId" in owner)) return undefined;
+  return view.runs[owner.runId] === undefined ? undefined : runTurn(view, owner.runId);
 }
 
 /** The task serving a call, directly or through a call it was made inside. */
