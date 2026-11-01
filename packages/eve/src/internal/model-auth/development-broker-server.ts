@@ -5,6 +5,7 @@ import { DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER } from "#internal/workflow/develo
 import { getDefaultCodexTokenBroker } from "#public/models/openai/chatgpt/token-broker.js";
 import { resolveModelApiKey } from "./api-key.js";
 import { resolveGatewayModelCredential } from "./gateway-credential.js";
+import { ModelCredentialServerError } from "./development-broker-client.js";
 import {
   DEVELOPMENT_MODEL_CREDENTIAL_ROUTE,
   DEVELOPMENT_MODEL_REJECTED_HEADER,
@@ -51,9 +52,15 @@ export async function handleDevelopmentModelCredentialRequest(
       };
     }
     return Response.json(credential, { headers });
-  } catch {
+  } catch (error) {
+    // A served credential URL's own message reaches the turn; resolver internals don't.
     return Response.json(
-      { error: "The model connection is unavailable. Run /login to reconnect." },
+      {
+        error:
+          error instanceof ModelCredentialServerError
+            ? error.message
+            : "The model connection is unavailable. Run /login to reconnect.",
+      },
       { status: 503, headers },
     );
   }
