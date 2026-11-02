@@ -7,7 +7,8 @@ last_updated: "2026-11-02"
 # Slack follow threads
 
 > **Implementation status:** Prototype on `barba/slack-natural-threads`. Routing, the model-facing
-> reply guidance, quiet turns, the manifest, docs, and unit tests are in. No e2e eval yet.
+> reply guidance, quiet turns, `threadContext` handling, `onEvent` precedence, docs, and unit tests
+> are in. No e2e eval yet.
 
 ## Summary
 
@@ -87,21 +88,23 @@ The guidance rides on the message, not the system prompt, because:
 - Channels have no system-prompt hook, and adding one to the core for this would widen
   `harness/` for one channel.
 
-**Quiet turns.** A follow-up gets no `received` acknowledgement. A turn whose every message is a
-follow-up starts quiet: the default renderer shows no thread status until the model calls a tool
-other than `no_reply`. A mention or DM folded into the turn makes it loud. `turn.settled` resets
-both flags. Authored renderers that call `thread.startTyping` themselves are unaffected.
+**Quiet turns.** A follow-up gets no `received` acknowledgement. Follow-ups share the quiet turn
+that message edits (#5796) introduced: a turn whose every message is an edit or a follow-up
+starts quiet, and the default renderer shows no thread status until a tool call finishes.
+`no_reply` reports no label, so its call finishing shows nothing before the turn ends. A new
+mention or DM folded into the turn makes it loud. `turn.settled` resets both flags. Authored
+renderers that call `thread.startTyping` themselves are unaffected.
 
 ```text
-deliver(followUp) ─┐
-deliver(followUp) ─┼─ pendingQuietTurn = true ─▶ turn.started: quietStatus = true
-deliver(mention)  ─┘  (any non-follow-up → false)        │
-                                    call.requested(tool ≠ no_reply) ─▶ quietStatus = null
-                                                turn.settled ─▶ both reset
+deliver(followUp | edit) ─┐
+deliver(followUp | edit) ─┼─ pendingQuietTurn = true ─▶ turn.started: quietStatus = true
+deliver(mention)         ─┘  (any other message → false)        │
+                                          call.settled ─▶ quietStatus = null
+                                          turn.settled ─▶ both reset
 ```
 
-**Manifest.** Adds `message.channels`, `message.groups`, `channels:history`, and
-`groups:history`, deduplicated against `codeChannels`.
+**Manifest.** No change: the default manifest already subscribes to `message.channels` and
+`message.groups` with their history scopes, because message edits use the same events.
 
 **Turn policy.** Follow-ups that arrive mid-turn follow `turnPolicy` like any message. Under
 `"steer"`, chatter steers a running turn; the guidance tells the model it may not need to change
@@ -139,15 +142,16 @@ hook in the step that admits a message, not when Slack's webhook arrives:
 
 ## Open questions
 
-1. **Message edits.** The in-flight `onMessageEdited` work has its own `pendingEditTurn` and
-   `quietStatus`. Both should share one "quiet turn" stamp so an edit and a follow-up compose.
+1. **Unmentioned edits in followed threads.** The default `onMessageEdited` only sends edits to
+   messages addressed to the agent. With `threads.follow`, an edit to an unmentioned reply in a
+   followed thread could reach the session too, so the agent sees the corrected text.
 2. **Engagement decay.** A long-lived thread keeps the agent in forever. Consider ending follow
    after the agent's last reply ages out, or after an explicit "stop following" signal.
 
 ## Validation
 
-- Unit: routing (follow-up sent; no session, bot, top-level, and mention copy ignored), quiet
-  status across `no_reply`, a real tool, and a mixed turn, the `<reply_guidance>` placement, and
-  manifest scopes.
+- Unit: routing (follow-up sent; no session, bot, top-level, and mention copy ignored), `onEvent`
+  fallback and precedence, `threadContext` seeding, quiet status across `no_reply`, a real tool,
+  an edit, and a mixed turn, and the `<reply_guidance>` placement.
 - E2E (to add): a fixture eval where Alice mentions the agent, Bob and Alice chat in the thread,
   and the agent calls `no_reply`, then answers Alice's unmentioned follow-up question.

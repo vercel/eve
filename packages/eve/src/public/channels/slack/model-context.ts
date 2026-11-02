@@ -86,7 +86,10 @@ export function formatSlackInboundMessage(
   message: { readonly text: string; readonly ts: string },
   options?: { readonly followUp?: boolean },
 ): string {
-  return formatSlackModelMessage(inboundModelMessage(context, message));
+  return formatSlackModelMessage({
+    ...inboundModelMessage(context, message),
+    ...(options?.followUp === true && { replyGuidance: FOLLOW_UP_REPLY_GUIDANCE }),
+  });
 }
 
 /**
@@ -140,7 +143,6 @@ function inboundModelMessage(
     channelId: context.channelId,
     content: slackModelContent(message.text),
     isMentioned: context.isMentioned,
-    ...(options?.followUp === true && { replyGuidance: FOLLOW_UP_REPLY_GUIDANCE }),
     senderId: context.userId || undefined,
     senderInfo,
     senderType: context.userId ? "user" : "unknown",

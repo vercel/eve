@@ -82,9 +82,9 @@ export default slackChannel({
 eve add tool/no_reply
 ```
 
-eve tells the model that an unmentioned reply may be meant for someone else in the thread. It shows no thread status for that reply until the agent calls a tool, so a reply the agent skips leaves no trace. Top-level messages, replies in threads without a session, and other bots' messages still need a mention.
+eve tells the model that an unmentioned reply may be meant for someone else in the thread. It shows no thread status for that reply until a tool call finishes, so a reply the agent skips leaves no trace. Top-level messages, replies in threads without a session, and other bots' messages still need a mention.
 
-Slack sends un-mentioned channel messages only when the app subscribes to them. With `threads.follow` set, the generated app manifest includes these subscriptions:
+Slack sends un-mentioned channel messages only when the app subscribes to them. The generated app manifest includes these subscriptions:
 
 <TabsWithChildren groupId="vercel" ariaLabel="How credentials are managed" tabs={["Vercel Connect", "Self-managed"]}>
 <TabContent order={1}>
