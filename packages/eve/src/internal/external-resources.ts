@@ -1,7 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import {
@@ -9,7 +7,7 @@ import {
   type ExternalResource,
   type ExternalResourcesSnapshot,
 } from "#internal/external-resources-snapshot.js";
-import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { createConnectManifest } from "#internal/connect-manifest.js";
 
 const CONNECT_MANIFEST_FILENAME = "vercel-connect-manifest.json";
 
@@ -66,50 +64,17 @@ function collectExternalResources(
 }
 
 export async function emitConnectManifest(input: {
-  readonly appRoot: string;
   readonly generatorVersion: string;
   readonly manifest: CompiledAgentManifest;
   readonly outputDirectory: string;
   readonly publicRoutePrefix?: string;
 }): Promise<void> {
   const snapshot = buildExternalResourcesSnapshot(input);
-  const manifest = await createConnectManifest({ appRoot: input.appRoot, snapshot });
+  const manifest = createConnectManifest(snapshot);
   if (manifest === undefined) return;
   await mkdir(input.outputDirectory, { recursive: true });
   await writeFile(
     join(input.outputDirectory, CONNECT_MANIFEST_FILENAME),
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
-}
-
-export async function createConnectManifest(input: {
-  readonly appRoot: string;
-  readonly snapshot: ExternalResourcesSnapshot;
-}): Promise<JsonObject | undefined> {
-  if (input.snapshot.resources.length === 0) return undefined;
-  const require = createRequire(join(input.appRoot, "package.json"));
-  let modulePath: string;
-  try {
-    modulePath = require.resolve("@vercel/connect/manifest");
-  } catch {
-    throw new Error(
-      "Connect-backed resources require @vercel/connect with manifest compiler support. Install or update @vercel/connect, then rerun `eve build`.",
-    );
-  }
-  try {
-    const compiler = (await import(pathToFileURL(modulePath).href)) as {
-      readonly experimental_createConnectManifestFromEveResources?: (snapshot: unknown) => unknown;
-    };
-    if (typeof compiler.experimental_createConnectManifestFromEveResources !== "function") {
-      throw new TypeError("missing experimental_createConnectManifestFromEveResources export");
-    }
-    return parseJsonObject(
-      compiler.experimental_createConnectManifestFromEveResources(input.snapshot),
-    );
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `Failed to create the Connect manifest: ${detail}. Update @vercel/connect and rerun \`eve build\`.`,
-    );
-  }
 }
