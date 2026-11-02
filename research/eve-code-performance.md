@@ -15,16 +15,20 @@ used, and a prompt written for a chat product.
 
 What the evidence shows:
 
-- **Coding results are at parity with pi.** On deepswe-lean, the only coding
-  set in CI (12 real-repo tasks, last run 2026-10-01), eve-code and pi are
-  tied at 50/72 pooled. opencode 2.0.20 led the newest run, 27/36 to 24/36.
+- **eve-code is behind on coding.** On deepswe-lean, the only coding set in
+  CI (12 real-repo tasks), the fresh `main` baseline (run 41504242132, Sonnet
+  5.5, 3 attempts, eve-code web tools off) resolved 20/36 for eve-code, 29/36
+  for opencode, and 25/36 for pi. eve-code trails opencode by 25% (95% CI −42%
+  to −11%). Earlier runs, with web tools on, had eve-code and pi tied at 50/72.
+  - eve-code stops sooner than opencode: a median of 19.5 model steps, against
+    26 for opencode and 17.5 for pi.
   - swe-lean is not a coding benchmark. It is 4 terminal-bench tasks (eve-code
     94/100, opencode 92/100, pi 89/100) plus 3 MCP data tasks (eve-code 72/75,
     pi 56/75).
-  - On deepswe-lean, only 4 of 12 tasks separate the harnesses (dateutil,
-    prometheus, sqlite-utils, tengo). 7 are solved every time by everyone, and
-    2 are almost never solved by anyone.
-- **The model ignores eve-code's tools.** In 108 deepswe-lean trials on
+  - In the earlier runs, only 4 of 12 tasks separated the harnesses (dateutil,
+    prometheus, sqlite-utils, tengo). 7 were solved every time by everyone, and
+    2 almost never by anyone.
+- **The model ignores eve-code's tools.** In 108 earlier deepswe-lean trials on
   `anthropic/claude-sonnet-5.5`:
   - `apply_patch` was called twice, `code__grep` 9 times, and `code__worker`
     never, even though the worker was offered.
@@ -35,14 +39,13 @@ What the evidence shows:
   tests but never tested the edge case the task described. Examples: copying
   `click.Path(exists=True)` into a command that must accept a new file, and
   inventing a tie-break order. pi fails the same hidden tests.
-- **Fixed prompt overhead is about 3x pi's.** On the current RC, the first
-  call is 8.5-9.8K tokens including the task, against 2.6-3.7K for pi. eve
-  core alone (default tools, Tasks section, skills section) is about 3K of
-  that, so getting to pi's level needs more than eve-code changes.
-  - Raw cost comparisons with pi are an adapter artifact: eve-bench sends pi
-    through Chat Completions with zero cache reads.
-  - eve-code's median deepswe-lean latency is already below pi's (245s vs
-    261s).
+- **Fixed prompt overhead is over 2x pi's.** In the baseline, the first step
+  is about 7K input tokens including the task, against 3K for pi and 11K for
+  opencode. eve core alone (default tools, Tasks section, skills section) is
+  about 3K of that, so getting to pi's level needs more than eve-code changes.
+  - pi now runs through `anthropic-messages` with prompt caching, so cost
+    comparisons are like for like (non-zero cache reads in run 41504111932).
+  - eve-code has the fastest median deepswe-lean latency (3m38s).
 - **The read-only worker does not fit its job.**
   - Its only tools are `glob`, `grep`, and `read_file`
     (`test/scenario/worker-manifest.test.ts:73`). It cannot run `git diff`,
@@ -122,9 +125,10 @@ as a paired variant and lands only if it passes a non-inferiority check.
 
 Most of this is eve-bench work, tracked in an eve-bench issue. The eve side:
 
-1. Schedule deepswe-lean on `main`, sharded by task so each job fits the time
-   limit (`resolve-benchmark-request.mjs:16-22` caps one job at 3 attempts).
-   Add `openai/gpt-6.1-sol` beside `anthropic/claude-sonnet-5.5`.
+1. Run deepswe-lean weekly on `main`, with `openai/gpt-6.1-sol` beside
+   `anthropic/claude-sonnet-5.5`, one job per family (#5806). Each job runs the
+   whole dataset at 3 attempts, because eve-bench compares only whole-dataset
+   results with matching attempts.
 2. Grow the coding set with DeepSWE tasks (113 available) chosen because they
    separate harnesses on both models. terminal-bench does not exercise
    repository edits.
@@ -137,7 +141,7 @@ Most of this is eve-bench work, tracked in an eve-bench issue. The eve side:
    - Turn on prompt caching for pi.
    - Report first-step tokens, steps, and tool calls by name.
 
-   Implemented in vercel-labs/eve-bench#103.
+   Done in vercel-labs/eve-bench#103.
 
 5. Make variants git refs. The extension is compiled into eve, and its
    instructions cannot be overridden, so each variant needs its own build.
@@ -148,7 +152,9 @@ Most of this is eve-bench work, tracked in an eve-bench issue. The eve side:
    incomparable.
 
 Exit criterion: a baseline of current eve-code, opencode, and pi on both
-models, with the margin and detectable effect stated.
+models, with the margin and detectable effect stated. The Sonnet baseline
+exists (run 41504242132). The `gpt-6.1-sol` baseline first runs after #5806
+merges.
 
 ## Phase 1: API removals (PR 1, before 1.0.0)
 
@@ -157,13 +163,19 @@ Observable changes. It edits `instructions.md` only to drop text that names the
 worker, so measured behavior changes no more than removing an unused tool. It
 does not wait for Phase 0. Implemented in #5800.
 
+- **Consumer migration.** The single consumer imports
+  `eve/internal/code/prwatch` and loads `code__lookup-agent-run`. It vendors
+  `lib/prwatch*.ts` and the skill before it bumps to the RC that contains the
+  removal.
 - **Template.** `apps/templates/eve-coding-agent-template` disables `agent` so
   delegation goes to `code__worker` (`agent/tools/agent.ts`,
   `instructions.md:16`). It pins a released eve, so update it after the RC
   that contains the removal:
   - delete `agent/tools/agent.ts`, re-enabling the core `agent` tool;
   - point the delegation line at `agent`, with a no-edit brief for read-only
-    slices.
+    slices;
+  - update the Delegation bullet in `README.md:31`, which names `code__worker`
+    and says `agent` is disabled.
 - **Tests:**
   - Remove `worker-manifest`, the worker case in `grep-search.test.ts`,
     `prwatch-*`, and the `validateRepositoryRoot` case.
@@ -180,7 +192,6 @@ does not wait for Phase 0. Implemented in #5800.
   - `docs/code-extension.mdx` (worker option, delegation text);
   - `docs/guides/dev-tui.md`;
   - the package README and `AGENTS.md`;
-  - the eve-git README;
   - a 1.0 upgrade note.
 - **Package:** remove the `./internal/code/prwatch` export from
   `packages/eve/package.json`.
@@ -189,67 +200,36 @@ does not wait for Phase 0. Implemented in #5800.
 
 ## Phase 2: Prompt rewrite
 
-Replace `extension/instructions.md` (about 6K characters) in two variants, so
-the effect can be attributed:
+Replace `extension/instructions.md` in two stacked variants, so the effect can
+be attributed. Each merges only when deepswe-lean shows it non-inferior to its
+base. The PRs hold the final text:
 
-- **2a, removals only.** Delete:
-  - the chat-product text ("instant messaging app", "ask one question",
-    "default to silence");
-  - consumer writing policy;
-  - the duplicated parallelism lines;
-  - the reference to the nonexistent `todo` tool;
-  - the Minds and delegation sections.
+- **2a, removals only (#5805).** 4,942 to 1,636 characters. It removes:
+  - the chat-product text and consumer writing policy;
+  - the duplicated parallelism lines and the nonexistent `todo` tool;
+  - the Minds text;
+  - the `apply_patch` and `grep` directives, which the tool descriptions
+    already carry.
 
-  Keep the safety rules and the AGENTS.md instruction.
+  It moves "Issues and bugs" and "Analysis and design" into `code__investigate`.
+  It keeps the safety rules, the AGENTS.md instruction, and a tool-neutral line
+  to edit with the editing tool rather than the shell, so GPT runs keep an
+  editing directive.
 
-- **2b, 2a plus a verification block.**
+- **2b, 2a plus a verification block (#5807).** 1,636 to 2,455 characters.
+  When the agent changed code, it works out each requirement and its edge
+  cases, checks each one by running code, keeps existing tests intact, states
+  how it read an ambiguous request, and reports what it checked and what it
+  could not check.
 
-Draft of 2b. It omits identity and interaction policy, which belong to the
+Neither variant carries identity or interaction policy, which belong to the
 consumer: the benchmark consumer says "finish without asking", and the template
-says "ask the one question you need answered".
-
-```md
-# Coding
-
-- Match action to the request. Questions, reviews, and diagnoses get
-  inspection and an answer, not edits. Change files only when asked to.
-- Before editing in a checkout, read its root `AGENTS.md` (or `CLAUDE.md`), and
-  the nearest nested one for the paths you touch. Follow the conventions of
-  the surrounding code.
-- Change generated files (lockfiles, build output) only by running their
-  generator.
-- Preserve changes you did not make. Do not run `git reset --hard`,
-  `git checkout --`, or similar commands unless asked. Do not delete
-  recursively on a home, repository, or workspace root, an unresolved
-  variable, or a broad glob.
-- Never print credentials, tokens, or `.env` contents.
-- Read large files in sections.
-
-# When you changed code
-
-Before finishing:
-
-1. Re-read the request, and work out each requirement and the edge cases it
-   implies.
-2. Check each one by running code: the relevant existing tests, plus a focused
-   check for anything they do not cover. Do not weaken or delete existing
-   tests to make them pass.
-3. Where the request is ambiguous, choose the reading most consistent with its
-   wording and the existing code and tests, and say which you chose.
-4. Remove scratch scripts and files you created for checking.
-
-Build large changes in steps and run them as you go.
-
-# Reporting
-
-Lead with the outcome. Name the files you changed and the checks you ran, with
-their results.
-```
+says "ask the one question you need answered". When the template upgrades, it
+restates the consumer policies 2a removes.
 
 The verification block came from 4 tasks, so judge 2b on DeepSWE tasks outside
-the current deepswe-lean set. The "use the editing tool" line is not in the
-draft: the current prompt says it more strongly and Claude still did not use
-`apply_patch`. If it comes back, it is its own variant.
+the current deepswe-lean set. 2b may add steps, which is acceptable: opencode
+takes more steps than eve-code and resolves more.
 
 ## Phase 3: Tools and context
 
@@ -257,13 +237,16 @@ draft: the current prompt says it more strongly and Claude still did not use
    decide the selection semantics before building it:
    - **Rule:** by provider family, `openai/*` gets `apply_patch` and everyone
      else gets `edit`. No model-name heuristics.
-   - **Overrides:** `apply_patch` stays a static, exported tool. The
+   - **Overrides:** `apply_patch` stays a static, exported tool, and the
      documented `agent/tools/code__apply_patch.ts` override
-     (`docs/code-extension.mdx:157-170`) must keep working, and making it
-     dynamic would silently lose to an override. Selection therefore cannot
-     just turn `apply_patch` into a dynamic tool. One option is a dynamic
-     `disableTool()` on the non-preferred tool, but verify how it interacts
-     with consumer overrides and the mount prefix first.
+     (`docs/code-extension.mdx:157-170`) must keep working. Today's primitives
+     cannot express the selection. A dynamic tool replaces a same-named
+     static one (`execution/catalog/step-catalog.ts:275`), so a dynamic
+     `code__apply_patch` would replace the consumer's override. `disableTool()`
+     is a static sentinel, and a dynamic resolver returns only tools or `null`
+     (`tools/dynamic.ts:17`), so nothing can hide a static tool per model.
+     Selection needs a core primitive for model-conditional tool availability
+     that keeps consumer overrides in charge, proposed as its own change.
    - **Model switch mid-session:** history may hold calls to a tool that is no
      longer offered. Specify that behavior, and test it in a scenario test.
 
@@ -291,34 +274,40 @@ draft: the current prompt says it more strongly and Claude still did not use
    - deepswe-lean repositories may not have an AGENTS.md, so judge this on
      real-repository use as well.
 5. **History growth.** History grows from about 11K to about 65K tokens per
-   step over a deepswe-lean trial. Bash output volume equals pi's, so the
-   lever is step count: eve-code took 87 more steps than pi in run
-   36917038074. Use the Phase 0 step metrics to check whether 2b reduces it.
+   step over a deepswe-lean trial, and bash output volume equals pi's. Step
+   count is not the lever: in the baseline, eve-code takes fewer steps than
+   opencode. Reduce per-step input instead, and use the Phase 0 step metrics
+   to see what 2b adds.
 6. **Core Tasks section.** About 1.3K characters on every step while the
    `agent` tool is present. If Phase 0 shows it matters, propose a shorter
    version in core, as its own change.
 
 ## Phase 4: Latency
 
-eve-code's median is already below pi's on deepswe-lean. The remaining fixed
+eve-code has the fastest median on deepswe-lean (3m38s). The remaining fixed
 cost is about 2.6s per trial outside model and tool time: start to healthy is
 a median 1.1s, and start to first event is 1.5s. Break down what is left
 before attributing it to eve, and track eve's share under
-[turn performance](./turn-performance.md). Fewer steps (Phase 2) and less
-per-step input are the main levers.
+[turn performance](./turn-performance.md). Less per-step input is the main
+lever. Phase 2b may add steps, so check it against the no-regression goal.
 
 ## Sequencing
 
-| PR  | Repo      | Content                                                                        | Depends on                     |
-| --- | --------- | ------------------------------------------------------------------------------ | ------------------------------ |
-| 1   | eve       | Phase 1 removals, `review` skill change, docs, tests (#5800)                   | Nothing. Before 1.0.0          |
-| 2   | eve       | Template delegation update                                                     | The RC release containing PR 1 |
-| 3   | eve-bench | Web off for eve-code, pi caching, metrics, variants, consumer contract         | –                              |
-| 4   | eve       | Scheduled sharded deepswe-lean, `gpt-6.1-sol` row, task expansion, re-baseline | 3                              |
-| 5   | eve       | Prompt variants 2a and 2b                                                      | 4                              |
-| 6   | eve       | `code__edit` and selection, stop mounting `code__grep`                         | 5                              |
-| 7   | eve       | Dynamic-instructions sandbox or state access (core)                            | –                              |
-| 8   | eve       | Environment context                                                            | 5, 7                           |
+| Step | Repo      | Content                                                | Depends on                    | PR                  |
+| ---- | --------- | ------------------------------------------------------ | ----------------------------- | ------------------- |
+| 1    | eve       | Phase 1 removals, `review` skill change, docs, tests   | Nothing. Before 1.0.0         | #5800               |
+| 2    | consumer  | Vendor the prwatch helpers and `lookup-agent-run`      | Before bumping to the RC of 1 | –                   |
+| 3    | eve       | Template delegation and README update                  | The RC release containing 1   | –                   |
+| 4    | eve-bench | Web off for eve-code, pi caching, overhead metrics     | –                             | eve-bench#103, done |
+| 5    | eve-bench | Variants as git refs, consumer contract                | –                             | –                   |
+| 6    | eve       | Two-family benchmark matrix, weekly deepswe-lean       | 4                             | #5806               |
+| 7    | eve       | Task expansion, margin, re-baseline on both families   | 5, 6                          | –                   |
+| 8    | eve       | Prompt variant 2a                                      | 1, 6                          | #5805               |
+| 9    | eve       | Prompt variant 2b                                      | 7, 8                          | #5807               |
+| 10   | eve       | Model-conditional tool availability (core)             | –                             | –                   |
+| 11   | eve       | `code__edit` and selection, stop mounting `code__grep` | 9, 10                         | –                   |
+| 12   | eve       | Dynamic-instructions sandbox or state access (core)    | –                             | –                   |
+| 13   | eve       | Environment context                                    | 9, 12                         | –                   |
 
 ## Risks
 
@@ -332,7 +321,10 @@ per-step input are the main levers.
 
 ## Evidence
 
-- deepswe-lean runs 36917038074, 36775772040, and 36661642270 (Sonnet 5.5,
+- deepswe-lean baseline on `main`, run 41504242132: eve-code at `e65f42b`,
+  Sonnet 5.5, reasoning `high`, 3 attempts, eve-code web tools off.
+- pi prompt caching through `anthropic-messages`: run 41504111932.
+- Earlier deepswe-lean runs 36917038074, 36775772040, and 36661642270 (Sonnet 5.5,
   reasoning `high`).
 - swe-lean runs 41357706039, 40926137987, 40787734654, 40730672526, and
   40124518396.
