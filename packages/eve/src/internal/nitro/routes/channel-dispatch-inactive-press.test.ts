@@ -174,6 +174,7 @@ describe("an inactive press through the production dispatcher", () => {
     const signingSecret = "test-signing-secret";
     const channel = asCompiled(
       slackChannel({
+        admit: () => true,
         credentials: { botToken: "xoxb-test", signingSecret },
       }),
     );
