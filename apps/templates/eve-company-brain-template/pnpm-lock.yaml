@@ -170,11 +170,11 @@ importers:
         specifier: 1.4.4-r.3
         version: 1.4.4-r.3
       '@vercel/connect':
-        specifier: ^2.5.2
-        version: 2.5.5(ai@7.0.140(zod@4.4.3))(eve@1.0.0-rc.0)
+        specifier: ^2.7.0
+        version: 2.7.0(ai@7.0.140(zod@4.4.3))(eve@1.0.0-rc.1)
       eve:
-        specifier: ^1.0.0-rc.0
-        version: 1.0.0-rc.0(@vercel/connect@2.5.5)(ai@7.0.140(zod@4.4.3))(just-bash@3.6.0)
+        specifier: ^1.0.0-rc.1
+        version: 1.0.0-rc.1(@vercel/connect@2.7.0)(ai@7.0.140(zod@4.4.3))(just-bash@3.6.0)
       just-bash:
         specifier: 3.6.0
         version: 3.6.0
@@ -487,15 +487,15 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@vercel/cli-config@0.3.3':
-    resolution: {integrity: sha512-5T0ZtIFgcFHuPFuuoJKno5ZeKvLQGiS/JAFMI1zG1HBw2dklScoHdA0LDb/SoeRYD53N33iXFAqyRA0tHLhdnQ==}
+  '@vercel/cli-config@0.3.5':
+    resolution: {integrity: sha512-O7y3EFzHENSLtE/3fjM3vIRqDpFFhZor2dMcZaND4G1d88gQk9u8yBcZhRR9CKnBowgzXdl0qcXkuINI05I72w==}
 
   '@vercel/cli-exec@1.0.1':
     resolution: {integrity: sha512-g9XerViJ/paZujufXYcu5XYI2vU2rtB4sgdpjUHde5RnOkdmpu0ngH46LCFGHoPXO/C+qDPSczIHIRN+8Q2YKQ==}
     engines: {node: '>= 18'}
 
-  '@vercel/connect@2.5.5':
-    resolution: {integrity: sha512-YUkQWcOb1afTwK36xfmJbPDDssuAcJtmOyxtePdyHH6SD5QaUfXLpvgFIW0lHnHMyaJC06phG/gYCNg4Uw/f2w==}
+  '@vercel/connect@2.7.0':
+    resolution: {integrity: sha512-kwg83Oo2LLYeFZnMuOI/OtRaJNNuSw6sR3ChdKBk2heKRMmach54ElGAxFrDoE+pfT9eIGVdjU3ct0GaoHF9Vw==}
     peerDependencies:
       '@ai-sdk/mcp': ^1 || ^2
       '@auth/core': '>=0.41.3'
@@ -503,7 +503,7 @@ packages:
       '@modelcontextprotocol/sdk': ^1.29.0
       ai: ^6 || ^7.0.0-beta.0
       better-auth: '>=1.5.0'
-      eve: '>=0.39.1'
+      eve: '>=0.39.1 || >=1.0.0-0'
     peerDependenciesMeta:
       '@ai-sdk/mcp':
         optional: true
@@ -524,8 +524,8 @@ packages:
     resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
     engines: {node: '>= 20'}
 
-  '@vercel/oidc@4.0.3':
-    resolution: {integrity: sha512-0sljpA/leE1vLkY7DVOs/z/OH6x1hgKhrF+IY2YdbRYm/6UnQjeu0SMnzOKLtkJWp13srUFkWdir4iU3feFYfg==}
+  '@vercel/oidc@4.0.5':
+    resolution: {integrity: sha512-E+duTxv0W8r3qNCGUYxTLt0V0BlLUlrEqxYOu2OoFubIbxwGjwm4wofache+YgU6Sr0MwoAA/vsSrrNrrWjimw==}
     engines: {node: '>= 20'}
 
   '@workflow/serde@4.1.0':
@@ -580,8 +580,8 @@ packages:
     resolution: {integrity: sha512-S8EFBKyznRwPVwayK187cYjvnpgC92xy+q0BIF++V965pfjMVVRbQ/HoTYGA/1EHmZ7E68k6Heq+4WnvVhOL5w==}
     hasBin: true
 
-  eve@1.0.0-rc.0:
-    resolution: {integrity: sha512-/GOeOMIgoohAP7xpTqOxrWO8H6Miiv6UN2dA04R+40RN9rpXoLQ4JEdqd5G4dyeEc2Ou6zK5krwcZOHfgpOObA==}
+  eve@1.0.0-rc.1:
+    resolution: {integrity: sha512-yg1zd3Wwi0OY+ue6NP8IV3gPa+Kth9jIB6Af0/sqVElySXWKxL9j0lNkTAddTI38SbyEu0Z11YCZhIlaOQTZLQ==}
     engines: {node: '>=24'}
     hasBin: true
     peerDependencies:
@@ -589,7 +589,7 @@ packages:
       '@nuxt/kit': ^4.0.0
       '@nuxt/schema': ^4.0.0
       '@opentelemetry/api': ^1.0.0
-      '@vercel/connect': ^2.5.2
+      '@vercel/connect': ^2.7.0
       ai: ^7.0.137
       braintrust: ^3.0.0
       chat: ^4.42.0
@@ -1089,7 +1089,7 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  '@vercel/cli-config@0.3.3':
+  '@vercel/cli-config@0.3.5':
     dependencies:
       xdg-app-paths: 5.5.1
       zod: 4.1.11
@@ -1098,18 +1098,18 @@ snapshots:
     dependencies:
       execa: 5.1.1
 
-  '@vercel/connect@2.5.5(ai@7.0.140(zod@4.4.3))(eve@1.0.0-rc.0)':
+  '@vercel/connect@2.7.0(ai@7.0.140(zod@4.4.3))(eve@1.0.0-rc.1)':
     dependencies:
-      '@vercel/oidc': 4.0.3
+      '@vercel/oidc': 4.0.5
     optionalDependencies:
       ai: 7.0.140(zod@4.4.3)
-      eve: 1.0.0-rc.0(@vercel/connect@2.5.5)(ai@7.0.140(zod@4.4.3))(just-bash@3.6.0)
+      eve: 1.0.0-rc.1(@vercel/connect@2.7.0)(ai@7.0.140(zod@4.4.3))(just-bash@3.6.0)
 
   '@vercel/oidc@3.2.0': {}
 
-  '@vercel/oidc@4.0.3':
+  '@vercel/oidc@4.0.5':
     dependencies:
-      '@vercel/cli-config': 0.3.3
+      '@vercel/cli-config': 0.3.5
       '@vercel/cli-exec': 1.0.1
       jose: 5.10.0
 
@@ -1153,13 +1153,13 @@ snapshots:
       httpxy: 0.5.5
       srvx: 1.0.5
 
-  eve@1.0.0-rc.0(@vercel/connect@2.5.5)(ai@7.0.140(zod@4.4.3))(just-bash@3.6.0):
+  eve@1.0.0-rc.1(@vercel/connect@2.7.0)(ai@7.0.140(zod@4.4.3))(just-bash@3.6.0):
     dependencies:
       ai: 7.0.140(zod@4.4.3)
       nitro: 3.0.260903-beta
       undici: 8.12.3
     optionalDependencies:
-      '@vercel/connect': 2.5.5(ai@7.0.140(zod@4.4.3))(eve@1.0.0-rc.0)
+      '@vercel/connect': 2.7.0(ai@7.0.140(zod@4.4.3))(eve@1.0.0-rc.1)
       just-bash: 3.6.0
 
   eventsource-parser@3.1.1: {}

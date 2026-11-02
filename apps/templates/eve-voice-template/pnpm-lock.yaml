@@ -54,8 +54,8 @@ importers:
         specifier: 0.45.2
         version: 0.45.2(@neondatabase/serverless@1.1.0)(@upstash/redis@1.38.2)(kysely@0.29.6)
       eve:
-        specifier: ^1.0.0-rc.0
-        version: 1.0.0-rc.0(ai@7.0.139(zod@4.4.3))(next@16.3.8(@types/node@25.9.9)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)
+        specifier: ^1.0.0-rc.1
+        version: 1.0.0-rc.1(ai@7.0.139(zod@4.4.3))(next@16.3.8(@types/node@25.9.9)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)
       lucide-react:
         specifier: 1.33.0
         version: 1.33.0(react@19.2.8)
@@ -2718,8 +2718,8 @@ packages:
   estree-util-is-identifier-name@3.0.0:
     resolution: {integrity: sha512-hFtqIDZTIUZ9BXLb8y4pYGyk6+wekIivNVTcmvk8NoOh+VeRn5y6cEHzbURrWbfp1fIqdVipilzj+lfaadNZmg==}
 
-  eve@1.0.0-rc.0:
-    resolution: {integrity: sha512-/GOeOMIgoohAP7xpTqOxrWO8H6Miiv6UN2dA04R+40RN9rpXoLQ4JEdqd5G4dyeEc2Ou6zK5krwcZOHfgpOObA==}
+  eve@1.0.0-rc.1:
+    resolution: {integrity: sha512-yg1zd3Wwi0OY+ue6NP8IV3gPa+Kth9jIB6Af0/sqVElySXWKxL9j0lNkTAddTI38SbyEu0Z11YCZhIlaOQTZLQ==}
     engines: {node: '>=24'}
     hasBin: true
     peerDependencies:
@@ -2727,7 +2727,7 @@ packages:
       '@nuxt/kit': ^4.0.0
       '@nuxt/schema': ^4.0.0
       '@opentelemetry/api': ^1.0.0
-      '@vercel/connect': ^2.5.2
+      '@vercel/connect': ^2.7.0
       ai: ^7.0.137
       braintrust: ^3.0.0
       chat: ^4.42.0
@@ -5877,7 +5877,7 @@ snapshots:
 
   estree-util-is-identifier-name@3.0.0: {}
 
-  eve@1.0.0-rc.0(ai@7.0.139(zod@4.4.3))(next@16.3.8(@types/node@25.9.9)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8):
+  eve@1.0.0-rc.1(ai@7.0.139(zod@4.4.3))(next@16.3.8(@types/node@25.9.9)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8):
     dependencies:
       ai: 7.0.139(zod@4.4.3)
       nitro: 3.0.260903-beta
