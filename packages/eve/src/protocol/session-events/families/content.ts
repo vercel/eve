@@ -20,7 +20,10 @@ export interface ContentDeltaData {
 
 export interface ContentCompletedData {
   readonly partId: string;
-  readonly runId: string;
+  /** The model run that wrote the part. Absent when the turn wrote it without one. */
+  readonly runId?: string;
+  /** The turn that wrote the part, for a part no model run wrote. */
+  readonly turnId?: string;
   readonly kind: ContentKind;
   /** The part's whole value: text for text and reasoning, JSON for a result, a file's metadata. */
   readonly value?: JsonValue;
@@ -49,7 +52,8 @@ export const contentSchemas = {
         mediaType: z.string().optional(),
         partId: id,
         phase: z.string(),
-        runId: id,
+        runId: id.optional(),
+        turnId: id.optional(),
         value: jsonValue.optional(),
         valueRef: valueReference.optional(),
       }),

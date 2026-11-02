@@ -448,6 +448,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const { capability, owner } = data;
     const counts = !("callId" in owner) && capability.kind !== "control";
     if (!narration && !counts) return;
+    // A call its turn made has no run to count it with: it shows its own label.
+    if ("turnId" in owner) {
+      await showStatus(channel, callLabel(data));
+      return;
+    }
     if (!("runId" in owner)) return;
     const stream = stepStream(channel.state, owner.runId);
     const label = callLabel(data);
@@ -487,7 +492,8 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const { channel } = ctx;
     if (data.kind === "reasoning") {
       const stream = streamByState.get(channel.state);
-      if (stream?.runId !== data.runId || typeof data.value !== "string") return;
+      if (stream === undefined || stream.runId !== data.runId || typeof data.value !== "string")
+        return;
       stream.reasoning = data.value;
       await showReasoning(channel, stream, { complete: true });
       stream.reasoning = "";

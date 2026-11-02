@@ -111,7 +111,9 @@ export interface RunRow extends Introduced, Ended {
 
 export interface PartRow extends Introduced {
   readonly partId: string;
-  readonly runId: string;
+  /** The run that wrote it; absent for a part its turn holds without one. */
+  readonly runId?: string;
+  readonly turnId?: string;
   readonly kind: ContentKind;
   readonly phase: ContentPhase;
   readonly value?: JsonValue;

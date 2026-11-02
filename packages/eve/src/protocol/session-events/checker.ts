@@ -256,9 +256,16 @@ export function createStreamChecker(
         return undefined;
       case "complete": {
         if (row !== undefined) fail("one-terminal", `${family} "${id}" completes twice.`);
-        const run = refOf({ runId: String(data.runId) })!;
-        if (rowOf(view, run.family, run.id) !== undefined && !isOpen(view, run))
-          fail("closure", `${family} "${id}" completes after its run settled.`);
+        if ((data.runId === undefined) === (data.turnId === undefined)) {
+          fail("schema", `${family} "${id}" names neither or both of a run and a turn.`);
+          return undefined;
+        }
+        const owner =
+          data.runId === undefined
+            ? { family: "turn" as const, id: String(data.turnId) }
+            : { family: "run" as const, id: String(data.runId) };
+        if (rowOf(view, owner.family, owner.id) !== undefined && !isOpen(view, owner))
+          fail("closure", `${family} "${id}" completes after its ${owner.family} settled.`);
         return undefined;
       }
       case "updates":
