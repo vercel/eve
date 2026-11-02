@@ -63,7 +63,11 @@ function fakeSandbox({
   };
 }
 
-const ctx = (sandbox) => ({ getSandbox: async () => sandbox });
+let nextSession = 0;
+const ctx = (sandbox) => ({
+  session: { id: (sandbox.sessionId ??= `test-session-${nextSession++}`) },
+  getSandbox: async () => sandbox,
+});
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The argv after the binary in the last agent-desktop command. */
@@ -282,7 +286,7 @@ test("a cancelled call kills its command and waits for its exit before it reject
   const controller = new AbortController();
   const call = tools.click.execute(
     { ref: "@s1:e2" },
-    { getSandbox: async () => sandbox, abortSignal: controller.signal },
+    { ...ctx(sandbox), abortSignal: controller.signal },
   );
   setTimeout(() => controller.abort(new Error("stopped")), 10);
   await assert.rejects(
@@ -310,7 +314,7 @@ test("a kill that fails is reported as an unstoppable command", async () => {
   const controller = new AbortController();
   const call = tools.click.execute(
     { ref: "@s1:e2" },
-    { getSandbox: async () => sandbox, abortSignal: controller.signal },
+    { ...ctx(sandbox), abortSignal: controller.signal },
   );
   setTimeout(() => controller.abort(new Error("stopped")), 10);
   await assert.rejects(call, /could not be stopped, so treat the action as possibly delivered/);
@@ -325,10 +329,7 @@ test("screenshot readback shares the call signal and its cleanup is inside the d
     return new Promise(() => {});
   };
   const controller = new AbortController();
-  const call = tools.screenshot.execute(
-    {},
-    { getSandbox: async () => sandbox, abortSignal: controller.signal },
-  );
+  const call = tools.screenshot.execute({}, { ...ctx(sandbox), abortSignal: controller.signal });
   await tick(10);
   assert.equal(readSignal?.aborted, false, "the read should still be running before the abort");
   controller.abort(new Error("stopped"));
@@ -465,6 +466,8 @@ function screenshotSandbox() {
       return path ? { stdout: OK({ format: "png", path, width: 370, height: 616 }) } : undefined;
     },
   });
+  sandbox.removed = [];
+  sandbox.removePath = async (options) => sandbox.removed.push(options);
   sandbox.readBinaryFile = async () => Buffer.from([0x89, 0x50, 0x4e, 0x47]);
   return sandbox;
 }
@@ -478,7 +481,10 @@ test("screenshot hands channels and the model the pixels, then deletes the file"
     `data:image/png;base64,${Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64")}`,
   );
   assert.equal(output.path, undefined);
-  assert.match(sandbox.commands.at(-1), /^rm -f '\/tmp\/agent-desktop-eve\/screenshots\/.+\.png'$/);
+  assert.equal(sandbox.removed.length, 1);
+  assert.match(sandbox.removed[0].path, /^\/tmp\/agent-desktop-eve\/screenshots\/.+\.png$/);
+  assert.equal(sandbox.removed[0].force, true);
+  assert.equal(sandbox.removed[0].signal.aborted, false);
   const model = await tools.screenshot.toModelOutput(output);
   assert.equal(model.type, "content");
   assert.ok(!JSON.stringify(model).includes("/tmp/agent-desktop-eve"));
@@ -490,7 +496,7 @@ test("inlineScreenshots false keeps the file and sends no pixels anywhere", asyn
   const output = await tools.screenshot.execute({ app: "gnome-calculator" }, ctx(sandbox));
   assert.equal(output.imageDataUrl, undefined);
   assert.match(output.path, /^\/tmp\/agent-desktop-eve\/screenshots\/.+\.png$/);
-  assert.ok(!sandbox.commands.some((command) => command.startsWith("rm -f")));
+  assert.equal(sandbox.removed.length, 0);
   assert.equal((await tools.screenshot.toModelOutput(output)).type, "json");
   resetConfig();
 });
@@ -504,10 +510,7 @@ test("an unreadable capture keeps its path and says why the model has no pixels"
   const output = await tools.screenshot.execute({ app: "gnome-calculator" }, ctx(sandbox));
   assert.match(output.path, /\.png$/);
   assert.equal(output.imageOmitted, "unreadable");
-  assert.ok(
-    !sandbox.commands.some((command) => command.startsWith("rm -f")),
-    "a capture we could not read is left in place",
-  );
+  assert.ok(sandbox.removed.length === 0, "a capture we could not read is left in place");
   const model = await tools.screenshot.toModelOutput(output);
   assert.match(JSON.stringify(model), /were not inlined/);
   assert.ok(

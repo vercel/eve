@@ -51,6 +51,42 @@ test("the report waits for the exit after the kill is accepted", async () => {
   );
 });
 
+for (const reason of [
+  new Error("cancelled during spawn"),
+  new DOMException("deadline", "TimeoutError"),
+]) {
+  test(`a delayed spawn cannot launch after ${reason.name}`, async () => {
+    const ready = Promise.withResolvers();
+    const controller = new AbortController();
+    let launched = false;
+    const sandbox = {
+      async spawn({ signal }) {
+        await ready.promise;
+        signal?.throwIfAborted();
+        launched = true;
+        return {
+          stdout: streamOf(""),
+          stderr: streamOf(""),
+          wait: async () => ({ exitCode: 0 }),
+          kill: async () => {},
+        };
+      },
+    };
+    const call = runCommand(sandbox, "command", controller.signal);
+    controller.abort(reason);
+    ready.resolve();
+    await assert.rejects(
+      call,
+      reason.name === "TimeoutError" ? /ran out of its 300s budget/ : /cancelled during spawn/,
+    );
+    assert.equal(
+      launched,
+      false,
+      "the provider must receive cancellation before starting the command",
+    );
+  });
+}
+
 test("collects stdout, stderr and the exit code of a finished command", async () => {
   const sandbox = createProcessSandbox();
   const result = await runCommand(sandbox, "echo out; echo err >&2; exit 7");

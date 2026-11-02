@@ -102,7 +102,10 @@ async function argvFor(name, input) {
       };
     },
   };
-  await tools[name].execute(input, { getSandbox: async () => sandbox });
+  await tools[name].execute(input, {
+    session: { id: "conformance" },
+    getSandbox: async () => sandbox,
+  });
   const invocation = command.slice(command.lastIndexOf("; ") + 2);
   return [...invocation.matchAll(/'((?:[^']|'"'"')*)'/g)].map((m) => m[1].replaceAll(`'"'"'`, "'"));
 }
@@ -155,7 +158,10 @@ test("a tool runs the real CLI through a real sandbox command", { skip: !availab
   extension({ binary, autoInstall: false, manageDesktop: false });
   const sandbox = createProcessSandbox();
   try {
-    const data = await tools.status.execute({}, { getSandbox: async () => sandbox });
+    const data = await tools.status.execute(
+      {},
+      { session: { id: "real-cli" }, getSandbox: async () => sandbox },
+    );
     assert.equal(typeof data?.version, "string", `status returned ${JSON.stringify(data)}`);
     assert.equal(typeof data?.platform, "string");
   } finally {

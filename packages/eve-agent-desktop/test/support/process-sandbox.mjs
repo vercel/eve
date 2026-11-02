@@ -10,6 +10,7 @@
 //   `kill()` resolves once the process is gone.
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 
 const gone = (child) => child.exitCode !== null || child.signalCode !== null;
 
@@ -63,7 +64,13 @@ export function createProcessSandbox() {
         },
       };
     },
-    async readBinaryFile({ path }) {
+    async removePath({ path, force, recursive, signal }) {
+      signal?.throwIfAborted();
+      await rm(path, { force, recursive });
+      signal?.throwIfAborted();
+    },
+    async readBinaryFile({ path, signal }) {
+      signal?.throwIfAborted();
       try {
         return readFileSync(path);
       } catch {

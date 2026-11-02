@@ -24,7 +24,7 @@ test(
       extraPackages: ["gnome-calculator"],
       signal: AbortSignal.timeout(300_000),
     });
-    const ctx = { getSandbox: async () => sandbox };
+    const ctx = { session: { id: "live-desktop" }, getSandbox: async () => sandbox };
 
     const launched = await tools.launch.execute({ app: "gnome-calculator", activate: true }, ctx);
     assert.equal(launched.app, "gnome-calculator");

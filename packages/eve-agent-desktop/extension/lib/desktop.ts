@@ -11,14 +11,10 @@ import {
 
 import { CALL_DEADLINE_MS, runCommand, untilSettled } from "./process";
 import extension from "../extension";
+import type { ToolContext } from "eve/tools";
+import type { SandboxSession } from "eve/sandbox";
 
-/** Structural subset of eve's tool context; every eve `ctx` satisfies it. */
-export interface DesktopToolContext {
-  readonly abortSignal?: AbortSignal;
-  /** The session's metadata; its id names the sandbox the tools are talking to. */
-  readonly session?: { readonly id?: string };
-  getSandbox(): PromiseLike<DesktopSandbox | null | undefined>;
-}
+export type DesktopToolContext = Pick<ToolContext, "abortSignal" | "session" | "getSandbox">;
 
 /** agent-desktop's JSON envelope: one per command on stdout. */
 interface Envelope {
@@ -38,7 +34,7 @@ interface Envelope {
  * desktop start and post-processing all sit inside the same deadline.
  */
 export interface DesktopCall {
-  readonly sandbox: DesktopSandbox;
+  readonly sandbox: Pick<SandboxSession, "spawn" | "readBinaryFile" | "removePath">;
   readonly signal: AbortSignal;
   run<TData = unknown>(args: readonly string[]): Promise<TData>;
 }
@@ -52,6 +48,7 @@ export interface DesktopCall {
  */
 const failedInstalls = new Map<string, { readonly error: Error; readonly at: number }>();
 const INSTALL_RETRY_AFTER_MS = 300_000;
+const pendingSetups = new Map<string, Promise<void>>();
 
 /**
  * Prepare the sandbox for one tool call and hand the caller its scope: the
@@ -64,11 +61,8 @@ export async function withDesktopCall<T>(
 ): Promise<T> {
   const deadline = AbortSignal.timeout(CALL_DEADLINE_MS);
   const signal = ctx.abortSignal ? AbortSignal.any([ctx.abortSignal, deadline]) : deadline;
-  const config = extension.config;
-
-  const sandbox = await awaitSandbox(ctx, signal);
-  if (config.autoInstall) await ensureInstalled(sandbox, signal, ctx.session?.id);
-  if (config.manageDesktop) await ensureDesktop(sandbox, signal);
+  const sandbox = await untilSettled(ctx.getSandbox(), signal);
+  await prepareSandbox(sandbox, signal, ctx.session.id);
 
   const call: DesktopCall = {
     sandbox,
@@ -122,20 +116,32 @@ function parseEnvelope<TData>(stdout: string, stderr: string, name: string): TDa
   );
 }
 
-async function awaitSandbox(ctx: DesktopToolContext, signal: AbortSignal): Promise<DesktopSandbox> {
-  const sandbox = await untilSettled(ctx.getSandbox(), signal);
-  if (sandbox === null || sandbox === undefined) {
-    throw new Error(
-      "The desktop tools require an eve sandbox. Configure agent/sandbox.ts in the consuming agent.",
-    );
-  }
-  return sandbox;
+async function prepareSandbox(
+  sandbox: DesktopSandbox,
+  signal: AbortSignal,
+  sessionId: string,
+): Promise<void> {
+  const previous = pendingSetups.get(sessionId) ?? Promise.resolve();
+  const config = extension.config;
+  const pending = previous
+    .catch(() => undefined)
+    .then(async () => {
+      signal.throwIfAborted();
+      if (config.autoInstall) await ensureInstalled(sandbox, signal, sessionId);
+      if (config.manageDesktop) await ensureDesktop(sandbox, signal);
+    });
+  pendingSetups.set(sessionId, pending);
+  const clear = () => {
+    if (pendingSetups.get(sessionId) === pending) pendingSetups.delete(sessionId);
+  };
+  void pending.then(clear, clear);
+  await untilSettled(pending, signal);
 }
 
 async function ensureInstalled(
   sandbox: DesktopSandbox,
   signal: AbortSignal,
-  sessionId: string | undefined,
+  sessionId: string,
 ): Promise<void> {
   const config = extension.config;
   const installed = await probeVersion(sandbox, signal);
@@ -152,7 +158,7 @@ async function ensureInstalled(
     throw versionMismatchError(installed);
 
   const spec = config.installSpec ?? DEFAULT_AGENT_DESKTOP_INSTALL_SPEC;
-  const key = `${sessionId ?? "unknown session"}\u0000${spec}`;
+  const key = `${sessionId}\u0000${spec}`;
   const failed = failedInstalls.get(key);
   if (failed !== undefined && Date.now() - failed.at < INSTALL_RETRY_AFTER_MS) throw failed.error;
   try {

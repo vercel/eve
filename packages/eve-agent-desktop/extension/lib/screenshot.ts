@@ -4,8 +4,7 @@ import { toolOutput, toolOutputPart, type ToolModelOutput } from "eve/tools";
 
 import extension from "../extension";
 import type { DesktopCall } from "./desktop";
-import { runCommand } from "./process";
-import { DESKTOP_ROOT, quoteShellArg, type DesktopSandbox } from "./sandbox";
+import { DESKTOP_ROOT } from "./sandbox";
 
 export interface ScreenshotOutput extends Record<string, unknown> {
   readonly path?: string;
@@ -15,14 +14,6 @@ export interface ScreenshotOutput extends Record<string, unknown> {
   readonly imageDataUrl?: string;
   /** Why an inline screenshot carried no pixels, when it should have. */
   readonly imageOmitted?: "too_large" | "unreadable";
-}
-
-/** eve's sandbox session, as much of it as reading a capture back needs. */
-interface SandboxWithFiles extends DesktopSandbox {
-  readBinaryFile?(options: {
-    readonly path: string;
-    readonly signal?: AbortSignal;
-  }): PromiseLike<Uint8Array | null>;
 }
 
 const MAX_INLINE_SCREENSHOT_BYTES = 3 * 1024 * 1024;
@@ -45,8 +36,7 @@ export async function inlineScreenshot(
   const output = { ...(data as ScreenshotOutput | null) };
   if (!extension.config.inlineScreenshots || output.path === undefined) return output;
   const { path, ...rest } = output;
-  const sandbox = call.sandbox as SandboxWithFiles;
-  if (sandbox.readBinaryFile === undefined) return output;
+  const sandbox = call.sandbox;
   let bytes: Uint8Array | null;
   try {
     bytes = await sandbox.readBinaryFile({ path, signal: call.signal });
@@ -57,23 +47,15 @@ export async function inlineScreenshot(
     return { ...output, imageOmitted: "unreadable" };
   if (bytes.length > MAX_INLINE_SCREENSHOT_BYTES)
     return { ...rest, path, imageOmitted: "too_large" };
-  await removeCapture(sandbox, path, call.signal);
+  try {
+    await sandbox.removePath({ path, force: true, signal: call.signal });
+  } catch {
+    call.signal.throwIfAborted();
+  }
   return {
     ...rest,
     imageDataUrl: `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`,
   };
-}
-
-async function removeCapture(
-  sandbox: DesktopSandbox,
-  path: string,
-  signal: AbortSignal,
-): Promise<void> {
-  try {
-    await runCommand(sandbox, `rm -f ${quoteShellArg(path)}`, signal);
-  } catch {
-    // A capture left behind is the sandbox's to reap; the result the tool returns matters more.
-  }
 }
 
 /** The model gets the pixels when they were captured inline, and never the sandbox path or the base64 as text. */

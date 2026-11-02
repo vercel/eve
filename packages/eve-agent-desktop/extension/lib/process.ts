@@ -36,7 +36,10 @@ export interface SandboxProcess {
  * stopped. Every eve sandbox session provides `spawn`.
  */
 export interface CommandSandbox {
-  spawn(options: { readonly command: string }): PromiseLike<SandboxProcess>;
+  spawn(options: {
+    readonly command: string;
+    readonly signal?: AbortSignal;
+  }): PromiseLike<SandboxProcess>;
 }
 
 export interface SandboxCommandResult {
@@ -92,7 +95,15 @@ export async function runCommand(
   signal?: AbortSignal,
 ): Promise<SandboxCommandResult> {
   signal?.throwIfAborted();
-  const process = await sandbox.spawn({ command });
+  const spawning = Promise.resolve(sandbox.spawn({ command, signal }));
+  let process: SandboxProcess;
+  try {
+    process = await untilSettled(spawning, signal);
+  } catch (error) {
+    if (signal?.aborted !== true) throw error;
+    void spawning.then(stopProcess, () => undefined);
+    throw stoppedError(signal, "unknown");
+  }
   let terminating: Promise<TerminationOutcome> | undefined;
   const stop = (): Promise<TerminationOutcome> => (terminating ??= stopProcess(process));
   let reportAbort: (error: Error) => void = () => {};
