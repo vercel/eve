@@ -79,10 +79,13 @@ export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 
 export {
   defaultSlackAllowFrom,
+  isExternalSlackConversation,
+  isSlackGuest,
   type SlackAllowFrom,
-  type SlackInboundUser,
+  type SlackClassifyOptions,
   type SlackInboundKind,
   type SlackInboundRequest,
+  type SlackInboundUser,
 } from "#public/channels/slack/allow-from.js";
 
 export { type SlackUserInfo } from "#public/channels/slack/user-info.js";

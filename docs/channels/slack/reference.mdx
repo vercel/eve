@@ -303,6 +303,7 @@ Pass `allowFrom: () => true` to allow every request.
 
 - Message hooks still decide routing and auth. A hook that returns `null` drops a message `allowFrom` let through.
 - `ctx.isExternalConversation()` on message hooks makes the same check as the default.
+- To check a conversation before the agent posts there, such as in a tool or schedule, use [`isExternalSlackConversation` and `isSlackGuest`](#slack-api-calls-outside-a-handler).
 - Reading a Slack Connect conversation through the Slack API is not affected.
 - Keep authorization checks in sensitive tools too. `allowFrom` controls who reaches the agent; tool checks control what that user may read or change.
 
@@ -919,6 +920,22 @@ const response = await callSlackApi({
   body: { channel: "C0123456789", timestamp: "1712345678.000100", full: true },
 });
 if (!response.ok) throw new Error(String(response.error));
+```
+
+`allowFrom` only checks inbound requests, so nothing stops a tool or schedule from posting into a Slack Connect conversation. Run the same checks first with `isExternalSlackConversation` and `isSlackGuest`. They take the same `api`, `botToken`, and `context` as `callSlackApi`, fail closed, and cache for five minutes:
+
+```ts
+import { callSlackApi, isExternalSlackConversation } from "eve/channels/slack";
+
+const slack = { botToken, context: { teamId: "T0123456789" } };
+if (await isExternalSlackConversation({ ...slack, channelId: "C0123456789" })) {
+  throw new Error("This agent doesn't post in Slack Connect conversations.");
+}
+await callSlackApi({
+  ...slack,
+  operation: "chat.postMessage",
+  body: { channel: "C0123456789", text: "Deploy finished." },
+});
 ```
 
 - `callSlackApi` passes `context` to a function-form token.
