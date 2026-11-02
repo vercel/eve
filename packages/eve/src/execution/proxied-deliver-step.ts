@@ -204,12 +204,18 @@ async function routeProxiedDeliver(
       };
       const childPayloadIndex = child.payloads.length;
       child.payloads.push(forChild.payload);
-      if (routed.forSelf === undefined && childIndex === 0) {
-        for (const metadata of sourceDelivery.deliveryMetadata ?? []) {
-          if (metadata.payloadIndex === sourcePayloadIndex) {
-            child.metadata.push({ ...metadata, payloadIndex: childPayloadIndex });
-          }
-        }
+      // Each child admits its answers as a delivery of its own, even when this session keeps
+      // the payload's other fields. Only the first keeps the payload's id, so two shares that
+      // reach one session never collide.
+      for (const metadata of payloadMetadata) {
+        child.metadata.push({
+          ...metadata,
+          deliveryId:
+            childIndex === 0
+              ? metadata.deliveryId
+              : `${metadata.deliveryId}_forwarded_${childIndex}`,
+          payloadIndex: childPayloadIndex,
+        });
       }
       children.set(key, child);
     }
