@@ -38,10 +38,15 @@ export function withUsageCall<T>(callId: string, fn: () => T): T {
   return sink === undefined ? fn() : withContextScopeValue(SINK, { ...sink, callId }, fn);
 }
 
-/** Runs a reaction's `fn`, where usage it records is published without waiting on reactions. */
+/**
+ * Runs a reaction's `fn`, where usage it records is published without waiting on reactions. A
+ * reaction can start inside a tool's call, from its progress, but what it spends isn't the call's.
+ */
 export function withUsageInReaction<T>(fn: () => T): T {
   const sink = contextScopeValue<UsageSink>(SINK);
-  return sink === undefined ? fn() : withContextScopeValue(SINK, { ...sink, inReaction: true }, fn);
+  if (sink === undefined) return fn();
+  const { callId: _callId, ...rest } = sink;
+  return withContextScopeValue(SINK, { ...rest, inReaction: true }, fn);
 }
 
 /**
