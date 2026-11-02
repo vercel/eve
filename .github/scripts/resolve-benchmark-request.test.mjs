@@ -20,6 +20,7 @@ const deepsweLean = { dataset: "deepswe-lean", reasoning: "high", attempts: "3" 
 const defaults = {
   harness: "eve-code,opencode,pi",
   slug: "eve-code+opencode+pi",
+  agentSource: true,
   ...sweLean,
   models: [anthropic],
 };
@@ -99,6 +100,7 @@ for (const harness of BENCHMARK_HARNESSES) {
     assert.deepEqual(await resolve(fixture({ body: `/benchmark ${harness}` })), {
       harness,
       slug: harness,
+      agentSource: harness === "eve-code",
       ...sweLean,
       models: [anthropic],
       sha,
@@ -324,6 +326,14 @@ test("manual dispatch can publish a deepswe-lean result and rejects unknown data
   await assert.rejects(resolve(input), /Supported benchmark datasets: swe-lean, deepswe-lean/u);
 });
 
+test("only a run with eve-code passes the agent source, which eve-bench rejects otherwise", async () => {
+  const input = fixture({ eventName: "workflow_dispatch" });
+  input.context.payload.inputs = { harness: "opencode", dataset: "deepswe-lean" };
+  assert.equal((await resolve(input)).agentSource, false);
+  input.context.payload.inputs.harness = "opencode,eve-code";
+  assert.equal((await resolve(input)).agentSource, true);
+});
+
 test("manual dispatch can select one model family or all of them", async () => {
   const input = fixture({ eventName: "workflow_dispatch" });
   for (const [model, expected] of [
@@ -380,7 +390,10 @@ test("workflow names and concurrency preserve independent authorized harness run
   // Each dataset's attempts run in waves of the action's maximum of 16 sandboxes.
   assert.match(workflow, /attempts: \$\{\{ needs\.request\.outputs\.attempts \}\}/u);
   assert.match(workflow, /concurrency: "16"/u);
-  assert.match(workflow, /agent-ref: \$\{\{ needs\.request\.outputs\.sha \}\}/u);
+  assert.match(
+    workflow,
+    /agent-ref: \$\{\{ needs\.request\.outputs\.agent-source == 'true' && needs\.request\.outputs\.sha \|\| '' \}\}/u,
+  );
 });
 
 test("the consumer tracks eve-bench main and owns its model selection", async () => {
@@ -395,7 +408,10 @@ test("the consumer tracks eve-bench main and owns its model selection", async ()
   assert.match(workflow, /blob-token: \$\{\{ secrets\.EVE_BENCH_BLOB_READ_WRITE_TOKEN \}\}/u);
   assert.doesNotMatch(workflow, /artifact-id/u);
   assert.match(workflow, /dataset: \$\{\{ needs\.request\.outputs\.dataset \}\}\n/u);
-  assert.match(workflow, /contenders: eve-code@baseline,eve-code@head\n/u);
+  assert.match(
+    workflow,
+    /contenders: \$\{\{ needs\.request\.outputs\.agent-source == 'true' && 'eve-code@baseline,eve-code@head' \|\| '' \}\}\n/u,
+  );
   assert.doesNotMatch(workflow, /^\s+task:/mu);
   assert.equal((workflow.match(/uses: \.\/\.eve-bench-action/gu) ?? []).length, 1);
 });

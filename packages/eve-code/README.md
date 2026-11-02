@@ -104,6 +104,8 @@ Main accepts changes only through a pull request with passing required checks. S
 
 Comment `/benchmark [<dataset>] [model=<family>] [<harness>[,<harness>...]]` to run a benchmark on a PR. Every part is optional and can come in any order, for example `/benchmark`, `/benchmark codex,eve-code`, or `/benchmark deepswe-lean model=openai`. You need write access to the repository. A comment runs one model family, because each harness and dataset gets a single PR comment that the latest run replaces.
 
+eve-bench keys stored results by the agent repository, which only an eve-code run provides. A run without `eve-code`, such as a `harness=opencode` dispatch or `/benchmark opencode`, only measures the harnesses it names. It reports to the job summary and posts no PR comment. It is not compared with stored results and does not publish. To re-baseline one competitor on `main`, dispatch it together with eve-code, for example `harness=eve-code,opencode`.
+
 Each dataset's attempts per task (5 for SWE-lean, 3 for DeepSWE-lean) match its stored baselines. eve-bench compares only whole-dataset results with the same attempts, so changing the count means re-baselining every harness on both models.
 
 ### Locally

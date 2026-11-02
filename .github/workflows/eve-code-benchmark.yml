@@ -61,6 +61,7 @@ jobs:
       reasoning: ${{ steps.request.outputs.reasoning }}
       attempts: ${{ steps.request.outputs.attempts }}
       models: ${{ steps.request.outputs.models }}
+      agent-source: ${{ steps.request.outputs.agentSource }}
       sha: ${{ steps.request.outputs.sha }}
       pr: ${{ steps.request.outputs.pr }}
     steps:
@@ -124,12 +125,14 @@ jobs:
         uses: ./.eve-bench-action
         with:
           harness: ${{ needs.request.outputs.harness }}
-          agent-repository: vercel/eve
-          agent-paths: '["packages/eve-code"]'
-          agent-ref: ${{ needs.request.outputs.sha }}
+          # Only eve-code reads the agent source; eve-bench rejects these inputs
+          # for a run of other harnesses alone.
+          agent-repository: ${{ needs.request.outputs.agent-source == 'true' && 'vercel/eve' || '' }}
+          agent-paths: ${{ needs.request.outputs.agent-source == 'true' && '["packages/eve-code"]' || '' }}
+          agent-ref: ${{ needs.request.outputs.agent-source == 'true' && needs.request.outputs.sha || '' }}
           dataset: ${{ needs.request.outputs.dataset }}
           # The PR comment's ranking tables show these plus each dimension's winner.
-          contenders: eve-code@baseline,eve-code@head
+          contenders: ${{ needs.request.outputs.agent-source == 'true' && 'eve-code@baseline,eve-code@head' || '' }}
           model: ${{ matrix.model }}
           # Reasoning and attempts are calibrated per dataset; see
           # .github/scripts/resolve-benchmark-request.mjs.

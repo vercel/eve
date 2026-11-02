@@ -96,6 +96,10 @@ function request({ dataset, harnesses, families }, models, sha, pr) {
   return {
     harness: harnesses.join(","),
     slug: harnesses.join("+"),
+    // eve-bench builds the agent checkout only for eve-code and rejects agent
+    // inputs without it. Such a run is measured but never published or compared
+    // with stored results, which are keyed by the agent repository.
+    agentSource: harnesses.includes("eve-code"),
     dataset,
     ...BENCHMARK_DATASETS[dataset],
     models: families.map((family) => {
