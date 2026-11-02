@@ -12,9 +12,9 @@ export const BASH_YIELD_SECONDS = 30;
  * The longest a `bash` call waits. A hosted step runs a model call and its tool
  * calls in one Vercel function, which Hobby plans stop at 300 seconds, and a
  * function timeout loses the call's result, so the cap leaves room for the
- * model call.
+ * model call, including its retries and long generations.
  */
-export const BASH_MAX_YIELD_SECONDS = 180;
+export const BASH_MAX_YIELD_SECONDS = 120;
 
 /** Where each command's output files live inside the sandbox. */
 const JOB_ROOT = "/tmp/.eve/jobs";
@@ -62,8 +62,8 @@ export interface BashInput {
   readonly command: string;
   /**
    * Seconds to wait before leaving the command running in the background.
-   * Defaults to {@link BASH_YIELD_SECONDS}; clamped to 1 through
-   * {@link BASH_MAX_YIELD_SECONDS}.
+   * Defaults to {@link BASH_YIELD_SECONDS}, also for non-finite values;
+   * clamped to 1 through {@link BASH_MAX_YIELD_SECONDS}.
    */
   readonly timeout?: number;
 }
@@ -140,10 +140,11 @@ export async function executeBashOnSandbox(
 ): Promise<BashResult> {
   const command = formatCommand(args.command);
   logDevelopmentSandboxCommand(`eve: starting sandbox command: ${command}`);
+  const { timeout } = args;
   const waitSeconds =
-    args.timeout === undefined
-      ? BASH_YIELD_SECONDS
-      : Math.min(Math.max(args.timeout, 1), BASH_MAX_YIELD_SECONDS);
+    timeout !== undefined && Number.isFinite(timeout)
+      ? Math.min(Math.max(timeout, 1), BASH_MAX_YIELD_SECONDS)
+      : BASH_YIELD_SECONDS;
   const result = await withDevelopmentSandboxProgress(command, () =>
     runCommand(sandbox, args.command, waitSeconds, options.abortSignal),
   );
@@ -249,7 +250,7 @@ async function claimRunningJob(
       `The command is still running after ${waitSeconds} seconds as process group ${pid}; stdout and stderr show its output so far. ` +
       `It keeps writing to ${directory}/stdout and ${directory}/stderr, and writes its exit code to ${directory}/exit when it finishes. ` +
       `Check on it with later commands such as \`tail ${directory}/stdout\` or \`cat ${directory}/exit\`, and stop it with \`kill -- -${pid}\`. ` +
-      `To wait for it in one call instead of polling, run \`while [ ! -e ${directory}/exit ]; do sleep 1; done; cat ${directory}/exit\` with a \`timeout\` of up to ${BASH_MAX_YIELD_SECONDS} seconds.`,
+      `To wait for it in one call instead of polling, run \`while [ ! -e ${directory}/exit ] && kill -0 -- -${pid} 2>/dev/null; do sleep 1; done; cat ${directory}/exit 2>/dev/null || echo "process group ${pid} exited without an exit code"\` with a \`timeout\` of up to ${BASH_MAX_YIELD_SECONDS} seconds.`,
     outputDirectory: directory,
     pid,
     status: "running",

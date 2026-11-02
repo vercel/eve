@@ -13,7 +13,7 @@ export interface BashToolInput {
   command: string;
   /**
    * Seconds to wait for the command before it keeps running in the
-   * background. Defaults to 30; values outside 1–180 are clamped.
+   * background. Defaults to 30; values outside 1–120 are clamped.
    */
   timeout?: number;
 }
@@ -52,7 +52,7 @@ export const BASH_INPUT_SCHEMA = defineJsonSchema<BashToolInput>({
     command: { type: "string", description: "The shell command to execute." },
     timeout: {
       type: "number",
-      description: `Seconds to wait for the command before it keeps running in the background. Defaults to ${BASH_YIELD_SECONDS}; values above ${BASH_MAX_YIELD_SECONDS} wait ${BASH_MAX_YIELD_SECONDS}.`,
+      description: `Seconds to wait for the command before it keeps running in the background. Defaults to ${BASH_YIELD_SECONDS}; values above ${BASH_MAX_YIELD_SECONDS} wait ${BASH_MAX_YIELD_SECONDS}, and values below 1 wait 1.`,
     },
   },
   required: ["command"],
@@ -104,7 +104,7 @@ export const BASH_OUTPUT_SCHEMA = defineJsonSchema<BashToolOutput>({
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool(
   defineTool({
     label: { start: (input) => toolLabel("Run", input.command) },
-    description: `Execute a shell command in the shared workspace environment. The call waits ${BASH_YIELD_SECONDS} seconds for the command, or \`timeout\` seconds up to ${BASH_MAX_YIELD_SECONDS}. For builds, installs, and test suites whose full output you need, pass a larger \`timeout\` instead of shortening or splitting the command. A command still running after the wait keeps running in the background and returns status "running" with its output so far and how to check on or stop it.`,
+    description: `Execute a shell command in the shared workspace environment. The call waits ${BASH_YIELD_SECONDS} seconds for the command, or \`timeout\` seconds from 1 to ${BASH_MAX_YIELD_SECONDS}. For builds, installs, and test suites whose full output you need, pass a larger \`timeout\` instead of shortening or splitting the command. A command still running after the wait keeps running in the background and returns status "running" with its output so far and how to check on or stop it.`,
     async execute(input, ctx) {
       return await executeBashOnSandbox(await ctx.getSandbox(), input as BashInput, {
         abortSignal: ctx.abortSignal,
