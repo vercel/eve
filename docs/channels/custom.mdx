@@ -295,16 +295,11 @@ await from(continuationToken).send(
 );
 ```
 
-For files behind authenticated URLs, as on Slack, put a `URL` object in the file part's `data` and declare `fetchFile` on the channel config:
+For files behind authenticated URLs, put a `URL` object in the file part's `data` and declare `fetchFile` on the channel config. `fetchUpload` is the resolver shown below:
 
 ```ts
 defineChannel({
-  fetchFile(url) {
-    if (!url.startsWith("https://files.slack.com/")) return null;
-    return fetch(url, { headers: { authorization: `Bearer ${token}` } })
-      .then((r) => r.arrayBuffer())
-      .then((b) => ({ bytes: Buffer.from(b) }));
-  },
+  fetchFile: fetchUpload,
 
   routes: [
     POST("/webhook", async (req, { from }) => {
@@ -327,23 +322,47 @@ defineChannel({
 });
 ```
 
-If `fetchFile` throws, eve replaces that attachment with a model-visible note and continues the turn. To tell the model why, throw `attachmentError` from `eve/channels`:
+The URL in `data` comes from whoever sent the message, so `fetchFile` must treat it as untrusted. Attach credentials only after the URL passes your host check and the caller may read the file. Reject redirects, set a timeout, and stop reading at your size limit, because `uploadPolicy` checks bytes only after `fetchFile` returns them:
 
 ```ts
-import { attachmentError } from "eve/channels";
+import { attachmentError, type FetchFileContext } from "eve/channels";
 
-async function fetchUpload(url: string) {
-  const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
-  if (response.status === 413) {
-    throw attachmentError("The file is over 100 MB. Ask for a smaller file.");
+const MAX_BYTES = 100 * 1024 * 1024;
+const TOO_LARGE = "The file is over 100 MB. Ask for a smaller file.";
+
+async function fetchUpload(url: string, context?: FetchFileContext) {
+  const target = new URL(url);
+  if (target.protocol !== "https:" || target.hostname !== "files.example.com") return null;
+  // Your own check that this caller may read this file.
+  if (!(await canReadFile(context?.session.auth.current, target))) {
+    throw attachmentError("You don't have access to this file.");
   }
-  return Buffer.from(await response.arrayBuffer());
+
+  const response = await fetch(target, {
+    headers: { authorization: `Bearer ${token}` },
+    redirect: "error",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`File fetch returned HTTP ${response.status}`);
+  if (Number(response.headers.get("content-length")) > MAX_BYTES) {
+    await response.body?.cancel();
+    throw attachmentError(TOO_LARGE);
+  }
+
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of response.body ?? []) {
+    size += chunk.byteLength;
+    if (size > MAX_BYTES) throw attachmentError(TOO_LARGE);
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 ```
 
-The model then reads `Attachment report.pdf could not be retrieved: The file is over 100 MB. Ask for a smaller file.` The message reaches the model as written. Keep it to details the person can act on, such as a size limit or a missing permission. Never include URLs, tokens, or upstream response text. Pass the original error as `attachmentError(message, { cause })` to keep it in operator logs. Any other thrown error becomes a generic note, with the original in operator logs.
+If `fetchFile` throws, eve replaces that attachment with a model-visible note and continues the turn. A thrown `attachmentError` from `eve/channels` tells the model why: for an oversized file, the model reads `Attachment report.pdf could not be retrieved: The file is over 100 MB. Ask for a smaller file.` The message reaches the model as written. Keep it to details the person can act on, such as a size limit or a missing permission. Never include URLs, tokens, or upstream response text. Pass the original error as `attachmentError(message, { cause })` to keep it in operator logs. Any other thrown error becomes a generic note, with the original in operator logs.
 
-`fetchFile` receives the URL as a string (its `href`), so the example matches with `url.startsWith(...)`. A string with a URL scheme in `data`, such as `https://...` or `myapp-file:abc`, works the same as a `URL` object. The second argument carries the channel's `state` and the attachment's `session`, so a resolver can check a file against the caller in `session.auth`.
+`fetchFile` receives the URL as a string (its `href`). Parse it and compare the protocol and hostname, as the example does, rather than matching a prefix. A string with a URL scheme in `data`, such as `https://...` or `myapp-file:abc`, works the same as a `URL` object. The second argument carries the channel's `state` and the attachment's `session`, so a resolver can check a file against the caller in `session.auth`.
 
 Return bytes to save the file to the sandbox. Return `null` for a URL your channel doesn't resolve, and eve downloads a public `https:` URL itself. eve's downloads have these limits:
 

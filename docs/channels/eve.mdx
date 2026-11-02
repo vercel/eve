@@ -128,6 +128,8 @@ export default eveChannel({
     if (!url.startsWith("https://uploads.example.com/")) return null;
     const response = await fetch(url, {
       headers: { authorization: `Bearer ${process.env.UPLOADS_TOKEN}` },
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
     });
     if (!response.ok) throw new Error(`Upload fetch returned HTTP ${response.status}`);
     return Buffer.from(await response.arrayBuffer());
@@ -135,7 +137,7 @@ export default eveChannel({
 });
 ```
 
-`fetchFile` follows the [custom channel contract](./custom#file-uploads): return bytes to save the file to the sandbox, or `null` for a URL that isn't yours. eve downloads a public `https:` URL itself and passes any other URL to the model as a note. `uploadPolicy` also checks fetched and downloaded files by their actual bytes and detected media type. A violating file reaches the model as a note instead of failing the request. See [Inbound attachments](../sandbox#inbound-attachments) for how eve stores files and shows them to the model.
+`fetchFile` follows the [custom channel contract](./custom#file-uploads): return bytes to save the file to the sandbox, or `null` for a URL that isn't yours. The URL comes from the caller, so a production resolver also checks that the caller may read the file and stops reading at its size limit, as the [custom channel resolver](./custom#file-uploads) does. eve downloads a public `https:` URL itself and passes any other URL to the model as a note. `uploadPolicy` also checks fetched and downloaded files by their actual bytes and detected media type. A violating file reaches the model as a note instead of failing the request. See [Inbound attachments](../sandbox#inbound-attachments) for how eve stores files and shows them to the model.
 
 ### Stream events
 
