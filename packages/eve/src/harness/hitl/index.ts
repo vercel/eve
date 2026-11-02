@@ -1,6 +1,8 @@
 import type { ApprovalMemory } from "#approval/evaluation.js";
 import type { ModelMessage } from "ai";
 
+import type { SessionAuthContext } from "#channel/types.js";
+import { AuthKey, SessionKey } from "#context/keys.js";
 import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import { fail } from "#harness/session-machine/transitions.js";
@@ -26,7 +28,6 @@ import {
 } from "./approvals.js";
 import { checkSessionUsageLimit, DEFAULT_SESSION_USAGE_LIMIT } from "./budget.js";
 import { isEmptyInput } from "./delivery.js";
-import { currentRequester, ownedSignIns } from "./requester.js";
 
 // The session's human-in-the-loop rules, behind the few points where the rest of the harness
 // meets them: a delivery's answers and sign-in callbacks before its turn runs
@@ -83,7 +84,7 @@ export async function stopForToolSignIn(
   await step.apply(
     requireSignIn(step.view(), {
       calls: interrupt.calls,
-      challenges: ownedSignIns(interrupt.challenges, currentRequester(step)),
+      challenges: interrupt.challenges,
     }),
     step.session.history,
   );
@@ -160,6 +161,11 @@ function responsePolicyRequestIds(
       );
     })
     .map((ask) => ask.interactionId);
+}
+
+/** The caller whose turn parks a step. */
+function currentRequester(step: Step): SessionAuthContext | null {
+  return step.ctx?.get(AuthKey) ?? step.ctx?.get(SessionKey)?.auth.current ?? null;
 }
 
 /**

@@ -32,7 +32,6 @@ import {
   withdrawUnavailable,
 } from "./approvals.js";
 import { runApprovedCalls } from "./approved-calls.js";
-import { currentRequester, ownedSignIns } from "./requester.js";
 import { publishDenial, type CallResult } from "#harness/call-executor.js";
 import { checkResponders, weighResponders } from "./responders.js";
 import {
@@ -338,7 +337,7 @@ async function runApproved(
         const approval = byCallId.get(stopped.call.callId);
         return approval === undefined ? stopped : { ...stopped, approval };
       }),
-      challenges: ownedSignIns(signIn.challenges, currentRequester(step)),
+      challenges: signIn.challenges,
     }),
     step.session.history,
   );
