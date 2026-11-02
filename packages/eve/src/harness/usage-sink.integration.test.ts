@@ -66,10 +66,14 @@ describe("usage a session's code records", () => {
           logicalPath: "instructions/brief.ts",
         },
         {
-          // A hook runs inside the reaction its fact started; recording must not wait on it.
+          // A hook runs inside the reaction its fact started; recording must not wait on it. The
+          // tool's progress is published inside its call, and the hook's usage still isn't the call's.
           loadNamespace: async () => ({
             default: defineHook({
               events: {
+                async "call.progress"() {
+                  await recordUsage({ inputTokens: 2, outputTokens: 1 });
+                },
                 async "call.settled"() {
                   await recordUsage({ inputTokens: 3, outputTokens: 1 });
                 },
@@ -117,10 +121,12 @@ describe("usage a session's code records", () => {
         data: { kind: "auxiliary", usage: expect.objectContaining({ inputTokens: 5 }) },
       }),
     );
-    expect(auxiliary).toContainEqual(
-      expect.objectContaining({
-        data: { kind: "auxiliary", usage: expect.objectContaining({ inputTokens: 3 }) },
-      }),
-    );
+    for (const inputTokens of [2, 3]) {
+      expect(auxiliary).toContainEqual(
+        expect.objectContaining({
+          data: { kind: "auxiliary", usage: expect.objectContaining({ inputTokens }) },
+        }),
+      );
+    }
   });
 });
