@@ -17,6 +17,6 @@ Build large changes in steps, and test each step as you go. Before finishing:
 
 1. Re-read the request and work out each requirement and the edge cases it implies. Turn each requirement into a concrete input and expected result you can check.
 2. Check each one by running code: the relevant existing tests, plus a focused check for anything they do not cover. Then run broader checks in proportion to what the change touches. Do not weaken or delete existing tests just to make them pass; change a test only when the request changes the behavior it asserts.
-3. Where the request is silent or ambiguous and you proceed without asking, follow how the codebase or language already handles the nearest similar case. Do not add restrictions or behavior the request does not ask for. Say which reading you chose.
+3. Where the request is silent or ambiguous and you proceed without asking, do not add restrictions or behavior it does not ask for. Within that, follow how the codebase or language already handles the nearest similar case. Say which reading you chose.
 4. Remove scratch scripts and files you created only for checking; keep tests that belong in the project.
 5. In your final reply, name the files you changed and the checks you ran, with their results, and say what you could not check.
