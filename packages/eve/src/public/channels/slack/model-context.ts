@@ -19,7 +19,20 @@ interface SlackModelMessageInput {
   readonly ts: string;
   /** Lines of the `<edit>` and `<diff>` blocks; present only for an edited message. */
   readonly editLines?: readonly string[];
+  /** Present only for an unmentioned reply `threads.follow` sent to the session. */
+  readonly replyGuidance?: string;
 }
+
+/**
+ * Tells the model that a followed thread's reply may not be for it. It rides on
+ * each such message rather than the system prompt, so it holds wherever the
+ * message sits in history, and a mention or DM never carries it.
+ */
+const FOLLOW_UP_REPLY_GUIDANCE = [
+  "You are part of this Slack thread, so every reply in it reaches you, including messages people send each other. Several people may share the thread, and <sender> names who wrote this one.",
+  "This message does not mention you. Reply when it is meant for you: a question or request you can help with, or a follow-up to something you said or did.",
+  "When people are talking among themselves, acknowledging each other, or someone else is better placed to answer, stay out of it: call `no_reply` instead of replying, or end your turn without text if you have no `no_reply` tool.",
+].join("\n");
 
 /**
  * Renders one Slack message with its metadata grouped into `<sender>`,
@@ -51,6 +64,7 @@ function formatSlackModelMessage(input: SlackModelMessageInput): string {
     `message_ts: ${input.ts}`,
     "</thread>",
     ...(input.editLines ?? []),
+    ...(input.replyGuidance ? ["<reply_guidance>", input.replyGuidance, "</reply_guidance>"] : []),
     "<content>",
     input.content,
     "</content>",
@@ -63,10 +77,14 @@ function oneLine(value: string): string {
   return value.replace(/[\r\n]+/gu, " ");
 }
 
-/** Renders the triggering inbound Slack message as one attributed block. */
+/**
+ * Renders the triggering inbound Slack message as one attributed block. A
+ * `followUp` also tells the model the message may not be meant for it.
+ */
 export function formatSlackInboundMessage(
   context: SlackInboundContext,
   message: { readonly text: string; readonly ts: string },
+  options?: { readonly followUp?: boolean },
 ): string {
   return formatSlackModelMessage(inboundModelMessage(context, message));
 }
@@ -122,6 +140,7 @@ function inboundModelMessage(
     channelId: context.channelId,
     content: slackModelContent(message.text),
     isMentioned: context.isMentioned,
+    ...(options?.followUp === true && { replyGuidance: FOLLOW_UP_REPLY_GUIDANCE }),
     senderId: context.userId || undefined,
     senderInfo,
     senderType: context.userId ? "user" : "unknown",

@@ -2,7 +2,12 @@ import { createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { buildAdapterContext } from "#channel/adapter-context.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionKey } from "#context/keys.js";
+import type { SessionEvent } from "#protocol/session-event.js";
+import { emptySessionView } from "#protocol/session-projection/fold.js";
 import { Card, CardText } from "#public/channels/slack/cards.js";
 import type { SlackPostInput } from "#public/channels/slack/api.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
@@ -650,5 +655,151 @@ describe("slackChannel message edits", () => {
       expect.objectContaining({ subtype: "message_changed" }),
     );
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("slackChannel threads.follow", () => {
+  const ROOT_TS = "1700000000.000001";
+  let eventCount = 0;
+
+  function channelMessage(
+    input: { readonly bot?: boolean; readonly text?: string; readonly topLevel?: boolean } = {},
+  ): Request {
+    const event = {
+      channel: "C01",
+      channel_type: "channel",
+      text: input.text ?? "Bob, can you take the rollback?",
+      ts: "1700000000.000300",
+      type: "message",
+      user: "U_ALICE",
+      ...(input.topLevel !== true && { thread_ts: ROOT_TS }),
+      ...(input.bot === true && { bot_id: "B_OTHER" }),
+    };
+    return signed(
+      JSON.stringify({
+        api_app_id: "A01",
+        authorizations: [{ is_bot: true, user_id: "U_BOT" }],
+        event,
+        event_id: `EvFollow${++eventCount}`,
+        team_id: "T01",
+        type: "event_callback",
+      }),
+    );
+  }
+
+  function shownStatuses(): unknown[] {
+    return slackCalls("assistant.threads.setStatus")
+      .map((call) => call.status)
+      .filter((status) => status !== "");
+  }
+
+  it("sends an unmentioned reply in a thread with a session, without acknowledging it", async () => {
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" }, threads: { follow: true } }),
+      channelMessage(),
+      send,
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [address, input] = send.mock.calls[0]! as [
+      string,
+      ObservedChannelDelivery<SlackChannelState>,
+    ];
+    expect(address).toBe(`C01:${ROOT_TS}`);
+    expect(input.state).toMatchObject({ followUp: true });
+    expect(JSON.stringify("message" in input ? input.message : undefined)).toContain(
+      "<reply_guidance>",
+    );
+    expect(shownStatuses()).toEqual([]);
+  });
+
+  it.each([
+    { name: "a thread without a session", request: () => channelMessage(), session: undefined },
+    { name: "another bot's reply", request: () => channelMessage({ bot: true }) },
+    { name: "a top-level message", request: () => channelMessage({ topLevel: true }) },
+    {
+      name: "the message copy of a mention",
+      request: () => channelMessage({ text: "<@U_BOT> can you take the rollback?" }),
+    },
+  ])("ignores $name", async ({ request, ...rest }) => {
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+    const session = "session" in rest ? rest.session : { id: "s1" };
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" }, threads: { follow: true } }),
+      request(),
+      send,
+      () => Promise.resolve(session),
+    );
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("keeps a follow-up or edit turn quiet until a tool call finishes", async () => {
+    const definition = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      threads: { follow: true },
+    });
+    if (!isCompiledChannel(definition)) throw new Error("Expected a compiled channel.");
+    const adapter = {
+      ...definition.adapter,
+      state: { ...definition.adapter.state, channelId: "C01", threadTs: ROOT_TS, teamId: "T01" },
+    };
+    const store = new ContextContainer();
+    store.setVirtualContext(SessionKey, {
+      sessionId: "s1",
+      auth: { current: null, initiator: null },
+      turn: { id: "t1", sequence: 0 },
+    });
+    const ctx = {
+      ...buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as never),
+      view: emptySessionView(),
+    };
+    const run = (fact: SessionEvent) =>
+      contextStorage.run(store, async () => {
+        const handler = adapter[fact.type] as
+          | ((event: SessionEvent, context: typeof ctx) => Promise<void>)
+          | undefined;
+        await handler?.(fact, ctx);
+      });
+    const deliver = (state: Partial<SlackChannelState>) =>
+      adapter.deliver?.({ message: "hello", state } as never, ctx);
+    const call = (type: "call.requested" | "call.settled", turnId: string, tool: string) =>
+      run({
+        type,
+        data: {
+          callId: `${turnId}-call`,
+          capability: { kind: "tool", name: tool },
+          // `no_reply` reports no label, so its call finishing shows nothing.
+          ...(tool !== "no_reply" && { label: `Ran ${tool}` }),
+          outcome: "completed",
+          owner: { runId: `${turnId}-run` },
+        },
+      } as never);
+    const startTurn = (turnId: string) =>
+      run({ type: "turn.started", data: { cause: {}, follows: null, turnId } } as never);
+
+    await deliver({ followUp: true });
+    await startTurn("t1");
+    await call("call.requested", "t1", "no_reply");
+    await call("call.settled", "t1", "no_reply");
+    await run({ type: "turn.settled", data: { turnId: "t1", outcome: "completed" } } as never);
+    expect(shownStatuses()).toEqual([]);
+
+    await deliver({ edit: true });
+    await startTurn("t2");
+    await call("call.requested", "t2", "search_docs");
+    expect(shownStatuses()).toEqual([]);
+    await call("call.settled", "t2", "search_docs");
+    expect(shownStatuses()).toEqual(["Ran search_docs"]);
+    await run({ type: "turn.settled", data: { turnId: "t2", outcome: "completed" } } as never);
+
+    // A mention folded into the same turn is addressed to the agent.
+    await deliver({ followUp: true });
+    await deliver({});
+    await run({ type: "turn.started", data: { cause: {}, follows: null, turnId: "t3" } } as never);
+    expect(shownStatuses().at(-1)).toBe("Thinking...");
   });
 });

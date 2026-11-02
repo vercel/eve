@@ -66,7 +66,40 @@ By default, the agent answers `@mentions` in any channel it has joined, replying
 
 ## Reply without a mention
 
-Return `{ auth }` from `onMessage` to start a turn, or `null` to ignore the message. This hook answers DMs, private channels, and mentions, and keeps answering in any thread the agent already joined:
+Set `threads: { follow: true }` to keep the agent in a thread once it has a session there. Every later human reply in that thread reaches the agent without a mention, including messages people send each other. The agent decides whether each reply needs an answer, so add the [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool to let it stay quiet:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  threads: { follow: true },
+});
+```
+
+```bash
+eve add tool/no_reply
+```
+
+eve tells the model that an unmentioned reply may be meant for someone else in the thread. It shows no thread status for that reply until the agent calls a tool, so a reply the agent skips leaves no trace. Top-level messages, replies in threads without a session, and other bots' messages still need a mention.
+
+Slack sends un-mentioned channel messages only when the app subscribes to them. With `threads.follow` set, the generated app manifest includes these subscriptions:
+
+<TabsWithChildren groupId="vercel" ariaLabel="How credentials are managed" tabs={["Vercel Connect", "Self-managed"]}>
+<TabContent order={1}>
+
+In the Connect connector's **Advanced** settings, add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. For private channels, also add `message.groups` and `groups:history`.
+
+</TabContent>
+<TabContent order={2}>
+
+In [Slack app settings](https://api.slack.com/apps), subscribe to the `message.channels` event and add the `channels:history` bot scope. For private channels, also add `message.groups` and `groups:history`. Then reinstall the app.
+
+</TabContent>
+</TabsWithChildren>
+
+To choose in code which messages start a turn, return `{ auth }` from `onMessage`, or `null` to ignore the message. `onMessage` receives every posted message, so it takes precedence over `threads.follow`. This hook answers DMs, private channels, and mentions, and keeps answering in any thread the agent already joined:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -83,22 +116,7 @@ export default slackChannel({
 });
 ```
 
-Slack sends un-mentioned channel messages only when the app subscribes to them:
-
-<TabsWithChildren groupId="vercel" ariaLabel="How credentials are managed" tabs={["Vercel Connect", "Self-managed"]}>
-<TabContent order={1}>
-
-In the Connect connector's **Advanced** settings, add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. For private channels, also add `message.groups` and `groups:history`.
-
-</TabContent>
-<TabContent order={2}>
-
-In [Slack app settings](https://api.slack.com/apps), subscribe to the `message.channels` event and add the `channels:history` bot scope. For private channels, also add `message.groups` and `groups:history`. Then reinstall the app.
-
-</TabContent>
-</TabsWithChildren>
-
-To follow a thread without answering every reply, ask a decision model from the hook with [`decide`](/docs/guides/decide). This hook answers mentions and DMs right away, and asks the model whether each unmentioned reply in an active thread expects an answer:
+To filter replies before they reach the agent, ask a decision model from the hook with [`decide`](/docs/guides/decide). This hook answers mentions and DMs right away, and asks the model whether each unmentioned reply in an active thread expects an answer:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";

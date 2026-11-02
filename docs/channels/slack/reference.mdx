@@ -291,6 +291,28 @@ Post sensitive requests in conversations limited to the intended approvers. Re-c
 
 #### Continue conversations without repeated mentions
 
+`threads.follow` sends every reply in the agent's threads to the agent, and `onMessage` lets you choose replies in code. Both need extra Slack subscriptions. With Vercel Connect, open **Advanced** when creating the connector. Add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels also need `message.groups` and `groups:history`. With `threads.follow` set, the generated app manifest includes them.
+
+##### Follow threads
+
+With `threads: { follow: true }`, every human reply in a thread that already has an eve session reaches the agent, mentioned or not:
+
+```ts title="agent/channels/slack.ts"
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  threads: { follow: true },
+});
+```
+
+- An unmentioned reply goes to `onMessage`, else `onAppMention` with `ctx.isBotMentioned()` returning `false`, else the default handler. Return `null` from either hook to drop it.
+- The reply's `<slack_message>` block carries a `<reply_guidance>` block. It tells the model the reply may be meant for someone else, and to call `no_reply` when it is.
+- The turn shows no thread status until the model calls a tool other than `no_reply`. A turn that also answers a mention or DM shows its status as usual.
+- Top-level messages, replies in threads without a session, and other bots' messages still need a mention.
+
+Add the [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool with `eve add tool/no_reply`. Without it, the model can still end its turn with no text, which posts nothing. Replies that arrive while a turn runs follow the [turn policy](#control-overlapping-turns).
+
+##### Choose which replies start a turn
+
 Use `onMessage` to answer explicit mentions and continue replies in threads that already have an eve session:
 
 ```ts title="agent/channels/slack.ts"
@@ -309,7 +331,7 @@ export default slackChannel({
 - `isBotMentioned()` checks for an explicit mention.
 - `isSubscribed()` checks whether the thread has an active eve session.
 
-Thread replies need extra subscriptions. With Vercel Connect, open **Advanced** when creating the connector. Add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels also need `message.groups` and `groups:history`.
+With `threads.follow` also set, an unmentioned reply that `onMessage` sends to a thread's existing session gets the same reply guidance and quiet status.
 
 ##### Classify ambient replies with a decision model
 
@@ -622,6 +644,7 @@ Public channels are `public`; DMs, group DMs, and private channels are `private`
 | `messageContext`  | Off                                                                                 | `{ users }` adds sender names, and emails with `email: true`, to model context. See [Add sender names and emails](#add-sender-names-and-emails). |
 | `threadContext`   | Off                                                                                 | Load earlier thread replies. `{}` means `since: "thread-root"`. See [Load prior thread messages](#load-prior-thread-messages).                   |
 | `codeChannels`    | `false`                                                                             | Serve Slack code channels as one session each. See [Serve Slack code channels](#serve-slack-code-channels).                                      |
+| `threads`         | Off | `{ follow: true }` sends later replies in the agent's threads to it without a mention. See [Follow threads](#follow-threads). |
 | `uploadPolicy`    | Any media type, up to 25 MB                                                         | `"disabled"` or `{ maxBytes, allowedMediaTypes }` for inbound files.                                                                             |
 | `approvalChannel` | `"thread"`                                                                          | `(request, ctx) => "thread" \| "direct-message"`. See [Human-in-the-loop](#human-in-the-loop-hitl).                                              |
 | `renderers`       | eve's default renderer                                                              | Renderers that wrap eve's default. See [Customize rendering](#customize-rendering).                                                              |

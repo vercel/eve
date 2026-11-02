@@ -103,6 +103,7 @@
   "SlackSlashCommandContext",
   "SlackThread",
   "SlackThreadMessage",
+  "SlackThreadsOptions",
   "SlackTransportOptions",
   "SlackUploadFilesOptions",
   "SlackUploadFilesResult",

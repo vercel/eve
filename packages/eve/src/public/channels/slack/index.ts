@@ -39,6 +39,7 @@ export {
   type SlackShortcut,
   type SlackShortcutContext,
   type SlackShortcutMessage,
+  type SlackThreadsOptions,
   type SlackMentionResult,
   type SlackReceiveTarget,
   type SlackSessionTarget,

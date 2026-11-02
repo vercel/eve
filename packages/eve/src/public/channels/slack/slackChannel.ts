@@ -306,15 +306,21 @@ export interface SlackChannelState extends UndeliveredReplyState {
    */
   edit?: boolean;
   /**
-   * Whether every message delivered since the last turn ended was an edit. The
-   * next turn starts quiet when it was.
+   * Stamped on the delivery of an unmentioned reply that `threads.follow`
+   * sent to the thread's session.
    * @internal
    */
-  pendingEditTurn?: boolean | null;
+  followUp?: boolean;
   /**
-   * The turn started from an edit, so the default renderer shows no status
-   * until the turn's first tool call finishes. A model that ends the turn
-   * without a reply then leaves no trace in the thread.
+   * Whether every message delivered since the last turn ended was an edit or
+   * an unmentioned follow-up. The next turn starts quiet when it was.
+   * @internal
+   */
+  pendingQuietTurn?: boolean | null;
+  /**
+   * The turn started from an edit or an unmentioned follow-up, so the default
+   * renderer shows no status until the turn's first tool call finishes. A
+   * model that ends the turn without a reply then leaves no trace in the thread.
    * @internal
    */
   quietStatus?: boolean | null;
@@ -763,6 +769,25 @@ export type SlackApprovalChannelResolver = (
   ctx: SessionContext,
 ) => SlackApprovalChannel | Promise<SlackApprovalChannel>;
 
+/** `slackChannel({ threads })`: how the agent takes part in its Slack threads. */
+export interface SlackThreadsOptions {
+  /**
+   * Keeps the agent in every thread it already has a session in: later human
+   * replies there reach the session without a mention. Un-mentioned replies
+   * go to `onMessage`, else `onAppMention` (where `ctx.isBotMentioned()`
+   * returns `false`), else the default handler. Replies in threads without a
+   * session, top-level messages, and other bots' messages still need a
+   * mention.
+   *
+   * eve tells the model that such a reply may not be meant for it, and
+   * shows no thread status until a tool call finishes. Add the `no_reply`
+   * tool so the agent can stay out of side conversations. Needs the
+   * `message.channels` and `message.groups` events, which the generated app
+   * manifest subscribes to. Defaults to `false`.
+   */
+  readonly follow?: boolean;
+}
+
 export interface SlackChannelConfig {
   /** Slack API transport overrides: base URLs and a custom fetch. */
   readonly api?: SlackTransportOptions;
@@ -790,6 +815,9 @@ export interface SlackChannelConfig {
    * channel and never looks one up.
    */
   readonly codeChannels?: boolean;
+
+  /** How the agent takes part in Slack threads it already has a session in. */
+  readonly threads?: SlackThreadsOptions;
 
   /**
    * Inbound upload policy applied to file attachments before they reach
@@ -1084,18 +1112,18 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           channel.state.replyThreadTs = channel.state.pendingReplyThreadTs;
           channel.state.pendingReplyThreadTs = undefined;
         }
-        channel.state.quietStatus = channel.state.pendingEditTurn === true;
-        channel.state.pendingEditTurn = null;
+        channel.state.quietStatus = channel.state.pendingQuietTurn === true;
+        channel.state.pendingQuietTurn = null;
         await renderTurnStarted?.(event, ctx);
       },
       async "call.settled"(event, ctx) {
-        // A turn an edit started shows its work once a tool call finishes; `no_reply` ends it first.
+        // A quiet turn shows its work once a tool call finishes; `no_reply` ends it first.
         ctx.channel.state.quietStatus = null;
         await renderCallSettled?.(event, ctx);
       },
       async "turn.settled"(event, ctx) {
         ctx.channel.state.quietStatus = null;
-        ctx.channel.state.pendingEditTurn = null;
+        ctx.channel.state.pendingQuietTurn = null;
         await renderTurnSettled?.(event, ctx);
       },
     },
@@ -1155,7 +1183,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       recordSlackPrincipal(channel.state, channel.session.auth.current, payload);
       followReplyThread(channel.state, payload);
       followTriggeringMessage(channel.state, payload);
-      followEditTurn(channel.state, payload);
+      followQuietTurn(channel.state, payload);
       return withUndeliveredReplyNote(channel.state, payload, "Slack");
     },
 
@@ -1550,6 +1578,8 @@ async function handleEventPost(input: {
     botUserId,
     codeChannelOnly: undefined,
     detectCodeChannels: config.codeChannels === true,
+    followThreads: config.threads?.follow === true,
+    followUpOnly: false,
     receivingBotUserId,
     from: input.from,
     resolveSession: input.resolveSession,
@@ -1571,9 +1601,15 @@ async function handleEventPost(input: {
       message: SlackMessage,
       handler: NonNullable<SlackChannelConfig["onMessage"]>,
       codeChannelOnly?: SlackCodeChannelOnly,
+      followUpOnly?: boolean,
     ) =>
     () =>
-      dispatchSlackMessage({ ...dispatchInput(kind, message), codeChannelOnly, handler });
+      dispatchSlackMessage({
+        ...dispatchInput(kind, message),
+        codeChannelOnly,
+        followUpOnly: followUpOnly === true,
+        handler,
+      });
 
   if (payload.kind === "app_mention" || payload.kind === "direct_message") {
     const kind = payload.kind;
@@ -1632,9 +1668,28 @@ async function handleEventPost(input: {
             installationTeamId,
           });
 
+  // `threads.follow` sends an unmentioned reply to the thread's session, like a mention, so
+  // an authored mention handler gates it. Whether the thread has a session is checked
+  // after Slack's ack.
+  const followUp =
+    dispatch === null && builtinDefault === null && config.threads?.follow === true
+      ? parseFollowUpReply(envelope, { appId, botUserId })
+      : null;
+  const dispatchFollowUp =
+    followUp === null
+      ? undefined
+      : dispatchMessage(
+          "channel_message",
+          followUp,
+          config.onAppMention ?? defaultOnMessage,
+          undefined,
+          true,
+        );
+
   // Slack asks agents to answer in a code channel without a mention. Every message
   // there is addressed to the agent, so an authored mention handler gates it. Only the
-  // lookup tells a code channel apart, so a message elsewhere falls back to `onEvent`.
+  // lookup tells a code channel apart, so a message elsewhere falls back to a followed
+  // thread, else `onEvent`.
   if (dispatch === null && builtinDefault === null && config.codeChannels === true) {
     const message = parseMessageEvent(envelope);
     if (
@@ -1647,12 +1702,19 @@ async function handleEventPost(input: {
       const onAppMention = config.onAppMention;
       if (onAppMention !== undefined) {
         dispatch = dispatchMessage("channel_message", message, onAppMention, {
-          otherwise: dispatchOnEvent,
+          otherwise: dispatchFollowUp ?? dispatchOnEvent,
         });
       } else {
-        builtinDefault = dispatchMessage("channel_message", message, defaultOnMessage, {});
+        builtinDefault = dispatchMessage("channel_message", message, defaultOnMessage, {
+          otherwise: dispatchFollowUp,
+        });
       }
     }
+  }
+
+  if (dispatch === null && builtinDefault === null && dispatchFollowUp !== undefined) {
+    if (config.onAppMention !== undefined) dispatch = dispatchFollowUp;
+    else builtinDefault = dispatchFollowUp;
   }
 
   // Specialized handlers retain their bot/subtype filters. onMessage receives
@@ -1718,6 +1780,25 @@ function mentionsBot(text: string | undefined, botUserId: string | undefined): b
   return botUserId !== undefined && text !== undefined && text.includes(`<@${botUserId}`);
 }
 
+/**
+ * A human's reply in a channel thread that doesn't mention the bot: what
+ * `threads.follow` may send to the thread's session. Without the bot's user id,
+ * a mention can't be told apart, and its `app_mention` would be delivered twice.
+ */
+function parseFollowUpReply(
+  envelope: SlackEventEnvelope,
+  identity: { readonly appId: string | undefined; readonly botUserId: string | undefined },
+): SlackMessage | null {
+  const message = parseMessageEvent(envelope);
+  if (message === null || message.author?.isBot !== false) return null;
+  if (message.threadTs === message.ts || message.raw.channel_type === "im") return null;
+  if (identity.botUserId === undefined || message.text.includes(`<@${identity.botUserId}`)) {
+    return null;
+  }
+  if (isSelfAuthoredSlackMessage(identity, message)) return null;
+  return isSlackCodeChannelOriginContext(message.raw) ? null : message;
+}
+
 /** Limits a message hook to code channels; `otherwise` serves a message posted elsewhere. */
 interface SlackCodeChannelOnly {
   readonly otherwise?: () => Promise<void>;
@@ -1730,6 +1811,10 @@ async function dispatchSlackMessage(input: {
   /** Serves the message only when it was posted in a code channel. */
   readonly codeChannelOnly: SlackCodeChannelOnly | undefined;
   readonly detectCodeChannels: boolean;
+  /** `slackChannel({ threads: { follow } })`: an unmentioned reply in a session's thread is a follow-up. */
+  readonly followThreads: boolean;
+  /** Serves the message only when it is a follow-up in a thread that already has a session. */
+  readonly followUpOnly: boolean;
   readonly receivingBotUserId: string | undefined;
   readonly from: ChannelFrom<SlackChannelState>;
   readonly resolveSession: ChannelResolveSession;
@@ -1880,6 +1965,18 @@ async function dispatchSlackMessage(input: {
 
   // An edit only reaches a thread the agent already serves, and shows no acknowledgement.
   if (edit !== undefined && (await sessionOperations.resolveSession()) === undefined) return;
+  // A follow-up may not be meant for the agent, so it gets no acknowledgement, and its turn
+  // starts quiet: the model may decide to stay out of the conversation.
+  const followUp =
+    edit === undefined &&
+    input.followThreads &&
+    input.kind === "channel_message" &&
+    !codeChannel &&
+    isThreadReply &&
+    !isBotMentioned &&
+    (await sessionOperations.resolveSession()) !== undefined;
+  if (input.followUpOnly && !followUp) return;
+  if (followUp) channelState.followUp = true;
 
   // A mention or DM is addressed to the agent, so it is acknowledged while the
   // hook decides. Other channel messages are mostly dropped, so they are
@@ -1904,7 +2001,7 @@ async function dispatchSlackMessage(input: {
     }
     return;
   }
-  if (edit === undefined) {
+  if (edit === undefined && !followUp) {
     await (acknowledged ?? acknowledgeMessage(input.received, input.message, { slack, thread }));
   }
 
@@ -1914,6 +2011,7 @@ async function dispatchSlackMessage(input: {
   await deliverSlackMessage({
     botUserId: input.receivingBotUserId,
     credentials: input.credentials,
+    followUp,
     kind: input.kind,
     isPrivateConversation,
     isMentioned: isMentionedNow,
@@ -2081,6 +2179,8 @@ async function deliverSlackMessage(input: {
   readonly botUserId: string | undefined;
   readonly sessionOperations: SlackSessionOperations;
   readonly credentials: SlackChannelCredentials | undefined;
+  /** An unmentioned reply `threads.follow` sent to the thread's session. */
+  readonly followUp: boolean;
   readonly isPrivateConversation: boolean;
   readonly isMentioned: boolean;
   readonly kind: string;
@@ -2155,7 +2255,7 @@ async function deliverSlackMessage(input: {
     };
     const attributedMessage =
       edit === undefined
-        ? formatSlackInboundMessage(inboundContext, message)
+        ? formatSlackInboundMessage(inboundContext, message, { followUp: input.followUp })
         : formatSlackInboundMessageEdit(inboundContext, {
             editedTs: edit.editedTs,
             previousText: edit.previousText,
@@ -2222,13 +2322,6 @@ function followReplyThread(state: SlackChannelState, payload: ChannelDelivery<un
   state.pendingReplyThreadTs = stamped?.replyThreadTs ?? null;
 }
 
-/** A turn starts quiet when every message delivered since the last one ended was an edit. */
-function followEditTurn(state: SlackChannelState, payload: ChannelDelivery<unknown>): void {
-  if (payload.message === undefined) return;
-  const edit = (payload.state as Partial<SlackChannelState> | undefined)?.edit === true;
-  state.pendingEditTurn = edit && state.pendingEditTurn !== false;
-}
-
 /** The latest message delivered is the one the next turn answers. */
 function followTriggeringMessage(
   state: SlackChannelState,
@@ -2237,6 +2330,18 @@ function followTriggeringMessage(
   if (payload.message === undefined) return;
   const stamped = (payload.state as Partial<SlackChannelState> | undefined)?.triggeringMessageTs;
   if (typeof stamped === "string") state.triggeringMessageTs = stamped;
+}
+
+/**
+ * A turn starts quiet only when every message it answers is an edit or an
+ * unmentioned follow-up: one new message addressed to the agent among them
+ * shows its status.
+ */
+function followQuietTurn(state: SlackChannelState, payload: ChannelDelivery<unknown>): void {
+  if (payload.message === undefined) return;
+  const stamped = payload.state as Partial<SlackChannelState> | undefined;
+  const quiet = stamped?.edit === true || stamped?.followUp === true;
+  state.pendingQuietTurn = quiet && state.pendingQuietTurn !== false;
 }
 
 /**

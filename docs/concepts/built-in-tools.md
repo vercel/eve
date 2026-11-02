@@ -477,7 +477,7 @@ Relative paths resolve against the workspace root; `$HOME` paths, parent travers
 
 ### `no_reply`
 
-`no_reply` ends the turn without a reply. It fits a scheduled check that finds nothing to report, or an action the agent already took is the whole answer. The model calls it with an optional `{ reason }`, which stays in session history and traces and is never sent. Channels and schedule sends post nothing, and later turns see that the agent chose to stay quiet. Add it:
+`no_reply` ends the turn without a reply. It fits a scheduled check that finds nothing to report, a [followed Slack thread](/docs/channels/slack/reference#follow-threads) reply meant for someone else, or an action the agent already took is the whole answer. The model calls it with an optional `{ reason }`, which stays in session history and traces and is never sent. Channels and schedule sends post nothing, and later turns see that the agent chose to stay quiet. Add it:
 
 ```sh
 eve add tool/no_reply

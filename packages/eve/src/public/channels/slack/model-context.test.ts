@@ -227,4 +227,22 @@ describe("Slack model context", () => {
       formatSlackThreadContext([threadMessage({ text: "Hi", ts: "1.1", user: "U1" })]),
     ).not.toContain("<bot>");
   });
+
+  it("tells the model a followed thread's reply may not be meant for it", () => {
+    const context = {
+      botUserId: "U_BOT",
+      channelId: "C01",
+      isMentioned: false,
+      threadTs: "1700000000.000001",
+      userId: "U_ALICE",
+    };
+    const message = { text: "Bob, can you take the rollback?", ts: "1700000000.000004" };
+
+    const followUp = formatSlackInboundMessage(context, message, { followUp: true });
+
+    expect(followUp).toMatch(
+      /<\/thread>\n<reply_guidance>\n[^]*`no_reply`[^]*\n<\/reply_guidance>\n<content>\nBob, can you take the rollback\?\n<\/content>/u,
+    );
+    expect(formatSlackInboundMessage(context, message)).not.toContain("<reply_guidance>");
+  });
 });
