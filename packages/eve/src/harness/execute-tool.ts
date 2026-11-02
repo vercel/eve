@@ -26,6 +26,12 @@ export interface HarnessToolDefinition {
   readonly executeInput?: (input: unknown) => JsonValue;
   readonly frameworkTool?: boolean;
   readonly frameworkAction?: "task-cancel" | "task-wait";
+  /**
+   * Runs a built-in executor that acts only on the conversation (`ask_question`, `no_reply`,
+   * `sleep`), so the agent-wide approval policy doesn't gate it. Set from the executor's identity,
+   * never from the tool's name.
+   */
+  readonly interactionOnly?: boolean;
   readonly inputSchema: FlexibleSchema;
   readonly name: string;
   readonly approval?: Approval;

@@ -108,18 +108,19 @@ describe("agent approval in the step catalog", () => {
     expect(catalog.get("crm")?.approval).toBeUndefined();
   });
 
-  it("leaves the built-in interaction tools ungated, but not an authored tool of the same name", () => {
+  it("leaves interaction-only executors ungated, but not tools that merely share their names", () => {
     const { catalog } = session({
       approval: () => "user-approval",
       tools: [
-        inlineTool("no_reply", { frameworkTool: true }),
+        inlineTool("no_reply", { frameworkTool: true, interactionOnly: true }),
+        // A framework-marked tool named like a built-in, such as a remote agent named `sleep`.
         inlineTool("sleep", { frameworkTool: true }),
-        inlineTool("ask_question"),
+        subagentTool("ask_question", { frameworkTool: true }),
       ],
     });
 
     expect(catalog.get("no_reply")?.approval).toBeUndefined();
-    expect(catalog.get("sleep")?.approval).toBeUndefined();
+    expect(catalog.get("sleep")?.approval).toBeDefined();
     expect(catalog.get("ask_question")?.approval).toBeDefined();
   });
 

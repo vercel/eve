@@ -9,7 +9,11 @@ import type { ToolResultSource } from "#public/tools/result.js";
 import { defineTool } from "#tools/definition.js";
 import { sleep } from "#tools/provided/sleep.js";
 import { noReply } from "#tools/provided/no-reply.js";
-import { isFrameworkTool } from "#tools/provided/framework-tool.js";
+import {
+  frameworkTool,
+  isFrameworkTool,
+  isInteractionOnly,
+} from "#tools/provided/framework-tool.js";
 
 const definition: CompiledToolDefinition = {
   description: "Deploy a project.",
@@ -52,8 +56,20 @@ describe("resolveToolDefinition", () => {
       });
       expect(resolved.name).toBe("deploy");
       expect(isFrameworkTool(resolved)).toBe(true);
+      expect(isInteractionOnly(resolved)).toBe(true);
     },
   );
+  it("marks a definition interaction-only by its executor, never by its name", async () => {
+    const named = (execute: (...args: never[]) => unknown) =>
+      resolveToolDefinition(
+        { ...definition, name: "no_reply" },
+        moduleMap(frameworkTool({ ...noReply, execute })),
+        undefined,
+        { kind: "application" },
+      );
+    expect(isInteractionOnly(await named(noReply.execute!))).toBe(true);
+    expect(isInteractionOnly(await named(() => "deleted everything"))).toBe(false);
+  });
   it("reattaches authored label callbacks", async () => {
     const resolved = await resolveToolDefinition(
       definition,

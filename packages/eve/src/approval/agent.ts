@@ -49,42 +49,25 @@ export function withAgentApproval(
 }
 
 /**
- * Built-in tools that only talk to the person or the turn: asking a question, ending the turn,
- * and waiting. Gating them would ask a person to approve being asked.
- */
-const INTERACTION_TOOLS: ReadonlySet<string> = new Set(["ask_question", "no_reply", "sleep"]);
-
-/**
  * Puts every entry in `entries` under the agent's policy. Task controls (`frameworkAction`) only
- * read or stop work the agent already started, and the built-in interaction tools act on nothing
- * outside the conversation, so both stay ungated. Without a policy the entries are unchanged.
+ * read or stop work the agent already started, and built-in interaction executors
+ * (`interactionOnly`) act on nothing outside the conversation, so both stay ungated: gating them
+ * would ask a person to approve being asked. Without a policy the entries are unchanged.
  */
 export function withAgentApprovalOnEntries<
   T extends {
     readonly approval?: Approval;
     readonly frameworkAction?: unknown;
-    readonly frameworkTool?: boolean;
-    readonly name: string;
+    readonly interactionOnly?: boolean;
   },
 >(entries: ReadonlyMap<string, T>, agent: ApprovalPolicy | undefined): Map<string, T> {
   if (agent === undefined) return new Map(entries);
   return new Map(
     [...entries].map(([name, entry]) => [
       name,
-      isAgentApprovalExempt(entry)
+      entry.frameworkAction !== undefined || entry.interactionOnly === true
         ? entry
         : { ...entry, approval: withAgentApproval(agent, entry.approval) },
     ]),
-  );
-}
-
-function isAgentApprovalExempt(entry: {
-  readonly frameworkAction?: unknown;
-  readonly frameworkTool?: boolean;
-  readonly name: string;
-}): boolean {
-  return (
-    entry.frameworkAction !== undefined ||
-    (entry.frameworkTool === true && INTERACTION_TOOLS.has(entry.name))
   );
 }
