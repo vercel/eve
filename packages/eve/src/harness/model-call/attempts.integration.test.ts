@@ -169,7 +169,8 @@ describe("a failed model call", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const events: SessionEvent[] = [];
     const message = "Alice asks for the weekly summary.";
-    const result = await createKernel({
+    const result = await createTestKernel({
+      agent: { model: { id: "m" } },
       handleEvent: eachEvent(async (event) => {
         events.push(event);
       }),
@@ -188,8 +189,7 @@ describe("a failed model call", () => {
       tools: new Map(),
     })(
       {
-        agent: { modelReference: { id: "m" }, system: "You help Alice.", tools: [] },
-        compaction: { recentWindowSize: 10, threshold: 100_000 },
+        compaction: {},
         continuationToken: "http:failed-call",
         history: [],
         sessionId: "failed-call",
