@@ -74,6 +74,72 @@ export default teamsChannel({
 });
 ```
 
+## Restrict who can reach the agent
+
+A valid Bot Connector token proves that Teams sent the activity, not that the sender should reach your agent. Shared channels can include people from other Microsoft Entra tenants, and anything the agent posts there is visible to them. Guests are in your tenant but outside your organization, and anonymous participants join meetings without an account.
+
+`admit(request)` is the channel's single access check. eve calls it before any hook, and before `receive` starts a session in a conversation:
+
+| `request.kind` | Surface                                                           | When `admit` returns `false` or throws                                                |
+| -------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `message`      | Messages, before `onMessage`                                      | Dropped                                                                               |
+| `answer`       | Approval and question card submissions, and **Sign in** presses   | Rejected; the request and its card stay open. A sign-in press is told it isn't theirs |
+| `invoke`       | `onInvoke` activities                                             | Acknowledged with `200 OK`; the hook doesn't run                                      |
+| `send`         | `receive`, through `to(teams, target)` or `ctx.to(teams, target)` | Throws before anything is posted                                                      |
+
+The default, `defaultTeamsAdmit`, refuses:
+
+- conversations that name no tenant, or conflicting ones in `channelData.tenant.id` and `conversation.tenantId`.
+- conversations in a tenant other than `credentials.tenantId` (or `MICROSOFT_TENANT_ID`), when one is set. A multi-tenant bot without it admits whichever tenant installed it.
+- channels Teams marks as shared (`channelData.channel.type: "shared"`).
+- people whose conversation membership reports another tenant.
+- guests and anonymous participants (`userRole` of `guest` or `anonymous`).
+- people Teams can't look up.
+
+For each request with a sender, eve looks the person up with the Bot Connector's `GET /v3/conversations/{id}/members/{userId}`. A channel's roster lives on its team, so eve asks the team. It caches the answer for five minutes, or one minute after a failed lookup. A send has no sender, so it checks only `target.tenantId`, which the default requires. eve can't tell from a send target whether a channel is shared.
+
+The request carries:
+
+- `kind`, from the table above
+- `conversationId`, the conversation the request comes from or a send posts into, without a thread suffix
+- `conversationType`, such as `personal`, `groupChat`, or `channel`
+- `tenantId`, the conversation's tenant
+- `actor`, the sender's Bot Framework `userId` and, when Teams reports it, their Microsoft Entra `aadObjectId`. It's `undefined` for sends.
+- `isExternalConversation()`, the tenant and shared-channel checks the default makes. It returns `true` when Teams can't classify the conversation or the sender.
+- `isGuest()`, the guest and anonymous check the default makes. It returns `true` when Teams can't look the sender up, and `false` without an actor.
+- `raw`, the verified activity, or the receive target for a send
+- `teams`, the Bot Connector handle for the conversation
+
+Write your own `admit` to change the policy. Call `defaultTeamsAdmit` from it to keep the tenant and guest checks. This one adds an allowlist of Microsoft Entra object ids:
+
+```ts title="agent/channels/teams.ts"
+import { defaultTeamsAdmit, teamsChannel } from "eve/channels/teams";
+
+const allowedUsers = new Set(["00000000-0000-0000-0000-000000000001"]);
+
+export default teamsChannel({
+  async admit(request) {
+    if (!(await defaultTeamsAdmit(request))) return false;
+    return request.kind === "send" || allowedUsers.has(request.actor?.aadObjectId ?? "");
+  },
+});
+```
+
+To serve a partner in one conversation, admit it before the default. To let guests in but keep the tenant checks, skip `isGuest()`:
+
+```ts
+admit: async (request) =>
+  request.conversationId === "19:partner@thread.tacv2" || (await defaultTeamsAdmit(request)),
+
+admit: async (request) => !(await request.isExternalConversation()),
+```
+
+Pass `admit: () => true` to admit every request.
+
+- `onMessage` and `onAnswers` still decide routing and auth. A hook that returns `null` drops a request `admit` let through.
+- The default looks up every sender, other bots included. If Teams can't look a bot up, the default refuses its messages.
+- Keep authorization checks in sensitive tools too. `admit` controls who reaches the agent; tool checks control what that person may read or change.
+
 ## Delivery
 
 Replies post as Markdown (`textFormat: "markdown"`), and long text is split across messages. A typing indicator shows when a turn starts and on each tool call. `thread.mentionUser()` shows the display name, or the user ID, as literal text, while the mention still targets the original user.
@@ -101,7 +167,7 @@ If you customize `onMessage` without setting `onAnswers`, eve rejects every pres
 
 ## Proactive sessions
 
-Proactive sessions need an existing conversation reference, because the Bot Framework v1 API can't create chats by Azure Active Directory (AAD) user id. Pass `serviceUrl`, `conversationId`, and the other reference fields as the target. Call `to(teams, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(teams, target).send(message, { auth })` from another channel.
+Proactive sessions need an existing conversation reference, because the Bot Framework v1 API can't create chats by Azure Active Directory (AAD) user id. Pass `serviceUrl`, `conversationId`, `tenantId`, and the other reference fields as the target. The default `admit` refuses a target without `tenantId`. Call `to(teams, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(teams, target).send(message, { auth })` from another channel.
 
 ## Attachments
 
@@ -129,6 +195,7 @@ export default teamsChannel({
 | `route`               | `/eve/v1/teams`                                                         | Messaging endpoint path.                                                                                                                                                           |
 | `api`                 | `https://login.microsoftonline.com` and the global `fetch`              | `{ loginBaseUrl, fetch }` for Connector token requests.                                                                                                                            |
 | `adaptiveCardVersion` | `"1.5"`                                                                 | Adaptive Card schema version for HITL and sign-in cards.                                                                                                                           |
+| `admit`               | `defaultTeamsAdmit`                                                     | `(request)` check that runs before every hook and proactive send. See [Restrict who can reach the agent](#restrict-who-can-reach-the-agent).                                       |
 | `turnPolicy`          | `"steer"`                                                               | `"steer"` or `"queue"` for messages that arrive during a turn.                                                                                                                     |
 | `files`               | Enabled, Microsoft hosts only, up to 25 MB                              | `{ enabled, allowedHosts, uploadPolicy }`. See [Attachments](#attachments).                                                                                                        |
 | `onMessage`           | Personal chats and direct mentions                                      | `(ctx, message)` hook. Return `{ auth }` to dispatch or `null` to ignore.                                                                                                          |
