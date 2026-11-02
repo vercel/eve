@@ -89,7 +89,8 @@ export async function askAside(
 /**
  * A command that answers a side question about the running task without steering or interrupting
  * it: `btw: { btwCommand() }` in `eveChannel({ commands })`, or run with `runCommand` from another
- * channel. The answer is shown only to the caller.
+ * channel. The eve channel shows the answer only to the caller. In a shared thread, such as Slack's,
+ * reply privately: the answer can quote tool inputs and outputs the thread doesn't otherwise show.
  */
 export function btwCommand(options: AsideOptions = {}): CommandDefinition {
   return defineCommand({

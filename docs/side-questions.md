@@ -24,7 +24,20 @@ export default eveChannel({
 
 In the terminal UI or Web Chat, type `/btw which branch are you on?`. The answer is shown only to you, and the turn carries on. The command needs a session, so it runs once the conversation has started.
 
-The same command runs in Slack threads through `findCommand` and `runCommand`; see [Slack commands](./channels/slack#add-commands). The answer posts in the thread, and the message never reaches the model.
+The same command runs in Slack threads through `findCommand` and `runCommand`; see [Slack commands](./channels/slack#add-commands). The message never reaches the model. Post the answer with `chat.postEphemeral` to the person who asked rather than with `ctx.thread.post`: it can quote tool inputs and outputs that the thread doesn't otherwise show.
+
+```ts title="agent/channels/slack.ts (in onAppMention)"
+const result = await runCommand(found, { argument, caller: auth, session });
+if (result.message) {
+  await ctx.slack.request("chat.postEphemeral", {
+    channel: message.channelId,
+    user: message.author?.userId,
+    // Empty in a code channel, whose session spans its threads.
+    ...(ctx.slack.threadTs && { thread_ts: ctx.slack.threadTs }),
+    text: result.message,
+  });
+}
+```
 
 ## Configure the answer
 

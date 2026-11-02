@@ -33,9 +33,12 @@ function promptText(prompt: LanguageModelV4Prompt): string {
   return JSON.stringify(prompt);
 }
 
-async function until(done: () => boolean, describe: () => string): Promise<void> {
+async function until(
+  done: () => boolean | Promise<boolean>,
+  describe: () => string,
+): Promise<void> {
   const deadline = Date.now() + 20_000;
-  while (!done()) {
+  while (!(await done())) {
     if (Date.now() > deadline) throw new Error(`Timed out: ${describe()}`);
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
@@ -47,14 +50,6 @@ async function readTypes(sessionId: string): Promise<string[]> {
     types.push(event.type);
   }
   return types;
-}
-
-async function untilAsync(done: () => Promise<boolean>): Promise<void> {
-  const deadline = Date.now() + 20_000;
-  while (!(await done())) {
-    if (Date.now() > deadline) throw new Error("Timed out waiting for the stream.");
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
 }
 
 /**
@@ -133,7 +128,10 @@ async function runWithAside<T>(name: string, aside: (sessionId: string) => Promi
       );
       // The stream's writer flushes asynchronously; ask once the tool call is durable, as a person
       // watching it run would.
-      await untilAsync(async () => (await readTypes(run.runId)).includes("call.started"));
+      await until(
+        async () => (await readTypes(run.runId)).includes("call.started"),
+        () => "the build call never reached the stream",
+      );
       result = await aside(run.runId);
       release();
       await until(
