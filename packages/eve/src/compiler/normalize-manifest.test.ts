@@ -1376,6 +1376,31 @@ describe("compileAgentManifest source graph", () => {
     ]);
   });
 
+  it("offers a memory's provider tools beside eve's built-in tool of the same name", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "memory/web_search.ts",
+        loadNamespace: async () => ({
+          default: defineMemory({
+            provider: { recall: { "turn.started": async () => null } },
+            scope: "user_1",
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.tools).toContainEqual(
+      expect.objectContaining({ logicalPath: "tools/web_search.ts", name: "web_search" }),
+    );
+    expect(await resolvedMemories(compiled, sourceRegistry)).toEqual([
+      expect.objectContaining({ offersTools: true, slot: "web_search" }),
+    ]);
+  });
+
   it("lets an application disable a memory's provider tools", async () => {
     const sourceRegistry = registry([
       {
