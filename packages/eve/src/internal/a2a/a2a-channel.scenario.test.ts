@@ -314,6 +314,13 @@ describe("A2A channel", () => {
       expect(second.contextId).not.toBe(first.contextId);
       expect(second.id).not.toBe(first.id);
       expect(second).toMatchObject({ artifacts: [{ parts: [{ text: "ECHO:A2A-ECHO two" }] }] });
+      // Nor does a returnImmediately send, which answers with whatever task the ID resolved to.
+      const third = await sendTask("anonymous", {
+        configuration: { returnImmediately: true },
+        message: userMessage("anon-1", "A2A-ECHO three"),
+      });
+      expect([first.contextId, second.contextId]).not.toContain(third.contextId);
+      expect(JSON.stringify(third)).not.toContain("A2A-ECHO one");
 
       // Inside a context the caller holds, a retry is still the same task.
       const contextId = requiredString(first.contextId, "contextId");
