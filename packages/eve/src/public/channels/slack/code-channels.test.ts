@@ -1,5 +1,6 @@
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildAdapterContext } from "#channel/adapter-context.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
@@ -9,6 +10,10 @@ import {
 } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
+import {
+  slackRenderingHarness,
+  type SlackTurnStep,
+} from "#internal/testing/slack-rendering-harness.js";
 import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import {
@@ -16,12 +21,7 @@ import {
   type SlackChannelConfig,
   type SlackChannelState,
 } from "#public/channels/slack/slackChannel.js";
-import { buildAdapterContext } from "#channel/adapter-context.js";
-import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
 import { postCompletedSlackReply } from "#public/channels/slack/index.js";
-import { emptySessionView } from "#protocol/session-projection/fold.js";
-import type { SessionEvent } from "#protocol/session-event.js";
 
 const SIGNING_SECRET = "test-signing-secret";
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -145,42 +145,16 @@ async function firePost(
   return { send, cancel, response };
 }
 function renderingHarness() {
-  const definition = slackChannel({ credentials: { botToken: "xoxb-test" } });
-  if (!isCompiledChannel(definition)) throw new Error("Expected compiled channel");
-  const adapter = {
-    ...definition.adapter,
-    state: {
-      ...definition.adapter.state,
-      channelId: "C01",
-      threadTs: null,
-      teamId: "T01",
-      codeChannel: true,
-    },
-  };
-  const store = new ContextContainer();
-  store.setVirtualContext(SessionKey, {
-    sessionId: "s1",
-    auth: { current: null, initiator: null },
-    turn: { id: "t1", sequence: 0 },
+  const harness = slackRenderingHarness(slackChannel({ credentials: { botToken: "xoxb-test" } }), {
+    channelId: "C01",
+    threadTs: null,
+    teamId: "T01",
+    codeChannel: true,
   });
-  const ctx = {
-    ...buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as never),
-    view: emptySessionView(),
-  };
   return {
-    channel: ctx,
-    async event(fact: SessionEvent) {
-      const handler = adapter[fact.type] as
-        | ((event: SessionEvent, context: typeof ctx) => Promise<void>)
-        | undefined;
-      if (!handler) throw new Error(`No handler for ${fact.type}`);
-      await contextStorage.run(store, () => handler(fact, ctx));
-    },
+    ...harness,
     async deliver(replyThreadTs: string, options?: { readonly quiet?: boolean }) {
-      await adapter.deliver?.(
-        { message: "hello", state: { replyThreadTs, quiet: options?.quiet } } as never,
-        ctx,
-      );
+      await harness.deliver({ message: "hello", state: { replyThreadTs, quiet: options?.quiet } });
     },
   };
 }
@@ -797,7 +771,7 @@ describe("slackChannel() code channels", () => {
   // Each step is followed by the statuses it wrote. `quiet` and `plain` are deliveries: edits and
   // deferred messages are delivered quiet.
   it.each<{ name: string; trace: string }>([
-    { name: "ends with no_reply", trace: "quiet turn model tool end:active" },
+    { name: "ends with no_reply", trace: "quiet turn model no_reply end:active" },
     {
       name: "shows a real tool's work",
       trace: "quiet turn model tool model:processing end:active",
@@ -808,35 +782,16 @@ describe("slackChannel() code channels", () => {
     { name: "next turn after a quiet one", trace: "quiet turn end:active plain turn:processing" },
   ])("keeps a quiet turn quiet: $name", async ({ trace }) => {
     useCodeChannels([]);
-    const { event, deliver } = renderingHarness();
-    let run = 0;
+    const { deliver, step } = renderingHarness();
     const observed: string[] = [];
-    for (const step of trace.split(" ").map((entry) => entry.split(":")[0]!)) {
+    for (const name of trace.split(" ").map((entry) => entry.split(":")[0]!)) {
       const before = statuses().length;
-      if (step === "quiet" || step === "plain") {
-        await deliver("1700000000.000100", { quiet: step === "quiet" });
-      } else if (step === "turn") {
-        await event({
-          type: "turn.started",
-          data: { cause: { deliveryId: "d1" }, follows: null, turnId: "t1" },
-        });
-      } else if (step === "model") {
-        const runId = `r${++run}`;
-        await event({
-          type: "model.started",
-          data: { attempt: 0, modelId: "test-model", runId },
-          scope: { runId, turnId: "t1" },
-        });
-      } else if (step === "tool") {
-        await event({
-          type: "call.settled",
-          data: { callId: "c1", outcome: "completed" },
-          scope: { runId: `r${run}`, turnId: "t1" },
-        });
+      if (name === "quiet" || name === "plain") {
+        await deliver("1700000000.000100", { quiet: name === "quiet" });
       } else {
-        await event({ type: "turn.settled", data: { turnId: "t1", outcome: "completed" } });
+        await step(name as SlackTurnStep);
       }
-      observed.push([step, ...statuses().slice(before)].join(":"));
+      observed.push([name, ...statuses().slice(before)].join(":"));
     }
     expect(observed.join(" ")).toBe(trace);
   });

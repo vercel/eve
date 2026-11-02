@@ -81,6 +81,8 @@ Only the first defined handler runs. A hook that returns `null` drops the messag
 - `onMessage(ctx, message)` handles other posted messages. `ctx.isBotMentioned()` and `ctx.isSubscribed()` let you answer only mentions or active threads.
 - `onMessageEdited(ctx, edit)` handles a person's edit to their own message in a thread that already has a session. See [Message edits](#message-edits).
 
+Without `onMessageEdited`, `onAppMention`, `onDirectMessage`, and `onMessage` also decide [edits](#message-edits) to the messages they receive. `ctx.edit` holds the edit while a hook decides one, and is unset for a new message. A hook with side effects, such as `ctx.send()`, `ctx.end()`, or a decision model call, should check `ctx.edit` so an edit doesn't repeat them.
+
 eve drops the app's own messages before any hook runs. Other bots' messages reach `onMessage`; check `message.author?.isBot` to ignore them.
 
 Hooks don't post anything. eve still acknowledges the message, shows progress, and posts the reply. To change what the agent posts, add [renderers](#customize-rendering).
@@ -138,13 +140,13 @@ message_ts: 1700000000.000004
 
 | `status`                | What the thread shows                                                                             |
 | ----------------------- | ------------------------------------------------------------------------------------------------- |
-| `"immediate"` (default) | `Thinking...` when the message arrives, then the thread status through the turn                   |
+| `"immediate"` (default) | The `received` acknowledgement when the message arrives, then the thread status through the turn  |
 | `"deferred"`            | Nothing until the turn's first tool call finishes; a turn that ends with `no_reply` shows nothing |
 
-- Mentions and DMs show `Thinking...` before their hook runs. `"deferred"` keeps the rest of their turn quiet but can't take that back.
+- Mentions and DMs outside code channels get the `received` acknowledgement, `Thinking...` by default, before their hook runs. `"deferred"` keeps the rest of their turn quiet but can't take the acknowledgement back.
 - When several messages start one turn, the turn is quiet only if all of them are deferred. A message that isn't deferred and joins a quiet turn shows the status from then on.
 - [Edits](#message-edits) are always deferred. `status` on an `onMessageEdited` result has no effect.
-- For other messages, `"deferred"` skips the `received` renderer, including one you write. Renderers that set the thread status themselves still do.
+- For other messages, including every code channel message, `"deferred"` skips the `received` acknowledgement, including one your renderer writes. Renderers that set the thread status themselves still do.
 
 `guidance` adds text you write to this one message. The model sees it as a `<guidance>` block after the metadata blocks, and after an edit's `<diff>`, before `<content>`:
 
@@ -172,14 +174,16 @@ Alice, I can take the rollback.
 </slack_message>
 ```
 
-Guidance stays with its message when several messages join one turn. `context` doesn't: it goes before all of the turn's messages. The model reads guidance as eve's own annotation, outside the message content. Never put user-controlled text, such as message text or profile names, in it.
+Guidance stays with its message when several messages join one turn. `context` doesn't: it goes before all of the turn's messages. eve skips guidance that is empty or only whitespace.
+
+The model reads guidance as eve's own annotation, outside the message content. eve encodes the `<` of its own block tags, such as `</content>` or `<guidance>`, inside message text, so a person can't close `<content>` or forge a guidance block. Never put user-controlled text, such as message text or profile names, in guidance.
 
 #### Message edits
 
 When a person edits one of their messages in a thread that already has a session, eve sends the edit to that session:
 
 - The edit follows the channel's [`turnPolicy`](#control-overlapping-turns) like any message. By default it joins a running turn, and if the agent already replied, it starts a new turn. With `turnPolicy: "queue"`, it waits behind the message it edits.
-- eve shows no `Thinking...` status for the edit. A turn the edit starts shows no status until its first tool call finishes, so an agent that ends the turn with [`no_reply`](/docs/concepts/built-in-tools#no_reply) leaves no trace in the thread.
+- eve skips the `received` acknowledgement for the edit. A turn the edit starts shows no status until its first tool call finishes, so an agent that ends the turn with [`no_reply`](/docs/concepts/built-in-tools#no_reply) leaves no trace in the thread.
 - The edit adds no thread context or files, and doesn't answer an open approval or question.
 - eve ignores edits by bots and apps, link previews added to a message, and edits in threads without a session.
 
@@ -194,7 +198,7 @@ By default, eve runs the edited message through the hook a new message of the sa
 
 The built-in defaults send the edit with the author's workspace-scoped auth. An edit that removes the mention still reaches the agent, so it can tell it's no longer wanted. The hook's `guidance` goes into the edit's block, so with the hook in [Continue conversations without repeated mentions](#continue-conversations-without-repeated-mentions), an edit to a followed reply arrives with the same guidance.
 
-Set `onMessageEdited(ctx, edit)` to choose which edits reach the agent instead. Return `{ auth }` to send the edit, or `null` to drop it. `edit.message` is the edited message at its original `ts`, `edit.previousText` is the text before the edit, and `edit.editedTs` is when the edit happened. For an edit, `ctx.isBotMentioned()` returns whether the message mentioned the agent before or after the edit. An authored `onEvent` comes before the default but not before `onMessageEdited`.
+Set `onMessageEdited(ctx, edit)` to choose which edits reach the agent instead. Return `{ auth }` to send the edit, or `null` to drop it. `edit.message` is the edited message at its original `ts`, `edit.previousText` is the text before the edit, and `edit.editedTs` is when the edit happened. For an edit, `ctx.isBotMentioned()` returns whether the message mentioned the agent before or after the edit, and `ctx.edit` holds the same edit as the hook's argument. An authored `onEvent` comes before the default but not before `onMessageEdited`.
 
 This hook sends every edit in a thread with a session, including replies without a mention. Apply the same checks as your other hooks before returning `{ auth }`:
 
@@ -382,6 +386,7 @@ export default slackChannel({
 - The DM check reads `channel_type`. `ctx.isDMOrPrivateChannel()` returns `true` for DMs, group DMs, and private channels, and also when it can't tell, such as on a missing scope or API error.
 - The agent needs the [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool to stay quiet. See [Status and guidance](#status-and-guidance) for what `status` and `guidance` do.
 - `defaultSlackAuth` gives each Slack user their own identity, so by default only the person whose message led to an approval can answer it. With `{ auth: null }`, messages carry no identity, and anyone in the thread can answer it.
+- A reply from the person a pending question or approval is waiting on can still answer it, even when the reply is meant for someone else, because eve matches answers by identity before the model sees the message.
 
 Thread replies need extra subscriptions. With Vercel Connect, open **Advanced** when creating the connector. Add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels also need `message.groups` and `groups:history`.
 
@@ -413,7 +418,8 @@ export default slackChannel({
     if (message.threadTs !== message.ts && (await ctx.isSubscribed())) {
       return { auth, status: "deferred", guidance: THREAD_GUIDANCE };
     }
-    if (!watchedChannels.has(message.channelId)) return null;
+    // Ask the decision model about new messages only, never again for an edit.
+    if (ctx.edit || !watchedChannels.has(message.channelId)) return null;
 
     const result = await decide({
       state: { latestMessage: message.text },
@@ -446,7 +452,7 @@ export default slackChannel({
 - The decision runs before eve delivers the message, so an ignored message doesn't start a turn.
 - Once `decide` lets a message through, its thread has a session. Later replies pass `ctx.isSubscribed()` without another decision call.
 - A reply in a watched thread without a session gets the same check. If the decision lets it through, the agent joins the conversation in progress. With [`threadContext`](#load-prior-thread-messages) set, the earlier replies arrive as history.
-- Every other unmentioned message in a watched channel costs one decision call, and the decision model sees its text.
+- Every other new unmentioned message in a watched channel costs one decision call, and the decision model sees its text.
 - If `decide` throws, eve logs the handler failure and drops the message. Catch the error and return `{ auth }` when your application should answer anyway.
 
 Pass `model` to choose the decision model. Make sure it's available through your configured provider and, with Vercel AI Gateway, allowed by the team's provider settings.
@@ -506,6 +512,7 @@ Message and interaction hooks expose the thread's session operations on `ctx`:
 
 ```ts
 async onAppMention(ctx) {
+  if (ctx.edit) return { auth: null }; // send an edit on without repeating these
   // Independent examples; a handler normally calls one.
   await ctx.send("Run a separate turn."); // the only call that can create a session
   await ctx.respond(answers);
@@ -530,7 +537,8 @@ async onAppMention(ctx) {
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
   async onMessage(ctx, message) {
-    if (message.text.trim() !== "/new") return null;
+    // An edit to an earlier message shouldn't end the session again.
+    if (ctx.edit || message.text.trim() !== "/new") return null;
 
     await ctx.end({ reason: "Slack user requested /new" });
     await ctx.thread.post("Started a fresh conversation.");

@@ -563,6 +563,15 @@ export interface SlackInboundMessageContext extends SlackContext, SlackSessionOp
    */
   isBotMentioned(): boolean;
   /**
+   * The edit being decided, when a person edited a message instead of posting
+   * a new one: set for `onMessageEdited`, and for `onMessage`, `onAppMention`,
+   * or `onDirectMessage` when they decide an edit in its place. `edit.message`
+   * is the message the hook receives. A hook with side effects, such as
+   * `ctx.send()`, `ctx.end()`, or a decision model call, should check it so an
+   * edit doesn't repeat them.
+   */
+  readonly edit?: SlackMessageEdit;
+  /**
    * Opens a Slack code channel from this message and returns session
    * operations bound to the channel's one session. Slack links the channel
    * in this thread. Send the first turn with the returned `send`, then return
@@ -730,15 +739,17 @@ export type SlackMentionResult = {
   readonly title?: string;
   /**
    * When eve shows that the agent is working on this message. `"immediate"`
-   * (the default) runs the renderer chain's `received` and shows the thread
-   * status through the turn. `"deferred"` skips `received`, and eve's default
-   * renderer shows no status until the turn's first tool call finishes, so a
-   * turn that ends with the `no_reply` tool leaves no trace in the thread.
+   * (the default) runs the renderer chain's `received` acknowledgement and
+   * shows the thread status through the turn. `"deferred"` skips the
+   * `received` acknowledgement, and eve's default renderer shows no status
+   * until the turn's first tool call finishes, so a turn that ends with the
+   * `no_reply` tool leaves no trace in the thread.
    *
-   * Mentions and DMs are acknowledged before their hook runs, so `"deferred"`
-   * keeps their turn quiet but can't take back the acknowledgement. A message
-   * that isn't deferred and joins the turn shows the status again. Edits are
-   * always deferred: `status` on an `onMessageEdited` result has no effect.
+   * Mentions and DMs outside code channels get the `received` acknowledgement
+   * before their hook runs, so `"deferred"` keeps their turn quiet but can't
+   * take the acknowledgement back. A message that isn't deferred and joins the
+   * turn shows the status again. Edits are always deferred: `status` on an
+   * edit's result has no effect.
    */
   readonly status?: "immediate" | "deferred";
   /**
@@ -1895,8 +1906,13 @@ async function dispatchSlackMessage(input: {
     (input.kind === "app_mention" && edit === undefined) ||
     mentionsBot(input.message.text, input.botUserId);
   const isBotMentioned = isMentionedNow || mentionsBot(edit?.previousText, input.botUserId);
+
+  // An edit only reaches a thread the agent already serves, and shows no acknowledgement.
+  if (edit !== undefined && (await sessionOperations.resolveSession()) === undefined) return;
+  const hookMessage = edit === undefined ? message : await resolveMessage();
   const ctx: SlackInboundMessageContext = {
     ...sessionOperations,
+    ...(edit !== undefined && { edit: { ...edit, message: hookMessage } }),
     isBotMentioned: () => isBotMentioned,
     isDMOrPrivateChannel,
     isSubscribed: async () => (await sessionOperations.resolveSession()) !== undefined,
@@ -1904,9 +1920,6 @@ async function dispatchSlackMessage(input: {
     slack,
     thread,
   };
-
-  // An edit only reaches a thread the agent already serves, and shows no acknowledgement.
-  if (edit !== undefined && (await sessionOperations.resolveSession()) === undefined) return;
 
   // A mention or DM is addressed to the agent, so it is acknowledged while the
   // hook decides. Other channel messages are mostly dropped, so they are
@@ -1918,7 +1931,7 @@ async function dispatchSlackMessage(input: {
     : undefined;
   let result;
   try {
-    result = await input.handler(ctx, edit === undefined ? message : await resolveMessage());
+    result = await input.handler(ctx, hookMessage);
   } catch (error) {
     logError(log, `${edit === undefined ? input.kind : "message edit"} handler failed`, error, {
       channelId: input.message.channelId,

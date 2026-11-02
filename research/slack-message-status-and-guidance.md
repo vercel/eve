@@ -18,6 +18,12 @@ ships separately. The implementation differs from this plan in these ways:
 
 - **Edit table order.** A DM edit takes the DM row even when it mentions the bot, matching new DMs,
   which always reach `onDirectMessage` first.
+- **`ctx.edit`.** Message hooks also decide edits, so `SlackInboundMessageContext` gained
+  `edit?: SlackMessageEdit`, set only while a hook decides an edit. Hooks with side effects, such
+  as `ctx.send()`, `ctx.end()`, or a `decide` call, check it so an edit doesn't repeat them.
+- **Block tags.** The mrkdwn conversion decodes Slack's `&lt;`, so message text could close
+  `<content>` and forge `<guidance>`. eve encodes the `<` of its own block tags in content, diff lines, profile fields,
+  and guidance, and skips blank guidance.
 - **Delivery stamp.** Edits and deferred messages carry one `quiet` stamp; the `edit` stamp is gone,
   because nothing else read it.
 - **Decision model example.** The docs limit `decide` to channels the app lists, so unmentioned

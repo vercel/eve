@@ -104,6 +104,7 @@ eve add tool/no_reply
 - `status: "deferred"` shows no thread status until the agent calls a tool, so a reply the agent ends with `no_reply` leaves no trace in the thread.
 - `guidance` tells the model how to treat this one message. See [Status and guidance](/docs/channels/slack/reference#status-and-guidance).
 - `defaultSlackAuth` gives each Slack user their own identity, so by default only the person whose message led to an approval can answer it. With `{ auth: null }`, messages carry no identity, and anyone in the thread can answer it.
+- A reply from the person a pending question or approval is waiting on can still answer it, even when the reply is meant for someone else, because eve matches answers by identity before the model sees the message.
 
 Slack sends un-mentioned channel messages only when the app subscribes to them:
 
@@ -146,7 +147,8 @@ export default slackChannel({
     if (message.threadTs !== message.ts && (await ctx.isSubscribed())) {
       return { auth, status: "deferred", guidance: THREAD_GUIDANCE };
     }
-    if (!watchedChannels.has(message.channelId)) return null;
+    // Ask the decision model about new messages only, never again for an edit.
+    if (ctx.edit || !watchedChannels.has(message.channelId)) return null;
 
     const result = await decide({
       state: { latestMessage: message.text },
@@ -183,7 +185,7 @@ Add the [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool so the agent c
 eve add tool/no_reply
 ```
 
-If you set `onAppMention`, `onDirectMessage`, or `onMessage`, eve runs the edited message through the hook a new message of the same kind would reach, so your checks apply to edits too. With the hook in [Reply without a mention](#reply-without-a-mention), an edit to a followed reply reaches the agent with the same guidance. To decide edits yourself, set `onMessageEdited`. Return `{ auth }` to send an edit, or `null` to drop it. This one sends every edit in a thread the agent serves:
+If you set `onAppMention`, `onDirectMessage`, or `onMessage`, eve runs the edited message through the hook a new message of the same kind would reach, so your checks apply to edits too. With the hook in [Reply without a mention](#reply-without-a-mention), an edit to a followed reply reaches the agent with the same guidance. `ctx.edit` is set while a hook decides an edit, so a hook with side effects, such as `ctx.send()` or a decision model call, can skip them for edits. To decide edits yourself, set `onMessageEdited`. Return `{ auth }` to send an edit, or `null` to drop it. This one sends every edit in a thread the agent serves:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";

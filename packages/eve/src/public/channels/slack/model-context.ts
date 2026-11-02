@@ -36,6 +36,7 @@ function formatSlackModelMessage(input: SlackModelMessageInput): string {
     ...(input.isMentioned !== undefined ? [`mentioned: ${input.isMentioned}`] : []),
   ];
   const tag = input.editLines === undefined ? "slack_message" : "slack_message_edit";
+  const guidance = input.guidance?.trim();
   return [
     `<${tag}>`,
     "<sender>",
@@ -53,9 +54,9 @@ function formatSlackModelMessage(input: SlackModelMessageInput): string {
     `message_ts: ${input.ts}`,
     "</thread>",
     ...(input.editLines ?? []),
-    ...(input.guidance ? ["<guidance>", input.guidance, "</guidance>"] : []),
+    ...(guidance ? ["<guidance>", neutralizeBlockTags(guidance), "</guidance>"] : []),
     "<content>",
-    input.content,
+    neutralizeBlockTags(input.content),
     "</content>",
     `</${tag}>`,
   ].join("\n");
@@ -63,7 +64,17 @@ function formatSlackModelMessage(input: SlackModelMessageInput): string {
 
 // Profile fields are user-controlled; keep them from forging extra metadata lines.
 function oneLine(value: string): string {
-  return value.replace(/[\r\n]+/gu, " ");
+  return neutralizeBlockTags(value.replace(/[\r\n]+/gu, " "));
+}
+
+// Slack sends `&lt;` for a typed `<`, and the mrkdwn conversion decodes it, so message text could
+// otherwise close `<content>` and open a block that reads as eve's own, such as `<guidance>`.
+const BLOCK_TAG =
+  /<(?=\/?\s*(?:slack_message_edit|slack_message|slack_thread_context|sender|bot|thread|edit|diff|guidance|content)\b)/giu;
+
+/** Encodes the `<` of eve's block tags, leaving other text and `<@U123>` mentions as they are. */
+function neutralizeBlockTags(value: string): string {
+  return value.replace(BLOCK_TAG, "&lt;");
 }
 
 /** Renders the triggering inbound Slack message as one attributed block. */
@@ -104,7 +115,7 @@ export function formatSlackInboundMessageEdit(
       `edited_ts: ${edit.editedTs}`,
       ...(diff === undefined ? [`diff: ${reason}`] : []),
       "</edit>",
-      ...(diff === undefined ? [] : ["<diff>", diff, "</diff>"]),
+      ...(diff === undefined ? [] : ["<diff>", neutralizeBlockTags(diff), "</diff>"]),
     ],
   });
 }
