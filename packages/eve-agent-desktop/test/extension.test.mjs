@@ -324,13 +324,17 @@ test("screenshot readback shares the call signal and its cleanup is inside the d
   resetConfig();
   const sandbox = screenshotSandbox();
   let readSignal;
+  const reading = Promise.withResolvers();
   sandbox.readBinaryFile = ({ signal }) => {
     readSignal = signal;
-    return new Promise(() => {});
+    reading.resolve();
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
   };
   const controller = new AbortController();
   const call = tools.screenshot.execute({}, { ...ctx(sandbox), abortSignal: controller.signal });
-  await tick(10);
+  await reading.promise;
   assert.equal(readSignal?.aborted, false, "the read should still be running before the abort");
   controller.abort(new Error("stopped"));
   await assert.rejects(call, /stopped/);

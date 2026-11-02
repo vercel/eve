@@ -41,8 +41,10 @@ export async function inlineScreenshot(
   try {
     bytes = await sandbox.readBinaryFile({ path, signal: call.signal });
   } catch {
+    call.signal.throwIfAborted();
     return { ...output, imageOmitted: "unreadable" };
   }
+  call.signal.throwIfAborted();
   if (bytes === null || bytes === undefined || bytes.length === 0)
     return { ...output, imageOmitted: "unreadable" };
   if (bytes.length > MAX_INLINE_SCREENSHOT_BYTES)
@@ -52,6 +54,7 @@ export async function inlineScreenshot(
   } catch {
     call.signal.throwIfAborted();
   }
+  call.signal.throwIfAborted();
   return {
     ...rest,
     imageDataUrl: `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`,
