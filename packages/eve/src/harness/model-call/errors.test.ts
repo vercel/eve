@@ -1,3 +1,4 @@
+import { APICallError } from "ai";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -13,6 +14,12 @@ import {
 } from "#harness/model-call/errors.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
+
+const cyberPolicyBody = {
+  code: "cyber_policy",
+  message: "This content was flagged for possible cybersecurity risk.",
+  type: "invalid_request",
+};
 
 /**
  * Builds the shape `ai@7.0.0-canary.169+` rejects with when a model
@@ -281,14 +288,31 @@ describe("classifyModelCallError", () => {
   });
 
   it("returns recoverable when OpenAI refuses a prompt for cybersecurity risk", () => {
-    const message = "This content was flagged for possible cybersecurity risk.";
-    const err = Object.assign(new Error(message), {
+    const err = Object.assign(new Error(cyberPolicyBody.message), {
+      ...cyberPolicyBody,
       name: "AI_StreamProviderError",
-      code: "cyber_policy",
       isRetryable: false,
       statusCode: 400,
-      type: "invalid_request",
-      data: { error: { code: "cyber_policy", message, type: "invalid_request" }, type: "error" },
+      data: { error: cyberPolicyBody, type: "error" },
+    });
+
+    expect(classifyModelCallError(err)).toBe("recoverable");
+  });
+
+  // `@ai-sdk/openai` keeps the provider code only in the body: in `data` for an error frame
+  // received before any output, and in the response body for an HTTP 400.
+  it.each([
+    { title: "an error frame before any output", body: { type: "error", error: cyberPolicyBody } },
+    { title: "an HTTP 400", body: { error: cyberPolicyBody } },
+  ])("returns recoverable when OpenAI refuses a prompt as $title", ({ body }) => {
+    const err = new APICallError({
+      message: cyberPolicyBody.message,
+      url: "https://api.openai.com/v1/responses",
+      requestBodyValues: {},
+      statusCode: 400,
+      responseBody: JSON.stringify(body),
+      data: body,
+      isRetryable: false,
     });
 
     expect(classifyModelCallError(err)).toBe("recoverable");
