@@ -4,6 +4,7 @@ import {
   type BashInput,
 } from "#execution/sandbox/bash.js";
 import { frameworkTool } from "./framework-tool.js";
+import { toolOutput, type ToolModelOutput } from "#tools/model-output.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
@@ -93,7 +94,7 @@ export const BASH_OUTPUT_SCHEMA = defineJsonSchema<BashToolOutput>({
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool(
   defineTool({
     label: { start: (input) => toolLabel("Run", input.command) },
-    description: `Execute a shell command in the shared workspace environment. A command still running after ${BASH_YIELD_SECONDS} seconds keeps running in the background and returns status "running" with its output so far and how to check on or stop it.`,
+    description: `Execute a shell command in the shared workspace environment. The result is the command's stdout, then any stderr, then its exit code. A command still running after ${BASH_YIELD_SECONDS} seconds keeps running in the background, and the result shows its output so far and how to check on or stop it.`,
     async execute(input, ctx) {
       return await executeBashOnSandbox(await ctx.getSandbox(), input as BashInput, {
         abortSignal: ctx.abortSignal,
@@ -101,7 +102,29 @@ export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool
     },
     inputSchema: BASH_INPUT_SCHEMA,
     outputSchema: BASH_OUTPUT_SCHEMA,
+    toModelOutput: bashModelOutput,
   }),
 );
+
+/**
+ * Shows the model plain text, so source, diffs, and logs read as printed
+ * instead of JSON-escaped. A wrapper's `execute` may return another shape,
+ * which stays JSON.
+ */
+function bashModelOutput(output: BashToolOutput): ToolModelOutput {
+  if (
+    typeof output !== "object" ||
+    output === null ||
+    typeof output.stdout !== "string" ||
+    typeof output.stderr !== "string"
+  ) {
+    return toolOutput.json(output);
+  }
+  const streams = [output.stdout, output.stderr && `stderr:\n${output.stderr}`]
+    .filter((text) => text.length > 0)
+    .map((text) => (text.endsWith("\n") ? text : `${text}\n`));
+  const status = output.status === "running" ? output.message : `exit code: ${output.exitCode}`;
+  return toolOutput.text(`${streams.join("\n")}${status}`);
+}
 
 export default bash;
