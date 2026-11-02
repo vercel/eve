@@ -12,8 +12,15 @@ describe("a2aChannel", () => {
     expect(() => a2aChannel({ auth: none(), route: "eve/a2a" })).toThrow("absolute path");
     expect(() => a2aChannel({ auth: none(), route: A2A_AGENT_CARD_PATH })).toThrow("absolute path");
     expect(() => a2aChannel({ auth: none(), maxBlockingMs: 0 })).toThrow("maxBlockingMs");
-    expect(() => a2aChannel({ auth: none(), url: "agent.example.com" })).toThrow("absolute URL");
-    expect(() => a2aChannel({ auth: none(), url: "ftp://agent.example.com" })).toThrow("http(s)");
+    for (const [publicOrigin, message] of [
+      ["agent.example.com", "absolute URL"],
+      ["ftp://agent.example.com", "http(s)"],
+      ["https://agent.example.com/api/a2a", "no path"],
+      ["https://agent.example.com/?x=1", "no path"],
+      ["https://user:pw@agent.example.com", "credentials"],
+    ]) {
+      expect(() => a2aChannel({ auth: none(), publicOrigin })).toThrow(message);
+    }
   });
 
   it("serves the Agent Card publicly and the JSON-RPC endpoint at its route", () => {
@@ -29,7 +36,7 @@ describe("a2aChannel", () => {
     const channel = a2aChannel({
       auth: httpBasic({ password: "secret-password", username: "alice" }),
       uploadPolicy: "disabled",
-      url: "https://agents.example.com/ignored-path",
+      publicOrigin: "https://agents.example.com/",
     });
     const response = await handler(channel, "GET")(
       new Request(`http://127.0.0.1${A2A_AGENT_CARD_PATH}`, { headers: { host: "127.0.0.1" } }),

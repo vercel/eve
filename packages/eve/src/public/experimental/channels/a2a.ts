@@ -41,10 +41,11 @@ export interface A2aChannelConfig {
   /** JSON-RPC endpoint path. @default "/eve/v1/a2a" */
   readonly route?: string;
   /**
-   * Public origin advertised in the Agent Card, when the request's isn't it (for example behind a
-   * proxy that rewrites `Host`). The card's interface URL is this origin plus `route`.
+   * Public origin advertised in the Agent Card, such as `https://agents.example.com`, when the
+   * request's isn't it (for example behind a proxy that rewrites `Host`). The card's interface URL
+   * is this origin plus `route`; set `route` to change the path.
    */
-  readonly url?: string;
+  readonly publicOrigin?: string;
   /** Agent Card fields to set or override. */
   readonly card?: A2aAgentCardOptions;
   /**
@@ -86,7 +87,8 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
   if (!Number.isFinite(maxBlockingMs) || maxBlockingMs <= 0) {
     throw new Error("a2aChannel maxBlockingMs must be a positive number of milliseconds.");
   }
-  const publicOrigin = input.url === undefined ? undefined : parsePublicOrigin(input.url);
+  const publicOrigin =
+    input.publicOrigin === undefined ? undefined : parsePublicOrigin(input.publicOrigin);
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
   const security: CardSecurity = {
     anonymous: admitsAnonymousCallers(input.auth),
@@ -149,15 +151,27 @@ const CARD_CORS = {
   "access-control-allow-origin": "*",
 };
 
-function parsePublicOrigin(url: string): string {
+/** A bare `http(s)` origin: a path would be dropped, so it's refused rather than ignored. */
+function parsePublicOrigin(origin: string): string {
   let parsed: URL;
   try {
-    parsed = new URL(url);
+    parsed = new URL(origin);
   } catch {
-    throw new Error(`a2aChannel url must be an absolute URL. Received: ${url}`);
+    throw new Error(`a2aChannel publicOrigin must be an absolute URL. Received: ${origin}`);
   }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new Error(`a2aChannel url must be an http(s) URL. Received: ${url}`);
+    throw new Error(`a2aChannel publicOrigin must be an http(s) origin. Received: ${origin}`);
+  }
+  if (
+    parsed.pathname !== "/" ||
+    parsed.search !== "" ||
+    parsed.hash !== "" ||
+    parsed.username !== "" ||
+    parsed.password !== ""
+  ) {
+    throw new Error(
+      `a2aChannel publicOrigin must be an origin with no path, query, or credentials; set route for the path. Received: ${origin}`,
+    );
   }
   return parsed.origin;
 }
