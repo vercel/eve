@@ -1,3 +1,4 @@
+import { workflowInboxTransport } from "#execution/session-inbox/workflow-transport.js";
 import { readSerializedSessionSchedule } from "#context/session-schedule.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { failSession, runPreparedSession, type SessionBoot } from "#execution/session/program.js";
@@ -160,7 +161,7 @@ export async function bootInitialOwner(
 ): Promise<BootOutcome | undefined> {
   const serializedContext = stampSessionIdentity(input.serializedContext, sessionId);
   const sessionWritable = getWritable<Uint8Array>();
-  const inbox = createSessionInbox(sessionId);
+  const inbox = createSessionInbox(workflowInboxTransport(sessionId));
   const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
   const continuationToken = (serializedContext["eve.continuationToken"] as string) || "";
   const serializedBundle = serializedContext["eve.bundle"] as {
@@ -377,7 +378,7 @@ async function bootForcedHandoffOwner(
     return undefined;
   }
   if (prepared === undefined) return undefined;
-  const inbox = createSessionInbox(sessionId);
+  const inbox = createSessionInbox(workflowInboxTransport(sessionId));
   try {
     await inbox.claimSessionHooks(hookTokens, { force: true, handover: attemptKey });
     prepared = await placeImportedSession(sessionId, prepared);
@@ -426,7 +427,7 @@ async function handBack(
 async function bootReleasedHandoffOwner(
   input: HandoffWorkflowEntryInput,
 ): Promise<BootOutcome | undefined> {
-  const inbox = createSessionInbox(input.sessionId);
+  const inbox = createSessionInbox(workflowInboxTransport(input.sessionId));
   let prepared: PreparedSuccessor | undefined;
   try {
     prepared = await prepareSuccessor(input);

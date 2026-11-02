@@ -1,3 +1,4 @@
+import { workflowInboxTransport } from "#execution/session-inbox/workflow-transport.js";
 import { isHookConflictError } from "#execution/hook-ownership.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
@@ -21,7 +22,7 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
   const prepared = await prepareLegacySessionStep(rawInput);
   const { sessionId } = prepared.sessionState;
   await recordSessionOwnerStep({ sessionId });
-  const inbox = createSessionInbox(sessionId);
+  const inbox = createSessionInbox(workflowInboxTransport(sessionId));
   try {
     await inbox.claimSessionHook(sessionCommandHookToken(sessionId));
   } catch (error) {
