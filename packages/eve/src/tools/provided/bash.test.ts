@@ -43,8 +43,8 @@ describe("bash model output", () => {
     },
     {
       name: "JSON for another shape a wrapper's execute returns",
-      output: { approved: false },
-      expected: { type: "json", value: { approved: false } },
+      output: { approved: false, stderr: "", stdout: "ok" },
+      expected: { type: "json", value: { approved: false, stderr: "", stdout: "ok" } },
     },
   ])("shows $name", async ({ output, expected }) => {
     expect(await bash.toModelOutput!(output as BashToolOutput)).toEqual(expected);

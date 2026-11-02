@@ -112,19 +112,29 @@ export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool
  * which stays JSON.
  */
 function bashModelOutput(output: BashToolOutput): ToolModelOutput {
+  const status = statusLine(output);
+  if (status === undefined) return toolOutput.json(output);
+  const streams = [output.stdout, output.stderr && `stderr:\n${output.stderr}`]
+    .filter((text) => text.length > 0)
+    .map((text) => (text.endsWith("\n") ? text : `${text}\n`));
+  return toolOutput.text(`${streams.join("\n")}${status}`);
+}
+
+/** The final line of a `bash` result, or undefined for any other shape. */
+function statusLine(output: BashToolOutput): string | undefined {
   if (
     typeof output !== "object" ||
     output === null ||
     typeof output.stdout !== "string" ||
     typeof output.stderr !== "string"
   ) {
-    return toolOutput.json(output);
+    return undefined;
   }
-  const streams = [output.stdout, output.stderr && `stderr:\n${output.stderr}`]
-    .filter((text) => text.length > 0)
-    .map((text) => (text.endsWith("\n") ? text : `${text}\n`));
-  const status = output.status === "running" ? output.message : `exit code: ${output.exitCode}`;
-  return toolOutput.text(`${streams.join("\n")}${status}`);
+  if (output.status === "completed" && typeof output.exitCode === "number") {
+    return `exit code: ${output.exitCode}`;
+  }
+  if (output.status === "running" && typeof output.message === "string") return output.message;
+  return undefined;
 }
 
 export default bash;
