@@ -368,17 +368,20 @@ export async function createSessionStreamResponse(
       startIndex === undefined || startIndex >= 0
         ? internalSession(session).getLineStream({ follow, startIndex: startIndex ?? 0 })
         : undefined;
-    // Handled below; this keeps an early rejection from being reported as unhandled.
-    early?.catch(() => {});
     const earlierEve = startedOnEarlierEve(session);
+    // Handled below; these keep an early rejection from being reported as unhandled.
+    early?.catch(() => {});
+    earlierEve.catch(() => {});
     let tailIndex: number | undefined;
-    if (includeTailIndex || early === undefined) {
-      try {
+    let v26: boolean;
+    try {
+      if (includeTailIndex || early === undefined) {
         tailIndex = await internalSession(session).getStreamTailIndex();
-      } catch (error) {
-        void early?.then((lines) => lines.cancel()).catch(() => {});
-        throw error;
       }
+      v26 = await earlierEve;
+    } catch (error) {
+      void early?.then((lines) => lines.cancel()).catch(() => {});
+      throw error;
     }
     const from =
       early === undefined
@@ -387,7 +390,7 @@ export async function createSessionStreamResponse(
     let lines: ReadableStream<unknown>;
     let lineLimit =
       includeTailIndex && tailIndex !== undefined ? Math.max(0, tailIndex - from + 1) : undefined;
-    if (await earlierEve) {
+    if (v26) {
       // An eve before v27 recorded it: read every v26 line, each in light of those before it.
       void early?.then((opened) => opened.cancel()).catch(() => {});
       // With no owner left to write to it, following would only reconnect each lease to read the
@@ -433,7 +436,8 @@ export async function createSessionStreamResponse(
 /**
  * True when the session's first stored line is a v26 event. v27 readers can't read such a
  * stream, so serving it as version 27 would leave a client waiting on facts that never come.
- * Reads at most one line; an empty, unreadable, or slow stream reads as current.
+ * Reads at most one line; an empty stream reads as current. An unreadable or slow one rejects
+ * rather than guess: clients refuse v26 lines for good, but retry a failed read.
  */
 async function startedOnEarlierEve(session: Session): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -444,13 +448,14 @@ async function startedOnEarlierEve(session: Session): Promise<boolean> {
     const { done, value } = await reader.read();
     return !done && isV26Line(value);
   })();
-  const timeout = new Promise<false>((resolve) => {
-    timer = setTimeout(() => resolve(false), SESSION_VERSION_CHECK_TIMEOUT_MS);
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("Timed out reading the session's first line.")),
+      SESSION_VERSION_CHECK_TIMEOUT_MS,
+    );
   });
   try {
     return await Promise.race([first, timeout]);
-  } catch {
-    return false;
   } finally {
     clearTimeout(timer);
     void first.finally(() => reader?.cancel().catch(() => {})).catch(() => {});

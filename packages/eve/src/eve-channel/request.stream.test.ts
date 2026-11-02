@@ -172,7 +172,7 @@ describe("createSessionStreamResponse", () => {
 
   // A reader refuses an earlier eve's lines for good, so a check that can't tell the version
   // must fail the read retryably rather than serve the stored lines as they are.
-  it.fails("fails a read with a retryable 503 when the first line can't be read", async () => {
+  it("fails a read with a retryable 503 when the first line can't be read", async () => {
     const session = earlierEveSessionReadingFirstLine(() =>
       Promise.reject(new Error("Transient read failure.")),
     );
@@ -180,7 +180,7 @@ describe("createSessionStreamResponse", () => {
     expect(response.status).toBe(503);
   });
 
-  it.fails("fails a read with a retryable 503 when the first line is too slow", async () => {
+  it("fails a read with a retryable 503 when the first line is too slow", async () => {
     vi.useFakeTimers();
     const session = earlierEveSessionReadingFirstLine(async () => new ReadableStream());
     const response = createSessionStreamResponse(catchUpRead(), session);
