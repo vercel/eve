@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { dynamicEvaluate, type DynamicSentinel } from "#dynamic/definition.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { bundleAuthoredModuleMapForGeneration } from "#internal/authored-module-loader.js";
@@ -240,30 +239,41 @@ describe("mounted extension via authored-source loader", () => {
           'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Work with the available tools.",
         "agent/extensions/one.mjs":
-          'import code from "eve/extensions/code"; export default code({ worker: { model: "openai/gpt-5.4", reasoning: "high" } });',
+          'import code from "eve/extensions/code"; export default code({ vercel: { connector: "vercel/one" } });',
         "agent/extensions/two.mjs":
-          'import code from "eve/extensions/code"; export default code({ worker: { model: "openai/gpt-5.4", reasoning: "low" } });',
+          'import code from "eve/extensions/code"; export default code({});',
       },
     });
     const { manifest, moduleMap } = await compileRuntimeGraph(app.appRoot);
-    const workers = ["one", "two"].map((name) =>
-      manifest.subagents.find((subagent) => subagent.name === `${name}__worker`)!,
+    const hooks = ["one", "two"].map((name) =>
+      manifest.hooks.find((hook) => hook.slug === `${name}__authenticate`)!,
     );
-    expect(workers[0]?.owner).toMatchObject({ mountId: "extensions/one" });
-    // Each mounted worker reads its own extension configuration.
-    const reasoningOf = (map: typeof moduleMap, worker: (typeof workers)[number]) => {
-      if (!("config" in worker.agent)) throw new Error("Expected a worker config.");
-      const definition = map.nodes[worker.nodeId]!.modules[worker.agent.config.source.sourceId]!
-        .default as { model: DynamicSentinel<{ reasoning: string }, object> };
-      return (dynamicEvaluate(definition.model)({}) as { reasoning: string }).reasoning;
+    // Each mounted authentication hook reads its own extension configuration:
+    // only the mount with a Vercel connector asks for the sandbox.
+    const requestsSandbox = async (map: typeof moduleMap, hook: (typeof hooks)[number]) => {
+      const definition = map.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[hook.sourceId]!
+        .default as {
+        events: Record<string, (event: unknown, ctx: object) => Promise<void>>;
+      };
+      const requested = new Error("sandbox requested");
+      try {
+        await definition.events["turn.started"]!(
+          {},
+          { getSandbox: () => Promise.reject(requested) },
+        );
+        return false;
+      } catch (error) {
+        if (error !== requested) throw error;
+        return true;
+      }
     };
-    const reasoning = workers.map((worker) => reasoningOf(moduleMap, worker));
-    expect(reasoning).toEqual(["high", "low"]);
+    const requests = await Promise.all(hooks.map((hook) => requestsSandbox(moduleMap, hook)));
+    expect(requests).toEqual([true, false]);
     const second = await loadCompiledModuleMapFromAuthoredSource({
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
     });
-    const secondReasoning = workers.map((worker) => reasoningOf(second, worker));
-    expect(secondReasoning).toEqual(["high", "low"]);
+    const secondRequests = await Promise.all(hooks.map((hook) => requestsSandbox(second, hook)));
+    expect(secondRequests).toEqual([true, false]);
   });
 
   it("keeps state independent across mounts and context restoration", async () => {

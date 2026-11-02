@@ -28,3 +28,14 @@ test("rejects retired github config instead of silently ignoring credentials", (
     /Invalid extension config/u,
   );
 });
+
+test("rejects the removed worker option with a migration hint", () => {
+  assert.throws(
+    // @ts-expect-error eve-code no longer ships a worker subagent.
+    () => extension({ worker: { model: "openai/gpt-5.4", reasoning: "high" } }),
+    {
+      message:
+        "Invalid extension config: eve-code no longer ships a worker subagent; delegate with the core `agent` tool and remove the `worker` option.",
+    },
+  );
+});

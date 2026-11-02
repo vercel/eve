@@ -1,6 +1,6 @@
 # eve/extensions/code
 
-`eve/extensions/code` is an eve extension for coding work. It contributes `apply_patch`, `grep`, investigation and review skills, a read-only worker subagent, sandbox tooling, and shared PR-watch primitives. Vercel credentials are brokered before each turn. GitHub instructions, the `pr` skill, and the authenticated `gh` tool live in [`eve/extensions/git`](../eve-git/README.md). Because eve workflow directives are application-only, consumers own their `prwatch` / `prwatch_delete` workflow tools.
+`eve/extensions/code` is an eve extension for coding work. It contributes `apply_patch`, `grep`, investigation and review skills, and sandbox tooling. Vercel credentials are brokered before each turn. GitHub instructions, the `pr` skill, and the authenticated `gh` tool live in [`eve/extensions/git`](../eve-git/README.md).
 
 It ships inside the `eve` package. This private `@eve/code` workspace package is its source of truth: eve's build copies `extension/` into `packages/eve/src/extensions/code/extension` and publishes it with these entry points:
 
@@ -24,7 +24,7 @@ The Vercel connector is optional; `code({})` mounts without it. The Vercel conne
 
 The retired `github` option is rejected. Configure `eve/extensions/git` for GitHub tools, instructions, and the pull request skill.
 
-The read-only worker subagent defaults to `openai/gpt-5.6-terra-fast` with `xhigh` reasoning. Set `worker: { model, reasoning, openaiReasoningEffort? }` to choose another model; `openaiReasoningEffort` is passed to OpenAI models as `reasoningEffort`.
+The removed `worker` option is rejected with a migration hint. Delegate with eve's built-in `agent` tool.
 
 ## Sandbox bootstrap
 

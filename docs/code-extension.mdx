@@ -3,7 +3,7 @@ title: "Code Extension"
 description: "Mount eve's coding extension, eve-code, and see its latest benchmark results against other coding agent harnesses."
 ---
 
-`eve/extensions/code` (eve-code) turns an eve agent into a coding agent. It ships inside the `eve` package, so you mount it without installing anything else. The extension adds file-editing and search tools, coding skills, a read-only worker subagent, and helpers that install coding tools in the sandbox. GitHub and pull request work lives in the companion [`eve/extensions/git`](#publish-with-the-git-extension) extension.
+`eve/extensions/code` (eve-code) turns an eve agent into a coding agent. It ships inside the `eve` package, so you mount it without installing anything else. The extension adds file-editing and search tools, coding skills, and helpers that install coding tools in the sandbox. GitHub and pull request work lives in the companion [`eve/extensions/git`](#publish-with-the-git-extension) extension.
 
 ## Benchmark results
 
@@ -42,7 +42,7 @@ The workflow skips incomplete runs, single-task runs, and pull request runs. Res
 
 ## Mount the extension
 
-Create an extension file in your agent. The file name sets the prefix of every tool and subagent the extension adds, such as `code__grep`:
+Create an extension file in your agent. The file name sets the prefix of every tool and skill the extension adds, such as `code__grep`:
 
 ```ts title="agent/extensions/code.ts"
 import code from "eve/extensions/code";
@@ -50,25 +50,21 @@ import code from "eve/extensions/code";
 export default code({});
 ```
 
-`code({})` mounts the extension without Vercel authentication. Omit `worker` to run the `worker` subagent on `openai/gpt-5.6-terra-fast` with `xhigh` reasoning.
+`code({})` mounts the extension without Vercel authentication.
 
 ## Configure the extension
 
-| Option                         | Required      | Effect                                                                                         |
-| ------------------------------ | ------------- | ---------------------------------------------------------------------------------------------- |
-| `vercel.connector`             | With `vercel` | Vercel Connect connector that gets a Vercel token for the app, not for a user                  |
-| `vercel.delivery`              | No            | `"firewall"` (default) or `"command"`                                                          |
-| `broker`                       | No            | `broker(sandbox, rules)` callback that merges Vercel credential rules into your network policy |
-| `worker.model`                 | With `worker` | Model for the `worker` subagent                                                                |
-| `worker.reasoning`             | With `worker` | Reasoning level for the `worker` subagent                                                      |
-| `worker.openaiReasoningEffort` | No            | Passed to OpenAI models as `reasoningEffort`                                                   |
+| Option             | Required      | Effect                                                                                         |
+| ------------------ | ------------- | ---------------------------------------------------------------------------------------------- |
+| `vercel.connector` | With `vercel` | Vercel Connect connector that gets a Vercel token for the app, not for a user                  |
+| `vercel.delivery`  | No            | `"firewall"` (default) or `"command"`                                                          |
+| `broker`           | No            | `broker(sandbox, rules)` callback that merges Vercel credential rules into your network policy |
 
 ```ts title="agent/extensions/code.ts"
 import code from "eve/extensions/code";
 
 export default code({
   vercel: { connector: "vercel/acme-bot" },
-  worker: { model: "openai/gpt-5.6-terra-fast", reasoning: "high" },
 });
 ```
 
@@ -198,6 +194,7 @@ eve rebuilds a prepared environment only when the sandbox file or environment op
 | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `eve-code firewall credential delivery requires a sandbox provider with mutable network policy (setNetworkPolicy).` | Set `vercel.delivery: "command"`, or pass a top-level `broker` callback.                                     |
 | `The current caller is not authorized to access <repository>.`                                                      | Your `github.authorize` callback returned `false` for that caller and repository. Check the callback's rule. |
+| `Invalid extension config: eve-code no longer ships a worker subagent; ...`                                         | Remove the `worker` option from `code()`. To delegate work, use the built-in `agent` tool.                   |
 
 ## What to read next
 
