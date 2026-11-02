@@ -2,6 +2,7 @@ import type { SlackThreadMessage } from "#public/channels/slack/api.js";
 import type { SlackInboundContext } from "#public/channels/slack/inbound.js";
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 import type { SlackUserInfo } from "#public/channels/slack/user-info.js";
+import { diffLines } from "#shared/line-diff.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 interface SlackModelMessageInput {
@@ -16,6 +17,8 @@ interface SlackModelMessageInput {
   readonly teamId?: string;
   readonly threadTs: string;
   readonly ts: string;
+  /** Lines of the `<edit>` and `<diff>` blocks; present only for an edited message. */
+  readonly editLines?: readonly string[];
 }
 
 /**
@@ -30,8 +33,9 @@ function formatSlackModelMessage(input: SlackModelMessageInput): string {
     ...(input.botUserId ? [`id: ${input.botUserId}`] : []),
     ...(input.isMentioned !== undefined ? [`mentioned: ${input.isMentioned}`] : []),
   ];
+  const tag = input.editLines === undefined ? "slack_message" : "slack_message_edit";
   return [
-    "<slack_message>",
+    `<${tag}>`,
     "<sender>",
     `type: ${input.senderType}`,
     ...(input.senderId ? [`id: ${input.senderId}`] : []),
@@ -46,10 +50,11 @@ function formatSlackModelMessage(input: SlackModelMessageInput): string {
     `thread_ts: ${input.threadTs}`,
     `message_ts: ${input.ts}`,
     "</thread>",
+    ...(input.editLines ?? []),
     "<content>",
     input.content,
     "</content>",
-    "</slack_message>",
+    `</${tag}>`,
   ].join("\n");
 }
 
@@ -63,12 +68,56 @@ export function formatSlackInboundMessage(
   context: SlackInboundContext,
   message: { readonly text: string; readonly ts: string },
 ): string {
+  return formatSlackModelMessage(inboundModelMessage(context, message));
+}
+
+/**
+ * Renders an edited Slack message as a `<slack_message_edit>` block: the line
+ * changes in `<diff>`, and the full edited text in `<content>`. Without the
+ * previous text, or when the message is too long to compare, `<edit>` says why
+ * there is no diff, so the model still reads it as an edit.
+ */
+export function formatSlackInboundMessageEdit(
+  context: SlackInboundContext,
+  edit: {
+    readonly text: string;
+    readonly ts: string;
+    readonly previousText: string | undefined;
+    readonly editedTs: string;
+  },
+): string {
+  const content = slackModelContent(edit.text);
+  const diff =
+    edit.previousText === undefined
+      ? undefined
+      : changedLines(slackModelContent(edit.previousText), content);
+  const reason =
+    edit.previousText === undefined
+      ? "unavailable, Slack did not include the text before the edit"
+      : "omitted, the message is too long to compare";
+  return formatSlackModelMessage({
+    ...inboundModelMessage(context, edit),
+    content,
+    editLines: [
+      "<edit>",
+      `edited_ts: ${edit.editedTs}`,
+      ...(diff === undefined ? [`diff: ${reason}`] : []),
+      "</edit>",
+      ...(diff === undefined ? [] : ["<diff>", diff, "</diff>"]),
+    ],
+  });
+}
+
+function inboundModelMessage(
+  context: SlackInboundContext,
+  message: { readonly text: string; readonly ts: string },
+): SlackModelMessageInput {
   const senderInfo: SlackUserInfo = {
     ...(context.displayName && { displayName: context.displayName }),
     ...(context.fullName && { realName: context.fullName }),
     ...(context.email && { email: context.email }),
   };
-  return formatSlackModelMessage({
+  return {
     botUserId: context.botUserId,
     channelId: context.channelId,
     content: slackModelContent(message.text),
@@ -79,7 +128,20 @@ export function formatSlackInboundMessage(
     teamId: context.teamId,
     threadTs: context.threadTs,
     ts: message.ts,
-  });
+  };
+}
+
+/**
+ * The lines an edit removed (`-`) and added (`+`), in message order.
+ * `<content>` carries the unchanged lines. Returns `undefined` when the
+ * message is too long to compare.
+ */
+function changedLines(before: string, after: string): string | undefined {
+  return diffLines(before.split("\n"), after.split("\n"))
+    ?.flatMap(({ kind, text }) =>
+      kind === undefined ? [] : [`${kind === "added" ? "+" : "-"}${text}`],
+    )
+    .join("\n");
 }
 
 function slackModelContent(input: string): string {

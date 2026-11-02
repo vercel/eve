@@ -46,9 +46,9 @@ export default slackChannel();
 
 In [Slack app settings](https://api.slack.com/apps):
 
-1. Add the `app_mentions:read` and `chat:write` bot scopes, plus `im:history` for DMs, `files:read` for inbound files, and `files:write` for long replies.
+1. Add the `app_mentions:read` and `chat:write` bot scopes, plus `channels:history`, `groups:history`, `im:history`, and `mpim:history` for DMs and message edits, `files:read` for inbound files, and `files:write` for long replies.
 2. Install the app. Set `SLACK_BOT_TOKEN` to its Bot User OAuth Token and `SLACK_SIGNING_SECRET` to the signing secret from **Basic Information**, in `.env.local` and in your host's environment.
-3. Set `https://your-agent.example/eve/v1/slack` as the Request URL under **Event Subscriptions** (subscribe to `app_mention`, plus `message.im` for DMs), **Interactivity & Shortcuts**, and each **Slash Command**.
+3. Set `https://your-agent.example/eve/v1/slack` as the Request URL under **Event Subscriptions** (subscribe to `app_mention`, plus `message.channels`, `message.groups`, `message.im`, and `message.mpim` for DMs and message edits), **Interactivity & Shortcuts**, and each **Slash Command**.
 
 Portable credentials also work on Vercel when you manage the Slack app yourself.
 
@@ -61,6 +61,7 @@ By default, the agent answers `@mentions` in any channel it has joined, replying
 
 - To customize what happens on a mention or DM, override `onAppMention` or `onDirectMessage`. See [Message hooks](/docs/channels/slack/reference#message-hooks).
 - To answer thread replies without a mention, see [Reply without a mention](#reply-without-a-mention).
+- To control what happens when someone edits a message, see [Handle message edits](#handle-message-edits).
 - To change the thread status or what the agent posts, see [Delivery](/docs/channels/slack/reference#delivery) and [Customize rendering](/docs/channels/slack/reference#customize-rendering).
 
 ## Reply without a mention
@@ -143,6 +144,32 @@ export default slackChannel({
 ```
 
 An ignored reply never starts a turn. If `decide` throws, eve drops the reply; catch the error and return `{ auth }` to answer anyway. See [Classify ambient replies with a decision model](/docs/channels/slack/reference#classify-ambient-replies-with-a-decision-model) for choosing the decision model.
+
+## Handle message edits
+
+When someone edits a DM, a code channel message, or a message that mentions the agent before or after the edit, in a thread the agent already serves, eve sends the edit to that session. The model sees a diff of the changed lines and the full edited message. By default, the edit joins a running turn. If the agent already replied, the edit starts a new turn, which shows no thread status until its first tool call finishes.
+
+Add the [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool so the agent can stay quiet when an edit changes nothing, and say when to use it in your instructions:
+
+```bash
+eve add tool/no_reply
+```
+
+If you set `onAppMention`, `onDirectMessage`, or `onMessage`, eve drops edits unless you also set `onMessageEdited`, so an edit can't skip your checks. Return `{ auth }` from `onMessageEdited` to send an edit, or `null` to drop it. This one sends edits to replies without a mention too:
+
+```ts title="agent/channels/slack.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  onMessageEdited(ctx, edit) {
+    return { auth: defaultSlackAuth(edit.message, ctx) };
+  },
+});
+```
+
+Slack sends edits only to apps subscribed to the `message.channels`, `message.groups`, `message.im`, and `message.mpim` events, with the matching `*:history` scopes. With Vercel Connect, add `message.mpim` and `mpim:history` to the connector for group DMs; its defaults include the rest. See [Message edits](/docs/channels/slack/reference#message-edits) for the model format.
 
 ## Load prior thread messages
 

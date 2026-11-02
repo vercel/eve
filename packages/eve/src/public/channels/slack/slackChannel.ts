@@ -67,6 +67,7 @@ import {
   defaultEvents,
   defaultInteractionEvents,
   defaultOnMessage,
+  defaultOnMessageEdited,
   defaultReceived,
 } from "#public/channels/slack/defaults.js";
 import { withFinalReplyDelivery } from "#public/channels/slack/reply-delivery.js";
@@ -84,6 +85,7 @@ import {
 } from "#public/channels/slack/task-card.js";
 import type { SlackThreadStatus } from "#public/channels/slack/thread-status.js";
 import {
+  parseMessageEditEvent,
   parseMessageEvent,
   type SlackEvent,
   slackEventBotUserId,
@@ -92,11 +94,13 @@ import {
   type SlackEventEnvelope,
   type SlackInboundContext,
   type SlackMessage,
+  type SlackMessageEdit,
   parseSlackEventEnvelope,
   slackMessageFromWebhookPayload,
 } from "#public/channels/slack/inbound.js";
 import {
   formatSlackInboundMessage,
+  formatSlackInboundMessageEdit,
   formatSlackThreadContext,
   slackThreadSessionHistory,
 } from "#public/channels/slack/model-context.js";
@@ -296,6 +300,24 @@ export interface SlackChannelState extends UndeliveredReplyState {
    * @internal
    */
   threadStatus?: SlackThreadStatus | null;
+  /**
+   * Stamped on the delivery of an edited message, so `deliver` can tell it from a new one.
+   * @internal
+   */
+  edit?: boolean;
+  /**
+   * Whether every message delivered since the last turn ended was an edit. The
+   * next turn starts quiet when it was.
+   * @internal
+   */
+  pendingEditTurn?: boolean | null;
+  /**
+   * The turn started from an edit, so the default renderer shows no status
+   * until the turn's first tool call finishes. A model that ends the turn
+   * without a reply then leaves no trace in the thread.
+   * @internal
+   */
+  quietStatus?: boolean | null;
   /**
    * Connection name to Slack message ts. Each entry is the public
    * link-free status post created by the default
@@ -533,7 +555,11 @@ export interface SlackInboundMessageContext extends SlackContext, SlackSessionOp
   isDMOrPrivateChannel(): Promise<boolean>;
   /** Returns whether this message belongs to a thread with an active eve session. */
   isSubscribed(): Promise<boolean>;
-  /** Returns whether the inbound event explicitly mentions this bot. */
+  /**
+   * Returns whether the inbound event explicitly mentions this bot. For an edit,
+   * returns whether the message mentioned it before or after the edit, so an
+   * edit that removes a mention still reaches a hook that answers mentions.
+   */
   isBotMentioned(): boolean;
   /**
    * Opens a Slack code channel from this message and returns session
@@ -857,11 +883,41 @@ export interface SlackChannelConfig {
   ): SlackMentionResult | Promise<SlackMentionResult>;
 
   /**
+   * Invoked when a person edits one of their Slack messages in a thread that
+   * already has an eve session. Bot and app edits, link unfurls, and edits
+   * outside such a thread never reach it.
+   *
+   * Return `{ auth }` to send the edit to the session, or `null` to drop it.
+   * eve sends it as a `<slack_message_edit>` block: a diff of the changed lines
+   * when Slack includes the previous text, and always the full edited text. The
+   * edit follows the channel's `turnPolicy` like any message: by default it
+   * steers an active turn, and it starts a turn otherwise. A turn an edit
+   * starts shows no status until its first tool call finishes, so pair this
+   * with the `no_reply` tool to let the agent stay silent when the edit
+   * changes nothing. `title`, `history`, and thread context don't apply to
+   * edits.
+   *
+   * Defaults to the author's workspace-scoped auth for edits to direct
+   * messages, code channel messages, and messages that mention the bot before
+   * or after the edit, and drops other edits. When `onAppMention`,
+   * `onDirectMessage`, or `onMessage` is authored, that default would skip
+   * their checks, so edits go to `onEvent` or are dropped unless this hook is
+   * authored too. Thrown errors are caught and logged and the edit is
+   * dropped. Requires the `message.channels`, `message.groups`, `message.im`,
+   * and `message.mpim` events, which the generated app manifest includes.
+   */
+  onMessageEdited?(
+    ctx: SlackInboundMessageContext,
+    edit: SlackMessageEdit,
+  ): SlackMentionResult | Promise<SlackMentionResult>;
+
+  /**
    * Fallback handler for signed Slack Events API callbacks. An authored
-   * `onAppMention` or `onDirectMessage` takes precedence for events accepted
-   * by that specialized handler; otherwise the raw event arrives here. When
-   * neither a specialized handler nor `onEvent` is authored, mentions and DMs
-   * retain their built-in defaults and other event types are ignored.
+   * `onAppMention`, `onDirectMessage`, or `onMessageEdited` takes precedence
+   * for events accepted by that specialized handler; otherwise the raw event
+   * arrives here. When neither a specialized handler nor `onEvent` is
+   * authored, mentions, DMs, and message edits retain their built-in defaults
+   * and other event types are ignored.
    *
    * The handler owns control flow. Call `ctx.send(...)` zero, one, or many
    * times to start turns on Slack, and use `ctx.waitUntil(...)` for detached
@@ -1011,6 +1067,8 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     taskCard: renderDefaultSlackTaskCard,
   });
   const renderTurnStarted = rendering.events["turn.started"];
+  const renderCallSettled = rendering.events["call.settled"];
+  const renderTurnSettled = rendering.events["turn.settled"];
   const events = withTaskCards(
     {
       ...rendering.events,
@@ -1026,7 +1084,19 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           channel.state.replyThreadTs = channel.state.pendingReplyThreadTs;
           channel.state.pendingReplyThreadTs = undefined;
         }
+        channel.state.quietStatus = channel.state.pendingEditTurn === true;
+        channel.state.pendingEditTurn = null;
         await renderTurnStarted?.(event, ctx);
+      },
+      async "call.settled"(event, ctx) {
+        // A turn an edit started shows its work once a tool call finishes; `no_reply` ends it first.
+        ctx.channel.state.quietStatus = null;
+        await renderCallSettled?.(event, ctx);
+      },
+      async "turn.settled"(event, ctx) {
+        ctx.channel.state.quietStatus = null;
+        ctx.channel.state.pendingEditTurn = null;
+        await renderTurnSettled?.(event, ctx);
       },
     },
     rendering.taskCard,
@@ -1085,6 +1155,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       recordSlackPrincipal(channel.state, channel.session.auth.current, payload);
       followReplyThread(channel.state, payload);
       followTriggeringMessage(channel.state, payload);
+      followEditTurn(channel.state, payload);
       return withUndeliveredReplyNote(channel.state, payload, "Slack");
     },
 
@@ -1473,36 +1544,36 @@ async function handleEventPost(input: {
   let dispatch: (() => Promise<void>) | null = null;
   let builtinDefault: (() => Promise<void>) | null = null;
 
+  const dispatchInput = (kind: SlackMessageKind, message: SlackMessage) => ({
+    api: input.api,
+    appId,
+    botUserId,
+    codeChannelOnly: undefined,
+    detectCodeChannels: config.codeChannels === true,
+    receivingBotUserId,
+    from: input.from,
+    resolveSession: input.resolveSession,
+    credentials: config.credentials,
+    installationTeamId,
+    kind,
+    message,
+    received: input.received,
+    // A typed reply would bypass a custom `onAnswers` and could answer
+    // a request `approvalChannel` sent privately, so either one disables it.
+    resolvesTypedInput: config.onAnswers === undefined && config.approvalChannel === undefined,
+    threadContext: config.threadContext,
+    uploadPolicy: input.uploadPolicy,
+    userResolver: input.userResolver,
+  });
   const dispatchMessage =
     (
-      kind: "app_mention" | "channel_message" | "direct_message",
+      kind: SlackMessageKind,
       message: SlackMessage,
       handler: NonNullable<SlackChannelConfig["onMessage"]>,
       codeChannelOnly?: SlackCodeChannelOnly,
     ) =>
     () =>
-      dispatchSlackMessage({
-        api: input.api,
-        appId,
-        botUserId,
-        codeChannelOnly,
-        detectCodeChannels: config.codeChannels === true,
-        receivingBotUserId,
-        from: input.from,
-        resolveSession: input.resolveSession,
-        credentials: config.credentials,
-        handler,
-        installationTeamId,
-        kind,
-        message,
-        received: input.received,
-        // A typed reply would bypass a custom `onAnswers` and could answer
-        // a request `approvalChannel` sent privately, so either one disables it.
-        resolvesTypedInput: config.onAnswers === undefined && config.approvalChannel === undefined,
-        threadContext: config.threadContext,
-        uploadPolicy: input.uploadPolicy,
-        userResolver: input.userResolver,
-      });
+      dispatchSlackMessage({ ...dispatchInput(kind, message), codeChannelOnly, handler });
 
   if (payload.kind === "app_mention" || payload.kind === "direct_message") {
     const kind = payload.kind;
@@ -1513,6 +1584,24 @@ async function handleEventPost(input: {
       if (handler !== undefined) dispatch = dispatchMessage(kind, message, handler);
       else builtinDefault = dispatchMessage(kind, message, defaultOnMessage);
     }
+  }
+
+  const edit = parseMessageEditEvent(envelope);
+  if (edit !== null && !isSelfAuthoredSlackMessage({ appId, botUserId }, edit.message)) {
+    const dispatchEdit = (handler: NonNullable<SlackChannelConfig["onMessageEdited"]>) => () =>
+      dispatchSlackMessage({
+        ...dispatchInput(slackEditKind(edit, botUserId), edit.message),
+        edit,
+        handler: (ctx, message) => handler(ctx, { ...edit, message }),
+      });
+    // An authored message hook decides who may reach the agent, and the default edit hook would
+    // skip it, so edits then need their own `onMessageEdited`.
+    const authorsMessages =
+      config.onAppMention !== undefined ||
+      config.onDirectMessage !== undefined ||
+      config.onMessage !== undefined;
+    if (config.onMessageEdited !== undefined) dispatch = dispatchEdit(config.onMessageEdited);
+    else if (!authorsMessages) builtinDefault = dispatchEdit(defaultOnMessageEdited);
   }
 
   const onMessage = config.onMessage;
@@ -1611,6 +1700,24 @@ function isSelfAuthoredSlackMessage(
   return identity.appId !== undefined && message.raw.app_id === identity.appId;
 }
 
+type SlackMessageKind = "app_mention" | "channel_message" | "direct_message";
+
+/**
+ * Slack sends no `app_mention` for an edit, so an edit counts as one when the message mentions the
+ * bot before or after it: an edit that removes the mention tells the agent it isn't wanted.
+ */
+function slackEditKind(edit: SlackMessageEdit, botUserId: string | undefined): SlackMessageKind {
+  if (edit.message.raw.channel_type === "im") return "direct_message";
+  if (mentionsBot(edit.message.text, botUserId) || mentionsBot(edit.previousText, botUserId)) {
+    return "app_mention";
+  }
+  return "channel_message";
+}
+
+function mentionsBot(text: string | undefined, botUserId: string | undefined): boolean {
+  return botUserId !== undefined && text !== undefined && text.includes(`<@${botUserId}`);
+}
+
 /** Limits a message hook to code channels; `otherwise` serves a message posted elsewhere. */
 interface SlackCodeChannelOnly {
   readonly otherwise?: () => Promise<void>;
@@ -1629,14 +1736,17 @@ async function dispatchSlackMessage(input: {
   readonly credentials: SlackChannelCredentials | undefined;
   readonly handler: NonNullable<SlackChannelConfig["onMessage"]>;
   readonly installationTeamId: string | undefined;
-  readonly kind: "app_mention" | "channel_message" | "direct_message";
+  readonly kind: SlackMessageKind;
   readonly message: SlackMessage;
+  /** Set when `message` is an edited message rather than a new one. */
+  readonly edit?: SlackMessageEdit;
   readonly received: SlackRenderChain["received"];
   readonly resolvesTypedInput: boolean;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly uploadPolicy: UploadPolicy;
   readonly userResolver: SlackUserResolver | undefined;
 }): Promise<void> {
+  const { edit } = input;
   const request = buildSlackWorkspaceHandle({
     api: input.api,
     botToken: input.credentials?.botToken,
@@ -1654,8 +1764,10 @@ async function dispatchSlackMessage(input: {
         ? Promise.resolve(input.message)
         : withSlackUserInfo(input.message, input.userResolver, userLookup));
   // Mentions and DMs are addressed to the agent, so their hooks see the looked-up author.
-  // Other channel messages are mostly dropped, so they are looked up only at delivery.
-  const message = input.kind === "channel_message" ? input.message : await resolveMessage();
+  // Other channel messages are mostly dropped, so they are looked up only at delivery. Edits are
+  // looked up once their thread proves to have a session.
+  const message =
+    input.kind === "channel_message" || edit !== undefined ? input.message : await resolveMessage();
   const author = message.author;
   // Code channel detection and the privacy check read the same conversation.
   let conversationInfo: ReturnType<typeof request> | undefined;
@@ -1699,6 +1811,7 @@ async function dispatchSlackMessage(input: {
     triggeringMessageTs: input.message.ts,
     triggeringUserId: author?.userId ?? null,
     ...(codeChannel && { codeChannel: true, replyThreadTs }),
+    ...(edit !== undefined && { edit: true }),
   };
   const sessionDefaultAuth =
     author === undefined
@@ -1749,9 +1862,12 @@ async function dispatchSlackMessage(input: {
       resolveSession: input.resolveSession,
     });
   };
-  const isBotMentioned =
-    input.kind === "app_mention" ||
-    (input.botUserId !== undefined && input.message.text.includes(`<@${input.botUserId}`));
+  // The model reads whether the message mentions the bot now; a hook deciding on an edit also
+  // sees a mention the edit removed.
+  const isMentionedNow =
+    (input.kind === "app_mention" && edit === undefined) ||
+    mentionsBot(input.message.text, input.botUserId);
+  const isBotMentioned = isMentionedNow || mentionsBot(edit?.previousText, input.botUserId);
   const ctx: SlackInboundMessageContext = {
     ...sessionOperations,
     isBotMentioned: () => isBotMentioned,
@@ -1762,19 +1878,22 @@ async function dispatchSlackMessage(input: {
     thread,
   };
 
+  // An edit only reaches a thread the agent already serves, and shows no acknowledgement.
+  if (edit !== undefined && (await sessionOperations.resolveSession()) === undefined) return;
+
   // A mention or DM is addressed to the agent, so it is acknowledged while the
   // hook decides. Other channel messages are mostly dropped, so they are
   // acknowledged only once the hook dispatches. A code channel's status belongs
   // to its one session, so a dropped message must not clear it mid-turn.
-  const acknowledgeFirst = input.kind !== "channel_message" && !codeChannel;
+  const acknowledgeFirst = input.kind !== "channel_message" && !codeChannel && edit === undefined;
   const acknowledged = acknowledgeFirst
     ? acknowledgeMessage(input.received, input.message, { slack, thread })
     : undefined;
   let result;
   try {
-    result = await input.handler(ctx, message);
+    result = await input.handler(ctx, edit === undefined ? message : await resolveMessage());
   } catch (error) {
-    logError(log, `${input.kind} handler failed`, error, {
+    logError(log, `${edit === undefined ? input.kind : "message edit"} handler failed`, error, {
       channelId: input.message.channelId,
     });
   }
@@ -1785,7 +1904,9 @@ async function dispatchSlackMessage(input: {
     }
     return;
   }
-  await (acknowledged ?? acknowledgeMessage(input.received, input.message, { slack, thread }));
+  if (edit === undefined) {
+    await (acknowledged ?? acknowledgeMessage(input.received, input.message, { slack, thread }));
+  }
 
   const isPrivateConversation = await isDMOrPrivateChannel();
   channelState.audience =
@@ -1795,8 +1916,9 @@ async function dispatchSlackMessage(input: {
     credentials: input.credentials,
     kind: input.kind,
     isPrivateConversation,
-    isMentioned: isBotMentioned,
+    isMentioned: isMentionedNow,
     message: await resolveMessage(),
+    edit,
     resolvesTypedInput: input.resolvesTypedInput,
     result,
     sessionOperations,
@@ -1963,6 +2085,8 @@ async function deliverSlackMessage(input: {
   readonly isMentioned: boolean;
   readonly kind: string;
   readonly message: SlackMessage;
+  /** Set when `message` is an edited message, which only joins a session that already exists. */
+  readonly edit: SlackMessageEdit | undefined;
   readonly resolvesTypedInput: boolean;
   readonly result: Exclude<SlackInboundResult, null>;
   readonly thread: SlackThread;
@@ -1977,12 +2101,13 @@ async function deliverSlackMessage(input: {
       }
     | undefined;
 }): Promise<void> {
-  const { message, thread } = input;
+  const { edit, message, thread } = input;
   // This runs in the webhook's `waitUntil` task; an unguarded throw would
   // reject silently into the dispatch `allSettled` ("no response, no logs").
   try {
+    // The session already saw the thread and the message's files when it was first sent.
     const priorMessages =
-      input.threadContext === undefined
+      input.threadContext === undefined || edit !== undefined
         ? []
         : await loadThreadContextMessages(thread, message, input.threadContext);
     // A message that starts the thread's session carries the replies as history; a started
@@ -2004,15 +2129,18 @@ async function deliverSlackMessage(input: {
     const history =
       input.result.history ??
       (seedsHistory ? slackThreadSessionHistory(priorMessages, users) : undefined);
-    const fileParts = await collectInboundFileParts({
-      botUserId: input.botUserId,
-      fetchThreadWindow: (latest, size) => fetchSlackThreadWindow(thread, latest, size),
-      // A DM can mention the app too, but every DM message brings its own files.
-      isMentioned: input.kind === "app_mention",
-      mention: message,
-      thread,
-      policy: input.uploadPolicy,
-    });
+    const fileParts =
+      edit !== undefined
+        ? []
+        : await collectInboundFileParts({
+            botUserId: input.botUserId,
+            fetchThreadWindow: (latest, size) => fetchSlackThreadWindow(thread, latest, size),
+            // A DM can mention the app too, but every DM message brings its own files.
+            isMentioned: input.kind === "app_mention",
+            mention: message,
+            thread,
+            policy: input.uploadPolicy,
+          });
     const inboundContext: SlackInboundContext = {
       botUserId: input.botUserId,
       channelId: message.channelId,
@@ -2025,7 +2153,15 @@ async function deliverSlackMessage(input: {
       userId: message.author?.userId ?? "",
       userName: message.author?.userName,
     };
-    const attributedMessage = formatSlackInboundMessage(inboundContext, message);
+    const attributedMessage =
+      edit === undefined
+        ? formatSlackInboundMessage(inboundContext, message)
+        : formatSlackInboundMessageEdit(inboundContext, {
+            editedTs: edit.editedTs,
+            previousText: edit.previousText,
+            text: message.text,
+            ts: message.ts,
+          });
     const turnMessage = buildSlackTurnMessage(
       threadContext === undefined ? attributedMessage : `${threadContext}\n\n${attributedMessage}`,
       fileParts,
@@ -2036,14 +2172,19 @@ async function deliverSlackMessage(input: {
       ? PRIVATE_SLACK_RUN_TITLE
       : (input.result.title ?? message.markdown);
     // The envelope stays model-visible; pending input matches what the person typed.
-    // With typed answers off, empty text keeps the envelope itself from answering.
-    const typedText = input.resolvesTypedInput ? slackTypedText(message.text, input.botUserId) : "";
+    // With typed answers off, empty text keeps the envelope itself from answering, as it
+    // does for an edit, which corrects a message rather than answering a request.
+    const typedText =
+      input.resolvesTypedInput && edit === undefined
+        ? slackTypedText(message.text, input.botUserId)
+        : "";
     const sendOptions: SlackSendOptions = attachInputText(
       {
         auth: input.result.auth,
-        title,
         ...(channelContext.length > 0 && { context: channelContext }),
-        ...(history !== undefined && { history }),
+        // An edit follows the channel's `turnPolicy`: steered, it joins the running turn; queued,
+        // it stays behind the message it edits instead of overtaking it into an earlier turn.
+        ...(edit === undefined && { title, ...(history !== undefined && { history }) }),
       },
       fileParts.length === 0 ? typedText : undefined,
     );
@@ -2079,6 +2220,13 @@ function followReplyThread(state: SlackChannelState, payload: ChannelDelivery<un
   if (payload.message === undefined || state.codeChannel !== true) return;
   const stamped = payload.state as Partial<SlackChannelState> | undefined;
   state.pendingReplyThreadTs = stamped?.replyThreadTs ?? null;
+}
+
+/** A turn starts quiet when every message delivered since the last one ended was an edit. */
+function followEditTurn(state: SlackChannelState, payload: ChannelDelivery<unknown>): void {
+  if (payload.message === undefined) return;
+  const edit = (payload.state as Partial<SlackChannelState> | undefined)?.edit === true;
+  state.pendingEditTurn = edit && state.pendingEditTurn !== false;
 }
 
 /** The latest message delivered is the one the next turn answers. */

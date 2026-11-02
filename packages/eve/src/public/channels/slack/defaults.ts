@@ -21,7 +21,7 @@ import {
   buildAuthEphemeralText,
   buildAuthRequiredPublicText,
 } from "#public/channels/slack/connections.js";
-import type { SlackMessage } from "#public/channels/slack/inbound.js";
+import type { SlackMessage, SlackMessageEdit } from "#public/channels/slack/inbound.js";
 import {
   notifyRefusedResponder,
   postRequestCards,
@@ -40,6 +40,7 @@ import type {
   SlackChannelState,
   SlackContext,
   SlackEventContext,
+  SlackInboundMessageContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
 import {
@@ -184,6 +185,22 @@ export function defaultSlackAuth(
  */
 export function defaultOnMessage(ctx: SlackContext, message: SlackMessage): SlackMentionResult {
   return { auth: defaultSlackAuth(message, ctx) };
+}
+
+/**
+ * Default `onMessageEdited`: sends an edit to a message addressed to the agent
+ * (a direct message, a code channel message, or one that mentions the bot
+ * before or after the edit) with auth derived from its author, matching which
+ * new messages the defaults answer. It runs only when no message hook is
+ * authored.
+ */
+export function defaultOnMessageEdited(
+  ctx: SlackInboundMessageContext,
+  edit: SlackMessageEdit,
+): SlackMentionResult {
+  const addressed =
+    edit.message.raw.channel_type === "im" || ctx.isBotMentioned() || ctx.slack.codeChannel;
+  return addressed ? defaultOnMessage(ctx, edit.message) : null;
 }
 
 /** eve's default `received`: the `Thinking...` status, set the moment a message arrives. */

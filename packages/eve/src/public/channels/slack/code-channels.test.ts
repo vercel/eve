@@ -172,8 +172,11 @@ function renderingHarness() {
       if (!handler) throw new Error(`No handler for ${fact.type}`);
       await contextStorage.run(store, () => handler(fact, ctx));
     },
-    async deliver(replyThreadTs: string) {
-      await adapter.deliver?.({ message: "hello", state: { replyThreadTs } } as never, ctx);
+    async deliver(replyThreadTs: string, options?: { readonly edit?: boolean }) {
+      await adapter.deliver?.(
+        { message: "hello", state: { replyThreadTs, edit: options?.edit } } as never,
+        ctx,
+      );
     },
   };
 }
@@ -726,6 +729,38 @@ describe("slackChannel() code channels", () => {
     ]);
     expect(statuses()).toContain("processing");
     expect(slackCalls("assistant.threads.setStatus")).toHaveLength(0);
+  });
+
+  it("keeps a turn an edit starts quiet until its first tool call finishes", async () => {
+    useCodeChannels([]);
+    const { event, deliver } = renderingHarness();
+    const modelStarted = (runId: string): SessionEvent => ({
+      type: "model.started",
+      data: { attempt: 0, modelId: "test-model", runId },
+      scope: { runId, turnId: "t1" },
+    });
+    await deliver("1700000000.000100", { edit: true });
+    await event({
+      type: "turn.started",
+      data: { cause: { deliveryId: "d1" }, follows: null, turnId: "t1" },
+    });
+    await event(modelStarted("r1"));
+    expect(statuses()).toEqual([]);
+
+    await event({
+      type: "call.settled",
+      data: { callId: "c1", outcome: "completed" },
+      scope: { runId: "r1", turnId: "t1" },
+    });
+    await event(modelStarted("r2"));
+    await event({ type: "turn.settled", data: { turnId: "t1", outcome: "completed" } });
+    // A new message's turn shows its status at once.
+    await deliver("1700000000.000200");
+    await event({
+      type: "turn.started",
+      data: { cause: { deliveryId: "d2" }, follows: "t1", turnId: "t2" },
+    });
+    expect(statuses()).toEqual(["processing", "active", "processing"]);
   });
 
   it("sets the session back to active when a turn is cancelled", async () => {
