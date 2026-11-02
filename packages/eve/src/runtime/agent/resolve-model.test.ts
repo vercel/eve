@@ -119,7 +119,7 @@ describe("dynamic runtime model resolution", () => {
     expect(model).toBe("eve-mock/dynamic-subagent");
   });
 
-  it.fails("leaves a model id to a custom AI SDK default provider under eve dev", async () => {
+  it("leaves a model id to a custom AI SDK default provider under eve dev", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("EVE_DEV", "1");
     vi.stubEnv("EVE_DEV_CONTROL_URL", "http://127.0.0.1:1");
