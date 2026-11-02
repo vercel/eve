@@ -381,7 +381,6 @@ async function buildApplicationInWorkspace(
     );
     await measureBuildPhase(profiler, "connect-manifest.emit", () =>
       emitConnectManifest({
-        appRoot: preparedHost.appRoot,
         generatorVersion: resolveInstalledPackageInfo().version,
         manifest: preparedHost.compileResult.manifest,
         outputDirectory: workspace.publication.output.stagedDir,

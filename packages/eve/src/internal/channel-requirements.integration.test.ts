@@ -175,7 +175,7 @@ function chatConfig() {
     throw new Error("build must not initialize adapters");
   });
   // Build declarations do not need runtime adapter operations.
-  const adapter = (name: string) => ({ name, initialize }) as unknown as Adapter;
+  const adapter = (name: string) => ({ name, initialize }) as Adapter;
   return {
     userName: "test",
     adapters: {
