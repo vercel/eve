@@ -2,6 +2,7 @@ import { workflowInboxTransport } from "#execution/session-inbox/workflow-transp
 import { readSerializedSessionSchedule } from "#context/session-schedule.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { failSession, runPreparedSession, type SessionBoot } from "#execution/session/program.js";
+import { workflowSessionHost } from "#execution/session/workflow-host.js";
 import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
 import type {
@@ -18,8 +19,10 @@ import { createSessionStep } from "#execution/create-session-step.js";
 import { claimHookOwnership, isHookConflictError } from "#execution/hook-ownership.js";
 import {
   createSessionInbox,
+  type InboxHook,
   type SessionInboxHandle,
   type SessionInboxPayload,
+  type SessionInboxTransport,
 } from "#execution/session-inbox/inbox.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
@@ -84,7 +87,11 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
         ? await bootForcedHandoffOwner(input)
         : await bootReleasedHandoffOwner(input);
   if (boot === undefined) return { output: "" };
-  const result = await runPreparedSession(boot.session, boot.inbox);
+  const result = await runPreparedSession(
+    boot.session,
+    boot.inbox,
+    workflowSessionHost(boot.session, boot.inbox),
+  );
   return { output: result.output };
 }
 
@@ -120,16 +127,19 @@ async function prepareInitialOwner(
     readonly sessionCreation: Promise<unknown>;
     readonly sessionId: string;
     readonly sessionTimeoutMs: number | false;
+    readonly untimed: boolean;
   },
 ): Promise<InitialOwnerPreparation> {
   const owner: OwnedInitialSession = {
     kind: "owned",
     // The session loop starts the timer once the claims are confirmed; one
     // started sooner could signal a command hook that is not registered yet.
-    timeoutControl: createSessionTimeoutControl({
-      sessionId: input.sessionId,
-      timeoutMs: input.sessionTimeoutMs,
-    }),
+    timeoutControl: input.untimed
+      ? undefined
+      : createSessionTimeoutControl({
+          sessionId: input.sessionId,
+          timeoutMs: input.sessionTimeoutMs,
+        }),
     // Created before any await so its abort hooks commit with the session's
     // hooks instead of beside the first turn's step.
     turnControl: createTurnControl(),
@@ -154,14 +164,30 @@ function unwrapSettled<T>(result: PromiseSettledResult<T>): T {
   return result.value;
 }
 
+/**
+ * Where a first owner keeps its session: the stream it writes, the transport its addresses
+ * arrive on, and whether a timer can end it. Workflow's, on the owner's run, unless a host
+ * keeps the session itself.
+ */
+export interface InitialOwnerPorts<Hook extends InboxHook = InboxHook> {
+  readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly inboxTransport: SessionInboxTransport<Hook>;
+  /** The host keeps no timer, so the session never times out. */
+  readonly untimed?: boolean;
+}
+
 /** Returns `undefined` when a competing continuation owner already exists. */
-export async function bootInitialOwner(
+export async function bootInitialOwner<Hook extends InboxHook>(
   input: InitialWorkflowEntryInput,
   sessionId: string,
+  ports?: InitialOwnerPorts<Hook>,
 ): Promise<BootOutcome | undefined> {
   const serializedContext = stampSessionIdentity(input.serializedContext, sessionId);
-  const sessionWritable = getWritable<Uint8Array>();
-  const inbox = createSessionInbox(workflowInboxTransport(sessionId));
+  const sessionWritable = ports?.sessionWritable ?? getWritable<Uint8Array>();
+  const inbox =
+    ports === undefined
+      ? createSessionInbox(workflowInboxTransport(sessionId))
+      : createSessionInbox(ports.inboxTransport);
   const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
   const continuationToken = (serializedContext["eve.continuationToken"] as string) || "";
   const serializedBundle = serializedContext["eve.bundle"] as {
@@ -190,6 +216,7 @@ export async function bootInitialOwner(
       sessionCreation: sessionCreationPromise,
       sessionId,
       sessionTimeoutMs,
+      untimed: ports?.untimed === true,
     });
     const callerResolutionPromise = hasDelegatedSessionContext(serializedContext)
       ? resolveInitialTurnCallerStep({ serializedContext })

@@ -1,7 +1,6 @@
 import { EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import { formatEarlierRemoteCallerInputError } from "#protocol/remote-agent-protocol.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
-import { sleep } from "#compiled/@workflow/core/index.js";
 
 import type { SessionCapabilities, TurnCaller } from "#channel/types.js";
 import {
@@ -44,9 +43,10 @@ import type { TurnPause } from "#execution/session/pending-turn-state.js";
 import type {
   RuntimeActionResultStepInput,
   TurnOutcome,
+  TurnStepInput,
   TurnStepPayload,
+  TurnStepResult,
 } from "#execution/session/turn-step-types.js";
-import { turnStep } from "#execution/session/turn-step.js";
 import { exhaustedStepError, normalizeSerializableError } from "#execution/workflow-errors.js";
 import { ActiveTurn } from "#execution/session/active-turn.js";
 import type { TurnControl } from "#execution/session/turn-control.js";
@@ -79,9 +79,21 @@ const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
   "This session cannot request human input, so it cannot wait for a tool approval or question. " +
   "Configure unattended tools with an approval policy that does not require human input.";
 
+/**
+ * How the host runs a session's turns: where each turn step runs, and the clock its parked
+ * waits time out on. Workflow runs each step as a durable `turnStep` and sleeps durably.
+ */
+export interface SessionTurnHost {
+  /** Runs one turn step across the host's step boundary. */
+  runTurnStep(input: TurnStepInput): Promise<TurnStepResult>;
+  /** Resolves once `ms` pass, for an `eve__task_wait` timeout. */
+  sleep(ms: number): Promise<void>;
+}
+
 export interface SessionExecutionInput {
   readonly capabilities?: SessionCapabilities;
   readonly cursor: SessionStateCursor;
+  readonly host: SessionTurnHost;
   readonly inbox: SessionInboxReader;
   readonly queue: SessionInputQueue;
   readonly sessionId: string;
@@ -89,7 +101,7 @@ export interface SessionExecutionInput {
 
 /**
  * Executes conversational turns inside the owning session workflow: runs
- * `turnStep`, services the inbox at committed boundaries, coordinates waits,
+ * each turn step on its host, services the inbox at committed boundaries, coordinates waits,
  * and settles locally. There is no child run and no transport protocol.
  */
 export class SessionExecution {
@@ -207,7 +219,7 @@ export class SessionExecution {
       // not the step's failure, so it is not recovered.
       const result = await cursor.advanceWithHistory((state) => {
         const run = (recover?: { readonly error: unknown }) =>
-          turnStep({
+          this.input.host.runTurnStep({
             ...state,
             handover,
             abortSignal: turn.signal,
@@ -359,7 +371,7 @@ export class SessionExecution {
     paused: Extract<TurnPause, { readonly on: "calls" }>,
   ): Promise<CallWait> {
     const dispatched = paused.dispatch ? await this.dispatchRuns() : [];
-    const wait = new CallWait(this.input.cursor, paused.callIds, dispatched);
+    const wait = new CallWait(this.input, paused.callIds, dispatched);
     await wait.answerTaskToolCalls(paused.taskToolCalls);
     return wait;
   }
@@ -438,6 +450,7 @@ export class SessionExecution {
  */
 class CallWait {
   private readonly cursor: SessionStateCursor;
+  private readonly sleep: SessionTurnHost["sleep"];
   private readonly callIds: readonly string[];
   private readonly results: RuntimeActionResult[] = [];
   private readonly acceptedAtMs = new Map<string, number>();
@@ -446,11 +459,12 @@ class CallWait {
   private taskWaits: TaskWait[] = [];
 
   constructor(
-    cursor: SessionStateCursor,
+    session: Pick<SessionExecutionInput, "cursor" | "host">,
     callIds: readonly string[],
     dispatched: readonly RuntimeActionResult[],
   ) {
-    this.cursor = cursor;
+    this.cursor = session.cursor;
+    this.sleep = session.host.sleep;
     this.callIds = callIds;
     const acceptedAtMs = Date.now();
     for (const result of dispatched) this.accept(result, acceptedAtMs);
@@ -477,7 +491,7 @@ class CallWait {
     };
   }
 
-  /** The durable sleeps of the parked `eve__task_wait` calls. */
+  /** The host's sleeps for the parked `eve__task_wait` calls. */
   timers(): readonly Promise<string>[] {
     return this.taskWaits.flatMap((wait) => (wait.timer === undefined ? [] : [wait.timer]));
   }
@@ -533,7 +547,7 @@ class CallWait {
     const startedAtMs = calls.length === 0 ? 0 : await startTaskToolCallsStep();
     for (const call of calls) {
       if (call.kind === TASK_WAIT_TOOL_NAME) {
-        waits.push(startTaskWait(call, startedAtMs));
+        waits.push(startTaskWait(call, startedAtMs, this.sleep));
         continue;
       }
       this.accept(await answerTaskCancel(this.cursor, call));
@@ -565,8 +579,8 @@ class CallWait {
 }
 
 /**
- * One `eve__task_wait` call the turn is parked on. Its timeout is a durable sleep
- * the turn races against the inbox; nothing polls.
+ * One `eve__task_wait` call the turn is parked on. Its timeout is the host's sleep (durable,
+ * on Workflow), which the turn races against the inbox; nothing polls.
  */
 interface TaskWait {
   readonly callId: string;
@@ -579,6 +593,7 @@ interface TaskWait {
 function startTaskWait(
   call: Extract<TaskToolCall, { readonly kind: typeof TASK_WAIT_TOOL_NAME }>,
   startedAtMs: number,
+  sleep: SessionTurnHost["sleep"],
 ): TaskWait {
   const { callId, timeoutMs } = call;
   const timer = timeoutMs === undefined ? undefined : sleep(timeoutMs).then(() => callId);
