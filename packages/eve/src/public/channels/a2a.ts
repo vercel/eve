@@ -142,6 +142,9 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
       }),
       POST(path, rpc),
     ],
+    // Intake checks declared sizes and types; staging enforces the same policy on the bytes a
+    // file URL actually downloads, which intake can't see.
+    uploadPolicy: input.uploadPolicy,
   });
 }
 

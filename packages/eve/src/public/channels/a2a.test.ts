@@ -5,6 +5,7 @@ import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { httpBasic, none } from "#public/channels/auth.js";
 import { A2A_AGENT_CARD_PATH, a2aChannel } from "#public/channels/a2a.js";
+import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 
 describe("a2aChannel", () => {
   it("fails closed when auth is omitted, and rejects invalid config", () => {
@@ -21,6 +22,16 @@ describe("a2aChannel", () => {
     ]) {
       expect(() => a2aChannel({ auth: none(), publicOrigin })).toThrow(message);
     }
+  });
+
+  it("hands its upload policy to the runtime, which enforces it on downloaded files", () => {
+    const channel = a2aChannel({
+      auth: none(),
+      uploadPolicy: { allowedMediaTypes: ["image/*"], maxBytes: 1024 },
+    });
+    expect(
+      (channel as unknown as { adapter: { uploadPolicy?: unknown } }).adapter.uploadPolicy,
+    ).toEqual(mergeUploadPolicy({ allowedMediaTypes: ["image/*"], maxBytes: 1024 }));
   });
 
   it("serves the Agent Card publicly and the JSON-RPC endpoint at its route", () => {
