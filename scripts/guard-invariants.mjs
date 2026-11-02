@@ -194,13 +194,15 @@
  *             (`decideApproval`), and nothing casts `as Clearance`. Every
  *             effect entry point takes one, so a call runs only on what the
  *             gate decided.
- *   rule 63 — The session loop doesn't reach Workflow: the loop
- *             (`execution/session/{program,turn,active-turn,state-cursor,
- *             input-queue,next-input}.ts`) and the inbox
- *             (`execution/session-inbox/inbox.ts`) import none of rule 61's
- *             specifiers, nor `#execution/workflow-runtime.js`. Workflow
- *             reaches them through their host ports (`SessionHost`,
- *             `SessionInboxTransport`, `SessionLineStore`, `SessionStepHost`).
+ *   rule 63 — The session loop and the in-process host don't reach Workflow:
+ *             the loop (`execution/session/{program,turn,active-turn,
+ *             state-cursor,input-queue,next-input}.ts`), the inbox
+ *             (`execution/session-inbox/inbox.ts`), and `execution/in-process/`
+ *             import none of rule 61's specifiers, nor
+ *             `#execution/workflow-runtime.js`. Workflow reaches them through
+ *             their host ports (`SessionHost`, `SessionInboxTransport`,
+ *             `SessionLineStore`, `SessionStepHost`). The in-process step
+ *             boundary may import Workflow's serializer, which it mirrors.
  *             Only direct imports are checked.
  *
  * Baselines for rules with pre-existing violations live in
@@ -1049,7 +1051,7 @@ function checkRule62(posix, lines, violations) {
   });
 }
 
-// ---------- Rule 63: the session loop doesn't reach Workflow ----------
+// ---------- Rule 63: the session loop and in-process host don't reach Workflow ----------
 
 const HOST_NEUTRAL_SESSION_FILES = new Set([
   "packages/eve/src/execution/session/program.ts",
@@ -1060,13 +1062,18 @@ const HOST_NEUTRAL_SESSION_FILES = new Set([
   "packages/eve/src/execution/session/next-input.ts",
   "packages/eve/src/execution/session-inbox/inbox.ts",
 ]);
+const IN_PROCESS_HOST_DIR = "packages/eve/src/execution/in-process/";
+const IN_PROCESS_STEP_BOUNDARY = "packages/eve/src/execution/in-process/step-boundary.ts";
+const WORKFLOW_SERIALIZER_SPECIFIER = "#compiled/@workflow/core/serialization.js";
 
 /** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
 function checkRule63(posix, lines, violations) {
-  if (!HOST_NEUTRAL_SESSION_FILES.has(posix)) return;
+  const inProcess = posix.startsWith(IN_PROCESS_HOST_DIR) && !posix.endsWith(".test.ts");
+  if (!inProcess && !HOST_NEUTRAL_SESSION_FILES.has(posix)) return;
   for (const [index, line] of lines.entries()) {
     const specifier = IMPORT_SPECIFIER_RE.exec(line)?.[1];
     if (specifier === undefined) continue;
+    if (posix === IN_PROCESS_STEP_BOUNDARY && specifier === WORKFLOW_SERIALIZER_SPECIFIER) continue;
     if (
       !WORKFLOW_RUNTIME_SPECIFIER_RE.test(specifier) &&
       specifier !== "#execution/workflow-runtime.js"
