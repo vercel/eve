@@ -15,19 +15,21 @@ used, and a prompt written for a chat product.
 
 What the evidence shows:
 
-- **eve-code is behind on coding.** On deepswe-lean, the only coding set in
-  CI (12 real-repo tasks), the fresh `main` baseline (run 41504242132, Sonnet
-  5.5, 3 attempts, eve-code web tools off) resolved 20/36 for eve-code, 29/36
-  for opencode, and 25/36 for pi. eve-code trails opencode by 25% (95% CI −42%
-  to −11%). Earlier runs, with web tools on, had eve-code and pi tied at 50/72.
-  - eve-code stops sooner than opencode: a median of 19.5 model steps, against
-    26 for opencode and 17.5 for pi.
+- **Bash output format was the main lever, not prompt text.** Sending core
+  `bash` results to the model as plain text instead of JSON (#5822) took
+  eve-code from 40/72 to 50/72 pooled on deepswe-lean, level with pi (25/36).
+  Prompt blocks for verification and ambiguity added nothing measurable on top,
+  and cost about a minute per task. See [Results](#results).
+- **opencode still leads.** It resolved 32/36 once eve-bench sent its
+  instruction once (eve-bench#104). The cause of the remaining gap is open.
+- **The benchmark is underpowered.** 12 tasks at 3 attempts move about ±3 per
+  run, so small effects cannot be told apart. Growing the task set (Phase 0)
+  now gates further tuning.
   - swe-lean is not a coding benchmark. It is 4 terminal-bench tasks (eve-code
     94/100, opencode 92/100, pi 89/100) plus 3 MCP data tasks (eve-code 72/75,
     pi 56/75).
-  - In the earlier runs, only 4 of 12 tasks separated the harnesses (dateutil,
-    prometheus, sqlite-utils, tengo). 7 were solved every time by everyone, and
-    2 almost never by anyone.
+  - In earlier runs, only 4 of 12 deepswe-lean tasks separated the harnesses.
+    7 were solved every time by everyone, and 2 almost never by anyone.
 - **The model ignores eve-code's tools.** In 108 earlier deepswe-lean trials on
   `anthropic/claude-sonnet-5.5`:
   - `apply_patch` was called twice, `code__grep` 9 times, and `code__worker`
@@ -35,17 +37,12 @@ What the evidence shows:
   - Nearly all reads and edits went through `bash`. The model also called
     `write_file` 9 times, to create new files.
   - pi looks the same: zero calls to its `edit` or `read` tools.
-- **Failures are untested edge cases, not tool failures.** Failing attempts ran
-  tests but never tested the edge case the task described. Examples: copying
-  `click.Path(exists=True)` into a command that must accept a new file, and
-  inventing a tie-break order. pi fails the same hidden tests.
 - **Fixed prompt overhead is over 2x pi's.** In the baseline, the first step
   is about 7K input tokens including the task, against 3K for pi and 11K for
   opencode. eve core alone (default tools, Tasks section, skills section) is
   about 3K of that, so getting to pi's level needs more than eve-code changes.
-  - pi now runs through `anthropic-messages` with prompt caching, so cost
-    comparisons are like for like (non-zero cache reads in run 41504111932).
-  - eve-code has the fastest median deepswe-lean latency (3m38s).
+  pi runs through `anthropic-messages` with prompt caching (eve-bench#103), so
+  cost comparisons are like for like.
 - **The read-only worker does not fit its job.**
   - Its only tools are `glob`, `grep`, and `read_file`
     (`test/scenario/worker-manifest.test.ts:73`). It cannot run `git diff`,
@@ -56,9 +53,43 @@ What the evidence shows:
     tools.
 
 The plan has four parts: fix what the benchmark can detect, remove
-single-consumer and unused API surface before 1.0.0, rewrite the prompt around
-verification, then improve the tools and context. Each behavior change ships
-as a paired variant and lands only if it passes a non-inferiority check.
+single-consumer and unused API surface before 1.0.0, trim the prompt, then
+improve the tools and context. Each behavior change is benchmarked on its own
+and lands only if it does not make results worse.
+
+## Results
+
+deepswe-lean, `anthropic/claude-sonnet-5.5`, reasoning `high`, 3 attempts per
+run. Variant runs are eve-code only, compared against the stored opencode and
+pi baselines.
+
+| Variant                       | PRs          | Resolved            | Runs                     | Notes                              |
+| ----------------------------- | ------------ | ------------------- | ------------------------ | ---------------------------------- |
+| `main`                        | –            | 20/36, 20/36: 40/72 | 41504242132, 41528486724 | Baseline                           |
+| 2a, prompt trim               | #5800, #5805 | 23/36               | 41512622405              |                                    |
+| 2a + 2b, verification block   | + #5807      | 24/36               | 41509319369              |                                    |
+| 2a + 2b + 2c, ambiguity block | + #5812      | 25/36               | 41521242524              | Latency +1m44s                     |
+| `bash` `timeout`, up to 120 s | #5813        | 19/36               | 41530685205              | Steps 21 to 17.5, sleeps 58 to 17  |
+| Plain-text `bash` output      | #5822        | 26/36, 24/36: 50/72 | 41537553126, 41543980463 | Latency unchanged                  |
+| All of the above              | #5825        | 22/36, 27/36: 49/72 | –                        | Latency +1m19s                     |
+| opencode                      | –            | 32/36               | 41528486724              | After eve-bench#104 (29/36 before) |
+| pi                            | –            | 25/36               | Stored                   | Prompt caching on (eve-bench#103)  |
+
+- **Plain-text output** is the one change that moved resolve rate. It
+  matches pi, with no latency cost.
+- **Prompt blocks** (2b, 2c) stay within run noise over 2a, and the
+  combination is no better than plain-text output alone. They cost about a
+  minute per task, so #5807 and #5812 are closed.
+- **2a stays.** It removes chat-product and single-consumer text and sends
+  fewer tokens on every step, without lowering results.
+- **`timeout` stays as an efficiency fix.** It does not change correctness.
+  `running` results fall from 23 to 14, and `timeout N` wrappers from 29 to 11.
+- **The gap to opencode is open.** Two hypotheses:
+  - eve's AI Gateway v4 path shows thinking as "omitted", where the Messages
+    API shows "summarized". This is at least an observability gap, and it may
+    affect results.
+  - Run noise of about ±3 hides effects of this size. Phase 0 task expansion
+    comes first.
 
 ## Goals
 
@@ -106,7 +137,7 @@ as a paired variant and lands only if it passes a non-inferiority check.
   repository, the ref or diff, and an instruction not to edit; otherwise audit
   in this session." The audit standards stay.
 - **Extension instructions.** Phase 1 removes only the text that names the
-  worker. Phase 2 rewrites the rest.
+  worker. Phase 2a trims the rest.
 - **`code__investigate` skill (Phase 2).** It absorbs the "Issues and bugs" and
   "Analysis and design" sections that `instructions.md` currently sends on every
   step.
@@ -141,7 +172,8 @@ Most of this is eve-bench work, tracked in an eve-bench issue. The eve side:
    - Turn on prompt caching for pi.
    - Report first-step tokens, steps, and tool calls by name.
 
-   Done in vercel-labs/eve-bench#103.
+   Done in vercel-labs/eve-bench#103. eve-bench#104 also sends opencode its
+   instruction once, which re-baselined opencode at 32/36.
 
 5. Make variants git refs. The extension is compiled into eve, and its
    instructions cannot be overridden, so each variant needs its own build.
@@ -150,11 +182,17 @@ Most of this is eve-bench work, tracked in an eve-bench issue. The eve side:
    task connections, and the sandbox. Drop the `E0_MODEL` default, then
    re-baseline, since changing the consumer makes stored baselines
    incomparable.
+7. eve-bench follow-ups:
+   - add the model to the PR-comment key, so both families can report on one
+     PR;
+   - show `--artifact` in the diagnostics `trials logs` hint;
+   - let competitor-only runs publish baselines. Today they cannot.
 
 Exit criterion: a baseline of current eve-code, opencode, and pi on both
 models, with the margin and detectable effect stated. The Sonnet baseline
-exists (run 41504242132). The `gpt-6.1-sol` baseline first runs after #5806
-merges.
+exists. The `gpt-6.1-sol` baseline first runs after #5806 merges. Item 2 is
+now the gating item: no further tuning until the expanded set can detect
+effects smaller than ±3 per run.
 
 ## Phase 1: API removals (PR 1, before 1.0.0)
 
@@ -198,13 +236,12 @@ does not wait for Phase 0. Implemented in #5800.
 - **Changeset:** `major`, following the pre-mode precedent in
   `.changeset/pre/eve-1-0.md`.
 
-## Phase 2: Prompt rewrite
+## Phase 2: Prompt trim
 
-Replace `extension/instructions.md` in two stacked variants, so the effect can
-be attributed. Each merges only when deepswe-lean shows it non-inferior to its
-base. The PRs hold the final text:
+Three stacked variants of `extension/instructions.md` were measured (see
+[Results](#results)). Only 2a lands:
 
-- **2a, removals only (#5805).** 4,942 to 1,636 characters. It removes:
+- **2a, removals only (#5805), kept.** 4,942 to 1,636 characters. It removes:
   - the chat-product text and consumer writing policy;
   - the duplicated parallelism lines and the nonexistent `todo` tool;
   - the Minds text;
@@ -216,24 +253,24 @@ base. The PRs hold the final text:
   to edit with the editing tool rather than the shell, so GPT runs keep an
   editing directive.
 
-- **2b, 2a plus a verification block (#5807).** 1,636 to 2,455 characters.
-  When the agent changed code, it works out each requirement and its edge
-  cases, checks each one by running code, keeps existing tests intact, states
-  how it read an ambiguous request, and reports what it checked and what it
-  could not check.
+- **2b, verification block (#5807), and 2c, ambiguity block (#5812),
+  closed.** No measurable gain over 2a, and about a minute more per task.
 
-Neither variant carries identity or interaction policy, which belong to the
-consumer: the benchmark consumer says "finish without asking", and the template
-says "ask the one question you need answered". When the template upgrades, it
+2a carries no identity or interaction policy, which belong to the consumer:
+the benchmark consumer says "finish without asking", and the template says
+"ask the one question you need answered". When the template upgrades, it
 restates the consumer policies 2a removes.
-
-The verification block came from 4 tasks, so judge 2b on DeepSWE tasks outside
-the current deepswe-lean set. 2b may add steps, which is acceptable: opencode
-takes more steps than eve-code and resolves more.
 
 ## Phase 3: Tools and context
 
-1. **Edit tool per model.** Add `code__edit` (see Observable changes) and
+1. **Core `bash` output and wait.** Both change core `bash`, so every agent
+   gets them, not only eve-code:
+   - plain-text results: stdout, then stderr after a `[stderr]` line, then a
+     final `[exit code: N]` or still-running line (#5822). The structured
+     output that `execute` returns does not change;
+   - an optional `timeout` input, 1-120 s, default 30 s, before a command
+     goes to the background (#5813).
+2. **Edit tool per model.** Add `code__edit` (see Observable changes) and
    decide the selection semantics before building it:
    - **Rule:** by provider family, `openai/*` gets `apply_patch` and everyone
      else gets `edit`. No model-name heuristics.
@@ -253,14 +290,14 @@ takes more steps than eve-code and resolves more.
    Adoption may stay low on Claude, so gate on resolve rate and on edit
    failures in real repositories.
 
-2. **Cost of `apply_patch` checks.** Each patch runs 3-6 sandbox commands, and
+3. **Cost of `apply_patch` checks.** Each patch runs 3-6 sandbox commands, and
    type-checks TypeScript files twice. Measure on the GPT row, and merge the
    checks into one `sandbox.run` if they add more than about 200 ms per edit.
-3. **Stop mounting `code__grep`.** It is core `grep` under another name (about
+4. **Stop mounting `code__grep` (#5815).** It is core `grep` under another name (about
    1.6K characters of schema). Models use `rg`, and `code__grep` was called 9
    times in 108 trials. Keep the `grep` export from
    `eve/extensions/code/tools`, which is stable.
-4. **Environment context.**
+5. **Environment context.**
    - Inject cwd, date, platform, git branch, and a capped root `AGENTS.md`
      (about 4KB, using `lib/guidelines.ts`) through dynamic instructions.
    - Collect only when a sandbox already exists, so chat-only turns never
@@ -273,12 +310,10 @@ takes more steps than eve-code and resolves more.
      which is a separate PR.
    - deepswe-lean repositories may not have an AGENTS.md, so judge this on
      real-repository use as well.
-5. **History growth.** History grows from about 11K to about 65K tokens per
-   step over a deepswe-lean trial, and bash output volume equals pi's. Step
-   count is not the lever: in the baseline, eve-code takes fewer steps than
-   opencode. Reduce per-step input instead, and use the Phase 0 step metrics
-   to see what 2b adds.
-6. **Core Tasks section.** About 1.3K characters on every step while the
+6. **History growth.** History grows from about 11K to about 65K tokens per
+   step over a deepswe-lean trial, and bash output volume equals pi's. Reduce
+   per-step input, and track steps with the Phase 0 metrics.
+7. **Core Tasks section.** About 1.3K characters on every step while the
    `agent` tool is present. If Phase 0 shows it matters, propose a shorter
    version in core, as its own change.
 
@@ -289,33 +324,50 @@ cost is about 2.6s per trial outside model and tool time: start to healthy is
 a median 1.1s, and start to first event is 1.5s. Break down what is left
 before attributing it to eve, and track eve's share under
 [turn performance](./turn-performance.md). Less per-step input is the main
-lever. Phase 2b may add steps, so check it against the no-regression goal.
+lever. Prompt blocks cost about a minute per task, which is one reason 2b and
+2c are closed.
 
 ## Sequencing
 
-| Step | Repo      | Content                                                | Depends on                    | PR                  |
-| ---- | --------- | ------------------------------------------------------ | ----------------------------- | ------------------- |
-| 1    | eve       | Phase 1 removals, `review` skill change, docs, tests   | Nothing. Before 1.0.0         | #5800               |
-| 2    | consumer  | Vendor the prwatch helpers and `lookup-agent-run`      | Before bumping to the RC of 1 | –                   |
-| 3    | eve       | Template delegation and README update                  | The RC release containing 1   | –                   |
-| 4    | eve-bench | Web off for eve-code, pi caching, overhead metrics     | –                             | eve-bench#103, done |
-| 5    | eve-bench | Variants as git refs, consumer contract                | –                             | –                   |
-| 6    | eve       | Two-family benchmark matrix, weekly deepswe-lean       | 4                             | #5806               |
-| 7    | eve       | Task expansion, margin, re-baseline on both families   | 5, 6                          | –                   |
-| 8    | eve       | Prompt variant 2a                                      | 1, 6                          | #5805               |
-| 9    | eve       | Prompt variant 2b                                      | 7, 8                          | #5807               |
-| 10   | eve       | Model-conditional tool availability (core)             | –                             | –                   |
-| 11   | eve       | `code__edit` and selection, stop mounting `code__grep` | 9, 10                         | –                   |
-| 12   | eve       | Dynamic-instructions sandbox or state access (core)    | –                             | –                   |
-| 13   | eve       | Environment context                                    | 9, 12                         | –                   |
+| Step | Repo      | Content                                              | Depends on                  | PR and state                                |
+| ---- | --------- | ---------------------------------------------------- | --------------------------- | ------------------------------------------- |
+| 1    | eve       | Phase 1 removals, `review` skill change, docs, tests | Nothing. Before 1.0.0       | #5800, auto-merge, awaiting approval        |
+| 2    | consumer  | Vendor the prwatch helpers and `lookup-agent-run`    | Before taking the RC of 1   | –                                           |
+| 3    | eve       | Template delegation and README update                | The RC release containing 1 | –                                           |
+| 4    | eve-bench | Web off for eve-code, pi caching, overhead metrics   | –                           | eve-bench#103, merged                       |
+| 5    | eve-bench | Send opencode its instruction once                   | –                           | eve-bench#104, merged                       |
+| 6    | eve-bench | Variants as git refs, consumer contract, follow-ups  | –                           | –                                           |
+| 7    | eve       | Two-family benchmark matrix, weekly deepswe-lean     | 4                           | #5806, auto-merge pending                   |
+| 8    | eve       | Task expansion, margin, re-baseline on both families | 6, 7                        | –, gates further tuning                     |
+| 9    | eve       | Prompt variant 2a                                    | 1                           | #5805, kept, retarget to `main` after #5800 |
+| 10   | eve       | Prompt variants 2b and 2c                            | 9                           | #5807, #5812, closed                        |
+| 11   | eve       | Plain-text `bash` output (core)                      | –                           | #5822, auto-merge pending                   |
+| 12   | eve       | `bash` `timeout` (core)                              | –                           | #5813, auto-merge pending                   |
+| 13   | eve       | Combined benchmark run, measurement only             | –                           | #5825, closed                               |
+| 14   | eve       | Stop mounting `code__grep`                           | 1                           | #5815, stacked on #5800, pending            |
+| 15   | eve       | Model-conditional tool availability (core)           | –                           | –                                           |
+| 16   | eve       | `code__edit` and selection                           | 8, 15                       | –                                           |
+| 17   | eve       | Dynamic-instructions sandbox or state access (core)  | –                           | –                                           |
+| 18   | eve       | Environment context                                  | 8, 17                       | –                                           |
+
+## Next steps
+
+1. Land the kept changes: #5800, then #5805 and #5815 on `main`, plus #5822,
+   #5813, and #5806.
+2. Expand the deepswe-lean task set and set the margin (Phase 0, items 2 and
+   3). Hold further prompt and tool tuning until then.
+3. Re-baseline `main` with the kept changes on both model families.
+4. Check whether thinking display ("omitted" on the AI Gateway v4 path,
+   "summarized" on the Messages API) affects results or only observability.
+5. Ship the eve-bench follow-ups (Phase 0, item 7).
 
 ## Risks
 
 - **1.0.0 timing.** PR 1 breaks a stable entry point and must merge before
   1.0.0.
-- **Detectability.** If the expanded task set still cannot detect a useful
-  effect, prompt changes are judged on step count and token metrics. Their
-  correctness claims stay unproven.
+- **Detectability.** The current set moves about ±3 per run. If the expanded
+  set still cannot detect a useful effect, changes are judged on step count,
+  token, and latency metrics, and their correctness claims stay unproven.
 - **Model family drift.** A change that helps one family can hurt the other.
   Every gate runs on both models.
 
@@ -323,6 +375,9 @@ lever. Phase 2b may add steps, so check it against the no-regression goal.
 
 - deepswe-lean baseline on `main`, run 41504242132: eve-code at `e65f42b`,
   Sonnet 5.5, reasoning `high`, 3 attempts, eve-code web tools off.
+- deepswe-lean `main` with opencode re-baselined after eve-bench#104: run
+  41528486724.
+- Variant runs: see [Results](#results).
 - pi prompt caching through `anthropic-messages`: run 41504111932.
 - Earlier deepswe-lean runs 36917038074, 36775772040, and 36661642270 (Sonnet 5.5,
   reasoning `high`).
