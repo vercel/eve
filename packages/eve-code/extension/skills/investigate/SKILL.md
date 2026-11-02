@@ -5,7 +5,7 @@ description: Investigate a specific issue report with strict, evidence-driven di
 
 # Investigate
 
-Determine unambiguously what the report means from the system's perspective. First establish whether it is real and reproducible. If not, pause and report that result.
+Determine unambiguously what the report means from the system's perspective. Collect every available piece of evidence for it, and check what changed recently in the affected area. Then establish whether it is real with a precise reproduction. If not, pause and report that result.
 
 Start at the observed effect and identify the code paths directly responsible. Climb one layer at a time across call frames, processes, network hops, and persistence boundaries. Go only as wide and deep as the evidence requires.
 
@@ -26,5 +26,10 @@ Keep an explicit hypothesis at every branch and try to disprove it. Prefer the s
 - Which source references remain unresolved?
 - Do the surrounding code and runtime state support the conclusion?
 - Does this explain both why the behavior occurs and why it began now?
+
+## Before proposing a change
+
+- Name the fundamental constraints, including the relevant data flows and the entry points that reach the affected code paths.
+- Choose the simplest change that reaches the desired state.
 
 Return compact but complete evidence, the diagnosed mechanism, a decision tree when useful, and the smallest prognosis justified by the evidence.
