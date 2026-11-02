@@ -255,6 +255,63 @@ describe("SessionStateCursor", () => {
       vi.unstubAllEnvs();
     }
   });
+  it("versions context and session state by the step outputs that produce them", async () => {
+    vi.stubEnv("WORKFLOW_SHARED_HISTORY", "1");
+    try {
+      const cursor = new SessionStateCursor({
+        history: [],
+        inbox: { claimSessionHooks: async () => {} },
+        sessionWritable: new WritableStream<Uint8Array>(),
+        serializedContext: { trace: { entries: {} } },
+        sessionState: state(""),
+      });
+      expect(SharedHistory.stateCursor(cursor.serializedContext)).toEqual({
+        logId: "ctx:session-1",
+        version: null,
+      });
+      // The first step roots each chain with the whole value, even unchanged.
+      const first = await cursor.advance((input) =>
+        withSessionStateDelta(input, async () => ({
+          serializedContext: { ...input.serializedContext, trace: { entries: { a: 1 } } },
+        })),
+      );
+      const rootCtx = SharedHistory.stateSegment(first.stateDelta.serializedContext);
+      const rootState = SharedHistory.stateSegment(first.stateDelta.sessionState);
+      expect(first.stateDelta.serializedContext).toMatchObject({ kind: "value" });
+      expect(rootCtx).toMatchObject({ logId: "ctx:session-1", base: null });
+      expect(rootState).toMatchObject({ logId: "state:session-1", base: null });
+      expect(SharedHistory.stateCursor(cursor.serializedContext)).toEqual({
+        logId: "ctx:session-1",
+        version: rootCtx!.version,
+      });
+      expect(cursor.serializedContext).toEqual({ trace: { entries: { a: 1 } } });
+      // Later steps produce deltas against the version they were given.
+      const second = await cursor.advance((input) =>
+        withSessionStateDelta(input, async () => ({
+          serializedContext: { trace: { entries: { a: 1, b: 2 } } },
+        })),
+      );
+      const seg = SharedHistory.stateSegment(second.stateDelta.serializedContext);
+      expect(second.stateDelta.serializedContext).toMatchObject({ kind: "object" });
+      expect(seg?.base).toBe(rootCtx!.version);
+      expect(second.stateDelta.sessionState).toBeUndefined();
+      expect(SharedHistory.stateCursor(cursor.sessionState)?.version).toBe(rootState!.version);
+      // A delta that names another base is never adopted.
+      await expect(
+        cursor.advance(async () => ({
+          stateDelta: {
+            serializedContext: SharedHistory.stateDelta(
+              { kind: "value", value: {} },
+              { logId: "ctx:session-1", base: "stale", version: "v-x" },
+            ),
+          },
+        })),
+      ).rejects.toThrow("not committed against its base version");
+      expect(cursor.serializedContext).toEqual({ trace: { entries: { a: 1, b: 2 } } });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
 
 function state(continuationToken: string): DurableSessionState {

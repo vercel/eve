@@ -54,6 +54,14 @@ export class SessionStateCursor {
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     };
+    if (this.sharedLogId !== undefined) {
+      const sessionId = input.sessionState.sessionId;
+      SharedHistory.state(this.values.serializedContext, {
+        logId: `ctx:${sessionId}`,
+        version: null,
+      });
+      SharedHistory.state(this.values.sessionState, { logId: `state:${sessionId}`, version: null });
+    }
   }
 
   get serializedContext(): Record<string, unknown> {
@@ -116,6 +124,7 @@ export class SessionStateCursor {
       throw new Error("A session step that was not given the history cannot change it.");
     }
     const next = applySessionStateDelta(base, result.stateDelta);
+    this.markStateVersions(base, next, result);
     // Applied synchronously, so no session step can start between the checks and the change;
     // claiming a new address would need an await.
     const tokens = new Set(sessionHookTokens(base));
@@ -123,6 +132,35 @@ export class SessionStateCursor {
     this.values = next;
     this.adopted++;
     return true;
+  }
+
+  /**
+   * With shared history, the next context and session state are the versions
+   * the step's output committed; mark them so the next step's input refers to
+   * that output instead of repeating the values. A delta must name the version
+   * it was computed against.
+   */
+  private markStateVersions(
+    base: SessionStateValues,
+    next: SessionStateValues,
+    result: SessionStateTransition,
+  ): void {
+    if (this.sharedLogId === undefined) return;
+    for (const key of ["serializedContext", "sessionState"] as const) {
+      const delta = result.stateDelta[key];
+      if (delta === undefined) continue;
+      const segment = SharedHistory.stateSegment(delta);
+      const from = SharedHistory.stateCursor(base[key]);
+      if (
+        segment === undefined ||
+        from === undefined ||
+        segment.logId !== from.logId ||
+        segment.base !== from.version
+      ) {
+        throw new Error(`Shared session ${key} delta was not committed against its base version.`);
+      }
+      SharedHistory.state(next[key] as object, { logId: segment.logId, version: segment.version });
+    }
   }
 
   /**
@@ -143,6 +181,7 @@ export class SessionStateCursor {
         throw new Error("A session step that was not given the history cannot change it.");
       }
       const next = applySessionStateDelta(base, result.stateDelta);
+      this.markStateVersions(base, next, result);
       await this.inbox.claimSessionHooks(sessionHookTokens(next));
       if (this.values !== base) {
         throw new Error("Session state changed while a step ran, so its state delta cannot apply.");

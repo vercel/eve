@@ -8,6 +8,7 @@ import type {
   WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
 import type { TurnStepPayload } from "#execution/session/turn-step-types.js";
+import { randomUUID } from "node:crypto";
 import { SharedHistory } from "#compiled/@workflow/core/index.js";
 import { diffValue, snapshotValue, type ValueDelta } from "#shared/value-delta.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
@@ -41,6 +42,11 @@ export async function withSessionStateDelta(
 ): Promise<SessionStateTransition> {
   // A shared-history prefix is frozen, so it is its own snapshot and keeps its cursor.
   const historyCursor = SharedHistory.cursor(input.history);
+  // Read before snapshotting: the copies do not carry the version marks.
+  const stateCursors = {
+    serializedContext: SharedHistory.stateCursor(input.serializedContext),
+    sessionState: SharedHistory.stateCursor(input.sessionState),
+  };
   const base = Object.fromEntries(
     SESSION_VALUE_KEYS.map((key) => [
       key,
@@ -74,6 +80,22 @@ export async function withSessionStateDelta(
   }
   if (historyCursor !== undefined && stateDelta.history !== undefined && history !== undefined) {
     markSharedHistoryAppend(input, historyCursor, stateDelta.history, history);
+  }
+  for (const key of ["serializedContext", "sessionState"] as const) {
+    const cursor = stateCursors[key];
+    if (cursor === undefined) continue;
+    // The first step after the session's values were created roots the chain
+    // with the whole value, so later inputs refer to step outputs only.
+    if (cursor.version === null) {
+      stateDelta[key] = { kind: "value", value: next[key] ?? base[key] };
+    }
+    const delta = stateDelta[key];
+    if (delta === undefined) continue;
+    SharedHistory.stateDelta(delta, {
+      logId: cursor.logId,
+      base: cursor.version,
+      version: randomUUID(),
+    });
   }
   return { ...result, stateDelta };
 }
