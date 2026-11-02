@@ -42,6 +42,7 @@ import {
 import { readSlackTextObject } from "#public/channels/slack/inbound-content.js";
 import { settleFreeformCard, settleHitlCard } from "#public/channels/slack/interaction-cards.js";
 import { authorizeAnswer } from "#public/channels/slack/answers.js";
+import { admitSlackInteraction } from "#public/channels/slack/admit.js";
 import type {
   SlackChannelConfig,
   SlackChannelState,
@@ -288,7 +289,9 @@ export async function handleInteractionPost(
   if (payload.kind === "unsupported") {
     const shortcut = parseShortcutPayload(payload.raw);
     if (shortcut !== null) {
-      dispatchShortcut(shortcut, readInstallationTeamId(payload.raw), ctx, deps);
+      // A parsed shortcut proves the payload is an object.
+      const raw = payload.raw as Record<string, unknown>;
+      dispatchShortcut(shortcut, readInstallationTeamId(raw), raw, ctx, deps);
       return new Response(null, { status: 200 });
     }
     log.warn("unsupported Slack interaction payload ignored", { type: payload.type });
@@ -324,6 +327,7 @@ export async function handleInteractionPost(
         ctx,
         deps,
         interaction,
+        raw: payload.raw,
         route,
         submission: {
           type: "block_actions",
@@ -342,11 +346,16 @@ export async function handleInteractionPost(
     if (customActions.length > 0) {
       // The code channel lookup can call Slack, so it runs after the ack.
       ctx.waitUntil(
-        dispatchCustomInteractions({ ctx, customActions, deps, interaction, onInteraction }).catch(
-          (error: unknown) => {
-            log.error("custom interaction dispatch failed", { error });
-          },
-        ),
+        dispatchCustomInteractions({
+          ctx,
+          customActions,
+          deps,
+          interaction,
+          onInteraction,
+          raw: payload.raw,
+        }).catch((error: unknown) => {
+          log.error("custom interaction dispatch failed", { error });
+        }),
       );
     }
   }
@@ -361,9 +370,22 @@ async function dispatchCustomInteractions(input: {
   readonly deps: InteractionHandlerDeps;
   readonly interaction: ParsedBlockActionsPayload;
   readonly onInteraction: NonNullable<SlackChannelConfig["onInteraction"]>;
+  readonly raw: Readonly<Record<string, unknown>>;
 }): Promise<void> {
   const { ctx, customActions, deps, interaction, onInteraction } = input;
   const actionUser = customActions[0]!.user;
+  const admitted = await admitSlackInteraction({
+    admit: deps.config.admit,
+    api: deps.api,
+    botToken: deps.config.credentials?.botToken,
+    kind: "interaction",
+    channelId: interaction.channelId,
+    installationTeamId: interaction.installationTeamId,
+    teamId: interaction.teamId,
+    userId: actionUser.id,
+    raw: input.raw,
+  });
+  if (!admitted) return;
   const codeChannel =
     deps.config.codeChannels === true &&
     (await isSlackCodeChannel(
@@ -487,6 +509,7 @@ function readOptionalString(value: unknown): string | undefined {
 function dispatchShortcut(
   shortcut: SlackShortcut,
   installationTeamId: string | undefined,
+  raw: Readonly<Record<string, unknown>>,
   ctx: { readonly waitUntil: (task: Promise<unknown>) => void },
   deps: InteractionHandlerDeps,
 ): void {
@@ -506,7 +529,24 @@ function dispatchShortcut(
       teamId: shortcut.teamId,
     }),
   };
-  dispatchInteractionHook(() => onShortcut(shortcut, shortcutCtx), ctx, "shortcut handler failed");
+  dispatchInteractionHook(
+    async () => {
+      const admitted = await admitSlackInteraction({
+        admit: deps.config.admit,
+        api: deps.api,
+        botToken: deps.config.credentials?.botToken,
+        kind: "shortcut",
+        channelId: shortcut.type === "message_action" ? shortcut.channelId : undefined,
+        installationTeamId,
+        teamId: shortcut.teamId,
+        userId: shortcut.user.id,
+        raw,
+      });
+      if (admitted) await onShortcut(shortcut, shortcutCtx);
+    },
+    ctx,
+    "shortcut handler failed",
+  );
 }
 
 function dispatchInteractionHook(
@@ -529,6 +569,7 @@ async function dispatchBlockAnswers(input: {
   };
   readonly deps: InteractionHandlerDeps;
   readonly interaction: ParsedBlockActionsPayload;
+  readonly raw: Readonly<Record<string, unknown>>;
   readonly route?: SlackHitlRoute;
   readonly submission: Extract<SlackAnswerSubmission, { type: "block_actions" }>;
 }): Promise<void> {
@@ -537,8 +578,10 @@ async function dispatchBlockAnswers(input: {
     threadTs: input.interaction.threadTs,
   };
   const result = await authorizeAnswer({
+    conversationId: input.interaction.channelId,
     deps: input.deps,
     installationTeamId: input.interaction.installationTeamId,
+    raw: input.raw,
     submission: input.submission,
     target,
     teamId: input.interaction.teamId,
@@ -721,6 +764,7 @@ async function handleViewSubmission(
       deps,
       installationTeamId,
       metadata,
+      raw: payload.raw,
       submission,
       teamId,
     }),
@@ -736,20 +780,23 @@ async function dispatchViewAnswer(input: {
   readonly deps: InteractionHandlerDeps;
   readonly installationTeamId: string | undefined;
   readonly metadata: HitlFreeformModalMetadata;
+  readonly raw: Readonly<Record<string, unknown>>;
   readonly submission: Extract<SlackAnswerSubmission, { type: "view_submission" }>;
   readonly teamId: string | null;
 }): Promise<void> {
   const { channelId, threadTs } = input.metadata;
+  const cardChannelId = input.metadata.messageChannelId ?? channelId;
   const result = await authorizeAnswer({
+    conversationId: cardChannelId,
     deps: input.deps,
     installationTeamId: input.installationTeamId,
+    raw: input.raw,
     submission: input.submission,
     target: input.metadata,
     teamId: input.teamId,
   });
   if (result === null) return;
 
-  const cardChannelId = input.metadata.messageChannelId ?? channelId;
   const response = await respondOrRetireInactivePrompt(
     () =>
       input.ctx.from(input.metadata.continuationToken).respond(input.submission.answers, {

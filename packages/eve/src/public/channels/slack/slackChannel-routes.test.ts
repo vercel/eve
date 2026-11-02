@@ -81,7 +81,7 @@ function mention(input: { readonly ts: string; readonly threadTs?: string }): Re
   );
 }
 
-function approvalPress(): Request {
+function approvalPress(channel = "C01"): Request {
   const payload = {
     actions: [
       {
@@ -90,7 +90,7 @@ function approvalPress(): Request {
         value: "approve",
       },
     ],
-    channel: { id: "C01" },
+    channel: { id: channel },
     message: {
       blocks: [{ text: { text: "Approve?", type: "mrkdwn" }, type: "section" }],
       thread_ts: "1700000000.000001",
@@ -649,6 +649,123 @@ describe("slackChannel message edits", () => {
       expect.anything(),
       expect.objectContaining({ subtype: "message_changed" }),
     );
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("slackChannel admit", () => {
+  function connectMention(channel: string, extShared: boolean): Request {
+    return signed(
+      JSON.stringify({
+        event: {
+          channel,
+          event_ts: "1700000000.000001",
+          text: "hello",
+          ts: "1700000000.000001",
+          type: "app_mention",
+          user: "U_BOB",
+          user_team: "T_PARTNER",
+        },
+        event_id: `Ev${channel}`,
+        is_ext_shared_channel: extShared,
+        team_id: "T01",
+        type: "event_callback",
+      }),
+    );
+  }
+
+  function sharedConversationInfo(channel: string, flags: Record<string, boolean>): void {
+    fetchMock.mockImplementation(async (request: string | URL | Request, init?: RequestInit) => {
+      if (String(request).includes("conversations.info")) {
+        const contentType = init?.headers ? new Headers(init.headers).get("content-type") : null;
+        const body = decodeSlackApiBody(init!.body!, contentType) as { channel?: string };
+        return Response.json({
+          ok: true,
+          channel: body.channel === channel ? { is_private: false, ...flags } : {},
+        });
+      }
+      return Response.json({ ok: true, ts: "1700000001.000001" });
+    });
+  }
+
+  it("keeps a Slack Connect mention from reaching the agent by default", async () => {
+    const onAppMention = vi.fn(() => ({ auth: null }));
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" }, onAppMention }),
+      connectMention("C_CONNECT_MENTION", true),
+      send,
+    );
+
+    expect(onAppMention).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("hands an authored admit the request and dispatches what it admits", async () => {
+    const admit = vi.fn(() => true);
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+
+    await firePost(
+      slackChannel({ admit, credentials: { botToken: "xoxb-test" } }),
+      connectMention("C_CONNECT_ADMITTED", true),
+      send,
+    );
+
+    expect(admit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: { teamId: "T_PARTNER", userId: "U_BOB" },
+        channelId: "C_CONNECT_ADMITTED",
+        installationTeamId: undefined,
+        kind: "message",
+      }),
+    );
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it("refuses an approval answered in an externally shared conversation", async () => {
+    sharedConversationInfo("C_SHARED_APPROVAL", { is_ext_shared: true, is_shared: true });
+    const onAnswers = vi.fn(() => ({ auth: null }));
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" }, onAnswers }),
+      approvalPress("C_SHARED_APPROVAL"),
+      send,
+    );
+
+    expect(onAnswers).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("refuses to start a session in a pending Slack Connect conversation", async () => {
+    sharedConversationInfo("C_PENDING", { is_pending_ext_shared: true });
+    let refusal: unknown;
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        refusal = await ctx
+          .send("follow up", { auth: null, target: { channelId: "C_PENDING" } })
+          .catch((error: unknown) => error);
+      },
+    });
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+
+    await firePost(
+      channel,
+      signed(
+        JSON.stringify({
+          event: { type: "team_join", user: "U01" },
+          event_id: "EvTeamJoin",
+          team_id: "T01",
+          type: "event_callback",
+        }),
+      ),
+      send,
+    );
+
+    expect(String(refusal)).toContain("refused to post in Slack conversation C_PENDING");
     expect(send).not.toHaveBeenCalled();
   });
 });

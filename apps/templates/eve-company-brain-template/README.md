@@ -107,9 +107,10 @@ terminal UI does not need Slack configured.
 
 **Every permitted conversation must be appropriate for the entire dataset.**
 Replies appear in that conversation, where other members may read them. Choose
-internal, non-shared conversations deliberately; the template does not check
-Slack Connect membership, move sensitive results to DMs, or implement per-user
-warehouse permissions. Everyone admitted uses the same warehouse identity.
+conversations deliberately. eve's Slack channel ignores Slack Connect
+conversations by default, but the template does not move sensitive results to
+DMs or implement per-user warehouse permissions. Everyone admitted uses the same
+warehouse identity.
 
 The HTTP channel requires HTTP Basic operator credentials in development. An
 unset or empty `COMPANY_BRAIN_HTTP_PASSWORD` disables HTTP access. Synthetic

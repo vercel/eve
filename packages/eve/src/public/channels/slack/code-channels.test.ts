@@ -77,6 +77,7 @@ function buildEventBody(
     authorizations: options.authorizations,
     event,
     event_id: options.eventId ?? `Ev${++counter}`,
+    is_ext_shared_channel: false,
     team_id: "T01",
     type: "event_callback",
   });

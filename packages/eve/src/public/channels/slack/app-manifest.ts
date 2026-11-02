@@ -21,13 +21,18 @@ export function defineSlackAppManifest(input: {
     build(channelName) {
       const name = (input.botName ?? channelName).slice(0, 35);
       // Slack sends message edits only through the message events, which need the history scopes.
+      // The read scopes let `conversations.info` tell Slack Connect conversations apart.
       const botScopes = [
         "app_mentions:read" as const,
         "channels:history" as const,
+        "channels:read" as const,
         "chat:write" as const,
         "groups:history" as const,
+        "groups:read" as const,
         "im:history" as const,
+        "im:read" as const,
         "mpim:history" as const,
+        "mpim:read" as const,
         ...(input.users === true ? (["users:read"] as const) : []),
         ...(input.users === true && input.userEmails === true
           ? (["users:read.email"] as const)
@@ -76,14 +81,7 @@ function withCodeChannels(manifest: {
     features: { ...manifest.features, code_channels: { enabled: true } },
     oauth_config: {
       scopes: {
-        bot: [
-          ...manifest.oauth_config.scopes.bot,
-          "channels:read",
-          "code_channels:manage",
-          "groups:read",
-          "im:read",
-          "mpim:read",
-        ],
+        bot: [...manifest.oauth_config.scopes.bot, "code_channels:manage"],
       },
     },
     settings: {
