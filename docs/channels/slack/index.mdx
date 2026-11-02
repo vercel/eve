@@ -147,7 +147,7 @@ An ignored reply never starts a turn. If `decide` throws, eve drops the reply; c
 
 ## Handle message edits
 
-When someone edits a DM, a message that mentions the agent, or a code channel message in a thread the agent already serves, eve sends the edit to that session. The model sees a diff of the changed lines and the full edited message. The edit joins a running turn. If the agent already replied, the edit starts a new turn, which shows no thread status until the agent calls a tool.
+When someone edits a DM, a message that mentions the agent, or a code channel message in a thread the agent already serves, eve sends the edit to that session. The model sees a diff of the changed lines and the full edited message. By default, the edit joins a running turn. If the agent already replied, the edit starts a new turn, which shows no thread status until its first tool call finishes.
 
 Add the [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool so the agent can stay quiet when an edit changes nothing, and say when to use it in your instructions:
 

@@ -302,11 +302,17 @@ export function parseMessageEditEvent(envelope: SlackEventCallback): SlackMessag
   if (message === null || message.author === undefined) return null;
 
   const previous = isObject(event.previous_message) ? event.previous_message : undefined;
+  if (previous !== undefined) {
+    // An edited message keeps `edited`, so a later link preview repeats its ts. The person's
+    // text, not the preview text the resolved content adds, says whether they changed it.
+    const previousEdit = isObject(previous.edited) ? previous.edited : undefined;
+    if (previousEdit !== undefined && previousEdit.ts === edited.edited.ts) return null;
+    if (previous.text === edited.text) return null;
+  }
   const previousText =
     previous === undefined
       ? undefined
       : resolveSlackInboundMrkdwn(typeof previous.text === "string" ? previous.text : "", previous);
-  if (previousText === message.text) return null;
 
   const editedTs =
     typeof edited.edited.ts === "string"

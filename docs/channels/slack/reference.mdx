@@ -134,7 +134,7 @@ message_ts: 1700000000.000004
 
 When a person edits one of their messages in a thread that already has a session, eve sends the edit to that session:
 
-- The edit joins a running turn, whatever the channel's `turnPolicy`. If the agent already replied, the edit starts a new turn.
+- The edit follows the channel's [`turnPolicy`](#control-overlapping-turns) like any message. By default it joins a running turn, and if the agent already replied, it starts a new turn. With `turnPolicy: "queue"`, it waits behind the message it edits.
 - eve shows no `Thinking...` status for the edit. A turn the edit starts shows no status until its first tool call finishes, so an agent that ends the turn with [`no_reply`](/docs/concepts/built-in-tools#no_reply) leaves no trace in the thread.
 - The edit adds no thread context or files, and doesn't answer an open approval or question.
 - eve ignores edits by bots and apps, link previews added to a message, and edits in threads without a session.
@@ -183,7 +183,7 @@ Deploy **api** to production
 
 Slack doesn't always include the text before an edit. Then, and for a message too long to compare, `<edit>` has a `diff:` line that says why there is no `<diff>`.
 
-Slack sends edits only through the `message.channels`, `message.groups`, `message.im`, and `message.mpim` events, which need the `channels:history`, `groups:history`, `im:history`, and `mpim:history` scopes. The generated app manifest includes them. With Vercel Connect, add the events under **Trigger Event Types** and the scopes under **Bot Scopes** in the connector's **Advanced** settings. Reinstall the app after adding scopes.
+Slack sends edits only through the `message.channels`, `message.groups`, `message.im`, and `message.mpim` events, which need the `channels:history`, `groups:history`, `im:history`, and `mpim:history` scopes. The generated app manifest includes them. If your Slack app lacks them, add them in its settings and reinstall the app.
 
 #### Add sender names and emails
 
@@ -443,7 +443,7 @@ When the triggering message starts the thread's session, eve adds the earlier re
 
 #### Control overlapping turns
 
-A Slack message sent during a running turn joins that turn by default (`turnPolicy: "steer"`). See [Overlapping messages](/docs/channels#overlapping-messages) for when it interrupts the model. Set `turnPolicy: "queue"` to let every running turn finish first. [Message edits](#message-edits) join a running turn either way:
+A Slack message sent during a running turn joins that turn by default (`turnPolicy: "steer"`). See [Overlapping messages](/docs/channels#overlapping-messages) for when it interrupts the model. Set `turnPolicy: "queue"` to let every running turn finish first. [Message edits](#message-edits) follow the same policy:
 
 ```ts title="agent/channels/slack.ts"
 export default slackChannel({

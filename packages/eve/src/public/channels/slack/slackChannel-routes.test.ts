@@ -529,7 +529,7 @@ describe("slackChannel message edits", () => {
     );
   }
 
-  it("steers the thread's session with a diff of an edited mention, showing no status", async () => {
+  it("sends an edited mention to the thread's session as a diff, showing no status", async () => {
     const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
 
     await firePost(
@@ -544,7 +544,9 @@ describe("slackChannel message edits", () => {
       ObservedChannelDelivery<SlackChannelState>,
     ];
     expect(address).toBe(`C01:${rootTs}`);
-    expect(input).toMatchObject({ turnPolicy: "steer", state: { edit: true } });
+    expect(input).toMatchObject({ state: { edit: true } });
+    // The channel's `turnPolicy` applies, so a queued edit can't overtake the message it edits.
+    expect(input).not.toHaveProperty("turnPolicy");
     expect(input).not.toHaveProperty("title");
     expect("message" in input && input.message).toEqual(
       expect.stringContaining(

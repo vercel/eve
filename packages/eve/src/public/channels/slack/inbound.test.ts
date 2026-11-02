@@ -309,12 +309,18 @@ describe("parseMessageEditEvent", () => {
     expect(edit?.previousText).toBeUndefined();
   });
 
-  it.each([
+  const preview = { attachments: [{ title: "Paris weather", text: "Sunny, 21°C" }] };
+  it.each<[string, Record<string, unknown>, Record<string, unknown>?]>([
     ["a bot or app update", { bot_id: "B01" }],
     ["a change Slack didn't mark as an edit", { edited: undefined }],
-    ["an unfurl that leaves the text as it was", { text: "Weather in Pari?" }],
-  ])("drops %s", (_name, message) => {
-    expect(changed(message)).toBeNull();
+    ["an unfurl that leaves the text as it was", { text: "Weather in Pari?", ...preview }],
+    [
+      "a link preview added to an already-edited message",
+      preview,
+      { text: "Weather in Paris?", ts: "1.0", edited: { ts: "1.4", user: "U01" } },
+    ],
+  ])("drops %s", (_name, message, previous) => {
+    expect(changed(message, previous)).toBeNull();
   });
 });
 

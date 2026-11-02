@@ -886,11 +886,12 @@ export interface SlackChannelConfig {
    * Return `{ auth }` to send the edit to the session, or `null` to drop it.
    * eve sends it as a `<slack_message_edit>` block: a diff of the changed lines
    * when Slack includes the previous text, and always the full edited text. The
-   * edit steers an active turn, whatever the channel's `turnPolicy`, and
-   * starts a turn otherwise. That turn shows no status until its first tool
-   * call finishes, so pair this with the `no_reply` tool to let the agent stay
-   * silent when the edit changes nothing. `title`, `history`, and thread
-   * context don't apply to edits.
+   * edit follows the channel's `turnPolicy` like any message: by default it
+   * steers an active turn, and it starts a turn otherwise. A turn an edit
+   * starts shows no status until its first tool call finishes, so pair this
+   * with the `no_reply` tool to let the agent stay silent when the edit
+   * changes nothing. `title`, `history`, and thread context don't apply to
+   * edits.
    *
    * Defaults to the author's workspace-scoped auth for edits to direct
    * messages, messages that mention the bot, and code channel messages, and
@@ -2157,10 +2158,9 @@ async function deliverSlackMessage(input: {
       {
         auth: input.result.auth,
         ...(channelContext.length > 0 && { context: channelContext }),
-        ...(edit === undefined
-          ? { title, ...(history !== undefined && { history }) }
-          : // An edit always joins the running turn instead of waiting for it.
-            { turnPolicy: "steer" as const }),
+        // An edit follows the channel's `turnPolicy`: steered, it joins the running turn; queued,
+        // it stays behind the message it edits instead of overtaking it into an earlier turn.
+        ...(edit === undefined && { title, ...(history !== undefined && { history }) }),
       },
       fileParts.length === 0 ? typedText : undefined,
     );
