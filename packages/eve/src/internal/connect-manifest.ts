@@ -23,7 +23,7 @@ export interface ConnectRequirement {
     readonly manifest: JsonObject;
     readonly service: string;
     readonly subjectTypes: readonly ConnectSubjectType[];
-    type?: string;
+    readonly type?: string;
   };
   readonly interfaces: readonly ConnectInterface[];
   readonly target: string;
@@ -87,30 +87,17 @@ function mergeRequirementConfiguration(
     );
   };
   if (current.connect.service !== next.connect.service) conflict("service");
-  if (current.connect.type && next.connect.type && current.connect.type !== next.connect.type) {
-    conflict("method");
-  }
-  const currentManifest = current.connect.manifest;
-  const nextManifest = next.connect.manifest;
-  const credentialOnly = (manifest: JsonObject): boolean =>
-    Object.keys(manifest).length === 1 && manifest.$type === RFC_7591_MANIFEST.$type;
+  if (current.connect.type !== next.connect.type) conflict("method");
   if (
-    !credentialOnly(currentManifest) &&
-    !credentialOnly(nextManifest) &&
-    canonicalJson(currentManifest) !== canonicalJson(nextManifest)
+    canonicalJson([...current.connect.subjectTypes].sort()) !==
+    canonicalJson([...next.connect.subjectTypes].sort())
   ) {
+    conflict("subject types");
+  }
+  if (canonicalJson(current.connect.manifest) !== canonicalJson(next.connect.manifest)) {
     conflict("provider manifest");
   }
-  const type = current.connect.type ?? next.connect.type;
-  const connect: ConnectRequirement["connect"] = {
-    service: current.connect.service,
-    subjectTypes: [
-      ...new Set([...current.connect.subjectTypes, ...next.connect.subjectTypes]),
-    ].sort(),
-    manifest: credentialOnly(currentManifest) ? nextManifest : currentManifest,
-  };
-  if (type !== undefined) connect.type = type;
-  return connect;
+  return current.connect;
 }
 
 function appendDistinct<T>(current: readonly T[], additional: readonly T[]): readonly T[] {
@@ -149,9 +136,11 @@ function toConnectRequirement(resource: ExternalResource): ConnectRequirement {
     service: resource.credentials.service,
     subjectTypes: resource.credentials.subjectTypes,
   };
-  if (resource.credentials.method !== undefined) connect.type = resource.credentials.method;
   return {
-    connect,
+    connect:
+      resource.credentials.method === undefined
+        ? connect
+        : { ...connect, type: resource.credentials.method },
     interfaces:
       resource.kind === "connection"
         ? [{ protocol: resource.protocol.type, url: resource.protocol.url }]

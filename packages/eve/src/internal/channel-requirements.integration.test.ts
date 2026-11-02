@@ -174,8 +174,25 @@ function chatConfig() {
   const initialize = vi.fn(() => {
     throw new Error("build must not initialize adapters");
   });
-  // Build declarations do not need runtime adapter operations.
-  const adapter = (name: string) => ({ name, initialize }) as Adapter;
+  const adapter = (name: string): Adapter => ({
+    name,
+    userName: "test",
+    initialize,
+    addReaction: initialize,
+    channelIdFromThreadId: initialize,
+    decodeThreadId: initialize,
+    deleteMessage: initialize,
+    editMessage: initialize,
+    encodeThreadId: initialize,
+    fetchMessages: initialize,
+    fetchThread: initialize,
+    handleWebhook: initialize,
+    parseMessage: initialize,
+    postMessage: initialize,
+    removeReaction: initialize,
+    renderFormatted: initialize,
+    startTyping: initialize,
+  });
   return {
     userName: "test",
     adapters: {

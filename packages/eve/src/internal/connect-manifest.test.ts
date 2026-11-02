@@ -55,23 +55,34 @@ describe("Connect manifest", () => {
       ],
     });
   });
-  it("combines a shared credential target without losing routes, native settings, or principals", () => {
+  it("combines compatible declarations without losing routes or duplicating uses", () => {
+    const other = {
+      ...channel,
+      name: "other",
+      logicalPath: "channels/other.ts",
+      route: { path: "/eve/v1/other" },
+    };
+    const manifest = compile([channel, other, channel]);
+    expect(manifest?.requirements).toHaveLength(1);
+    expect(manifest?.requirements[0]).toMatchObject({
+      target: channel.credentials.reference,
+      connect: { type: "slack", subjectTypes: ["app"], manifest: channel.manifest },
+      triggers: [{ path: "/eve/v1/support" }, { path: "/eve/v1/other" }],
+    });
+    expect(manifest?.requirements[0]?.uses).toHaveLength(2);
+  });
+  it("rejects a shared native channel and credential-only connection in either order", () => {
     for (const resources of [
-      [connection, channel, channel],
-      [channel, connection, channel],
+      [connection, channel],
+      [channel, connection],
     ]) {
-      const manifest = compile(resources);
-      expect(manifest?.requirements).toHaveLength(1);
-      expect(manifest?.requirements[0]).toMatchObject({
-        target: "connector:slack/support",
-        connect: { type: "slack", subjectTypes: ["app", "user"], manifest: channel.manifest },
-        interfaces: [{ protocol: "mcp", url: "https://mcp.slack.com/mcp" }],
-        triggers: [{ path: "/eve/v1/support" }],
-      });
-      expect(manifest?.requirements[0]?.uses).toHaveLength(2);
+      expect(() => compile(resources)).toThrow("Conflicting declarations");
     }
   });
-  it.each([
+  it.each<ExternalResource>([
+    { ...channel, credentials: { ...channel.credentials, method: undefined } },
+    { ...channel, credentials: { ...channel.credentials, subjectTypes: ["user" as const] } },
+    { ...channel, manifest: { $type: "https://datatracker.ietf.org/doc/html/rfc7591" } },
     { ...channel, credentials: { ...channel.credentials, service: "github" } },
     { ...channel, credentials: { ...channel.credentials, method: "oauth" } },
     { ...channel, manifest: { ...channel.manifest, display_information: { name: "Different" } } },
