@@ -739,23 +739,33 @@ describe("slackChannel threads.follow", () => {
 
   it.each([
     {
-      name: "sends a reply in a thread with a session to its session ahead of onEvent",
+      name: "follows a thread ahead of onEvent",
+      codeChannels: false,
       onAppMention: undefined,
       session: { id: "s1" },
       reaches: "session",
     },
     {
-      name: "hands a reply in a thread without a session to onEvent",
+      name: "follows a thread beside code channels",
+      codeChannels: true,
+      onAppMention: undefined,
+      session: { id: "s1" },
+      reaches: "session",
+    },
+    {
+      name: "hands a sessionless reply to onEvent",
+      codeChannels: false,
       onAppMention: () => ({ auth: null }),
       session: undefined,
       reaches: "onEvent",
     },
-  ])("$name", async ({ onAppMention, session, reaches }) => {
+  ])("$name", async ({ codeChannels, onAppMention, session, reaches }) => {
     const onEvent = vi.fn();
     const send = vi.fn().mockResolvedValue({ id: "s1" });
 
     await firePost(
       slackChannel({
+        codeChannels,
         credentials: { botToken: "xoxb-test" },
         onAppMention,
         onEvent,

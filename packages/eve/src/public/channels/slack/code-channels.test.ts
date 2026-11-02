@@ -417,6 +417,37 @@ describe("slackChannel() code channels", () => {
     expect(events).toEqual(["C_ORDINARY_ON_EVENT"]);
   });
 
+  it("serves code channel messages ahead of onEvent without a mention hook", async () => {
+    useCodeChannels(["C_CODE_DEFAULT_ON_EVENT"]);
+    const events: string[] = [];
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onEvent(_ctx, event) {
+        events.push(String(event.channel));
+      },
+    });
+
+    const code = await firePost(
+      channel,
+      buildSignedRequest({
+        body: channelMessage({ channel: "C_CODE_DEFAULT_ON_EVENT", user: "U_ALICE" }),
+      }),
+    );
+    const ordinary = await firePost(
+      channel,
+      buildSignedRequest({
+        body: channelMessage({ channel: "C_ORDINARY_DEFAULT_ON_EVENT", user: "U_ALICE" }),
+      }),
+    );
+
+    expect(code.send.mock.calls.map(([address]) => address)).toEqual([
+      "code:C_CODE_DEFAULT_ON_EVENT",
+    ]);
+    expect(ordinary.send).not.toHaveBeenCalled();
+    expect(events).toEqual(["C_ORDINARY_DEFAULT_ON_EVENT"]);
+  });
+
   it("treats a code channel as an ordinary channel without codeChannels", async () => {
     useCodeChannels(["C_CODE_OFF"]);
     const isCodeChannel = vi.fn();

@@ -132,6 +132,10 @@ hook in the step that admits a message, not when Slack's webhook arrives:
   session. Without this, every later turn would re-send replies the session already received, the
   whole thread with the default `since: "thread-root"`. The one loss is other bots' replies, which
   following doesn't deliver. DMs and code channels keep their transcript.
+- `onEvent`: code channels and following both take precedence over it, whether or not
+  `onAppMention` is authored. `onEvent` still gets every message they don't serve. Before this,
+  the built-in code channel route lost to `onEvent`, so adding `onEvent` without `onAppMention`
+  silently turned code channels off. That change ships as its own `patch` changeset.
 
 ## Open questions
 

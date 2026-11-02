@@ -811,7 +811,8 @@ export interface SlackChannelConfig {
    * Serves each Slack code channel as one session and answers every message in
    * it, not just mentions. Un-mentioned messages go to `onMessage`, else
    * `onAppMention` (where `ctx.isBotMentioned()` returns `false`), else the
-   * default handler. Adds the code channel scopes, events, and feature flag to
+   * default handler, ahead of `onEvent`, which still gets messages posted
+   * outside code channels. Adds the code channel scopes, events, and feature flag to
    * the app manifest. Without it, eve treats a code channel like any other
    * channel and never looks one up.
    */
@@ -948,7 +949,8 @@ export interface SlackChannelConfig {
    * for events accepted by that specialized handler; otherwise the raw event
    * arrives here. When neither a specialized handler nor `onEvent` is
    * authored, mentions, DMs, and message edits retain their built-in defaults
-   * and other event types are ignored.
+   * and other event types are ignored. Un-mentioned messages that
+   * `codeChannels` or `threads.follow` serves never arrive here.
    *
    * The handler owns control flow. Call `ctx.send(...)` zero, one, or many
    * times to start turns on Slack, and use `ctx.waitUntil(...)` for detached
@@ -1692,7 +1694,8 @@ async function handleEventPost(input: {
   // Slack asks agents to answer in a code channel without a mention. Every message
   // there is addressed to the agent, so an authored mention handler gates it. Only the
   // lookup tells a code channel apart, so a message elsewhere falls back to a followed
-  // thread, else `onEvent`.
+  // thread, else `onEvent`. Code channels and following are opted into, so both take
+  // precedence over `onEvent`, which still gets the messages they don't serve.
   if (dispatch === null && builtinDefault === null && config.codeChannels === true) {
     const message = parseMessageEvent(envelope);
     if (
@@ -1702,21 +1705,14 @@ async function handleEventPost(input: {
       !isSlackCodeChannelOriginContext(message.raw) &&
       (botUserId === undefined || !message.text.includes(`<@${botUserId}`))
     ) {
-      const onAppMention = config.onAppMention;
-      if (onAppMention !== undefined) {
-        dispatch = dispatchMessage("channel_message", message, onAppMention, {
-          otherwise: dispatchFollowUp ?? dispatchOnEvent,
-        });
-      } else {
-        builtinDefault = dispatchMessage("channel_message", message, defaultOnMessage, {
-          otherwise: dispatchFollowUp,
-        });
-      }
+      dispatch = dispatchMessage(
+        "channel_message",
+        message,
+        config.onAppMention ?? defaultOnMessage,
+        { otherwise: dispatchFollowUp ?? dispatchOnEvent },
+      );
     }
   }
-
-  // Following is opted into, so it takes precedence over `onEvent`, which still gets the
-  // replies following doesn't serve.
   if (dispatch === null && builtinDefault === null && dispatchFollowUp !== undefined) {
     dispatch = dispatchFollowUp;
   }

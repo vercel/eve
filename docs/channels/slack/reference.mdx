@@ -63,16 +63,17 @@ A message hook decides whether a Slack message starts a turn:
 - Add `history` to bring in prior conversation; see [Start from prior history](/docs/channels/eve#start-from-prior-history).
 - Add `title` to set the run title. Public conversations otherwise use the message text; DMs and private channels always use `Private message`.
 
-| Incoming event                    | Handler order                                                                           |
-| --------------------------------- | --------------------------------------------------------------------------------------- |
-| App mention                       | `onAppMention` → `onMessage` → `onEvent` → built-in mention default                     |
-| Direct message                    | `onDirectMessage` → `onMessage` → `onEvent` → built-in DM default                       |
-| Un-mentioned code channel message | `onMessage` → `onAppMention` → `onEvent` → built-in default                             |
-| Other Slack message               | `onMessage` → `onEvent` → ignore                                                        |
-| Edited message                    | `onMessageEdited` → `onEvent` → built-in edit default, only without other message hooks |
-| Other Events API event            | `onEvent` → ignore                                                                      |
+| Incoming event                     | Handler order                                                                           |
+| ---------------------------------- | --------------------------------------------------------------------------------------- |
+| App mention                        | `onAppMention` → `onMessage` → `onEvent` → built-in mention default                     |
+| Direct message                     | `onDirectMessage` → `onMessage` → `onEvent` → built-in DM default                       |
+| Un-mentioned code channel message  | `onMessage` → `onAppMention` → built-in default                                         |
+| Un-mentioned followed thread reply | `onMessage` → `onAppMention` → built-in default                                         |
+| Other Slack message                | `onMessage` → `onEvent` → ignore                                                        |
+| Edited message                     | `onMessageEdited` → `onEvent` → built-in edit default, only without other message hooks |
+| Other Events API event             | `onEvent` → ignore                                                                      |
 
-Only the first defined handler runs. A hook that returns `null` drops the message instead of passing it down the table.
+Only the first defined handler runs. A hook that returns `null` drops the message instead of passing it down the table. A followed thread reply is a human reply in a thread that already has a session, with [`threads.follow`](#follow-threads) set.
 
 - `onAppMention(ctx, message)` handles `app_mention`. By default, it identifies the sender within their workspace.
 - `onDirectMessage(ctx, message)` handles DMs, which need `message.im` and `im:history`. It never receives bot messages or edits.
