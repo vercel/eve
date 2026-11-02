@@ -296,13 +296,16 @@ function createResolvedAgentConfig(
 
 /**
  * The names the agent's tool files take, selected or disabled: an eve feature that offers tools
- * under one of them, such as a memory slot's, yields to the file.
+ * under one of them, such as a memory slot's, yields to the file. eve's own built-in tools aren't
+ * the agent's files, so a slot named like one still offers its tools beside it.
  */
 function toolFileNames(
   manifest: CompiledAgentNodeManifest | CompiledAgentResources,
 ): ReadonlySet<string> {
   return new Set([
-    ...manifest.tools.map(({ name }) => name),
+    ...manifest.tools.flatMap(({ name, sourceId }) =>
+      manifest.bindings[sourceId]?.owner.kind === "framework" ? [] : [name],
+    ),
     ...manifest.definitions.flatMap((definition) =>
       definition.kind === "tool" && definition.extensionNamespace === undefined
         ? [definition.slug]
