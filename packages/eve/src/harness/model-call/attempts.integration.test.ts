@@ -188,7 +188,7 @@ describe("a failed model call", () => {
       tools: new Map(),
     })(
       {
-        agent: { modelReference: { id: "m" }, system: "You help Alice.", tools: [] },
+        agent: { modelReference: { id: "m" }, tools: [] },
         compaction: { recentWindowSize: 10, threshold: 100_000 },
         continuationToken: "http:failed-call",
         history: [],
