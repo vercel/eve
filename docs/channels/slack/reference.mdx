@@ -304,10 +304,10 @@ export default slackChannel({
 });
 ```
 
-- An unmentioned reply goes to `onMessage`, else `onAppMention` with `ctx.isBotMentioned()` returning `false`, else the default handler. Return `null` from either hook to drop it.
+- An unmentioned reply goes to `onMessage`, else `onAppMention` with `ctx.isBotMentioned()` returning `false`, else the default handler. It doesn't reach `onEvent`. Return `null` from either hook to drop it.
 - The reply's `<slack_message>` block carries a `<reply_guidance>` block. It tells the model the reply may be meant for someone else, and to call `no_reply` when it is.
 - The turn shows no thread status until the model calls a tool other than `no_reply`. A turn that also answers a mention or DM shows its status as usual.
-- Top-level messages, replies in threads without a session, and other bots' messages still need a mention.
+- Top-level messages, replies in threads without a session, and other bots' messages still need a mention. Without `onMessage`, they still reach `onEvent`.
 
 Add the [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool with `eve add tool/no_reply`. Without it, the model can still end its turn with no text, which posts nothing. Replies that arrive while a turn runs follow the [turn policy](#control-overlapping-turns).
 

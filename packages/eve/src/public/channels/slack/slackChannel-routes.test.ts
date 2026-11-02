@@ -737,6 +737,39 @@ describe("slackChannel threads.follow", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      name: "sends a reply in a thread with a session to its session ahead of onEvent",
+      onAppMention: undefined,
+      session: { id: "s1" },
+      reaches: "session",
+    },
+    {
+      name: "hands a reply in a thread without a session to onEvent",
+      onAppMention: () => ({ auth: null }),
+      session: undefined,
+      reaches: "onEvent",
+    },
+  ])("$name", async ({ onAppMention, session, reaches }) => {
+    const onEvent = vi.fn();
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+
+    await firePost(
+      slackChannel({
+        credentials: { botToken: "xoxb-test" },
+        onAppMention,
+        onEvent,
+        threads: { follow: true },
+      }),
+      channelMessage(),
+      send,
+      () => Promise.resolve(session),
+    );
+
+    expect(send).toHaveBeenCalledTimes(reaches === "session" ? 1 : 0);
+    expect(onEvent).toHaveBeenCalledTimes(reaches === "onEvent" ? 1 : 0);
+  });
+
   it("adds thread context only when a message starts a followed thread's session", async () => {
     fetchMock.mockImplementation(async (request: string | URL | Request) => {
       const url = String(request);

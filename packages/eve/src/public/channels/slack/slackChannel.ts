@@ -775,9 +775,9 @@ export interface SlackThreadsOptions {
    * Keeps the agent in every thread it already has a session in: later human
    * replies there reach the session without a mention. Un-mentioned replies
    * go to `onMessage`, else `onAppMention` (where `ctx.isBotMentioned()`
-   * returns `false`), else the default handler. Replies in threads without a
-   * session, top-level messages, and other bots' messages still need a
-   * mention.
+   * returns `false`), else the default handler, ahead of `onEvent`. Replies in
+   * threads without a session, top-level messages, and other bots' messages
+   * still need a mention, and still reach `onEvent`.
    *
    * eve tells the model that such a reply may not be meant for it, and
    * shows no thread status until a tool call finishes. Add the `no_reply`
@@ -1582,7 +1582,7 @@ async function handleEventPost(input: {
     codeChannelOnly: undefined,
     detectCodeChannels: config.codeChannels === true,
     followThreads: config.threads?.follow === true,
-    followUpOnly: false,
+    followUpOnly: undefined,
     receivingBotUserId,
     from: input.from,
     resolveSession: input.resolveSession,
@@ -1604,13 +1604,13 @@ async function handleEventPost(input: {
       message: SlackMessage,
       handler: NonNullable<SlackChannelConfig["onMessage"]>,
       codeChannelOnly?: SlackCodeChannelOnly,
-      followUpOnly?: boolean,
+      followUpOnly?: SlackFollowUpOnly,
     ) =>
     () =>
       dispatchSlackMessage({
         ...dispatchInput(kind, message),
         codeChannelOnly,
-        followUpOnly: followUpOnly === true,
+        followUpOnly,
         handler,
       });
 
@@ -1673,7 +1673,7 @@ async function handleEventPost(input: {
 
   // `threads.follow` sends an unmentioned reply to the thread's session, like a mention, so
   // an authored mention handler gates it. Whether the thread has a session is checked
-  // after Slack's ack.
+  // after Slack's ack; a reply in a thread without one falls back to `onEvent`.
   const followUp =
     dispatch === null && builtinDefault === null && config.threads?.follow === true
       ? parseFollowUpReply(envelope, { appId, botUserId })
@@ -1686,7 +1686,7 @@ async function handleEventPost(input: {
           followUp,
           config.onAppMention ?? defaultOnMessage,
           undefined,
-          true,
+          { otherwise: dispatchOnEvent },
         );
 
   // Slack asks agents to answer in a code channel without a mention. Every message
@@ -1715,9 +1715,10 @@ async function handleEventPost(input: {
     }
   }
 
+  // Following is opted into, so it takes precedence over `onEvent`, which still gets the
+  // replies following doesn't serve.
   if (dispatch === null && builtinDefault === null && dispatchFollowUp !== undefined) {
-    if (config.onAppMention !== undefined) dispatch = dispatchFollowUp;
-    else builtinDefault = dispatchFollowUp;
+    dispatch = dispatchFollowUp;
   }
 
   // Specialized handlers retain their bot/subtype filters. onMessage receives
@@ -1807,6 +1808,11 @@ interface SlackCodeChannelOnly {
   readonly otherwise?: () => Promise<void>;
 }
 
+/** Limits a message hook to follow-ups; `otherwise` serves a reply in a thread without a session. */
+interface SlackFollowUpOnly {
+  readonly otherwise?: () => Promise<void>;
+}
+
 async function dispatchSlackMessage(input: {
   readonly api: SlackTransportOptions | undefined;
   readonly appId: string | undefined;
@@ -1817,7 +1823,7 @@ async function dispatchSlackMessage(input: {
   /** `slackChannel({ threads: { follow } })`: an unmentioned reply in a session's thread is a follow-up. */
   readonly followThreads: boolean;
   /** Serves the message only when it is a follow-up in a thread that already has a session. */
-  readonly followUpOnly: boolean;
+  readonly followUpOnly: SlackFollowUpOnly | undefined;
   readonly receivingBotUserId: string | undefined;
   readonly from: ChannelFrom<SlackChannelState>;
   readonly resolveSession: ChannelResolveSession;
@@ -1978,7 +1984,10 @@ async function dispatchSlackMessage(input: {
     isThreadReply &&
     !isBotMentioned &&
     (await sessionOperations.resolveSession()) !== undefined;
-  if (input.followUpOnly && !followUp) return;
+  if (input.followUpOnly !== undefined && !followUp) {
+    await input.followUpOnly.otherwise?.();
+    return;
+  }
   if (followUp) channelState.followUp = true;
 
   // A mention or DM is addressed to the agent, so it is acknowledged while the
