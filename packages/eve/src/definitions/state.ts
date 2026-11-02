@@ -34,11 +34,6 @@ export interface DefinitionsState {
   readonly memos?: Readonly<Record<string, Readonly<Record<string, JsonValue>>>>;
   /** Memo scopes a deployment change discarded, until each succeeds again: for diagnostics. */
   readonly discarded?: readonly string[];
-  /**
-   * Sessions from before user-role instructions were announced: the digest of the content each
-   * definition last added. Restoring moves it to the history's announcements.
-   */
-  readonly appended?: Readonly<Record<string, string>>;
   /** The latest line of each event type, plus `"*"` for the latest fact. */
   readonly latest: Readonly<Record<string, number>>;
   /** When the latest commit was written, as ISO 8601: `ctx.now`. */

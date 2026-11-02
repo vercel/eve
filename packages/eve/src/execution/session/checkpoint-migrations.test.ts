@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
-import { SESSION_CHECKPOINT_VERSION } from "#execution/session/handoff.js";
+import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
+import { digestOf } from "#definitions/state.js";
 
 function checkpoint(version: number) {
   return {
@@ -58,6 +59,51 @@ describe("migrateSessionCheckpoint", () => {
       kind: "current",
     });
   });
+
+  it("keeps an 18's offered catalog tools as the catalog's value", () => {
+    const offered = { connections: false, searchableSkills: false, skills: true, tools: true };
+    const migrated = migrateSessionCheckpoint({
+      ...checkpoint(18),
+      serializedContext: {
+        "eve.offeredCatalogTools": offered,
+        "eve.reactions": { latest: { "*": 7 }, slots: {} },
+      },
+    });
+
+    expect(migrated).toMatchObject({ kind: "current" });
+    const { serializedContext } = (migrated as { checkpoint: SessionCheckpoint }).checkpoint;
+    expect(serializedContext).toEqual({
+      "eve.reactions": {
+        latest: { "*": 7 },
+        slots: { "eve.catalog": { digest: "", since: 7, value: offered } },
+      },
+    });
+  });
+
+  it.each([true, false])(
+    "announces an 18's dynamic user instruction only while its history holds it (held: %s)",
+    (held) => {
+      const content = "Alice prefers tables.";
+      const value = { content, role: "user" };
+      const migrated = migrateSessionCheckpoint({
+        ...checkpoint(18),
+        history: held ? [{ content, kind: "context.instruction", role: "user" }] : [],
+        serializedContext: {
+          "eve.reactions": {
+            appended: { "instructions:prefs": digestOf(value) },
+            latest: {},
+            slots: { "instructions:prefs": { digest: digestOf(value), since: 1, value } },
+          },
+        },
+      });
+
+      const { serializedContext } = (migrated as { checkpoint: SessionCheckpoint }).checkpoint;
+      expect(serializedContext["eve.reactions"]).not.toHaveProperty("appended");
+      expect(serializedContext["eve.historyState"]).toEqual(
+        held ? { announcements: { "instructions:prefs": digestOf(value) } } : undefined,
+      );
+    },
+  );
 
   it.each([9, SESSION_CHECKPOINT_VERSION + 1])("refuses checkpoint version %s", (version) => {
     expect(migrateSessionCheckpoint({ ...eve069Checkpoint(), version })).toMatchObject({

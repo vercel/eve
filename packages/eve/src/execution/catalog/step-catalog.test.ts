@@ -239,20 +239,6 @@ describe("buildStepCatalog", () => {
       ]);
       expect(catalogTools(later)).toEqual(catalogTools(reachingEverything));
     });
-
-    it("keeps the catalog tools a session's record from an earlier deployment offered", async () => {
-      const { catalog } = await catalogContext({
-        offered: { connections: false, searchableSkills: false, skills: true, tools: true },
-        tools: [inlineTool("add")],
-      });
-
-      expect(names(catalog.advertised)).toEqual([
-        "add",
-        SEARCH_TOOL_NAME,
-        CALL_TOOL_NAME,
-        SKILL_TOOL_NAME,
-      ]);
-    });
   });
 
   it("hides root-only entries, direct or deferred, from delegated sessions", async () => {
