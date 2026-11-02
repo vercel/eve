@@ -104,11 +104,13 @@ export interface DynamicContext extends DynamicModelContext {
    * sandbox, and the first one waits for it to start.
    *
    * ```ts
-   * const checkout = calls(ctx.view, { name: "bash" }).findLast(isCheckout);
-   * const guidelines = await ctx.memo(["agents-md", checkout?.callId ?? null], async () => {
+   * const checkout = calls(ctx.view, { name: "checkout" })
+   *   .filter((call) => call.state === "completed")
+   *   .at(-1);
+   * if (!checkout) return null;
+   * const guidelines = await ctx.memo(["agents-md", checkout.callId], async () => {
    *   const sandbox = await ctx.getSandbox();
-   *   const read = await sandbox.run({ command: "cat AGENTS.md" });
-   *   return read.exitCode === 0 ? read.stdout : null;
+   *   return sandbox.readTextFile({ path: "AGENTS.md" });
    * });
    * ```
    */

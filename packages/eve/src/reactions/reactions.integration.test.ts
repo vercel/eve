@@ -715,7 +715,7 @@ describe("reactions", () => {
     }
   }, 90_000);
 
-  it("reads the session's sandbox from a dynamic value, once per memo key", async () => {
+  it("reads the session's sandbox from a dynamic value once per memo key, across turns", async () => {
     const log: string[] = [];
     const prompts: LanguageModelV4Prompt[] = [];
     const model = markMockModel(
@@ -788,25 +788,40 @@ describe("reactions", () => {
       ],
     });
 
+    const continuationToken = "http:repo-guidelines";
+
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: "Check out the repository." },
-          serializedContext: buildSerializedContext({ auth: ALICE, channelKind: "http" }),
+          serializedContext: buildSerializedContext({
+            auth: ALICE,
+            channelKind: "http",
+            continuationToken,
+          }),
         },
       ]);
       try {
         await until(log, "turn:settled", 1);
+        await resumeHook(sessionInboxHookToken(continuationToken), {
+          auth: ALICE,
+          delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+          kind: "send",
+          payload: { message: "What do the guidelines say?" },
+        });
+        await until(log, "turn:settled", 2);
       } finally {
         await run.cancel().catch(() => {});
       }
     });
 
-    expect(prompts).toHaveLength(2);
+    // The second turn's model call reads the same checkout, so it reuses the memo's result.
+    expect(prompts).toHaveLength(3);
     expect(JSON.stringify(prompts[0])).not.toContain("Run pnpm test.");
     expect(JSON.stringify(prompts[1])).toContain("Run pnpm test.");
+    expect(JSON.stringify(prompts[2])).toContain("Run pnpm test.");
     expect(log.filter((entry) => entry === "read:AGENTS.md")).toEqual(["read:AGENTS.md"]);
   }, 60_000);
 
