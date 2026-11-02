@@ -242,7 +242,7 @@ A valid Slack signature proves that Slack sent the event, not that the sender sh
 | -------------- | ----------------------------------------------------------------------- | ------------------------------------------------ |
 | `message`      | Mentions, DMs, other messages, and code channel messages                | Dropped, with no acknowledgement                 |
 | `edit`         | Message edits                                                           | Dropped                                          |
-| `event`        | `onEvent` callbacks                                                     | Dropped                                          |
+| `event`        | `onEvent` callbacks and code channel stops                              | Dropped                                          |
 | `answer`       | Clicks and modal answers on eve's approval and question controls        | Rejected; the request and its controls stay open |
 | `interaction`  | `onInteraction` actions                                                 | Dropped                                          |
 | `command`      | `onSlashCommand` commands                                               | Dropped                                          |

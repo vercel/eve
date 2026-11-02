@@ -134,7 +134,7 @@ The channel calls `admit` before it picks a hook, so authoring
 | `interaction` | `onInteraction` actions                                              | Dropped                                                             |
 | `command`     | Slash commands                                                       | Dropped; Slack still gets its ack                                   |
 | `shortcut`    | Global and message shortcuts                                         | Dropped                                                             |
-| `event`       | `onEvent` callbacks                                                  | Dropped                                                             |
+| `event`       | `onEvent` callbacks and code channel stops                           | Dropped                                                             |
 | `send`        | `receive`, `onEvent`'s `ctx.send`, and `ctx.to()` starting a session | Throws before anything is posted, with an error the model can relay |
 
 A throw counts as `false`. Dropped inbound events are logged at `info` with the
@@ -164,10 +164,11 @@ from sibling workspaces in the same Grid org.
 Evidence order, cheapest first:
 
 1. Events API envelopes carry `is_ext_shared_channel`, and eve uses it without
-   an API call. Messages therefore need no extra scope or request. The verdict
-   is also cached for later interactions in the same process. Trade-off: the
-   envelope flag doesn't report a pending share, so a mention in a channel
-   whose share is still pending is admitted.
+   an API call. Messages therefore need no extra scope or request. Trade-off:
+   the envelope flag doesn't report a pending share, so a mention in a channel
+   whose share is still pending is admitted. Only a `true` flag is cached, so a
+   later answer or send in that channel still gets the lookup that sees the
+   pending share.
 2. Otherwise use `conversations.info`, cached per installation and channel for
    five minutes (failed lookups for one minute).
 3. If the lookup fails (missing scope, API error, or a missing `channel` in the

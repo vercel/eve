@@ -135,9 +135,11 @@ async function classifyConversation(input: {
   readonly request: (operation: string, body: unknown) => Promise<SlackApiResponse>;
 }): Promise<boolean> {
   const key = `${input.installationTeamId ?? ""}:${input.channelId}`;
-  // Every Events API callback says whether its channel is externally shared.
+  // Every Events API callback says whether its channel is externally shared. It doesn't report a
+  // pending share, so only a `true` is cached: a `false` must not spare a later send or answer the
+  // lookup that sees one.
   if (input.extSharedChannel !== undefined) {
-    cacheVerdict(key, input.extSharedChannel, false);
+    if (input.extSharedChannel) cacheVerdict(key, true, false);
     return input.extSharedChannel;
   }
   const cached = verdicts.get(key);

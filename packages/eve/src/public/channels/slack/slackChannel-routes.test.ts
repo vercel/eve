@@ -785,6 +785,39 @@ describe("slackChannel admit", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("still looks up a conversation for a send after a message said it isn't shared", async () => {
+    sharedConversationInfo("C_PENDING_AFTER_MESSAGE", { is_pending_ext_shared: true });
+    const onAppMention = vi.fn(() => null);
+
+    // Slack's envelope flag doesn't report pending shares, so the mention is admitted.
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" }, onAppMention }),
+      connectMention("C_PENDING_AFTER_MESSAGE", false),
+    );
+    expect(onAppMention).toHaveBeenCalledOnce();
+
+    let sendRefusal: unknown;
+    await firePost(
+      slackChannel({
+        credentials: { botToken: "xoxb-test" },
+        async onEvent(ctx) {
+          sendRefusal = await ctx
+            .send("follow up", { auth: null, target: { channelId: "C_PENDING_AFTER_MESSAGE" } })
+            .catch((error: unknown) => error);
+        },
+      }),
+      signed(
+        JSON.stringify({
+          event: { type: "team_join" },
+          event_id: "EvPendingAfterMessage",
+          team_id: "T01",
+          type: "event_callback",
+        }),
+      ),
+    );
+    expect(String(sendRefusal)).toContain("C_PENDING_AFTER_MESSAGE");
+  });
+
   it("refuses to start a session in a pending Slack Connect conversation", async () => {
     sharedConversationInfo("C_PENDING", { is_pending_ext_shared: true });
     let refusal: unknown;

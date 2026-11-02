@@ -1536,6 +1536,37 @@ async function handleEventPost(input: {
   const receivingBotUserId = slackEventReceivingBotUserId(envelope);
   const installationTeamId = slackEventInstallationTeamId(envelope);
 
+  const workspace = buildSlackWorkspaceHandle({
+    api: input.api,
+    botToken: config.credentials?.botToken,
+    installationTeamId,
+    teamId: typeof envelope.team_id === "string" ? envelope.team_id : undefined,
+  });
+  const conversationId = slackEventConversationId(envelope.event);
+  const isExternalConversation = slackConversationClassifier({
+    channelId: conversationId,
+    installationTeamId,
+    extSharedChannel:
+      typeof envelope.is_ext_shared_channel === "boolean"
+        ? envelope.is_ext_shared_channel
+        : undefined,
+    request: workspace.request,
+  });
+
+  const admitted = (kind: SlackAdmitKind) =>
+    isSlackRequestAdmitted(
+      config.admit ?? defaultSlackAdmit,
+      createSlackAdmitRequest({
+        kind,
+        channelId: conversationId,
+        installationTeamId,
+        actor: slackEventActor(envelope.event),
+        raw: envelope,
+        slack: workspace,
+        isExternalConversation,
+      }),
+    );
+
   // Slack requires an agent to stop when a person stops a code channel session.
   // The stop names the channel, or a thread in it; both are the channel's one session.
   const stopped = envelope.event;
@@ -1558,6 +1589,8 @@ async function handleEventPost(input: {
     const onEvent = config.onEvent;
     input.waitUntil(
       (async () => {
+        // Someone `admit` refuses can't stop a session either.
+        if (!(await admitted("event"))) return;
         // A threaded stop needs the code channel lookup, which must not hold Slack's ack.
         if (
           stopped.thread_ts !== undefined &&
@@ -1590,23 +1623,6 @@ async function handleEventPost(input: {
     );
     return new Response("ok");
   }
-
-  const workspace = buildSlackWorkspaceHandle({
-    api: input.api,
-    botToken: config.credentials?.botToken,
-    installationTeamId,
-    teamId: typeof envelope.team_id === "string" ? envelope.team_id : undefined,
-  });
-  const conversationId = slackEventConversationId(envelope.event);
-  const isExternalConversation = slackConversationClassifier({
-    channelId: conversationId,
-    installationTeamId,
-    extSharedChannel:
-      typeof envelope.is_ext_shared_channel === "boolean"
-        ? envelope.is_ext_shared_channel
-        : undefined,
-    request: workspace.request,
-  });
 
   // Handler precedence, in fall-through order:
   // 1) an authored mention/DM handler for its own event kind,
@@ -1750,19 +1766,10 @@ async function handleEventPost(input: {
   if (isDuplicateEvent(envelope, payload.retry, input.handledEvents)) return new Response("ok");
 
   const run = dispatch;
-  const request = createSlackAdmitRequest({
-    kind,
-    channelId: conversationId,
-    installationTeamId,
-    actor: slackEventActor(envelope.event),
-    raw: envelope,
-    slack: workspace,
-    isExternalConversation,
-  });
   // The conversation lookup can call Slack, so admission runs after the ack.
   input.waitUntil(
     (async () => {
-      if (await isSlackRequestAdmitted(config.admit ?? defaultSlackAdmit, request)) await run();
+      if (await admitted(kind)) await run();
     })(),
   );
   return new Response("ok");

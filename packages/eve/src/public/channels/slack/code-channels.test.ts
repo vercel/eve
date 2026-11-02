@@ -605,6 +605,24 @@ describe("slackChannel() code channels", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("ignores a stop from someone admit refuses", async () => {
+    useCodeChannels([]);
+    const channel = slackChannel({
+      admit: (request) => request.actor?.userId !== "U_REFUSED",
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+    });
+    const body = buildEventBody({
+      channel: "C_CODE_REFUSED_STOP",
+      type: "agent_session_stopped",
+      user: "U_REFUSED",
+    });
+
+    const { cancel } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
   // A turn that died without ending leaves `processing` up, which never times out.
   it("resets the status to active when a stop finds no active turn", async () => {
     useCodeChannels([]);
