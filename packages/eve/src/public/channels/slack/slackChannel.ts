@@ -109,6 +109,7 @@ import {
   createSlackAdmitRequest,
   defaultSlackAdmit,
   isSlackRequestAdmitted,
+  slackAdmitMissingScopes,
   slackConversationClassifier,
   type SlackAdmit,
   type SlackAdmitActor,
@@ -1287,25 +1288,25 @@ async function receiveOnSlack(
     typeof receiveTarget.installationTeamId === "string"
       ? receiveTarget.installationTeamId
       : deps.installationTeamId;
-  const admitted = await isSlackRequestAdmitted(
-    deps.admit,
-    createSlackAdmitRequest({
-      kind: "send",
-      channelId,
+  const sendRequest = createSlackAdmitRequest({
+    kind: "send",
+    channelId,
+    installationTeamId,
+    actor: undefined,
+    raw: receiveTarget,
+    slack: buildSlackWorkspaceHandle({
+      api: deps.api,
+      botToken: deps.credentials?.botToken,
       installationTeamId,
-      actor: undefined,
-      raw: receiveTarget,
-      slack: buildSlackWorkspaceHandle({
-        api: deps.api,
-        botToken: deps.credentials?.botToken,
-        installationTeamId,
-        teamId: deps.teamId,
-      }),
+      teamId: deps.teamId,
     }),
-  );
-  if (!admitted) {
+  });
+  if (!(await isSlackRequestAdmitted(deps.admit, sendRequest))) {
+    const missing = slackAdmitMissingScopes(sendRequest);
     throw new Error(
-      `slackChannel().receive: the admit hook refused to post in Slack conversation ${channelId}. By default eve doesn't post in Slack Connect conversations or in conversations it can't classify, which needs the channels:read, groups:read, im:read, and mpim:read scopes.`,
+      missing.length > 0
+        ? `slackChannel().receive: eve can't tell whether Slack conversation ${channelId} is shared through Slack Connect because the Slack app is missing the ${missing.join(", ")} scope. Add it and reinstall the Slack app.`
+        : `slackChannel().receive: the admit hook refused to post in Slack conversation ${channelId}. By default eve doesn't post in Slack Connect conversations.`,
     );
   }
   const initialMessage = receiveTarget.initialMessage;
@@ -1543,7 +1544,7 @@ async function handleEventPost(input: {
     teamId: typeof envelope.team_id === "string" ? envelope.team_id : undefined,
   });
   const conversationId = slackEventConversationId(envelope.event);
-  const isExternalConversation = slackConversationClassifier({
+  const classifyConversation = slackConversationClassifier({
     channelId: conversationId,
     installationTeamId,
     extSharedChannel:
@@ -1563,7 +1564,7 @@ async function handleEventPost(input: {
         actor: slackEventActor(envelope.event),
         raw: envelope,
         slack: workspace,
-        isExternalConversation,
+        classifyConversation,
       }),
     );
 
@@ -1644,7 +1645,7 @@ async function handleEventPost(input: {
     resolveSession: input.resolveSession,
     credentials: config.credentials,
     installationTeamId,
-    isExternalConversation,
+    isExternalConversation: async () => (await classifyConversation()).flagged,
     kind,
     message,
     received: input.received,
@@ -1777,14 +1778,22 @@ async function handleEventPost(input: {
 
 /** The conversation an Events API callback happened in, when it names one. */
 function slackEventConversationId(event: SlackEvent): string | undefined {
-  if (typeof event.channel === "string" && event.channel.length > 0) return event.channel;
-  // Reactions, pins, and stars name their conversation on the item.
-  const item = event.item;
-  if (typeof item === "object" && item !== null) {
-    const channel = (item as { readonly channel?: unknown }).channel;
-    if (typeof channel === "string" && channel.length > 0) return channel;
-  }
-  return undefined;
+  const nested = (value: unknown, key: string): unknown =>
+    typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)[key]
+      : undefined;
+  const candidates = [
+    event.channel,
+    // `file_shared` and similar events.
+    event.channel_id,
+    // Reactions, pins, and stars.
+    nested(event.item, "channel"),
+    // Assistant thread events.
+    nested(event.assistant_thread, "channel_id"),
+  ];
+  return candidates.find(
+    (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0,
+  );
 }
 
 /** The Slack user behind an Events API callback, when it names one. */

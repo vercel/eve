@@ -133,6 +133,7 @@ export function slackDriver(
         response: {
           channel: {
             id: CHANNEL,
+            is_ext_shared: false,
             is_private: false,
             properties: { record_channel: { record_type: "agent_channel" } },
           },
@@ -146,11 +147,18 @@ export function slackDriver(
       return {
         body,
         method,
-        response: { ok: true, user: { id: (body as { user?: unknown }).user } },
+        response: {
+          ok: true,
+          user: { id: (body as { user?: unknown }).user, is_restricted: false },
+        },
       };
     }
     if (method === "conversations.info") {
-      return { body, method, response: { channel: { id: CHANNEL, is_private: false }, ok: true } };
+      return {
+        body,
+        method,
+        response: { channel: { id: CHANNEL, is_ext_shared: false, is_private: false }, ok: true },
+      };
     }
     // Everything the bot shows in a code channel posts top-level; Slack has no thread to find.
     if (

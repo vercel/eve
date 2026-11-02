@@ -196,6 +196,14 @@ interactions, slash commands, and sends in private channels and group DMs fail
 the conversation lookup and are refused. Vercel Connect's defaults should add
 the two scopes; until then, those apps need them added to the connector.
 
+Self-managed apps that upgrade usually lack `users:read`, so the guest check
+refuses every person until the app is reinstalled. That failure must be loud:
+a lookup that fails with `missing_scope` logs an error naming the scope
+(Slack's `needed` field), refused inbound requests get an ephemeral notice to
+the person who asked, and a refused send throws an error naming the scope. A
+Slack object without the flags the check reads counts as unclassified, not
+as internal or a member.
+
 ## Migration
 
 This is a breaking change to default behavior and ships before 1.0 GA. The

@@ -26,7 +26,7 @@ function asMember<A extends unknown[]>(
 ) {
   return async (request: string | URL | Request, ...rest: A): Promise<Response> =>
     String(request).includes("users.info")
-      ? Response.json({ ok: true, user: { id: "U01" } })
+      ? Response.json({ ok: true, user: { id: "U01", is_restricted: false } })
       : respond(request, ...rest);
 }
 
@@ -207,10 +207,11 @@ describe("slackChannel() code channels", () => {
           ok: true,
           channel: codeChannelIds.includes(String(channel))
             ? {
+                is_ext_shared: false,
                 is_private: false,
                 properties: { record_channel: { record_type: "agent_channel" } },
               }
-            : { is_private: false },
+            : { is_ext_shared: false, is_private: false },
         });
       }),
     );
@@ -243,7 +244,11 @@ describe("slackChannel() code channels", () => {
       asMember(async (url: string | URL | Request) =>
         String(url).endsWith("/agents.conversations.create")
           ? Response.json({ ok: true, channel_id: "C_CODE_OPENED" })
-          : Response.json({ ok: true, channel: { is_private: false }, ts: "1700000001.000001" }),
+          : Response.json({
+              ok: true,
+              channel: { is_ext_shared: false, is_private: false },
+              ts: "1700000001.000001",
+            }),
       ),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -865,7 +870,7 @@ describe("slackChannel().receive code channels", () => {
           ? Response.json({ ok: true, channel_id: createdChannelId })
           : Response.json({
               ok: true,
-              channel: { is_private: isPrivate },
+              channel: { is_ext_shared: false, is_private: isPrivate },
               ts: "1700000001.000001",
             }),
       ),

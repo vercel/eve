@@ -257,7 +257,9 @@ The default, `defaultSlackAdmit`, refuses:
 
 Requests without a conversation, such as global shortcuts, skip the conversation check. Sends and events without a user skip the guest check.
 
-Events API callbacks say whether their conversation is externally shared. Interactions, slash commands, shortcuts, and sends don't, so eve looks the conversation up with `conversations.info`, which needs the `channels:read`, `groups:read`, `im:read`, and `mpim:read` scopes. The guest check calls `users.info`, which needs `users:read`. eve caches both answers for five minutes. The generated app manifest includes all five scopes. Without them, the default refuses the requests it can't classify.
+Events API callbacks say whether their conversation is externally shared. Interactions, slash commands, shortcuts, and sends don't, so eve looks the conversation up with `conversations.info`, which needs the `channels:read`, `groups:read`, `im:read`, and `mpim:read` scopes. The guest check calls `users.info`, which needs `users:read`. eve caches both answers for five minutes. The generated app manifest includes all five scopes. Without them, the default refuses the requests it can't classify. When a lookup fails for a missing scope, eve logs an error naming the scope and tells the person who asked, in a message only they can see, to have an admin add it and reinstall the app. A refused send throws an error naming the scope.
+
+A Slack object without the flags the check reads, such as a conversation without `is_ext_shared` or a user without `is_restricted`, counts as unclassified.
 
 The request carries:
 

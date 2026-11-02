@@ -28,7 +28,7 @@ function asMember<A extends unknown[]>(
 ) {
   return async (request: string | URL | Request, ...rest: A): Promise<Response> =>
     String(request).includes("users.info")
-      ? Response.json({ ok: true, user: { id: "U01" } })
+      ? Response.json({ ok: true, user: { id: "U01", is_restricted: false } })
       : respond(request, ...rest);
 }
 
@@ -40,7 +40,7 @@ beforeEach(() => {
     asMember(async (request: string | URL | Request) => {
       const url = String(request);
       if (url.includes("conversations.info"))
-        return Response.json({ channel: { is_private: false }, ok: true });
+        return Response.json({ channel: { is_ext_shared: false, is_private: false }, ok: true });
       if (url.endsWith("files.getUploadURLExternal"))
         return Response.json({
           ok: true,
@@ -228,7 +228,7 @@ describe("slackChannel messageContext.users", () => {
           },
         });
       if (url.includes("conversations.info"))
-        return Response.json({ channel: { is_private: false }, ok: true });
+        return Response.json({ channel: { is_ext_shared: false, is_private: false }, ok: true });
       return Response.json({ ok: true, ts: "1700000001.000001" });
     });
     const onAppMention = vi.fn<NonNullable<SlackChannelConfig["onAppMention"]>>((ctx, message) => ({
@@ -318,7 +318,7 @@ describe("slackChannel thread history", () => {
             ok: true,
           });
         if (url.includes("conversations.info"))
-          return Response.json({ channel: { is_private: false }, ok: true });
+          return Response.json({ channel: { is_ext_shared: false, is_private: false }, ok: true });
         return Response.json({ ok: true, ts: "1700000001.000001" });
       }),
     );
@@ -695,7 +695,10 @@ describe("slackChannel admit", () => {
           const body = decodeSlackApiBody(init!.body!, contentType) as { channel?: string };
           return Response.json({
             ok: true,
-            channel: body.channel === channel ? { is_private: false, ...flags } : {},
+            channel:
+              body.channel === channel
+                ? { is_ext_shared: false, is_private: false, ...flags }
+                : { is_ext_shared: false },
           });
         }
         return Response.json({ ok: true, ts: "1700000001.000001" });
@@ -747,6 +750,99 @@ describe("slackChannel admit", () => {
     );
 
     expect(onAppMention).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["names its conversation as channel_id", { channel_id: "C_CONNECT_FILE", type: "file_shared" }],
+    ["names no conversation", { type: "assistant_thread_context_changed" }],
+  ])("keeps a Slack Connect event that %s from onEvent", async (_name, event) => {
+    const onEvent = vi.fn();
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" }, onEvent }),
+      signed(
+        JSON.stringify({
+          event: { ...event, user: "U_BOB" },
+          event_id: `Ev${event.type}`,
+          is_ext_shared_channel: true,
+          team_id: "T01",
+          type: "event_callback",
+        }),
+      ),
+    );
+
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses a send into a conversation Slack reports no sharing flags for", async () => {
+    fetchMock.mockImplementation(async (request: string | URL | Request) =>
+      String(request).includes("conversations.info")
+        ? Response.json({ ok: true, channel: {} })
+        : Response.json({ ok: true, ts: "1700000001.000001" }),
+    );
+    let refusal: unknown;
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        refusal = await ctx
+          .send("follow up", { auth: null, target: { channelId: "C_NO_FLAGS" } })
+          .catch((error: unknown) => error);
+      },
+    });
+
+    await firePost(
+      channel,
+      signed(
+        JSON.stringify({
+          event: { type: "team_join" },
+          event_id: "EvNoFlags",
+          team_id: "T01",
+          type: "event_callback",
+        }),
+      ),
+    );
+
+    expect(String(refusal)).toContain("C_NO_FLAGS");
+  });
+
+  it("tells the person when a missing scope keeps the agent from answering", async () => {
+    fetchMock.mockImplementation(async (request: string | URL | Request) =>
+      String(request).includes("users.info")
+        ? Response.json({ ok: false, error: "missing_scope", needed: "users:read" })
+        : Response.json({ ok: true, ts: "1700000001.000001" }),
+    );
+    const onAppMention = vi.fn(() => ({ auth: null }));
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" }, onAppMention }),
+      signed(
+        JSON.stringify({
+          event: {
+            channel: "C01",
+            event_ts: "1700000000.000002",
+            text: "hello",
+            thread_ts: "1700000000.000001",
+            ts: "1700000000.000002",
+            type: "app_mention",
+            user: "U_NO_SCOPE",
+          },
+          event_id: "EvNoScope",
+          is_ext_shared_channel: false,
+          team_id: "T01",
+          type: "event_callback",
+        }),
+      ),
+    );
+
+    expect(onAppMention).not.toHaveBeenCalled();
+    expect(slackCalls("chat.postEphemeral")).toEqual([
+      expect.objectContaining({
+        channel: "C01",
+        text: expect.stringContaining("missing the users:read scope"),
+        thread_ts: "1700000000.000001",
+        user: "U_NO_SCOPE",
+      }),
+    ]);
   });
 
   it("hands an authored admit the request and dispatches what it admits", async () => {
