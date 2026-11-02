@@ -9,6 +9,8 @@
  * to read the live state instead of retrying blind.
  */
 
+import { collectCommandOutput } from "./output.js";
+
 /** Budget for one desktop tool call, covering sandbox acquisition, install, desktop start and the command. */
 export const CALL_DEADLINE_MS = 300_000;
 
@@ -102,8 +104,10 @@ export async function runCommand(
   } catch (error) {
     if (signal?.aborted !== true) throw error;
     void spawning.then(stopProcess, () => undefined);
-    throw stoppedError(signal, "unknown");
+    throw stoppedError(abortReason(signal), "unknown");
   }
+  const output = collectCommandOutput(process);
+  void output.result.catch(() => undefined);
   let terminating: Promise<TerminationOutcome> | undefined;
   const stop = (): Promise<TerminationOutcome> => (terminating ??= stopProcess(process));
   let reportAbort: (error: Error) => void = () => {};
@@ -111,30 +115,36 @@ export async function runCommand(
     reportAbort = resolve;
   });
   const onAbort = (): void => {
-    void stop().then((outcome) => reportAbort(stoppedError(signal, outcome)));
+    output.close();
+    void stop().then((outcome) => reportAbort(stoppedError(abortReason(signal), outcome)));
   };
   if (signal !== undefined) {
     signal.addEventListener("abort", onAbort, { once: true });
     if (signal.aborted) onAbort();
   }
-  const collected = collectOutput(process);
-  void collected.catch(() => undefined);
   try {
     const result = await Promise.race([
-      collected,
+      output.result,
       aborted.then((error) => {
         throw error;
       }),
     ]);
     if (signal?.aborted !== true) return result;
-    throw stoppedError(signal, await stop());
+    throw stoppedError(abortReason(signal), await stop());
   } catch (error) {
     // A cancelled call rejects collection at once, before the kill it triggered
     // has run. The abort is reported from the termination path either way, so a
     // raw stream or wait rejection never stands in for the stop's outcome.
-    if (signal?.aborted !== true) throw error;
-    throw await aborted;
+    output.close();
+    if (signal?.aborted === true) throw await aborted;
+    const reason = new Error(
+      error instanceof Error
+        ? error.message.slice(0, 2000)
+        : "The desktop command output could not be read.",
+    );
+    throw stoppedError(reason, await stop());
   } finally {
+    output.close();
     if (signal !== undefined) signal.removeEventListener("abort", onAbort);
   }
 }
@@ -157,19 +167,6 @@ async function stopProcess(process: SandboxProcess): Promise<TerminationOutcome>
     // call usually lands here: the kill was accepted, the exit was not seen.
     return "killed";
   }
-}
-
-async function collectOutput(process: SandboxProcess): Promise<SandboxCommandResult> {
-  const [stdout, stderr, exited] = await Promise.all([
-    streamText(process.stdout),
-    streamText(process.stderr),
-    process.wait(),
-  ]);
-  return { exitCode: exited.exitCode, stderr, stdout };
-}
-
-async function streamText(stream: ReadableStream<Uint8Array>): Promise<string> {
-  return await new Response(stream).text();
 }
 
 function withTimeout<T>(work: PromiseLike<T>, ms: number): Promise<T> {
@@ -215,14 +212,12 @@ export function abortReason(signal: AbortSignal | undefined): Error {
   return new Error("The tool call was cancelled.");
 }
 
-function stoppedError(signal: AbortSignal | undefined, termination: TerminationOutcome): Error {
+function stoppedError(reason: Error, termination: TerminationOutcome): Error {
   const outcome = {
     stopped: " Its command exited; anything it completed may already have landed.",
     killed:
       " Its command was killed, but its exit could not be observed, so treat the action as possibly delivered.",
     unknown: " Its command could not be stopped, so treat the action as possibly delivered.",
   }[termination];
-  return new Error(
-    `${abortReason(signal).message}${outcome} Read the live state before acting again.`,
-  );
+  return new Error(`${reason.message}${outcome} Read the live state before acting again.`);
 }

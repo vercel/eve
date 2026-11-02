@@ -95,6 +95,25 @@ test("collects stdout, stderr and the exit code of a finished command", async ()
   assert.equal(result.stderr?.trim(), "err");
 });
 
+test(
+  "a real command exceeding the output budget is stopped before rejection",
+  { timeout: 5000 },
+  async (t) => {
+    const sandbox = createProcessSandbox();
+    t.after(() => {
+      for (const child of sandbox.children) if (!gone(child)) child.kill("SIGKILL");
+    });
+    await assert.rejects(
+      runCommand(sandbox, "node -e 'process.stdout.write(Buffer.alloc(9 * 1024 * 1024, 120))'"),
+      /8 MiB combined stdout\/stderr limit/,
+    );
+    assert.ok(
+      gone(sandbox.children.at(-1)),
+      "the command must be stopped before the error is returned",
+    );
+  },
+);
+
 test("a cancelled command is dead and its outcome reported before the call rejects", async () => {
   const sandbox = createProcessSandbox();
   const controller = new AbortController();

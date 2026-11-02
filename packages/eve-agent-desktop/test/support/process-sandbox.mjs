@@ -11,6 +11,7 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
+import { Readable } from "node:stream";
 
 const gone = (child) => child.exitCode !== null || child.signalCode !== null;
 
@@ -53,8 +54,8 @@ export function createProcessSandbox() {
       signal?.addEventListener("abort", () => child.kill("SIGTERM"), { once: true });
       if (signal?.aborted === true) child.kill("SIGTERM");
       return {
-        stdout: child.stdout,
-        stderr: child.stderr,
+        stdout: Readable.toWeb(child.stdout),
+        stderr: Readable.toWeb(child.stderr),
         wait,
         async kill() {
           if (gone(child)) return;

@@ -106,6 +106,8 @@ export default defineTool({ ...close_app, approval: always() });
 
 Each tool runs one `agent-desktop <command>` in the sandbox from `ctx.getSandbox()`, inside the managed desktop session (`DISPLAY`, the session bus, and the accessibility variables), and returns the `data` of its JSON envelope. An error envelope becomes a tool error that keeps agent-desktop's `code`, `suggestion`, and `disposition.retry`, so the model only retries when the CLI says retrying is safe. Each call has a five-minute budget covering install, desktop start, the command, and screenshot readback. Cancellation attempts to kill the command before reporting failure. The error states whether termination was confirmed and tells the model to read the live state before acting again.
 
+Each sandbox command has an 8 MiB combined stdout/stderr limit, including version probes, installation, and desktop startup. If output exceeds that limit, the runner cancels both readers and attempts to stop the command before returning a bounded error. The error preserves delivery uncertainty and tells the model to inspect live state before retrying.
+
 A sandbox running a different agent-desktop minor is reinstalled, or reported with an install hint. A failed install is not retried for five minutes in that session.
 
 ## Develop
