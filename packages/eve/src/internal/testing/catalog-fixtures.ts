@@ -6,12 +6,7 @@
 
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import {
-  AuthKey,
-  OfferedCatalogToolsKey,
-  SessionIdKey,
-  type OfferedCatalogTools,
-} from "#context/keys.js";
+import { AuthKey, SessionIdKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { stepCatalog } from "#definitions/step.js";
@@ -260,8 +255,6 @@ export async function catalogContext(
   input: {
     readonly connections?: readonly FakeConnection[];
     readonly dynamicSubagents?: readonly string[];
-    /** The catalog tools earlier steps of the session offered. */
-    readonly offered?: OfferedCatalogTools;
     readonly session?: { readonly rootSessionId?: string };
     readonly skills?: readonly CatalogSkillSource[];
     readonly tools?: readonly HarnessToolDefinition[];
@@ -287,7 +280,6 @@ export async function catalogContext(
   if (input.connections !== undefined) {
     ctx.set(ConnectionRegistryKey, connectionRegistry(input.connections));
   }
-  if (input.offered !== undefined) ctx.set(OfferedCatalogToolsKey, input.offered);
   const catalog = await nativeCatalog({
     agentTools: toolMap(...(input.tools ?? [])),
     ctx,

@@ -11,7 +11,6 @@ import { stepSystem } from "#definitions/step.js";
 import { restoreDefinitions } from "#definitions/kernel.js";
 import { contextStorage } from "#context/container.js";
 import { createFrameworkUserMessage } from "#harness/messages.js";
-import { readDefinitionsState, writeDefinitionsState } from "#definitions/state.js";
 
 /** The system prompt's parts after its first: the dynamic system instructions. */
 const system = async (ctx: ReturnType<typeof definitionSession>["ctx"]) => {
@@ -71,32 +70,6 @@ describe("dynamic instructions", () => {
     await contextStorage.run(ctx, () => restoreDefinitions(ctx, { conversation }));
     expect(await announcedNext(ctx)).toEqual([]);
   });
-
-  it.each([false, true])(
-    "migrates a legacy dynamic digest only if its instruction remains in history (retained: %s)",
-    async (retained) => {
-      const content = "Alice prefers tables.";
-      const { ctx } = definitionSession({
-        instructions: [
-          {
-            evaluate: () => defineInstructions({ content, role: "user" }),
-            slug: "prefs",
-          },
-        ],
-      });
-      await beforeModelCall(ctx);
-      const state = readDefinitionsState(ctx);
-      const id = "instructions:prefs";
-      writeDefinitionsState(ctx, { ...state, appended: { [id]: state.slots[id]!.digest } });
-      const conversation = retained
-        ? [createFrameworkUserMessage("context.instruction", content)]
-        : [];
-
-      await contextStorage.run(ctx, () => restoreDefinitions(ctx, { conversation }));
-
-      expect(await announcedNext(ctx)).toEqual(retained ? [] : [content]);
-    },
-  );
 
   it("rejects a value without defineInstructions()", async () => {
     const { ctx } = definitionSession({

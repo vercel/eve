@@ -223,7 +223,7 @@ export async function restoreDefinitions(
     readonly revision?: string;
   } = {},
 ): Promise<void> {
-  migrateAnnounced(ctx, input.conversation);
+  announceHeldInstructions(ctx, input.conversation);
   const before = readDefinitionsState(ctx);
   if (input.revision !== undefined && input.revision !== before.revision) {
     const moved = before.revision !== undefined && before.memos !== undefined;
@@ -253,16 +253,19 @@ export async function restoreDefinitions(
 }
 
 /**
- * Sessions from before user instructions were announced: dynamic ones recorded what each added
- * under its definition, and static ones started the history. The history's announcements record
- * both now, under the same key and digest, so the same content doesn't join again.
+ * Sessions from before static user instructions were announced started their history with them.
+ * One the history still holds counts as announced, so the same content doesn't join again. It
+ * needs the deployment's files, so it can't move with the rest into the checkpoint upgrade.
  */
-function migrateAnnounced(
+function announceHeldInstructions(
   ctx: ContextContainer,
   conversation: readonly ModelMessage[] | undefined,
 ): void {
-  const { appended, ...state } = readDefinitionsState(ctx);
   const history = ctx.get(HistoryStateKey) ?? {};
+  const unannounced = staticUserInstructions(ctx).filter(
+    ({ key }) => history.announcements?.[key] === undefined,
+  );
+  if (unannounced.length === 0) return;
   const said = new Set(
     (conversation ?? []).flatMap((message) =>
       message.role === "user" &&
@@ -272,33 +275,15 @@ function migrateAnnounced(
         : [],
     ),
   );
-  const held = Object.fromEntries(
-    staticUserInstructions(ctx).flatMap(({ content, key }) =>
-      history.announcements?.[key] === undefined && said.has(content)
-        ? [[key, digestOf(content)]]
-        : [],
-    ),
-  );
-  if (appended === undefined && Object.keys(held).length === 0) return;
-  const retained = Object.fromEntries(
-    Object.entries(appended ?? {}).filter(([id]) => {
-      const value = state.slots[id]?.value;
-      return (
-        value !== null &&
-        typeof value === "object" &&
-        "role" in value &&
-        "content" in value &&
-        value.role === "user" &&
-        typeof value.content === "string" &&
-        said.has(value.content)
-      );
-    }),
-  );
+  const held = unannounced.filter(({ content }) => said.has(content));
+  if (held.length === 0) return;
   ctx.set(HistoryStateKey, {
     ...history,
-    announcements: { ...retained, ...held, ...history.announcements },
+    announcements: {
+      ...Object.fromEntries(held.map(({ content, key }) => [key, digestOf(content)])),
+      ...history.announcements,
+    },
   });
-  if (appended !== undefined) writeDefinitionsState(ctx, state);
 }
 
 /**
