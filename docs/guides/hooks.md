@@ -27,6 +27,8 @@ The hook's name is its path without the extension: `agent/hooks/audit.ts` is `"a
 
 The `events` map keys each handler by event type, and `*` matches every event. Any event in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming) works, such as `session.started`, `turn.settled`, `content.completed`, and `call.settled`. Progress events (`content.delta`, `call.input`, and `call.progress`) reach only handlers keyed on their exact type, never `*`.
 
+`session.ended` reaches hooks only when a turn ends the session. When a session ends outside a turn, because it expired, was reset or closed, failed outside a turn, or was [stranded and ended](../concepts/execution-model-and-durability), eve still records `session.ended` on the stream and delivers it to channel handlers and [instrumentation](./instrumentation/instrumentation), but hooks don't run: the ending session may not restore, and no turn remains to run your code in. To observe every session end, use instrumentation or read the session stream.
+
 Handlers can call external services, cancel the running turn, and [continue a finished turn](#continue-a-turn-from-a-hook) with a new message. They can't add text to the model's context. To add model context at runtime, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
 ## Hook structure and context
