@@ -18,7 +18,7 @@ export default recallChannel({
           instructions: `Is the latest line asking ${botName}, a meeting assistant that manages Linear issues, to do or answer something? The name may be transcribed loosely.`,
         },
       },
-      abortSignal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(5_000),
     });
     return answers.addressed.probability >= 0.5;
   },
