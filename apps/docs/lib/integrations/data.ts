@@ -280,7 +280,7 @@ export default telegramChannel({
   credentials: connectTelegramCredentials("telegram/my-agent"),
 });
 \`\`\``,
-    configure: `Create a bot with [@BotFather](https://t.me/botfather). Connect-backed setup stores the bot token in a Telegram connector, registers the bot's webhook, and routes verified updates to \`/eve/v1/telegram\`. With portable credentials, deploy first, then call \`setWebhook\` for that route with your secret token. See the [Telegram channel docs](/docs/channels/telegram) for group privacy and command setup.`,
+    configure: `Create a bot by sending \`/newbot\` to [@BotFather](https://t.me/BotFather). Connect-backed setup stores the bot token in a Telegram connector, registers the bot's webhook, and routes verified updates to \`/eve/v1/telegram\`. With portable credentials, deploy first, then call \`setWebhook\` for that route with your secret token. See the [Telegram channel docs](/docs/channels/telegram) for group privacy and command setup.`,
   },
   twilio: {
     logo: "twilio",
