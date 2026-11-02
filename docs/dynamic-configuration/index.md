@@ -14,17 +14,18 @@ The module's top-level code runs at build time and at runtime, so keep caller-sp
 
 Every dynamic function receives:
 
-| Field                     | Contents                                                                                                                                |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `ctx.session`             | Session ID, authenticated caller and initiator, and optional schedule and predecessor.                                                  |
-| `ctx.session.parent`      | In a delegated session: the parent session, its turn, the call that opened this session, and `rootSessionId`. Absent in a root session. |
-| `ctx.channel`             | Channel kind, continuation token, and metadata. Narrow typed metadata with `isChannel`.                                                 |
-| `ctx.view`                | Read-only view of the session so far. Read it with selectors from `eve/events`, such as `turns(ctx.view)`.                              |
-| `ctx.turn`                | Latest turn, with its ID, input, and status; `null` before the first turn.                                                              |
-| `ctx.now`                 | Time of the latest recorded session event, as a `Date`.                                                                                 |
-| `ctx.model.id`            | Selected model ID. Unavailable inside the `model` field, before the model is chosen.                                                    |
-| `await ctx.messages()`    | The conversation so far, assembled only when you call it.                                                                               |
-| `await ctx.memo(key, fn)` | A saved JSON result for a key.                                                                                                          |
+| Field                     | Contents                                                                                                                                             |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ctx.session`             | Session ID, authenticated caller and initiator, and optional schedule and predecessor.                                                               |
+| `ctx.session.parent`      | In a delegated session: the parent session, its turn, the call that opened this session, and `rootSessionId`. Absent in a root session.              |
+| `ctx.channel`             | Channel kind, continuation token, and metadata. Narrow typed metadata with `isChannel`.                                                              |
+| `ctx.view`                | Read-only view of the session so far. Read it with selectors from `eve/events`, such as `turns(ctx.view)`.                                           |
+| `ctx.turn`                | Latest turn, with its ID, input, and status; `null` before the first turn.                                                                           |
+| `ctx.now`                 | Time of the latest recorded session event, as a `Date`.                                                                                              |
+| `ctx.model.id`            | Selected model ID. Unavailable inside the `model` field, before the model is chosen.                                                                 |
+| `await ctx.messages()`    | The conversation so far, assembled only when you call it.                                                                                            |
+| `await ctx.memo(key, fn)` | A saved JSON result for a key.                                                                                                                       |
+| `await ctx.getSandbox()`  | The session's sandbox, started on first use. Unavailable inside the `model` field. Call it inside a memo; see [Read the sandbox](#read-the-sandbox). |
 
 Code outside a memo runs every time eve runs the function. Put a fetch or decision inside a memo when its answer should stay fixed for a key:
 
@@ -72,8 +73,36 @@ The key sets a lifetime, not a dependency list. A change in context that the cal
 - Deployment changes discard memos. Memos are a cache, not a record of side effects.
 - Memos can run concurrently with `Promise.all`, but cannot nest. Await every memo before returning.
 - Memo results are saved privately with the session and never appear on the stream.
+- Key a dynamic tool's memos on the turn or the session. If a key changes within a turn, such as a key on a call ID, eve can refuse an approved call to the tool after a restart, and the model has to request the call again.
 
 A memo callback receives `{ idempotencyKey, abortSignal }`. Pass `idempotencyKey` to an external service that supports idempotency, because an interrupted step can run again before eve saves its result. The key is stable per session, definition, and memo key. It repeats when a deployment change or skipped branch runs the memo again, so send your own key when a run needs a fresh response. Perform side effects in [hooks](/docs/guides/hooks) or tool execution, not while computing a definition.
+
+### Read the sandbox
+
+`ctx.getSandbox()` returns the session's sandbox, the same handle tools and hooks get. eve runs a dynamic function before every model call, so a sandbox call outside a memo makes every model call wait for the sandbox, and the first one waits for the sandbox to start. Read the sandbox inside a memo, keyed on something in the session that changes when the files might have changed.
+
+This instruction reads the repository's `AGENTS.md` once after each completed `checkout` call:
+
+```ts title="agent/instructions/repo-guidelines.ts"
+import { calls } from "eve/events";
+import { defineDynamic, defineInstructions } from "eve/instructions";
+
+export default defineDynamic(async (ctx) => {
+  const checkout = calls(ctx.view, { name: "checkout" })
+    .filter((call) => call.state === "completed")
+    .at(-1);
+  if (!checkout) return null;
+  const guidelines = await ctx.memo(["agents-md", checkout.callId], async () => {
+    const sandbox = await ctx.getSandbox();
+    return sandbox.readTextFile({ path: "AGENTS.md" });
+  });
+  return guidelines ? defineInstructions({ content: guidelines, role: "user" }) : null;
+});
+```
+
+Reading `ctx.view` doesn't touch the sandbox, so the function starts no sandbox before the first checkout, and reads the file once per checkout after that. A run after a cold start reuses the saved result instead of reading the sandbox again. The memo doesn't notice later edits to the file, such as a `bash` or `write_file` call; add those calls to the key when edits matter.
+
+Return content read from the sandbox as a user instruction. It comes from the workspace rather than from the agent's own instructions, and a user instruction joins the conversation only when its content changes, which keeps the prompt cached.
 
 ## Dynamic models
 

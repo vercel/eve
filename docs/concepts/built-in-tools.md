@@ -43,6 +43,8 @@ export { default } from "eve/tools/bash";
 - `stdout`, `stderr`, and `truncated`: the output so far
 - `message`: instructions for the model
 
+The model reads the result as plain text: `stdout`, then any `stderr` after a `[stderr]` line, then `[exit code: N]`. For a running command, `message` replaces the exit code line. Channels and hooks get the fields above on `call.settled`.
+
 The command writes to `stdout` and `stderr` files in `outputDirectory`, and its exit code to an `exit` file when it finishes. The model checks on or stops it with shell commands in later `bash` calls, so the tool's approval policy applies to them:
 
 ```sh
@@ -70,6 +72,8 @@ export default defineTool({
 ```
 
 A wrapper that spreads `bash` keeps its `timeout` input. If the wrapper supplies its own `execute` or input schema, forward `timeout` to `bash.execute` or remove it from the schema.
+
+The wrapper keeps the plain-text view through the spread `toModelOutput`. If your `execute` returns a string, the model sees that text. Any other shape, including a `bash` result with extra fields, reaches the model as JSON; set your own [`toModelOutput`](../tools#shape-what-the-model-sees-with-tomodeloutput) to change that.
 
 Disable only `bash`:
 

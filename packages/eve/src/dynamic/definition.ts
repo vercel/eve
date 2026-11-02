@@ -7,6 +7,7 @@ import type { UserPart } from "#protocol/session-events/envelope.js";
 import type { SessionView } from "#protocol/session-projection/session-view.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
+import type { SessionContext } from "#context/session-context.js";
 
 /**
  * The session's latest turn, running or not. Its `id` keys a memo that runs once per turn: it
@@ -96,6 +97,24 @@ export interface DynamicModelContext extends SessionFrame {
 export interface DynamicContext extends DynamicModelContext {
   /** The model chosen for the session. */
   readonly model: { readonly id: string };
+  /**
+   * Resolves the session's sandbox, starting it on first use, as `ctx.getSandbox()` does in a
+   * tool or hook. A dynamic value runs before every model call, so call it inside `ctx.memo`,
+   * keyed on what would change what you read: outside a memo, every model call waits on the
+   * sandbox, and the first one waits for it to start.
+   *
+   * ```ts
+   * const checkout = calls(ctx.view, { name: "checkout" })
+   *   .filter((call) => call.state === "completed")
+   *   .at(-1);
+   * if (!checkout) return null;
+   * const guidelines = await ctx.memo(["agents-md", checkout.callId], async () => {
+   *   const sandbox = await ctx.getSandbox();
+   *   return sandbox.readTextFile({ path: "AGENTS.md" });
+   * });
+   * ```
+   */
+  readonly getSandbox: SessionContext["getSandbox"];
 }
 
 /**
