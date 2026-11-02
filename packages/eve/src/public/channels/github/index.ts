@@ -17,6 +17,7 @@ export {
   type GitHubWebhookSecret,
 } from "#public/channels/github/auth.js";
 export { defaultGitHubAuth } from "#public/channels/github/defaults.js";
+export { defineGitHubHandlers, type GitHubHandlers } from "#public/channels/github/handlers.js";
 export {
   type GitHubAppRef,
   type GitHubCheckRunEvent,

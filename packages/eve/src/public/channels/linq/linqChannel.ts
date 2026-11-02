@@ -1,3 +1,4 @@
+import type { ComposableChannelEvents } from "#public/channels/compose-events.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { sameEnvironmentVercelOidc } from "#public/channels/same-environment-oidc.js";
@@ -78,7 +79,9 @@ export interface LinqChannelConfig {
   /** Outbound credentials and inbound webhook verification. */
   readonly credentials?: LinqChannelCredentials;
   /** Per-event overrides for the underlying Chat SDK channel. */
-  readonly events?: ChatSdkChannelEvents<{ linq: ReturnType<typeof createLinqAdapter> }>;
+  readonly events?: ComposableChannelEvents<
+    ChatSdkChannelEvents<{ linq: ReturnType<typeof createLinqAdapter> }>
+  >;
   /** Inbound message policy. Defaults to dispatching with the Linq message author's user auth. */
   readonly onMessage?: (
     ctx: LinqInboundMessageContext,

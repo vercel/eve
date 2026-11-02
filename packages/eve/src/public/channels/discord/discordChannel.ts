@@ -1,3 +1,7 @@
+import {
+  composeChannelEvents,
+  type ComposableChannelEvents,
+} from "#public/channels/compose-events.js";
 import type { DiscordChannelCredentials } from "#public/channels/discord/credentials.js";
 export type { DiscordChannelCredentials } from "#public/channels/discord/credentials.js";
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
@@ -224,7 +228,7 @@ export interface DiscordChannelConfig {
    */
   readonly gateway?: DiscordGatewayConfig;
 
-  readonly events?: DiscordChannelEvents;
+  readonly events?: ComposableChannelEvents<DiscordChannelEvents>;
 }
 
 /** Low-level Discord handle exposed to hooks and event handlers. */
@@ -280,7 +284,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
   const onCommand = config.onCommand ?? defaultOnCommand;
   const onAnswers =
     config.onAnswers ?? (config.onCommand === undefined ? acceptAsPresser : dropUnmappedAnswer);
-  const mergedEvents: DiscordChannelEvents = { ...defaultEvents, ...config.events };
+  const mergedEvents = composeChannelEvents("discordChannel", defaultEvents, config.events);
 
   return defineChannel<
     DiscordChannelState,

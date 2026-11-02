@@ -83,7 +83,8 @@ The invocation token is plain text, not a GitHub mention, so GitHub may not auto
 | `onCheckSuite`       | None                                                                   | `(ctx, checkSuite)` hook for `check_suite` events.                                                                            |
 | `onCheckRun`         | None                                                                   | `(ctx, checkRun)` hook for `check_run` events.                                                                                |
 | `onWorkflowRun`      | None                                                                   | `(ctx, workflowRun)` hook for `workflow_run` events.                                                                          |
-| `events`             | eve's default handlers                                                 | Per-event handler overrides for replies, reactions, and checkout.                                                             |
+| `handlers`           | None                                                                   | Webhook hooks contributed by extensions or shared modules. See [Contributed handlers](#contributed-handlers).                 |
+| `events`             | eve's default handlers                                                 | Handlers that run before, after, or instead of the defaults. See [Default event handlers](#default-event-handlers).           |
 
 The channel mounts `POST /eve/v1/github`.
 
@@ -117,6 +118,63 @@ export default githubChannel({
 ```
 
 The CI hooks expose normalized `action`, `status`, `conclusion`, `app.slug`, `headSha`, and `pullRequests` fields, plus `checkSuiteId`, `checkRunId`, or `workflowRunId`. For `workflow_run`, which only GitHub Actions sends, `app.slug` is `"github-actions"`. A CI turn replies on the first PR in `pullRequests`. When the array is empty, the hook still runs but must return `null`, because there is no thread to reply in.
+
+### Contributed handlers
+
+One app has one GitHub channel, but several extensions may each need its webhooks. Each contributes a `defineGitHubHandlers(...)` value, and the app lists them in `handlers`:
+
+```ts title="node_modules/@acme/github-review/extension/github.ts"
+import { defaultGitHubAuth, defineGitHubHandlers } from "eve/channels/github";
+
+export const reviewHandlers = defineGitHubHandlers({
+  name: "github-review",
+  onPullRequest: (ctx, pr) =>
+    pr.action === "opened" ? { auth: defaultGitHubAuth(ctx), context: ["Review this PR."] } : null,
+});
+```
+
+```ts title="agent/channels/github.ts"
+import { githubChannel } from "eve/channels/github";
+import { reviewHandlers } from "@acme/github-review/github";
+import { triageHandlers } from "@acme/github-triage/github";
+
+export default githubChannel({ handlers: [reviewHandlers, triageHandlers] });
+```
+
+For each webhook, eve runs the config's own hook first (for comments, `onComment` or the default invocation-token gate), then each `handlers` entry in list order. Every handler runs, even after one has dispatched. A handler that throws is logged with its `name` and skipped. The first non-null result starts the one turn for that delivery; later results are logged and dropped. An event with no handler anywhere is acknowledged and ignored.
+
+## Default event handlers
+
+The channel owns these session events. Each default has side effects other features rely on:
+
+| Event                                       | Default side effects                                                                                                                                       |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `turn.started`                              | Adds the `eyes` reaction (unless `progress.reactions` is `false`), then checks out the repository and sets `state.checkoutPath`, `headSha`, and `baseRef`. |
+| `content.completed`                         | Posts the final reply as one or more comments.                                                                                                             |
+| `turn.settled`                              | Posts an error comment when the turn failed.                                                                                                               |
+| `session.ended`                             | Posts an error comment when the session failed.                                                                                                            |
+| `interaction.opened`, `interaction.settled` | Posts each approval, question, and sign-in prompt, one at a time.                                                                                          |
+
+To add behavior, wrap your handler with `beforeDefault` or `afterDefault` from `eve/channels`. To drop the default, say so with `replaceDefault`:
+
+```ts title="agent/channels/github.ts"
+import { afterDefault, beforeDefault, replaceDefault } from "eve/channels";
+import { githubChannel } from "eve/channels/github";
+
+export default githubChannel({
+  events: {
+    // Checkout still runs, once.
+    "turn.started": afterDefault(async (_event, { channel }) => {
+      await channel.thread.react("rocket");
+    }),
+    "interaction.opened": replaceDefault(async (event, { channel }) => {
+      await channel.thread.post("Waiting for approval.");
+    }),
+  },
+});
+```
+
+`before` handlers run in order, then the default (or the one replacement), then `after` handlers in order. An event takes one wrapped handler or a list of them, and at most one `replaceDefault`. A `before` or `after` handler that throws is logged, and the rest still run, so a failing status update never stops checkout or delivery. A failure in the default or a replacement fails the handler as before. A plain function still replaces the default and logs a warning; wrap it in `replaceDefault` to keep that behavior.
 
 ## Delivery
 
