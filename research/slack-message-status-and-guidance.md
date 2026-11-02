@@ -79,7 +79,8 @@ export default slackChannel({
     const auth = defaultSlackAuth(message, ctx);
     const isDirectMessage = message.raw.channel_type === "im";
     if (ctx.isBotMentioned() || ctx.slack.codeChannel || isDirectMessage) return { auth };
-    if (message.threadTs !== message.ts && (await ctx.isSubscribed())) {
+    // An edit only reaches a thread that has a session, including an edit to its first message.
+    if (ctx.edit || (message.threadTs !== message.ts && (await ctx.isSubscribed()))) {
       return {
         auth,
         status: "deferred",
@@ -199,6 +200,7 @@ The documented pattern uses existing helpers:
 | `message.author?.isBot === false`  | Another bot replying would loop.                                       |
 | Not a mention, code channel, or DM | Those are addressed to the agent and get a plain `{ auth }`.           |
 | `message.threadTs !== message.ts`  | Top-level messages start their own thread, so they need a mention.     |
+| `ctx.edit`                         | An edit only reaches a thread with a session, root message included.   |
 | `ctx.isSubscribed()`               | The agent follows a thread only once a mention or the app admitted it. |
 
 A message that mentions the bot arrives as `app_mention`. When eve knows the bot's user id, it
@@ -226,8 +228,9 @@ async onMessage(ctx, message) {
   if (ctx.isBotMentioned() || ctx.slack.codeChannel || message.raw.channel_type === "im") {
     return { auth };
   }
-  const followed = message.threadTs !== message.ts && (await ctx.isSubscribed());
-  if (followed) return { auth, status: "deferred", guidance: THREAD_GUIDANCE };
+  if (ctx.edit || (message.threadTs !== message.ts && (await ctx.isSubscribed()))) {
+    return { auth, status: "deferred", guidance: THREAD_GUIDANCE };
+  }
   const result = await decide({
     state: { latestMessage: message.text },
     questions: {
@@ -276,8 +279,8 @@ on the edited message:
 
 The app's own access checks apply to edits with no extra code. The edit keeps its own treatment:
 the `<slack_message_edit>` block, no acknowledgement, and a quiet turn. `guidance` on the result
-goes into the edit block. With the following pattern, an edit to a followed reply reaches the
-session with the same guidance, and an edit to an unrelated message is dropped.
+goes into the edit block. With the following pattern, an edit in a followed thread, including
+one to its root message, reaches the session with the same guidance.
 
 An authored `onMessageEdited` still replaces this, and `onEvent` still comes before it. Apps
 without message hooks see no change: the built-in defaults answer the same edits that

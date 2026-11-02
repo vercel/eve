@@ -70,7 +70,7 @@ function oneLine(value: string): string {
 // Slack sends `&lt;` for a typed `<`, and the mrkdwn conversion decodes it, so message text could
 // otherwise close `<content>` and open a block that reads as eve's own, such as `<guidance>`.
 const BLOCK_TAG =
-  /<(?=\/?\s*(?:slack_message_edit|slack_message|slack_thread_context|sender|bot|thread|edit|diff|guidance|content)\b)/giu;
+  /<(?=\s*\/?\s*(?:slack_message_edit|slack_message|slack_thread_context|sender|bot|thread|edit|diff|guidance|content)\b)/giu;
 
 /** Encodes the `<` of eve's block tags, leaving other text and `<@U123>` mentions as they are. */
 function neutralizeBlockTags(value: string): string {

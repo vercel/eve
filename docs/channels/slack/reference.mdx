@@ -361,7 +361,8 @@ export default slackChannel({
     const auth = defaultSlackAuth(message, ctx);
     const isDirectMessage = message.raw.channel_type === "im";
     if (ctx.isBotMentioned() || ctx.slack.codeChannel || isDirectMessage) return { auth };
-    if (message.threadTs !== message.ts && (await ctx.isSubscribed())) {
+    // An edit only reaches a thread that has a session, including an edit to its first message.
+    if (ctx.edit || (message.threadTs !== message.ts && (await ctx.isSubscribed()))) {
       return {
         auth,
         status: "deferred",
@@ -375,12 +376,13 @@ export default slackChannel({
 });
 ```
 
-| Check                             | Why                                                                                          |
-| --------------------------------- | -------------------------------------------------------------------------------------------- |
-| `message.author?.isBot === false` | Another bot replying in the thread would loop.                                               |
-| Mention, code channel, or DM      | These are addressed to the agent, so they get a plain `{ auth }`.                            |
-| `message.threadTs !== message.ts` | Top-level messages start their own thread, so they still need a mention.                     |
-| `ctx.isSubscribed()`              | The thread has an active eve session, so the agent follows only threads it was brought into. |
+| Check                             | Why                                                                                                     |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `message.author?.isBot === false` | Another bot replying in the thread would loop.                                                          |
+| Mention, code channel, or DM      | These are addressed to the agent, so they get a plain `{ auth }`.                                       |
+| `message.threadTs !== message.ts` | Top-level messages start their own thread, so they still need a mention.                                |
+| `ctx.edit`                        | An edit only reaches a thread that has a session, so it's followed like a reply, root message included. |
+| `ctx.isSubscribed()`              | The thread has an active eve session, so the agent follows only threads it was brought into.            |
 
 - Without `onAppMention` and `onDirectMessage`, mentions and DMs reach `onMessage` too, so the hook answers them first.
 - The DM check reads `channel_type`. `ctx.isDMOrPrivateChannel()` returns `true` for DMs, group DMs, and private channels, and also when it can't tell, such as on a missing scope or API error.
@@ -415,11 +417,11 @@ export default slackChannel({
     if (ctx.isBotMentioned() || ctx.slack.codeChannel || message.raw.channel_type === "im") {
       return { auth };
     }
-    if (message.threadTs !== message.ts && (await ctx.isSubscribed())) {
+    // An edit only reaches a thread that has a session, so it never reaches the decision model.
+    if (ctx.edit || (message.threadTs !== message.ts && (await ctx.isSubscribed()))) {
       return { auth, status: "deferred", guidance: THREAD_GUIDANCE };
     }
-    // Ask the decision model about new messages only, never again for an edit.
-    if (ctx.edit || !watchedChannels.has(message.channelId)) return null;
+    if (!watchedChannels.has(message.channelId)) return null;
 
     const result = await decide({
       state: { latestMessage: message.text },

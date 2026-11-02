@@ -79,7 +79,8 @@ export default slackChannel({
     const auth = defaultSlackAuth(message, ctx);
     const isDirectMessage = message.raw.channel_type === "im";
     if (ctx.isBotMentioned() || ctx.slack.codeChannel || isDirectMessage) return { auth };
-    if (message.threadTs !== message.ts && (await ctx.isSubscribed())) {
+    // An edit only reaches a thread that has a session, including an edit to its first message.
+    if (ctx.edit || (message.threadTs !== message.ts && (await ctx.isSubscribed()))) {
       return {
         auth,
         status: "deferred",
@@ -101,6 +102,7 @@ eve add tool/no_reply
 
 - Without `onAppMention` and `onDirectMessage`, mentions and DMs reach `onMessage` too, so the hook answers them first. It checks `channel_type` because `ctx.isDMOrPrivateChannel()` is also `true` in private channels.
 - `ctx.isSubscribed()` is `true` once the thread has a session, so the agent follows only threads it was brought into. Top-level messages still need a mention.
+- `ctx.edit` is set for an edit, which only reaches a thread that has a session. The hook follows it like a reply, including an edit to the thread's first message.
 - `status: "deferred"` shows no thread status until the agent calls a tool, so a reply the agent ends with `no_reply` leaves no trace in the thread.
 - `guidance` tells the model how to treat this one message. See [Status and guidance](/docs/channels/slack/reference#status-and-guidance).
 - `defaultSlackAuth` gives each Slack user their own identity, so by default only the person whose message led to an approval can answer it. With `{ auth: null }`, messages carry no identity, and anyone in the thread can answer it.
@@ -144,11 +146,11 @@ export default slackChannel({
     if (ctx.isBotMentioned() || ctx.slack.codeChannel || message.raw.channel_type === "im") {
       return { auth };
     }
-    if (message.threadTs !== message.ts && (await ctx.isSubscribed())) {
+    // An edit only reaches a thread that has a session, so it never reaches the decision model.
+    if (ctx.edit || (message.threadTs !== message.ts && (await ctx.isSubscribed()))) {
       return { auth, status: "deferred", guidance: THREAD_GUIDANCE };
     }
-    // Ask the decision model about new messages only, never again for an edit.
-    if (ctx.edit || !watchedChannels.has(message.channelId)) return null;
+    if (!watchedChannels.has(message.channelId)) return null;
 
     const result = await decide({
       state: { latestMessage: message.text },

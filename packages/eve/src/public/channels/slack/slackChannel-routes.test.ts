@@ -528,8 +528,8 @@ describe("slackChannel message status and guidance", () => {
       }),
     );
   }
-  const threadReply = () =>
-    channelMessage({ ts: "1700000000.000003", threadTs: "1700000000.000001" });
+  const rootTs = "1700000000.000001";
+  const threadReply = () => channelMessage({ ts: "1700000000.000003", threadTs: rootTs });
 
   it("follows served threads with the documented onMessage hook", async () => {
     const followGuidance =
@@ -542,7 +542,7 @@ describe("slackChannel message status and guidance", () => {
         const auth = defaultSlackAuth(message, ctx);
         const isDirectMessage = message.raw.channel_type === "im";
         if (ctx.isBotMentioned() || ctx.slack.codeChannel || isDirectMessage) return { auth };
-        if (message.threadTs !== message.ts && (await ctx.isSubscribed())) {
+        if (ctx.edit || (message.threadTs !== message.ts && (await ctx.isSubscribed()))) {
           return { auth, status: "deferred", guidance: followGuidance };
         }
         return null;
@@ -559,16 +559,46 @@ describe("slackChannel message status and guidance", () => {
       send,
       noSession,
     );
+    // An unmentioned edit to the root of the thread the agent serves.
+    const root = {
+      text: "Who can take the rollback?",
+      thread_ts: rootTs,
+      ts: rootTs,
+      user: "U_BOB",
+    };
+    await firePost(
+      channel,
+      signed(
+        JSON.stringify({
+          api_app_id: "A01",
+          authorizations: [{ is_bot: true, user_id: "U_BOT" }],
+          event: {
+            channel: "C01",
+            channel_type: "channel",
+            message: { ...root, text: "Who can take the rollback today?", edited: { ts: "1.9" } },
+            previous_message: root,
+            subtype: "message_changed",
+            ts: "1700000000.000009",
+            type: "message",
+          },
+          event_id: "EvRootEdit",
+          team_id: "T01",
+          type: "event_callback",
+        }),
+      ),
+      send,
+    );
 
-    expect(send).toHaveBeenCalledTimes(1);
-    const [address, input] = send.mock.calls[0]! as [
-      string,
-      ObservedChannelDelivery<SlackChannelState>,
-    ];
-    expect(address).toBe("C01:1700000000.000001");
-    expect(input.auth?.principalId).toBe("slack:T01:U_BOB");
-    expect("message" in input && input.message).toEqual(
-      expect.stringContaining(`<guidance>\n${followGuidance}\n</guidance>`),
+    const deliveries = send.mock.calls as [string, ObservedChannelDelivery<SlackChannelState>][];
+    expect(deliveries.map(([address]) => address)).toEqual([`C01:${rootTs}`, `C01:${rootTs}`]);
+    for (const [, input] of deliveries) {
+      expect(input.auth?.principalId).toBe("slack:T01:U_BOB");
+      expect("message" in input && input.message).toEqual(
+        expect.stringContaining(`<guidance>\n${followGuidance}\n</guidance>`),
+      );
+    }
+    expect("message" in deliveries[1]![1] && deliveries[1]![1].message).toEqual(
+      expect.stringContaining("<slack_message_edit>"),
     );
     expect(slackCalls("assistant.threads.setStatus")).toEqual([]);
   });
