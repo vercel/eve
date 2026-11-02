@@ -19,10 +19,11 @@ function stubSlack(responses: Record<string, unknown>): void {
 describe("isExternalSlackConversation", () => {
   it.each([
     [{ is_ext_shared: true, is_shared: true }, true],
-    [{ is_pending_ext_shared: true }, true],
-    [{ is_shared: true }, true],
-    [{ is_org_shared: true, is_shared: true }, false],
-    [{ is_private: true }, false],
+    [{ is_ext_shared: false, is_pending_ext_shared: true }, true],
+    [{ is_ext_shared: false, is_shared: true }, true],
+    [{ is_ext_shared: false, is_org_shared: true, is_shared: true }, false],
+    [{ is_ext_shared: false, is_private: true }, false],
+    [{}, true],
   ])("classifies %o as external: %s", async (channel, external) => {
     stubSlack({ "conversations.info": { ok: true, channel } });
 
@@ -46,8 +47,9 @@ describe("isExternalSlackConversation", () => {
 describe("isSlackGuest", () => {
   it.each([
     [{ is_restricted: true }, true],
-    [{ is_ultra_restricted: true }, true],
-    [{}, false],
+    [{ is_restricted: false, is_ultra_restricted: true }, true],
+    [{ is_restricted: false }, false],
+    [{}, true],
   ])("classifies %o as a guest: %s", async (user, guest) => {
     stubSlack({ "users.info": { ok: true, user } });
 

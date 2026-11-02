@@ -444,7 +444,7 @@ export interface SlackClassifyOptions {
 export async function isExternalSlackConversation(
   input: SlackClassifyOptions & { readonly channelId: string },
 ): Promise<boolean> {
-  return await classifyConversation({
+  const { flagged } = await classifyConversation({
     channelId: input.channelId,
     installationTeamId: input.context?.teamId,
     request: (operation, body) =>
@@ -456,6 +456,7 @@ export async function isExternalSlackConversation(
         body,
       }),
   });
+  return flagged;
 }
 
 /**
@@ -466,7 +467,7 @@ export async function isExternalSlackConversation(
 export async function isSlackGuest(
   input: SlackClassifyOptions & { readonly userId: string },
 ): Promise<boolean> {
-  return await classifyGuest({
+  const { flagged } = await classifyGuest({
     userId: input.userId,
     installationTeamId: input.context?.teamId,
     request: (operation, body) =>
@@ -478,4 +479,5 @@ export async function isSlackGuest(
         body,
       }),
   });
+  return flagged;
 }
