@@ -2,6 +2,7 @@ import type { ModelMessage } from "ai";
 
 import { contextStorage } from "#context/container.js";
 import { HistoryStateKey } from "#context/keys.js";
+import { keptAnnouncements } from "#harness/announcements.js";
 import { withoutPromptMeasurement } from "#harness/compaction/engine.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -23,7 +24,7 @@ export type HistoryChange =
   | { readonly repaired: readonly ModelMessage[] }
   /**
    * History is replaced, as a compaction or a clear replaces it. What eve measured about the old
-   * history, and the announcements it held, no longer apply.
+   * history no longer applies, nor do the announcements whose message it dropped.
    */
   | { readonly rewrite: readonly ModelMessage[] };
 
@@ -52,12 +53,17 @@ function applyChange<T extends WithHistory>(session: T, change: HistoryChange): 
   if ("repaired" in change) {
     return { ...session, history: validateHarnessModelMessages(change.repaired) };
   }
-  // The announcements a request made, and its measured prompt, described the old history.
-  contextStorage.getStore()?.delete(HistoryStateKey);
+  // Its measured prompt described the old history, and so did announcements whose message it drops.
+  const history = validateHarnessModelMessages(change.rewrite);
+  const ctx = contextStorage.getStore();
+  const state = ctx?.get(HistoryStateKey);
+  if (ctx !== undefined && state !== undefined) {
+    ctx.set(HistoryStateKey, keptAnnouncements(state, history));
+  }
   return {
     ...session,
     compaction: withoutPromptMeasurement(session.compaction),
-    history: validateHarnessModelMessages(change.rewrite),
+    history,
   };
 }
 

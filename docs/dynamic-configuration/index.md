@@ -189,7 +189,7 @@ Because eve runs dynamic functions before every model call, they see a steering 
 
 ### Execution order
 
-Hooks finish first, then model selection, then connections, subagents, tools, skills, and instructions. Don't depend on the order in which files run; each definition computes its own value.
+Hooks finish first, then model selection, then instructions, connections, subagents, tools, and skills. Don't depend on the order in which files run; each definition computes its own value.
 
 A tool with `deferred: true` stays out of the model's tool list. It is found with `eve__search` and called with `eve__tool`, like a [static deferred tool](/docs/tools#keep-a-tool-out-of-the-tool-list).
 
@@ -232,7 +232,7 @@ export default defineDynamic(async (ctx) => {
 });
 ```
 
-Before a turn's first model call, new user content joins just before the turn's input; mid-turn changes append at the current position. Returning `null` adds nothing and resets content tracking, so returning the earlier content later adds it again, but it doesn't remove earlier history. Clear, compaction, and deployment changes don't re-append unchanged content.
+Before a turn's first model call, new user content joins just before the turn's input; mid-turn changes append at the current position. Returning `null` adds nothing and resets content tracking, so returning the earlier content later adds it again, but it doesn't remove earlier history. Unchanged content isn't added again after a deployment, or after a compaction that keeps it in the history; a clear or compaction that removes it adds it again.
 
 ## Errors and recovery
 

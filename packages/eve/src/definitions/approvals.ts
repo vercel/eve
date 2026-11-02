@@ -1,4 +1,4 @@
-import { pendingApprovalsNote } from "#harness/hitl/index.js";
+import { pendingApprovalsNote } from "#harness/hitl/approval-prompt.js";
 import { type Definition, section, SECTION_ORDER } from "./definition.js";
 
 /**

@@ -6,6 +6,7 @@ import {
   type HarnessModelMessage,
   type UserModelMessage,
 } from "#harness/messages.js";
+import { keptAnnouncements } from "#harness/announcements.js";
 import { announce, placeAnchored } from "./messages.js";
 import type { CallRecord } from "./definition.js";
 
@@ -141,6 +142,35 @@ describe("a call's messages", () => {
       skills,
     );
     expect(settled.record.at(-1)).toMatchObject({ content: "skills changed" });
-    expect(settled.historyState).toEqual({ announcements: { skills: "v2" } });
+    expect(settled.historyState).toEqual({
+      announcements: { skills: "v2" },
+      messages: { skills: expect.any(String) },
+    });
+  });
+
+  it("announces again after a rewrite only what the rewrite dropped", () => {
+    const question = input("Which sources?", "turn_1");
+    const announcements = {
+      brief: { kind: "context.instruction" as const, render: () => "Release brief.", value: "b" },
+      catalog: { render: () => "You have more tools.", value: "c" },
+    };
+    const first = announce(
+      { historyState: {}, record: [question] },
+      new Set([question]),
+      announcements,
+    );
+    // A rewrite that keeps the brief's message, as capping tool results does, and drops the catalog's.
+    const history = first.record.filter(({ content }) => content !== "You have more tools.");
+    const again = announce(
+      { historyState: keptAnnouncements(first.historyState, history), record: history },
+      new Set(),
+      announcements,
+    );
+
+    expect(texts(again.record)).toEqual([
+      "Release brief.",
+      "Which sources?",
+      "You have more tools.",
+    ]);
   });
 });

@@ -545,4 +545,76 @@ describe("announcements after a compaction during a turn", () => {
       ["Summary of our conversation so far:", catalog, question],
     ]);
   });
+
+  it("doesn't announce the catalog again when capping keeps its message", async () => {
+    const requests: string[][] = [];
+    const model = new MockLanguageModelV3({
+      doStream: async ({ prompt }) => {
+        requests.push(userTexts(prompt));
+        const parts = (requests.length === 1 ? lookup("Let me check.") : answer()).stream;
+        // Usage that follows the prompt's size, as a provider reports it, so eve measures the
+        // large result it left behind.
+        const total = Math.ceil(JSON.stringify(prompt).length / 4);
+        return {
+          stream: parts.pipeThrough(
+            new TransformStream<StreamPart, StreamPart>({
+              transform(part, controller) {
+                controller.enqueue(
+                  part.type === "finish"
+                    ? {
+                        ...part,
+                        usage: {
+                          ...part.usage,
+                          inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: total, total },
+                        },
+                      }
+                    : part,
+                );
+              },
+            }),
+          ),
+        };
+      },
+    });
+    const tools: HarnessToolMap = new Map([
+      // A large result that capping shortens once it is old.
+      ["lookup", { ...lookupTool, execute: async () => "x".repeat(100_000) }],
+      // A deferred tool gives the session a catalog to announce.
+      ["refund_invoice", { ...lookupTool, deferred: true, name: "refund_invoice" }],
+    ]);
+    const events: SessionEvent[] = [];
+    // The first turn fits, and leaves the large result behind; the second doesn't, until capping
+    // shortens the old result.
+    const reference = { contextWindowTokens: 200_000, id: "step-model" };
+    const kernel = createTestKernel({
+      agent: { model: reference, thresholdPercent: 1 },
+      handleEvent: foldingHandler(async (event) => void events.push(event)),
+      resolveModel: async () => model,
+      tools,
+    });
+
+    await contextStorage.run(new ContextContainer(), async () => {
+      let session: HarnessSession = {
+        compaction: {},
+        continuationToken: "http:announcement-capping-session",
+        history: [],
+        sessionId: "announcement-capping-session",
+      };
+      for (const message of ["Look up the sources.", "Which sources back the second claim?"]) {
+        let stepped = await kernel(session, { message });
+        while (typeof stepped.next === "function") stepped = await stepped.next(stepped.session);
+        session = stepped.session;
+        reference.contextWindowTokens = 20_000;
+      }
+    });
+
+    expect(
+      events.filter(({ type }) => type === "context.settled").map(({ data }) => data),
+    ).toMatchObject([{ kind: "compaction", outcome: "completed" }]);
+    // Only the turns' own runs: capping was enough, so no summary ran.
+    expect(requests).toHaveLength(3);
+    const catalogs = (texts: readonly string[]) =>
+      texts.filter((text) => text.includes("eve__search")).length;
+    expect(requests.map(catalogs)).toEqual([1, 1, 1]);
+  });
 });

@@ -120,6 +120,8 @@ export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDel
 export interface HistoryState {
   /** Last announced value per keyed announcement (see `#harness/announcements.js`). */
   readonly announcements?: Readonly<Record<string, string>>;
+  /** The digest of the message each key's announcement last added, which a rewrite looks for. */
+  readonly messages?: Readonly<Record<string, string>>;
 }
 export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
 /**
