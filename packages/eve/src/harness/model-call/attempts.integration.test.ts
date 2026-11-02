@@ -1,4 +1,4 @@
-import { jsonSchema } from "ai";
+import { APICallError, jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -159,6 +159,49 @@ describe("run attributes", () => {
         "$eve.output_tokens": 2,
         "$eve.tool_count": 1,
       }),
+    );
+  });
+});
+
+describe("a failed model call", () => {
+  it("keeps the person's message in history", async () => {
+    // The input joins history before the call, so a call that fails can't lose it.
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const events: SessionEvent[] = [];
+    const message = "Alice asks for the weekly summary.";
+    const result = await createKernel({
+      handleEvent: eachEvent(async (event) => {
+        events.push(event);
+      }),
+      resolveModel: async () =>
+        new MockLanguageModelV3({
+          doStream: async () => {
+            throw new APICallError({
+              isRetryable: false,
+              message: "Bad Request",
+              requestBodyValues: {},
+              statusCode: 400,
+              url: "https://provider.example/v1/messages",
+            });
+          },
+        }),
+      tools: new Map(),
+    })(
+      {
+        agent: { modelReference: { id: "m" }, system: "You help Alice.", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100_000 },
+        continuationToken: "http:failed-call",
+        history: [],
+        sessionId: "failed-call",
+      },
+      { message },
+    );
+
+    expect(events.find((event) => event.type === "model.settled")).toMatchObject({
+      data: { outcome: "failed" },
+    });
+    expect(result.session.history).toContainEqual(
+      expect.objectContaining({ content: message, role: "user" }),
     );
   });
 });
