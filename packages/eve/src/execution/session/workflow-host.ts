@@ -1,4 +1,5 @@
 import { sleep } from "#compiled/@workflow/core/index.js";
+import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import type { SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { SessionHandoff } from "#execution/session/handoff.js";
 import type { SessionBoot, SessionHost } from "#execution/session/program.js";
@@ -22,6 +23,7 @@ export function workflowSessionHost(boot: SessionBoot, inbox: SessionInboxHandle
       sessionId: boot.sessionId,
       sessionWritable: boot.sessionWritable,
     }),
+    dispatchRuns: (input) => dispatchCoordinationStep(input),
     runTurnStep: (input) => turnStep(input),
     sleep: (ms) => sleep(ms),
   };

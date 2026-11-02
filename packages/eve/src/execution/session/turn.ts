@@ -3,10 +3,12 @@ import { formatEarlierRemoteCallerInputError } from "#protocol/remote-agent-prot
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 
 import type { SessionCapabilities, TurnCaller } from "#channel/types.js";
-import {
-  dispatchCoordinationStep,
-  publishDispatchedCallsStep,
-} from "#execution/coordination-dispatch-step.js";
+import { publishDispatchedCallsStep } from "#execution/coordination-dispatch-step.js";
+import type {
+  CoordinationDispatchInput,
+  CoordinationDispatchResult,
+} from "#execution/coordination-dispatch-shared.js";
+import type { WithSessionStateDelta } from "#execution/session/state-delta.js";
 import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
@@ -86,6 +88,13 @@ const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
 export interface SessionTurnHost {
   /** Runs one turn step across the host's step boundary. */
   runTurnStep(input: TurnStepInput): Promise<TurnStepResult>;
+  /**
+   * Starts the runs of the calls a parked step waits on, and of the tasks it started, as one
+   * step: `dispatchCoordinationStep` on Workflow.
+   */
+  dispatchRuns(
+    input: CoordinationDispatchInput,
+  ): Promise<WithSessionStateDelta<CoordinationDispatchResult>>;
   /** Resolves once `ms` pass, for an `eve__task_wait` timeout. */
   sleep(ms: number): Promise<void>;
 }
@@ -384,7 +393,7 @@ export class SessionExecution {
   private async dispatchRuns(): Promise<readonly RuntimeActionResult[]> {
     const { cursor } = this.input;
     const dispatched = await cursor.advance(({ serializedContext, sessionState }) =>
-      dispatchCoordinationStep({
+      this.input.host.dispatchRuns({
         serializedContext,
         sessionState,
         workflowToolRunOwner: {

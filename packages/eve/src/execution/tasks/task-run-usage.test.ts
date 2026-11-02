@@ -8,6 +8,7 @@ import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
+import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { turnStep } from "#execution/session/turn-step.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
 import {
@@ -24,8 +25,9 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import { withSessionUsage } from "#internal/testing/session-usage.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-/** Turn steps as Workflow runs them, and its sleep. */
+/** Turn steps and dispatches as Workflow runs them, and its sleep. */
 const WORKFLOW_TURN_HOST: SessionTurnHost = {
+  dispatchRuns: (input) => dispatchCoordinationStep(input),
   runTurnStep: (input) => turnStep(input),
   sleep: (ms) => sleep(ms),
 };

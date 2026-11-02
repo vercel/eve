@@ -47,8 +47,9 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-/** Turn steps as Workflow runs them, and its sleep. */
+/** Turn steps and dispatches as Workflow runs them, and its sleep. */
 const WORKFLOW_TURN_HOST: SessionTurnHost = {
+  dispatchRuns: (input) => dispatchCoordinationStep(input),
   runTurnStep: (input) => turnStep(input),
   sleep: (ms) => sleep(ms),
 };
