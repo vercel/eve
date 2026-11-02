@@ -194,6 +194,14 @@
  *             (`decideApproval`), and nothing casts `as Clearance`. Every
  *             effect entry point takes one, so a call runs only on what the
  *             gate decided.
+ *   rule 63 — The session loop doesn't reach Workflow: the loop
+ *             (`execution/session/{program,turn,active-turn,state-cursor,
+ *             input-queue,next-input}.ts`) and the inbox
+ *             (`execution/session-inbox/inbox.ts`) import none of rule 61's
+ *             specifiers, nor `#execution/workflow-runtime.js`. Workflow
+ *             reaches them through their host ports (`SessionHost`,
+ *             `SessionInboxTransport`, `SessionLineStore`, `SessionStepHost`).
+ *             Only direct imports are checked.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -323,6 +331,7 @@ function isTsLike(relPath) {
  *   rule60: Violation[];
  *   rule61: Violation[];
  *   rule62: Violation[];
+ *   rule63: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -411,6 +420,7 @@ async function scanRepo(state) {
     checkRule60(posix, content, state.rule60);
     checkRule61(posix, lines, state.rule61);
     checkRule62(posix, lines, state.rule62);
+    checkRule63(posix, lines, state.rule63);
   }
 }
 
@@ -1037,6 +1047,39 @@ function checkRule62(posix, lines, violations) {
         "mints a clearance outside the gate. A call's clearance comes from `decideApproval` or `approvedClearance`.",
     });
   });
+}
+
+// ---------- Rule 63: the session loop doesn't reach Workflow ----------
+
+const HOST_NEUTRAL_SESSION_FILES = new Set([
+  "packages/eve/src/execution/session/program.ts",
+  "packages/eve/src/execution/session/turn.ts",
+  "packages/eve/src/execution/session/active-turn.ts",
+  "packages/eve/src/execution/session/state-cursor.ts",
+  "packages/eve/src/execution/session/input-queue.ts",
+  "packages/eve/src/execution/session/next-input.ts",
+  "packages/eve/src/execution/session-inbox/inbox.ts",
+]);
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule63(posix, lines, violations) {
+  if (!HOST_NEUTRAL_SESSION_FILES.has(posix)) return;
+  for (const [index, line] of lines.entries()) {
+    const specifier = IMPORT_SPECIFIER_RE.exec(line)?.[1];
+    if (specifier === undefined) continue;
+    if (
+      !WORKFLOW_RUNTIME_SPECIFIER_RE.test(specifier) &&
+      specifier !== "#execution/workflow-runtime.js"
+    )
+      continue;
+    violations.push({
+      rule: 63,
+      file: posix,
+      line: index + 1,
+      message:
+        "imports Workflow into the host-neutral session loop. Reach Workflow through a host port (`SessionHost`, `SessionInboxTransport`, `SessionLineStore`, or `SessionStepHost`), and implement Workflow's side in its own module.",
+    });
+  }
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -2111,6 +2154,7 @@ async function main() {
     rule60: /** @type {Violation[]} */ ([]),
     rule61: /** @type {Violation[]} */ ([]),
     rule62: /** @type {Violation[]} */ ([]),
+    rule63: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2241,6 +2285,7 @@ async function main() {
   violations.push(...state.rule60);
   violations.push(...state.rule61);
   violations.push(...state.rule62);
+  violations.push(...state.rule63);
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });
