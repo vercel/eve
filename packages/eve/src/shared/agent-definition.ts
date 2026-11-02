@@ -1,4 +1,5 @@
 import type { JsonObject } from "#shared/json.js";
+import type { ApprovalPolicy } from "#approval/definition.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import {
@@ -346,6 +347,8 @@ export type AgentToolExposure = boolean | "deferred";
  */
 export type InternalAgentDefinition = {
   name: string;
+  /** Whether `agent.ts` authors an `approval`; the runtime loads it from `source`. */
+  approval?: boolean;
   description?: string;
   build?: AgentBuildDefinition;
   compaction?: InternalAgentCompactionDefinition;
@@ -381,6 +384,21 @@ type PublicAgentDefinitionBase = {
    * the parent agent as the lowered subagent tool's description.
    */
   readonly description?: string;
+  /**
+   * One approval policy for every call this agent's model makes: authored, built-in, extension,
+   * dynamic, workflow, and connection tools, and subagents. It runs beside each entry's own
+   * `approval`, and the stricter status wins (denied, then user approval, then approved), so it
+   * can add a gate but never remove one. Returning `undefined` leaves the entry's own decision.
+   *
+   * The root agent's policy also applies in every subagent session; a subagent's own can only add
+   * to it. Task controls, connection sign-in, `ctx.agent()` calls from workflow code, and
+   * provider-executed tools such as a provider's native web search are not covered.
+   *
+   * ```ts
+   * approval: auto(), // a decision model reviews every call; tools' own gates still apply
+   * ```
+   */
+  readonly approval?: ApprovalPolicy;
   readonly build?: AgentBuildDefinition;
   readonly compaction?: PublicAgentCompactionDefinition;
   /**

@@ -616,6 +616,7 @@ const compiledAgentLimitsDefinitionSchema = z
   .strict();
 
 const compiledAgentConfigBaseFields = {
+  approval: z.boolean().optional(),
   build: compiledAgentBuildDefinitionSchema.optional(),
   compaction: compiledAgentCompactionDefinitionSchema.optional(),
   defaultTools: z.boolean().optional(),
@@ -1197,6 +1198,7 @@ export function createCompiledAgentNodeManifest(
 
 function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): CompiledAgentDefinition {
   const base = {
+    approval: config.approval,
     build:
       config.build === undefined
         ? undefined

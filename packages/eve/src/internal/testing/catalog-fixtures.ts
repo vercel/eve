@@ -16,6 +16,7 @@ import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { buildStepCatalog } from "#execution/catalog/step-catalog.js";
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { ApprovalPolicy } from "#approval/definition.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
@@ -106,6 +107,8 @@ export interface CatalogSkillSource {
 /** The parts of a session bundle the catalog reads: authored skills and dynamic subagent resolvers. */
 export function catalogBundle(
   input: {
+    /** The agent's `approval` from `agent.ts`. */
+    readonly approval?: ApprovalPolicy;
     /** The connections the agent declares. */
     readonly connections?: readonly ResolvedConnectionDefinition[];
     readonly dynamicSubagents?: readonly string[];
@@ -115,12 +118,12 @@ export function catalogBundle(
   return {
     adapterRegistry: undefined as never,
     compiledArtifactsSource: undefined as never,
-    graph: undefined as never,
+    graph: { nodesByNodeId: new Map() } as never,
     modelMetadata: undefined as never,
     moduleMap: undefined as never,
     nodeId: undefined,
     resolvedAgent: {
-      config: { name: "test-agent" },
+      config: { approval: input.approval, name: "test-agent" },
       connections: input.connections ?? [],
       dynamicSkillResolvers: [],
       dynamicToolResolvers: [],
@@ -256,6 +259,7 @@ export function connectionTool(
  */
 export function catalogContext(
   input: {
+    readonly approval?: ApprovalPolicy;
     readonly connections?: readonly FakeConnection[];
     readonly dynamicSubagents?: readonly string[];
     /** The catalog tools earlier steps of the session offered. */
@@ -277,6 +281,7 @@ export function catalogContext(
   ctx.set(
     BundleKey,
     catalogBundle({
+      approval: input.approval,
       connections: input.connections?.map((connection) => connection.definition),
       dynamicSubagents: input.dynamicSubagents,
       skills: input.skills,
