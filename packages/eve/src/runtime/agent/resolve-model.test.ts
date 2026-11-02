@@ -108,6 +108,7 @@ describe("dynamic runtime model resolution", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   it("does not resolve a source-free eve mock model without the test seam", async () => {
@@ -116,6 +117,19 @@ describe("dynamic runtime model resolution", () => {
     const model = await resolveRuntimeModelReference({ id: "eve-mock/dynamic-subagent" });
 
     expect(model).toBe("eve-mock/dynamic-subagent");
+  });
+
+  it.fails("leaves a model id to a custom AI SDK default provider under eve dev", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv("EVE_DEV_CONTROL_URL", "http://127.0.0.1:1");
+    vi.stubEnv("EVE_DEV_WORKFLOW_TRANSPORT_SECRET", "secret");
+    vi.stubEnv("EVE_MODEL_CONNECTION", undefined);
+    vi.stubGlobal("AI_SDK_DEFAULT_PROVIDER", { languageModel: vi.fn() });
+
+    const model = await resolveRuntimeModelReference({ id: "openai/gpt-5.6-luna" });
+
+    expect(model).toBe("openai/gpt-5.6-luna");
   });
 
   it("resolves a source-free eve mock model through the explicit test seam", async () => {
