@@ -95,7 +95,7 @@ function respondToBashJob(message: string, request: MockModelRequest): MockModel
     );
   if (outputs.length === 0) {
     const command = /by running: `([^`]+)`/u.exec(message)?.[1] ?? "";
-    return { toolCalls: [{ input: { command }, name: "bash" }] };
+    return { toolCalls: [{ input: { command, timeout: 5 }, name: "bash" }] };
   }
   const { outputDirectory, pid } = outputs[0] ?? {};
   if (typeof outputDirectory !== "string" || typeof pid !== "number") {

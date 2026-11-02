@@ -23,6 +23,7 @@ import type {
   ResolvedInstructionsDefinition,
 } from "#runtime/types.js";
 import type { AgentToolExposure, SessionUsageLimit } from "#shared/agent-definition.js";
+import type { ApprovalPolicy } from "#approval/definition.js";
 
 /**
  * Input for resolving one compiled authored agent into a runtime-owned model.
@@ -137,31 +138,54 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
         ...resolvedAgent,
         config: createResolvedAgentConfig(
           input.manifest,
-          await loadSessionUsageLimit(input.manifest, input.moduleMap, input.nodeId),
+          await loadAgentConfigFunctions(input.manifest, input.moduleMap, input.nodeId),
         ),
       }
     : resolvedAgent;
 }
 
-/** Loads the authored `limits.sessionUsage` function, which the manifest can only mark. */
-async function loadSessionUsageLimit(
+interface AgentConfigFunctions {
+  readonly approval?: ApprovalPolicy;
+  readonly sessionUsage?: SessionUsageLimit | false;
+}
+
+/** Loads the authored functions the manifest can only mark: `limits.sessionUsage` and `approval`. */
+async function loadAgentConfigFunctions(
   manifest: CompiledAgentNodeManifest,
   moduleMap: CompiledModuleMap,
   nodeId: string | undefined,
-): Promise<SessionUsageLimit | false | undefined> {
-  if (manifest.config.limits?.sessionUsage === false) return false;
+): Promise<AgentConfigFunctions> {
+  const sessionUsage = manifest.config.limits?.sessionUsage;
+  const approval = manifest.config.approval === true;
   const source = manifest.config.source;
-  if (manifest.config.limits?.sessionUsage !== true || source === undefined) return undefined;
+  if (approval && source === undefined) {
+    throw new Error(
+      'The compiled agent marks an "approval" policy but has no agent config module.',
+    );
+  }
+  if ((sessionUsage !== true && !approval) || source === undefined) {
+    return sessionUsage === false ? { sessionUsage: false } : {};
+  }
   const definition = await loadResolvedModuleExport({
     definition: source,
     kindLabel: "agent config",
     moduleMap,
     nodeId,
   });
-  return normalizeAgentDefinition(
+  const authored = normalizeAgentDefinition(
     definition,
     `Expected the authored agent config export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
-  ).limits?.sessionUsage;
+  );
+  // A gate the manifest promises but the module no longer has would fail open; refuse to start.
+  if (approval && authored.approval === undefined) {
+    throw new Error(
+      `The compiled agent marks an "approval" policy, but "${source.logicalPath}" no longer exports one. Rebuild the agent.`,
+    );
+  }
+  return {
+    ...(approval && { approval: authored.approval }),
+    sessionUsage: sessionUsage === false ? false : authored.limits?.sessionUsage,
+  };
 }
 
 function requireBindingOwner(
@@ -204,9 +228,10 @@ function requireCompiledSourceOwner(
 
 function createResolvedAgentConfig(
   manifest: CompiledAgentNodeManifest,
-  sessionUsage: SessionUsageLimit | false | undefined,
+  { approval, sessionUsage }: AgentConfigFunctions,
 ): NonNullable<ResolvedAgent["config"]> {
   const config: {
+    approval?: ApprovalPolicy;
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
     defaultTools?: boolean;
     description?: string;
@@ -222,6 +247,9 @@ function createResolvedAgentConfig(
 
   if (manifest.config.defaultTools !== undefined) {
     config.defaultTools = manifest.config.defaultTools;
+  }
+  if (approval !== undefined) {
+    config.approval = approval;
   }
   if (manifest.config.description !== undefined) {
     config.description = manifest.config.description;

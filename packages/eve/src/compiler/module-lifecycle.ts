@@ -59,6 +59,8 @@ export function markConfigRuntimeEntries(
     config.compaction?.model?.source,
     // The runtime loads `limits.sessionUsage` from the agent config module.
     config.limits?.sessionUsage === true ? config.source : undefined,
+    // And `approval`.
+    config.approval === true ? config.source : undefined,
   ];
   for (const source of sources) {
     if (source !== undefined) evaluation.requireRuntimeEntry(source.sourceId);

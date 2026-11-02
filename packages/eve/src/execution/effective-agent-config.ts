@@ -4,6 +4,8 @@ import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { AgentLimitsDefinition, SessionUsageLimit } from "#shared/agent-definition.js";
+import type { ApprovalPolicy } from "#approval/definition.js";
+import { strictestApproval } from "#approval/agent.js";
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
@@ -35,6 +37,22 @@ export function resolveSessionUsageLimit(
     bundle.resolvedAgent.config?.limits?.sessionUsage ??
     bundle.graph.nodesByNodeId.get(ROOT_RUNTIME_AGENT_NODE_ID)?.agent.config?.limits?.sessionUsage;
   return limit === false ? () => false : limit;
+}
+
+/**
+ * The session's agent-wide `approval`. The root agent's always applies, including in subagent
+ * sessions; a subagent's own can only add to it, so no subagent (an extension's included) can
+ * loosen the root's gates.
+ */
+export function resolveAgentApproval(
+  bundle: Pick<CompiledBundle, "graph" | "nodeId" | "resolvedAgent">,
+): ApprovalPolicy | undefined {
+  const root = bundle.graph.nodesByNodeId.get(ROOT_RUNTIME_AGENT_NODE_ID)?.agent.config?.approval;
+  // The root session's own policy is the root's, so it must not run twice.
+  if (bundle.nodeId === undefined || bundle.nodeId === ROOT_RUNTIME_AGENT_NODE_ID) return root;
+  const own = bundle.resolvedAgent.config?.approval;
+  if (own === undefined) return root;
+  return root === undefined ? own : strictestApproval([root, own]);
 }
 
 export function resolveEffectiveAgentRuntimeFromConfig(

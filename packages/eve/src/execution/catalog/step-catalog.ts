@@ -8,6 +8,9 @@
  */
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import type { ApprovalPolicy } from "#approval/definition.js";
+import { withAgentApprovalOnEntries } from "#approval/agent.js";
+import { resolveAgentApproval } from "#execution/effective-agent-config.js";
 import { connectionToolName } from "#connections/ownership.js";
 import { dynamicConnectionVersions } from "#reactions/kinds/connection.js";
 import { buildDynamicSubagentTools } from "#reactions/kinds/subagent.js";
@@ -148,8 +151,12 @@ export function buildStepCatalog(input: {
     [...input.agentTools.values()].some(
       (definition) => visible(definition) && startsTasks(definition),
     );
+  const agentApproval = bundle === undefined ? undefined : resolveAgentApproval(bundle);
   const ownEntries = stepEntries(input, visible);
-  const entries = offersTasks ? withTaskTools(ownEntries) : ownEntries;
+  const entries = withAgentApprovalOnEntries(
+    offersTasks ? withTaskTools(ownEntries) : ownEntries,
+    agentApproval,
+  );
   const direct = new Map<string, HarnessToolDefinition>();
   const deferred = new Map<string, HarnessToolDefinition>();
   for (const [name, definition] of entries) {
@@ -179,7 +186,7 @@ export function buildStepCatalog(input: {
     advertised.get(name) ??
     (registry === undefined
       ? undefined
-      : connectionEntryNamed(name, registry, connections, connectionVersions));
+      : connectionEntryNamed(name, registry, connections, connectionVersions, agentApproval));
   const describe = (definition: HarnessToolDefinition) => describeEntry(definition, input.endsTurn);
   const catalog: StepCatalog = {
     advertised,
@@ -295,17 +302,21 @@ function connectionEntryNamed(
   registry: ConnectionRegistry,
   connections: readonly ResolvedConnectionDefinition[],
   versions: ReadonlyMap<string, string>,
+  agentApproval: ApprovalPolicy | undefined,
 ): HarnessToolDefinition | undefined {
   for (const connection of connections) {
     const version = versions.get(connection.connectionName);
     const versioned = (entry: HarnessToolDefinition) =>
       version === undefined ? entry : { ...entry, version };
     if (name === connection.connectionName) {
+      // Signing in acts on nothing remote, so the agent's policy doesn't gate it.
       return versioned(connectionSignInEntry(registry, connection));
     }
     const prefix = connectionToolName(connection.connectionName, "");
     if (name.length > prefix.length && name.startsWith(prefix)) {
-      return versioned(connectionEntry(registry, connection, name.slice(prefix.length)));
+      return versioned(
+        connectionEntry(registry, connection, name.slice(prefix.length), agentApproval),
+      );
     }
   }
   return undefined;

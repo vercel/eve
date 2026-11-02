@@ -120,10 +120,10 @@ export const askQuestion: WorkflowExecuteToolDefinition<AskQuestionInput, AskQue
   frameworkTool(
     defineWorkflowTool({
       description: ASK_QUESTION_TOOL_DESCRIPTION,
-      execute: executeAskQuestionTool,
+      execute: interactionOnly(executeAskQuestionTool),
       inputSchema: ASK_QUESTION_INPUT_SCHEMA,
       outputSchema: ASK_QUESTION_OUTPUT_SCHEMA,
       toModelOutput: toInterruptibleModelOutput,
     }),
   );
-import { frameworkTool } from "./framework-tool.js";
+import { frameworkTool, interactionOnly } from "./framework-tool.js";

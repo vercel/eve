@@ -61,6 +61,11 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
       `${message} The "limits.sessionUsage" field cannot be selected at runtime; the root agent's \`sessionUsage\` applies.`,
     );
   }
+  if (definition.approval !== undefined) {
+    throw new Error(
+      `${message} The "approval" field cannot be selected at runtime; the root agent's \`approval\` applies.`,
+    );
+  }
 
   const config: {
     compaction?: DynamicSubagentAgentConfig["compaction"];

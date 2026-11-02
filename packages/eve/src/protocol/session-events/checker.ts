@@ -256,9 +256,24 @@ export function createStreamChecker(
         return undefined;
       case "complete": {
         if (row !== undefined) fail("one-terminal", `${family} "${id}" completes twice.`);
-        const run = refOf({ runId: String(data.runId) })!;
-        if (rowOf(view, run.family, run.id) !== undefined && !isOpen(view, run))
-          fail("closure", `${family} "${id}" completes after its run settled.`);
+        // A part no run wrote belongs to the turn its scope names.
+        const owner =
+          data.runId !== undefined
+            ? refOf({ runId: String(data.runId) })
+            : refOf(fact.scope?.turnId === undefined ? undefined : { turnId: fact.scope.turnId });
+        if (owner === undefined) {
+          fail("schema", `${family} "${id}" names no run, and its scope names no turn.`);
+          return undefined;
+        }
+        // The reference check above covers `data.runId`, but not a turn named only in scope.
+        if (rowOf(view, owner.family, owner.id) === undefined) {
+          if (data.runId === undefined)
+            fail(
+              "introduce-before-reference",
+              `${family} "${id}" names turn "${owner.id}" before it was introduced.`,
+            );
+        } else if (!isOpen(view, owner))
+          fail("closure", `${family} "${id}" completes after its ${owner.family} settled.`);
         return undefined;
       }
       case "updates":

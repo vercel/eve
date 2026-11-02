@@ -6,6 +6,7 @@ import { requestAuthorization } from "#harness/authorization.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ApprovalPolicy } from "#approval/definition.js";
+import { withAgentApprovalOnEntries } from "#approval/agent.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import { invokeTool, type InvokeToolRuntime } from "#execution/invoke-tool.js";
@@ -319,6 +320,36 @@ describe("invokeTool", () => {
       expect(await invokeTool(runtime, "deploy", {}, { auth: alice })).toMatchObject(expected);
       expect(execute).toHaveBeenCalledTimes(ran ? 1 : 0);
     }
+  });
+
+  it("applies the agent-wide policy the invoke route wraps its tools with", async () => {
+    const execute = vi.fn(() => "ran");
+    const runtime = runtimeWith([
+      tool("deploy", execute),
+      tool("release", execute, { approval: () => "user-approval" }),
+      tool("note", execute),
+    ]);
+    const agent: ApprovalPolicy = ({ toolName }) =>
+      toolName === "deploy"
+        ? { reason: "Deploys are blocked.", type: "denied" }
+        : toolName === "release"
+          ? "approved"
+          : undefined;
+    const governed = { ...runtime, tools: withAgentApprovalOnEntries(runtime.tools, agent) };
+
+    expect(await invokeTool(governed, "deploy", {}, { auth: alice })).toMatchObject({
+      outcome: "rejected",
+      reason: "Deploys are blocked.",
+    });
+    // The agent's "approved" can't loosen the tool's own ask.
+    expect(await invokeTool(governed, "release", {}, { auth: alice })).toMatchObject({
+      outcome: "rejected",
+      reason: "approval-required",
+    });
+    expect(await invokeTool(governed, "note", {}, { auth: alice })).toMatchObject({
+      outcome: "completed",
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it("refuses unknown, framework, and badly typed calls before running anything", async () => {

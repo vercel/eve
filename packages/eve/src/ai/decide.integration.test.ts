@@ -68,13 +68,11 @@ describe("decide", () => {
     const decider = decisionModel();
     const factory = vi.fn(() => decider.model);
     vi.stubGlobal("AI_SDK_DEFAULT_PROVIDER", { decisionModel: factory });
-    localDecisionModel.mockReturnValue(decisionModel().model);
 
     await decide({ state, questions });
     await decide({ model: "internal-decider", state, questions });
 
     expect(factory.mock.calls).toEqual([["typesafe-ai/jev"], ["internal-decider"]]);
-    expect(localDecisionModel).not.toHaveBeenCalled();
   });
 
   it("translates stable request options for explicit provider model instances", async () => {

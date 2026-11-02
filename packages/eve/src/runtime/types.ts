@@ -10,7 +10,7 @@ import type { ChannelRouteMethod, RouteContext } from "#public/definitions/chann
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
-import type { Approval } from "#approval/definition.js";
+import type { ApprovalPolicy, Approval } from "#approval/definition.js";
 import type { ToolModelOutput } from "#tools/definition.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import type {
@@ -337,8 +337,9 @@ export type ResolvedDynamicSubagentDefinition = ResolvedReactionSource;
  */
 type ResolvedAgentDefinitionBase = Omit<
   InternalAgentDefinition,
-  "build" | "limits" | "model" | "source"
+  "approval" | "build" | "limits" | "model" | "source"
 > & {
+  approval?: ApprovalPolicy;
   limits?: AgentLimitsDefinition;
   source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
 };

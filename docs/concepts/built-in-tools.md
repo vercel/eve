@@ -36,7 +36,7 @@ eve add tool/bash
 export { default } from "eve/tools/bash";
 ```
 
-`bash` waits up to 30 seconds for a command. A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A command that is still running keeps running in the sandbox as its own process group and returns `status: "running"` with:
+`bash` waits up to 30 seconds for a command. The model can pass `timeout` to wait longer for a build or test suite, up to 120 seconds. Values above 120 wait 120, and values below 1 wait 1. The cap leaves room for the model call within the Vercel Functions time limit. A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A command that is still running keeps running in the sandbox as its own process group and returns `status: "running"` with:
 
 - `pid`: the process group id
 - `outputDirectory`: a directory under `/tmp/.eve/jobs/`
@@ -51,7 +51,7 @@ cat /tmp/.eve/jobs/3f9a1c2e/exit      # exit code, once the command has finished
 kill -- -4312                         # stop the command's whole process group
 ```
 
-The command runs across turns until it exits, the model stops it, or the sandbox stops, and its output files last until the sandbox stops. Cancelling a turn stops a command that hasn't yet returned `running`. The `just-bash` provider has no background processes, so it runs every command to completion.
+The command runs across turns until it exits, the model stops it, or the sandbox stops, and its output files last until the sandbox stops. Cancelling a turn stops a command that hasn't yet returned `running`. A message that arrives while `bash` waits reaches the model after the call returns, so a longer `timeout` can delay it. The `just-bash` provider has no background processes, so it runs every command to completion.
 
 Override its description, approval policy, or executor by wrapping the exported definition:
 
@@ -68,6 +68,8 @@ export default defineTool({
   },
 });
 ```
+
+A wrapper that spreads `bash` keeps its `timeout` input. If the wrapper supplies its own `execute` or input schema, forward `timeout` to `bash.execute` or remove it from the schema.
 
 Disable only `bash`:
 
