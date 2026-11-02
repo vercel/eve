@@ -366,8 +366,10 @@ describe("A2A channel", () => {
   it(
     "streams a task to completion, and to input-required then through a subscription",
     async () => {
+      // A slow reply, so the first snapshot always precedes completion: a reply that finishes
+      // first streams as one terminal task instead, which the spec also allows.
       const quick = await streamEvents("alice", "SendStreamingMessage", {
-        message: userMessage("s-1", "Say hi"),
+        message: userMessage("s-1", "A2A-SLOW stream"),
       });
       expect(Object.keys(quick[0] ?? {})).toEqual(["task"]);
       const last = quick.at(-1);
@@ -375,7 +377,7 @@ describe("A2A channel", () => {
       expect(quick).toContainEqual({
         artifactUpdate: expect.objectContaining({
           artifact: expect.objectContaining({
-            parts: [expect.objectContaining({ text: "A2A-QUICK-REPLY" })],
+            parts: [expect.objectContaining({ text: "A2A-SLOW-DONE" })],
           }),
           lastChunk: true,
         }),
