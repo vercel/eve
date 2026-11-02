@@ -57,6 +57,11 @@ export async function remoteAgentCredentials(input: {
         `"${label}" read ctx.messages() while eve rebuilt a remote agent's credentials for its child, where the conversation as it was isn't available. Decide from the conversation inside a memo, so the child keeps the decision.`,
       );
     },
+    getSandbox: () => {
+      throw new Error(
+        `"${label}" called ctx.getSandbox() while eve rebuilt a remote agent's credentials for its child, where the parent's sandbox isn't available. Read the sandbox inside a memo, so the child keeps what it read.`,
+      );
+    },
     model: { id: binding.model ?? "" },
   };
   let value: unknown;

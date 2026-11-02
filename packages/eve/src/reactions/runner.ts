@@ -1,5 +1,6 @@
 import type { ModelMessage } from "ai";
 
+import { sandboxOf } from "#context/build-callback-context.js";
 import type { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
@@ -353,6 +354,14 @@ function internalContext(
       ...frame,
       abortSignal: run.abortSignal,
       ctx,
+      getSandbox:
+        reaction.kind === "model"
+          ? () => {
+              throw new Error(
+                `"${reaction.label}" called ctx.getSandbox() while choosing the model. Choose the model from the session, and read the sandbox in the definitions that use it.`,
+              );
+            }
+          : sandboxOf(ctx),
       history,
       memo: run.memo,
       messages: async () => requireHistory({ history }, reaction.label),
