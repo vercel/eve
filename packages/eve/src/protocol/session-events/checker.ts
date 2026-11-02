@@ -265,7 +265,14 @@ export function createStreamChecker(
           fail("schema", `${family} "${id}" names no run, and its scope names no turn.`);
           return undefined;
         }
-        if (rowOf(view, owner.family, owner.id) !== undefined && !isOpen(view, owner))
+        // The reference check above covers `data.runId`, but not a turn named only in scope.
+        if (rowOf(view, owner.family, owner.id) === undefined) {
+          if (data.runId === undefined)
+            fail(
+              "introduce-before-reference",
+              `${family} "${id}" names turn "${owner.id}" before it was introduced.`,
+            );
+        } else if (!isOpen(view, owner))
           fail("closure", `${family} "${id}" completes after its ${owner.family} settled.`);
         return undefined;
       }

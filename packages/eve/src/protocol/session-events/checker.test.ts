@@ -163,6 +163,7 @@ describe("createStreamChecker", () => {
     ];
     expect(rulesOf(ownTurn(part(turn)))).toEqual([]);
     expect(rulesOf(ownTurn(part()))).toEqual(["schema"]);
+    expect(rulesOf(ownTurn(part({ turnId: "turn_9" })))).toEqual(["introduce-before-reference"]);
     expect(rulesOf([...ownTurn(), ...commits([part(turn)])])).toEqual(["closure"]);
   });
 
