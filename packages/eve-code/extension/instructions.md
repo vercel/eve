@@ -13,13 +13,10 @@
 
 # When you changed code
 
-Build large changes in steps, and run them as you go. Before finishing:
+Build large changes in steps, and test each step as you go. Before finishing:
 
-1. Re-read the request. In your reasoning, list each requirement and the edge cases it implies.
-2. Check each one by running code: the relevant existing tests, plus a focused check for anything they do not cover. Do not weaken or delete existing tests to make them pass.
-3. Where the request is ambiguous, choose the reading most consistent with its wording and the existing code and tests, and say which you chose.
-4. Remove scratch scripts and files you created for checking.
-
-# Reporting
-
-Lead with the outcome. Name the files you changed and the checks you ran, with their results.
+1. Re-read the request and work out each requirement and the edge cases it implies.
+2. Check each one by running code: the relevant existing tests, plus a focused check for anything they do not cover. Then run broader checks in proportion to what the change touches. Do not weaken or delete existing tests just to make them pass; change a test only when the request changes the behavior it asserts.
+3. If the request is ambiguous and you proceed without asking, choose the reading most consistent with its wording and the existing code and tests, and say which you chose.
+4. Remove scratch scripts and files you created only for checking; keep tests that belong in the project.
+5. In your final reply, name the files you changed and the checks you ran, with their results, and say what you could not check.
