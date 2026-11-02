@@ -147,7 +147,7 @@ An ignored reply never starts a turn. If `decide` throws, eve drops the reply; c
 
 ## Handle message edits
 
-When someone edits a DM, a message that mentions the agent, or a code channel message in a thread the agent already serves, eve sends the edit to that session. The model sees a diff of the changed lines and the full edited message. By default, the edit joins a running turn. If the agent already replied, the edit starts a new turn, which shows no thread status until its first tool call finishes.
+When someone edits a DM, a code channel message, or a message that mentions the agent before or after the edit, in a thread the agent already serves, eve sends the edit to that session. The model sees a diff of the changed lines and the full edited message. By default, the edit joins a running turn. If the agent already replied, the edit starts a new turn, which shows no thread status until its first tool call finishes.
 
 Add the [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool so the agent can stay quiet when an edit changes nothing, and say when to use it in your instructions:
 
@@ -155,7 +155,7 @@ Add the [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool so the agent c
 eve add tool/no_reply
 ```
 
-To send edits to replies without a mention too, return `{ auth }` from `onMessageEdited`, or `null` to drop the edit:
+If you set `onAppMention`, `onDirectMessage`, or `onMessage`, eve drops edits unless you also set `onMessageEdited`, so an edit can't skip your checks. Return `{ auth }` from `onMessageEdited` to send an edit, or `null` to drop it. This one sends edits to replies without a mention too:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -169,7 +169,7 @@ export default slackChannel({
 });
 ```
 
-Slack sends edits only to apps subscribed to the `message.channels`, `message.groups`, `message.im`, and `message.mpim` events, with the matching `*:history` scopes. See [Message edits](/docs/channels/slack/reference#message-edits) for the model format and subscriptions.
+Slack sends edits only to apps subscribed to the `message.channels`, `message.groups`, `message.im`, and `message.mpim` events, with the matching `*:history` scopes. With Vercel Connect, add `message.mpim` and `mpim:history` to the connector for group DMs; its defaults include the rest. See [Message edits](/docs/channels/slack/reference#message-edits) for the model format.
 
 ## Load prior thread messages
 

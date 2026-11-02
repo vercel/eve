@@ -555,7 +555,11 @@ export interface SlackInboundMessageContext extends SlackContext, SlackSessionOp
   isDMOrPrivateChannel(): Promise<boolean>;
   /** Returns whether this message belongs to a thread with an active eve session. */
   isSubscribed(): Promise<boolean>;
-  /** Returns whether the inbound event explicitly mentions this bot. */
+  /**
+   * Returns whether the inbound event explicitly mentions this bot. For an edit,
+   * returns whether the message mentioned it before or after the edit, so an
+   * edit that removes a mention still reaches a hook that answers mentions.
+   */
   isBotMentioned(): boolean;
   /**
    * Opens a Slack code channel from this message and returns session
@@ -894,8 +898,11 @@ export interface SlackChannelConfig {
    * edits.
    *
    * Defaults to the author's workspace-scoped auth for edits to direct
-   * messages, messages that mention the bot, and code channel messages, and
-   * drops other edits. Thrown errors are caught and logged and the edit is
+   * messages, code channel messages, and messages that mention the bot before
+   * or after the edit, and drops other edits. When `onAppMention`,
+   * `onDirectMessage`, or `onMessage` is authored, that default would skip
+   * their checks, so edits go to `onEvent` or are dropped unless this hook is
+   * authored too. Thrown errors are caught and logged and the edit is
    * dropped. Requires the `message.channels`, `message.groups`, `message.im`,
    * and `message.mpim` events, which the generated app manifest includes.
    */
@@ -1581,15 +1588,20 @@ async function handleEventPost(input: {
 
   const edit = parseMessageEditEvent(envelope);
   if (edit !== null && !isSelfAuthoredSlackMessage({ appId, botUserId }, edit.message)) {
-    const onMessageEdited = config.onMessageEdited ?? defaultOnMessageEdited;
-    const dispatchEdit = () =>
+    const dispatchEdit = (handler: NonNullable<SlackChannelConfig["onMessageEdited"]>) => () =>
       dispatchSlackMessage({
-        ...dispatchInput(slackEditKind(edit.message, botUserId), edit.message),
+        ...dispatchInput(slackEditKind(edit, botUserId), edit.message),
         edit,
-        handler: (ctx, message) => onMessageEdited(ctx, { ...edit, message }),
+        handler: (ctx, message) => handler(ctx, { ...edit, message }),
       });
-    if (config.onMessageEdited !== undefined) dispatch = dispatchEdit;
-    else builtinDefault = dispatchEdit;
+    // An authored message hook decides who may reach the agent, and the default edit hook would
+    // skip it, so edits then need their own `onMessageEdited`.
+    const authorsMessages =
+      config.onAppMention !== undefined ||
+      config.onDirectMessage !== undefined ||
+      config.onMessage !== undefined;
+    if (config.onMessageEdited !== undefined) dispatch = dispatchEdit(config.onMessageEdited);
+    else if (!authorsMessages) builtinDefault = dispatchEdit(defaultOnMessageEdited);
   }
 
   const onMessage = config.onMessage;
@@ -1690,11 +1702,20 @@ function isSelfAuthoredSlackMessage(
 
 type SlackMessageKind = "app_mention" | "channel_message" | "direct_message";
 
-/** Slack sends no `app_mention` for an edit, so an edit that mentions the bot counts as one. */
-function slackEditKind(message: SlackMessage, botUserId: string | undefined): SlackMessageKind {
-  if (message.raw.channel_type === "im") return "direct_message";
-  if (botUserId !== undefined && message.text.includes(`<@${botUserId}`)) return "app_mention";
+/**
+ * Slack sends no `app_mention` for an edit, so an edit counts as one when the message mentions the
+ * bot before or after it: an edit that removes the mention tells the agent it isn't wanted.
+ */
+function slackEditKind(edit: SlackMessageEdit, botUserId: string | undefined): SlackMessageKind {
+  if (edit.message.raw.channel_type === "im") return "direct_message";
+  if (mentionsBot(edit.message.text, botUserId) || mentionsBot(edit.previousText, botUserId)) {
+    return "app_mention";
+  }
   return "channel_message";
+}
+
+function mentionsBot(text: string | undefined, botUserId: string | undefined): boolean {
+  return botUserId !== undefined && text !== undefined && text.includes(`<@${botUserId}`);
 }
 
 /** Limits a message hook to code channels; `otherwise` serves a message posted elsewhere. */
@@ -1841,9 +1862,12 @@ async function dispatchSlackMessage(input: {
       resolveSession: input.resolveSession,
     });
   };
-  const isBotMentioned =
-    input.kind === "app_mention" ||
-    (input.botUserId !== undefined && input.message.text.includes(`<@${input.botUserId}`));
+  // The model reads whether the message mentions the bot now; a hook deciding on an edit also
+  // sees a mention the edit removed.
+  const isMentionedNow =
+    (input.kind === "app_mention" && edit === undefined) ||
+    mentionsBot(input.message.text, input.botUserId);
+  const isBotMentioned = isMentionedNow || mentionsBot(edit?.previousText, input.botUserId);
   const ctx: SlackInboundMessageContext = {
     ...sessionOperations,
     isBotMentioned: () => isBotMentioned,
@@ -1892,7 +1916,7 @@ async function dispatchSlackMessage(input: {
     credentials: input.credentials,
     kind: input.kind,
     isPrivateConversation,
-    isMentioned: isBotMentioned,
+    isMentioned: isMentionedNow,
     message: await resolveMessage(),
     edit,
     resolvesTypedInput: input.resolvesTypedInput,

@@ -594,6 +594,47 @@ describe("slackChannel message edits", () => {
     expect(send).toHaveBeenCalledWith(`C01:${rootTs}`, expect.anything());
   });
 
+  it("sends an edit that removes the bot mention, which the model sees as unmentioned", async () => {
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" } }),
+      edited({ previousText: "<@U_BOT> can you review?", text: "<@U_ALICE> can you review?" }),
+      send,
+    );
+
+    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    expect("message" in input && input.message).toEqual(
+      expect.stringContaining("<bot>\nid: U_BOT\nmentioned: false\n</bot>"),
+    );
+  });
+
+  it("drops an edit an authored mention hook would have checked, unless onEvent takes it", async () => {
+    const onAppMention = vi.fn(() => null);
+    const send = vi.fn();
+    const request = () =>
+      edited({ previousText: "<@U_BOT> hi", text: "<@U_BOT> please deploy production" });
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" }, onAppMention }),
+      request(),
+      send,
+    );
+    const onEvent = vi.fn();
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" }, onAppMention, onEvent }),
+      request(),
+      send,
+    );
+
+    expect(send).not.toHaveBeenCalled();
+    expect(onAppMention).not.toHaveBeenCalled();
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ subtype: "message_changed" }),
+    );
+  });
+
   it("leaves an edit to an authored onEvent", async () => {
     const onEvent = vi.fn();
     const send = vi.fn();

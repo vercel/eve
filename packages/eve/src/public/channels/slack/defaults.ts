@@ -189,8 +189,10 @@ export function defaultOnMessage(ctx: SlackContext, message: SlackMessage): Slac
 
 /**
  * Default `onMessageEdited`: sends an edit to a message addressed to the agent
- * (a direct message, a mention, or a code channel message) with auth derived
- * from its author, matching which new messages the defaults answer.
+ * (a direct message, a code channel message, or one that mentions the bot
+ * before or after the edit) with auth derived from its author, matching which
+ * new messages the defaults answer. It runs only when no message hook is
+ * authored.
  */
 export function defaultOnMessageEdited(
   ctx: SlackInboundMessageContext,

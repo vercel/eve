@@ -63,14 +63,14 @@ A message hook decides whether a Slack message starts a turn:
 - Add `history` to bring in prior conversation; see [Start from prior history](/docs/channels/eve#start-from-prior-history).
 - Add `title` to set the run title. Public conversations otherwise use the message text; DMs and private channels always use `Private message`.
 
-| Incoming event                    | Handler order                                                       |
-| --------------------------------- | ------------------------------------------------------------------- |
-| App mention                       | `onAppMention` → `onMessage` → `onEvent` → built-in mention default |
-| Direct message                    | `onDirectMessage` → `onMessage` → `onEvent` → built-in DM default   |
-| Un-mentioned code channel message | `onMessage` → `onAppMention` → `onEvent` → built-in default         |
-| Other Slack message               | `onMessage` → `onEvent` → ignore                                    |
-| Edited message                    | `onMessageEdited` → `onEvent` → built-in edit default               |
-| Other Events API event            | `onEvent` → ignore                                                  |
+| Incoming event                    | Handler order                                                                           |
+| --------------------------------- | --------------------------------------------------------------------------------------- |
+| App mention                       | `onAppMention` → `onMessage` → `onEvent` → built-in mention default                     |
+| Direct message                    | `onDirectMessage` → `onMessage` → `onEvent` → built-in DM default                       |
+| Un-mentioned code channel message | `onMessage` → `onAppMention` → `onEvent` → built-in default                             |
+| Other Slack message               | `onMessage` → `onEvent` → ignore                                                        |
+| Edited message                    | `onMessageEdited` → `onEvent` → built-in edit default, only without other message hooks |
+| Other Events API event            | `onEvent` → ignore                                                                      |
 
 Only the first defined handler runs. A hook that returns `null` drops the message instead of passing it down the table.
 
@@ -139,7 +139,11 @@ When a person edits one of their messages in a thread that already has a session
 - The edit adds no thread context or files, and doesn't answer an open approval or question.
 - eve ignores edits by bots and apps, link previews added to a message, and edits in threads without a session.
 
-By default, eve sends edits to DMs, messages that mention the agent, and code channel messages, and drops other edits. `onMessageEdited(ctx, edit)` replaces that default. Return `{ auth }` to send the edit, or `null` to drop it. `edit.message` is the edited message at its original `ts`, `edit.previousText` is the text before the edit, and `edit.editedTs` is when the edit happened. This hook also sends edits to replies without a mention, to match an [`onMessage` hook](#continue-conversations-without-repeated-mentions) that answers them:
+By default, eve sends edits to DMs, code channel messages, and messages that mention the agent before or after the edit, and drops other edits. An edit that removes the mention still reaches the agent, so it can tell it's no longer wanted.
+
+The default applies only when you set no other message hook. With `onAppMention`, `onDirectMessage`, or `onMessage` set, eve sends edits to `onEvent` or drops them, so an edit can't skip the checks in those hooks. Set `onMessageEdited(ctx, edit)` to choose which edits reach the agent. Return `{ auth }` to send the edit, or `null` to drop it. `edit.message` is the edited message at its original `ts`, `edit.previousText` is the text before the edit, and `edit.editedTs` is when the edit happened. For an edit, `ctx.isBotMentioned()` returns whether the message mentioned the agent before or after the edit.
+
+This hook sends every edit in a thread with a session, including replies without a mention, to match an [`onMessage` hook](#continue-conversations-without-repeated-mentions) that answers them. Apply the same checks as your other hooks before returning `{ auth }`:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -183,7 +187,7 @@ Deploy **api** to production
 
 Slack doesn't always include the text before an edit. Then, and for a message too long to compare, `<edit>` has a `diff:` line that says why there is no `<diff>`.
 
-Slack sends edits only through the `message.channels`, `message.groups`, `message.im`, and `message.mpim` events, which need the `channels:history`, `groups:history`, `im:history`, and `mpim:history` scopes. The generated app manifest includes them. If your Slack app lacks them, add them in its settings and reinstall the app.
+Slack sends edits only through the `message.channels`, `message.groups`, `message.im`, and `message.mpim` events, which need the `channels:history`, `groups:history`, `im:history`, and `mpim:history` scopes. The generated app manifest includes them. Vercel Connect's defaults include all of them except `message.mpim` and `mpim:history`; add those to the connector to receive edits in group DMs.
 
 #### Add sender names and emails
 
@@ -608,28 +612,28 @@ Public channels are `public`; DMs, group DMs, and private channels are `private`
 
 `slackChannel(config)` takes these options. All are optional.
 
-| Option            | Default                                                | Description                                                                                                                                      |
-| ----------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `credentials`     | `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET`           | Bot token and inbound verification, from `connectSlackCredentials(...)` or `{ botToken, signingSecret, webhookVerifier }`.                       |
-| `route`           | `/eve/v1/slack`                                        | Path for Events API, interactivity, and slash command requests.                                                                                  |
-| `api`             | Slack's own hosts and the global `fetch`               | `{ apiBaseUrl, fileBaseUrl, fetch }`. See [Point the channel at a different Slack API host](#point-the-channel-at-a-different-slack-api-host).   |
-| `botName`         | The channel name, cut to 35 characters                 | App name in the generated Slack app manifest.                                                                                                    |
-| `turnPolicy`      | `"steer"`                                              | `"steer"` or `"queue"`. See [Control overlapping turns](#control-overlapping-turns).                                                             |
-| `messageContext`  | Off                                                    | `{ users }` adds sender names, and emails with `email: true`, to model context. See [Add sender names and emails](#add-sender-names-and-emails). |
-| `threadContext`   | Off                                                    | Load earlier thread replies. `{}` means `since: "thread-root"`. See [Load prior thread messages](#load-prior-thread-messages).                   |
-| `codeChannels`    | `false`                                                | Serve Slack code channels as one session each. See [Serve Slack code channels](#serve-slack-code-channels).                                      |
-| `uploadPolicy`    | Any media type, up to 25 MB                            | `"disabled"` or `{ maxBytes, allowedMediaTypes }` for inbound files.                                                                             |
-| `approvalChannel` | `"thread"`                                             | `(request, ctx) => "thread" \| "direct-message"`. See [Human-in-the-loop](#human-in-the-loop-hitl).                                              |
-| `renderers`       | eve's default renderer                                 | Renderers that wrap eve's default. See [Customize rendering](#customize-rendering).                                                              |
-| `onAppMention`    | Dispatch with workspace-scoped auth                    | `(ctx, message)` hook for `app_mention` events.                                                                                                  |
-| `onDirectMessage` | Dispatch with workspace-scoped auth                    | `(ctx, message)` hook for DMs.                                                                                                                   |
-| `onMessage`       | None                                                   | `(ctx, message)` hook for other posted messages. See [Message hooks](#message-hooks).                                                            |
-| `onMessageEdited` | Send edits to DMs, mentions, and code channel messages | `(ctx, edit)` hook for message edits. See [Message edits](#message-edits).                                                                       |
-| `onAnswers`       | Accept with `ctx.defaultAuth`                          | `(ctx, submission)` hook that authorizes HITL answers.                                                                                           |
-| `onEvent`         | None                                                   | `(ctx, event)` hook for other Events API callbacks. See [Other Events API callbacks](#other-events-api-callbacks).                               |
-| `onInteraction`   | None                                                   | `(action, ctx)` hook for your own `block_actions` callbacks.                                                                                     |
-| `onShortcut`      | None                                                   | `(shortcut, ctx)` hook for message and global shortcuts.                                                                                         |
-| `onSlashCommand`  | None                                                   | `(command, ctx)` hook for slash commands.                                                                                                        |
+| Option            | Default                                                                             | Description                                                                                                                                      |
+| ----------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `credentials`     | `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET`                                        | Bot token and inbound verification, from `connectSlackCredentials(...)` or `{ botToken, signingSecret, webhookVerifier }`.                       |
+| `route`           | `/eve/v1/slack`                                                                     | Path for Events API, interactivity, and slash command requests.                                                                                  |
+| `api`             | Slack's own hosts and the global `fetch`                                            | `{ apiBaseUrl, fileBaseUrl, fetch }`. See [Point the channel at a different Slack API host](#point-the-channel-at-a-different-slack-api-host).   |
+| `botName`         | The channel name, cut to 35 characters                                              | App name in the generated Slack app manifest.                                                                                                    |
+| `turnPolicy`      | `"steer"`                                                                           | `"steer"` or `"queue"`. See [Control overlapping turns](#control-overlapping-turns).                                                             |
+| `messageContext`  | Off                                                                                 | `{ users }` adds sender names, and emails with `email: true`, to model context. See [Add sender names and emails](#add-sender-names-and-emails). |
+| `threadContext`   | Off                                                                                 | Load earlier thread replies. `{}` means `since: "thread-root"`. See [Load prior thread messages](#load-prior-thread-messages).                   |
+| `codeChannels`    | `false`                                                                             | Serve Slack code channels as one session each. See [Serve Slack code channels](#serve-slack-code-channels).                                      |
+| `uploadPolicy`    | Any media type, up to 25 MB                                                         | `"disabled"` or `{ maxBytes, allowedMediaTypes }` for inbound files.                                                                             |
+| `approvalChannel` | `"thread"`                                                                          | `(request, ctx) => "thread" \| "direct-message"`. See [Human-in-the-loop](#human-in-the-loop-hitl).                                              |
+| `renderers`       | eve's default renderer                                                              | Renderers that wrap eve's default. See [Customize rendering](#customize-rendering).                                                              |
+| `onAppMention`    | Dispatch with workspace-scoped auth                                                 | `(ctx, message)` hook for `app_mention` events.                                                                                                  |
+| `onDirectMessage` | Dispatch with workspace-scoped auth                                                 | `(ctx, message)` hook for DMs.                                                                                                                   |
+| `onMessage`       | None                                                                                | `(ctx, message)` hook for other posted messages. See [Message hooks](#message-hooks).                                                            |
+| `onMessageEdited` | Send edits to DMs, mentions, and code channel messages, without other message hooks | `(ctx, edit)` hook for message edits. See [Message edits](#message-edits).                                                                       |
+| `onAnswers`       | Accept with `ctx.defaultAuth`                                                       | `(ctx, submission)` hook that authorizes HITL answers.                                                                                           |
+| `onEvent`         | None                                                                                | `(ctx, event)` hook for other Events API callbacks. See [Other Events API callbacks](#other-events-api-callbacks).                               |
+| `onInteraction`   | None                                                                                | `(action, ctx)` hook for your own `block_actions` callbacks.                                                                                     |
+| `onShortcut`      | None                                                                                | `(shortcut, ctx)` hook for message and global shortcuts.                                                                                         |
+| `onSlashCommand`  | None                                                                                | `(command, ctx)` hook for slash commands.                                                                                                        |
 
 The channel mounts `POST /eve/v1/slack`. It reads `SLACK_BOT_TOKEN` when `credentials` has no bot token, and `SLACK_SIGNING_SECRET` when it has neither a signing secret nor a `webhookVerifier`.
 

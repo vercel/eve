@@ -2,6 +2,7 @@ import type { SlackThreadMessage } from "#public/channels/slack/api.js";
 import type { SlackInboundContext } from "#public/channels/slack/inbound.js";
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 import type { SlackUserInfo } from "#public/channels/slack/user-info.js";
+import { diffLines } from "#shared/line-diff.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 interface SlackModelMessageInput {
@@ -130,48 +131,17 @@ function inboundModelMessage(
   };
 }
 
-// Bounds the line comparison table, about 1 MB, for messages near Slack's 40,000-character limit.
-const MAX_DIFF_CELLS = 250_000;
-
 /**
- * The lines an edit removed (`-`) and added (`+`), in message order, from a
- * longest-common-subsequence line diff. `<content>` carries the unchanged
- * lines. Returns `undefined` when the comparison would exceed its bound.
+ * The lines an edit removed (`-`) and added (`+`), in message order.
+ * `<content>` carries the unchanged lines. Returns `undefined` when the
+ * message is too long to compare.
  */
 function changedLines(before: string, after: string): string | undefined {
-  const a = before.split("\n");
-  const b = after.split("\n");
-  if ((a.length + 1) * (b.length + 1) > MAX_DIFF_CELLS) return undefined;
-  const width = b.length + 1;
-  // common[i * width + j]: longest common subsequence of a[i..] and b[j..].
-  const common = new Uint32Array((a.length + 1) * width);
-  for (let i = a.length - 1; i >= 0; i -= 1) {
-    for (let j = b.length - 1; j >= 0; j -= 1) {
-      common[i * width + j] =
-        a[i] === b[j]
-          ? common[(i + 1) * width + j + 1]! + 1
-          : Math.max(common[(i + 1) * width + j]!, common[i * width + j + 1]!);
-    }
-  }
-  const lines: string[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < a.length || j < b.length) {
-    if (i < a.length && j < b.length && a[i] === b[j]) {
-      i += 1;
-      j += 1;
-    } else if (
-      j === b.length ||
-      (i < a.length && common[(i + 1) * width + j]! >= common[i * width + j + 1]!)
-    ) {
-      lines.push(`-${a[i]}`);
-      i += 1;
-    } else {
-      lines.push(`+${b[j]}`);
-      j += 1;
-    }
-  }
-  return lines.join("\n");
+  return diffLines(before.split("\n"), after.split("\n"))
+    ?.flatMap(({ kind, text }) =>
+      kind === undefined ? [] : [`${kind === "added" ? "+" : "-"}${text}`],
+    )
+    .join("\n");
 }
 
 function slackModelContent(input: string): string {
