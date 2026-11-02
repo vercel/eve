@@ -149,6 +149,51 @@ describe("createSessionStreamResponse", () => {
     await live.response.body?.cancel();
   });
 
+  // #5782: a followed v26 session reconnects every lease, so re-reading its history from the
+  // first line on each reconnect costs CPU that grows with the session.
+  it.fails("reconnects a followed earlier eve's session without reading its history again", async () => {
+    vi.useFakeTimers();
+    const v26 = (type: string, data: object) => ({
+      data: { sequence: 0, turnId: "turn_0", ...data },
+      meta: { at, deliveryIds: ["delivery_1"] },
+      type,
+    });
+    const stored: unknown[] = [
+      { data: {}, meta: { at }, type: "session.started" },
+      v26("turn.started", {}),
+      v26("message.received", { message: "Alice asks." }),
+    ];
+    const { session, starts } = sessionOf(stored, { open: true });
+    const owned = { ...session, hasRunnableOwner: async () => true, id: "session_v26" } as Session;
+    const followedLease = async (startIndex: number) => {
+      const response = await createSessionStreamResponse(
+        new Request(`https://eve.test/eve/v1/session/session_v26/stream?startIndex=${startIndex}`),
+        owned,
+      );
+      const body = records(response);
+      await vi.advanceTimersByTimeAsync(60_000);
+      return (await body).filter((record) => JSON.stringify(record) !== '{"$eve":"heartbeat"}');
+    };
+
+    expect((await followedLease(0)).at(-1)).toEqual({ $eve: "stream.lease-ended" });
+    stored.push(v26("turn.completed", {}));
+    const reconnected = await followedLease(3);
+
+    // The same line as a read of the whole history converts it.
+    const full = sessionOf(stored);
+    const [, completed] = await records(
+      await createSessionStreamResponse(
+        new Request(
+          "https://eve.test/eve/v1/session/session_full/stream?follow=false&startIndex=3",
+        ),
+        { ...full.session, id: "session_full" } as Session,
+      ),
+    );
+    expect(reconnected).toEqual([completed, { $eve: "stream.lease-ended" }]);
+    // The reconnect reads only the line its reader has not seen.
+    expect(starts.at(-1)).toBe(3);
+  });
+
   it("serves a fresh stream with no lines yet without a version check failing it", async () => {
     const { session } = sessionOf([]);
     const response = await createSessionStreamResponse(
