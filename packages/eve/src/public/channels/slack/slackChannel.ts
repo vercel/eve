@@ -783,7 +783,8 @@ export interface SlackThreadsOptions {
    * shows no thread status until a tool call finishes. Add the `no_reply`
    * tool so the agent can stay out of side conversations. Needs the
    * `message.channels` and `message.groups` events, which the generated app
-   * manifest subscribes to. Defaults to `false`.
+   * manifest subscribes to. `threadContext` then adds the thread's earlier
+   * replies only when a message starts the session. Defaults to `false`.
    */
   readonly follow?: boolean;
 }
@@ -833,7 +834,9 @@ export interface SlackChannelConfig {
    * turn. Messages are rendered with their Slack sender ids attached so a
    * multi-user transcript retains unambiguous speaker attribution. When the
    * message starts the thread's session, the same replies are added as
-   * history instead: this app's replies become assistant turns. Omit this
+   * history instead: this app's replies become assistant turns. With
+   * `threads.follow`, a channel thread's replies already reach its session,
+   * so they are only added when a message starts the session. Omit this
    * option to avoid fetching thread history.
    */
   readonly threadContext?: LoadThreadContextMessagesOptions;
@@ -2011,6 +2014,7 @@ async function dispatchSlackMessage(input: {
   await deliverSlackMessage({
     botUserId: input.receivingBotUserId,
     credentials: input.credentials,
+    followsThread: input.followThreads && !codeChannel && input.kind !== "direct_message",
     followUp,
     kind: input.kind,
     isPrivateConversation,
@@ -2179,6 +2183,8 @@ async function deliverSlackMessage(input: {
   readonly botUserId: string | undefined;
   readonly sessionOperations: SlackSessionOperations;
   readonly credentials: SlackChannelCredentials | undefined;
+  /** `threads.follow` sends the thread's later replies to its session as they arrive. */
+  readonly followsThread: boolean;
   /** An unmentioned reply `threads.follow` sent to the thread's session. */
   readonly followUp: boolean;
   readonly isPrivateConversation: boolean;
@@ -2205,17 +2211,24 @@ async function deliverSlackMessage(input: {
   // This runs in the webhook's `waitUntil` task; an unguarded throw would
   // reject silently into the dispatch `allSettled` ("no response, no logs").
   try {
-    // The session already saw the thread and the message's files when it was first sent.
+    let sessionStarted: Promise<boolean> | undefined;
+    const hasSession = () =>
+      (sessionStarted ??= input.sessionOperations
+        .resolveSession()
+        .then((session) => session !== undefined));
+    // The session already saw the thread and the message's files when an edited message was
+    // first sent. A followed thread's replies reached its session as they arrived, so the
+    // transcript would repeat them; they only seed history when a message starts the session.
     const priorMessages =
-      input.threadContext === undefined || edit !== undefined
+      input.threadContext === undefined ||
+      edit !== undefined ||
+      (input.followsThread && (await hasSession()))
         ? []
         : await loadThreadContextMessages(thread, message, input.threadContext);
     // A message that starts the thread's session carries the replies as history; a started
     // session gets them as a transcript, as before. Authored history keeps the transcript.
     const seedsHistory =
-      priorMessages.length > 0 &&
-      input.result.history === undefined &&
-      (await input.sessionOperations.resolveSession()) === undefined;
+      priorMessages.length > 0 && input.result.history === undefined && !(await hasSession());
     // Thread replies are only model-visible, so their senders are looked up here.
     const users =
       input.users === undefined

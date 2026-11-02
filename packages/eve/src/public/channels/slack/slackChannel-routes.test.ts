@@ -737,6 +737,46 @@ describe("slackChannel threads.follow", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("adds thread context only when a message starts a followed thread's session", async () => {
+    fetchMock.mockImplementation(async (request: string | URL | Request) => {
+      const url = String(request);
+      if (url.includes("conversations.replies"))
+        return Response.json({
+          messages: [
+            { text: "Who has the rollback?", thread_ts: ROOT_TS, ts: ROOT_TS, user: "U_BOB" },
+            { text: "Bob, can you take it?", thread_ts: ROOT_TS, ts: "1700000000.000300" },
+          ],
+          ok: true,
+        });
+      if (url.includes("conversations.info"))
+        return Response.json({ channel: { is_private: false }, ok: true });
+      return Response.json({ ok: true, ts: "1700000001.000001" });
+    });
+    const channel = () =>
+      slackChannel({
+        credentials: { botToken: "xoxb-test" },
+        threadContext: {},
+        threads: { follow: true },
+      });
+    const sent = (send: ReturnType<typeof vi.fn>) =>
+      send.mock.calls[0]![1] as ObservedChannelDelivery<SlackChannelState> & {
+        readonly history?: readonly unknown[];
+        readonly message: unknown;
+      };
+
+    const starts = vi.fn().mockResolvedValue({ id: "s1" });
+    await firePost(channel(), mention({ threadTs: ROOT_TS, ts: "1700000000.000300" }), starts, () =>
+      Promise.resolve(undefined),
+    );
+    expect(sent(starts).history).toHaveLength(1);
+
+    const follows = vi.fn().mockResolvedValue({ id: "s1" });
+    await firePost(channel(), channelMessage(), follows);
+    expect(follows).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(sent(follows).message)).not.toContain("Who has the rollback?");
+    expect(sent(follows).history).toBeUndefined();
+  });
+
   it("keeps a follow-up or edit turn quiet until a tool call finishes", async () => {
     const definition = slackChannel({
       credentials: { botToken: "xoxb-test" },

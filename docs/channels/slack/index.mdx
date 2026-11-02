@@ -203,6 +203,8 @@ export default slackChannel({
 });
 ```
 
+With [`threads: { follow: true }`](#reply-without-a-mention), `threadContext` loads the earlier replies only when a message starts the thread's session, because later replies already reach the agent.
+
 ## Provide agent with user info
 
 The agent sees each sender's Slack user ID. To also give it their name, and optionally their email, set `messageContext.users`:

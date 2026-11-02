@@ -128,20 +128,16 @@ hook in the step that admits a message, not when Slack's webhook arrives:
 - Stability: stable, `minor`.
 - Missing `no_reply`: documented only. No warning and no build change.
 - Queued turns: no change needed; see [Semantics](#semantics).
+- `threadContext`: in a followed channel thread, it only seeds history when a message starts the
+  session. Without this, every later turn would re-send replies the session already received, the
+  whole thread with the default `since: "thread-root"`. The one loss is other bots' replies, which
+  following doesn't deliver. DMs and code channels keep their transcript.
 
 ## Open questions
 
-1. **`threadContext` overlap.** `threadContext` copies the thread's earlier replies into each turn,
-   because without following, the agent only sees messages that mention it. With `threads.follow`,
-   every human reply after the session starts already reached the agent as its own message. So on
-   later turns, `threadContext` sends those replies a second time as `<slack_thread_context>`. With
-   the default `since: "thread-root"`, that's the whole thread on every turn. `"last-agent-reply"`
-   also repeats every reply the agent skipped with `no_reply`. Recommendation: with
-   `threads.follow`, use `threadContext` only to seed history when a mention starts the session.
-   The one loss is other bots' replies, which following doesn't deliver.
-2. **Message edits.** The in-flight `onMessageEdited` work has its own `pendingEditTurn` and
+1. **Message edits.** The in-flight `onMessageEdited` work has its own `pendingEditTurn` and
    `quietStatus`. Both should share one "quiet turn" stamp so an edit and a follow-up compose.
-3. **Engagement decay.** A long-lived thread keeps the agent in forever. Consider ending follow
+2. **Engagement decay.** A long-lived thread keeps the agent in forever. Consider ending follow
    after the agent's last reply ages out, or after an explicit "stop following" signal.
 
 ## Validation

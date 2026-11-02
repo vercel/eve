@@ -467,6 +467,8 @@ export default slackChannel({
 
 When the triggering message starts the thread's session, eve adds the earlier replies as session history. This app's replies become assistant turns, and other replies become user messages with their Slack user IDs. Those assistant turns hold what Slack shows, which can differ from what the model wrote. Later messages in the thread get the earlier replies as a transcript instead. A hook that returns its own `history` also gets the transcript.
 
+With [`threads.follow`](#follow-threads), every later reply in a channel thread already reaches the session as its own message. eve then adds earlier replies only when a message starts the session, and later messages get no transcript.
+
 #### Control overlapping turns
 
 A Slack message sent during a running turn joins that turn by default (`turnPolicy: "steer"`). See [Overlapping messages](/docs/channels#overlapping-messages) for when it interrupts the model. Set `turnPolicy: "queue"` to let every running turn finish first. [Message edits](#message-edits) follow the same policy:
@@ -644,7 +646,7 @@ Public channels are `public`; DMs, group DMs, and private channels are `private`
 | `messageContext`  | Off                                                                                 | `{ users }` adds sender names, and emails with `email: true`, to model context. See [Add sender names and emails](#add-sender-names-and-emails). |
 | `threadContext`   | Off                                                                                 | Load earlier thread replies. `{}` means `since: "thread-root"`. See [Load prior thread messages](#load-prior-thread-messages).                   |
 | `codeChannels`    | `false`                                                                             | Serve Slack code channels as one session each. See [Serve Slack code channels](#serve-slack-code-channels).                                      |
-| `threads`         | Off | `{ follow: true }` sends later replies in the agent's threads to it without a mention. See [Follow threads](#follow-threads). |
+| `threads`         | Off                                                                                 | `{ follow: true }` sends later replies in the agent's threads to it without a mention. See [Follow threads](#follow-threads).                    |
 | `uploadPolicy`    | Any media type, up to 25 MB                                                         | `"disabled"` or `{ maxBytes, allowedMediaTypes }` for inbound files.                                                                             |
 | `approvalChannel` | `"thread"`                                                                          | `(request, ctx) => "thread" \| "direct-message"`. See [Human-in-the-loop](#human-in-the-loop-hitl).                                              |
 | `renderers`       | eve's default renderer                                                              | Renderers that wrap eve's default. See [Customize rendering](#customize-rendering).                                                              |
