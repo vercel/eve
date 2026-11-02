@@ -291,7 +291,7 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
       if (!channel.state.platform) await identifyBot(api, channel.state);
 
       if (channel.state.awaitingCall && isInCall(event)) {
-        await flushOutbox(channel, (channel as unknown as { readonly ctx: ContextAccessor }).ctx);
+        await flushOutbox(channel, adapterContextOf(channel));
       }
 
       // The route drops chat under the configured name; the session also knows
@@ -512,6 +512,12 @@ async function identifyBot(api: RecallApiOptions, state: RecallChannelState): Pr
 /** Real-time events only flow once the bot is in the call; joining statuses don't count. */
 function isInCall(event: RecallMeetingEvent): boolean {
   return event.type !== "status" || event.status.startsWith("in_call");
+}
+
+/** The step's context, which the adapter puts beside the channel's own context. */
+function adapterContextOf(channel: object): ContextAccessor {
+  if (!("ctx" in channel)) throw new Error("recallChannel: deliver ran without a step context.");
+  return channel.ctx as ContextAccessor;
 }
 
 async function flushOutbox(channel: RecallChannelContext, ctx: ContextAccessor): Promise<void> {
