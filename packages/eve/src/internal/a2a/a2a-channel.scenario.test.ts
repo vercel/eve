@@ -4,12 +4,12 @@ import {
   materializeScenarioApp,
   type ScenarioAppDescriptor,
 } from "#internal/testing/scenario-app.js";
-import {
-  requiredRecord,
-  requiredString,
-  startScenarioEveDev,
-  type RunningEveDev,
-} from "#internal/testing/scenario-eve-dev.js";
+import { startEveDev, type RunningEveDev } from "#internal/testing/dev-server-harness.js";
+import { encodeTaskId } from "#internal/a2a/ids.js";
+import { requiredRecord, requiredString } from "#internal/testing/scenario-values.js";
+
+/** A production build that runs the scenario's own `mockModel`. */
+const SCENARIO_ENV = { EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" };
 
 const SETUP_TIMEOUT_MS = 360_000;
 const TEST_TIMEOUT_MS = 60_000;
@@ -107,7 +107,7 @@ function url(): string {
 describe("A2A channel", () => {
   beforeAll(async () => {
     app = await materializeScenarioApp(A2A_AGENT_DESCRIPTOR);
-    server = await startScenarioEveDev(app.appRoot);
+    server = await startEveDev(app.appRoot, { env: SCENARIO_ENV });
   }, SETUP_TIMEOUT_MS);
 
   afterAll(async () => {
@@ -195,6 +195,13 @@ describe("A2A channel", () => {
           await rpc("bob", "SendMessage", { message: { ...userMessage("b-1", "hi"), contextId } }),
         ),
       ).toBe(-32602);
+
+      // A task ID decodes to any delivery: one that names no A2A message is no task, even in a
+      // context the caller owns.
+      const phantom = encodeTaskId({ deliveryId: "not-an-a2a-message", sessionId: contextId });
+      for (const method of ["GetTask", "SubscribeToTask", "CancelTask"]) {
+        expect(rpcErrorCode(await rpc("alice", method, { id: phantom }))).toBe(-32001);
+      }
 
       // A typed answer on the same task resumes it.
       const done = await sendTask("alice", {

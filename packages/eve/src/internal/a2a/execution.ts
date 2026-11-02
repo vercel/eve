@@ -42,6 +42,7 @@ import {
   deliveryIdForMessage,
   encodePageToken,
   messageIdempotencyKey,
+  messageIdOfDelivery,
   type TaskRef,
 } from "./ids.js";
 import {
@@ -70,6 +71,7 @@ import {
   projectTask,
   reachedTask,
   readSessionView,
+  submittedTask,
   type ProjectTaskOptions,
 } from "./task-projection.js";
 
@@ -109,7 +111,8 @@ export class A2aTaskExecution {
     const sent = await this.#deliver(request, call);
     const options = { historyLength: request.configuration?.historyLength };
     if (request.configuration?.returnImmediately === true) {
-      return projectTask(await readSessionView(sent.ref.sessionId), sent.ref, options);
+      const view = await readSessionView(sent.ref.sessionId);
+      return projectTask(view, reachedRef(view, sent), options);
     }
     const signal = AbortSignal.any([call.signal, AbortSignal.timeout(this.#options.maxBlockingMs)]);
     let task: Task | undefined;
@@ -117,7 +120,12 @@ export class A2aTaskExecution {
       task = update.task;
       if (update.read && isSettledForBlocking(task.status.state)) return task;
     }
-    return task ?? projectTask(await readSessionView(sent.ref.sessionId), sent.ref, options);
+    if (task !== undefined) return task;
+    // The deadline passed before the first replay finished: another replay would take as long
+    // again, past the host timeout `maxBlockingMs` stays under. Answer from what's already read.
+    return sent.view === undefined
+      ? submittedTask(sent.ref)
+      : projectTask(sent.view, reachedRef(sent.view, sent), options);
   }
 
   /**
@@ -138,8 +146,8 @@ export class A2aTaskExecution {
     request: SubscribeToTaskRequest,
     call: A2aCallContext,
   ): Promise<AsyncIterable<StreamResponse>> {
-    const { ref } = await this.#ownedTask(request.id, call.auth);
-    const task = projectTask(await readSessionView(ref.sessionId), ref, { historyLength: 0 });
+    const { ref, view } = await this.#readTask(request.id, call.auth);
+    const task = projectTask(view, ref, { historyLength: 0 });
     if (isTerminalState(task.status.state)) {
       throw new A2aError(A2A_JSON_RPC_ERRORS.unsupportedOperation, "Task is already terminal.");
     }
@@ -149,10 +157,8 @@ export class A2aTaskExecution {
   }
 
   async getTask(request: GetTaskRequest, call: A2aCallContext): Promise<Task> {
-    const { ref } = await this.#ownedTask(request.id, call.auth);
-    return projectTask(await readSessionView(ref.sessionId), ref, {
-      historyLength: request.historyLength,
-    });
+    const { ref, view } = await this.#readTask(request.id, call.auth);
+    return projectTask(view, ref, { historyLength: request.historyLength });
   }
 
   /**
@@ -160,8 +166,7 @@ export class A2aTaskExecution {
    * the answer usually reads `CANCELED`.
    */
   async cancelTask(request: CancelTaskRequest, call: A2aCallContext): Promise<Task> {
-    const { ref, token } = await this.#ownedTask(request.id, call.auth);
-    const view = await readSessionView(ref.sessionId);
+    const { ref, token, view } = await this.#readTask(request.id, call.auth);
     const task = projectTask(view, ref);
     if (isTerminalState(task.status.state)) {
       throw new A2aError(A2A_JSON_RPC_ERRORS.taskNotCancelable, "Task is already terminal.");
@@ -334,12 +339,11 @@ export class A2aTaskExecution {
     call: A2aCallContext,
     delivery: DeliveryKeys,
   ): Promise<SentDelivery> {
-    const { ref, run, token } = await this.#ownedTask(message.taskId!, call.auth);
+    const { ref, run, token, view } = await this.#readTask(message.taskId!, call.auth);
     if (message.contextId !== undefined && message.contextId !== ref.sessionId) {
       throw new A2aError(A2A_JSON_RPC_ERRORS.invalidParams, "contextId does not match taskId.");
     }
-    const sent: SentDelivery = { deliveryId: delivery.deliveryId, followUp: true, ref };
-    const view = await readSessionView(ref.sessionId);
+    const sent: SentDelivery = { deliveryId: delivery.deliveryId, followUp: true, ref, view };
     if (hasDelivery(view, delivery.deliveryId)) return sent;
     const task = projectTask(view, ref, { historyLength: 0 });
     if (isTerminalState(task.status.state)) {
@@ -411,13 +415,24 @@ export class A2aTaskExecution {
     return answer;
   }
 
-  async #ownedTask(taskId: string, auth: SessionAuthContext | null) {
+  /**
+   * A task the caller owns, with its session as it stands. A task ID decodes to any delivery, so
+   * one that names no A2A message, or none an ended session ever admitted, is not found: only a
+   * live session's message may not have reached its stream yet.
+   */
+  async #readTask(taskId: string, auth: SessionAuthContext | null) {
     const ref = decodeTaskId(taskId);
-    if (ref === undefined) throw A2aError.taskNotFound();
+    if (ref === undefined || messageIdOfDelivery(ref.deliveryId) === undefined) {
+      throw A2aError.taskNotFound();
+    }
     const run = await readOwnedInvocationRun(ref.sessionId, auth);
     const token = run === undefined ? undefined : invocationContinuationToken(run);
     if (run === undefined || token === undefined) throw A2aError.taskNotFound();
-    return { ref, run, token };
+    const view = await readSessionView(ref.sessionId);
+    if (view.deliveries[ref.deliveryId] === undefined && view.session.status === "ended") {
+      throw A2aError.taskNotFound();
+    }
+    return { ref, run, token, view };
   }
 
   /** The message as eve content, held to the channel's upload policy. */
@@ -443,8 +458,7 @@ export class A2aTaskExecution {
   ): AsyncGenerator<{ readonly task: Task; readonly read: boolean }, void, undefined> {
     try {
       for await (const view of followSessionView(sent.ref.sessionId, signal)) {
-        const ref =
-          sent.followUp === true ? reachedTask(view, sent.ref, sent.deliveryId) : sent.ref;
+        const ref = reachedRef(view, sent);
         const task = projectTask(view, ref, options);
         // A message can be consumed a line before the prompt it answers settles: until the
         // status moves past that prompt, the session hasn't acted on the message yet. An answer
@@ -495,7 +509,9 @@ export class A2aTaskExecution {
       }
       last = key;
       const state = task.status.state;
-      if (isTerminalState(state)) return;
+      // A follow-up the session hasn't read yet may still start a task of its own once this one
+      // ends, so its stream waits for that rather than closing on the task it continued.
+      if (isTerminalState(state) && (sent.followUp !== true || read)) return;
       if (mode.closeOnInterrupt && read && isSettledForBlocking(state)) return;
     }
   }
@@ -514,6 +530,13 @@ interface SentDelivery {
   readonly followUp?: boolean;
   /** The interrupted status (`statusKey`) the message answers, when it continued one. */
   readonly answering?: string;
+  /** The session as delivering the message last read it, when it did. */
+  readonly view?: SessionView;
+}
+
+/** The task `sent` reached: a follow-up may have started a task of its own. */
+function reachedRef(view: SessionView, sent: SentDelivery): TaskRef {
+  return sent.followUp === true ? reachedTask(view, sent.ref, sent.deliveryId) : sent.ref;
 }
 
 /** `from().send()` options plus the ones only framework channels pass. */

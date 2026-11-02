@@ -121,6 +121,15 @@ export function projectTask(
   return task;
 }
 
+/** A task whose message the session hasn't admitted yet, as `projectTask` reads it then. */
+export function submittedTask(ref: TaskRef): Task {
+  return {
+    contextId: ref.sessionId,
+    id: encodeTaskId(ref),
+    status: { state: "TASK_STATE_SUBMITTED" },
+  };
+}
+
 interface TaskAddress {
   readonly contextId: string;
   readonly taskId: string;

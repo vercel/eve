@@ -15,7 +15,10 @@ import {
 import { A2aTaskExecution } from "#internal/a2a/execution.js";
 import { handleA2aJsonRpc } from "#internal/a2a/json-rpc.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { validateMcpHttpRequest, validateMcpMetadataRequest } from "#internal/mcp/http-security.js";
+import {
+  validateHttpEndpointRequest,
+  validateHttpMetadataRequest,
+} from "#internal/http/request-guards.js";
 import { readRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { routeAuth, type AuthFn } from "#public/channels/auth.js";
 import {
@@ -93,7 +96,7 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
   };
 
   const card = async (request: Request, args: RouteHandlerArgs) => {
-    const failure = validateMcpMetadataRequest(request, "A2A");
+    const failure = validateHttpMetadataRequest(request, "A2A");
     if (failure !== undefined) return failure;
     // Public metadata by design: discovery happens before a client has credentials.
     const body = buildAgentCard({
@@ -112,7 +115,7 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
   };
 
   const rpc = async (request: Request, args: RouteHandlerArgs) => {
-    const failure = validateMcpHttpRequest(request, "A2A");
+    const failure = validateHttpEndpointRequest(request, "A2A");
     if (failure !== undefined) return failure;
     const auth = await routeAuth(request, input.auth);
     if (auth instanceof Response) return auth;
@@ -134,7 +137,7 @@ export function a2aChannel(input: A2aChannelConfig): A2aChannel {
     routes: [
       GET(A2A_AGENT_CARD_PATH, card),
       OPTIONS(A2A_AGENT_CARD_PATH, async (request) => {
-        const failure = validateMcpMetadataRequest(request, "A2A");
+        const failure = validateHttpMetadataRequest(request, "A2A");
         return failure ?? new Response(null, { headers: CARD_CORS, status: 204 });
       }),
       POST(path, rpc),
