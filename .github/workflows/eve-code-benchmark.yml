@@ -167,8 +167,12 @@ jobs:
       group: eve-code-docs-snapshot
       cancel-in-progress: false
     runs-on: ubuntu-latest
+    # Main only accepts changes through a pull request with passing checks, so
+    # the job commits to a bot branch and opens a PR the same way changesets
+    # opens the Version Packages PR: with GITHUB_TOKEN.
     permissions:
       contents: write
+      pull-requests: write
       actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -177,17 +181,20 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      # Merge onto the newest main so a concurrent refresh of the other dataset
-      # is never overwritten. createCommitOnBranch commits are signed by GitHub,
-      # which satisfies the signed-commit requirement without a bot signing key.
-      # The snapshot script keeps generatedAt when the results are unchanged, so
-      # an identical report makes no commit.
-      - name: Commit snapshot to main
+      # The branch restarts from the newest main on every refresh, so the PR
+      # holds one commit and never conflicts. createCommitOnBranch commits are
+      # signed by GitHub, which satisfies the signed-commit rule without a bot
+      # signing key. The snapshot script keeps generatedAt when the results are
+      # unchanged, so an identical report opens no PR.
+      - name: Open snapshot pull request
         env:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT: ${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}-anthropic
           FILE: apps/docs/lib/evals/eve-code-benchmark.json
+          BRANCH: bot/eve-code-benchmark-snapshot
+          TITLE: "chore: refresh eve-code benchmark results"
         run: |
+          set -euo pipefail
           if ! gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n "$ARTIFACT" -D "$RUNNER_TEMP/bench" ||
             [ ! -f "$RUNNER_TEMP/bench/report.json" ]; then
             echo "::notice::eve-code docs snapshot not updated: the run uploaded no $ARTIFACT report."
@@ -198,5 +205,30 @@ jobs:
           cp "$FILE" "$RUNNER_TEMP/before.json"
           node .github/scripts/eve-code-docs-snapshot.mjs "$RUNNER_TEMP/bench/report.json" "$FILE"
           if cmp -s "$FILE" "$RUNNER_TEMP/before.json"; then exit 0; fi
+
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" -f sha="$head" -F force=true > /dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$head" > /dev/null
+          fi
           HEAD_OID="$head" node .github/scripts/eve-code-docs-snapshot.mjs --commit-payload "$FILE" > "$RUNNER_TEMP/commit.json"
           gh api graphql --input "$RUNNER_TEMP/commit.json" -q .data.createCommitOnBranch.commit.url
+
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          cat > "$RUNNER_TEMP/body.md" <<EOF
+          Refreshes \`$FILE\` from the deepswe-lean \`anthropic\` report of $run_url.
+
+          GitHub holds workflow runs on pull requests that \`GITHUB_TOKEN\` opens until a maintainer approves them. To run the required checks, select **Approve workflows to run** on this PR, as on the Version Packages PR. Then review and approve the PR; auto-merge squashes it once checks pass.
+
+          Every refresh resets \`$BRANCH\` to \`main\`, so do not push other changes to it.
+          EOF
+          pr=$(gh pr list -R "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json url -q '.[0].url // empty')
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" -R "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$RUNNER_TEMP/body.md"
+          else
+            pr=$(gh pr create -R "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/body.md")
+          fi
+          echo "Snapshot pull request: $pr"
+          gh pr merge "$pr" -R "$GITHUB_REPOSITORY" --auto --squash \
+            --body "Signed-off-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>" ||
+            echo "::notice::Auto-merge was not enabled on $pr; merge it after approval."
