@@ -256,14 +256,15 @@ export function createStreamChecker(
         return undefined;
       case "complete": {
         if (row !== undefined) fail("one-terminal", `${family} "${id}" completes twice.`);
-        if ((data.runId === undefined) === (data.turnId === undefined)) {
-          fail("schema", `${family} "${id}" names neither or both of a run and a turn.`);
+        // A part no run wrote belongs to the turn its scope names.
+        const owner =
+          data.runId !== undefined
+            ? refOf({ runId: String(data.runId) })
+            : refOf(fact.scope?.turnId === undefined ? undefined : { turnId: fact.scope.turnId });
+        if (owner === undefined) {
+          fail("schema", `${family} "${id}" names no run, and its scope names no turn.`);
           return undefined;
         }
-        const owner =
-          data.runId === undefined
-            ? { family: "turn" as const, id: String(data.turnId) }
-            : { family: "run" as const, id: String(data.runId) };
         if (rowOf(view, owner.family, owner.id) !== undefined && !isOpen(view, owner))
           fail("closure", `${family} "${id}" completes after its ${owner.family} settled.`);
         return undefined;

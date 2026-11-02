@@ -521,6 +521,11 @@ export function runTurn(view: SessionView, runId: string): string | undefined {
   return ownerOf(view, { family: "run", id: runId }, "turn");
 }
 
+/** The turn a part belongs to: its run's, or the turn that wrote it when no run did. */
+export function partTurn(view: SessionView, row: PartRow): string | undefined {
+  return row.runId === undefined ? row.turnId : runTurn(view, row.runId);
+}
+
 /** What an owner leaves open: the entities that still need a terminal fact. */
 export interface OpenWork {
   readonly calls: readonly CallRow[];

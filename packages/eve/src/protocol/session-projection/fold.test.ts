@@ -347,7 +347,7 @@ describe("the shared fold", () => {
       at,
       facts: [
         {
-          data: { kind: "text", partId: "p_own", phase: "reply", turnId: "turn_0", value: "Mine." },
+          data: { kind: "text", partId: "p_own", phase: "reply", value: "Mine." },
           scope: { turnId: "turn_0" },
           type: "content.completed",
         },

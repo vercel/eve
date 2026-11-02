@@ -130,9 +130,9 @@ describe("createStreamChecker", () => {
   });
 
   it("accepts a call and a reply the turn makes without a run, and refuses a part it can't place", () => {
-    const part = (data: Record<string, unknown>) => ({
-      data: { kind: "text", partId: "p_own", phase: "reply", value: "Done.", ...data },
-      scope: turn,
+    const part = (scope?: object) => ({
+      data: { kind: "text", partId: "p_own", phase: "reply", value: "Done." },
+      ...(scope !== undefined && { scope }),
       type: "content.completed",
     });
     const ownTurn = (...facts: unknown[]) => [
@@ -161,10 +161,9 @@ describe("createStreamChecker", () => {
         ],
       ),
     ];
-    expect(rulesOf(ownTurn(part({ turnId: "turn_0" })))).toEqual([]);
-    expect(rulesOf(ownTurn(part({})))).toEqual(["schema"]);
-    expect(rulesOf(ownTurn(part({ runId: "run_0", turnId: "turn_0" })))).toContain("schema");
-    expect(rulesOf([...ownTurn(), ...commits([part({ turnId: "turn_0" })])])).toEqual(["closure"]);
+    expect(rulesOf(ownTurn(part(turn)))).toEqual([]);
+    expect(rulesOf(ownTurn(part()))).toEqual(["schema"]);
+    expect(rulesOf([...ownTurn(), ...commits([part(turn)])])).toEqual(["closure"]);
   });
 
   it("accepts a run's attempts in order, and refuses one out of order or after it settled", () => {

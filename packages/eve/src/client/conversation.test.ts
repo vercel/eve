@@ -151,7 +151,7 @@ describe("the conversation", () => {
       { data: { callId: "call_0" }, scope: own, type: "call.started" },
       { data: { callId: "call_0", outcome: "completed" }, scope: own, type: "call.settled" },
       {
-        data: { kind: "text", partId: "p_0", phase: "reply", turnId, value: "Deployed." },
+        data: { kind: "text", partId: "p_0", phase: "reply", value: "Deployed." },
         scope: own,
         type: "content.completed",
       },

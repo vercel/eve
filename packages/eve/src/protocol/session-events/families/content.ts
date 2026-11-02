@@ -20,10 +20,8 @@ export interface ContentDeltaData {
 
 export interface ContentCompletedData {
   readonly partId: string;
-  /** The model run that wrote the part. Absent when the turn wrote it without one. */
+  /** The model run that wrote the part. Absent when its turn wrote it, which `scope.turnId` names. */
   readonly runId?: string;
-  /** The turn that wrote the part, for a part no model run wrote. */
-  readonly turnId?: string;
   readonly kind: ContentKind;
   /** The part's whole value: text for text and reasoning, JSON for a result, a file's metadata. */
   readonly value?: JsonValue;
@@ -53,7 +51,6 @@ export const contentSchemas = {
         partId: id,
         phase: z.string(),
         runId: id.optional(),
-        turnId: id.optional(),
         value: jsonValue.optional(),
         valueRef: valueReference.optional(),
       }),

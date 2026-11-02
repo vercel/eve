@@ -101,8 +101,9 @@ export interface RunObservation extends ObservationTiming {
 
 export interface ContentObservation extends ObservationTiming {
   readonly partId: string;
-  /** The model run that wrote the part; absent for a part its turn holds without one. */
+  /** The model run that wrote the part; absent when its turn wrote it. */
   readonly runId?: string;
+  /** The turn the part belongs to, when known. */
   readonly turnId?: string;
   readonly kind: ContentKind;
   readonly phase: ContentPhase;

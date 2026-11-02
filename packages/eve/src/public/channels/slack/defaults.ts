@@ -450,7 +450,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     if (!narration && !counts) return;
     // A call its turn made has no run to count it with: it shows its own label.
     if ("turnId" in owner) {
-      await showStatus(channel, callLabel(data));
+      await showStatus(channel, narration ?? callLabel(data));
       return;
     }
     if (!("runId" in owner)) return;
