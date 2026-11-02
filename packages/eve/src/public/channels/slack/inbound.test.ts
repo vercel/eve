@@ -466,7 +466,7 @@ describe("parseDirectMessageEvent", () => {
   });
 
   // A thread reply posted with "Also send to direct message" (#5774).
-  it.fails("keeps a DM thread reply that is also sent to the conversation", () => {
+  it("keeps a DM thread reply that is also sent to the conversation", () => {
     const payload = parseSlackWebhookBody(
       JSON.stringify({
         type: "event_callback",
