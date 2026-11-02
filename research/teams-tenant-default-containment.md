@@ -92,7 +92,8 @@ member lookup:
 are refused. The lookup is
 `GET {serviceUrl}/v3/conversations/{teamId ?? conversationId}/members/{from.id}`,
 cached per tenant, roster, and user for five minutes (one minute after a
-failure). Any failure answers `true` for both checks.
+failure). A failure, or a member without a `tenantId`, answers `true` for both
+checks.
 
 A send has no sender and no channel type, so it checks only the tenant and
 requires `target.tenantId`.

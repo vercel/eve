@@ -702,6 +702,11 @@ describe("teamsChannel admit", () => {
       member: { ...MEMBER, userRole: "anonymous" },
     },
     { case: "a person Teams can't look up", activity: () => channelMessage(), member: null },
+    {
+      case: "a member without a tenant",
+      activity: () => channelMessage(),
+      member: { userRole: "user" },
+    },
   ])("keeps $case from reaching the agent by default", async ({ activity, member }) => {
     const { fetch } = connector(member);
     const onMessage = vi.fn(() => ({ auth: null }));

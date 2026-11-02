@@ -450,7 +450,8 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
         config.admit ?? defaultTeamsAdmit,
         createTeamsSendAdmitRequest({
           api: teamsApiOptions(config),
-          conversationId,
+          // Inbound requests name the conversation without its thread suffix too.
+          conversationId: normalizeTeamsContinuationAddress({ conversationId }).conversationId,
           conversationType: conversationType ?? undefined,
           raw: receiveTarget,
           teams: buildTeamsHandle({ config, state }),

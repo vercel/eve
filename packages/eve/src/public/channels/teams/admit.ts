@@ -79,7 +79,7 @@ export async function defaultTeamsAdmit(request: TeamsAdmitRequest): Promise<boo
 
 /** What the Bot Connector reports about one conversation member. */
 interface TeamsMemberFacts {
-  readonly tenantId: string | undefined;
+  readonly tenantId: string;
   readonly userRole: string | undefined;
 }
 
@@ -122,7 +122,7 @@ async function lookUpMember(input: {
   readonly userId: string;
 }): Promise<TeamsMemberFacts | null> {
   const roster = input.teamId ?? input.conversationId;
-  const key = `${input.tenantId ?? ""}:${roster}:${input.userId}`;
+  const key = `${input.serviceUrl} ${input.tenantId ?? ""}:${roster}:${input.userId}`;
   const cached = members.get(key);
   if (cached !== undefined && cached.expiresAtMs > Date.now()) return cached.facts;
 
@@ -133,7 +133,9 @@ async function lookUpMember(input: {
       path: `/v3/conversations/${encodeURIComponent(roster)}/members/${encodeURIComponent(input.userId)}`,
       serviceUrl: input.serviceUrl,
     });
-    if (!response.ok || !isObject(response.body)) {
+    const tenantId = isObject(response.body) ? readString(response.body.tenantId) : undefined;
+    // A member without a tenant can't be told apart from another tenant's.
+    if (!response.ok || tenantId === undefined) {
       log.error("Teams member lookup failed, so eve treats the user as external", {
         status: response.status,
       });
@@ -141,8 +143,8 @@ async function lookUpMember(input: {
       return null;
     }
     const facts = {
-      tenantId: readString(response.body.tenantId),
-      userRole: readString(response.body.userRole),
+      tenantId,
+      userRole: readString((response.body as { userRole?: unknown }).userRole),
     };
     cacheMember(key, facts);
     return facts;
@@ -209,9 +211,7 @@ export function createTeamsActivityAdmitRequest(input: {
         const reportedTenant = readString((activity.raw.from as { tenantId?: unknown })?.tenantId);
         if (reportedTenant !== undefined && reportedTenant !== activity.tenantId) return true;
         const facts = await memberFacts();
-        return (
-          facts === null || (facts.tenantId !== undefined && facts.tenantId !== activity.tenantId)
-        );
+        return facts === null || facts.tenantId !== activity.tenantId;
       })()),
     isGuest: () =>
       (guest ??= memberFacts().then((facts) => facts === null || isGuestRole(facts.userRole))),

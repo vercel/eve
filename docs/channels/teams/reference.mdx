@@ -94,7 +94,7 @@ The default, `defaultTeamsAdmit`, refuses:
 - channels Teams marks as shared (`channelData.channel.type: "shared"`).
 - people whose conversation membership reports another tenant.
 - guests and anonymous participants (`userRole` of `guest` or `anonymous`).
-- people Teams can't look up.
+- people Teams can't look up, or whose membership doesn't report a tenant.
 
 For each request with a sender, eve looks the person up with the Bot Connector's `GET /v3/conversations/{id}/members/{userId}`. A channel's roster lives on its team, so eve asks the team. It caches the answer for five minutes, or one minute after a failed lookup. A send has no sender, so it checks only `target.tenantId`, which the default requires. eve can't tell from a send target whether a channel is shared.
 
