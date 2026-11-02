@@ -6,21 +6,23 @@ last_updated: "2026-11-02"
 
 # eve from first principles: a kernel, definitions, and a harness
 
-## Introduction
+## Motivation
 
 We like adding new ways for a user to customize how eve works.
 
-Let's take compaction as an example. Today, we have a default compaction behavior, and a few levers that you can pull to customize it, but it'd be nice if users could customize this further.
+Today, we have a default compaction behavior, and a few levers that you can pull to customize it, but it'd be nice if users could customize this further.
 
-How do we enable this? First, for any new behavior that we want the user to customize, we need to define the scope of what customization can control and when user code should be invoked. For compaction, this gets tricky. There's a natural temptation to decompose this into two functions: one that says "when" you should compact ("you've hit x% of the model's context threshold") and one that says "how" you should compact ("strip out large tool results, then summarize the transcript using a model call").
+How do we enable this? We first need to define the scope of what customization can control and when user code should be invoked. For compaction, this gets tricky. We can think of it as two functions: one that says "when" you should compact ("you've hit x% of the model's context threshold") and one that says "how" you should compact ("strip out large tool results, then summarize the transcript using a model call").
 
-This is sensible, but it brings up further questions. What if you want to have something that continuously strips down large tool results before the model ever sees them? Would that be a compaction method that runs "all the time"? If so, would we need to compose that with another "normal" compaction policy? If so, how would we do that composition now that there are two functions per policy? etc. etc.
+This is sensible, but it brings up further questions. What if you want to strip large tool results before they get back to the model? Would the "when" be "all the time" in that case? If so, how would that interact with "normal" compaction? How would the four total functions compose with each other? etc. etc.
 
-`defineMemory` also illustrates the challenge. It provides a coherent interface to the user to do a combination of pretty complex things: you add tools, you interface with model-facing context, and you add hooks for collecting memory. These are all things that someone might want to do independently. Tools of course are their own things, and hooks for collecting state are generally useful. Interfacing with model-facing context sounds kinda similar to what we want to do for compaction maybe? So it seems like there is some underlying set of "things that we want to be able to modify" and most of our `defineX` things (dynamic or otherwise) are remixes of some core underlying concept.
+`defineMemory` also illustrates the challenge. It adds tools, hooks, and model-facing context. Tools and hooks already could be added directly, but prior to `defineMemory`, there was no way to directly interact with context in that way. Combining all of this into a coherent interface is necessary for comprehensibility, but what if users have other reasons they might want to interact with model-facing context that are not directly related to memory? Today, they have no way of doing so.
 
 This leads to the first question: could we get to a point where even a feature as complex as memory could have been implemented as a user-space integration? What about other complex features like our deferred tools and skill search?
 
 That leads to the secondary question: if we got to that point, what would be "left" of eve? If we go too far on decomposing all of eve's behaviors into arbitrary plugins, what differentiates an eve program from a durable `while` loop with arbitrary code inside of it? Can we make guarantees about any program written in eve, regardless of what customization a user puts on top?
+
+## Summary
 
 This doc will give a lot more reasoning on these conclusions, but in short:
 
