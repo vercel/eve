@@ -280,6 +280,20 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(err)).toBe("terminal");
   });
 
+  it("returns recoverable when OpenAI refuses a prompt for cybersecurity risk", () => {
+    const message = "This content was flagged for possible cybersecurity risk.";
+    const err = Object.assign(new Error(message), {
+      name: "AI_StreamProviderError",
+      code: "cyber_policy",
+      isRetryable: false,
+      statusCode: 400,
+      type: "invalid_request",
+      data: { error: { code: "cyber_policy", message, type: "invalid_request" }, type: "error" },
+    });
+
+    expect(classifyModelCallError(err)).toBe("recoverable");
+  });
+
   it("returns terminal for structural 4xx errors", () => {
     for (const statusCode of [400, 401, 403, 404, 413]) {
       const err = Object.assign(new Error("bad req"), { statusCode });
