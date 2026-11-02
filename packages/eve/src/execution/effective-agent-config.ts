@@ -1,3 +1,4 @@
+import type { CompactionStrategy } from "#shared/compaction-strategy.js";
 import type { ContextReader } from "#context/key.js";
 import { AgentSessionRuntimeOverridesKey, DynamicSubagentAgentConfigKey } from "#context/keys.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
@@ -35,6 +36,13 @@ export function resolveSessionUsageLimit(
     bundle.resolvedAgent.config?.limits?.sessionUsage ??
     bundle.graph.nodesByNodeId.get(ROOT_RUNTIME_AGENT_NODE_ID)?.agent.config?.limits?.sessionUsage;
   return limit === false ? () => false : limit;
+}
+
+/** The agent's own `compaction.compact`. A subagent without one uses eve's default strategy. */
+export function resolveCompactionStrategy(
+  bundle: Pick<CompiledBundle, "resolvedAgent">,
+): CompactionStrategy | undefined {
+  return bundle.resolvedAgent.config?.compaction?.compact;
 }
 
 export function resolveEffectiveAgentRuntimeFromConfig(

@@ -111,10 +111,12 @@ export function askApprovals(
     tasks: input.tasks,
   });
   return {
-    commit: [
-      ...committed,
-      ...(snippet === undefined ? [] : [createFrameworkUserMessage("context.state", snippet)]),
-    ],
+    history: {
+      append: [
+        ...committed,
+        ...(snippet === undefined ? [] : [createFrameworkUserMessage("context.state", snippet)]),
+      ],
+    },
     events: input.tasks.length > 0 ? [] : input.requests.map((ask) => approvalOpened(ask)),
     turn,
   };

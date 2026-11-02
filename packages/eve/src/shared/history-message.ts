@@ -233,3 +233,27 @@ export type HistoryMessage =
   | UserModelMessage
   | AssistantModelMessage
   | ToolModelMessage;
+
+/**
+ * Who wrote a user-role message in eve's stored history. `user`: a person, the turn's input.
+ * `task.result`: a delegated task's answer. The rest are eve's own: `context.compaction` a
+ * compaction summary or prompt, `context.instruction` and `context.state` injected context,
+ * `memory.load` recalled memory, `execution.continuation` and `execution.retry` notes that
+ * resume or retry a turn.
+ */
+export type HistoryMessageKind =
+  | "user"
+  | "task.result"
+  | "context.instruction"
+  | "context.state"
+  | "context.compaction"
+  | "memory.load"
+  | "execution.continuation"
+  | "execution.retry";
+
+/** One message of eve's stored history, as a compaction strategy reads and returns it. */
+export type StoredHistoryMessage =
+  | SystemModelMessage
+  | (UserModelMessage & { readonly kind: HistoryMessageKind })
+  | AssistantModelMessage
+  | ToolModelMessage;

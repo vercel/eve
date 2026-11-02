@@ -176,6 +176,11 @@
  *             eve-owned Nitro id uses `#eve/`, and nothing pins Nitro's
  *             private virtual ids. Files that predate the rule are baselined
  *             and may only leave the baseline.
+ *   rule 60 — Session history changes through `changeHistory`
+ *             (`harness/session-machine/history.ts`) or a transition's `history`.
+ *             Writing `{ ...session, history }` elsewhere, or `history: …` after a
+ *             session spread with other properties between, skips the checks and the
+ *             resets a rewrite needs. A spread under another name isn't caught.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -302,6 +307,7 @@ function isTsLike(relPath) {
  *   rule57: Violation[];
  *   rule58: Violation[];
  *   rule59: { allowlist: Set<string>; violations: Violation[] };
+ *   rule60: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -387,6 +393,7 @@ async function scanRepo(state) {
     checkRule57(posix, lines, state.rule57);
     checkRule58(posix, lines, state.rule58);
     checkRule59(posix, lines, state.rule59);
+    checkRule60(posix, content, state.rule60);
   }
 }
 
@@ -875,6 +882,38 @@ function checkRule59(posix, lines, state) {
         "`#nitro/` id literal detected. Name eve-owned Nitro virtual modules under `#eve/`, and assert on routes and handler behavior rather than Nitro's private virtual ids.",
     });
   });
+}
+
+// ---------- Rule 60: one writer for session history ----------
+
+const HISTORY_OWNER = "packages/eve/src/harness/session-machine/history.ts";
+/** Assembles a legacy snapshot from stored history; it changes nothing. */
+const HISTORY_ASSEMBLY_FILES = new Set([
+  "packages/eve/src/execution/legacy-session/completion-step.ts",
+]);
+// A spread of a session followed, in the same object, by its history: with other properties between,
+// or the shorthand `{ ...session, history }`.
+const SESSION_HISTORY_WRITE_RE = /\.\.\.\s*(?:[\w.]*\.)?session(?![\w.])[^{}]*?\bhistory\s*[:,}]/g;
+
+/** @param {string} posix @param {string} content @param {Violation[]} violations */
+function checkRule60(posix, content, violations) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    posix === HISTORY_OWNER ||
+    HISTORY_ASSEMBLY_FILES.has(posix) ||
+    posix.startsWith("packages/eve/src/internal/testing/") ||
+    posix.endsWith(".test.ts")
+  )
+    return;
+  for (const match of content.matchAll(SESSION_HISTORY_WRITE_RE)) {
+    violations.push({
+      rule: 60,
+      file: posix,
+      line: content.slice(0, match.index).split("\n").length,
+      message:
+        "writes session history directly. Change it with `changeHistory(session, { append | extend | repaired | rewrite })` from `#harness/session-machine/history.js`, or return `history` from a transition.",
+    });
+  }
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -1942,6 +1981,7 @@ async function main() {
       allowlist: new Set(baseline.rule59_nitroVirtualIdAllowlist),
       violations: /** @type {Violation[]} */ ([]),
     },
+    rule60: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2055,6 +2095,7 @@ async function main() {
   violations.push(...state.rule57);
   violations.push(...state.rule58);
   violations.push(...state.rule59.violations);
+  violations.push(...state.rule60);
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });
