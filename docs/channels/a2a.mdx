@@ -5,7 +5,7 @@ description: "Publish an eve agent as an Agent2Agent (A2A) v1.0 server that othe
 
 The A2A channel publishes an eve agent as an [A2A](https://a2a-protocol.org/) v1.0 server. An orchestrator or another agent that speaks A2A discovers the agent from its Agent Card, sends it messages, and follows the resulting tasks through questions, approvals, and sign-ins to a result. Each A2A context is a durable eve session that belongs to the caller who started it.
 
-This API is experimental and may change with the A2A specification. Import it from `eve/experimental/channels/a2a`. To let MCP clients such as Claude Code delegate work instead, use the [MCP channel](../channels/mcp).
+Import it from `eve/channels/a2a`. To let MCP clients such as Claude Code delegate work instead, use the [MCP channel](./mcp).
 
 ## Configure the channel
 
@@ -13,7 +13,7 @@ Create a channel file, such as `agent/channels/a2a.ts`. Authentication is requir
 
 ```ts title="agent/channels/a2a.ts"
 import { localDev } from "eve/channels/auth";
-import { a2aChannel } from "eve/experimental/channels/a2a";
+import { a2aChannel } from "eve/channels/a2a";
 
 export default a2aChannel({
   auth: localDev(),
@@ -40,7 +40,7 @@ The Agent Card path is fixed by the A2A specification, so an application can hav
 | `publicOrigin`  | Request origin  | The public origin the Agent Card advertises, when a proxy changes it, such as `https://agents.example.com`. Set `route` for the path.                                       |
 | `card`          | Derived         | Agent Card fields to set or override: `name`, `description`, `skills`, `provider`, `version`, `documentationUrl`, `iconUrl`, `securitySchemes`, and `securityRequirements`. |
 | `maxBlockingMs` | `25_000`        | The longest a blocking `SendMessage` waits before returning a working task. Keep it under the host's request timeout.                                                       |
-| `uploadPolicy`  | 25 MB, any type | Limits on inbound file parts, as for the [eve HTTP channel](../channels/eve).                                                                                               |
+| `uploadPolicy`  | 25 MB, any type | Limits on inbound file parts, as for the [eve HTTP channel](./eve).                                                                                                         |
 
 By default, the Agent Card takes its name and description from the agent, lists the agent's [skills](../skills) as A2A skills, and reports the installed eve version as the agent version.
 
@@ -140,7 +140,7 @@ Each message answers one prompt and carries only text parts, which eve joins int
 
 The JSON-RPC endpoint runs the ordinary eve auth walk: Basic auth, HMAC or ECDSA JWTs, OIDC, Vercel OIDC, custom `AuthFn` policies, or an ordered array of them. A request no strategy accepts gets `401` with the strategies' challenges. Tasks and contexts belong to the principal that created them; unknown, expired, and other callers' tasks all read as `TaskNotFoundError`.
 
-The Agent Card is public, because clients read it before they have credentials. Its `securitySchemes` come from the auth policy: an HTTP `Basic` or `Bearer` scheme for each challenge the policy's strategies declare, or `Bearer` when they declare none. With [`oauthResource()`](../channels/mcp#interactive-oauth), the Bearer scheme names the authorization server, and its `securityRequirements` list the configured scopes. Set `card.securitySchemes` and `card.securityRequirements` to advertise anything else, such as an API key header that a custom `AuthFn` checks.
+The Agent Card is public, because clients read it before they have credentials. Its `securitySchemes` come from the auth policy: an HTTP `Basic` or `Bearer` scheme for each challenge the policy's strategies declare, or `Bearer` when they declare none. With [`oauthResource()`](./mcp#interactive-oauth), the Bearer scheme names the authorization server, and its `securityRequirements` list the configured scopes. Set `card.securitySchemes` and `card.securityRequirements` to advertise anything else, such as an API key header that a custom `AuthFn` checks.
 
 For the complete strategy model, see [Authentication](../guides/auth-and-route-protection).
 
@@ -150,7 +150,7 @@ To expose the agent without authentication, use `none()`:
 
 ```ts title="agent/channels/a2a.ts"
 import { none } from "eve/channels/auth";
-import { a2aChannel } from "eve/experimental/channels/a2a";
+import { a2aChannel } from "eve/channels/a2a";
 
 export default a2aChannel({
   auth: none(),

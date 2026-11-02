@@ -1,8 +1,4 @@
-/**
- * Experimental: publish this agent as an A2A (Agent2Agent) v1.0 server over the JSON-RPC binding.
- *
- * This API has no compatibility promise and may change with the A2A specification.
- */
+/** Publish this agent as an A2A (Agent2Agent) v1.0 server over the JSON-RPC binding. */
 import {
   admitsAnonymousCallers,
   declaredAuthChallenges,

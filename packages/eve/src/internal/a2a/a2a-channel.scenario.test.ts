@@ -61,7 +61,7 @@ export default defineAgent({
 });
 `,
     "agent/channels/a2a.ts": `import { withAuthChallenges } from "eve/channels/auth";
-import { a2aChannel } from "eve/experimental/channels/a2a";
+import { a2aChannel } from "eve/channels/a2a";
 
 export default a2aChannel({
   auth: withAuthChallenges((request) => {
