@@ -1,7 +1,7 @@
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -241,39 +241,44 @@ describe("mounted extension via authored-source loader", () => {
         "agent/extensions/one.mjs":
           'import code from "eve/extensions/code"; export default code({ vercel: { connector: "vercel/one" } });',
         "agent/extensions/two.mjs":
-          'import code from "eve/extensions/code"; export default code({});',
+          'import code from "eve/extensions/code"; export default code({ vercel: { connector: "vercel/two" } });',
       },
     });
     const { manifest, moduleMap } = await compileRuntimeGraph(app.appRoot);
-    const hooks = ["one", "two"].map((name) =>
-      manifest.hooks.find((hook) => hook.slug === `${name}__authenticate`)!,
+    // Keep the Connect token request offline: an unexpired OIDC token skips the
+    // refresh, and the request itself fails before reaching the network.
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    vi.stubEnv(
+      "VERCEL_OIDC_TOKEN",
+      `e30.${Buffer.from(JSON.stringify({ exp })).toString("base64url")}.sig`,
     );
-    // Each mounted authentication hook reads its own extension configuration:
-    // only the mount with a Vercel connector asks for the sandbox.
-    const requestsSandbox = async (map: typeof moduleMap, hook: (typeof hooks)[number]) => {
-      const definition = map.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[hook.sourceId]!
-        .default as {
-        events: Record<string, (event: unknown, ctx: object) => Promise<void>>;
+    vi.stubEnv("VERCEL_OIDC_TOKEN_FILE", "");
+    vi.stubGlobal("fetch", () => Promise.reject(new Error("offline")));
+    try {
+      // Each mounted authentication hook requests a token for its own connector.
+      const authenticate = (map: typeof moduleMap, mount: string) => {
+        const hook = manifest.hooks.find((entry) => entry.slug === `${mount}__authenticate`)!;
+        const definition = map.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[hook.sourceId]!
+          .default as {
+          events: Record<string, (event: unknown, ctx: object) => Promise<void>>;
+        };
+        return definition.events["turn.started"]!({}, { getSandbox: async () => ({}) });
       };
-      const requested = new Error("sandbox requested");
-      try {
-        await definition.events["turn.started"]!(
-          {},
-          { getSandbox: () => Promise.reject(requested) },
+      const second = await loadCompiledModuleMapFromAuthoredSource({
+        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
+      });
+      for (const map of [moduleMap, second]) {
+        await expect(authenticate(map, "one")).rejects.toThrow(
+          'Connect token request failed for "vercel/one": offline',
         );
-        return false;
-      } catch (error) {
-        if (error !== requested) throw error;
-        return true;
+        await expect(authenticate(map, "two")).rejects.toThrow(
+          'Connect token request failed for "vercel/two": offline',
+        );
       }
-    };
-    const requests = await Promise.all(hooks.map((hook) => requestsSandbox(moduleMap, hook)));
-    expect(requests).toEqual([true, false]);
-    const second = await loadCompiledModuleMapFromAuthoredSource({
-      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
-    });
-    const secondRequests = await Promise.all(hooks.map((hook) => requestsSandbox(second, hook)));
-    expect(secondRequests).toEqual([true, false]);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("keeps state independent across mounts and context restoration", async () => {
