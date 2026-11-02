@@ -1,10 +1,13 @@
-import { promptQueueEvents } from "#channel/prompt-queue.js";
-import { renderTextInputRequest } from "#channel/resolve-text.js";
+import type { Interaction } from "#channel/interaction-prompts.js";
+import { renderTextInteraction } from "#channel/resolve-text.js";
+import {
+  postedIn,
+  signInChallengeText,
+  type SignIn,
+  type SignInSurface,
+} from "#channel/sign-in.js";
+import { surfaceEvents } from "#channel/surface.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import { extractErrorId, formatErrorHint } from "#internal/logging.js";
-import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
-import { displayProperName } from "#shared/display-name.js";
-import type { InputRequest } from "#shared/input.js";
 import type { RecallParticipant } from "#public/channels/recall/inbound.js";
 import type {
   RecallChannelEvents,
@@ -177,79 +180,57 @@ export function defaultShouldRespond(input: RecallRespondInput): boolean {
 
 /** Built-in Recall event handlers: chat replies, typed prompts, private sign-ins, and errors. */
 export const defaultEvents: RecallChannelEvents = {
-  async "message.completed"(event, channel) {
-    // Text before a tool call is the agent saying it's starting, which a
-    // meeting wants to hear about while it waits.
-    if (!event.message) return;
-    await channel.recall.sendChatMessage(event.message);
-  },
-
-  // Meeting chat has no buttons, so a reply can only answer the request it sees.
-  ...promptQueueEvents(showPrompt),
-
-  async "authorization.required"(event, channel) {
-    if (event.candidateId !== undefined) return;
-    const displayName = event.authorization?.displayName ?? displayProperName(event.name);
-    const challenge = event.authorization;
-    const prompt = [
-      `Sign in to ${displayName} to continue.`,
-      challenge?.instructions,
-      challenge?.userCode ? `Code: ${challenge.userCode}` : undefined,
-      challenge?.url,
-    ]
-      .filter((part): part is string => part !== undefined && part.length > 0)
-      .join("\n\n");
-    // Instructions alone, such as "approve on your phone", are safe for everyone to see.
-    if (!challenge?.url && !challenge?.userCode) {
-      await channel.recall.sendChatMessage(prompt);
-      return;
-    }
-    const participantId = participantIdOf(event.principalId, channel.recall.botId);
-    // A sign-in link or code is a credential, so it goes only to the person signing in.
-    if (
-      participantId !== undefined &&
-      channel.recall.supportsDirectMessages &&
-      (await channel.recall.sendChatMessage(prompt, { to: participantId }))
-    ) {
-      await channel.recall.sendChatMessage(
-        `${displayName} needs a sign-in. I sent the link privately.`,
-      );
-      return;
-    }
-    await channel.recall.sendChatMessage(
-      `${displayName} needs a sign-in, and this meeting's chat can't deliver a private link. Connect ${displayName} outside the meeting, then ask again.`,
-    );
-  },
-
-  async "authorization.completed"(event, channel) {
-    if (event.candidateId !== undefined) return;
-    await channel.recall.sendChatMessage(
-      renderAuthorizationOutcome({
-        displayName: event.authorization?.displayName ?? displayProperName(event.name),
-        outcome: event.outcome,
-        reason: event.reason,
-      }),
-    );
-  },
-
-  async "turn.failed"(event, channel) {
-    if (event.terminal) return;
-    const errorId = extractErrorId(event.details);
-    await channel.recall.sendChatMessage(
-      `I hit an error${formatErrorHint(event)}. Please ask again.${errorId ? ` (Error id: ${errorId})` : ""}`,
-    );
-  },
-
-  async "session.failed"(event, channel) {
-    const errorId = extractErrorId(event.details);
-    await channel.recall.sendChatMessage(
-      `I can't continue in this meeting after an error${formatErrorHint(event)}.${errorId ? ` (Error id: ${errorId})` : ""}`,
-    );
+  ...surfaceEvents<RecallEventContext>({
+    post: (channel, text) => channel.recall.sendChatMessage(text),
+    restart: "meeting",
+    // Meeting chat has no buttons, so a reply can only answer the request it sees.
+    requests: { showOne: showPrompt },
+    signIns: recallSignIns,
+  }),
+  // Text before a tool call is the agent saying it's starting, which a
+  // meeting wants to hear about while it waits.
+  async "content.completed"({ data }, { channel }) {
+    if (data.kind !== "text" || typeof data.value !== "string" || !data.value) return;
+    await channel.recall.sendChatMessage(data.value);
   },
 };
 
-async function showPrompt(channel: RecallEventContext, request: InputRequest): Promise<boolean> {
-  const body = renderTextInputRequest(request);
+export function recallSignIns(channel: RecallEventContext): SignInSurface {
+  const post = async (text: string) => {
+    await channel.recall.sendChatMessage(text);
+    return undefined;
+  };
+  return {
+    private: false,
+    postChallenge: (signIn) => post(signInChallengeText(signIn)),
+    // A sign-in link or code is a credential, so it goes only to the person signing in.
+    async deliverPrivately(signIn) {
+      if (!hasCredential(signIn)) return false;
+      const participantId = participantIdOf(signIn.principalId, channel.recall.botId);
+      if (participantId === undefined || !channel.recall.supportsDirectMessages) return false;
+      return channel.recall.sendChatMessage(signInChallengeText(signIn), { to: participantId });
+    },
+    postStatus(signIn, delivered) {
+      // Instructions alone, such as "approve on your phone", are safe for everyone to see.
+      if (!hasCredential(signIn)) return post(signInChallengeText(signIn));
+      return post(
+        delivered
+          ? `${signIn.displayName} needs a sign-in. I sent the link privately.`
+          : `${signIn.displayName} needs a sign-in, and this meeting's chat can't deliver a private link. Connect ${signIn.displayName} outside the meeting, then ask again.`,
+      );
+    },
+    post,
+    posted: postedIn(channel.state, "pendingSignIns"),
+  };
+}
+
+function hasCredential(signIn: SignIn): boolean {
+  return Boolean(signIn.url || signIn.userCode);
+}
+
+async function showPrompt(channel: RecallEventContext, interaction: Interaction): Promise<boolean> {
+  const { request } = interaction;
+  const body = renderTextInteraction(request);
   const instruction =
     (request.options ?? []).length === 0
       ? undefined
@@ -262,22 +243,10 @@ async function showPrompt(channel: RecallEventContext, request: InputRequest): P
   if (shown) {
     channel.state.shownOptions = {
       options: (request.options ?? []).map(({ id, label }) => ({ id, label })),
-      requestId: request.requestId,
+      requestId: interaction.interactionId,
     };
   }
   return shown;
-}
-
-function renderAuthorizationOutcome(input: {
-  readonly displayName: string;
-  readonly outcome: ConnectionAuthorizationOutcome;
-  readonly reason?: string;
-}): string {
-  if (input.outcome === "authorized") return `${input.displayName} connected.`;
-  if (input.outcome === "declined") return `${input.displayName} sign-in cancelled.`;
-  const outcome = input.outcome === "timed-out" ? "timed out" : input.outcome;
-  const reason = input.reason === undefined ? "" : ` (${input.reason})`;
-  return `${input.displayName} sign-in ${outcome}${reason}.`;
 }
 
 function escapeRegExp(text: string): string {

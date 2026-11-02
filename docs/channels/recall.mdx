@@ -8,7 +8,7 @@ type: integration
   The Recall.ai channel is experimental. Its API and defaults may change in a patch release.
 </Callout>
 
-The Recall.ai channel puts your agent in a video meeting as a bot. [Recall.ai](https://www.recall.ai) runs the bot in Zoom, Google Meet, or Microsoft Teams. It sends the meeting's live transcript and chat to your agent as webhooks, and the agent replies in the meeting chat. Each bot's meeting is one eve session, and each participant is their own principal. See [Channels](./overview) for the contract this builds on.
+The Recall.ai channel puts your agent in a video meeting as a bot. [Recall.ai](https://www.recall.ai) runs the bot in Zoom, Google Meet, or Microsoft Teams. It sends the meeting's live transcript and chat to your agent as webhooks, and the agent replies in the meeting chat. Each bot's meeting is one eve session, and each participant is their own principal. See [Channels](/docs/channels) for the contract this builds on.
 
 ## Add the channel
 
@@ -61,7 +61,7 @@ export default defineSchedule({
 });
 ```
 
-Bots created this way send webhooks to `webhookUrl`. It defaults to `RECALL_WEBHOOK_URL`, then to the channel's route on the current Vercel deployment: the production URL in production, and the deployment's own URL on previews, so a preview's bots report to the preview. The default includes the agent's route prefix when the agent is mounted under one, and adds the [Protection Bypass for Automation](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation) secret when the project has one. Outside Vercel, such as in local development through a tunnel, set `RECALL_WEBHOOK_URL`.
+Bots created this way send webhooks to `webhookUrl`. It defaults to `RECALL_WEBHOOK_URL`, then to the channel's route on the current Vercel deployment: the production URL in production, and the deployment's own URL on previews, so a preview's bots report to the preview. The default includes the agent's route prefix when the agent is mounted under one. It never includes a [Deployment Protection](https://vercel.com/docs/deployment-protection) bypass secret, so on a protected deployment, set `RECALL_WEBHOOK_URL` to a URL Recall can reach. Outside Vercel, such as in local development through a tunnel, set `RECALL_WEBHOOK_URL`.
 
 A new bot can't post to the chat until the meeting admits it, which can take minutes when the meeting has a waiting room. Until then, the channel holds the agent's chat messages and posts them once the session receives its first meeting event, such as someone speaking or joining. If nobody speaks, chats, or joins after the bot is admitted, the held messages wait until someone does. While a message is held, `sendChatMessage` returns `true`, and a later failure to post it is only logged.
 
@@ -140,7 +140,7 @@ export default recallChannel({
 
 ### Replies
 
-The default `message.completed` handler posts each reply to the meeting chat, including text the agent writes before a tool call. Long replies are split at the platform's limit: 500 characters on Google Meet, and 4,096 on Zoom and Microsoft Teams.
+The default `content.completed` handler posts each reply to the meeting chat, including text the agent writes before a tool call. Long replies are split at the platform's limit: 500 characters on Google Meet, and 4,096 on Zoom and Microsoft Teams.
 
 When a private Zoom chat message joins a turn, the whole turn stays private: replies, approval and question prompts, error notices, and sign-in notices all go only to the sender, even if public lines join the same turn. The next turn posts publicly again. If private messages from more than one person join one turn, or the platform can't send a private message, the bot posts a notice instead of the reply.
 
@@ -150,11 +150,11 @@ Webex bots can't send chat messages. The channel replies only in text; it doesn'
 
 The channel defaults to `turnPolicy: "queue"`, because people keep talking while the agent works, and `"steer"` would restart the turn on every utterance. Lines spoken during a turn are delivered after it ends, and each runs `shouldRespond` then.
 
-While a turn waits on a tool approval or sign-in, the person it's working for can still redirect it: a message from them that doesn't answer the prompt cancels the prompt and steers the turn. A question asked with `ctx.ask()` inside a [workflow tool](../tools/workflows) doesn't work this way yet. Until someone answers it, every message waits behind it and the bot stays quiet. If that matters for your agent, set `turnPolicy: "steer"`, which lets a message cancel the question but interrupts pending model output on every line the session receives.
+While a turn waits on a tool approval or sign-in, the person it's working for can still redirect it: a message from them that doesn't answer the prompt cancels the prompt and steers the turn. A question asked with `ctx.ask()` inside a [workflow tool](/docs/tools/workflows) doesn't work this way yet. Until someone answers it, every message waits behind it and the bot stays quiet. If that matters for your agent, set `turnPolicy: "steer"`, which lets a message cancel the question but interrupts pending model output on every line the session receives.
 
 ### Human-in-the-loop (HITL)
 
-Meeting chat has no buttons, so the default handlers post each question and tool approval as text with numbered options. Participants answer in the chat, or by speaking to the bot. Answers can be phrased naturally: "okay eve, approve it" approves, and "eve, option two" or "the second one" picks the second option. The bot's name, filler words, and number words are ignored, and what's left must name exactly one option, so "neither, approve is wrong" doesn't pick one. To render questions differently, declare your own `events["input.requested"]` handler.
+Meeting chat has no buttons, so the default handlers post each question and tool approval as text with numbered options. Participants answer in the chat, or by speaking to the bot. Answers can be phrased naturally: "okay eve, approve it" approves, and "eve, option two" or "the second one" picks the second option. The bot's name, filler words, and number words are ignored, and what's left must name exactly one option, so "neither, approve is wrong" doesn't pick one. To render questions differently, declare your own `events["interaction.opened"]` handler.
 
 ### Sign-ins
 
@@ -188,6 +188,6 @@ For example, you may be required to tell meeting participants that the meeting i
 
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
-- [Auth & route protection](../guides/auth-and-route-protection): principals and authorization
-- [Custom channels](./custom#cross-channel-hand-off): hand a request from another channel into a meeting
+- [Channels overview](/docs/channels): the channel contract and every built-in channel
+- [Auth & route protection](/docs/guides/auth-and-route-protection): principals and authorization
+- [Custom channels](/docs/channels/custom#cross-channel-hand-off): hand a request from another channel into a meeting

@@ -2,15 +2,15 @@ import type { ChannelFrom } from "#channel/channel-operations.js";
 import type { PromptQueueState } from "#channel/prompt-queue.js";
 import type { RouteHandler } from "#channel/routes.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import { defaultDeliverResult } from "#channel/adapter.js";
 import { type ContextAccessor, ContextKey } from "#context/key.js";
 import { attachInputText } from "#internal/input-text.js";
 import { createLogger } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { SessionEvent } from "#protocol/session-event.js";
 import {
   type Channel,
   type ChannelContinuationOps,
+  type ChannelEventContext,
+  type ChannelEventOf,
   defineChannel,
   POST,
 } from "#public/definitions/channel.js";
@@ -54,14 +54,14 @@ const MAX_WEBHOOK_BYTES = 256 * 1024;
  */
 const PostedOutboxKey = new ContextKey<number>("recall.posted-outbox");
 
+/** A `deliver` result with nothing to deliver, so the line starts no turn. */
+const IGNORED = {};
+
 /** How many of the bot's own chat messages are remembered, to drop them when they echo back. */
 const MAX_SENT_CHAT = 10;
 
 /** How many lines the agent didn't answer stay in state for the next turn it takes. */
 const MAX_TRANSCRIPT_LINES = 60;
-
-type EventData<T extends UnstampedMessageStreamEvent["type"]> =
-  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** JSON-serializable state for one bot's meeting session. */
 export interface RecallChannelState extends PromptQueueState {
@@ -85,6 +85,8 @@ export interface RecallChannelState extends PromptQueueState {
   /** Set while a bot `receive` sent is still joining; chat waits in `outbox` until it hears the meeting. */
   awaitingCall?: boolean;
   outbox?: { message: string; to?: string }[];
+  /** @internal The sign-ins the default flow sent a prompt for, by connection name. */
+  pendingSignIns?: Record<string, string>;
 }
 
 /** Per-delivery state: the event a line came from, which `deliver` reads and doesn't keep. */
@@ -173,31 +175,21 @@ export type RecallInboundResultOrPromise =
   | undefined
   | Promise<RecallInboundResult | undefined>;
 
-type RecallEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
-  data: EventData<T>,
-  channel: RecallEventContext,
-  ctx: SessionContext,
+type RecallEventHandler<T extends SessionEvent["type"]> = (
+  event: ChannelEventOf<T>,
+  ctx: ChannelEventContext<RecallEventContext>,
 ) => void | Promise<void>;
 
 /** Event handlers supported by `recallChannel({ events })`. */
 export interface RecallChannelEvents {
   readonly "turn.started"?: RecallEventHandler<"turn.started">;
-  readonly "actions.requested"?: RecallEventHandler<"actions.requested">;
-  readonly "action.result"?: RecallEventHandler<"action.result">;
-  readonly "message.completed"?: RecallEventHandler<"message.completed">;
-  readonly "input.requested"?: RecallEventHandler<"input.requested">;
-  readonly "input.resolved"?: RecallEventHandler<"input.resolved">;
-  readonly "approval.settled"?: RecallEventHandler<"approval.settled">;
-  readonly "turn.failed"?: RecallEventHandler<"turn.failed">;
-  readonly "turn.completed"?: RecallEventHandler<"turn.completed">;
-  readonly "turn.cancelled"?: RecallEventHandler<"turn.cancelled">;
-  readonly "session.failed"?: (
-    data: EventData<"session.failed">,
-    channel: RecallEventContext,
-  ) => void | Promise<void>;
-  readonly "session.completed"?: RecallEventHandler<"session.completed">;
-  readonly "authorization.required"?: RecallEventHandler<"authorization.required">;
-  readonly "authorization.completed"?: RecallEventHandler<"authorization.completed">;
+  readonly "call.requested"?: RecallEventHandler<"call.requested">;
+  readonly "call.settled"?: RecallEventHandler<"call.settled">;
+  readonly "content.completed"?: RecallEventHandler<"content.completed">;
+  readonly "interaction.opened"?: RecallEventHandler<"interaction.opened">;
+  readonly "interaction.settled"?: RecallEventHandler<"interaction.settled">;
+  readonly "turn.settled"?: RecallEventHandler<"turn.settled">;
+  readonly "session.ended"?: RecallEventHandler<"session.ended">;
 }
 
 /** Target accepted by `receive(recall, { target })`: sends a new bot to a meeting. */
@@ -281,7 +273,6 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
   };
 
   return defineChannel<RecallChannelState, RecallChannelContext, RecallReceiveTarget>({
-    kindHint: "recall",
     turnPolicy: config.turnPolicy ?? "queue",
     state: { botId: null, platform: null },
     audience: () => "unknown",
@@ -296,21 +287,16 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
       // A session's first send seeds state with the whole delivery.
       delete (channel.state as RecallDeliveryState).event;
       const event = delivered?.event;
-      if (event === undefined || typeof payload.message !== "string") {
-        return defaultDeliverResult(payload);
-      }
+      if (event === undefined || typeof payload.message !== "string") return;
       if (!channel.state.platform) await identifyBot(api, channel.state);
 
       if (channel.state.awaitingCall && isInCall(event)) {
-        await flushOutbox(
-          channel,
-          (channel as RecallChannelContext & { readonly ctx: ContextAccessor }).ctx,
-        );
+        await flushOutbox(channel, (channel as unknown as { readonly ctx: ContextAccessor }).ctx);
       }
 
       // The route drops chat under the configured name; the session also knows
       // the name Recall shows and what the bot just sent.
-      if (isOwnChat(event, channel.state)) return undefined;
+      if (isOwnChat(event, channel.state)) return IGNORED;
 
       const transcript = channel.state.transcript ?? [];
       const line = payload.message;
@@ -318,7 +304,7 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
         // Between turns the session parks without a model call; during a held
         // turn eve ignores the delivery, so a pending prompt stays open.
         channel.state.transcript = [...transcript, line].slice(-MAX_TRANSCRIPT_LINES);
-        return undefined;
+        return IGNORED;
       }
       channel.state.transcript = [];
       // A private chat keeps the rest of the turn private, even if public lines join it.
@@ -327,31 +313,32 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
         channel.state.replyTo =
           replyTo === undefined || replyTo === event.participant.id ? event.participant.id : null;
       }
-      const input = defaultDeliverResult(payload);
       const option =
         "text" in event ? shownOptionIn(channel.state, event.text, botName) : undefined;
-      if (input !== undefined && option !== undefined) attachInputText(input, option.id);
-      if (input === undefined || transcript.length === 0) return input;
-      return { ...input, context: [...(input.context ?? []), formatTranscript(transcript)] };
+      // A pending prompt resolves against the delivery's own answer text, not a replacement's.
+      if (option !== undefined) attachInputText(payload, option.id);
+      if (transcript.length === 0) return;
+      const { state: _state, ...delivery } = payload;
+      return { ...delivery, context: [...(payload.context ?? []), formatTranscript(transcript)] };
     },
 
     routes: [
       POST<RecallChannelState>(route, handleWebhook({ api, botName, config, onMeetingEvent })),
     ],
 
-    async receive(input, { from }) {
+    async receive({ message, target, ...send }, { from }) {
       const webhookUrl = resolveRecallWebhookUrl(config.webhookUrl, route);
       const bot = await createRecallBot({
         ...api,
         body: recallBotConfig({
           botName,
-          meetingUrl: input.target.meetingUrl,
-          metadata: input.target.metadata,
+          meetingUrl: target.meetingUrl,
+          metadata: target.metadata,
           webhookUrl,
         }),
       });
-      return await from(bot.id).send(input.message, {
-        auth: input.auth,
+      return await from(bot.id).send(message, {
+        ...send,
         // Recall rejects chat until the bot is admitted, which can take minutes.
         state: { awaitingCall: true, botId: bot.id, botName, platform: bot.platform ?? null },
       });
@@ -545,26 +532,14 @@ function shownOptionIn(state: RecallChannelState, text: string, botName: string)
   return matchSpokenOption(text, botName, shown.options);
 }
 
-/** Wraps the turn-ending handlers so the turn's private reply target ends with it. */
+/** Wraps the turn-ending handler so the turn's private reply target ends with it. */
 function clearReplyToAfterTurn(events: RecallChannelEvents): RecallChannelEvents {
-  const {
-    "turn.cancelled": cancelled,
-    "turn.completed": completed,
-    "turn.failed": failed,
-  } = events;
+  const settled = events["turn.settled"];
   return {
     ...events,
-    async "turn.cancelled"(data, channel, ctx) {
-      await cancelled?.(data, channel, ctx);
-      delete channel.state.replyTo;
-    },
-    async "turn.completed"(data, channel, ctx) {
-      await completed?.(data, channel, ctx);
-      delete channel.state.replyTo;
-    },
-    async "turn.failed"(data, channel, ctx) {
-      await failed?.(data, channel, ctx);
-      delete channel.state.replyTo;
+    async "turn.settled"(event, ctx) {
+      await settled?.(event, ctx);
+      delete ctx.channel.state.replyTo;
     },
   };
 }

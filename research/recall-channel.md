@@ -107,7 +107,7 @@ session, so another channel can hand a request into a meeting.
   said with the bot's name, filler words, and number words dropped: "okay
   Eve, approve it" approves, and "Eve, one" picks option 1. What's left must
   name exactly one option.
-- **Replies:** `message.completed` posts to the chat, including text before a
+- **Replies:** `content.completed` posts to the chat, including text before a
   tool call. Once a private Zoom chat joins a turn, everything the turn posts
   without an explicit `to` (replies, prompts, errors, notices) goes privately
   to its sender until the turn ends. Private chats from several people in one
