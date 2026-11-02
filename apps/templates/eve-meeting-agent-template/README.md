@@ -36,7 +36,7 @@ LINEAR_CONNECTOR=<connector-uid>   # defaults to "linear"
 RECALL_API_KEY=...
 RECALL_WORKSPACE_VERIFICATION_SECRET=whsec_...
 RECALL_REGION=us-east-1            # your Recall workspace region
-RECALL_WEBHOOK_URL=https://...     # only needed for local development
+RECALL_WEBHOOK_URL=https://...     # for local development or a protected deployment
 ```
 
 ## Deploy
@@ -45,7 +45,7 @@ RECALL_WEBHOOK_URL=https://...     # only needed for local development
 vercel deploy --prod
 ```
 
-Recall posts to `/eve/v1/recall` at the production URL. If Deployment Protection covers production, run `vercel project protection enable --protection-bypass`, and redeploy. Bots the agent creates carry the bypass secret automatically; append `?x-vercel-protection-bypass=<secret>` to webhook URLs you configure in Recall yourself.
+Recall posts to `/eve/v1/recall` at the production URL. eve never adds a Deployment Protection bypass to that URL, so if protection covers production, Recall can't reach the route until you give it a way in. One option is to run `vercel project protection enable --protection-bypass`, set `RECALL_WEBHOOK_URL` to `https://<production-host>/eve/v1/recall?x-vercel-protection-bypass=<secret>`, and redeploy. Add the same query to webhook URLs you configure in Recall yourself.
 
 ## Join meetings
 
