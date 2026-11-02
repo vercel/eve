@@ -465,6 +465,35 @@ describe("parseDirectMessageEvent", () => {
     ]);
   });
 
+  // A thread reply posted with "Also send to direct message" (#5774).
+  it.fails("keeps a DM thread reply that is also sent to the conversation", () => {
+    const payload = parseSlackWebhookBody(
+      JSON.stringify({
+        type: "event_callback",
+        team_id: "T01",
+        event: {
+          type: "message",
+          channel_type: "im",
+          subtype: "thread_broadcast",
+          user: "U01",
+          text: "also sending this to the DM",
+          channel: "D01",
+          ts: "1700000000.000200",
+          thread_ts: "1700000000.000100",
+        },
+      }),
+    );
+    if (payload.kind !== "direct_message") throw new Error("expected direct_message");
+
+    const message = slackMessageFromWebhookPayload(payload);
+
+    expect(message).toMatchObject({
+      channelId: "D01",
+      text: "also sending this to the DM",
+      threadTs: "1700000000.000100",
+    });
+  });
+
   it.each(["is_share", "is_msg_unfurl", "is_reply_unfurl"])(
     "includes an app mention's %s attachment",
     (sharedMessageFlag) => {
