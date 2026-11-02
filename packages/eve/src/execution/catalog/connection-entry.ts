@@ -17,6 +17,7 @@ import {
   type ApprovalStatus,
   type ConnectionToolAnnotations,
 } from "#approval/definition.js";
+import { withAgentApproval } from "#approval/agent.js";
 import { isConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { connectionToolName } from "#connections/ownership.js";
 import { loadContext } from "#context/container.js";
@@ -79,14 +80,17 @@ export function connectionEntry(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
   toolName: string,
+  agentApproval?: ApprovalPolicy,
 ): HarnessToolDefinition {
   const label = `${displayProperName(connection.connectionName)}: ${displayTitle(toolName)}`;
+  // Wrapped inside the pin, so a call the agent's policy holds is pinned to this instance too.
+  const approval = withAgentApproval(agentApproval, connection.approval);
   return {
-    approval: connectionApproval(registry, connection, toolName),
+    approval: connectionApproval(registry, connection, toolName, approval),
     deferred: true,
     description: "",
     execute: (input: unknown, options: ToolExecuteOptions) =>
-      callConnectionTool(registry, connection, toolName, input, options),
+      callConnectionTool(registry, connection, toolName, input, options, approval !== undefined),
     // Checked before approval, so no one is asked to approve a call that cannot run.
     inputSchema: refineJsonSchema({}, (input) => checkInput(registry, connection, toolName, input)),
     label: { start: () => label },
@@ -144,11 +148,12 @@ async function callConnectionTool(
   toolName: string,
   rawInput: unknown,
   options: ToolExecuteOptions,
+  gated: boolean,
 ): Promise<unknown> {
   releaseApprovalPin(options.toolCallId, connection);
   const result = await runConnectionTool(registry, connection, toolName, rawInput, options);
   // The call runs again after the sign-in, and its approval recheck expects a pin.
-  if (connection.approval !== undefined && isAuthorizationSignal(result)) {
+  if (gated && isAuthorizationSignal(result)) {
     pinApprovedInstance(options.toolCallId, connection);
   }
   return result;
@@ -338,8 +343,8 @@ function connectionApproval(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
   toolName: string,
+  approval: Approval | undefined,
 ): Approval | undefined {
-  const { approval } = connection;
   if (approval === undefined) return undefined;
   const policy = resolveApprovalPolicy(approval);
   const request = async (context: ApprovalContext) =>

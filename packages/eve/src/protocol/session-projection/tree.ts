@@ -138,8 +138,9 @@ export function parentOf(view: SessionView, ref: Ref): Ref | undefined {
     case "child":
       return refOf(rowOf(view, "child", ref.id)?.owner);
     case "part": {
-      const runId = rowOf(view, "part", ref.id)?.runId;
-      return runId === undefined ? undefined : { family: "run", id: runId };
+      const row = rowOf(view, "part", ref.id);
+      if (row?.runId !== undefined) return { family: "run", id: row.runId };
+      return row?.turnId === undefined ? undefined : { family: "turn", id: row.turnId };
     }
     case "turn":
     case "task":
