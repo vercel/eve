@@ -11,7 +11,7 @@
 - Never print credentials, tokens, or `.env` contents.
 - Search large files first, then read the sections you need.
 
-# When you changed code
+# When you change code
 
 Build large changes in steps, and test each step as you go. Before finishing:
 
