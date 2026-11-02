@@ -1,7 +1,7 @@
 import { generateText, type LanguageModel } from "ai";
 
 import { defineCommand, type CommandDefinition } from "#public/definitions/command.js";
-import { emptySessionView, foldEvents, type SessionView } from "#public/events/index.js";
+import { emptySessionView, foldEvents, runs, type SessionView } from "#public/events/index.js";
 import { sessions } from "#public/server/index.js";
 
 import { asideTranscript } from "./transcript.js";
@@ -18,6 +18,8 @@ export interface AsideInput {
   /** The session's state when the question was asked, for answerers that query it directly. */
   readonly view: SessionView;
   readonly sessionId: string;
+  /** The model ID the session's latest turn ran on, when it has run one. */
+  readonly sessionModelId?: string;
   readonly abortSignal?: AbortSignal;
 }
 
@@ -27,7 +29,9 @@ export type AsideAnswerer = (input: AsideInput) => Promise<string>;
 export interface AsideOptions {
   /**
    * The model the default answerer calls: a model ID routed through AI Gateway, or an AI SDK
-   * model instance. Ignored when `answer` is set. Default `"openai/gpt-6-luna-fast"`.
+   * model instance. Ignored when `answer` is set. Defaults to the model ID the session's latest
+   * turn ran on, through AI Gateway, falling back to `"openai/gpt-6-luna-fast"` when there is none
+   * or that call fails, such as for a provider instance the gateway doesn't route.
    */
   readonly model?: string | LanguageModel;
   /** Replaces the default answerer, for example to answer with your own model or prompt. */
@@ -65,8 +69,21 @@ export async function askAside(
 ): Promise<string> {
   const view = await readSession(sessionId, abortSignal);
   const transcript = asideTranscript(view, options.maxContextChars ?? DEFAULT_MAX_CONTEXT_CHARS);
-  const answer = options.answer ?? modelAnswerer(options.model ?? DEFAULT_MODEL);
-  return answer({ question, transcript, view, sessionId, abortSignal });
+  const sessionModelId = runs(view).findLast((run) => run.turnId !== undefined)?.modelId;
+  const input: AsideInput = { question, transcript, view, sessionId, sessionModelId, abortSignal };
+  if (options.answer !== undefined) return options.answer(input);
+  if (options.model !== undefined) return modelAnswerer(options.model)(input);
+  if (sessionModelId === undefined) return modelAnswerer(DEFAULT_MODEL)(input);
+  try {
+    return await modelAnswerer(sessionModelId)(input);
+  } catch (error) {
+    if (abortSignal?.aborted === true || sessionModelId === DEFAULT_MODEL) throw error;
+    console.warn(
+      `The session's model ${sessionModelId} failed a side question; using ${DEFAULT_MODEL}.`,
+      { error },
+    );
+    return modelAnswerer(DEFAULT_MODEL)(input);
+  }
 }
 
 /**

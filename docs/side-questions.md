@@ -33,11 +33,13 @@ Every option is optional:
 ```ts
 btwCommand({
   // The model that answers: an AI Gateway model ID or an AI SDK model instance.
-  // Default "openai/gpt-6-luna-fast". Ignored when `answer` is set.
+  // Default: the model the session's latest turn ran on, through AI Gateway, or
+  // "openai/gpt-6-luna-fast" when there is none or that call fails. Ignored when `answer` is set.
   model: "openai/gpt-6-luna-fast",
   // Characters of the session the answer reads, newest first. Default 24,000.
   maxContextChars: 24_000,
-  // Replaces the default answer. Receives { question, transcript, view, sessionId, abortSignal }.
+  // Replaces the default answer.
+  // Receives { question, transcript, view, sessionId, sessionModelId, abortSignal }.
   answer: async ({ question, transcript }) => myAnswer(question, transcript),
 });
 ```
@@ -53,4 +55,4 @@ The default answer is one model call with no tools. It reads a transcript of the
 ## Limits
 
 - The answer knows only what the session has recorded. Recent work can take a moment to reach it, and it can't see files or run tools.
-- The answering model isn't the agent: it gets the transcript, not the agent's instructions, skills, or tools.
+- The answer runs on the session's model by default, but it isn't the agent: it gets the transcript, not the agent's instructions, skills, or tools.

@@ -171,6 +171,7 @@ describe("eve/extensions/btw", () => {
     expect(seen).toHaveLength(1);
     const { question, transcript } = seen[0]!;
     expect(question).toBe(QUESTION);
+    expect(seen[0]!.sessionModelId).toBe("eve-test/scripted-model");
     // The answerer sees the task and the call still in flight, inside the running turn.
     expect(transcript).toContain('<turn status="running">');
     expect(transcript).toContain(`<user>${JSON.stringify(TASK)}</user>`);
