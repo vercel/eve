@@ -783,4 +783,17 @@ describe("Client commands", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("not json"));
     await expect(client.runCommand("escalate")).rejects.toThrow(CommandResponseError);
   });
+
+  it("rejects command names and aliases outside the command grammar", async () => {
+    const client = new Client({ baseUrl: "https://eve.test" });
+    for (const command of [
+      { name: "escalate\u001b]52;c;cHduZWQ=\u0007", description: "x", session: "optional" },
+      { name: "escalate", description: "x", aliases: ["human\u001b[2J"], session: "optional" },
+    ]) {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        Response.json({ ok: true, commands: [command] }),
+      );
+      await expect(client.commands()).rejects.toThrow(CommandResponseError);
+    }
+  });
 });

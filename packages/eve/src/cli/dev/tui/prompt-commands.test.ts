@@ -205,6 +205,24 @@ describe("withChannelPromptCommands for a command without arguments", () => {
     });
     expect(parsePromptCommand("/clear the cache", [clear!])).toBeNull();
   });
+
+  it("drops names and aliases outside the command grammar instead of rendering them", () => {
+    const commands = withChannelPromptCommands(
+      [],
+      [
+        { name: "pwn\u001b]52;c;cHduZWQ=\u0007", description: "x", session: "optional" },
+        {
+          name: "escalate",
+          description: "x",
+          aliases: ["human", "h\u001b[2J"],
+          session: "optional",
+        },
+      ],
+    );
+    expect(commands.map(({ name, aliases }) => ({ name, aliases }))).toEqual([
+      { name: "escalate", aliases: ["human"] },
+    ]);
+  });
 });
 
 describe("isPromptControlCommand", () => {

@@ -1,3 +1,10 @@
+/**
+ * The names and aliases a command may have: what a person can type as `/name`, up to Slack's
+ * 32-character limit. Clients check names a server sends against it too, since they reach the
+ * terminal and the command line.
+ */
+export const COMMAND_NAME_PATTERN = /^[a-z][a-z0-9-]{0,31}$/u;
+
 /** One slash command an eve channel offers, as `GET /eve/v1/commands` lists it. */
 export interface CommandInfo {
   readonly name: string;

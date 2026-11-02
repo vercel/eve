@@ -1,5 +1,9 @@
 import { z } from "#compiled/zod/index.js";
-import type { CommandInfo, CommandRunResult } from "#protocol/commands.js";
+import {
+  COMMAND_NAME_PATTERN,
+  type CommandInfo,
+  type CommandRunResult,
+} from "#protocol/commands.js";
 import { EveError } from "#shared/eve-error.js";
 
 /** One slash command an eve channel offers, from `GET /eve/v1/commands`. */
@@ -8,14 +12,17 @@ export type ChannelCommandInfo = CommandInfo;
 /** Result of running an eve channel slash command. */
 export type ChannelCommandResult = CommandRunResult;
 
+// Names reach the terminal and the command line, so a server can't send controls in one.
+const commandName = z.string().regex(COMMAND_NAME_PATTERN);
+
 export const ChannelCommandListSchema = z.object({
   ok: z.literal(true),
   commands: z.array(
     z.object({
-      name: z.string(),
+      name: commandName,
       description: z.string(),
       input: z.object({ hint: z.string() }).optional(),
-      aliases: z.array(z.string()).optional(),
+      aliases: z.array(commandName).optional(),
       session: z.enum(["optional", "required"]),
     }),
   ),
