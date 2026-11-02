@@ -102,9 +102,11 @@ as a paired variant and lands only if it passes a non-inferiority check.
   fresh-context agent, give it a self-contained audit brief that names the
   repository, the ref or diff, and an instruction not to edit; otherwise audit
   in this session." The audit standards stay.
-- **`code__investigate` skill.** It absorbs the "Issues and bugs" and "Analysis
-  and design" sections that `instructions.md` currently sends on every step.
-- **Extension instructions.** Rewritten in Phase 2.
+- **Extension instructions.** Phase 1 removes only the text that names the
+  worker. Phase 2 rewrites the rest.
+- **`code__investigate` skill (Phase 2).** It absorbs the "Issues and bugs" and
+  "Analysis and design" sections that `instructions.md` currently sends on every
+  step.
 
 ### Added later, gated on measurement
 
@@ -134,6 +136,9 @@ Most of this is eve-bench work, tracked in an eve-bench issue. The eve side:
      PR in 6 sql-formatter trials.
    - Turn on prompt caching for pi.
    - Report first-step tokens, steps, and tool calls by name.
+
+   Implemented in vercel-labs/eve-bench#103.
+
 5. Make variants git refs. The extension is compiled into eve, and its
    instructions cannot be overridden, so each variant needs its own build.
 6. Define the benchmark consumer contract. `packages/eve-code/agent/` owns the
@@ -147,9 +152,10 @@ models, with the margin and detectable effect stated.
 
 ## Phase 1: API removals (PR 1, before 1.0.0)
 
-This PR carries only the removals and skill changes listed under Observable
-changes. It does not edit `instructions.md`, so it changes no measured
-behavior beyond dropping an unused tool, and it does not wait for Phase 0.
+This PR carries only the removals and the `review` change listed under
+Observable changes. It edits `instructions.md` only to drop text that names the
+worker, so measured behavior changes no more than removing an unused tool. It
+does not wait for Phase 0. Implemented in #5800.
 
 - **Template.** `apps/templates/eve-coding-agent-template` disables `agent` so
   delegation goes to `code__worker` (`agent/tools/agent.ts`,
@@ -159,8 +165,12 @@ behavior beyond dropping an unused tool, and it does not wait for Phase 0.
   - point the delegation line at `agent`, with a no-edit brief for read-only
     slices.
 - **Tests:**
-  - Remove `worker-manifest`, `code-query-worker`, the worker case in
-    `grep-search.test.ts`, `prwatch-*`, and `repository-root`.
+  - Remove `worker-manifest`, the worker case in `grep-search.test.ts`,
+    `prwatch-*`, and the `validateRepositoryRoot` case.
+  - Keep `code-query-worker` (renamed `diagnostics-worker`): it covers the
+    TypeScript diagnostics worker that `apply_patch` still runs. Keep the
+    workspace-root cases from `repository-root.test.ts`: they cover shipped
+    workspace-boundary checks.
   - Add a `worker` rejection case to `extension-config`.
   - Replace the `worker`-based fixture in
     `packages/eve/src/compiler/mounted-extension.integration.test.ts:236-268`.
@@ -301,7 +311,7 @@ per-step input are the main levers.
 
 | PR  | Repo      | Content                                                                        | Depends on                     |
 | --- | --------- | ------------------------------------------------------------------------------ | ------------------------------ |
-| 1   | eve       | Phase 1 removals, `review` and `investigate` skill changes, docs, tests        | Nothing. Before 1.0.0          |
+| 1   | eve       | Phase 1 removals, `review` skill change, docs, tests (#5800)                   | Nothing. Before 1.0.0          |
 | 2   | eve       | Template delegation update                                                     | The RC release containing PR 1 |
 | 3   | eve-bench | Web off for eve-code, pi caching, metrics, variants, consumer contract         | –                              |
 | 4   | eve       | Scheduled sharded deepswe-lean, `gpt-6.1-sol` row, task expansion, re-baseline | 3                              |
