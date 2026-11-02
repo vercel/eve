@@ -201,9 +201,8 @@ export function parseAppMentionEvent(envelope: SlackEventCallback): SlackMessage
  * Returns `null` when:
  * - the envelope is not an IM `message` event,
  * - required fields (channel id, ts) are missing,
- * - the message carries a system `subtype` (edits, deletes, joins, etc.)
- *   other than `file_share` — file uploads are real user messages and
- *   must reach the handler with their attachments intact, or
+ * - the message carries a subtype that does not post a new message
+ *   (edits, deletes, joins, etc.), or
  * - the message was posted by a bot (`bot_id` set) — this prevents the
  *   bot's own DM replies from re-triggering the handler.
  */
@@ -289,13 +288,7 @@ export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMess
 }
 
 function isHumanMessage(message: SlackMessageEvent): boolean {
-  if (
-    typeof message.subtype === "string" &&
-    message.subtype.length > 0 &&
-    message.subtype !== "file_share"
-  ) {
-    return false;
-  }
+  if (!isPostedMessageSubtype(message.subtype)) return false;
   return !(typeof message.bot_id === "string" && message.bot_id.length > 0);
 }
 
@@ -304,13 +297,7 @@ export function slackMessageFromWebhookPayload(
   installationTeamId?: string,
 ): SlackMessage | null {
   if (payload.kind === "direct_message") {
-    if (
-      typeof payload.subtype === "string" &&
-      payload.subtype.length > 0 &&
-      payload.subtype !== "file_share"
-    ) {
-      return null;
-    }
+    if (!isPostedMessageSubtype(payload.subtype)) return null;
     if (typeof payload.botId === "string" && payload.botId.length > 0) return null;
   }
 
