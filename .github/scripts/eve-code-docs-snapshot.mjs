@@ -72,9 +72,17 @@ function harnessVersion(harness, provenance) {
   return typeof sha === "string" ? sha.slice(0, 7) : null;
 }
 
-/** Replaces one dataset's section in an existing snapshot. */
+/**
+ * Replaces one dataset's section in an existing snapshot. Unchanged results keep their
+ * generatedAt, so rerunning the same report leaves the file byte-identical and commits nothing.
+ */
 export function mergeSnapshot(existing, section, generatedAt) {
-  const datasets = { ...existing?.datasets, [section.dataset.name]: { ...section, generatedAt } };
+  const { generatedAt: previousAt, ...previous } = existing?.datasets?.[section.dataset.name] ?? {};
+  const unchanged = previousAt && JSON.stringify(previous) === JSON.stringify(section);
+  const datasets = {
+    ...existing?.datasets,
+    [section.dataset.name]: { ...section, generatedAt: unchanged ? previousAt : generatedAt },
+  };
   return { schemaVersion: SNAPSHOT_SCHEMA_VERSION, datasets };
 }
 

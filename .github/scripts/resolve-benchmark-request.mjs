@@ -14,10 +14,9 @@ export const DEFAULT_HARNESSES = ["eve-code", "opencode", "pi"];
 /**
  * eve-bench datasets a benchmark can run, with the settings each was calibrated for.
  * swe-lean needs five attempts to separate a 10-15% token change from trial noise.
- * deepswe-lean resolves almost nothing at low reasoning, and its 20-minute trials
- * make three attempts the most that fits one job. eve-bench compares and publishes
- * only whole-dataset results with matching attempts, so the tasks cannot be split
- * across jobs to add attempts.
+ * deepswe-lean resolves almost nothing at low reasoning; its stored baselines use
+ * three attempts. eve-bench compares only whole-dataset results with matching
+ * attempts, so changing either count needs fresh baselines for every harness.
  */
 export const BENCHMARK_DATASETS = {
   "swe-lean": { reasoning: "low", attempts: "5" },
@@ -33,8 +32,9 @@ export const SCHEDULED_DATASET = "deepswe-lean";
 /**
  * Model families a benchmark can run; the workflow maps each to a model ID. The first is
  * the default. eve-bench stores results per model, so families are never compared with
- * each other. Main covers every family; a PR runs one, because eve-bench keys its PR
- * comment by harness and dataset only, and two families would overwrite each other.
+ * each other. Only scheduled and dispatched runs cover every family: Vercel Sandbox
+ * limits how fast vCPUs can be allocated. A PR comment runs one family, because
+ * eve-bench keys its PR comment by harness and dataset only.
  */
 export const BENCHMARK_MODEL_FAMILIES = ["anthropic", "openai"];
 
@@ -73,14 +73,22 @@ function parseSelection(value) {
   const datasets = names.filter((name) => Object.hasOwn(BENCHMARK_DATASETS, name));
   if (datasets.length > 1) throw new Error("Name at most one benchmark dataset.");
   const models = names.filter((name) => name.startsWith("model="));
-  if (models.length > 1) throw new Error("Name at most one benchmark model.");
+  const family = models[0]?.slice("model=".length) ?? DEFAULT_MODEL_FAMILY;
+  // `model=anthropic,openai` splits into a model and a bare family name.
+  if (
+    models.length > 1 ||
+    !BENCHMARK_MODEL_FAMILIES.includes(family) ||
+    names.some((name) => BENCHMARK_MODEL_FAMILIES.includes(name))
+  ) {
+    throw new Error(
+      `A comment runs one model family: name one of ${BENCHMARK_MODEL_FAMILIES.map((name) => `model=${name}`).join(", ")}.`,
+    );
+  }
   const harnesses = names.filter((name) => !datasets.includes(name) && !models.includes(name));
   return {
     dataset: datasets[0] ?? DEFAULT_DATASET,
     harnesses: harnesses.length ? parseHarnesses(harnesses) : DEFAULT_HARNESSES,
-    families: [
-      models.length ? parseFamily(models[0].slice("model=".length)) : DEFAULT_MODEL_FAMILY,
-    ],
+    families: [family],
   };
 }
 
@@ -130,7 +138,7 @@ export async function resolveBenchmarkRequest({ github, context, models }) {
       ? parseSelection(command[1])
       : { ...selection, families: [DEFAULT_MODEL_FAMILY] };
     number = payload.issue.number;
-  } else if (eventName === "pull_request") {
+  } else if (eventName === "pull_request" || eventName === "push") {
     selection.families = [DEFAULT_MODEL_FAMILY];
   } else if (eventName === "workflow_dispatch") {
     const model = payload.inputs?.model || "all";
@@ -143,7 +151,7 @@ export async function resolveBenchmarkRequest({ github, context, models }) {
     };
   } else if (eventName === "schedule") {
     selection.dataset = SCHEDULED_DATASET;
-  } else if (eventName !== "push") {
+  } else {
     return null;
   }
 

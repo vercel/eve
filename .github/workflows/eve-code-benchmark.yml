@@ -6,10 +6,11 @@ on:
       - ".github/workflows/eve-code-benchmark.yml"
       - ".github/scripts/resolve-benchmark-request*"
       - "packages/eve-code/**"
-  # Every eve-code change on main publishes a fresh swe-lean result per harness
-  # and model, so PRs compare their HEAD against the latest main as the baseline.
-  # Pushes do not run deepswe-lean: the weekly schedule refreshes its baseline, so
-  # a PR's delta there can also include eve-code changes merged since.
+  # Every eve-code change on main publishes a fresh swe-lean result per harness on
+  # the default model, so PRs compare their HEAD against the latest main as the
+  # baseline. Pushes do not run deepswe-lean or the other model: the weekly
+  # schedule refreshes those baselines, so a PR's delta there can also include
+  # eve-code changes merged since.
   push:
     branches: [main]
     paths:
@@ -91,11 +92,15 @@ jobs:
     if: needs.request.outputs.run == 'true'
     concurrency:
       group: eve-code-${{ needs.request.outputs.pr || github.ref }}-${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}-${{ matrix.family }}
-      cancel-in-progress: true
-    # One job per model family. Results and baselines are stored per model, so the
-    # families are never compared with each other.
+      # A newer PR head or comment supersedes a PR run. Runs on main publish
+      # baselines, so they queue instead of cancelling each other.
+      cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'issue_comment' }}
+    # One job per model family, one at a time: Vercel Sandbox rate-limits vCPU
+    # allocation, and two families at once fail trials with HTTP 429. Results and
+    # baselines are stored per model, so the families are never compared.
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include: ${{ fromJSON(needs.request.outputs.models) }}
     runs-on: ubuntu-latest
@@ -134,8 +139,10 @@ jobs:
           concurrency: "16"
           native-build: "false"
           # Baselines and cross-harness references resolve automatically from the
-          # durable result store; only dispatch/push/schedule runs publish to it.
+          # durable result store. Only dispatch, push, and schedule runs on main
+          # publish to it (`auto`); a dispatch on another branch does not.
           blob-token: ${{ secrets.EVE_BENCH_BLOB_READ_WRITE_TOKEN }}
+          publish: ${{ github.ref == 'refs/heads/main' && 'auto' || 'false' }}
           artifact-name: ${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}-${{ matrix.family }}
           gateway-key: ${{ secrets.AI_GATEWAY_API_KEY }}
           github-token: ${{ github.token }}
@@ -167,22 +174,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Download benchmark report
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ARTIFACT: ${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}-anthropic
-        run: gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n "$ARTIFACT" -D "$RUNNER_TEMP/bench"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
       # Merge onto the newest main so a concurrent refresh of the other dataset
       # is never overwritten. createCommitOnBranch commits are signed by GitHub,
       # which satisfies the signed-commit requirement without a bot signing key.
+      # The snapshot script keeps generatedAt when the results are unchanged, so
+      # an identical report makes no commit.
       - name: Commit snapshot to main
         env:
           GH_TOKEN: ${{ github.token }}
+          ARTIFACT: ${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}-anthropic
           FILE: apps/docs/lib/evals/eve-code-benchmark.json
         run: |
+          if ! gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n "$ARTIFACT" -D "$RUNNER_TEMP/bench" ||
+            [ ! -f "$RUNNER_TEMP/bench/report.json" ]; then
+            echo "::notice::eve-code docs snapshot not updated: the run uploaded no $ARTIFACT report."
+            exit 0
+          fi
           head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" -q .object.sha)
           gh api "repos/$GITHUB_REPOSITORY/contents/$FILE?ref=$head" -H "Accept: application/vnd.github.raw" > "$FILE"
           cp "$FILE" "$RUNNER_TEMP/before.json"

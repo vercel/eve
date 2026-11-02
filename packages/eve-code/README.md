@@ -88,19 +88,21 @@ The `eve-code` workflow benchmarks eve-code, opencode, and pi together, with one
 
 Every trial runs in its own Vercel Sandbox, up to 16 at a time per harness. Each harness is compared with its own latest result from `main` on the same dataset and model, never with another model's results. The report covers resolved tasks, latency, and token usage. It goes to the job summary and, on PRs, a PR comment.
 
-| Trigger                                | Dataset      | Models                 |
-| -------------------------------------- | ------------ | ---------------------- |
-| PR that changes `packages/eve-code/**` | SWE-lean     | `anthropic`            |
-| `/benchmark` comment on a PR           | chosen       | `anthropic`, or chosen |
-| Push to `main` that changes eve-code   | SWE-lean     | both                   |
-| Weekly, Monday 06:00 UTC, on `main`    | DeepSWE-lean | both                   |
-| Manual dispatch                        | chosen       | both, or chosen        |
+| Trigger                                | Dataset      | Models                 | Publishes baselines |
+| -------------------------------------- | ------------ | ---------------------- | ------------------- |
+| PR that changes `packages/eve-code/**` | SWE-lean     | `anthropic`            | No                  |
+| `/benchmark` comment on a PR           | chosen       | `anthropic`, or chosen | No                  |
+| Push to `main` that changes eve-code   | SWE-lean     | `anthropic`            | Yes                 |
+| Weekly, Monday 06:00 UTC, on `main`    | DeepSWE-lean | both, one after other  | Yes                 |
+| Manual dispatch                        | chosen       | both, or chosen        | Only on `main`      |
 
-Runs on `main` publish their results to the eve-bench result store, which is where PRs get their baselines. DeepSWE-lean baselines come from the weekly run, so a PR's DeepSWE-lean delta can include eve-code changes merged since. The DeepSWE-lean results in the docs come from the `anthropic` model's report of the latest weekly or dispatched run.
+Vercel Sandbox limits how fast a team can allocate vCPUs, so the two families never run at the same time: a run that covers both runs them one after the other, each with its own 120-minute job limit. Two benchmarks that start at the same time from different runs can still hit that limit and lose trials to HTTP 429 errors. A newer PR head or comment cancels an older PR run; runs on `main` queue behind each other instead.
+
+PRs get their baselines from the eve-bench result store. SWE-lean baselines for `anthropic` come from every push to `main`. DeepSWE-lean baselines, and all `openai` baselines, come from the weekly run, so a PR's delta there can include eve-code changes merged since. The DeepSWE-lean results in the docs come from the `anthropic` report of the latest weekly or dispatched run on `main`.
 
 Comment `/benchmark [<dataset>] [model=<family>] [<harness>[,<harness>...]]` to run a benchmark on a PR. Every part is optional and can come in any order, for example `/benchmark`, `/benchmark codex,eve-code`, or `/benchmark deepswe-lean model=openai`. You need write access to the repository. A comment runs one model family, because each harness and dataset gets a single PR comment that the latest run replaces.
 
-DeepSWE-lean runs 3 attempts per task, the most that fits one job with its 20-minute trials. eve-bench compares and publishes only whole-dataset results with matching attempts, so the tasks are not split across jobs.
+Each dataset's attempts per task (5 for SWE-lean, 3 for DeepSWE-lean) match its stored baselines. eve-bench compares only whole-dataset results with the same attempts, so changing the count means re-baselining every harness on both models.
 
 ### Locally
 
@@ -122,4 +124,4 @@ eve-bench trials logs https://github.com/vercel/eve/actions/runs/<id>
 eve-bench trials logs https://github.com/vercel/eve/actions/runs/<id> --harness eve-code --task <task>
 ```
 
-The report's Diagnostics section prints this command with the run URL filled in. A run uploads one artifact per model family, named `<dataset>-<harnesses>-<family>`; add `--artifact <name>` to download only one. The download uses the GitHub CLI and needs read access to this repository. The raw files (`agent.log`, `events.ndjson`, `observability.ndjson`, `verifier.log`) are cached under `~/.cache/eve-bench/runs/`.
+The report's Diagnostics section prints this command with the run URL filled in. Each model family uploads its own artifact, named `<dataset>-<harnesses>-<family>`, for example `deepswe-lean-eve-code+opencode+pi-openai`. For a run that covered both families, add `--artifact <name>` to the printed command so it reads only that family's trials. The download uses the GitHub CLI and needs read access to this repository. The raw files (`agent.log`, `events.ndjson`, `observability.ndjson`, `verifier.log`) are cached under `~/.cache/eve-bench/runs/`.
