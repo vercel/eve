@@ -2,9 +2,25 @@ import { type LanguageModel, type ModelMessage, streamText } from "ai";
 
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { estimateTokens } from "#harness/token-estimate.js";
+import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { AuthKey } from "#context/keys.js";
 import { changeHistory } from "#harness/session-machine/history.js";
+import {
+  strategyHistory,
+  type StrategyContext,
+  type StrategyInput,
+  type Summarize,
+  type SummaryCall,
+  triggersAt,
+} from "#harness/compaction/authored.js";
+import { checkHistory } from "#harness/compaction/check.js";
+import type {
+  CompactionMeasure,
+  CompactionPhase,
+  CompactionReason,
+} from "#shared/compaction-strategy.js";
+import type { PublicAgentStaticModelDefinition } from "#shared/agent-definition.js";
 import {
   type CompactionConfig,
   type HarnessSession,
@@ -30,6 +46,7 @@ import {
   shouldCompact,
 } from "#harness/compaction/engine.js";
 import { takeCompactionCaptureFailure } from "#reactions/kinds/memory.js";
+import { checksSessionEvents } from "#shared/dev-checks.js";
 import { isDeepStrictEqual } from "node:util";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { Usage } from "#protocol/session-events/envelope.js";
@@ -80,8 +97,9 @@ export function assertFixedPartFits(input: {
 }
 
 /**
- * `session.compact()`: summarizes the history, then the session waits. The control is a delivery:
- * it's admitted first, and applied once the history is decided.
+ * `session.compact()`: compacts the history, with the agent's strategy when it has one, then the
+ * session waits. The control is a delivery: it's admitted first, and applied once the history is
+ * decided.
  */
 export async function compactHistory(step: Step): Promise<StepResult> {
   const { config } = step;
@@ -108,14 +126,19 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       session: step.session,
     });
     step.session = resolvedModel.session;
-    await summarizeHistory(step, {
+    const { compaction } = step.session;
+    const envelope = compaction.requestEnvelopeTokens;
+    await decideHistory(step, {
       betweenTurns: true,
       change,
       compact: true,
       messages,
       model: resolvedModel.model,
+      phase: "manual",
       promptMessages: messages,
-      requestEnvelopeTokens: step.session.compaction.requestEnvelopeTokens,
+      reason: "manual",
+      requestEnvelopeTokens: envelope,
+      size: sizeOf(step.session, getInputTokenCount(messages, compaction, envelope, envelope)),
     });
   } catch (error) {
     outcome = "failed";
@@ -130,11 +153,12 @@ export async function compactHistory(step: Step): Promise<StepResult> {
 }
 
 /**
- * The history the next model call reads, committed: summarized when the call would pass the
- * threshold, a share of the model's window (`agent.ts`'s `compaction.threshold`), counting the
- * summary prompt's own overhead. Returns the messages the call reads, or `undefined` when the
- * history stays. A failure is rethrown, after settling any change it opened; `step.session`
- * counts the summary calls that finished.
+ * The history the next model call reads, committed. eve's default summarizes when the call would
+ * pass the threshold, a share of the model's window (`agent.ts`'s `compaction.threshold`),
+ * counting the summary prompt's own overhead; an agent's strategy decides with its own trigger.
+ * Returns the messages the call reads, or `undefined` when the history stays. A failure is
+ * rethrown, after settling any change it opened; `step.session` counts the summary calls that
+ * finished.
  */
 export async function historyBeforeCall(
   step: Step,
@@ -144,20 +168,36 @@ export async function historyBeforeCall(
     /** The prompt as the model reads it, which the call's size measures. */
     readonly promptMessages: readonly HarnessModelMessage[];
     readonly model: LanguageModel;
+    /** What the request starts with: its instructions and tools. */
+    readonly request: StrategyContext["request"];
     readonly requestEnvelopeTokens: number;
+    /** The provider rejected the request as too long: compact whatever the trigger says. */
+    readonly overflow?: true;
   },
 ): Promise<HarnessModelMessage[] | undefined> {
+  const overflow = input.overflow === true;
   const prompt = validateHarnessModelMessages(input.promptMessages);
   const { compaction } = step.session;
-  const previousEnvelope = compaction.requestEnvelopeTokens;
-  if (!shouldCompact(prompt, compaction, input.requestEnvelopeTokens, previousEnvelope)) {
+  if (
+    step.config.compactionStrategy === undefined &&
+    !overflow &&
+    !shouldCompact(
+      prompt,
+      compaction,
+      input.requestEnvelopeTokens,
+      compaction.requestEnvelopeTokens,
+    )
+  ) {
     return undefined;
   }
-  const tokens = getInputTokenCount(
-    prompt,
-    compaction,
-    input.requestEnvelopeTokens,
-    previousEnvelope,
+  const size = sizeOf(
+    step.session,
+    getInputTokenCount(
+      prompt,
+      compaction,
+      input.requestEnvelopeTokens,
+      compaction.requestEnvelopeTokens,
+    ),
   );
   const { projection } = step.view();
   const turnId = step.position().turnId;
@@ -165,16 +205,93 @@ export async function historyBeforeCall(
     changeId: nextChangeId(projection),
     prompt,
     runId: nextRunId(projection),
-    started: { kind: "compaction", trigger: { inputTokens: tokens }, turnId },
+    started: { kind: "compaction", trigger: { inputTokens: size.tokens }, turnId },
   });
-  return await summarizeHistory(step, {
+  return await decideHistory(step, {
     change,
+    ...(overflow && { compact: true as const }),
     messages: input.messages,
     model: input.model,
+    phase: "step",
     promptMessages: prompt,
+    reason: overflow ? "overflow" : "automatic",
+    request: input.request,
     requestEnvelopeTokens: input.requestEnvelopeTokens,
+    size,
     telemetryTurnId: activeTurnId(step.position()),
   });
+}
+
+/**
+ * Compacts the history after the turn's answer, before the turn settles, when the agent's
+ * strategy asks at `turn-end` and is due. The answer stands either way: a failure settles the
+ * change failed, is logged, and keeps the history.
+ */
+export async function compactAtTurnEnd(step: Step): Promise<void> {
+  if (!triggersAt(step.config.compactionStrategy, "turn-end")) return;
+  if (step.session.history.length === 0) return;
+  const { compaction } = step.session;
+  const envelope = compaction.requestEnvelopeTokens ?? 0;
+  const messages = validateHarnessModelMessages(step.session.history);
+  const size = sizeOf(step.session, getInputTokenCount(messages, compaction, envelope, envelope));
+  const { projection } = step.view();
+  const change = lazyChange(step, {
+    changeId: nextChangeId(projection),
+    prompt: messages,
+    runId: nextRunId(projection),
+    started: {
+      kind: "compaction",
+      trigger: { inputTokens: size.tokens },
+      turnId: step.position().turnId,
+    },
+  });
+  try {
+    const resolvedModel = await resolveEffectiveRuntimeModel({
+      config: step.config,
+      ctx: step.ctx,
+      session: step.session,
+    });
+    step.session = resolvedModel.session;
+    await decideHistory(step, {
+      change,
+      messages,
+      model: resolvedModel.model,
+      phase: "turn-end",
+      promptMessages: messages,
+      reason: "automatic",
+      requestEnvelopeTokens: envelope,
+      size,
+      telemetryTurnId: activeTurnId(step.position()),
+    });
+  } catch (error) {
+    throwIfTurnAborted(step.config.abortSignal);
+    logError(log, "turn-end compaction failed", error, { sessionId: step.session.sessionId });
+  }
+}
+
+/** The session model's context window and output limit. */
+function modelLimitsOf(
+  session: HarnessSession,
+): Pick<CompactionMeasure, "contextWindowTokens" | "maxOutputTokens"> {
+  const { compaction } = session;
+  return {
+    contextWindowTokens:
+      compaction.thresholdPercent === undefined
+        ? compaction.threshold
+        : Math.round(compaction.threshold / compaction.thresholdPercent),
+    maxOutputTokens: requireSessionModelReference(session).maxOutputTokens,
+  };
+}
+
+/** The next call's input tokens, and the model's window when its catalog knows it. */
+interface HistorySize {
+  readonly tokens: number;
+  readonly window?: number;
+}
+
+function sizeOf(session: HarnessSession, tokens: number): HistorySize {
+  const window = requireSessionModelReference(session).contextWindowTokens;
+  return { tokens, ...(window !== undefined && { window }) };
 }
 
 /** A compaction change that opens the first time something needs it: a summary or a rewrite. */
@@ -217,10 +334,13 @@ function lazyChange(
 }
 
 /**
- * Compacts the history and commits it. The change opens with the first summary call or rewrite,
- * so a history with nothing to compact records none.
+ * Compacts the history and commits it: eve's default, or the agent's strategy. The change opens
+ * with the first summary call or rewrite, so a history with nothing to compact records none. A
+ * strategy's history is checked before it rewrites the session's; eve's summaries apply as they
+ * are. Under `eve dev` and in tests, a strategy must return the same history when asked again
+ * about what it returned.
  */
-async function summarizeHistory(
+async function decideHistory(
   step: Step,
   input: {
     /** Between turns, no turn's usage reports the summary calls. */
@@ -230,51 +350,116 @@ async function summarizeHistory(
     readonly messages: readonly HarnessModelMessage[];
     /** The turn's model, which writes summaries unless the agent names a compaction model. */
     readonly model: LanguageModel;
+    /** Where eve asks: before a model call, after the turn's answer, or `session.compact()`. */
+    readonly phase: CompactionPhase | "manual";
     readonly promptMessages: readonly HarnessModelMessage[];
+    readonly reason: CompactionReason;
+    /** What the turn's request starts with, when a model call is about to send it. */
+    readonly request?: StrategyContext["request"];
     readonly requestEnvelopeTokens: number | undefined;
+    readonly size: HistorySize;
     readonly telemetryTurnId?: string;
   },
 ): Promise<HarnessModelMessage[] | undefined> {
   const { change } = input;
-  const before = validateHarnessModelMessages(input.messages);
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
-  let executor: Awaited<ReturnType<typeof summaryExecutor>> | undefined;
+  const summaries = new WeakSet<object>();
+  const executors = new Map<
+    PublicAgentStaticModelDefinition | undefined,
+    ReturnType<typeof summaryExecutor>
+  >();
   let runOpen = false;
-  const summarize: CompactionSummarizer = async (prompt) => {
-    await change.open();
-    executor ??= await summaryExecutor(step, input);
-    if (!runOpen) {
-      runOpen = true;
-      await step.publish([
-        runRequested({ changeId: change.changeId }, change.runId),
-        runStarted({ attempt: 0, modelId: executor.modelId, runId: change.runId }),
-      ]);
-    }
-    const summary = await executor.summarize(prompt);
-    summaryUsage.push(summary.usage);
-    if (summary.text.trim().length === 0) {
-      throw new Error(
-        `The compaction model returned an empty summary. Finish reason: ${summary.finishReason}.`,
-      );
-    }
-    return summary.text;
-  };
-
-  let messages: HarnessModelMessage[];
-  try {
-    const rewrite = historyContext(step.session, {
-      ...input,
-      threshold: step.session.compaction.threshold,
-    });
-    messages = (await compactMessages(
-      before,
+  const summarizeWith =
+    (model?: PublicAgentStaticModelDefinition): SummaryCall =>
+    async (prompt) => {
+      await change.open();
+      const known = executors.get(model) ?? summaryExecutor(step, input, model);
+      executors.set(model, known);
+      const executor = await known;
+      if (!runOpen) {
+        runOpen = true;
+        await step.publish([
+          runRequested({ changeId: change.changeId }, change.runId),
+          runStarted({ attempt: 0, modelId: executor.modelId, runId: change.runId }),
+        ]);
+      }
+      const summary = await executor.summarize(prompt);
+      summaryUsage.push(summary.usage);
+      if (summary.text.trim().length === 0) {
+        throw new Error(
+          `The compaction model returned an empty summary. Finish reason: ${summary.finishReason}.`,
+        );
+      }
+      return summary.text;
+    };
+  const summarize: Summarize = async (history, options) => {
+    const rewrite = historyContext(step.session, { ...input, threshold: options.tokens });
+    const summarized = (await compactMessages(
+      validateHarnessModelMessages([...history]),
       rewrite.config,
-      summarize,
+      withInstructions(summarizeWith(options.model), options.instructions),
       input.compact === true,
       rewrite.historyTokens,
     )) as HarnessModelMessage[];
+    summaries.add(summarized);
+    return summarized;
+  };
+  const strategy = step.config.compactionStrategy;
+  const { threshold } = step.session.compaction;
+  const strategyAt = (
+    reason: CompactionReason,
+    at: {
+      readonly open: () => Promise<void>;
+      readonly phase: CompactionPhase | "manual";
+      readonly summarizeWith: typeof summarizeWith;
+    },
+  ) =>
+    strategy === undefined
+      ? undefined
+      : strategyHistory(strategy, {
+          abortSignal: step.config.abortSignal ?? new AbortController().signal,
+          changeId: change.changeId,
+          limit: fitLimit(input),
+          model: modelLimitsOf(step.session),
+          open: at.open,
+          phase: at.phase,
+          reason,
+          request: input.request ?? { instructions: step.session.agent.system ?? undefined },
+          sessionId: step.session.sessionId,
+          summarizeWith: at.summarizeWith,
+          threshold,
+        });
+  const history = strategyAt(input.reason, {
+    open: () => change.open(),
+    phase: input.phase,
+    summarizeWith,
+  });
+  // Asked again before the next call, a strategy keeps what it returned.
+  const again = strategyAt("automatic", {
+    open: async () => {},
+    phase: "step",
+    summarizeWith: () => () => {
+      throw new Error("The compaction strategy summarizes what it already returned.");
+    },
+  });
+
+  const before = validateHarnessModelMessages(input.messages);
+  let messages: HarnessModelMessage[];
+  try {
+    const kept =
+      history === undefined
+        ? await summarize(before, { tokens: threshold })
+        : await history({ history: before, inputTokens: input.size.tokens, summarize });
+    if (kept === undefined || kept === before || isDeepStrictEqual(kept, before)) {
+      if (change.opened) await settleChange(step, { ...input, runOpen, summaryUsage }, before);
+      return undefined;
+    }
     // Capping old tool output alone rewrites the history without a summary call.
-    if (!isDeepStrictEqual(messages, before)) await change.open();
+    await change.open();
+    messages = summaries.has(kept)
+      ? (kept as HarnessModelMessage[])
+      : checkHistory(before, kept, { limit: fitLimit(input) });
+    if (again !== undefined) await assertFixpoint(messages, again, input);
   } catch (error) {
     const usage = summaryUsageOf(summaryUsage);
     countSummaryUsage(step, input.betweenTurns, usage);
@@ -289,11 +474,7 @@ async function summarizeHistory(
     }
     throw error;
   }
-  const unchanged = isDeepStrictEqual(messages, before);
-  if (change.opened) {
-    await settleChange(step, { ...input, runOpen, summaryUsage }, unchanged ? before : messages);
-  }
-  if (unchanged) return undefined;
+  await settleChange(step, { ...input, runOpen, summaryUsage }, messages);
   step.session = changeHistory(step.session, { rewrite: messages });
   return messages;
 }
@@ -332,6 +513,42 @@ async function settleChange(
     ],
     messages,
   );
+}
+
+/** The history's room in the model's window, beside the rest of the call. Unknown, unbounded. */
+function fitLimit(input: {
+  readonly messages: readonly HarnessModelMessage[];
+  readonly promptMessages: readonly HarnessModelMessage[];
+  readonly requestEnvelopeTokens: number | undefined;
+  readonly size: HistorySize;
+}): number {
+  if (input.size.window === undefined) return Number.POSITIVE_INFINITY;
+  const around = Math.max(0, estimateTokens(input.promptMessages) - estimateTokens(input.messages));
+  return Math.max(1, input.size.window - (input.requestEnvelopeTokens ?? 0) - around);
+}
+
+/**
+ * Under `eve dev` and in tests, a strategy asked about the history it returned returns it again:
+ * one that keeps rewriting the past would rewrite it on every call.
+ */
+async function assertFixpoint(
+  history: HarnessModelMessage[],
+  again: (input: StrategyInput) => Promise<readonly HarnessModelMessage[] | undefined>,
+  input: { readonly requestEnvelopeTokens: number | undefined },
+): Promise<void> {
+  if (!checksSessionEvents()) return;
+  const kept = await again({
+    history,
+    inputTokens: estimateTokens(history) + (input.requestEnvelopeTokens ?? 0),
+    summarize: () => {
+      throw new Error("The compaction strategy summarizes what it already returned.");
+    },
+  });
+  if (kept !== undefined && kept !== history && !isDeepStrictEqual(kept, history)) {
+    throw new Error(
+      "The compaction strategy changes what it returned when asked again. Return the history as it is when nothing needs to change.",
+    );
+  }
 }
 
 /**
@@ -393,14 +610,24 @@ async function summaryExecutor(
     readonly model: LanguageModel;
     readonly telemetryTurnId?: string;
   },
+  /** A strategy's own summary model, instead of the agent's compaction model or the turn's. */
+  override?: PublicAgentStaticModelDefinition,
 ): Promise<{
   readonly modelId: string;
   summarize(prompt: CompactionSummaryPrompt): ReturnType<typeof streamCompactionSummary>;
 }> {
   const { config, session } = step;
   const turnReference = requireSessionModelReference(session);
-  const reference = session.agent.compactionModelReference ?? turnReference;
-  const model = reference === turnReference ? input.model : await config.resolveModel(reference);
+  const reference =
+    typeof override === "string"
+      ? { id: override }
+      : (session.agent.compactionModelReference ?? turnReference);
+  const model =
+    override !== undefined && typeof override !== "string"
+      ? (override as LanguageModel)
+      : reference === turnReference
+        ? input.model
+        : await config.resolveModel(reference);
   const profile = resolveModelProfile(model);
   const call = {
     abortSignal: config.abortSignal,
@@ -432,6 +659,15 @@ async function summaryExecutor(
         config.abortSignal,
       ),
   };
+}
+
+/** Appends a strategy's instructions to eve's summary prompt. */
+function withInstructions(
+  summarize: SummaryCall,
+  instructions: string | undefined,
+): CompactionSummarizer {
+  if (instructions === undefined) return summarize;
+  return (prompt) => summarize({ ...prompt, system: `${prompt.system}\n\n${instructions}` });
 }
 
 /** Spent between turns, no turn's report to a parent claims the summary calls. */
@@ -494,7 +730,7 @@ export function compactedTurnInput<Message extends ModelMessage>(
   return messages.findLast((message) => isUserModelMessage(message) && message.kind === "user");
 }
 
-type CompactionSummaryPrompt = Parameters<CompactionSummarizer>[0];
+type CompactionSummaryPrompt = Parameters<SummaryCall>[0];
 
 /**
  * Calls the compaction model the way a step calls its model: streamed, with stream errors
@@ -512,7 +748,11 @@ async function streamCompactionSummary(
   readonly usage: TokenUsageDelta | undefined;
 }> {
   // The stream's error part is rethrown below; the default handler would also log it.
-  const result = streamText({ ...input, onError: () => {} });
+  const result = streamText({
+    ...input,
+    ...(input.tools !== undefined && { toolChoice: "none" as const }),
+    onError: () => {},
+  });
   for await (const part of result.fullStream) {
     if (part.type === "error") throw normalizeModelStreamError(part.error);
   }

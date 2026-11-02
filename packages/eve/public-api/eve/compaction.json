@@ -1,0 +1,16 @@
+[
+  "CompactionContext",
+  "CompactionMeasure",
+  "CompactionOverflowError",
+  "CompactionPhase",
+  "CompactionReason",
+  "CompactionRewrite",
+  "CompactionStrategy",
+  "CompactionSummaryOptions",
+  "CompactionTrigger",
+  "FixedTailOptions",
+  "HistoryMessageKind",
+  "StoredHistoryMessage",
+  "fixedTail",
+  "turns"
+]

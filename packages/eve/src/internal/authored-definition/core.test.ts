@@ -148,6 +148,47 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow('Rename "compaction.thresholdPercent" to "compaction.threshold"');
   });
 
+  it("keeps a custom compaction strategy and rejects the default's settings beside it", () => {
+    const compact = () => undefined;
+    expect(
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.4", compaction: { compact, threshold: 0.8 } },
+        FAILURE_MESSAGE,
+      ).compaction,
+    ).toEqual({ compact, threshold: 0.8 });
+    expect(() =>
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.4", compaction: { compact, model: "openai/gpt-5-mini" } },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow("choose the summary model in the strategy, for example fixedTail({ model })");
+    expect(() =>
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.4", compaction: { compact: "fixedTail" } },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"compaction.compact" must be a compaction strategy');
+  });
+
+  it("keeps a strategy with its trigger, and rejects a phase eve doesn't ask at", () => {
+    const strategy = { compact: () => undefined, when: { due: () => true, phases: ["turn-end"] } };
+    expect(
+      normalizeAgentDefinition(
+        { model: "openai/gpt-5.4", compaction: { compact: strategy } },
+        FAILURE_MESSAGE,
+      ).compaction,
+    ).toEqual({ compact: strategy });
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.4",
+          compaction: { compact: { compact: () => undefined, when: { phases: ["overflow"] } } },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"compaction.compact" must be a compaction strategy');
+  });
+
   it("accepts agent limits and keeps the session usage function", () => {
     const sessionUsage = ({ window }: { window: { inputTokens: number } }) =>
       window.inputTokens >= 1_000;
