@@ -46,11 +46,11 @@ By default, the Agent Card takes its name and description from the agent, lists 
 
 ## How tasks map to eve sessions
 
-| A2A        | eve                                                                                                           |
-| ---------- | ------------------------------------------------------------------------------------------------------------- |
-| Context    | One durable eve session, owned by the principal that started it. The `contextId` is the session ID.           |
-| Task       | One turn of that session: the turn the task's first message started.                                          |
-| Message ID | The delivery's idempotency key, scoped to the caller. A retried message is the same task, never a second one. |
+| A2A        | eve                                                                                                                                                                                      |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Context    | One durable eve session, owned by the principal that started it. The `contextId` is the session ID.                                                                                      |
+| Task       | One turn of that session: the turn the task's first message started.                                                                                                                     |
+| Message ID | The delivery's idempotency key, scoped to the caller. A retried message is the same task, never a second one. Under `none()`, a message that starts a new context always starts its own. |
 
 How the agent handles a `SendMessage` depends on the IDs the message carries:
 
@@ -157,7 +157,7 @@ export default a2aChannel({
 });
 ```
 
-The Agent Card then advertises no security schemes. Every caller shares the anonymous principal, so context and task IDs become bearer capabilities: anyone holding one can read, answer, or cancel that task. Use public access only when anonymous delegation is intentional.
+The Agent Card then advertises no security schemes. Every caller shares the anonymous principal, so context and task IDs become bearer capabilities: anyone holding one can read, answer, or cancel that task. A message ID is not shared the same way: an anonymous message without a `contextId` always starts a new context, so a retry after a lost response starts a second one instead of returning the first. Use public access only when anonymous delegation is intentional.
 
 ## HTTP security
 

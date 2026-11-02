@@ -10,8 +10,12 @@
  *
  * Every message is delivered under an idempotency key derived from its owner and `messageId`, and
  * as a delivery ID that encodes the `messageId`, so a retried message is the same delivery and the
- * same task, never a second one.
+ * same task, never a second one. The exception is an anonymous caller's new context: `none()`
+ * gives every caller one principal, so that `messageId` always starts a context of its own.
  */
+import { randomUUID } from "node:crypto";
+
+import { isAnonymousPrincipal } from "#channel/principal-identity.js";
 import { answerFromText } from "#channel/resolve-text.js";
 import type { InternalChannelAddressDeliveryOptions } from "#channel/channel-address.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
@@ -269,11 +273,18 @@ export class A2aTaskExecution {
   ): Promise<SentDelivery> {
     const content = this.#content(message);
     // A retried messageId resolves to the session its first attempt created, as eve-channel's
-    // operationId does, so a lost response never starts a second context.
-    const continuationToken = `a2a:${delivery.idempotencyKey}`;
-    const existing = await this.#options.resolveSession(continuationToken);
-    if (existing !== undefined) {
-      return { deliveryId: delivery.deliveryId, ref: refFor(existing.id, delivery) };
+    // operationId does, so a lost response never starts a second context. `none()` gives every
+    // caller one principal, so there a messageId would be a shared key to another caller's
+    // context: each anonymous message starts its own, and a lost response isn't recovered.
+    const anonymous = call.auth === null || isAnonymousPrincipal(call.auth);
+    const continuationToken = anonymous
+      ? `a2a:anonymous:${randomUUID()}`
+      : `a2a:${delivery.idempotencyKey}`;
+    if (!anonymous) {
+      const existing = await this.#options.resolveSession(continuationToken);
+      if (existing !== undefined) {
+        return { deliveryId: delivery.deliveryId, ref: refFor(existing.id, delivery) };
+      }
     }
     const handle = await this.#options.createSession({
       auth: call.auth,

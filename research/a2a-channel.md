@@ -40,7 +40,9 @@ its turn is therefore a new task, named by its own delivery.
 - **Retries.** The session drops a duplicate idempotency key silently, so the channel names the
   delivery itself (`deliveryIdForMessage`, reversible so history echoes the client's IDs). A retry
   of a context's first message resolves its session through a continuation token derived from the
-  same key, as eve-channel's `operationId` does.
+  same key, as eve-channel's `operationId` does. Not for anonymous callers: `none()` gives everyone
+  one principal, so that lookup would hand a guessed `messageId`'s context to another caller. Their
+  first messages get a random token instead, as tool sessions refuse an anonymous caller's key.
 - **Reading a message.** Blocking calls and streams follow the session stream. A message is read
   once its delivery is consumed or its answer admitted and, for an answer, once the status moves
   past the prompt it answered: the answer is admitted a line before its prompt settles.

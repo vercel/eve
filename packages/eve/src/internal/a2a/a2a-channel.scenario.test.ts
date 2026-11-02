@@ -66,9 +66,12 @@ import { a2aChannel } from "eve/experimental/channels/a2a";
 export default a2aChannel({
   auth: withAuthChallenges((request) => {
     const principalId = request.headers.get("x-test-principal");
-    return principalId === null
-      ? null
-      : { attributes: {}, authenticator: "scenario", principalId, principalType: "user" };
+    if (principalId === null) return null;
+    // The principal none() gives every unauthenticated caller.
+    if (principalId === "anonymous") {
+      return { attributes: {}, authenticator: "none", principalId, principalType: "anonymous" };
+    }
+    return { attributes: {}, authenticator: "scenario", principalId, principalType: "user" };
   }, [{ scheme: "Bearer" }]),
   maxBlockingMs: 10_000,
   uploadPolicy: { allowedMediaTypes: ["image/*"] },
@@ -288,6 +291,28 @@ describe("A2A channel", () => {
       });
       const foreign = requiredRecord((await rpc("bob", "ListTasks", { contextId })).result, "page");
       expect(foreign).toMatchObject({ tasks: [], totalSize: 0 });
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "never lets one anonymous caller's messageId reach another's context",
+    async () => {
+      // none() gives every caller one principal, so the same messageId from two anonymous
+      // callers must start two contexts rather than hand the second the first one's task.
+      const first = await sendTask("anonymous", { message: userMessage("anon-1", "A2A-ECHO one") });
+      const second = await sendTask("anonymous", {
+        message: userMessage("anon-1", "A2A-ECHO two"),
+      });
+      expect(second.contextId).not.toBe(first.contextId);
+      expect(second.id).not.toBe(first.id);
+      expect(second).toMatchObject({ artifacts: [{ parts: [{ text: "ECHO:A2A-ECHO two" }] }] });
+
+      // Inside a context the caller holds, a retry is still the same task.
+      const contextId = requiredString(first.contextId, "contextId");
+      const followUp = { ...userMessage("anon-2", "A2A-ECHO three"), contextId };
+      const task = await sendTask("anonymous", { message: followUp });
+      expect((await sendTask("anonymous", { message: followUp })).id).toBe(task.id);
     },
     TEST_TIMEOUT_MS,
   );
