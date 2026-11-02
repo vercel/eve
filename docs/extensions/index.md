@@ -335,6 +335,32 @@ in the environment's preparation callback to install desktop packages and the
 driver; it requires an apt-based image with root or passwordless sudo. Start
 the managed display and driver after opening each session sandbox.
 
+### Accessibility-based desktop tools
+
+The experimental `@eve/agent-desktop` package provides separate tools for reading native accessibility trees, acting on element refs, and taking screenshots. Use it for desktop apps that expose accessibility information; use `eve/extensions/computer-use` for coordinate-based computer use.
+
+Install the package alongside `eve`:
+
+```bash
+pnpm add @eve/agent-desktop
+```
+
+Mount it in your agent:
+
+```ts title="agent/extensions/desktop.ts"
+import desktop from "@eve/agent-desktop";
+
+export default desktop({
+  extraPackages: ["gnome-calculator"],
+});
+```
+
+Configure an [agent sandbox](/docs/sandbox). The extension requires Ubuntu 24.04 or later, apt, and root or passwordless sudo. On first use, it installs agent-desktop and starts a headless desktop. The agent gets `desktop__launch`, `desktop__snapshot`, `desktop__click`, and other namespaced tools, with instructions for the observe, act, and verify loop.
+
+Headless actions use accessibility APIs by default. Set `headed: true` only when the agent may use physical pointer and keyboard input. The tools preserve agent-desktop's retry guidance when an action fails.
+
+For prepared sandbox templates, `@eve/agent-desktop/sandbox` exports `installAgentDesktop` and `startDesktop`. See the [package README](https://github.com/vercel/eve/tree/main/packages/eve-agent-desktop#mount) for setup, configuration, and tool overrides.
+
 ### Use an extension tool result in a hook
 
 To keep an extension tool's result type in your hook, import its definition from `./tools` and pass it to [`toolResultFrom`](/docs/guides/hooks#narrowing-tool-results):

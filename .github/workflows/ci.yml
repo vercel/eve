@@ -167,6 +167,48 @@ jobs:
       - name: Run scenario tests
         run: pnpm test:scenario
 
+  test-agent-desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the desktop extension and its workspace dependencies
+        run: pnpm exec turbo run build --filter=@eve/agent-desktop
+
+      - name: Install the targeted agent-desktop CLI
+        working-directory: packages/eve-agent-desktop
+        run: |
+          version=$(node --input-type=module -e 'import { AGENT_DESKTOP_VERSION } from "./dist/sandbox/sandbox.js"; console.log(AGENT_DESKTOP_VERSION)')
+          npm install --prefix "${{ runner.temp }}/agent-desktop-cli" --no-save "agent-desktop@$version"
+          echo "${{ runner.temp }}/agent-desktop-cli/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Check every tool against the real CLI
+        run: pnpm --filter @eve/agent-desktop test:conformance
+
+      - name: Drive a real Linux desktop
+        env:
+          AGENT_DESKTOP_LIVE: "1"
+        run: pnpm --filter @eve/agent-desktop test:live
+
   test-framework-fixtures:
     name: test-framework-fixtures (next, nuxt, sveltekit, tanstack)
     runs-on: ubuntu-latest
