@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { isCompiledChannel } from "#channel/compiled-channel.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
@@ -29,9 +30,10 @@ describe("a2aChannel", () => {
       auth: none(),
       uploadPolicy: { allowedMediaTypes: ["image/*"], maxBytes: 1024 },
     });
-    expect(
-      (channel as unknown as { adapter: { uploadPolicy?: unknown } }).adapter.uploadPolicy,
-    ).toEqual(mergeUploadPolicy({ allowedMediaTypes: ["image/*"], maxBytes: 1024 }));
+    if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
+    expect(channel.adapter.uploadPolicy).toEqual(
+      mergeUploadPolicy({ allowedMediaTypes: ["image/*"], maxBytes: 1024 }),
+    );
   });
 
   it("serves the Agent Card publicly and the JSON-RPC endpoint at its route", () => {
