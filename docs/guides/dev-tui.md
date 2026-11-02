@@ -39,7 +39,7 @@ A [stranded session](./deployment/self-hosted-operations#recover-a-stranded-sess
 
 After interactive `eve init`, the TUI opens directly. eve keeps the connection already selected for the project, including a project OIDC connection. Without one, it checks credentials set in the environment, the saved machine default, and then the Vercel CLI's current team. With the Vercel CLI team, eve checks account access but doesn't create or link a Vercel project.
 
-During startup, a progress indicator names the connection being checked. Messages you send before the agent is ready are queued. A picker takes over input when a choice or API key is needed, then your draft returns. If setup is cancelled or fails, queued messages return to the draft.
+During startup, a progress indicator names the connection being checked. Messages you send before the agent is ready are queued above the prompt and sent once it is. A picker takes over input when a choice or API key is needed, then your draft returns.
 
 If no connection is ready, `/login` offers:
 
@@ -121,7 +121,7 @@ Slash commands run immediately, even during a turn. Press `Esc` or `Ctrl+C`, or 
 
 ## Logs and traces
 
-The UI shows severity-tagged errors by default. Run `/loglevel <mode>` or press `Ctrl+L` to change the display; bare `/loglevel` reports the current mode.
+The UI shows severity-tagged errors by default. Run `/loglevel <mode>` or press `Ctrl+L` to change which new lines appear; lines already in the transcript stay as they are. Bare `/loglevel` reports the current mode.
 
 | Mode    | Shows                                                                                                                 |
 | ------- | --------------------------------------------------------------------------------------------------------------------- |
@@ -131,19 +131,19 @@ The UI shows severity-tagged errors by default. Run `/loglevel <mode>` or press 
 | `debug` | All severity-tagged records.                                                                                          |
 | `all`   | Also unclassified stdout, stderr, sandbox output, and Workflow SDK lines such as `[workflow-sdk]` or `[world-local]`. |
 
-These modes filter the display only; they don't change `EVE_LOG_LEVEL` or a dependency's debug logging. Every `eve dev` process writes diagnostic logs to `.eve/logs/` regardless of mode. Read them with [`eve logs`](../reference/cli#eve-logs).
+These modes filter the display only; they don't change `EVE_LOG_LEVEL` or a dependency's debug logging. Every `eve dev` process writes diagnostic logs to `.eve/logs/` regardless of mode, so a line hidden from the transcript is still there. Read them with [`eve logs`](../reference/cli#eve-logs).
+
+When you edit the agent's source, the status line shows the rebuild while it runs and briefly after it finishes. A failed rebuild appears in the transcript as an error.
 
 Use `/traces` to inspect traces recorded during local development. See [Local traces](../observability/otel#local-traces) for trace capture and retention settings.
 
 ## Display options
 
-`eve dev` flags control how tool calls, reasoning, subagents, connection authorization, response statistics, context usage, and logs display:
+By default, settled tool calls collapse to one line, reasoning is hidden, and a subagent task writes a line when it starts and when it ends, with its current activity in the panel above the prompt. Pass `--verbose` to show tool input and output, reasoning, and each subagent message and tool call in full:
 
 ```bash
-eve dev --show-tools full --show-reasoning collapsed --logs all
+eve dev --verbose --logs all
 ```
-
-`--show-subagents` accepts `collapsed` (default), `full`, or `hidden`. `full` also writes each subagent message and tool call to the transcript, and `hidden` leaves subagent tasks out of the transcript and the drawer.
 
 Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. Set `EVE_TUI_RENDER_MARKDOWN=0` to show responses as plain text instead of rendered Markdown. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
 

@@ -313,14 +313,8 @@ export class EveTUIRunner {
   #sentMessage?: { readonly text: string; deliveryId?: string };
   /** Whether this TUI asked to cancel the turn of {@link #sentMessage}. */
   #cancelRequested = false;
-  /** Aborts the off-critical-path boot auth probe when the run loop unwinds. */
+  /** Aborts an in-flight Vercel login probe when the run loop unwinds. */
   readonly #authProbeAbort = new AbortController();
-  /**
-   * Set once a setup command changes Vercel state (any status-line effect), so
-   * a slow boot login probe that resolves afterward cannot paint a stale
-   * "not logged in" hint over a session the user has since logged into.
-   */
-  #authHintStale = false;
   #setupAttentionRevision = 0;
   #agentInfoRevision = 0;
   /** Cheap-and-local boot detection issues, cached so the auth probe can re-combine. */
@@ -432,7 +426,7 @@ export class EveTUIRunner {
     const serverUrl = this.#serverUrl;
     if (serverUrl === undefined) {
       this.#reportBeforeFirstPaint();
-      if (!this.#onboard) await this.#renderSetupIssues(undefined);
+      if (!this.#onboard) void this.#refreshSetupAttention();
       return;
     }
 
@@ -456,8 +450,8 @@ export class EveTUIRunner {
       }
     }
     this.#reportBeforeFirstPaint();
-    const headerInfo = this.#replaceAgentInfo(info);
-    if (!this.#onboard) await this.#renderSetupIssues(headerInfo);
+    this.#replaceAgentInfo(info);
+    if (!this.#onboard) void this.#refreshSetupAttention();
   }
 
   #replaceAgentInfo(info: AgentInfoResult | undefined): AgentInfoResult | undefined {
@@ -1052,22 +1046,7 @@ export class EveTUIRunner {
     );
   }
 
-  async #renderSetupIssues(info: AgentInfoResult | undefined): Promise<void> {
-    if (this.#appRoot === undefined) return;
-    const context: BootDetectionContext = {
-      appRoot: this.#appRoot,
-      env: process.env,
-    };
-    if (info !== undefined) context.info = info;
-    this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
-    this.#paintSetupAttention();
-    // Login state is a `vercel whoami` round-trip — too costly for the
-    // cheap-and-local boot detections above — so it rides its own probe off
-    // the critical path and never delays the first prompt.
-    this.#probeAuthIssue();
-  }
-
-  /** Repaints the attention line from the cached detection + auth issues, or clears it. */
+  /** Repaints the attention line from the cached detection and auth issues, or clears it. */
   #paintSetupAttention(): void {
     if (this.#startupActive) return;
     const issues = orderedSetupIssues(this.#bootIssues, this.#authIssue);
@@ -1076,47 +1055,30 @@ export class EveTUIRunner {
     );
   }
 
-  /** Checks Vercel auth after boot without delaying the first prompt. */
-  async #probeAuthIssue(): Promise<void> {
-    const appRoot = this.#appRoot;
-    if (appRoot === undefined || process.env.EVE_MODEL_CONNECTION !== "ai-gateway-project") return;
-    let status: VercelAuthStatus;
-    try {
-      status = await this.#getVercelAuthStatus(appRoot, { signal: this.#authProbeAbort.signal });
-    } catch {
-      return;
-    }
-    if (this.#disposed || this.#authHintStale) return;
-    this.#authIssue = authIssueForStatus(status);
-    this.#paintSetupAttention();
-  }
-
   /**
-   * Re-evaluates the attention line after a setup command changed local state,
-   * so a fixed issue clears (e.g. the `not logged in · /deploy` line disappears
-   * once `/deploy` succeeds) instead of lingering stale. Authoritative: unlike
-   * the boot probe it re-reads detections and auth and is not stale-guarded.
+   * Re-reads installation issues, then Vercel login, painting after each so
+   * the cheap local checks never wait on the `vercel whoami` round-trip. A
+   * later refresh supersedes an earlier one still in flight.
    */
-  async #refreshSetupAttention(info: AgentInfoResult | undefined): Promise<void> {
+  async #refreshSetupAttention(): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
     const revision = ++this.#setupAttentionRevision;
+    const current = () => !this.#disposed && revision === this.#setupAttentionRevision;
     const context: BootDetectionContext = { appRoot, env: process.env };
-    if (info !== undefined) context.info = info;
-    try {
-      const [issues, auth] = await Promise.all([
-        detectSetupIssues(context, this.#bootDetections),
-        process.env.EVE_MODEL_CONNECTION === "ai-gateway-project"
-          ? this.#getVercelAuthStatus(appRoot, { signal: this.#authProbeAbort.signal })
-          : undefined,
-      ]);
-      if (this.#disposed || revision !== this.#setupAttentionRevision) return;
-      this.#bootIssues = issues;
-      this.#authIssue = auth === undefined ? undefined : authIssueForStatus(auth);
-      this.#paintSetupAttention();
-    } catch {
-      return;
-    }
+    if (this.#agentInfo !== undefined) context.info = this.#agentInfo;
+    const issues = await detectSetupIssues(context, this.#bootDetections).catch(() => undefined);
+    if (!current()) return;
+    if (issues !== undefined) this.#bootIssues = issues;
+    if (process.env.EVE_MODEL_CONNECTION !== "ai-gateway-project") this.#authIssue = undefined;
+    this.#paintSetupAttention();
+    if (process.env.EVE_MODEL_CONNECTION !== "ai-gateway-project") return;
+    const auth = await this.#getVercelAuthStatus(appRoot, {
+      signal: this.#authProbeAbort.signal,
+    }).catch(() => undefined);
+    if (!current() || auth === undefined) return;
+    this.#authIssue = authIssueForStatus(auth);
+    this.#paintSetupAttention();
   }
 
   #finishCommand(outcome: CommandPresentation): void {
@@ -1153,15 +1115,13 @@ export class EveTUIRunner {
   async #applyCommandEffect(effect: PromptCommandOutcome["effect"]): Promise<void> {
     if (effect?.kind === "model-access-changed") {
       this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
-      this.#authHintStale = true;
       await this.#refreshModelAccess(effect);
       return;
     }
     if (effect === undefined) return;
 
     this.#vercelStatus?.applyEffect(effect);
-    this.#authHintStale = true;
-    void this.#refreshSetupAttention(this.#agentInfo);
+    void this.#refreshSetupAttention();
   }
 
   async #settleCommandOutcome(outcome: PromptCommandOutcome): Promise<PromptCommandOutcome> {
@@ -1350,7 +1310,7 @@ export class EveTUIRunner {
     const nextInfo = await this.#readAgentInfo();
     if (this.#disposed || revision !== this.#agentInfoRevision || nextInfo === undefined) return;
     this.#replaceAgentInfo(nextInfo);
-    void this.#refreshSetupAttention(this.#agentInfo);
+    void this.#refreshSetupAttention();
   }
 
   async #readAgentInfo(): Promise<AgentInfoResult | undefined> {
