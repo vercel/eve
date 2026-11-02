@@ -94,7 +94,7 @@ export const BASH_OUTPUT_SCHEMA = defineJsonSchema<BashToolOutput>({
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool(
   defineTool({
     label: { start: (input) => toolLabel("Run", input.command) },
-    description: `Execute a shell command in the shared workspace environment. The result is the command's stdout, then any stderr, then its exit code. A command still running after ${BASH_YIELD_SECONDS} seconds keeps running in the background, and the result shows its output so far and how to check on or stop it.`,
+    description: `Execute a shell command in the shared workspace environment. The result is the command's stdout, then any stderr after a \`[stderr]\` line. The final line is always \`[exit code: N]\` or a note that the command is still running, and only that final line reports how the command ended. A command still running after ${BASH_YIELD_SECONDS} seconds keeps running in the background, and the note says how to check on or stop it.`,
     async execute(input, ctx) {
       return await executeBashOnSandbox(await ctx.getSandbox(), input as BashInput, {
         abortSignal: ctx.abortSignal,
@@ -106,35 +106,44 @@ export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool
   }),
 );
 
+/** Every key a `bash` result can have, across both statuses. */
+const BASH_OUTPUT_KEYS = new Set([
+  "exitCode",
+  "message",
+  "outputDirectory",
+  "pid",
+  "status",
+  "stderr",
+  "stdout",
+  "truncated",
+]);
+
 /**
  * Shows the model plain text, so source, diffs, and logs read as printed
- * instead of JSON-escaped. A wrapper's `execute` may return another shape,
- * which stays JSON.
+ * instead of JSON-escaped. A wrapper's `execute` may return another value: a
+ * string stays text, and any other shape stays JSON.
  */
-function bashModelOutput(output: BashToolOutput): ToolModelOutput {
-  const status = statusLine(output);
-  if (status === undefined) return toolOutput.json(output);
-  const streams = [output.stdout, output.stderr && `stderr:\n${output.stderr}`]
+function bashModelOutput(output: unknown): ToolModelOutput {
+  if (typeof output === "string") return toolOutput.text(output);
+  if (!isBashResult(output)) return toolOutput.json(output);
+  const streams = [output.stdout, output.stderr && `[stderr]\n${output.stderr}`]
     .filter((text) => text.length > 0)
     .map((text) => (text.endsWith("\n") ? text : `${text}\n`));
+  const status = output.status === "running" ? output.message : `[exit code: ${output.exitCode}]`;
   return toolOutput.text(`${streams.join("\n")}${status}`);
 }
 
-/** The final line of a `bash` result, or undefined for any other shape. */
-function statusLine(output: BashToolOutput): string | undefined {
-  if (
-    typeof output !== "object" ||
-    output === null ||
-    typeof output.stdout !== "string" ||
-    typeof output.stderr !== "string"
-  ) {
-    return undefined;
-  }
-  if (output.status === "completed" && typeof output.exitCode === "number") {
-    return `exit code: ${output.exitCode}`;
-  }
-  if (output.status === "running" && typeof output.message === "string") return output.message;
-  return undefined;
+/** A `bash` result with no extra keys and the fields its status requires. */
+function isBashResult(output: unknown): output is BashToolOutput {
+  if (typeof output !== "object" || output === null) return false;
+  const value = output as Record<string, unknown>;
+  return (
+    Object.keys(value).every((key) => BASH_OUTPUT_KEYS.has(key)) &&
+    typeof value.stdout === "string" &&
+    typeof value.stderr === "string" &&
+    ((value.status === "completed" && typeof value.exitCode === "number") ||
+      (value.status === "running" && typeof value.message === "string"))
+  );
 }
 
 export default bash;

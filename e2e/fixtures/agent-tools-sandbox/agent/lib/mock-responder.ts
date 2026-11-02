@@ -150,8 +150,11 @@ function bashStdout(request: MockModelRequest): string {
   const output = formatOutput(
     [...request.toolResults].reverse().find((result) => result.name === "bash")?.output,
   );
-  // bash shows the model its stdout, then any `stderr:` section, then `exit code: N`.
-  return output.split(/^(?:stderr:|exit code: \d+)$/mu)[0]!.trim();
+  // bash shows the model its stdout, then any `[stderr]` section, then `[exit code: N]` last.
+  const body = output.replace(/\[exit code: -?\d+\]$/u, "");
+  const stderrAt = body.lastIndexOf("\n[stderr]\n");
+  const end = stderrAt !== -1 ? stderrAt : body.startsWith("[stderr]\n") ? 0 : body.length;
+  return body.slice(0, end).trim();
 }
 
 function toolOutput(request: MockModelRequest, name: string): string {
