@@ -5,14 +5,26 @@ import test from "node:test";
 import {
   BENCHMARK_DATASETS,
   BENCHMARK_HARNESSES,
+  BENCHMARK_MODEL_FAMILIES,
   DEFAULT_DATASET,
   DEFAULT_HARNESSES,
+  DEFAULT_MODEL_FAMILY,
   resolveBenchmarkRequest,
 } from "./resolve-benchmark-request.mjs";
 
+const models = { anthropic: "anthropic/claude-sonnet-5.5", openai: "openai/gpt-6.1-sol" };
+const anthropic = { family: "anthropic", model: models.anthropic };
+const openai = { family: "openai", model: models.openai };
 const sweLean = { dataset: "swe-lean", reasoning: "low", attempts: "5" };
 const deepsweLean = { dataset: "deepswe-lean", reasoning: "high", attempts: "3" };
-const defaults = { harness: "eve-code,opencode,pi", slug: "eve-code+opencode+pi", ...sweLean };
+const defaults = {
+  harness: "eve-code,opencode,pi",
+  slug: "eve-code+opencode+pi",
+  ...sweLean,
+  models: [anthropic],
+};
+const workflow = () =>
+  readFile(new URL("../workflows/eve-code-benchmark.yml", import.meta.url), "utf8");
 
 const sha = "a".repeat(40);
 const pull = {
@@ -60,13 +72,14 @@ function fixture({
       },
     },
   };
-  return { context, github, calls };
+  return { context, github, calls, models };
 }
 
 const resolve = (input) => resolveBenchmarkRequest(input);
 
 test("automatic PR runs compare eve-code with opencode and pi at the exact current PR head", async () => {
   assert.deepEqual(DEFAULT_HARNESSES, ["eve-code", "opencode", "pi"]);
+  assert.equal(DEFAULT_MODEL_FAMILY, "anthropic");
   const input = fixture({ eventName: "pull_request" });
   assert.deepEqual(await resolve(input), { ...defaults, sha, pr: "42" });
   assert.deepEqual(input.calls, [["pull", { owner: "vercel", repo: "eve", pull_number: 42 }]]);
@@ -87,6 +100,7 @@ for (const harness of BENCHMARK_HARNESSES) {
       harness,
       slug: harness,
       ...sweLean,
+      models: [anthropic],
       sha,
       pr: "42",
     });
@@ -105,15 +119,24 @@ test("a comment can select several harnesses, comma- or space-separated, dedupli
   }
 });
 
-test("manual dispatch offers exactly the datasets the resolver accepts", async () => {
-  const workflow = await readFile(
-    new URL("../workflows/eve-code-benchmark.yml", import.meta.url),
-    "utf8",
-  );
-  const input = /\n {6}dataset:\n(?: {8}.*\n)+/u.exec(workflow)?.[0] ?? "";
-  const options = /^ {8}options: \[(.*)\]$/mu.exec(input)?.[1].split(/, */u);
-  assert.deepEqual(options, Object.keys(BENCHMARK_DATASETS));
-  assert.equal(/^ {8}default: (\S+)$/mu.exec(input)?.[1], DEFAULT_DATASET);
+function dispatchInput(source, name) {
+  const input = new RegExp(`\\n {6}${name}:\\n(?: {8}.*\\n)+`, "u").exec(source)?.[0] ?? "";
+  return {
+    options: /^ {8}options: \[(.*)\]$/mu.exec(input)?.[1].split(/, */u),
+    default: /^ {8}default: (\S+)$/mu.exec(input)?.[1],
+  };
+}
+
+test("manual dispatch offers exactly the datasets and models the resolver accepts", async () => {
+  const source = await workflow();
+  assert.deepEqual(dispatchInput(source, "dataset"), {
+    options: Object.keys(BENCHMARK_DATASETS),
+    default: DEFAULT_DATASET,
+  });
+  assert.deepEqual(dispatchInput(source, "model"), {
+    options: ["all", ...BENCHMARK_MODEL_FAMILIES],
+    default: "all",
+  });
 });
 
 test("a comment can select a dataset, with the default harnesses or its own list", async () => {
@@ -141,6 +164,38 @@ test("a comment cannot name two datasets", async () => {
   await assert.rejects(
     resolve(fixture({ body: "/benchmark swe-lean deepswe-lean" })),
     /at most one benchmark dataset/u,
+  );
+});
+
+test("a comment can run one other model family, anywhere in the command", async () => {
+  assert.deepEqual(await resolve(fixture({ body: "/benchmark model=openai" })), {
+    ...defaults,
+    models: [openai],
+    sha,
+    pr: "42",
+  });
+  for (const body of [
+    "/benchmark deepswe-lean model=openai pi",
+    "/benchmark pi, model=openai, deepswe-lean",
+  ]) {
+    const result = await resolve(fixture({ body }));
+    assert.deepEqual(
+      [result.dataset, result.harness, result.models],
+      ["deepswe-lean", "pi", [openai]],
+    );
+  }
+});
+
+test("a comment runs exactly one model family, since both would share one PR comment", async () => {
+  for (const body of ["/benchmark model=all", "/benchmark model=gemini", "/benchmark model="]) {
+    await assert.rejects(
+      resolve(fixture({ body })),
+      /Supported benchmark models: anthropic, openai/u,
+    );
+  }
+  await assert.rejects(
+    resolve(fixture({ body: "/benchmark model=openai model=anthropic" })),
+    /at most one benchmark model/u,
   );
 });
 
@@ -197,10 +252,11 @@ test("invalid or injected commands never become action inputs", async () => {
     "/benchmark codex extra",
     "/benchmark codex,",
     "/benchmark codex;pi",
+    "/benchmark harness=pi",
   ]) {
     await assert.rejects(
       resolve(fixture({ body })),
-      /Use \/benchmark|Supported benchmark harnesses/u,
+      /Use \/benchmark|Supported benchmark harnesses|Supported benchmark models/u,
     );
   }
 });
@@ -239,7 +295,12 @@ test("a superseded pull_request event cannot run or cancel the current benchmark
 
 test("manual dispatch defaults to the default harnesses and validates an explicit list", async () => {
   const input = fixture({ eventName: "workflow_dispatch" });
-  assert.deepEqual(await resolve(input), { ...defaults, sha: input.context.sha, pr: "" });
+  assert.deepEqual(await resolve(input), {
+    ...defaults,
+    models: [anthropic, openai],
+    sha: input.context.sha,
+    pr: "",
+  });
   input.context.payload.inputs.harness = "codex";
   assert.equal((await resolve(input)).harness, "codex");
   input.context.payload.inputs.harness = "codex, pi";
@@ -254,6 +315,7 @@ test("manual dispatch can publish a deepswe-lean result and rejects unknown data
   assert.deepEqual(await resolve(input), {
     ...defaults,
     ...deepsweLean,
+    models: [anthropic, openai],
     sha: input.context.sha,
     pr: "",
   });
@@ -261,14 +323,51 @@ test("manual dispatch can publish a deepswe-lean result and rejects unknown data
   await assert.rejects(resolve(input), /Supported benchmark datasets: swe-lean, deepswe-lean/u);
 });
 
-test("pushes to main publish the default harnesses at the pushed commit", async () => {
+test("manual dispatch can select one model family or all of them", async () => {
+  const input = fixture({ eventName: "workflow_dispatch" });
+  for (const [model, expected] of [
+    ["all", [anthropic, openai]],
+    ["openai", [openai]],
+  ]) {
+    input.context.payload.inputs = { model };
+    assert.deepEqual((await resolve(input)).models, expected);
+  }
+  input.context.payload.inputs = { model: "gemini" };
+  await assert.rejects(resolve(input), /Supported benchmark models/u);
+});
+
+test("pushes to main publish the default harnesses on every model at the pushed commit", async () => {
   const input = fixture({ eventName: "push" });
-  assert.deepEqual(await resolve(input), { ...defaults, sha: input.context.sha, pr: "" });
+  assert.deepEqual(await resolve(input), {
+    ...defaults,
+    models: [anthropic, openai],
+    sha: input.context.sha,
+    pr: "",
+  });
   assert.deepEqual(input.calls, []);
 });
 
+test("the weekly schedule publishes deepswe-lean for the default harnesses on every model", async () => {
+  const input = fixture({ eventName: "schedule" });
+  assert.deepEqual(await resolve(input), {
+    ...defaults,
+    ...deepsweLean,
+    models: [anthropic, openai],
+    sha: input.context.sha,
+    pr: "",
+  });
+  assert.deepEqual(input.calls, []);
+  assert.match(await workflow(), /\n {2}schedule:\n {4}- cron: "[^"]+"\n/u);
+});
+
+test("a family without a configured model fails instead of running the wrong model", async () => {
+  const input = fixture({ eventName: "push" });
+  input.models = { anthropic: models.anthropic, openai: "" };
+  await assert.rejects(resolve(input), /No model is set for openai/u);
+});
+
 test("other events never run a benchmark", async () => {
-  assert.equal(await resolve(fixture({ eventName: "schedule" })), null);
+  assert.equal(await resolve(fixture({ eventName: "workflow_run" })), null);
 });
 
 test("workflow names and concurrency preserve independent authorized harness runs", async () => {
@@ -277,7 +376,7 @@ test("workflow names and concurrency preserve independent authorized harness run
     "utf8",
   );
   assert.match(workflow, /^name: eve-code\n/u);
-  assert.match(workflow, /name: Benchmark harness/u);
+  assert.match(workflow, /name: Benchmark harness \(\$\{\{ matrix\.family \}\}\)/u);
   assert.match(workflow, /issue_comment:\n\s+types: \[created\]/u);
   assert.match(
     workflow,
@@ -286,11 +385,16 @@ test("workflow names and concurrency preserve independent authorized harness run
   // A deepswe-lean run never cancels or overwrites a swe-lean run of the same harnesses.
   assert.match(
     workflow,
-    /group: eve-code-.*needs\.request\.outputs\.pr.*needs\.request\.outputs\.dataset.*needs\.request\.outputs\.slug/u,
+    /group: eve-code-.*needs\.request\.outputs\.pr.*needs\.request\.outputs\.dataset.*needs\.request\.outputs\.slug.*matrix\.family/u,
   );
   assert.match(
     workflow,
-    /artifact-name: \$\{\{ needs\.request\.outputs\.dataset \}\}-\$\{\{ needs\.request\.outputs\.slug \}\}/u,
+    /artifact-name: \$\{\{ needs\.request\.outputs\.dataset \}\}-\$\{\{ needs\.request\.outputs\.slug \}\}-\$\{\{ matrix\.family \}\}/u,
+  );
+  // One model family's failure never cancels the other's run.
+  assert.match(
+    workflow,
+    /fail-fast: false\n\s+matrix:\n\s+include: \$\{\{ fromJSON\(needs\.request\.outputs\.models\) \}\}\n/u,
   );
   assert.match(workflow, /push:\n\s+branches: \[main\]/u);
   // Each dataset's attempts run in waves of the action's maximum of 16 sandboxes.
@@ -308,8 +412,17 @@ test("the consumer tracks eve-bench main and owns its model selection", async ()
   assert.match(workflow, /uses: \.\/\.eve-bench-action/u);
   assert.match(
     workflow,
-    /model: \$\{\{ vars\.EVE_CODE_BENCH_MODEL \|\| 'anthropic\/claude-sonnet-5\.5' \}\}/u,
+    /ANTHROPIC_MODEL: \$\{\{ vars\.EVE_CODE_BENCH_MODEL \|\| 'anthropic\/claude-sonnet-5\.5' \}\}/u,
   );
+  assert.match(
+    workflow,
+    /OPENAI_MODEL: \$\{\{ vars\.EVE_CODE_BENCH_OPENAI_MODEL \|\| 'openai\/gpt-6\.1-sol' \}\}/u,
+  );
+  assert.match(
+    workflow,
+    /const models = \{ anthropic: process\.env\.ANTHROPIC_MODEL, openai: process\.env\.OPENAI_MODEL \};/u,
+  );
+  assert.match(workflow, /model: \$\{\{ matrix\.model \}\}\n/u);
   assert.match(workflow, /reasoning: \$\{\{ needs\.request\.outputs\.reasoning \}\}\n/u);
   assert.doesNotMatch(workflow, /runner-revision:/u);
   assert.match(workflow, /blob-token: \$\{\{ secrets\.EVE_BENCH_BLOB_READ_WRITE_TOKEN \}\}/u);
@@ -318,4 +431,18 @@ test("the consumer tracks eve-bench main and owns its model selection", async ()
   assert.match(workflow, /contenders: eve-code@baseline,eve-code@head\n/u);
   assert.doesNotMatch(workflow, /^\s+task:/mu);
   assert.equal((workflow.match(/uses: \.\/\.eve-bench-action/gu) ?? []).length, 1);
+});
+
+test("the docs snapshot refreshes from the default model's deepswe-lean report on main", async () => {
+  const source = await workflow();
+  const job = /\n {2}docs-snapshot:\n(?: {4}.*\n|\n)+/u.exec(source)?.[0] ?? "";
+  assert.match(job, /github\.event_name == 'schedule'/u);
+  assert.match(
+    job,
+    new RegExp(
+      `contains\\(fromJSON\\(needs\\.request\\.outputs\\.models\\)\\.\\*\\.family, '${DEFAULT_MODEL_FAMILY}'\\)`,
+      "u",
+    ),
+  );
+  assert.match(job, new RegExp(`ARTIFACT: .*\\.slug \\}\\}-${DEFAULT_MODEL_FAMILY}\\n`, "u"));
 });
