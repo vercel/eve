@@ -370,6 +370,12 @@
       "import": "./dist/src/extensions/git/tools.js",
       "default": "./dist/src/extensions/git/tools.js"
     },
+    "./extensions/btw": {
+      "eve-source": "./dist/src/extensions/btw/index.js",
+      "types": "./dist/src/extensions/btw/index.d.ts",
+      "import": "./dist/src/extensions/btw/index.js",
+      "default": "./dist/src/extensions/btw/index.js"
+    },
     "./extensions/git/sandbox": {
       "eve-source": "./dist/src/extensions/git/extension/lib/sandbox.js",
       "types": "./dist/src/extensions/git/extension/lib/sandbox.d.ts",

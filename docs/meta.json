@@ -21,6 +21,7 @@
     "---Integrate---",
     "install-integrations",
     "extensions",
+    "side-questions",
     "code-extension",
     "protocols/acp",
     "guides/client",
