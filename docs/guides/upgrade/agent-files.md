@@ -140,6 +140,19 @@ export default git({
 
 See [Control access with `authorize`](/docs/code-extension#control-access-with-authorize).
 
+## Remove the code extension's `worker` option
+
+The code extension adds no `code__worker` subagent, and `code()` rejects a `worker` option. Remove `worker` from your code extension mount. To hand a slice of work to a child agent, use the built-in `agent` tool. If an `agent/tools/agent.ts` override disables that tool so delegation goes to `code__worker`, delete the override.
+
+```ts title="agent/extensions/code.ts"
+import code from "eve/extensions/code";
+
+export default code({
+  vercel: { connector: "vercel/acme-bot" },
+  worker: { model: "openai/gpt-5.6-terra-fast", reasoning: "high" }, // [!code --]
+});
+```
+
 ## Workflow imports
 
 Workflow tools import the Workflow SDK through eve. Import durable primitives from `eve/workflow` and run and hook operations from `eve/workflow/api`. Bare `workflow` and `workflow/*` imports fail the build.
