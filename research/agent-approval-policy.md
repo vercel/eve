@@ -61,9 +61,11 @@ response policies stay with the entry that asks.
   (`eve__search`, `eve__skill`), connection sign-in entries, provider-executed tools, and
   `ctx.agent()` calls from workflow code. A child started by `ctx.agent()` is still governed: its
   own calls run under the root policy.
-- **Subagents.** The root agent's policy applies in every subagent session. A subagent's own
-  `approval` joins it under the same stricter-wins rule, so no subagent, including one an extension
-  ships, can loosen the root's gates. A dynamic subagent config can't select one.
+- **Subagents.** The root agent's policy applies in every local subagent session. A subagent's own
+  `approval` joins it under the same stricter-wins rule, so no local subagent, including one an
+  extension ships, can loosen the root's gates. A dynamic subagent config can't select one. A
+  remote agent runs in its own deployment under that deployment's policy; the parent's policy gates
+  only the call to it.
 - **Connection pinning.** The joined policy runs inside the connection's instance pin, so a call it
   parks runs only against the instance it was approved for.
 - **Fail closed at load.** A compiled agent that marks a policy the runtime can't load refuses to

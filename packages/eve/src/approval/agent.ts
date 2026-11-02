@@ -47,3 +47,22 @@ export function withAgentApproval(
   const request = strictestApproval([agent, resolveApprovalPolicy(own)]);
   return typeof own === "function" ? request : { ...own, request };
 }
+
+/**
+ * Puts every entry in `entries` under the agent's policy. Task controls (`frameworkAction`) only
+ * read or stop work the agent already started, so they stay ungated. Without a policy the entries
+ * are returned unchanged.
+ */
+export function withAgentApprovalOnEntries<
+  T extends { readonly approval?: Approval; readonly frameworkAction?: unknown },
+>(entries: ReadonlyMap<string, T>, agent: ApprovalPolicy | undefined): Map<string, T> {
+  if (agent === undefined) return new Map(entries);
+  return new Map(
+    [...entries].map(([name, entry]) => [
+      name,
+      entry.frameworkAction === undefined
+        ? { ...entry, approval: withAgentApproval(agent, entry.approval) }
+        : entry,
+    ]),
+  );
+}

@@ -390,9 +390,11 @@ type PublicAgentDefinitionBase = {
    * `approval`, and the stricter status wins (denied, then user approval, then approved), so it
    * can add a gate but never remove one. Returning `undefined` leaves the entry's own decision.
    *
-   * The root agent's policy also applies in every subagent session; a subagent's own can only add
-   * to it. Task controls, connection sign-in, `ctx.agent()` calls from workflow code, and
-   * provider-executed tools such as a provider's native web search are not covered.
+   * The root agent's policy also applies in every local subagent session; a subagent's own can only
+   * add to it. A remote agent's deployment governs its own calls; this policy gates the call to it.
+   * `eve__search`, `eve__skill`, task controls, connection sign-in, `ctx.agent()` calls from
+   * workflow code, and provider-executed tools such as a provider's native web search are not
+   * covered.
    *
    * ```ts
    * approval: auto(), // a decision model reviews every call; tools' own gates still apply

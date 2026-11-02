@@ -1,5 +1,5 @@
 import type { InvokeToolFn } from "#channel/invoke-tool.js";
-import { withAgentApproval } from "#approval/agent.js";
+import { withAgentApprovalOnEntries } from "#approval/agent.js";
 import { resolveAgentApproval } from "#execution/effective-agent-config.js";
 import { invokeTool, type InvokeToolRuntime } from "#execution/invoke-tool.js";
 import { createNodeHarnessTools } from "#execution/node-step.js";
@@ -58,13 +58,10 @@ export async function loadInvokeToolRuntime(input: {
     loadCompiledManifest({ compiledArtifactsSource }),
   ]);
   const node = bundle.graph.root;
-  const agentApproval = resolveAgentApproval(bundle);
   // A channel's direct `invokeTool` runs under the same agent-wide policy as a model's call.
-  const tools = new Map(
-    [...createNodeHarnessTools({ node })].map(([name, definition]) => [
-      name,
-      { ...definition, approval: withAgentApproval(agentApproval, definition.approval) },
-    ]),
+  const tools = withAgentApprovalOnEntries(
+    createNodeHarnessTools({ node }),
+    resolveAgentApproval(bundle),
   );
   return {
     bundle,

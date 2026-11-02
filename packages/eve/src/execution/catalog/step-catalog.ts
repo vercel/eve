@@ -9,7 +9,7 @@
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { ApprovalPolicy } from "#approval/definition.js";
-import { withAgentApproval } from "#approval/agent.js";
+import { withAgentApprovalOnEntries } from "#approval/agent.js";
 import { resolveAgentApproval } from "#execution/effective-agent-config.js";
 import { connectionToolName } from "#connections/ownership.js";
 import { dynamicConnectionVersions } from "#reactions/kinds/connection.js";
@@ -153,7 +153,7 @@ export function buildStepCatalog(input: {
     );
   const agentApproval = bundle === undefined ? undefined : resolveAgentApproval(bundle);
   const ownEntries = stepEntries(input, visible);
-  const entries = governedEntries(
+  const entries = withAgentApprovalOnEntries(
     offersTasks ? withTaskTools(ownEntries) : ownEntries,
     agentApproval,
   );
@@ -294,25 +294,6 @@ function isVisible(
     definition.availableInSubagents === false ||
     definition.behavior?.availability.includes("root-session") === true;
   return !rootOnly || session.rootSessionId === undefined;
-}
-
-/**
- * Puts every entry the session can run under the agent's `approval`. Task controls only read or
- * stop work the agent already started, so they stay ungated.
- */
-function governedEntries(
-  entries: ReadonlyMap<string, HarnessToolDefinition>,
-  agentApproval: ApprovalPolicy | undefined,
-): Map<string, HarnessToolDefinition> {
-  if (agentApproval === undefined) return new Map(entries);
-  return new Map(
-    [...entries].map(([name, definition]) => [
-      name,
-      definition.frameworkAction === undefined
-        ? { ...definition, approval: withAgentApproval(agentApproval, definition.approval) }
-        : definition,
-    ]),
-  );
 }
 
 /** A connection owns its own name, which signs the user in, and every name under its prefix. */
