@@ -14,7 +14,7 @@ Create a bot by sending `/newbot` to [@BotFather](https://t.me/BotFather), then 
 
 ### Vercel Connect
 
-This path needs an authenticated Vercel CLI. eve links a Vercel project, stores the token in a Telegram connector, and routes the connector's triggers to `/eve/v1/telegram`. Vercel Connect registers the bot's webhook, checks Telegram's secret token, and forwards each update with a Vercel OIDC token. `connectTelegramCredentials` resolves the bot token from the connector and verifies that OIDC token, so your deployment holds no bot token or webhook secret:
+This path needs an authenticated Vercel CLI. eve links a Vercel project, stores the token in a [Vercel Connect](https://vercel.com/docs/connect) Telegram connector, and routes its triggers to `/eve/v1/telegram`. Connect registers the bot's webhook and forwards each update with a Vercel OIDC token that `connectTelegramCredentials` verifies, so your deployment holds no bot token or webhook secret:
 
 ```ts title="agent/channels/telegram.ts"
 import { connectTelegramCredentials } from "@vercel/connect/eve";
@@ -26,11 +26,11 @@ export default telegramChannel({
 });
 ```
 
-A Telegram bot has one webhook, so Connect replaces any webhook the bot already has. Setup routes updates to production. To test a preview, create a second bot and connector and attach it with `--environment preview`, as in Slack's [Test a preview branch](/docs/channels/slack/reference#test-a-preview-branch).
+Setup routes updates to production. To test a preview, create a second bot and connector and attach it with `--environment preview`, as in Slack's [Test a preview branch](/docs/channels/slack/reference#test-a-preview-branch).
 
 ### Portable credentials
 
-On a host without Vercel Connect, choose **Use portable credentials** during `eve add channel/telegram`. eve writes the bot token and a random webhook secret to `.env.local`. If `.env.local` already has a different `TELEGRAM_BOT_TOKEN`, eve asks before replacing it, and it keeps an existing `TELEGRAM_WEBHOOK_SECRET_TOKEN`:
+On a host without Vercel Connect, choose **Use portable credentials** during `eve add channel/telegram`. eve writes the bot token and a random webhook secret to `.env.local`:
 
 ```ts title="agent/channels/telegram.ts"
 import { telegramChannel } from "eve/channels/telegram";

@@ -4,7 +4,7 @@ description: "Reach your agent from a Telegram bot in private chats, groups, and
 type: integration
 ---
 
-A Telegram agent answers every message in a private chat. In a group, it answers commands, `@mentions`, and replies to its own messages, and ignores the rest. Approvals and questions appear as inline-keyboard buttons. [Set up](#set-up) connects a bot you create with BotFather, through Vercel Connect or with self-managed credentials.
+A Telegram agent answers every message in a private chat. In a group, it answers commands, `@mentions`, and replies to its own messages, and ignores the rest. Approvals and questions appear as inline-keyboard buttons. [Set up](#set-up) connects a bot you create with BotFather, through [Vercel Connect](https://vercel.com/docs/connect) or with self-managed credentials.
 
 For information on all configuration and customization options, see the [Telegram reference](/docs/channels/telegram/reference).
 
@@ -22,7 +22,7 @@ eve add channel/telegram
 eve deploy
 ```
 
-Setup needs an authenticated Vercel CLI, so run `vercel login` first. It links a Vercel project, then asks for the bot token and checks it with Telegram. It stores the token in a Vercel Connect Telegram connector and routes the connector's triggers to `/eve/v1/telegram`. Connect registers the bot's webhook and forwards each update with a Vercel OIDC token that the channel verifies, so your deployment holds no bot token or webhook secret. Setup writes the channel file:
+Setup links a Vercel project and stores the bot token in a Telegram connector. Connect registers the bot's webhook and forwards updates to `/eve/v1/telegram`, so your deployment holds no bot token or webhook secret. Setup writes the channel file:
 
 ```ts title="agent/channels/telegram.ts"
 import { connectTelegramCredentials } from "@vercel/connect/eve";
@@ -33,8 +33,6 @@ export default telegramChannel({
   credentials: connectTelegramCredentials("telegram/my-agent"),
 });
 ```
-
-Connect replaces any webhook the bot already has. Setup routes updates to your production deployment; see the [reference](/docs/channels/telegram/reference#vercel-connect) to test a preview.
 
 </TabContent>
 <TabContent order={2}>
