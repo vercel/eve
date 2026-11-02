@@ -71,10 +71,6 @@ function portableTemplate(botUsername: string): string {
 
 export default telegramChannel({
   botUsername: ${JSON.stringify(botUsername)},
-  credentials: {
-    botToken: process.env.TELEGRAM_BOT_TOKEN!,
-    webhookSecretToken: process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN!,
-  },
 });
 `;
 }

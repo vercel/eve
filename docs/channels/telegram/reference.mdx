@@ -14,7 +14,7 @@ Create a bot by sending `/newbot` to [@BotFather](https://t.me/BotFather), then 
 
 ### Vercel Connect
 
-Choose Vercel Connect, which needs an authenticated Vercel CLI, and eve links a Vercel project, stores the token in a Telegram connector, and routes the connector's triggers to `/eve/v1/telegram`. Vercel Connect registers the bot's webhook, checks Telegram's secret token, and forwards each update with a Vercel OIDC token. `connectTelegramCredentials` resolves the bot token from the connector and verifies that OIDC token, so your deployment holds no bot token or webhook secret:
+This path needs an authenticated Vercel CLI. eve links a Vercel project, stores the token in a Telegram connector, and routes the connector's triggers to `/eve/v1/telegram`. Vercel Connect registers the bot's webhook, checks Telegram's secret token, and forwards each update with a Vercel OIDC token. `connectTelegramCredentials` resolves the bot token from the connector and verifies that OIDC token, so your deployment holds no bot token or webhook secret:
 
 ```ts title="agent/channels/telegram.ts"
 import { connectTelegramCredentials } from "@vercel/connect/eve";
@@ -26,7 +26,7 @@ export default telegramChannel({
 });
 ```
 
-A Telegram bot has one webhook, so Connect replaces any webhook the bot already has. Connect forwards updates only to deployed URLs, so test on a preview or production deployment.
+A Telegram bot has one webhook, so Connect replaces any webhook the bot already has. Setup routes updates to production. To test a preview, create a second bot and connector and attach it with `--environment preview`, as in Slack's [Test a preview branch](/docs/channels/slack/reference#test-a-preview-branch).
 
 ### Portable credentials
 
