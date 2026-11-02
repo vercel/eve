@@ -1600,6 +1600,8 @@ async function handleEventPost(input: {
           if (onEvent === undefined) return;
           await dispatchSlackEvent({
             admit: config.admit ?? defaultSlackAdmit,
+            // The stop was admitted before anything ran.
+            admitted: async () => true,
             api: input.api,
             from: input.from,
             resolveSession: input.resolveSession,
@@ -1719,6 +1721,7 @@ async function handleEventPost(input: {
       : () =>
           dispatchSlackEvent({
             admit: config.admit ?? defaultSlackAdmit,
+            admitted: () => admitted("event"),
             api: input.api,
             from: input.from,
             resolveSession: input.resolveSession,
@@ -1770,7 +1773,8 @@ async function handleEventPost(input: {
   // The conversation lookup can call Slack, so admission runs after the ack.
   input.waitUntil(
     (async () => {
-      if (await admitted(kind)) await run();
+      // `onEvent` admits itself, wherever it runs from.
+      if (kind === "event" || (await admitted(kind))) await run();
     })(),
   );
   return new Response("ok");
@@ -1803,7 +1807,8 @@ function slackEventActor(event: SlackEvent): SlackAdmitActor | undefined {
     typeof event.message === "object" && event.message !== null && typeof event.user !== "string"
       ? (event.message as Record<string, unknown>)
       : event;
-  const userId = source.user;
+  // `file_shared` and similar events name the user as `user_id`.
+  const userId = typeof source.user === "string" ? source.user : source.user_id;
   if (typeof userId !== "string" || userId.length === 0) return undefined;
   const teamId = [source.user_team, source.team].find(
     (value): value is string => typeof value === "string" && value.length > 0,
@@ -2132,6 +2137,8 @@ async function acknowledgeMessage(
 /** Runs a generic Events API handler with an imperative Slack operation surface. */
 async function dispatchSlackEvent(input: {
   readonly admit: SlackAdmit;
+  /** Admits the event itself as `kind: "event"`. */
+  readonly admitted: () => Promise<boolean>;
   readonly api: SlackTransportOptions | undefined;
   readonly from: ChannelFrom<SlackChannelState>;
   readonly resolveSession: ChannelResolveSession;
@@ -2141,6 +2148,7 @@ async function dispatchSlackEvent(input: {
   readonly handler: NonNullable<SlackChannelConfig["onEvent"]>;
   readonly installationTeamId: string | undefined;
 }): Promise<void> {
+  if (!(await input.admitted())) return;
   const eventTeamId = input.envelope.event.team_id;
   const teamId =
     typeof eventTeamId === "string"

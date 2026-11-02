@@ -437,6 +437,25 @@ describe("slackChannel() code channels", () => {
     expect(events).toEqual(["C_ORDINARY_ON_EVENT"]);
   });
 
+  it("admits the onEvent fallback for an ordinary channel message as an event", async () => {
+    useCodeChannels([]);
+    const onEvent = vi.fn();
+    const channel = slackChannel({
+      admit: (request) => request.kind !== "event",
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onAppMention: () => null,
+      onEvent,
+    });
+
+    await firePost(
+      channel,
+      buildSignedRequest({ body: channelMessage({ channel: "C_EVENT_REFUSED", user: "U_ALICE" }) }),
+    );
+
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
   it("treats a code channel as an ordinary channel without codeChannels", async () => {
     useCodeChannels(["C_CODE_OFF"]);
     const isCodeChannel = vi.fn();
