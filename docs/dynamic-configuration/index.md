@@ -73,6 +73,7 @@ The key sets a lifetime, not a dependency list. A change in context that the cal
 - Deployment changes discard memos. Memos are a cache, not a record of side effects.
 - Memos can run concurrently with `Promise.all`, but cannot nest. Await every memo before returning.
 - Memo results are saved privately with the session and never appear on the stream.
+- Key a dynamic tool's memos on the turn or the session. If a key changes within a turn, such as a key on a call ID, eve can refuse an approved call to the tool after a restart, and the model has to request the call again.
 
 A memo callback receives `{ idempotencyKey, abortSignal }`. Pass `idempotencyKey` to an external service that supports idempotency, because an interrupted step can run again before eve saves its result. The key is stable per session, definition, and memo key. It repeats when a deployment change or skipped branch runs the memo again, so send your own key when a run needs a fresh response. Perform side effects in [hooks](/docs/guides/hooks) or tool execution, not while computing a definition.
 
