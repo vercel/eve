@@ -18,16 +18,6 @@ fail-open by omission.
 ## Authoring API
 
 ```ts title="agent/agent.ts"
-import { defineAgent } from "eve";
-import { auto } from "eve/tools/approval";
-
-export default defineAgent({
-  model: "anthropic/claude-sonnet-4.6",
-  approval: auto(), // a decision model reviews every call
-});
-```
-
-```ts title="agent/agent.ts"
 export default defineAgent({
   model: "anthropic/claude-sonnet-4.6",
   approval: ({ toolName, toolInput }) => {
@@ -44,6 +34,9 @@ export default defineAgent({
 `once()`, `auto()`, and authored policies work unchanged. There's no object form: prompts and
 response policies stay with the entry that asks.
 
+`auto()` runs a decision model before every call and asks a person on model errors, timeouts, and
+inputs over 64 KB, so it belongs behind cheap rules rather than as the whole policy.
+
 ## Semantics
 
 - **Stricter wins.** For each call eve runs the agent's policy and the entry's own `approval` and
@@ -51,6 +44,10 @@ response policies stay with the entry that asks.
   agent's policy can add a gate but never remove one. `undefined` leaves the entry's decision. A
   denial skips the entry's policy. On a tie the entry's status wins, so its `once()` memory, prompt,
   and response policy still apply.
+- **Remembered approvals.** A plain `"user-approval"` from the agent asks on every call, even after
+  a person approved the entry's `once()`: letting that memory satisfy the agent's ask would let an
+  entry's `once()` remove the agent's gate. An agent policy that wants session-long consent returns
+  `once()`'s status, which shares the entry's memory under the same tool-scoped key.
 - **One choke point.** The policy joins each entry's approval when the step catalog resolves it, so
   it covers every path that resolves through the catalog: direct calls, `eve__tool`, parked calls
   and their rechecks, and response policies. Covered: authored, built-in, extension, dynamic, and
@@ -58,9 +55,9 @@ response policies stay with the entry that asks.
   channel's direct `invokeTool` gets the same policy, so a call it would ask about is rejected with
   `approval-required`, as an entry's own `always()` is today.
 - **Not covered.** Task controls (`eve__task_wait`, `eve__task_cancel`), catalog meta-tools
-  (`eve__search`, `eve__skill`), connection sign-in entries, provider-executed tools, and
-  `ctx.agent()` calls from workflow code. A child started by `ctx.agent()` is still governed: its
-  own calls run under the root policy.
+  (`eve__search`, `eve__skill`), the built-in `ask_question`, `no_reply`, and `sleep` tools,
+  connection sign-in entries, provider-executed tools, and `ctx.agent()` calls from workflow code.
+  A local child started by `ctx.agent()` is still governed: its own calls run under the root policy.
 - **Subagents.** The root agent's policy applies in every local subagent session. A subagent's own
   `approval` joins it under the same stricter-wins rule, so no local subagent, including one an
   extension ships, can loosen the root's gates. A dynamic subagent config can't select one. A

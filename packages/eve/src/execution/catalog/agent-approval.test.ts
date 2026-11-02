@@ -108,6 +108,21 @@ describe("agent approval in the step catalog", () => {
     expect(catalog.get("crm")?.approval).toBeUndefined();
   });
 
+  it("leaves the built-in interaction tools ungated, but not an authored tool of the same name", () => {
+    const { catalog } = session({
+      approval: () => "user-approval",
+      tools: [
+        inlineTool("no_reply", { frameworkTool: true }),
+        inlineTool("sleep", { frameworkTool: true }),
+        inlineTool("ask_question"),
+      ],
+    });
+
+    expect(catalog.get("no_reply")?.approval).toBeUndefined();
+    expect(catalog.get("sleep")?.approval).toBeUndefined();
+    expect(catalog.get("ask_question")?.approval).toBeDefined();
+  });
+
   it("changes nothing for an agent without a policy", () => {
     const tool = inlineTool("bash");
     const { catalog } = catalogContext({ tools: [tool] });
@@ -117,29 +132,37 @@ describe("agent approval in the step catalog", () => {
 });
 
 describe("resolveAgentApproval", () => {
-  const bundle = (root?: ApprovalPolicy, own?: ApprovalPolicy) =>
+  const bundle = (root?: ApprovalPolicy, own?: ApprovalPolicy, nodeId?: string) =>
     ({
       graph: {
         nodesByNodeId: new Map([
           [ROOT_RUNTIME_AGENT_NODE_ID, { agent: { config: { approval: root } } }],
         ]),
       },
+      nodeId,
       resolvedAgent: { config: { approval: own } },
     }) as never;
   const status = (policy: ApprovalPolicy | undefined) => policy?.({} as never);
+  const CHILD_NODE = "subagents/reviewer";
+
+  it("runs the root's policy once in the root session", () => {
+    const root: ApprovalPolicy = () => "user-approval";
+    // A copy of the root's agent object must not make the root's policy run twice.
+    expect(resolveAgentApproval(bundle(root, () => "user-approval"))).toBe(root);
+  });
 
   it("applies the root's policy in a subagent session without its own", async () => {
     const root: ApprovalPolicy = () => "user-approval";
-    expect(resolveAgentApproval(bundle(root))).toBe(root);
+    expect(resolveAgentApproval(bundle(root, undefined, CHILD_NODE))).toBe(root);
   });
 
   it("doesn't let a subagent's own policy loosen the root's", async () => {
     const root: ApprovalPolicy = () => "user-approval";
-    expect(await status(resolveAgentApproval(bundle(root, () => "approved")))).toBe(
+    expect(await status(resolveAgentApproval(bundle(root, () => "approved", CHILD_NODE)))).toBe(
       "user-approval",
     );
-    expect(await status(resolveAgentApproval(bundle(root, () => ({ type: "denied" }))))).toEqual({
-      type: "denied",
-    });
+    expect(
+      await status(resolveAgentApproval(bundle(root, () => ({ type: "denied" }), CHILD_NODE))),
+    ).toEqual({ type: "denied" });
   });
 });

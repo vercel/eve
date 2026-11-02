@@ -71,6 +71,40 @@ describe("withAgentApproval", () => {
     expect(decision.remember).toBeDefined();
   });
 
+  describe("after a person approved the tool's once()", () => {
+    const approvedOnce = {
+      memory: {
+        pending: [],
+        remembered: {
+          [JSON.stringify(["deploy", "once"])]: {
+            interactionId: "i-1",
+            outcome: "accepted" as const,
+          },
+        },
+      },
+    };
+
+    it("still asks on every call when the agent's policy asks like always()", async () => {
+      const approval = withAgentApproval(always(), once());
+      const decision = await evaluateApproval(
+        resolveApprovalPolicy(approval!),
+        ctx("deploy"),
+        approvedOnce,
+      );
+      expect(decision.awaitsPerson).toBe(true);
+    });
+
+    it("runs when the agent's policy asks with once(), which shares the tool's memory", async () => {
+      const approval = withAgentApproval(once(), once());
+      const decision = await evaluateApproval(
+        resolveApprovalPolicy(approval!),
+        ctx("deploy"),
+        approvedOnce,
+      );
+      expect(decision).toEqual({ clearedBy: { policy: "approval" }, denied: false });
+    });
+  });
+
   it("keeps the entry's prompt and response policy", () => {
     const prompt = () => "Refund?";
     const response = () => ({ status: "allowed" as const });

@@ -18,6 +18,7 @@ import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ApprovalPolicy } from "#approval/definition.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
+import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import {
@@ -118,7 +119,12 @@ export function catalogBundle(
   return {
     adapterRegistry: undefined as never,
     compiledArtifactsSource: undefined as never,
-    graph: { nodesByNodeId: new Map() } as never,
+    // The root session: its agent is the graph's root node.
+    graph: {
+      nodesByNodeId: new Map([
+        [ROOT_RUNTIME_AGENT_NODE_ID, { agent: { config: { approval: input.approval } } }],
+      ]),
+    } as never,
     modelMetadata: undefined as never,
     moduleMap: undefined as never,
     nodeId: undefined,

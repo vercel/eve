@@ -45,11 +45,13 @@ export function resolveSessionUsageLimit(
  * loosen the root's gates.
  */
 export function resolveAgentApproval(
-  bundle: Pick<CompiledBundle, "graph" | "resolvedAgent">,
+  bundle: Pick<CompiledBundle, "graph" | "nodeId" | "resolvedAgent">,
 ): ApprovalPolicy | undefined {
   const root = bundle.graph.nodesByNodeId.get(ROOT_RUNTIME_AGENT_NODE_ID)?.agent.config?.approval;
+  // The root session's own policy is the root's, so it must not run twice.
+  if (bundle.nodeId === undefined || bundle.nodeId === ROOT_RUNTIME_AGENT_NODE_ID) return root;
   const own = bundle.resolvedAgent.config?.approval;
-  if (own === undefined || own === root) return root;
+  if (own === undefined) return root;
   return root === undefined ? own : strictestApproval([root, own]);
 }
 

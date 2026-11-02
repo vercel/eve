@@ -397,7 +397,10 @@ type PublicAgentDefinitionBase = {
    * covered.
    *
    * ```ts
-   * approval: auto(), // a decision model reviews every call; tools' own gates still apply
+   * approval: ({ toolName, toolAnnotations }) =>
+   *   toolName.startsWith("billing__") || toolAnnotations?.destructiveHint === true
+   *     ? "user-approval"
+   *     : undefined, // leave the tool's own decision
    * ```
    */
   readonly approval?: ApprovalPolicy;

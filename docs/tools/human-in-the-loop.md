@@ -157,12 +157,24 @@ export default defineAgent({
 });
 ```
 
-For each call, eve runs this policy and the tool's own `approval` and keeps the stricter result: denied, then user approval, then approved. The agent's policy can add a gate but never remove one, and `undefined` leaves the tool's decision. When both ask, the tool's prompt, `once()` memory, and response policy apply.
+For each call, eve runs this policy and the tool's own `approval` and keeps the stricter result: denied, then user approval, then approved. The agent's policy can add a gate but never remove one, and `undefined` leaves the tool's decision. When both ask, the tool's prompt and response policy apply.
+
+A plain `"user-approval"` from the agent's policy asks on every call, like `always()`, even for a tool whose `once()` a person already approved. To let one approval cover the rest of the session, return `once()`'s status from the agent's policy; it shares the tool's `once()` memory:
+
+```ts
+import { once } from "eve/tools/approval";
+
+const askOnce = once();
+// ...
+approval: (ctx) => (ctx.toolAnnotations?.destructiveHint === true ? askOnce(ctx) : undefined),
+```
+
+`auto()` works here too, but it runs a decision model before every call, including reads, and asks a person when the model errors, times out, or the input is over 64 KB. A direct `invokeTool` call it would ask about is rejected. Put cheap rules first and call `auto()` only for the calls that need it.
 
 - Local subagent sessions run under the root agent's policy too. A subagent's own `approval` in its `agent.ts` adds to it and can't loosen it.
 - A [remote agent](/docs/guides/remote-agents) runs in its own deployment under that deployment's policy. Your policy gates the call to the remote agent, not the calls it makes.
 - A call through `eve__tool` runs the resolved entry's policy, such as `linear__create_issue`'s.
-- Not gated: `eve__search`, `eve__skill`, task controls, connection sign-in, and provider-executed tools such as a provider's native web search. Neither is `ctx.agent()` in workflow code, though a local child's own calls are.
+- Not gated: `eve__search`, `eve__skill`, task controls, the built-in `ask_question`, `no_reply`, and `sleep` tools, connection sign-in, and provider-executed tools such as a provider's native web search. Neither is `ctx.agent()` in workflow code, though a local child's own calls are.
 - A channel calling `invokeTool` directly gets the same policy: a call it would ask about is rejected with `approval-required`.
 - With a policy set, eve evaluates it on every call, so keep it fast and pass `abortSignal` to asynchronous work.
 
