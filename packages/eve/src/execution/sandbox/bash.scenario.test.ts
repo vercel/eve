@@ -14,7 +14,7 @@ import { createConnectionSession } from "./session.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
-// Real `bash -lc` on the host stands in for a sandbox; fake timers skip the 30-second yield.
+// Real `bash -lc` on the host stands in for a sandbox; fake timers skip the wait before the yield.
 describe("executeBashOnSandbox with a real shell", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -65,6 +65,39 @@ describe("executeBashOnSandbox with a real shell", () => {
     });
     await rm(result.outputDirectory, { force: true, recursive: true });
   });
+
+  it.each([
+    { timeout: undefined, waitSeconds: 30 },
+    { timeout: 120, waitSeconds: 120 },
+    { timeout: 3_600, waitSeconds: 180 },
+    { timeout: 0, waitSeconds: 1 },
+  ])(
+    "waits $waitSeconds seconds for timeout $timeout before leaving the command running",
+    async ({ timeout, waitSeconds }) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const { home, sandbox } = await createHostSandbox();
+      const pidFile = join(home, "child.pid");
+      let returned = false;
+
+      const call = executeBashOnSandbox(sandbox, {
+        command: `sleep 60 & echo $! > ${pidFile}; wait`,
+        timeout,
+      }).finally(() => {
+        returned = true;
+      });
+      await readPid(pidFile);
+      await vi.advanceTimersByTimeAsync(waitSeconds * 1000 - 1);
+      expect(returned).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await call;
+
+      if (result.status !== "running")
+        throw new Error(`expected running: ${JSON.stringify(result)}`);
+      expect(result.message).toContain(`still running after ${waitSeconds} seconds`);
+      await runHostBash(`kill -- -${result.pid}`, home);
+      await rm(result.outputDirectory, { force: true, recursive: true });
+    },
+  );
 
   it("stops the command's process group when the call is aborted", async () => {
     const { home, sandbox } = await createHostSandbox();

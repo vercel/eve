@@ -36,7 +36,7 @@ eve add tool/bash
 export { default } from "eve/tools/bash";
 ```
 
-`bash` waits up to 30 seconds for a command. A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A command that is still running keeps running in the sandbox as its own process group and returns `status: "running"` with:
+`bash` waits up to 30 seconds for a command. The model can pass `timeout` to wait longer for a build or test suite, up to 180 seconds; eve treats larger values as 180. The cap keeps a hosted turn inside the Vercel Functions time limit. A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A command that is still running keeps running in the sandbox as its own process group and returns `status: "running"` with:
 
 - `pid`: the process group id
 - `outputDirectory`: a directory under `/tmp/.eve/jobs/`
