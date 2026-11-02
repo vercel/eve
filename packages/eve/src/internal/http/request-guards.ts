@@ -1,14 +1,17 @@
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 /**
- * Applies the fetch-native HTTP guards required in front of the MCP SDK (and the A2A channel,
- * which passes its own `protocol` label for error messages).
+ * Applies the fetch-native HTTP guards in front of a protocol endpoint, such as MCP's. `protocol`
+ * names it in error messages.
  *
  * Non-browser clients normally omit `Origin`; browser requests are restricted
  * to the endpoint's exact origin. Plain HTTP is accepted only on loopback.
  */
-export function validateMcpHttpRequest(request: Request, protocol = "MCP"): Response | undefined {
-  const baseFailure = validateMcpHttpRequestBase(request, protocol);
+export function validateHttpEndpointRequest(
+  request: Request,
+  protocol: string,
+): Response | undefined {
+  const baseFailure = validateTransportAndHost(request, protocol);
   if (baseFailure !== undefined) return baseFailure;
 
   const target = new URL(request.url);
@@ -29,17 +32,17 @@ export function validateMcpHttpRequest(request: Request, protocol = "MCP"): Resp
 }
 
 /**
- * Applies transport and Host validation to the public OAuth discovery route
+ * Applies transport and Host validation to a public metadata route, such as OAuth discovery,
  * without restricting its Origin. The route itself supplies permissive CORS.
  */
-export function validateMcpMetadataRequest(
+export function validateHttpMetadataRequest(
   request: Request,
-  protocol = "MCP",
+  protocol: string,
 ): Response | undefined {
-  return validateMcpHttpRequestBase(request, protocol);
+  return validateTransportAndHost(request, protocol);
 }
 
-function validateMcpHttpRequestBase(request: Request, protocol: string): Response | undefined {
+function validateTransportAndHost(request: Request, protocol: string): Response | undefined {
   let target: URL;
   try {
     target = new URL(request.url);

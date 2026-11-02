@@ -165,6 +165,25 @@ describe("createChannelAddress", () => {
     expect(delivery.deliveryId).toBe("delivery-1");
   });
 
+  it("refuses a named delivery ID without its idempotency key, or of the wrong shape", async () => {
+    const runtime = createRuntime();
+    const address = createChannelAddress({
+      adapter: { kind: "http" },
+      channelName: "a2a",
+      continuationToken: "context-1",
+      runtime,
+    });
+    await expect(
+      address.send("hi", { auth: null, deliveryId: "delivery-1" } as never),
+    ).rejects.toThrow("requires the idempotencyKey");
+    for (const deliveryId of ["", "has space", "line\nbreak", "x".repeat(2049)]) {
+      await expect(
+        address.send("hi", { auth: null, deliveryId, idempotencyKey: "message-1" } as never),
+      ).rejects.toThrow("printable ASCII");
+    }
+    expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+  });
+
   it("binds every control directly to the namespaced continuation token", async () => {
     const runtime = createRuntime();
     const address = createChannelAddress({

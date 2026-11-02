@@ -605,6 +605,8 @@ export function oauthResource(
     }
     return null;
   };
+  // The walk ends in none() when the list does, so the composition admits anonymous callers too.
+  if (admitsAnonymousCallers(list)) markAnonymous(composed);
   const declaredChallenges = collectDeclaredChallenges(list);
   const wrapped = withAuthChallenges(
     composed,
@@ -660,6 +662,7 @@ export function withAuthChallenges<TEvent, TResult extends AuthResult = AuthResu
   Object.defineProperty(wrapped, AUTH_CHALLENGES_SYMBOL, {
     value: challenges,
   });
+  if (admitsAnonymousCallers(fn as AuthFn<never>)) markAnonymous(wrapped);
   return wrapped;
 }
 
@@ -821,13 +824,19 @@ const NONE_AUTH_SYMBOL = Symbol.for("eve.channels.auth.none");
  */
 export function none<TEvent = unknown>(): AuthFn<TEvent> {
   const anonymous: AuthFn<TEvent> = () => ANONYMOUS_SESSION_AUTH_CONTEXT;
-  Object.defineProperty(anonymous, NONE_AUTH_SYMBOL, { value: true });
+  markAnonymous(anonymous);
   return anonymous;
+}
+
+/** Marks `fn` as admitting anonymous callers, so {@link admitsAnonymousCallers} sees through it. */
+function markAnonymous(fn: AuthFn<never>): void {
+  Object.defineProperty(fn, NONE_AUTH_SYMBOL, { value: true });
 }
 
 /**
  * @internal Whether `auth` admits anonymous callers: it includes {@link none}, which ends the walk
- * for any request the entries before it declined. Read from the policy, never from a request.
+ * for any request the entries before it declined, directly or inside {@link oauthResource} or
+ * {@link withAuthChallenges}. Read from the policy, never from a request.
  */
 export function admitsAnonymousCallers(auth: AuthFn<never> | readonly AuthFn<never>[]): boolean {
   const list: readonly AuthFn<never>[] = Array.isArray(auth) ? auth : [auth as AuthFn<never>];

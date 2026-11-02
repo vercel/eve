@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { type ScenarioAppDescriptor, useScenarioApp } from "#internal/testing/scenario-app.js";
-import {
-  requiredRecord,
-  requiredString,
-  startScenarioEveDev,
-} from "#internal/testing/scenario-eve-dev.js";
+import { startEveDev } from "#internal/testing/dev-server-harness.js";
+import { requiredRecord, requiredString } from "#internal/testing/scenario-values.js";
+
+/** A production build that runs the scenario's own `mockModel`. */
+const SCENARIO_ENV = { EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" };
 
 const scenarioApp = useScenarioApp();
 const SCENARIO_TIMEOUT_MS = 360_000;
@@ -72,7 +72,7 @@ describe("MCP agent channel", () => {
     "runs a durable input lifecycle through modern and legacy Nitro requests",
     async () => {
       const app = await scenarioApp(MCP_AGENT_DESCRIPTOR);
-      const server = await startScenarioEveDev(app.appRoot);
+      const server = await startEveDev(app.appRoot, { env: SCENARIO_ENV });
 
       try {
         const started = await callTool(server.url, "alice", "modern", "agent_start", {
