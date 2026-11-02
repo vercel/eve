@@ -30,22 +30,22 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 - [Agents](${EVE_ORIGIN}/docs/agent-config.md): Configure the model, reasoning effort, compaction, and runtime behavior.
 - [Instructions](${EVE_ORIGIN}/docs/instructions.md): Write the agent's always-on system prompt.
+- [Channels](${EVE_ORIGIN}/docs/channels.md): Expose the agent through HTTP, Slack, Discord, and other messaging surfaces.
+- [Base eve Channel](${EVE_ORIGIN}/docs/channels/eve.md): Understand the HTTP API exposed by each running eve app.
+- [Skills](${EVE_ORIGIN}/docs/skills.md): Add procedures that the model loads on demand.
 - [Tools](${EVE_ORIGIN}/docs/tools.md): Define typed actions and gate sensitive calls on human approval.
+- [Connections](${EVE_ORIGIN}/docs/connections.md): Connect external MCP and OpenAPI servers without exposing credentials to the model.
+- [Sandbox](${EVE_ORIGIN}/docs/sandbox.md): Configure the isolated shell, filesystem, lifecycle, and network policy.
 - [Memory](${EVE_ORIGIN}/docs/memory.md): Give an agent cross-session context through eve-managed slots backed by Supermemory, the built-in file provider, or your own provider.
 - [File Memory](${EVE_ORIGIN}/docs/memory/file.md): Configure the built-in bounded document provider and its storage backends.
 - [Build a Memory Provider](${EVE_ORIGIN}/docs/memory/custom-provider.md): Implement the recall, capture, and tools contract for any store or memory service.
-- [Connections](${EVE_ORIGIN}/docs/connections.md): Connect external MCP and OpenAPI servers without exposing credentials to the model.
-- [Channels](${EVE_ORIGIN}/docs/channels/overview.md): Expose the agent through HTTP, Slack, Discord, and other messaging surfaces.
-- [Base eve Channel](${EVE_ORIGIN}/docs/channels/eve.md): Understand the HTTP API exposed by each running eve app.
-- [Skills](${EVE_ORIGIN}/docs/skills.md): Add procedures that the model loads on demand.
-- [Sandbox](${EVE_ORIGIN}/docs/sandbox.md): Configure the isolated shell, filesystem, lifecycle, and network policy.
 - [Subagents](${EVE_ORIGIN}/docs/subagents.md): Delegate work to copies of the root agent or declared specialists.
-- [Evals](${EVE_ORIGIN}/docs/evals/overview.md): Define repeatable scored checks and run them with \`eve eval\`.
-- [Durable State](${EVE_ORIGIN}/docs/concepts/state.md): Persist per-session memory across step boundaries.
-- [Session Context](${EVE_ORIGIN}/docs/guides/session-context.md): Use session metadata and runtime accessors in authored code.
 - [Schedules](${EVE_ORIGIN}/docs/schedules.md): Run prompts or handlers on a cron cadence.
 - [Hooks](${EVE_ORIGIN}/docs/guides/hooks.md): Subscribe to runtime stream events.
 - [Dynamic Capabilities](${EVE_ORIGIN}/docs/guides/dynamic-capabilities.md): Resolve models, tools, skills, subagents, and instructions at runtime.
+- [Evals](${EVE_ORIGIN}/docs/evals.md): Define repeatable scored checks and run them with \`eve eval\`.
+- [Durable State](${EVE_ORIGIN}/docs/concepts/state.md): Persist per-session memory across step boundaries.
+- [Session Context](${EVE_ORIGIN}/docs/guides/session-context.md): Use session metadata and runtime accessors in authored code.
 
 ## Integrate
 
@@ -54,16 +54,16 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Remote Agents](${EVE_ORIGIN}/docs/guides/remote-agents.md): Call another eve deployment as a subagent.
 - [Agent Client Protocol (ACP)](${EVE_ORIGIN}/docs/protocols/acp.md): Use local or deployed eve agents from ACP clients.
 - [Universal Commerce Protocol (UCP)](${EVE_ORIGIN}/docs/protocols/ucp.md): Serve a UCP profile from a custom eve channel.
-- [Frontend Frameworks](${EVE_ORIGIN}/docs/guides/frontend/overview.md): Build browser chat interfaces with \`useEveAgent\`.
+- [Frontend Frameworks](${EVE_ORIGIN}/docs/guides/frontend.md): Build browser chat interfaces with \`useEveAgent\`.
 - [Next.js](${EVE_ORIGIN}/docs/guides/frontend/nextjs.md): Mount eve routes and use the React client in Next.js.
 - [Nuxt](${EVE_ORIGIN}/docs/guides/frontend/nuxt.md): Mount eve routes and use the Vue client in Nuxt.
 - [SvelteKit](${EVE_ORIGIN}/docs/guides/frontend/sveltekit.md): Mount eve routes and use the Svelte client in SvelteKit.
 - [TanStack Start](${EVE_ORIGIN}/docs/guides/frontend/tanstack.md): Mount eve routes and use the React client in TanStack Start.
-- [Client SDK](${EVE_ORIGIN}/docs/guides/client/overview.md): Call an eve app from scripts, services, tests, or custom UIs.
+- [Client SDK](${EVE_ORIGIN}/docs/guides/client.md): Call an eve app from scripts, services, tests, or custom UIs.
 
 ## Operate
 
-- [Deployment Overview](${EVE_ORIGIN}/docs/guides/deployment/overview.md): Choose between Vercel and self-hosted infrastructure.
+- [Deployment](${EVE_ORIGIN}/docs/guides/deployment.md): Choose between Vercel and self-hosted infrastructure.
 - [Deploy to Vercel](${EVE_ORIGIN}/docs/guides/deployment/vercel.md): Build and deploy with Vercel Workflow and Vercel Sandbox.
 - [Self-Hosting](${EVE_ORIGIN}/docs/guides/deployment/self-hosting.md): Run eve as a Node service or container.
 - [Workflow Worlds](${EVE_ORIGIN}/docs/guides/deployment/workflow-worlds.md): Choose the local, Postgres, or another Workflow world for self-hosted sessions.
@@ -71,10 +71,6 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Authentication](${EVE_ORIGIN}/docs/guides/auth-and-route-protection.md): Secure an agent's HTTP routes and establish caller identity.
 - [Instrumentation](${EVE_ORIGIN}/docs/observability/instrumentation.md): Configure lifecycle instrumentation and OpenTelemetry destinations.
 - [Terminal UI](${EVE_ORIGIN}/docs/guides/dev-tui.md): Work with a local or deployed agent from the interactive terminal UI.
-
-## Tutorial
-
-- [Tutorial](${EVE_ORIGIN}/docs/tutorial/first-agent.md): Build an agent with tools, durable state, and an interface.
 
 ## Patterns
 

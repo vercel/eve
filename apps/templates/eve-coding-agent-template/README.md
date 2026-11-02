@@ -80,5 +80,5 @@ Deploy with `eve deploy`, then install the GitHub App on your repositories from 
 ## Learn more
 
 - [Code extension](https://eve.dev/docs/code-extension)
-- [Slack channel](https://eve.dev/docs/channels/slack), [Slack code channels](https://eve.dev/docs/channels/slack#serve-slack-code-channels), and [GitHub channel](https://eve.dev/docs/channels/github)
+- [Slack channel](https://eve.dev/docs/channels/slack), [Slack code channels](https://eve.dev/docs/channels/slack/reference#serve-slack-code-channels), and [GitHub channel](https://eve.dev/docs/channels/github)
 - [Vercel Sandbox](https://eve.dev/docs/sandbox/vercel)

@@ -36,7 +36,32 @@ eve's default image runs Ubuntu with Node.js 24, npm, Python 3, git, ripgrep, jq
 The default image doesn't include pnpm or pip, so install them in `prepare` when your agent needs them:
 
 - `npm install -g pnpm` installs pnpm for the `vercel-sandbox` user.
-- Ubuntu's system Python refuses `pip install`, so run `sudo apt-get install -y python3-venv` and use the pip inside a virtual environment. The [analysis tutorial](/docs/tutorial/run-analysis#install-the-chart-dependencies) shows the Python setup.
+- Ubuntu's system Python refuses `pip install`, so run `sudo apt-get install -y python3-venv` and use the pip inside a virtual environment.
+
+For example, this sandbox installs matplotlib once for every session:
+
+```ts title="agent/sandbox/sandbox.ts"
+import { DefaultSandbox, defineSandbox } from "eve/sandbox";
+
+export const environment = DefaultSandbox.environment({
+  prepare: async (sandbox) => {
+    for (const command of [
+      "sudo apt-get update && sudo apt-get install -y python3-venv",
+      "python3 -m venv /workspace/.venv",
+      "/workspace/.venv/bin/pip install matplotlib==3.10.8",
+    ]) {
+      const result = await sandbox.run({ command });
+      if (result.exitCode !== 0) {
+        throw new Error(`Sandbox setup failed: ${result.stderr || result.stdout}`);
+      }
+    }
+  },
+});
+
+export default defineSandbox(() => environment.open());
+```
+
+Tools then run `/workspace/.venv/bin/python` through `ctx.getSandbox()`. `sandbox.run()` returns a non-zero `exitCode` instead of throwing, so check it before using a command's output.
 
 Preparation runs when eve builds the template, so it needs network access to the package registries.
 

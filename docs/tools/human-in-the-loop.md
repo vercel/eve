@@ -324,9 +324,9 @@ An answered `ctx.ask()` returns `responder`, when available: the signed-in respo
 
 ## Answering from a client or channel
 
-Every [channel](/docs/channels/overview) turns requests into native UI and sends the user's choice back as the answer. Slack, for example, shows approvals as buttons and questions as select menus.
+Every [channel](/docs/channels) turns requests into native UI and sends the user's choice back as the answer. Slack, for example, shows approvals as buttons and questions as select menus.
 
-In your own frontend, use `openInteractions(view)` and `respond([{ interactionId, optionId }])` on the same session. A request stays `open` until its `interaction.settled` event, and you can answer while other work runs. See [Building a frontend](/docs/guides/frontend/overview#human-in-the-loop-prompts).
+In your own frontend, use `openInteractions(view)` and `respond([{ interactionId, optionId }])` on the same session. A request stays `open` until its `interaction.settled` event, and you can answer while other work runs. See [Building a frontend](/docs/guides/frontend#human-in-the-loop-prompts).
 
 ## How pause and resume works
 
@@ -379,12 +379,12 @@ The message answers that request when it matches one of its options or the reque
 
 When one step calls both a workflow tool, such as `ask_question`, and an approval-gated tool, the question comes first. eve asks for the approval after the workflow tool call finishes.
 
-Text-only channels show one request at a time, in this order, so a reply answers the request the person sees. These are Twilio, GitHub, Linear, and all Chat SDK channels. Chat SDK can't tell whether an adapter shows buttons, so this includes Linq, Photon, and adapters with buttons. Native channels with buttons, such as Slack, show every open request, and a typed reply still answers the first. A Slack app that sets `onAnswers` or `approvalChannel` accepts answers only through its controls; see [Restrict who can invoke the agent](/docs/channels/slack#restrict-who-can-invoke-the-agent).
+Text-only channels show one request at a time, in this order, so a reply answers the request the person sees. These are Twilio, GitHub, Linear, and all Chat SDK channels. Chat SDK can't tell whether an adapter shows buttons, so this includes Linq, Photon, and adapters with buttons. Native channels with buttons, such as Slack, show every open request, and a typed reply still answers the first. A Slack app that sets `onAnswers` or `approvalChannel` accepts answers only through its controls; see [Restrict who can invoke the agent](/docs/channels/slack/reference#restrict-who-can-invoke-the-agent).
 
 ## What to read next
 
 - [Tools](/docs/tools): define the typed actions an approval gates
 - [Built-in tools](/docs/concepts/built-in-tools): the default tools and opt-in tools such as `ask_question`
 - [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming): the event and resume contract behind the pause
-- [Building a frontend](/docs/guides/frontend/overview): render and answer requests from your own UI
+- [Building a frontend](/docs/guides/frontend): render and answer requests from your own UI
 - [Multi-tenant approvals](/docs/patterns/multi-tenant-approvals): resolve per-tenant approval policy for authored and connection tools

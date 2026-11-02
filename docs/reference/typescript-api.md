@@ -45,7 +45,7 @@ Install the packages for each integration entry you import. They are optional pe
 | Chat SDK, Linq, and Photon channels                           | `chat` 4.42 or later in v4                            |
 | `eve/channels/linq`                                           | Also `@linqapp/sdk` 0.47.1 or later in v0.47          |
 | `eve/sandbox/just-bash`, `eve/experimental/sandbox/just-bash` | `just-bash` 3.6 or later in v3                        |
-| `@vercel/connect/eve` with eve connections                    | `@vercel/connect` 2.5.2 or later in v2                |
+| `@vercel/connect/eve` with eve connections                    | `@vercel/connect` 2.7.0 or later in v2                |
 
 Connections with `experimental.events` require a static Connect auth provider with its events bridge.
 SDK-backed handles use the SDK classes installed in your app, not copies bundled with eve.
@@ -65,7 +65,7 @@ The AI SDK is a required peer and has its own Zod peer requirement. To type the 
 | `defineMcpClientConnection`                           | `eve/connections`                                                       | `agent/connections/<name>.ts`                                                          | [MCP connections](../connections/mcp)                  |
 | `defineOpenAPIConnection`                             | `eve/connections`                                                       | `agent/connections/<name>.ts`                                                          | [OpenAPI connections](../connections/openapi)          |
 | `defineChannel`                                       | `eve/channels`                                                          | `agent/channels/<name>.ts`                                                             | [Custom channels](../channels/custom)                  |
-| `eveChannel`, `slackChannel`, and the other platforms | `eve/channels/<platform>`                                               | `agent/channels/<platform>.ts`                                                         | [Channels](../channels/overview)                       |
+| `eveChannel`, `slackChannel`, and the other platforms | `eve/channels/<platform>`                                               | `agent/channels/<platform>.ts`                                                         | [Channels](/docs/channels)                             |
 | `defineSkill`                                         | `eve/skills`                                                            | `agent/skills/<name>.ts`                                                               | [Skills](../skills)                                    |
 | `defineInstructions`                                  | `eve/instructions`                                                      | `agent/instructions.ts`                                                                | [Instructions](../instructions)                        |
 | `defineMemory`, `defineMemoryProvider`                | `eve/memory`                                                            | `agent/memory.ts` or `agent/memory/<slot>.ts`                                          | [Memory](../memory)                                    |
@@ -78,10 +78,10 @@ The AI SDK is a required peer and has its own Zod peer requirement. To type the 
 | `defineInstrumentation`                               | `eve/instrumentation`                                                   | `agent/instrumentation/<name>.ts`                                                      | [Instrumentation](../observability/instrumentation)    |
 | `otel`, `otelIntegration`                             | `eve/instrumentation/otel`                                              | `agent/instrumentation/<destination>.ts`                                               | [OpenTelemetry](../observability/otel)                 |
 | `defineRemoteAgent`                                   | `eve`                                                                   | `agent/subagents/<id>/agent.ts`                                                        | [Remote agents](../guides/remote-agents)               |
-| `defineEval`                                          | `eve/evals`                                                             | `evals/*.eval.ts`                                                                      | [Evals](../evals/overview)                             |
-| `defineEvalConfig`                                    | `eve/evals`                                                             | `evals/evals.config.ts`                                                                | [Evals](../evals/overview)                             |
-| `mockModel`                                           | `eve/evals`                                                             | Deterministic fixture agent models                                                     | [Evals](../evals/overview)                             |
-| `useEveAgent`                                         | `eve/react`, `eve/vue`, `eve/svelte`                                    | frontend                                                                               | [Frontend](../guides/frontend/overview)                |
+| `defineEval`                                          | `eve/evals`                                                             | `evals/*.eval.ts`                                                                      | [Evals](/docs/evals)                                   |
+| `defineEvalConfig`                                    | `eve/evals`                                                             | `evals/evals.config.ts`                                                                | [Evals](/docs/evals)                                   |
+| `mockModel`                                           | `eve/evals`                                                             | Deterministic fixture agent models                                                     | [Evals](/docs/evals)                                   |
+| `useEveAgent`                                         | `eve/react`, `eve/vue`, `eve/svelte`                                    | frontend                                                                               | [Frontend](/docs/guides/frontend)                      |
 
 Tool-wide helpers and types such as `defineTool`, `defineWorkflowTool`, `defineDynamic`, `disableTool`, and `ToolLabelDefinition` come from `eve/tools`. Built-in tool definitions use their own subpaths; see [Built-in tools](../concepts/built-in-tools):
 
@@ -196,7 +196,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/evals/loaders`                                                               | `loadJson`, `loadYaml`                                                                                            |
 | `eve/react`, `eve/vue`, `eve/svelte`                                              | `useEveAgent`                                                                                                     |
 | `eve/next`, `eve/nuxt`, `eve/sveltekit`, `eve/tanstack`                           | framework bundler plugins                                                                                         |
-| [`eve/client`](../guides/client/overview)                                         | `Client`, `ClientSession`, health and agent-info schemas, `EveError` and the typed client errors                  |
+| [`eve/client`](/docs/guides/client)                                               | `Client`, `ClientSession`, health and agent-info schemas, `EveError` and the typed client errors                  |
 | [`eve/sessions`](../guides/client/messages#reusable-delivery-reads)               | `Delivery`, `DeliveryResult`, read options, `SessionReader`, `Session`, `EveError`, and `SessionNotActiveError`   |
 | [`eve/events`](../concepts/sessions-runs-and-streaming#query-session-state)       | Event types, opaque `SessionView`, immutable observations, and query/fold functions                               |
 | [`eve/server`](../concepts/sessions-runs-and-streaming#read-a-session-in-process) | `sessions`, for reading session streams in process                                                                |

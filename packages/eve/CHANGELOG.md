@@ -1,5 +1,18 @@
 # eve
 
+## 1.0.0-rc.1
+
+Released 2026-10-31 · [Compare with 1.0.0-rc.0](https://github.com/vercel/eve/compare/eve%401.0.0-rc.0...eve%401.0.0-rc.1)
+
+### Features
+
+- Removed the Build an Agent tutorial from the docs, and the link to it from the README that `eve init` writes; the old tutorial URLs redirect to the matching guides. ([#5717](https://github.com/vercel/eve/pull/5717))
+
+### Bug Fixes
+
+- Default scaffolded projects to `@vercel/connect@2.7.0` and require `^2.7.0` for the optional `@vercel/connect` peer.
+  Earlier `@vercel/connect` releases reject eve 1.0 prereleases as a peer, which made `npm install` fail with `ERESOLVE` on freshly scaffolded projects. ([#5733](https://github.com/vercel/eve/pull/5733))
+
 ## 1.0.0-rc.0
 
 Released 2026-10-30 · [Compare with 0.91.0](https://github.com/vercel/eve/compare/eve%400.91.0...eve%401.0.0-rc.0)

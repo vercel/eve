@@ -65,7 +65,7 @@ Credential brokering gives the model _authenticated_ network access from inside 
 
 ## Channel verification
 
-A [channel](../channels/overview) authenticates its own inbound traffic. The built-in platform channels follow two rules, and so must any channel you write:
+A [channel](/docs/channels) authenticates its own inbound traffic. The built-in platform channels follow two rules, and so must any channel you write:
 
 - **Verify signatures in constant time.** Platform channels (Slack, GitHub,
   Telegram, Twilio) verify the platform's HMAC signature over the raw request

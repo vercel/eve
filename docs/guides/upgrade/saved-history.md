@@ -29,7 +29,7 @@ import { convertLegacyEvents } from "eve/internal/legacy-events";
 const events = convertLegacyEvents(saved);
 ```
 
-Store the converted events with their metadata unchanged and pass them as `SessionStore`'s `initialEvents`. Their metadata records which saved lines they came from, including lines that produced no v27 events, and `SessionStore` uses it to resume reading at the right line. The number of converted events doesn't match the number of lines, so don't compute a resume position from it or from another reader's cursor. See [Resumable sessions](/docs/guides/frontend/overview#resumable-sessions).
+Store the converted events with their metadata unchanged and pass them as `SessionStore`'s `initialEvents`. Their metadata records which saved lines they came from, including lines that produced no v27 events, and `SessionStore` uses it to resume reading at the right line. The number of converted events doesn't match the number of lines, so don't compute a resume position from it or from another reader's cursor. See [Resumable sessions](/docs/guides/frontend#resumable-sessions).
 
 `convertLegacyEvents` converts one session at a time. It throws for an array that doesn't start at `session.started`, holds a second session, or already holds v27 events. A session saved mid-turn converts to an unfinished turn. The function is a temporary migration aid with no compatibility promise, and a later release removes it, so convert once and store the result.
 

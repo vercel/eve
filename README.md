@@ -107,8 +107,6 @@ npm run dev
 ```
 
 That's a working agent. Add human-in-the-loop prompts, subagents, and schedules as needed.
-Follow the [first-agent tutorial](https://eve.dev/docs/tutorial/first-agent) for a complete
-walkthrough.
 
 ### Add Web Chat
 
