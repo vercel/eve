@@ -18,7 +18,7 @@ The stream is still newline-delimited JSON, but its structure changed:
 - **Positions replace event IDs.** Each event carries `meta.position`: the zero-based `line` it was stored in and its `index` within that line. `startIndex` and saved cursors count lines, not events. Store events keyed on `(sessionId, line, index)`, so reading a stream again doesn't create duplicates.
 - **Each event names what it belongs to.** An event's `scope` holds the IDs of its turn, run, or task.
 - **One event ends each item, with an `outcome`.** Instead of separate `turn.completed`, `turn.failed`, and `turn.cancelled` events, a turn ends with `turn.settled` and an `outcome` of `completed`, `failed`, or `cancelled`. Calls, tasks, deliveries, and requests for input follow the same pattern.
-- **Errors share one shape:** `error: { code, message, id?, hint? }`.
+- **Errors share one shape:** `error: { code, message, id?, hint?, semanticErrorId? }`.
 - **Token usage has its own event.** Read it from `usage.recorded`, not from turn or session events.
 - **Only a person pauses a turn.** A turn that waits on background tasks keeps running. A turn pauses, with `turn.paused`, only while it waits for an approval, a question, a sign-in, or a budget prompt.
 - **New values can appear without a version change.** Keep a default branch when you switch on event types, kinds, or outcomes.

@@ -1415,6 +1415,35 @@ describe("models that fail", () => {
     expect(events.at(-1)?.type).toBe("session.ended");
     expect(failure(viewOfEvents(events).view, "turn_0")?.message).toContain("Invalid API key");
   });
+
+  it("names the failure eve recognized on the error it publishes", async () => {
+    const { events } = await withSession(
+      "edge-model-recognized-failure",
+      {
+        message: "Hello?",
+        model: scriptedModel(() => {
+          throw Object.assign(new Error("AI Gateway authentication failed: Invalid API key."), {
+            name: "GatewayAuthenticationError",
+            statusCode: 401,
+            type: "authentication_error",
+          });
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.until("ended", (event) => event.type === "session.ended");
+      },
+    );
+
+    const [ended] = ofType(events, "session.ended");
+    expect(ended?.data).toMatchObject({
+      error: {
+        code: "MODEL_CALL_FAILED",
+        hint: expect.any(String),
+        semanticErrorId: "gateway-auth-invalid-api-key",
+      },
+    });
+  });
 });
 
 describe("work delegated to a child session", () => {

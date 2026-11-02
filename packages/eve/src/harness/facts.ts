@@ -41,12 +41,13 @@ export function errorInfoOf(failure: {
   readonly details?: JsonObject;
   readonly message: string;
 }): ErrorInfo {
-  const { errorId, hint } = failure.details ?? {};
+  const { errorId, hint, semanticErrorId } = failure.details ?? {};
   return defined({
     code: failure.code,
     hint: typeof hint === "string" && hint.trim().length > 0 ? hint.trim() : undefined,
     id: typeof errorId === "string" ? errorId : undefined,
     message: failure.message,
+    semanticErrorId: typeof semanticErrorId === "string" ? semanticErrorId : undefined,
   });
 }
 

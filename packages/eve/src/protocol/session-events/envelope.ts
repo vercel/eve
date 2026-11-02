@@ -183,6 +183,11 @@ export interface ErrorInfo {
   readonly id?: string;
   /** What to do about it, when eve recognizes the failure: a person-facing remedy. */
   readonly hint?: string;
+  /**
+   * Which known failure eve recognized, such as `gateway-rate-limited`: a stable kebab-case id to
+   * branch on instead of matching `message`. Absent when eve doesn't recognize the failure.
+   */
+  readonly semanticErrorId?: string;
 }
 
 /** Tokens and cost one unit of work spent. */

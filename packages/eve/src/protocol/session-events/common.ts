@@ -101,6 +101,7 @@ export const errorInfo = conforming<ErrorInfo>()(
     hint: z.string().optional(),
     id: z.string().optional(),
     message: z.string(),
+    semanticErrorId: z.string().optional(),
   }),
 );
 
