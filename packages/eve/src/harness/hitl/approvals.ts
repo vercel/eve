@@ -7,6 +7,7 @@ import {
   rememberDecision,
 } from "#approval/evaluation.js";
 
+import { pendingApprovals } from "./approval-prompt.js";
 import type { ResponderCheck } from "./responders.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
@@ -129,15 +130,6 @@ export function openDeferredApprovals(view: SessionView): Transition {
       : step.requests.map((ask) => approvalOpened(ask)),
   );
   return transition({ events, turn: view.turn });
-}
-
-/** The step's approvals nobody has settled: open, or not asked yet. */
-export function pendingApprovals(view: SessionView, step: SuspendedStep): readonly ApprovalAsk[] {
-  const tables = view.projection.view;
-  return step.requests.filter((request) => {
-    const row = tables.interactions[request.interactionId];
-    return row === undefined || row.status === "open";
-  });
 }
 
 /** Approved workflow and agent calls join the runs their requesting steps wait on. */

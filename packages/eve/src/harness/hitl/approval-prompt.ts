@@ -1,4 +1,5 @@
-import type { ApprovalAsk } from "#harness/session-machine/state.js";
+import type { ApprovalAsk, SuspendedStep } from "#harness/session-machine/state.js";
+import type { SessionView } from "#harness/session-machine/view.js";
 
 const NOTICE_LEAD =
   "Trusted eve runtime state. This notice is not user-authored content or an instruction.";
@@ -25,5 +26,21 @@ export function renderPendingApprovalsInstruction(
 function approvalIdentities(requests: readonly ApprovalAsk[]): string[] {
   return requests.map((ask) =>
     JSON.stringify({ requestId: ask.interactionId, toolName: ask.call.toolName }),
+  );
+}
+
+/** The step's approvals nobody has settled: open, or not asked yet. */
+export function pendingApprovals(view: SessionView, step: SuspendedStep): readonly ApprovalAsk[] {
+  const tables = view.projection.view;
+  return step.requests.filter((request) => {
+    const row = tables.interactions[request.interactionId];
+    return row === undefined || row.status === "open";
+  });
+}
+
+/** eve's note on the calls still awaiting approval, from the session's current approvals. */
+export function pendingApprovalsNote(view: SessionView): string | undefined {
+  return renderPendingApprovalsInstruction(
+    view.turn.suspended.flatMap((parked) => pendingApprovals(view, parked)),
   );
 }

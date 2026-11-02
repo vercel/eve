@@ -182,18 +182,26 @@
  *             Writing `{ ...session, history }` elsewhere, or `history: …` after a
  *             session spread with other properties between, skips the checks and the
  *             resets a rewrite needs. A spread under another name isn't caught.
- *   rule 61 — The kernel (`harness/`) doesn't reach the Workflow runtime:
- *             no `#compiled/@workflow/*`, `#internal/workflow/*`,
+ *   rule 61 — No file in the kernel (`harness/`) imports the Workflow runtime
+ *             directly: no `#compiled/@workflow/*`, `#internal/workflow/*`,
  *             `#internal/workflow-bundle/*`, `workflow`, `@workflow/*`, or
  *             `#runtime/attributes/emit.js` import. The workflow wrapper in
  *             `execution/` reads Workflow metadata and passes what the kernel
- *             needs (its callback URL, attribute sink) in, so the kernel can run
- *             under another driver.
+ *             needs (its callback URL, attribute sink) in. The rule checks
+ *             direct imports only: `harness/` still reaches Workflow code
+ *             through `execution/` and `runtime/`.
  *   rule 62 — Only the gate mints a `Clearance`: `mintClearance` is called
  *             only in `harness/clearance.ts` and `harness/tools.ts`
- *             (`decideApproval`), and nothing casts `as Clearance`. Every
- *             effect entry point takes one, so a call runs only on what the
- *             gate decided.
+ *             (`decideApproval`), and nothing casts `as Clearance`. The
+ *             harness's `invokeTool` requires one before it runs a call. Two
+ *             paths run `execute` without taking one: `execution/invoke-tool.ts`
+ *             decides approval itself, and a catalog route's `runEntryCall` runs
+ *             only inside `invokeTool`.
+ *   rule 63 — `definitions/` reaches the kernel only through the modules it
+ *             offers definitions: announcements, messages, the session's
+ *             current view, provider tool history, the usage sink, the
+ *             pending-approvals note, and the harness's types. A definition
+ *             that needs more of the kernel asks for it here first.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -323,6 +331,7 @@ function isTsLike(relPath) {
  *   rule60: Violation[];
  *   rule61: Violation[];
  *   rule62: Violation[];
+ *   rule63: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -411,6 +420,7 @@ async function scanRepo(state) {
     checkRule60(posix, content, state.rule60);
     checkRule61(posix, lines, state.rule61);
     checkRule62(posix, lines, state.rule62);
+    checkRule63(posix, lines, state.rule63);
   }
 }
 
@@ -1037,6 +1047,36 @@ function checkRule62(posix, lines, violations) {
         "mints a clearance outside the gate. A call's clearance comes from `decideApproval` or `approvedClearance`.",
     });
   });
+}
+
+// ---------- Rule 63: definitions reach the kernel through what it offers them ----------
+
+const DEFINITION_KERNEL_MODULES = new Set([
+  "#harness/announcements.js",
+  "#harness/execute-tool.js",
+  "#harness/hitl/approval-prompt.js",
+  "#harness/messages.js",
+  "#harness/provider-tool-history.js",
+  "#harness/session-machine/current.js",
+  "#harness/session-machine/view.js",
+  "#harness/types.js",
+  "#harness/usage-sink.js",
+]);
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule63(posix, lines, violations) {
+  if (!posix.startsWith("packages/eve/src/definitions/") || posix.endsWith(".test.ts")) return;
+  for (const [index, line] of lines.entries()) {
+    const specifier = IMPORT_SPECIFIER_RE.exec(line)?.[1];
+    if (specifier === undefined || !specifier.startsWith("#harness/")) continue;
+    if (DEFINITION_KERNEL_MODULES.has(specifier)) continue;
+    violations.push({
+      rule: 63,
+      file: posix,
+      line: index + 1,
+      message: `imports ${specifier}, which the kernel doesn't offer definitions. Use a module rule 63 lists, or add one there deliberately.`,
+    });
+  }
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -2111,6 +2151,7 @@ async function main() {
     rule60: /** @type {Violation[]} */ ([]),
     rule61: /** @type {Violation[]} */ ([]),
     rule62: /** @type {Violation[]} */ ([]),
+    rule63: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2241,6 +2282,7 @@ async function main() {
   violations.push(...state.rule60);
   violations.push(...state.rule61);
   violations.push(...state.rule62);
+  violations.push(...state.rule63);
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });
