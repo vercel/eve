@@ -53,7 +53,7 @@ const AUTHORIZATION_PENDING_BRAND = "__eveAuthorizationPending" as const;
  * instead of parking the turn and naming who it resumes as. Registered, because the runtime can
  * load this module more than once in one process.
  */
-export const AUTHORIZATION_SIGNAL: unique symbol = Symbol.for("eve.authorizationSignal");
+const AUTHORIZATION_SIGNAL: unique symbol = Symbol.for("eve.authorizationSignal");
 
 // ---------------------------------------------------------------------------
 // Public types
