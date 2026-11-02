@@ -174,8 +174,8 @@ export async function leaveRecallCall(
  * The public URL Recall posts a bot's webhooks to. Uses `url`, then
  * `RECALL_WEBHOOK_URL`, then `route` on the current Vercel deployment: the
  * production URL in production and the deployment's own URL on previews,
- * including the agent's route prefix and the Protection Bypass for Automation
- * secret. Locally, set `RECALL_WEBHOOK_URL` to a tunnel to `eve dev`.
+ * including the agent's route prefix. Locally, set `RECALL_WEBHOOK_URL` to a
+ * tunnel to `eve dev`.
  */
 export function resolveRecallWebhookUrl(url?: string, route = DEFAULT_RECALL_ROUTE): string {
   const explicit = (url ?? process.env.RECALL_WEBHOOK_URL)?.trim();

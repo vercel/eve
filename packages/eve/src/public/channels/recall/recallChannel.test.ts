@@ -6,7 +6,7 @@ import { readInputText } from "#internal/input-text.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { resolveRecallWebhookUrl, sendRecallChatMessage } from "#public/channels/recall/api.js";
-import { defaultEvents, matchSpokenOption } from "#public/channels/recall/defaults.js";
+import { matchSpokenOption, recallSignIns } from "#public/channels/recall/defaults.js";
 import {
   recallChannel,
   type RecallChannelConfig,
@@ -379,16 +379,21 @@ describe("recallChannel receive", () => {
 });
 
 describe("recall sign-in", () => {
-  const required = {
-    authorization: { url: "https://auth.example.com/device", userCode: "ABCD" },
+  const signIn = {
+    displayName: "Linear",
+    interactionId: "interaction_1",
     name: "linear",
     principalId: "recall:bot_1:7",
-  } as never;
+    url: "https://auth.example.com/device",
+    userCode: "ABCD",
+  };
 
   it("keeps the link out of shared chat when the private send fails", async () => {
     const { channel, sendChatMessage } = handlerContext({}, [false]);
+    const surface = recallSignIns(channel);
 
-    await defaultEvents["authorization.required"]!(required, channel, {} as never);
+    const delivered = await surface.deliverPrivately!(signIn);
+    await surface.postStatus!(signIn, delivered);
 
     expect(sendChatMessage).toHaveBeenCalledTimes(2);
     const shared = sendChatMessage.mock.calls[1] as unknown[];
@@ -410,19 +415,15 @@ describe("resolveRecallWebhookUrl", () => {
     vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "bypass");
   }
 
-  it("points a preview's bots at the preview, past Deployment Protection", () => {
+  it("points a preview's bots at the preview, without the deployment's bypass secret", () => {
     deployment("preview");
-    expect(resolveRecallWebhookUrl()).toBe(
-      "https://agent-abc123.vercel.app/eve/v1/recall?x-vercel-protection-bypass=bypass",
-    );
+    expect(resolveRecallWebhookUrl()).toBe("https://agent-abc123.vercel.app/eve/v1/recall");
   });
 
   it("points production bots at the production URL, under the agent's route prefix", () => {
     deployment("production");
     vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/support");
-    expect(resolveRecallWebhookUrl()).toBe(
-      "https://agent.vercel.app/support/eve/v1/recall?x-vercel-protection-bypass=bypass",
-    );
+    expect(resolveRecallWebhookUrl()).toBe("https://agent.vercel.app/support/eve/v1/recall");
   });
 
   it("prefers RECALL_WEBHOOK_URL, and asks for it outside a deployment", () => {
