@@ -101,7 +101,7 @@ async function executeAuthorizedStep(
       await collectAuthorizationCallbacks({
         authorizationResults,
         callback,
-        challenges: result.signal.challenges,
+        challenges: result.challenges,
         ctx,
         pending,
         run,
