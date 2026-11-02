@@ -45,12 +45,17 @@ export async function sessionDefinitions(
 async function buildAgentDefinitions(bundle: CompiledBundle): Promise<readonly Definition[]> {
   const agent = bundle.resolvedAgent;
   const model = await loadModelDefinition(bundle);
+  // The order is the contract. Definitions contribute in it, and each arrangement wraps what the
+  // ones before it left: the first to offer a tool name keeps it, so static tools come before
+  // dynamic ones, and connections keep theirs before tools and subagents check names against them.
   return [
     ...declared(agent, "hook").map(hookDefinition),
     ...(model === undefined ? [] : [model]),
     instructions,
     ...declared(agent, "instructions").map(instructionsDefinition),
     workspace,
+    connections,
+    ...declared(agent, "connection").map(connectionDefinition),
     staticTools,
     ...bundle.subagentRegistry.dynamicResolvers.map(subagentDefinition),
     ...declared(agent, "memory").map(memoryDefinition),
@@ -63,8 +68,6 @@ async function buildAgentDefinitions(bundle: CompiledBundle): Promise<readonly D
       .map(scheduleToolsDefinition),
     skills,
     ...declared(agent, "skill").map(skillDefinition),
-    connections,
-    ...declared(agent, "connection").map(connectionDefinition),
     approvals,
     builtins,
   ];

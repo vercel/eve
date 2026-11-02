@@ -102,16 +102,17 @@ export async function installDynamicConnections(ctx: Pick<ContextReader, "get">)
 }
 
 /**
- * Every connection name the session has: the registry's, and those dynamic connections this
- * evaluation already kept, which the registry installs after every connection has evaluated.
+ * Every connection name the session has: the agent's own, and those dynamic connections this
+ * evaluation already kept. The registry still holds the last call's dynamic connections until
+ * every connection has evaluated and it installs them again.
  */
 export function sessionConnectionNames(ctx: Pick<ContextReader, "get">): readonly string[] {
-  return [
-    ...new Set([
-      ...(ctx.get(ConnectionRegistryKey)?.getConnectionNames() ?? []),
-      ...dynamicConnectionVersions(ctx).keys(),
-    ]),
-  ];
+  const registry = ctx.get(ConnectionRegistryKey);
+  const own =
+    registry instanceof ConnectionRegistryImpl
+      ? registry.getStaticConnectionNames()
+      : (registry?.getConnectionNames() ?? []);
+  return [...new Set([...own, ...dynamicConnectionVersions(ctx).keys()])];
 }
 
 /** The version of each dynamic connection, by name: what it reaches, and its memo results. */

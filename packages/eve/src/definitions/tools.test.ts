@@ -88,6 +88,29 @@ describe("dynamic tools", () => {
     expect(await evaluationError(ctx)).toContain(message);
   });
 
+  it("takes a name a dynamic connection gives up in the same call", async () => {
+    let moved = false;
+    const { ctx } = definitionSession({
+      connections: [
+        {
+          evaluate: () => ({
+            [moved ? "jira" : "linear"]: defineMcpClientConnection({
+              description: "Issues.",
+              url: "https://issues.example",
+            }),
+          }),
+          slug: "issues",
+        },
+      ],
+      tools: [{ evaluate: () => (moved ? { linear__search: tool() } : null), slug: "search" }],
+    });
+    await beforeModelCall(ctx);
+    moved = true;
+    await beforeModelCall(ctx);
+
+    expect((await dynamicTools(ctx)).map(({ name }) => name)).toEqual(["linear__search"]);
+  });
+
   it("rejects a tool map name longer than 64 characters after namespacing", async () => {
     const extensionNamespace = "a".repeat(40);
     const key = "b".repeat(30);
