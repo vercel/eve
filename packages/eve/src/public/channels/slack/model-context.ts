@@ -16,6 +16,8 @@ interface SlackModelMessageInput {
   readonly teamId?: string;
   readonly threadTs: string;
   readonly ts: string;
+  /** Lines of the `<edit>` and `<diff>` blocks; present only for an edited message. */
+  readonly editLines?: readonly string[];
 }
 
 /**
@@ -30,8 +32,9 @@ function formatSlackModelMessage(input: SlackModelMessageInput): string {
     ...(input.botUserId ? [`id: ${input.botUserId}`] : []),
     ...(input.isMentioned !== undefined ? [`mentioned: ${input.isMentioned}`] : []),
   ];
+  const tag = input.editLines === undefined ? "slack_message" : "slack_message_edit";
   return [
-    "<slack_message>",
+    `<${tag}>`,
     "<sender>",
     `type: ${input.senderType}`,
     ...(input.senderId ? [`id: ${input.senderId}`] : []),
@@ -46,10 +49,11 @@ function formatSlackModelMessage(input: SlackModelMessageInput): string {
     `thread_ts: ${input.threadTs}`,
     `message_ts: ${input.ts}`,
     "</thread>",
+    ...(input.editLines ?? []),
     "<content>",
     input.content,
     "</content>",
-    "</slack_message>",
+    `</${tag}>`,
   ].join("\n");
 }
 
@@ -63,12 +67,56 @@ export function formatSlackInboundMessage(
   context: SlackInboundContext,
   message: { readonly text: string; readonly ts: string },
 ): string {
+  return formatSlackModelMessage(inboundModelMessage(context, message));
+}
+
+/**
+ * Renders an edited Slack message as a `<slack_message_edit>` block: the line
+ * changes in `<diff>`, and the full edited text in `<content>`. Without the
+ * previous text, or when the message is too long to compare, `<edit>` says why
+ * there is no diff, so the model still reads it as an edit.
+ */
+export function formatSlackInboundMessageEdit(
+  context: SlackInboundContext,
+  edit: {
+    readonly text: string;
+    readonly ts: string;
+    readonly previousText: string | undefined;
+    readonly editedTs: string;
+  },
+): string {
+  const content = slackModelContent(edit.text);
+  const diff =
+    edit.previousText === undefined
+      ? undefined
+      : changedLines(slackModelContent(edit.previousText), content);
+  const reason =
+    edit.previousText === undefined
+      ? "unavailable, Slack did not include the text before the edit"
+      : "omitted, the message is too long to compare";
+  return formatSlackModelMessage({
+    ...inboundModelMessage(context, edit),
+    content,
+    editLines: [
+      "<edit>",
+      `edited_ts: ${edit.editedTs}`,
+      ...(diff === undefined ? [`diff: ${reason}`] : []),
+      "</edit>",
+      ...(diff === undefined ? [] : ["<diff>", diff, "</diff>"]),
+    ],
+  });
+}
+
+function inboundModelMessage(
+  context: SlackInboundContext,
+  message: { readonly text: string; readonly ts: string },
+): SlackModelMessageInput {
   const senderInfo: SlackUserInfo = {
     ...(context.displayName && { displayName: context.displayName }),
     ...(context.fullName && { realName: context.fullName }),
     ...(context.email && { email: context.email }),
   };
-  return formatSlackModelMessage({
+  return {
     botUserId: context.botUserId,
     channelId: context.channelId,
     content: slackModelContent(message.text),
@@ -79,7 +127,51 @@ export function formatSlackInboundMessage(
     teamId: context.teamId,
     threadTs: context.threadTs,
     ts: message.ts,
-  });
+  };
+}
+
+// Bounds the line comparison table, about 1 MB, for messages near Slack's 40,000-character limit.
+const MAX_DIFF_CELLS = 250_000;
+
+/**
+ * The lines an edit removed (`-`) and added (`+`), in message order, from a
+ * longest-common-subsequence line diff. `<content>` carries the unchanged
+ * lines. Returns `undefined` when the comparison would exceed its bound.
+ */
+function changedLines(before: string, after: string): string | undefined {
+  const a = before.split("\n");
+  const b = after.split("\n");
+  if ((a.length + 1) * (b.length + 1) > MAX_DIFF_CELLS) return undefined;
+  const width = b.length + 1;
+  // common[i * width + j]: longest common subsequence of a[i..] and b[j..].
+  const common = new Uint32Array((a.length + 1) * width);
+  for (let i = a.length - 1; i >= 0; i -= 1) {
+    for (let j = b.length - 1; j >= 0; j -= 1) {
+      common[i * width + j] =
+        a[i] === b[j]
+          ? common[(i + 1) * width + j + 1]! + 1
+          : Math.max(common[(i + 1) * width + j]!, common[i * width + j + 1]!);
+    }
+  }
+  const lines: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) {
+      i += 1;
+      j += 1;
+    } else if (
+      j === b.length ||
+      (i < a.length && common[(i + 1) * width + j]! >= common[i * width + j + 1]!)
+    ) {
+      lines.push(`-${a[i]}`);
+      i += 1;
+    } else {
+      lines.push(`+${b[j]}`);
+      j += 1;
+    }
+  }
+  return lines.join("\n");
 }
 
 function slackModelContent(input: string): string {
