@@ -1,9 +1,6 @@
 import { prewarmWorkflowSession } from "#execution/session-prewarm.js";
-import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { readRemoteChildBinding } from "#execution/child-binding.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";
-import { validateDeliveryIdempotencyKey } from "#channel/delivery-idempotency.js";
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   EntityConflictError,
@@ -22,7 +19,6 @@ import type {
   SessionCommand,
   SessionCommandResult,
 } from "#channel/types.js";
-import { serializeContext } from "#context/serialize.js";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
@@ -44,13 +40,8 @@ import {
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
 import type { SessionPredecessor } from "#protocol/session-events/families/session.js";
-import { SessionPredecessorKey } from "#context/keys.js";
-import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
-import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import { buildRunContext } from "#execution/runtime-context.js";
-import { agentLimits } from "#execution/effective-agent-config.js";
 import {
   assertSessionHistoryReadable,
   readSessionEventHistory,
@@ -60,6 +51,12 @@ import {
   readSessionStreamTailIndex,
 } from "#execution/session-event-stream.js";
 import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.js";
+import { prepareInitialEntry, type SessionRuntimeConfig } from "#execution/initial-entry.js";
+import {
+  activeCommandResult,
+  identifyCommand,
+  inactiveCommandResult,
+} from "#execution/session-commands.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
@@ -87,9 +84,6 @@ import {
   StrandedSessionOwnerError,
 } from "#execution/session-inbox/owner.js";
 import { describeStrandedSession, SessionStrandedError } from "#channel/session-stranded-error.js";
-import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
-import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import {
   SESSION_TIMEOUT_WORKFLOW_NAME,
   WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
@@ -143,84 +137,21 @@ export const connectionEventDeliveryWorkflowReference = {
  * Creates a workflow-backed runtime whose current owner executes turns and
  * whose original run retains the public event stream across owner handoffs.
  */
-export function createWorkflowRuntime(config: {
-  readonly agentSessionRuntimeOverrides?: AgentSessionRuntimeOverrides;
-  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
-  readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
-  readonly nodeId?: string;
-}): Runtime {
+export function createWorkflowRuntime(config: SessionRuntimeConfig): Runtime {
   /** `predecessor` is set only on a successor of a retired session that has just ended. */
   const startSession = async (
     input: RunInput,
     predecessor?: SessionPredecessor,
   ): Promise<RunHandle> => {
-    validateDeliveryIdempotencyKey(input.idempotencyKey);
-    if (input.input.message !== undefined && input.delivery === undefined) {
-      input = {
-        ...input,
-        delivery: createChannelDeliveryMetadata({
-          channelKind: input.adapter.kind,
-          channelName: input.channelName ?? input.adapter.kind,
-          requestId: input.requestId,
-        }),
-      };
-    }
-    // A losing candidate forwards this command to the winner instead of starting, so it is the
-    // same delivery and must carry the same identity.
-    const conflictCommand = input.continuationConflictCommand;
-    if (conflictCommand !== undefined && conflictCommand.delivery === undefined) {
-      input = {
-        ...input,
-        continuationConflictCommand: { ...conflictCommand, delivery: input.delivery },
-      };
-    }
-    const bundle = await getCompiledRuntimeAgentBundle({
-      compiledArtifactsSource: config.compiledArtifactsSource,
-      nodeId: config.nodeId,
-    });
-    if (input.toolStubs !== undefined && input.toolStubs.rootSessionId === undefined) {
-      validateToolStubTargets(input.toolStubs.rules, bundle.graph);
-    }
-    const ctx = buildRunContext({
-      agentSessionRuntimeOverrides: config.agentSessionRuntimeOverrides,
-      bundle,
-      dynamicSubagentAgentConfig: config.dynamicSubagentAgentConfig,
-      run: input,
-    });
-    if (predecessor !== undefined) ctx.set(SessionPredecessorKey, predecessor);
-    const traceDecision = initializeSessionInstrumentation({
-      agentName: bundle.turnAgent.id,
-      ctx,
-    });
-    const sessionTimeoutMs = agentLimits(bundle, ctx)?.sessionTimeoutMs;
-    // Workflow cannot purge inputs and outputs independently.
-    const retention =
-      bundle.resolvedAgent.config?.experimental?.workflow?.retention ??
-      (traceDecision.action === "record" &&
-      traceDecision.recordInputs &&
-      traceDecision.recordOutputs
-        ? undefined
-        : 0);
-    const serializedContext = serializeContext(ctx);
+    const prepared = await prepareInitialEntry(config, input, predecessor);
+    input = prepared.input;
+    const { bundle, serializedContext } = prepared;
+    const retention = prepared.entry.retention;
     const parentLineage = readParentLineage(serializedContext);
-    const workflowInput: {
-      -readonly [K in keyof InitialWorkflowEntryInput]: InitialWorkflowEntryInput[K];
-    } = {
-      idempotencyKey: input.idempotencyKey,
-      kind: "initial",
-      input: input.input,
+    const workflowInput: InitialWorkflowEntryInput = {
+      ...prepared.entry,
       ownerDeploymentId: await resolveCurrentWorkflowDeploymentId(),
-      serializedContext,
     };
-    if (input.continuationConflictCommand !== undefined) {
-      workflowInput.continuationConflictCommand = input.continuationConflictCommand;
-    }
-    if (sessionTimeoutMs !== undefined) {
-      workflowInput.sessionTimeoutMs = sessionTimeoutMs;
-    }
-    if (retention !== undefined) {
-      workflowInput.retention = retention;
-    }
     const sessionAttributes =
       parentLineage.sessionId === undefined
         ? buildSessionAttributes({
@@ -486,31 +417,6 @@ function sessionStrandedError(
   return new SessionStrandedError(owner, describeStrandedSession(owner, nextStep));
 }
 
-function activeCommandResult<TCommand extends SessionCommand>(
-  command: TCommand,
-  sessionId: string,
-): SessionCommandResult<TCommand> {
-  const result =
-    command.kind === "reset"
-      ? { previousSessionId: sessionId, status: "reset" as const }
-      : command.kind === "send" && command.delivery !== undefined
-        ? { sessionId, status: "accepted" as const, deliveryId: command.delivery.deliveryId }
-        : { sessionId, status: "accepted" as const };
-  return result as SessionCommandResult<TCommand>;
-}
-
-function inactiveCommandResult<TCommand extends SessionCommand>(
-  command: TCommand,
-): SessionCommandResult<TCommand> {
-  const result =
-    command.kind === "send"
-      ? { status: "session_not_active" as const }
-      : command.kind === "cancel"
-        ? { status: "no_active_turn" as const }
-        : { status: "no_active_session" as const };
-  return result as SessionCommandResult<TCommand>;
-}
-
 /**
  * Sends one command to a session through its stable command inbox. A caller
  * holding the session id asked for that exact session, so a send to a
@@ -720,24 +626,5 @@ function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {
 
   return {
     runId,
-  };
-}
-
-/** Assign the delivery before accepting it, so replay and the sender name the same facts. */
-function identifyCommand<T extends SessionCommand>(command: T): T {
-  if (command.kind !== "send" || command.delivery !== undefined) return command;
-  const channel =
-    command.caller === undefined
-      ? command.schedule === undefined
-        ? "http"
-        : "schedule"
-      : "subagent";
-  return {
-    ...command,
-    delivery: createChannelDeliveryMetadata({
-      channelKind: channel,
-      channelName: channel,
-      requestId: command.requestId,
-    }),
   };
 }
