@@ -119,6 +119,24 @@ describe("Slack model context", () => {
     expect(tooLong).not.toContain("<diff>");
   });
 
+  it("places guidance after the metadata and an edit's diff, before the content", () => {
+    const context = { channelId: "C01", threadTs: "1.0", userId: "U_BOB" };
+    const guidance = "This reply doesn't mention you.\nAnswer only if it's meant for you.";
+    const guidanceBlock = `<guidance>\n${guidance}\n</guidance>`;
+
+    const message = formatSlackInboundMessage(context, { guidance, text: "On it", ts: "1.1" });
+    const edit = formatSlackInboundMessageEdit(context, {
+      editedTs: "1.9",
+      guidance,
+      previousText: "On it",
+      text: "On it now",
+      ts: "1.1",
+    });
+
+    expect(message).toContain(`</thread>\n${guidanceBlock}\n<content>\nOn it\n</content>`);
+    expect(edit).toContain(`</diff>\n${guidanceBlock}\n<content>\nOn it now\n</content>`);
+  });
+
   it("attributes every fetched thread message by stable Slack id", () => {
     const block = formatSlackThreadContext([
       threadMessage({ text: "I own the API.", ts: "1.1", user: "U_BACKEND" }),

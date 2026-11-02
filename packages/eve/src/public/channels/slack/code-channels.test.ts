@@ -11,7 +11,11 @@ import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
-import { slackChannel, type SlackChannelState } from "#public/channels/slack/slackChannel.js";
+import {
+  slackChannel,
+  type SlackChannelConfig,
+  type SlackChannelState,
+} from "#public/channels/slack/slackChannel.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
@@ -103,7 +107,7 @@ function buildMentionBody({
 async function firePost(
   channel: unknown,
   request: Request,
-  options: { cancelResult?: "ignored" | "completed" } = {},
+  options: { cancelResult?: "ignored" | "completed"; hasSession?: boolean } = {},
 ) {
   if (!isCompiledChannel(channel)) throw new Error("Expected compiled channel");
   const post = channel.routes.find((route) => route.method === "POST");
@@ -125,7 +129,7 @@ async function firePost(
   const response = await post.handler(request, {
     ...mockAgentRouteArgs(),
     from,
-    resolveSession: async () => undefined,
+    resolveSession: async () => (options.hasSession ? ({ sessionId: "s1" } as never) : undefined),
     waitUntil,
     attachSession: vi.fn() as never,
     to: vi.fn() as never,
@@ -172,9 +176,9 @@ function renderingHarness() {
       if (!handler) throw new Error(`No handler for ${fact.type}`);
       await contextStorage.run(store, () => handler(fact, ctx));
     },
-    async deliver(replyThreadTs: string, options?: { readonly edit?: boolean }) {
+    async deliver(replyThreadTs: string, options?: { readonly quiet?: boolean }) {
       await adapter.deliver?.(
-        { message: "hello", state: { replyThreadTs, edit: options?.edit } } as never,
+        { message: "hello", state: { replyThreadTs, quiet: options?.quiet } } as never,
         ctx,
       );
     },
@@ -501,6 +505,65 @@ describe("slackChannel() code channels", () => {
     expect(alice.send.mock.calls.map(([address]) => address)).toEqual(["code:C_CODE_GATED"]);
   });
 
+  // Each row authors a hook the edit must skip, so the default can't just be "no hooks".
+  it.each<{
+    name: string;
+    channel: string;
+    hooks: readonly ("onAppMention" | "onDirectMessage" | "onMessage")[];
+    reached: "onAppMention" | "onMessage" | "default";
+  }>([
+    {
+      name: "code edit to onMessage",
+      channel: "C_CODE_EDIT_MESSAGE",
+      hooks: ["onAppMention", "onMessage"],
+      reached: "onMessage",
+    },
+    {
+      name: "code edit to onAppMention",
+      channel: "C_CODE_EDIT_MENTION",
+      hooks: ["onAppMention", "onDirectMessage"],
+      reached: "onAppMention",
+    },
+    {
+      name: "code edit to the default",
+      channel: "C_CODE_EDIT_DEFAULT",
+      hooks: ["onDirectMessage"],
+      reached: "default",
+    },
+  ])("$name", async ({ channel: channelId, hooks, reached }) => {
+    useCodeChannels([channelId]);
+    const calls: string[] = [];
+    const hook =
+      (name: string): NonNullable<SlackChannelConfig["onMessage"]> =>
+      (_ctx, message) => {
+        calls.push(`${name}: ${message.text}`);
+        return { auth: null };
+      };
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      ...Object.fromEntries(hooks.map((name) => [name, hook(name)])),
+    });
+    const message = { text: "keep going", ts: "1700000000.000300", user: "U_ALICE" };
+    const body = buildEventBody(
+      {
+        channel: channelId,
+        channel_type: "channel",
+        message: { ...message, text: "keep going, please", edited: { ts: "1700000000.000309" } },
+        previous_message: message,
+        subtype: "message_changed",
+        ts: "1700000000.000309",
+        type: "message",
+      },
+      { authorizations: BOT_AUTHORIZATIONS },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }), { hasSession: true });
+
+    expect(calls).toEqual(reached === "default" ? [] : [`${reached}: keep going, please`]);
+    expect(send.mock.calls.map(([address]) => address)).toEqual([`code:${channelId}`]);
+  });
+
   it("addresses a custom interaction in a code channel to the channel's session", async () => {
     useCodeChannels(["C_CODE_CARD"]);
     const channel = slackChannel({
@@ -731,36 +794,51 @@ describe("slackChannel() code channels", () => {
     expect(slackCalls("assistant.threads.setStatus")).toHaveLength(0);
   });
 
-  it("keeps a turn an edit starts quiet until its first tool call finishes", async () => {
+  // Each step is followed by the statuses it wrote. `quiet` and `plain` are deliveries: edits and
+  // deferred messages are delivered quiet.
+  it.each<{ name: string; trace: string }>([
+    { name: "ends with no_reply", trace: "quiet turn model tool end:active" },
+    {
+      name: "shows a real tool's work",
+      trace: "quiet turn model tool model:processing end:active",
+    },
+    { name: "quiet, then plain", trace: "quiet plain turn:processing" },
+    { name: "plain, then quiet", trace: "plain quiet turn:processing" },
+    { name: "steered plain message", trace: "quiet turn model plain model:processing end:active" },
+    { name: "next turn after a quiet one", trace: "quiet turn end:active plain turn:processing" },
+  ])("keeps a quiet turn quiet: $name", async ({ trace }) => {
     useCodeChannels([]);
     const { event, deliver } = renderingHarness();
-    const modelStarted = (runId: string): SessionEvent => ({
-      type: "model.started",
-      data: { attempt: 0, modelId: "test-model", runId },
-      scope: { runId, turnId: "t1" },
-    });
-    await deliver("1700000000.000100", { edit: true });
-    await event({
-      type: "turn.started",
-      data: { cause: { deliveryId: "d1" }, follows: null, turnId: "t1" },
-    });
-    await event(modelStarted("r1"));
-    expect(statuses()).toEqual([]);
-
-    await event({
-      type: "call.settled",
-      data: { callId: "c1", outcome: "completed" },
-      scope: { runId: "r1", turnId: "t1" },
-    });
-    await event(modelStarted("r2"));
-    await event({ type: "turn.settled", data: { turnId: "t1", outcome: "completed" } });
-    // A new message's turn shows its status at once.
-    await deliver("1700000000.000200");
-    await event({
-      type: "turn.started",
-      data: { cause: { deliveryId: "d2" }, follows: "t1", turnId: "t2" },
-    });
-    expect(statuses()).toEqual(["processing", "active", "processing"]);
+    let run = 0;
+    const observed: string[] = [];
+    for (const step of trace.split(" ").map((entry) => entry.split(":")[0]!)) {
+      const before = statuses().length;
+      if (step === "quiet" || step === "plain") {
+        await deliver("1700000000.000100", { quiet: step === "quiet" });
+      } else if (step === "turn") {
+        await event({
+          type: "turn.started",
+          data: { cause: { deliveryId: "d1" }, follows: null, turnId: "t1" },
+        });
+      } else if (step === "model") {
+        const runId = `r${++run}`;
+        await event({
+          type: "model.started",
+          data: { attempt: 0, modelId: "test-model", runId },
+          scope: { runId, turnId: "t1" },
+        });
+      } else if (step === "tool") {
+        await event({
+          type: "call.settled",
+          data: { callId: "c1", outcome: "completed" },
+          scope: { runId: `r${run}`, turnId: "t1" },
+        });
+      } else {
+        await event({ type: "turn.settled", data: { turnId: "t1", outcome: "completed" } });
+      }
+      observed.push([step, ...statuses().slice(before)].join(":"));
+    }
+    expect(observed.join(" ")).toBe(trace);
   });
 
   it("sets the session back to active when a turn is cancelled", async () => {

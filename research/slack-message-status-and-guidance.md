@@ -1,6 +1,6 @@
 ---
 issue: "None (maintainer proposal; supersedes PR #5797)"
-status: proposed
+status: in-progress
 last_updated: "2026-11-02"
 ---
 
@@ -9,6 +9,24 @@ last_updated: "2026-11-02"
 > Builds on @benpankow's
 > [review of #5797](https://github.com/vercel/eve/pull/5797#issuecomment-6584564412): put the
 > behavior on the message hook's result, not behind a routing option.
+
+## Implementation status
+
+Everything except [Thread context](#thread-context) is implemented: `status`, `guidance`, the shared
+quiet turn, the steer fix, edit delegation, docs, and unit tests. The thread context checkpoint
+ships separately. The implementation differs from this plan in these ways:
+
+- **Edit table order.** A DM edit takes the DM row even when it mentions the bot, matching new DMs,
+  which always reach `onDirectMessage` first.
+- **Delivery stamp.** Edits and deferred messages carry one `quiet` stamp; the `edit` stamp is gone,
+  because nothing else read it.
+- **Decision model example.** The docs limit `decide` to channels the app lists, so unmentioned
+  traffic elsewhere costs no decision call.
+- **Vercel Connect subscriptions.** The two docs pages still disagree on Connect's defaults. That
+  stays open until someone can check a Connect connector.
+- **Validation.** Batching keeps guidance per message by construction, because guidance is part of
+  each message's text, so it has no test of its own. The E2E eval is a follow-up: no Slack E2E
+  fixture exists yet.
 
 ## Summary
 
@@ -245,8 +263,8 @@ on the edited message:
 
 | Edited message                    | Hook that decides                                       |
 | --------------------------------- | ------------------------------------------------------- |
-| Mentions the bot, before or after | `onAppMention` → `onMessage` → built-in mention default |
 | In a DM                           | `onDirectMessage` → `onMessage` → built-in DM default   |
+| Mentions the bot, before or after | `onAppMention` → `onMessage` → built-in mention default |
 | In a code channel                 | `onMessage` → `onAppMention` → built-in default         |
 | Other                             | `onMessage` → ignore                                    |
 

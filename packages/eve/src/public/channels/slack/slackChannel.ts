@@ -301,20 +301,21 @@ export interface SlackChannelState extends UndeliveredReplyState {
    */
   threadStatus?: SlackThreadStatus | null;
   /**
-   * Stamped on the delivery of an edited message, so `deliver` can tell it from a new one.
+   * Stamped on the delivery of an edit or a message whose hook returned
+   * `status: "deferred"`, so `deliver` can tell it from one that shows status.
    * @internal
    */
-  edit?: boolean;
+  quiet?: boolean;
   /**
-   * Whether every message delivered since the last turn ended was an edit. The
+   * Whether every message delivered since the last turn ended was quiet. The
    * next turn starts quiet when it was.
    * @internal
    */
-  pendingEditTurn?: boolean | null;
+  pendingQuietTurn?: boolean | null;
   /**
-   * The turn started from an edit, so the default renderer shows no status
-   * until the turn's first tool call finishes. A model that ends the turn
-   * without a reply then leaves no trace in the thread.
+   * The turn is quiet, so the default renderer shows no status until the
+   * turn's first tool call finishes or a message that isn't quiet joins it. A
+   * model that ends the turn without a reply then leaves no trace in the thread.
    * @internal
    */
   quietStatus?: boolean | null;
@@ -714,19 +715,42 @@ export type SlackAnswerSubmission =
 export type SlackAnswerResult = { readonly auth: SessionAuthContext | null } | null;
 
 /**
- * Result of an `onAppMention` or `onDirectMessage` callback. Return an
- * object (auth may be `null`) to dispatch a turn, or `null` to drop the
- * inbound message. `context` strings are appended as user messages to
- * session history before the delivery message. `history` entries are added as
- * user and assistant turns before it; when present, `threadContext` keeps its
- * transcript and never seeds. `title` overrides the workflow run title without
- * changing the message sent to the model.
+ * Result of a message hook: `onMessage`, `onAppMention`, `onDirectMessage`,
+ * or `onMessageEdited`. Return an object (auth may be `null`) to dispatch a
+ * turn, or `null` to drop the inbound message. `context` strings are appended
+ * as user messages to session history before the delivery message. `history`
+ * entries are added as user and assistant turns before it; when present,
+ * `threadContext` keeps its transcript and never seeds. `title` overrides the
+ * workflow run title without changing the message sent to the model.
  */
 export type SlackMentionResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
   readonly history?: readonly SessionHistoryMessage[];
   readonly title?: string;
+  /**
+   * When eve shows that the agent is working on this message. `"immediate"`
+   * (the default) runs the renderer chain's `received` and shows the thread
+   * status through the turn. `"deferred"` skips `received`, and eve's default
+   * renderer shows no status until the turn's first tool call finishes, so a
+   * turn that ends with the `no_reply` tool leaves no trace in the thread.
+   *
+   * Mentions and DMs are acknowledged before their hook runs, so `"deferred"`
+   * keeps their turn quiet but can't take back the acknowledgement. A message
+   * that isn't deferred and joins the turn shows the status again. Edits are
+   * always deferred: `status` on an `onMessageEdited` result has no effect.
+   */
+  readonly status?: "immediate" | "deferred";
+  /**
+   * Text that tells the model how to treat this one message, such as "This
+   * reply doesn't mention you. Answer only if it's meant for you." eve adds it
+   * as a `<guidance>` block inside the message's `<slack_message>` or
+   * `<slack_message_edit>` block, after the metadata and before `<content>`.
+   *
+   * The model reads guidance as eve's own annotation, outside the message
+   * content. Never put user-controlled text in it.
+   */
+  readonly guidance?: string;
 } | null;
 
 /**
@@ -839,7 +863,9 @@ export interface SlackChannelConfig {
   /**
    * Handles human-authored Slack messages. Specialized `onAppMention` and
    * `onDirectMessage` handlers take precedence for their event types. Other
-   * channel messages are ignored when this hook is omitted.
+   * channel messages are ignored when this hook is omitted. Without
+   * `onMessageEdited`, this hook also decides edits to messages it would
+   * receive; see `onMessageEdited`.
    */
   onMessage?(
     ctx: SlackInboundMessageContext,
@@ -850,7 +876,9 @@ export interface SlackChannelConfig {
    * Invoked when a Slack `app_mention` event arrives (only `app_mention`;
    * other event types are ignored). Decides whether to dispatch and with
    * what auth. It renders nothing: the renderer chain's `received`
-   * acknowledges the mention while this hook runs.
+   * acknowledges the mention while this hook runs. Without
+   * `onMessageEdited`, it also decides edits to messages that mention the bot
+   * before or after the edit.
    *
    * Return `{ auth }` to dispatch with that session auth context, or `null`
    * to drop the mention. May be sync or async; the result is awaited before
@@ -869,6 +897,7 @@ export interface SlackChannelConfig {
    * filtered out first, so handlers only see plain user-authored DMs.
    * Decides whether to dispatch and with what auth. It renders nothing: the
    * renderer chain's `received` acknowledges the message while this hook runs.
+   * Without `onMessageEdited`, it also decides edits to direct messages.
    *
    * Return `{ auth }` to dispatch with that session auth context, or `null`
    * to drop the message. May be sync or async; the result is awaited before
@@ -895,16 +924,19 @@ export interface SlackChannelConfig {
    * starts shows no status until its first tool call finishes, so pair this
    * with the `no_reply` tool to let the agent stay silent when the edit
    * changes nothing. `title`, `history`, and thread context don't apply to
-   * edits.
+   * edits, and `status` has no effect: edits are always deferred. `guidance`
+   * goes into the `<slack_message_edit>` block.
    *
-   * Defaults to the author's workspace-scoped auth for edits to direct
-   * messages, code channel messages, and messages that mention the bot before
-   * or after the edit, and drops other edits. When `onAppMention`,
-   * `onDirectMessage`, or `onMessage` is authored, that default would skip
-   * their checks, so edits go to `onEvent` or are dropped unless this hook is
-   * authored too. Thrown errors are caught and logged and the edit is
-   * dropped. Requires the `message.channels`, `message.groups`, `message.im`,
-   * and `message.mpim` events, which the generated app manifest includes.
+   * By default, the edited message goes to the hook a new message of the same
+   * kind would reach: for a DM, `onDirectMessage`, then `onMessage`; for a
+   * message that mentions the bot before or after the edit, `onAppMention`,
+   * then `onMessage`; in a code channel, `onMessage`, then `onAppMention`;
+   * otherwise `onMessage`. Without one, DMs, mentions, and code channel
+   * messages use the author's workspace-scoped auth, and other edits are
+   * dropped. An authored `onEvent` comes before this default. Thrown errors
+   * are caught and logged and the edit is dropped. Requires the
+   * `message.channels`, `message.groups`, `message.im`, and `message.mpim`
+   * events, which the generated app manifest includes.
    */
   onMessageEdited?(
     ctx: SlackInboundMessageContext,
@@ -1084,18 +1116,18 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           channel.state.replyThreadTs = channel.state.pendingReplyThreadTs;
           channel.state.pendingReplyThreadTs = undefined;
         }
-        channel.state.quietStatus = channel.state.pendingEditTurn === true;
-        channel.state.pendingEditTurn = null;
+        channel.state.quietStatus = channel.state.pendingQuietTurn === true;
+        channel.state.pendingQuietTurn = null;
         await renderTurnStarted?.(event, ctx);
       },
       async "call.settled"(event, ctx) {
-        // A turn an edit started shows its work once a tool call finishes; `no_reply` ends it first.
+        // A quiet turn shows its work once a tool call finishes; `no_reply` ends it first.
         ctx.channel.state.quietStatus = null;
         await renderCallSettled?.(event, ctx);
       },
       async "turn.settled"(event, ctx) {
         ctx.channel.state.quietStatus = null;
-        ctx.channel.state.pendingEditTurn = null;
+        ctx.channel.state.pendingQuietTurn = null;
         await renderTurnSettled?.(event, ctx);
       },
     },
@@ -1155,7 +1187,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       recordSlackPrincipal(channel.state, channel.session.auth.current, payload);
       followReplyThread(channel.state, payload);
       followTriggeringMessage(channel.state, payload);
-      followEditTurn(channel.state, payload);
+      followQuietTurn(channel.state, payload);
       return withUndeliveredReplyNote(channel.state, payload, "Slack");
     },
 
@@ -1538,9 +1570,10 @@ async function handleEventPost(input: {
   }
 
   // Handler precedence, in fall-through order:
-  // 1) an authored mention/DM handler for its own event kind,
+  // 1) an authored mention/DM/edit handler for its own event kind,
   // 2) an authored generic `onEvent` fallback,
-  // 3) the built-in mention/DM defaults.
+  // 3) the built-in mention/DM defaults, and the default edit hook, which runs the message hook
+  //    a new message of the same kind would reach.
   let dispatch: (() => Promise<void>) | null = null;
   let builtinDefault: (() => Promise<void>) | null = null;
 
@@ -1594,14 +1627,8 @@ async function handleEventPost(input: {
         edit,
         handler: (ctx, message) => handler(ctx, { ...edit, message }),
       });
-    // An authored message hook decides who may reach the agent, and the default edit hook would
-    // skip it, so edits then need their own `onMessageEdited`.
-    const authorsMessages =
-      config.onAppMention !== undefined ||
-      config.onDirectMessage !== undefined ||
-      config.onMessage !== undefined;
     if (config.onMessageEdited !== undefined) dispatch = dispatchEdit(config.onMessageEdited);
-    else if (!authorsMessages) builtinDefault = dispatchEdit(defaultOnMessageEdited);
+    else builtinDefault = dispatchEdit(defaultOnMessageEdited(config));
   }
 
   const onMessage = config.onMessage;
@@ -1811,7 +1838,7 @@ async function dispatchSlackMessage(input: {
     triggeringMessageTs: input.message.ts,
     triggeringUserId: author?.userId ?? null,
     ...(codeChannel && { codeChannel: true, replyThreadTs }),
-    ...(edit !== undefined && { edit: true }),
+    ...(edit !== undefined && { quiet: true }),
   };
   const sessionDefaultAuth =
     author === undefined
@@ -1904,8 +1931,11 @@ async function dispatchSlackMessage(input: {
     }
     return;
   }
-  if (edit === undefined) {
-    await (acknowledged ?? acknowledgeMessage(input.received, input.message, { slack, thread }));
+  // An edit is always quiet; a deferred message shows nothing until its turn calls a tool.
+  if (edit === undefined && result.status === "deferred") channelState.quiet = true;
+  if (acknowledged !== undefined) await acknowledged;
+  else if (channelState.quiet !== true) {
+    await acknowledgeMessage(input.received, input.message, { slack, thread });
   }
 
   const isPrivateConversation = await isDMOrPrivateChannel();
@@ -2153,11 +2183,17 @@ async function deliverSlackMessage(input: {
       userId: message.author?.userId ?? "",
       userName: message.author?.userName,
     };
+    const { guidance } = input.result;
     const attributedMessage =
       edit === undefined
-        ? formatSlackInboundMessage(inboundContext, message)
+        ? formatSlackInboundMessage(inboundContext, {
+            guidance,
+            text: message.text,
+            ts: message.ts,
+          })
         : formatSlackInboundMessageEdit(inboundContext, {
             editedTs: edit.editedTs,
+            guidance,
             previousText: edit.previousText,
             text: message.text,
             ts: message.ts,
@@ -2222,11 +2258,16 @@ function followReplyThread(state: SlackChannelState, payload: ChannelDelivery<un
   state.pendingReplyThreadTs = stamped?.replyThreadTs ?? null;
 }
 
-/** A turn starts quiet when every message delivered since the last one ended was an edit. */
-function followEditTurn(state: SlackChannelState, payload: ChannelDelivery<unknown>): void {
+/**
+ * A turn starts quiet when every message delivered since the last one ended was quiet. The
+ * runtime calls `deliver` in the step that admits the message, so one that isn't quiet and joins
+ * a running quiet turn shows its status from then on.
+ */
+function followQuietTurn(state: SlackChannelState, payload: ChannelDelivery<unknown>): void {
   if (payload.message === undefined) return;
-  const edit = (payload.state as Partial<SlackChannelState> | undefined)?.edit === true;
-  state.pendingEditTurn = edit && state.pendingEditTurn !== false;
+  const quiet = (payload.state as Partial<SlackChannelState> | undefined)?.quiet === true;
+  state.pendingQuietTurn = quiet && state.pendingQuietTurn !== false;
+  if (!quiet) state.quietStatus = null;
 }
 
 /** The latest message delivered is the one the next turn answers. */

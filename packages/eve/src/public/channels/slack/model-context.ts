@@ -19,6 +19,8 @@ interface SlackModelMessageInput {
   readonly ts: string;
   /** Lines of the `<edit>` and `<diff>` blocks; present only for an edited message. */
   readonly editLines?: readonly string[];
+  /** App-written text from the message hook's result, rendered as a `<guidance>` block. */
+  readonly guidance?: string;
 }
 
 /**
@@ -51,6 +53,7 @@ function formatSlackModelMessage(input: SlackModelMessageInput): string {
     `message_ts: ${input.ts}`,
     "</thread>",
     ...(input.editLines ?? []),
+    ...(input.guidance ? ["<guidance>", input.guidance, "</guidance>"] : []),
     "<content>",
     input.content,
     "</content>",
@@ -66,7 +69,7 @@ function oneLine(value: string): string {
 /** Renders the triggering inbound Slack message as one attributed block. */
 export function formatSlackInboundMessage(
   context: SlackInboundContext,
-  message: { readonly text: string; readonly ts: string },
+  message: InboundMessageInput,
 ): string {
   return formatSlackModelMessage(inboundModelMessage(context, message));
 }
@@ -79,9 +82,7 @@ export function formatSlackInboundMessage(
  */
 export function formatSlackInboundMessageEdit(
   context: SlackInboundContext,
-  edit: {
-    readonly text: string;
-    readonly ts: string;
+  edit: InboundMessageInput & {
     readonly previousText: string | undefined;
     readonly editedTs: string;
   },
@@ -108,9 +109,16 @@ export function formatSlackInboundMessageEdit(
   });
 }
 
+interface InboundMessageInput {
+  readonly text: string;
+  readonly ts: string;
+  /** Trusted text from the message hook; never user-controlled. */
+  readonly guidance?: string;
+}
+
 function inboundModelMessage(
   context: SlackInboundContext,
-  message: { readonly text: string; readonly ts: string },
+  message: InboundMessageInput,
 ): SlackModelMessageInput {
   const senderInfo: SlackUserInfo = {
     ...(context.displayName && { displayName: context.displayName }),
@@ -121,6 +129,7 @@ function inboundModelMessage(
     botUserId: context.botUserId,
     channelId: context.channelId,
     content: slackModelContent(message.text),
+    guidance: message.guidance,
     isMentioned: context.isMentioned,
     senderId: context.userId || undefined,
     senderInfo,
