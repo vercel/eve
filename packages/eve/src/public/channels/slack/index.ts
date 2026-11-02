@@ -79,6 +79,9 @@ export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 
 export {
   defaultSlackAdmit,
+  isExternalSlackConversation,
+  isSlackGuest,
+  type SlackClassifyOptions,
   type SlackAdmit,
   type SlackAdmitActor,
   type SlackAdmitKind,

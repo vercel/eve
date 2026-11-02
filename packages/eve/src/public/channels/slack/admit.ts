@@ -7,8 +7,10 @@
 import { createLogger, logError } from "#internal/logging.js";
 import {
   buildSlackWorkspaceHandle,
+  callSlackApi,
   type SlackApiResponse,
   type SlackBotToken,
+  type SlackBotTokenContext,
   type SlackWorkspaceHandle,
 } from "#public/channels/slack/api.js";
 import type { SlackTransportOptions } from "#public/channels/slack/transport.js";
@@ -422,4 +424,58 @@ export async function admitSlackInteraction(input: {
       }),
     }),
   );
+}
+
+/** Slack Web API access for {@link isExternalSlackConversation} and {@link isSlackGuest}. */
+export interface SlackClassifyOptions {
+  readonly api?: SlackTransportOptions;
+  readonly botToken: SlackBotToken | undefined;
+  /** Passed to a function-form token. `teamId` names the installation workspace. */
+  readonly context?: SlackBotTokenContext;
+}
+
+/**
+ * Whether a conversation is shared with another organization through Slack
+ * Connect, or is pending such a share, the check `defaultSlackAdmit` makes.
+ * Use it before a tool posts with `callSlackApi`. Returns `true` when Slack
+ * can't classify the conversation, for example without the `channels:read`,
+ * `groups:read`, `im:read`, and `mpim:read` scopes. Cached for five minutes.
+ */
+export async function isExternalSlackConversation(
+  input: SlackClassifyOptions & { readonly channelId: string },
+): Promise<boolean> {
+  return await classifyConversation({
+    channelId: input.channelId,
+    installationTeamId: input.context?.teamId,
+    request: (operation, body) =>
+      callSlackApi({
+        api: input.api,
+        botToken: input.botToken,
+        context: input.context,
+        operation,
+        body,
+      }),
+  });
+}
+
+/**
+ * Whether a Slack user is a multi-channel or single-channel guest, the check
+ * `defaultSlackAdmit` makes. Returns `true` when Slack can't classify the
+ * user, for example without the `users:read` scope. Cached for five minutes.
+ */
+export async function isSlackGuest(
+  input: SlackClassifyOptions & { readonly userId: string },
+): Promise<boolean> {
+  return await classifyGuest({
+    userId: input.userId,
+    installationTeamId: input.context?.teamId,
+    request: (operation, body) =>
+      callSlackApi({
+        api: input.api,
+        botToken: input.botToken,
+        context: input.context,
+        operation,
+        body,
+      }),
+  });
 }
