@@ -172,7 +172,7 @@ async function askBotToken(
   deps: TelegramSetupDeps,
 ): Promise<{ botToken: string; botUsername: string }> {
   context.presenter.log.info(
-    "Open @BotFather in Telegram and send /newbot. Pick a display name and a username ending in `bot`, then copy the token BotFather replies with.\nBotFather: https://t.me/BotFather\nFor an existing bot, send /token to BotFather instead.",
+    "Open @BotFather in Telegram and send /newbot, then copy the token BotFather replies with.\nBotFather: https://t.me/BotFather\nFor an existing bot, send /token to BotFather instead.",
   );
   const botToken = (
     await context.asker.ask(
