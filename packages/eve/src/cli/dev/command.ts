@@ -22,14 +22,7 @@ import {
 } from "./url-target.js";
 import { parseDevelopmentServerUrl } from "./url.js";
 import { waitForServerOrStop, waitForUiOrServer } from "./wait-for-ui.js";
-import {
-  parseContextSizeOption,
-  parseDisplayMode,
-  parseLogsMode,
-  parsePortOption,
-  parseStatsMode,
-  parseSubagentDisplayMode,
-} from "../option-parsers.js";
+import { parseLogsMode, parsePortOption } from "../option-parsers.js";
 
 interface DevelopmentCommandLogger {
   log(message: string): void;
@@ -60,36 +53,7 @@ function hasInteractiveTerminal(): boolean {
 
 function addTerminalDisplayOptions(command: Command): Command {
   return command
-    .option(
-      "--show-tools <mode>",
-      "How tool calls render: full | collapsed | auto-collapsed | hidden",
-      parseDisplayMode,
-    )
-    .option(
-      "--show-reasoning <mode>",
-      "How reasoning renders: full | collapsed | auto-collapsed | hidden",
-      parseDisplayMode,
-    )
-    .option(
-      "--show-subagents <mode>",
-      "How subagent tasks render: full | collapsed | hidden",
-      parseSubagentDisplayMode,
-    )
-    .option(
-      "--show-connection-auth <mode>",
-      "How connection authorization renders: full | collapsed | auto-collapsed | hidden",
-      parseDisplayMode,
-    )
-    .option(
-      "--assistant-response-stats <mode>",
-      "Assistant header statistic: tokens | tokensPerSecond",
-      parseStatsMode,
-    )
-    .option(
-      "--context-size <tokens>",
-      "Model context window size, shown as a usage percentage",
-      parseContextSizeOption,
-    )
+    .option("--verbose", "Show tool input and output, reasoning, and subagent activity in full")
     .option("--logs <mode>", "Log severity: none | error | warn | debug | all", parseLogsMode);
 }
 

@@ -10,12 +10,11 @@ import {
 import { theme } from "./lib/theme.ts";
 
 /**
- * End-to-end proof of the buffered `/loglevel` command. Logs are captured
- * regardless of the display mode, so switching modes applies retroactively:
+ * End-to-end proof of the `/loglevel` command. A mode applies to output from
+ * then on; lines already in scrollback stay as they are:
  *
- *   - `/loglevel none` hides log lines already in the transcript
- *   - lines captured while hidden stay buffered, invisible
- *   - `/loglevel all` restores every buffered log line
+ *   - `/loglevel none` hides new lines and leaves earlier ones in place
+ *   - `/loglevel all` shows lines captured from then on
  *
  * Needs no agent server and no model credentials.
  */
@@ -23,6 +22,7 @@ const UNREACHABLE_HOST = "http://127.0.0.1:49217";
 const VISIBLE_STDOUT_MARK = "LOGLEVEL_STDOUT_MARK_4f2";
 const VISIBLE_STDERR_MARK = "LOGLEVEL_STDERR_MARK_8d5";
 const HIDDEN_STDOUT_MARK = "LOGLEVEL_HIDDEN_MARK_1a9";
+const RESTORED_STDOUT_MARK = "LOGLEVEL_RESTORED_MARK_7c3";
 process.env.EVE_TUI_UNICODE = "1";
 
 void (async () => {
@@ -61,12 +61,11 @@ void (async () => {
     input.enter();
     await screen.waitForText("Logs hidden", 5_000);
 
-    const hidden = screen.snapshot();
-    if (hidden.includes(VISIBLE_STDOUT_MARK) || hidden.includes(VISIBLE_STDERR_MARK)) {
-      throw new Error(`/loglevel none should retroactively hide past logs:\n${hidden}`);
+    const kept = screen.snapshot();
+    if (!kept.includes(VISIBLE_STDOUT_MARK) || !kept.includes(VISIBLE_STDERR_MARK)) {
+      throw new Error(`/loglevel none should leave earlier lines in place:\n${kept}`);
     }
 
-    // Captured while hidden: buffered, never rendered.
     process.stdout.write(`${HIDDEN_STDOUT_MARK}\n`);
     if (screen.snapshot().includes(HIDDEN_STDOUT_MARK)) {
       throw new Error(`logs captured while hidden should not render:\n${screen.snapshot()}`);
@@ -76,20 +75,17 @@ void (async () => {
     input.enter();
     await screen.waitForText("Showing all logs", 5_000);
 
+    process.stdout.write(`${RESTORED_STDOUT_MARK}\n`);
     const restored = screen.snapshot();
-    if (
-      !restored.includes(VISIBLE_STDOUT_MARK) ||
-      !restored.includes(HIDDEN_STDOUT_MARK) ||
-      !restored.includes(VISIBLE_STDERR_MARK)
-    ) {
-      throw new Error(`/loglevel all should restore every buffered line:\n${restored}`);
+    if (!restored.includes(RESTORED_STDOUT_MARK) || restored.includes(HIDDEN_STDOUT_MARK)) {
+      throw new Error(`/loglevel all should show only new lines:\n${restored}`);
     }
 
     input.type("/exit");
     input.enter();
     await runPromise;
 
-    process.stdout.write(`${theme.muted("[tui-loglevel] buffered hide/restore verified")}\n`);
+    process.stdout.write(`${theme.muted("[tui-loglevel] forward-only log levels verified")}\n`);
   } catch (error) {
     process.stdout.write(
       `${theme.danger("\n[tui] tui-loglevel smoke test failed:")} ${String(error)}\n`,

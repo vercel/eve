@@ -157,11 +157,13 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     // Match the activity row even while its dot is hidden, without treating
     // the completed coda, a prompt, or ordinary prose as active work.
     const liveTurnBar = /^[•* ] (?:Thinking|Generating|Running) \(\d/mu;
+    // The composer opens while the agent starts; it is idle once startup ends.
+    const starting = /^. (?:Starting agent|Reading saved connection|Loading selected model)…$/mu;
     // Unicode glyphs only: the ASCII prompt mark (`>`) is ambiguous with the
     // ASCII brand mark, and every TUI smoke script pins EVE_TUI_UNICODE=1.
     const idle = () => {
       const snapshot = this.snapshot();
-      return /^[❯]/mu.test(snapshot) && !liveTurnBar.test(snapshot);
+      return /^[❯]/mu.test(snapshot) && !liveTurnBar.test(snapshot) && !starting.test(snapshot);
     };
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {

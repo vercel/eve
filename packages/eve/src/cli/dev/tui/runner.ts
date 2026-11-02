@@ -35,7 +35,6 @@ import {
   conversationView,
   isWorking,
   tuiSessionData,
-  type AgentTUIConversationView,
   type TuiFailure,
 } from "./conversation-view.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
@@ -43,7 +42,6 @@ import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-p
 import {
   formatFailureDetail,
   formatFailureMessage,
-  interruptedError,
   isInterruptedError,
   localFailureHint,
 } from "./errors.js";
@@ -51,7 +49,6 @@ import {
 import { probeAgentInfo } from "#services/dev-client/agent-info-probe.js";
 import { parseLogDisplayMode } from "./log-display-mode.js";
 import {
-  formatPromptCommandHelp,
   parsePromptCommand,
   PROMPT_COMMANDS,
   type PromptCommand,
@@ -63,7 +60,6 @@ import {
   createRemoteConnectionController,
   type RemoteConnectionController,
   type RemoteConnectionControllerOptions,
-  type RemoteConnectionSnapshot,
 } from "./remote-connection.js";
 import type { RemoteAuthFlow } from "./remote-auth.js";
 import { describeRemoteAuthCompletedMutations } from "./remote-auth-result.js";
@@ -82,14 +78,12 @@ import {
   type SetupIssue,
 } from "./setup-issues.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
-import type { TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import type { RemoteDevelopmentTarget } from "./target.js";
-import type { LogDisplayMode, TuiDisplayOptions } from "./types.js";
+import type { TuiDisplayOptions } from "./types.js";
 import { TerminalRenderer, type TerminalInput, type TerminalOutput } from "./terminal-renderer.js";
 import {
   createVercelStatusTracker,
   type VercelStatusEffect,
-  type VercelStatusSnapshot,
   type VercelStatusTracker,
   type VercelStatusTrackerOptions,
 } from "./vercel-status.js";
@@ -105,17 +99,6 @@ import type { CommandLifecycle } from "../../shutdown.js";
 
 const idleRuntimeArtifactPollMs = 500;
 const idleChatGptAuthPollMs = 5_000;
-
-export type AgentTUISessionOptions = {
-  title?: string;
-  /**
-   * Text to seed the composer's draft with before the user types. Set by the
-   * runner for the first prompt when `eve dev --input` is used.
-   */
-  initialDraft?: string;
-  /** Closes the composer without discarding its draft. */
-  signal?: AbortSignal;
-};
 
 /** One user action from the composer. */
 export type AgentTUIInput =
@@ -179,121 +162,8 @@ export type AgentTUIAgentHeader = {
   localDevelopment?: boolean;
 };
 
-export type AgentTUIRenderer = {
-  /**
-   * Commits the startup card to the transcript before the first prompt and
-   * refreshes it after local dev artifact changes. Optional — renderers
-   * without a header simply skip it.
-   */
-  renderAgentHeader?(header: AgentTUIAgentHeader): void;
-  /** Keeps preliminary connection diagnostics out of the startup presentation. */
-  setStartupPhase?(phase: "starting" | "connecting" | "updating" | undefined): void;
-  /**
-   * Commits a single informational line to the transcript. Used for session
-   * recovery and slash-command results. Optional.
-   */
-  renderNotice?(text: string): void;
-  /**
-   * Puts back a message whose turn was cancelled from outside this prompt, such as `/cancel` from
-   * another client, when the composer is empty. Optional.
-   */
-  restoreDraft?(text: string): void;
-  /**
-   * Commits the session boundary (`┌── Session restarted, clear context.`)
-   * when a dead session is replaced mid-conversation. The old conversation's
-   * transcript settles as shown; the next `renderConversation` starts fresh.
-   * Optional; renderers without it get the plain notice.
-   */
-  renderSessionBoundary?(): void;
-  /**
-   * Commits one development sandbox lifecycle line to the transcript.
-   * Optional so non-terminal renderers can ignore local prewarm progress.
-   */
-  renderSetupWarning?(text: string): void;
-  /** Clears the setup attention line once its issue is resolved. */
-  clearSetupWarning?(): void;
-  /** Commits the startup `/deploy` invocation to the transcript. */
-  renderCommandInvocation?(text: string): void;
-  finishCommand?(outcome: CommandPresentation): void;
-  choosePromptCommand?(commands: readonly PromptCommandSpec[]): Promise<string | undefined>;
-  showInfoPanel?(text: string): Promise<void>;
-  readonly setupFlow?: SetupFlowRenderer;
-  /**
-   * The renderer's full-screen local trace viewer, opened by `/traces`.
-   * The returned promise resolves when the user closes the viewer.
-   */
-  readonly traceViewer?: TraceViewerRenderer;
-  /**
-   * Reads the next composer action. Resolves `undefined` when `signal`
-   * aborts and rejects with an interrupt when the user leaves.
-   */
-  readInput?(options?: AgentTUISessionOptions): Promise<AgentTUIInput | undefined>;
-  /** Draws the session's transcript from one conversation snapshot. */
-  renderConversation?(view: AgentTUIConversationView): void;
-  /** Commits one error block, such as a message the session did not accept. */
-  renderError?(title: string, message: string): void;
-  /**
-   * Reports the server session id backing the conversation — pushed by the
-   * runner once a send is accepted, and overwritten when a later session's
-   * turn is accepted. Deliberately sticky across `/new` and interrupt
-   * recovery: the terminal renderer echoes the LAST session this TUI talked
-   * to in the parting line on exit, so an interrupted conversation (whose
-   * replacement session never ran a turn) can still be found again
-   * (`eve logs`, the session store). Optional.
-   */
-  setSessionId?(sessionId: string): void;
-  readToolApproval?(
-    request: AgentTUIToolApprovalRequest,
-    options?: AgentTUISessionOptions,
-  ): Promise<AgentTUIToolApprovalResponse>;
-  readInputQuestion?(
-    question: AgentTUIInputQuestion,
-    options?: AgentTUISessionOptions,
-  ): Promise<AgentTUIInputQuestionResponse | undefined>;
-  /**
-   * The log display mode currently in effect. Paired with
-   * {@link setLogDisplayMode}; both are absent on renderers that do not
-   * capture process output.
-   */
-  logDisplayMode?(): LogDisplayMode;
-  /**
-   * Switches which captured log sources (stdout/stderr) the transcript
-   * shows. Captured output is buffered regardless of mode, so a change
-   * applies retroactively: hiding removes already-rendered log lines from
-   * the transcript and showing restores buffered ones at their original
-   * positions. Used by the `/loglevel` command.
-   */
-  setLogDisplayMode?(mode: LogDisplayMode): void;
-  /**
-   * Commits any delayed local dev build errors immediately before dispatching
-   * a user prompt. Renderers without process-log capture ignore it.
-   */
-  flushDelayedDevBuildErrors?(): void;
-  /**
-   * Sets the workspace-scoped Vercel segment of the persistent bottom
-   * status line. Pushed by the runner at startup and after Vercel-related
-   * setup outcomes. Renderers without a status line ignore it.
-   */
-  setVercelStatus?(status: VercelStatusSnapshot): void;
-  /** Sets the remote deployment badge and its current connection/authentication state. */
-  setRemoteConnectionStatus?(status: RemoteConnectionSnapshot): void;
-  /**
-   * Clears the rendered transcript and resets per-conversation display
-   * state, leaving the UI interactive on a fresh screen. Used by the
-   * `/new` command to start a new session with a clean slate.
-   */
-  reset?(): void;
-  /**
-   * Tears down interactive mode and restores the terminal when the runner's
-   * lifecycle ends.
-   */
-  shutdown?(): void;
-  requestInterrupt?(): void;
-  exitRequested?(): boolean;
-};
-
 export interface PromptCommandHandlerContext {
-  readonly renderer: AgentTUIRenderer;
+  readonly setupFlow: SetupFlowRenderer;
   readonly title: string;
   /** Provider entry authorized by confirmed boot-time model-access evidence. */
   readonly initialModelStep?: "provider";
@@ -331,16 +201,12 @@ export interface PromptCommandHandler {
   ): Promise<PromptCommandOutcome | undefined>;
 }
 
-type TuiStartup = {
-  finish(): { draft: string; queuedPrompt: string | undefined };
-};
-
 export type EveTUIRunnerOptions = TuiDisplayOptions & {
   /** Production TUI probe injected by the launcher; omitted in hermetic runners. */
   probeMcpConnection?: McpConnectionProbe;
   /** Configured client for the conversation's sessions and their subagent streams. */
   client: Client;
-  renderer?: AgentTUIRenderer;
+  renderer?: TerminalRenderer;
   screen?: TerminalOutput;
   userInput?: TerminalInput;
   /**
@@ -398,8 +264,6 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   /** Parent-owned diagnostics recorder; omitted for remote and test renderers. */
   diagnostics?: DevDiagnostics;
   lifecycle?: CommandLifecycle;
-  /** Editing-only startup state retained until the final agent header is ready to paint. */
-  startup?: TuiStartup;
 };
 
 /** The attention-line issue for a Vercel auth state, or undefined when nothing's wrong. */
@@ -419,7 +283,7 @@ export class EveTUIRunner {
   /** Owns the conversation's sessions, root stream, turns, and subagent streams. */
   readonly #store: SessionStore;
   /** The terminal's presentation facts, folded from the store's events. */
-  readonly #renderer: AgentTUIRenderer;
+  readonly #renderer: TerminalRenderer;
   readonly #diagnostics?: DevDiagnostics;
   readonly #name: string;
   readonly #formatTransportError: (error: unknown) => string;
@@ -428,8 +292,6 @@ export class EveTUIRunner {
   readonly #appRoot?: string;
   /** Seeds the first prompt's editable buffer. */
   readonly #initialInput?: string;
-  readonly #startup?: TuiStartup;
-  #startupPrompt?: string;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
   readonly #onboard: boolean;
   #reportedFirstResponse = false;
@@ -473,7 +335,7 @@ export class EveTUIRunner {
   readonly #vercelStatus?: VercelStatusTracker;
   readonly #mcpConnectionStatus?: McpConnectionStatusTracker;
   #agentInfo?: AgentInfoResult;
-  /** Closes the composer when something else needs the keyboard. */
+  /** Stops waiting on the composer when something else needs the runner. */
   #inputController?: AbortController;
   /** Questions the user skipped; they stay open for the server to resolve. */
   readonly #dismissedInputs = new Set<string>();
@@ -506,7 +368,7 @@ export class EveTUIRunner {
     this.#store.setCallbacks({
       onEvent: (event) => this.#recordDiagnostics(event),
       onSessionChange: (session) => {
-        if (session !== undefined) this.#renderer.setSessionId?.(session.sessionId);
+        if (session !== undefined) this.#renderer.setSessionId(session.sessionId);
       },
       prepareSend: (input) => this.#prepareSend(input),
     });
@@ -514,7 +376,6 @@ export class EveTUIRunner {
     this.#withExclusiveTerminal = options.withExclusiveTerminal;
     this.#formatTransportError = options.formatTransportError ?? toErrorMessage;
     if (options.initialInput !== undefined) this.#initialInput = options.initialInput;
-    if (options.startup !== undefined) this.#startup = options.startup;
     this.#onboard = options.onboard === true;
     this.#onOnboardingStep = options.onOnboardingStep;
     this.#onOnboardingTerminal = options.onOnboardingTerminal;
@@ -522,7 +383,7 @@ export class EveTUIRunner {
       this.#appRoot = options.appRoot;
       const trackerOptions: VercelStatusTrackerOptions = {
         appRoot: options.appRoot,
-        onChange: (snapshot) => this.#renderer.setVercelStatus?.(snapshot),
+        onChange: (snapshot) => this.#renderer.setVercelStatus(snapshot),
       };
       if (options.detectProjectIdentity !== undefined) {
         trackerOptions.detectIdentity = options.detectProjectIdentity;
@@ -545,7 +406,7 @@ export class EveTUIRunner {
         client: this.#client,
         credentials: options.remote.credentials,
         target: options.remote.target,
-        onChange: (snapshot) => this.#renderer.setRemoteConnectionStatus?.(snapshot),
+        onChange: (snapshot) => this.#renderer.setRemoteConnectionStatus(snapshot),
         resolveOidcToken: options.remote.resolveOidcToken,
         resolveDeployment: options.remote.resolveDeployment,
       });
@@ -599,12 +460,6 @@ export class EveTUIRunner {
     if (!this.#onboard) await this.#renderSetupIssues(headerInfo);
   }
 
-  #finishStartup(): string | undefined {
-    const startup = this.#startup?.finish();
-    this.#startupPrompt = startup?.queuedPrompt;
-    return startup?.draft ?? this.#initialInput;
-  }
-
   #replaceAgentInfo(info: AgentInfoResult | undefined): AgentInfoResult | undefined {
     const headerInfo =
       this.#appRoot === undefined ? info : normalizeLocalModelEndpoint(info, process.env);
@@ -618,7 +473,7 @@ export class EveTUIRunner {
       localDevelopment: this.#appRoot !== undefined,
     };
     if (headerInfo !== undefined) header.info = headerInfo;
-    this.#renderer.renderAgentHeader?.(header);
+    this.#renderer.renderAgentHeader(header);
     return headerInfo;
   }
 
@@ -629,7 +484,7 @@ export class EveTUIRunner {
   }
 
   async run() {
-    const onStop = () => this.#renderer.requestInterrupt?.();
+    const onStop = () => this.#renderer.requestInterrupt();
     if (this.#lifecycle?.signal.aborted === true) onStop();
     else this.#lifecycle?.signal.addEventListener("abort", onStop, { once: true });
     const unsubscribe = this.#store.subscribe(() => this.#renderSnapshot());
@@ -646,7 +501,7 @@ export class EveTUIRunner {
       unsubscribe();
       detachSessionStore(this.#store);
       // Restore captured stdout/stderr before a fatal error reaches the CLI.
-      this.#renderer.shutdown?.();
+      this.#renderer.shutdown();
       // Drops any in-flight link probe so a late resolution cannot paint
       // into a torn-down terminal.
       this.#vercelStatus?.dispose();
@@ -657,8 +512,8 @@ export class EveTUIRunner {
 
   async #run() {
     const title = this.#name;
-    let prompt: string | undefined;
-    this.#renderer.setStartupPhase?.("starting");
+    this.#renderer.start({ title, initialDraft: this.#initialInput });
+    this.#renderer.setStartupPhase("starting");
     await this.#loadInitialAgentInfo();
     // Fire-and-forget: the link identity is network-bound to resolve, and the
     // first prompt must not wait on it. The segment appears when it lands.
@@ -670,10 +525,9 @@ export class EveTUIRunner {
         (this.#agentInfo?.agent.model.endpoint?.kind === "gateway" &&
           !this.#agentInfo.agent.model.endpoint.connected)) &&
       this.#appRoot !== undefined &&
-      this.#promptCommandHandler !== undefined &&
-      this.#renderer.setupFlow !== undefined;
+      this.#promptCommandHandler !== undefined;
     let startupOutcome: PromptCommandOutcome | undefined;
-    if (this.#remoteConnection !== undefined && this.#renderer.setupFlow !== undefined) {
+    if (this.#remoteConnection !== undefined) {
       const access = await prepareRemoteTuiAccess({
         connection: this.#remoteConnection,
         renderer: this.#renderer.setupFlow,
@@ -700,35 +554,29 @@ export class EveTUIRunner {
       startupOutcome = { message: remote.warning };
     }
     if (initialAgentOnboarding) {
-      this.#renderer.setStartupPhase?.("connecting");
+      this.#renderer.setStartupPhase("connecting");
       startupOutcome = await this.#runInitialAgentOnboarding(title);
     }
 
-    let initialDraft = this.#finishStartup();
-    if (startupOutcome?.cancelled || startupOutcome?.failed) {
-      initialDraft = [this.#startupPrompt, initialDraft].filter(Boolean).join("\n\n") || undefined;
-    } else {
-      prompt = this.#startupPrompt;
-    }
     this.#startupActive = false;
     this.#replaceAgentInfo(this.#agentInfo);
     this.#paintSetupAttention();
-    this.#renderer.setStartupPhase?.(undefined);
+    this.#renderer.setStartupPhase(undefined);
     if (!initialAgentOnboarding || startupOutcome?.cancelled || startupOutcome?.failed) {
       if (startupOutcome?.message !== undefined)
         this.#finishCommand({ kind: "result", message: startupOutcome.message });
     }
 
-    // One loop for everything that takes the keyboard. The store streams the
-    // session throughout, so the composer stays open while work runs.
-    while (this.#lifecycle?.signal.aborted !== true && this.#renderer.exitRequested?.() !== true) {
+    // One loop for everything the runner does. The store streams the session
+    // throughout, and the composer stays open on screen the whole time.
+    while (this.#lifecycle?.signal.aborted !== true && !this.#renderer.exitRequested()) {
       if (this.#sessionFailed()) {
         this.#replaceSession();
         continue;
       }
       // Answering first lets the agent continue while setup owns the terminal.
       if (this.#answerableInputs().length > 0) {
-        await this.#answerInputs(title);
+        await this.#answerInputs();
         continue;
       }
       // Setup takes the terminal, so it waits for the session to settle.
@@ -744,40 +592,29 @@ export class EveTUIRunner {
         }
         continue;
       }
-      if (prompt === undefined) {
-        const input = await this.#readInput({ title, initialDraft });
-        initialDraft = undefined;
-        if (input === undefined) continue;
-        if (input.type === "cancel") {
-          this.#cancelTurn();
-          continue;
-        }
-        if (input.type === "interrupt") {
-          this.#replaceSession(
-            "Stopped following the turn and started a new session. Earlier context was cleared; the interrupted turn may still be running on the server.",
-          );
-          continue;
-        }
-        prompt = input.text;
-      }
-      const text = prompt;
-      prompt = undefined;
-      const command = parsePromptCommand(text);
-      if (command === null) {
-        this.#submitMessage(text);
+      const input = await this.#nextInput();
+      if (input === undefined) continue;
+      if (input.type === "cancel") {
+        this.#cancelTurn();
         continue;
       }
-      const outcome = await this.#runCommand(command, title);
-      if (outcome === "exit") return;
-      if (outcome !== undefined) initialDraft = outcome.draft;
+      if (input.type === "interrupt") {
+        this.#replaceSession(
+          "Stopped following the turn and started a new session. Earlier context was cleared; the interrupted turn may still be running on the server.",
+        );
+        continue;
+      }
+      const command = parsePromptCommand(input.text);
+      if (command === null) {
+        this.#submitMessage(input.text);
+        continue;
+      }
+      if ((await this.#runCommand(command, title)) === "exit") return;
     }
   }
 
-  /** Runs one slash command; returns `"exit"` or a draft for the next prompt. */
-  async #runCommand(
-    command: PromptCommand,
-    title: string,
-  ): Promise<"exit" | { draft: string } | undefined> {
+  /** Runs one slash command; returns `"exit"` when the TUI should leave. */
+  async #runCommand(command: PromptCommand, title: string): Promise<"exit" | undefined> {
     switch (command.type) {
       case "exit":
         this.#finishCommand({ kind: "dismiss" });
@@ -814,15 +651,9 @@ export class EveTUIRunner {
       // Help renders locally; unlike extension commands it must work even
       // without a prompt-command handler (e.g. remote --url sessions).
       case "help": {
-        if (this.#renderer.choosePromptCommand === undefined) {
-          this.#finishCommand({
-            kind: "result",
-            message: formatPromptCommandHelp(this.#availablePromptCommands),
-          });
-          return;
-        }
         const selected = await this.#renderer.choosePromptCommand(this.#availablePromptCommands);
-        return selected === undefined ? undefined : { draft: selected };
+        if (selected !== undefined) this.#renderer.setDraft(selected);
+        return;
       }
       case "info":
         await this.#showApplicationInfo();
@@ -831,11 +662,10 @@ export class EveTUIRunner {
       // log filter, so it works without a prompt-command handler.
       case "loglevel": {
         const outcome = this.#applyLogLevelCommand(command.argument);
-        const error =
-          outcome.startsWith("/loglevel is not available") ||
-          outcome.startsWith("Unknown log level");
         this.#finishCommand(
-          error ? { kind: "result", message: outcome } : { kind: "result", summary: outcome },
+          outcome.startsWith("Unknown log level")
+            ? { kind: "result", message: outcome }
+            : { kind: "result", summary: outcome },
         );
         return;
       }
@@ -885,14 +715,13 @@ export class EveTUIRunner {
         onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
       });
     }
-    if (input.message !== undefined) this.#renderer.flushDelayedDevBuildErrors?.();
     return input;
   }
 
   #renderSnapshot(): void {
     const snapshot = this.#store.snapshot;
     const data = tuiSessionData(snapshot);
-    this.#renderer.renderConversation?.(
+    this.#renderer.renderConversation(
       conversationView(snapshot, data, this.#appRoot === undefined ? undefined : localFailureHint),
     );
     this.#reportSessionError(snapshot.error, data.sessionFailed);
@@ -930,7 +759,7 @@ export class EveTUIRunner {
       !this.#cancelRequested &&
       failure(conversation.view, turnId) === undefined
     )
-      this.#renderer.restoreDraft?.(sent.text);
+      this.#renderer.restoreDraft(sent.text);
   }
 
   /** Session failures render from the conversation; other errors get one block each. */
@@ -941,13 +770,13 @@ export class EveTUIRunner {
     // A stranded session is a property of that session, not of the connection.
     if (!this.#renderStrandedSession(error)) {
       this.#remoteConnection?.reportFailure(error);
-      this.#renderer.renderError?.("Error", this.#formatTransportError(error));
+      this.#renderer.renderError("Error", this.#formatTransportError(error));
     }
   }
 
   #renderSendError(title: string, error: unknown): void {
     if (this.#renderStrandedSession(error)) return;
-    this.#renderer.renderError?.(title, this.#formatTransportError(error));
+    this.#renderer.renderError(title, this.#formatTransportError(error));
   }
 
   #strandedSessionNotice(error: unknown): string | undefined {
@@ -961,7 +790,7 @@ export class EveTUIRunner {
   #renderStrandedSession(error: unknown): boolean {
     const notice = this.#strandedSessionNotice(error);
     if (notice === undefined) return false;
-    this.#renderer.renderError?.("Session stranded", notice);
+    this.#renderer.renderError("Session stranded", notice);
     return true;
   }
 
@@ -992,13 +821,13 @@ export class EveTUIRunner {
    * Prompts for open requests one at a time and sends each answer as it is given, so an agent
    * waiting on one answer resumes without waiting for the rest.
    */
-  async #answerInputs(title: string): Promise<void> {
+  async #answerInputs(): Promise<void> {
     for (let answered = 0; ; answered += 1) {
       const inputs = this.#answerableInputs();
       const input = inputs[0];
       if (input === undefined) return;
       const context = inputContext(input, answered + 1, answered + inputs.length);
-      const response = await this.#readAnswer(input, context, title);
+      const response = await this.#readAnswer(input, context);
       if (response === undefined) {
         // A skipped question stays open; the server decides whether the
         // user's next message answers, dismisses, or leaves it.
@@ -1017,31 +846,18 @@ export class EveTUIRunner {
   async #readAnswer(
     request: Interaction,
     context: AgentTUIInputContext | undefined,
-    title: string,
   ): Promise<Answer | undefined> {
     if (request.request.kind === "approval") {
-      if (!this.#renderer.readToolApproval) {
-        throw new Error(
-          "Tool approval was requested, but the renderer does not support tool approval input.",
-        );
-      }
       const response = await this.#renderer.readToolApproval(
         toAgentTUIToolApprovalRequest(request, context),
-        { title },
       );
       return {
         interactionId: request.interactionId,
         optionId: response.approved ? APPROVE_OPTION_ID : DENY_OPTION_ID,
       };
     }
-    if (!this.#renderer.readInputQuestion) {
-      throw new Error(
-        "An interactive question was requested, but the renderer does not support input questions.",
-      );
-    }
     const response = await this.#renderer.readInputQuestion(
       toAgentTUIInputQuestion(request, context),
-      { title },
     );
     if (response === undefined) return undefined;
     return {
@@ -1057,14 +873,8 @@ export class EveTUIRunner {
    * session.
    */
   #replaceSession(notice?: string): void {
-    if (this.#renderer.renderSessionBoundary !== undefined) {
-      this.#renderer.renderSessionBoundary();
-    } else if (notice === undefined) {
-      this.#renderer.renderNotice?.(
-        "Session ended — started a new session. Earlier context was cleared.",
-      );
-    }
-    if (notice !== undefined) this.#renderer.renderNotice?.(notice);
+    this.#renderer.renderSessionBoundary();
+    if (notice !== undefined) this.#renderer.renderNotice(notice);
     this.#resetConversation();
   }
 
@@ -1086,7 +896,7 @@ export class EveTUIRunner {
   #cancelTurn(): void {
     this.#cancelRequested = true;
     void this.#store.cancel().catch((error: unknown) => {
-      this.#renderer.renderNotice?.(`Couldn't cancel the turn: ${toErrorMessage(error)}`);
+      this.#renderer.renderNotice(`Couldn't cancel the turn: ${toErrorMessage(error)}`);
     });
   }
 
@@ -1127,33 +937,25 @@ export class EveTUIRunner {
       return;
     }
     this.#clearRunnerState();
-    this.#renderer.reset?.();
+    this.#renderer.reset();
     this.#finishCommand({ kind: "dismiss" });
   }
 
   /**
-   * Reads the composer, closing it when a request or setup needs the keyboard.
-   * Resolves `undefined` only for that runner-owned close; a renderer that
-   * ends input on its own ends the session.
+   * Waits for the next composer action, giving up when a request, a failed
+   * session, or setup needs the runner first. The composer keeps its draft.
    */
-  async #readInput(options: AgentTUISessionOptions): Promise<AgentTUIInput | undefined> {
-    if (!this.#renderer.readInput) {
-      throw new Error("The renderer does not support prompt input.");
-    }
+  async #nextInput(): Promise<AgentTUIInput | undefined> {
     const controller = new AbortController();
     this.#inputController = controller;
     try {
-      const input = await this.#withIdleRefresh(
-        this.#renderer.readInput({ ...options, signal: controller.signal }),
-      );
-      if (input === undefined && !controller.signal.aborted) throw interruptedError();
-      return input;
+      return await this.#withIdleRefresh(this.#renderer.nextInput(controller.signal));
     } finally {
       if (this.#inputController === controller) this.#inputController = undefined;
     }
   }
 
-  /** Polls local dev artifacts while the composer is open, so HMR stays current. */
+  /** Polls local dev artifacts while the runner waits on the composer, so HMR stays current. */
   async #withIdleRefresh<T>(prompt: Promise<T>): Promise<T> {
     const runtimeArtifacts = this.#runtimeArtifacts;
     if (runtimeArtifacts === undefined) {
@@ -1242,7 +1044,7 @@ export class EveTUIRunner {
   }
 
   async #openRegistrySetup(address: string): Promise<void> {
-    this.#renderer.renderCommandInvocation?.(`/add ${address}`);
+    this.#renderer.renderCommandInvocation(`/add ${address}`);
     await this.#executeExtensionCommand(
       { type: "extension", name: "add", argument: address },
       "Add to your agent",
@@ -1258,7 +1060,6 @@ export class EveTUIRunner {
     };
     if (info !== undefined) context.info = info;
     this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
-    if (this.#renderer.renderSetupWarning === undefined) return;
     this.#paintSetupAttention();
     // Login state is a `vercel whoami` round-trip — too costly for the
     // cheap-and-local boot detections above — so it rides its own probe off
@@ -1270,11 +1071,9 @@ export class EveTUIRunner {
   #paintSetupAttention(): void {
     if (this.#startupActive) return;
     const issues = orderedSetupIssues(this.#bootIssues, this.#authIssue);
-    if (issues.length > 0) {
-      this.#renderer.renderSetupWarning?.(formatSetupIssuesLine(issues));
-    } else {
-      this.#renderer.clearSetupWarning?.();
-    }
+    this.#renderer.renderSetupWarning(
+      issues.length > 0 ? formatSetupIssuesLine(issues) : undefined,
+    );
   }
 
   /** Checks Vercel auth after boot without delaying the first prompt. */
@@ -1301,7 +1100,6 @@ export class EveTUIRunner {
   async #refreshSetupAttention(info: AgentInfoResult | undefined): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
-    if (this.#renderer.renderSetupWarning === undefined) return;
     const revision = ++this.#setupAttentionRevision;
     const context: BootDetectionContext = { appRoot, env: process.env };
     if (info !== undefined) context.info = info;
@@ -1322,14 +1120,7 @@ export class EveTUIRunner {
   }
 
   #finishCommand(outcome: CommandPresentation): void {
-    if (this.#renderer.finishCommand !== undefined) {
-      this.#renderer.finishCommand(outcome);
-      return;
-    }
-    if (outcome.kind === "result") {
-      const notice = [outcome.summary, outcome.message].filter(Boolean).join("\n");
-      if (notice !== "") this.#renderer.renderNotice?.(notice);
-    }
+    this.#renderer.finishCommand(outcome);
   }
 
   async #handleExtensionCommand(
@@ -1343,7 +1134,7 @@ export class EveTUIRunner {
     const endpoint = this.#agentInfo?.agent.model.endpoint;
     const baseContext: PromptCommandHandlerContext = {
       ...input,
-      renderer: this.#renderer,
+      setupFlow: this.#renderer.setupFlow,
       settleOutcome: (outcome) => this.#settleCommandOutcome(outcome),
       chatGptAccountLabel:
         endpoint?.kind === "chatgpt" && endpoint.state === "ready"
@@ -1378,8 +1169,8 @@ export class EveTUIRunner {
     const refreshTimer =
       outcome.effect.kind === "model-access-changed" && outcome.effect.reload
         ? setTimeout(() => {
-            if (this.#startupActive) this.#renderer.setStartupPhase?.("updating");
-            this.#renderer.setupFlow?.setStatus("Loading selected model…");
+            if (this.#startupActive) this.#renderer.setStartupPhase("updating");
+            this.#renderer.setupFlow.setStatus("Loading selected model…");
           }, 150)
         : undefined;
     try {
@@ -1446,7 +1237,7 @@ export class EveTUIRunner {
     if (connection?.state !== "ready" || connection.info === this.#agentInfo) return;
     this.#agentInfo = connection.info;
     if (this.#serverUrl === undefined) return;
-    this.#renderer.renderAgentHeader?.({
+    this.#renderer.renderAgentHeader({
       info: connection.info,
       name: this.#name,
       serverUrl: this.#serverUrl,
@@ -1459,7 +1250,7 @@ export class EveTUIRunner {
    * without a local app root) get a one-line notice instead.
    */
   async #openTraceViewer(argument: string): Promise<void> {
-    if (this.#appRoot === undefined || this.#renderer.traceViewer === undefined) {
+    if (this.#appRoot === undefined) {
       this.#finishCommand({
         kind: "result",
         message: "/traces is only available in local dev sessions.",
@@ -1491,8 +1282,7 @@ export class EveTUIRunner {
     }
     try {
       const info = renderApplicationInfo(await this.#inspectApplication(appRoot));
-      if (this.#renderer.showInfoPanel !== undefined) await this.#renderer.showInfoPanel(info);
-      else this.#finishCommand({ kind: "result", message: info });
+      await this.#renderer.showInfoPanel(info);
     } catch (error) {
       this.#finishCommand({
         kind: "result",
@@ -1502,17 +1292,13 @@ export class EveTUIRunner {
   }
 
   /**
-   * Applies `/loglevel [none|error|warn|debug|all]` against the renderer's buffered
-   * log filter and returns the one-line outcome. A bare `/loglevel` reports
-   * the current mode instead of changing it.
+   * Applies `/loglevel [none|error|warn|debug|all]` to output from now on and
+   * returns the one-line outcome. A bare `/loglevel` reports the current mode.
    */
   #applyLogLevelCommand(argument: string): string {
     const renderer = this.#renderer;
-    if (renderer.logDisplayMode === undefined || renderer.setLogDisplayMode === undefined) {
-      return "/loglevel is not available in this session.";
-    }
     if (argument === "") {
-      return `Logs: ${renderer.logDisplayMode()}. Use /loglevel none|error|warn|debug|all — logs stay buffered, so switching also hides or restores past lines.`;
+      return `Logs: ${renderer.logDisplayMode()}. Use /loglevel none|error|warn|debug|all to choose what new output shows.`;
     }
     const mode = parseLogDisplayMode(argument);
     if (mode === undefined) {
@@ -1524,7 +1310,7 @@ export class EveTUIRunner {
     renderer.setLogDisplayMode(mode);
     switch (mode) {
       case "none":
-        return "Logs hidden. Output stays buffered — /loglevel all restores it.";
+        return "Logs hidden. Every line still reaches the diagnostics log.";
       case "error":
         return "Showing errors.";
       case "warn":
@@ -1559,14 +1345,11 @@ export class EveTUIRunner {
     void this.#refreshAgentInfo();
   }
 
-  async #refreshAgentInfo(notify = false): Promise<void> {
-    const previousInfo = this.#agentInfo;
+  async #refreshAgentInfo(): Promise<void> {
     const revision = ++this.#agentInfoRevision;
     const nextInfo = await this.#readAgentInfo();
     if (this.#disposed || revision !== this.#agentInfoRevision || nextInfo === undefined) return;
     this.#replaceAgentInfo(nextInfo);
-    if (notify && !this.#renderer.renderAgentHeader)
-      this.#renderer.renderNotice?.(formatAgentUpdateNotice(previousInfo, nextInfo));
     void this.#refreshSetupAttention(this.#agentInfo);
   }
 
@@ -1579,7 +1362,7 @@ export class EveTUIRunner {
   }
 
   #handleRuntimeArtifactsChanged(): void {
-    void this.#refreshAgentInfo(true);
+    void this.#refreshAgentInfo();
   }
 
   /** Agents' own tool failures reach the diagnostics log whatever the subagent display mode. */
@@ -1666,43 +1449,20 @@ export class EveTUIRunner {
   }
 }
 
-function createRenderer(options: EveTUIRunnerOptions): AgentTUIRenderer {
-  if (options.renderer) {
-    return options.renderer;
-  }
-
-  // `TerminalRenderer` defaults every omitted field, so explicit `undefined`s
-  // are equivalent to leaving them out. Omitted input/output fall back to the
-  // real process stdio.
-  return new TerminalRenderer({
-    tools: options.tools,
-    reasoning: options.reasoning,
-    subagents: options.subagents,
-    connectionAuth: options.connectionAuth,
-    assistantResponseStats: options.assistantResponseStats,
-    contextSize: options.contextSize,
-    logs: options.logs,
-    availablePromptCommands: options.availablePromptCommands,
-    argumentSuggestions: options.argumentSuggestions,
-    input: options.userInput,
-    output: options.screen,
-    diagnostics: options.diagnostics,
-    onExitRequest: options.lifecycle?.requestStop,
-  });
-}
-
-function formatAgentUpdateNotice(
-  previousInfo: AgentInfoResult | undefined,
-  nextInfo: AgentInfoResult | undefined,
-): string {
-  const previousModel = previousInfo?.agent.model.id;
-  const nextModel = nextInfo?.agent.model.id;
-
-  if (previousModel !== undefined && nextModel !== undefined && previousModel !== nextModel) {
-    return `Agent updated: Model ${previousModel} -> ${nextModel}`;
-  }
-
-  return "Agent updated.";
+function createRenderer(options: EveTUIRunnerOptions): TerminalRenderer {
+  return (
+    options.renderer ??
+    new TerminalRenderer({
+      verbose: options.verbose,
+      logs: options.logs,
+      availablePromptCommands: options.availablePromptCommands,
+      argumentSuggestions: options.argumentSuggestions,
+      input: options.userInput,
+      output: options.screen,
+      diagnostics: options.diagnostics,
+      onExitRequest: options.lifecycle?.requestStop,
+    })
+  );
 }
 
 /** Tool results in the conversation that hand a registry install to the terminal. */

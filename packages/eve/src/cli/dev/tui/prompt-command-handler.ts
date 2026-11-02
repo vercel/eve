@@ -126,10 +126,7 @@ export function createPromptCommandHandler(
         };
       }
 
-      const flow = context.renderer.setupFlow;
-      if (flow === undefined) {
-        return { message: `/${command.name} is not supported by this renderer.` };
-      }
+      const flow = context.setupFlow;
 
       let setupCommands: typeof import("./setup-commands.js");
       try {

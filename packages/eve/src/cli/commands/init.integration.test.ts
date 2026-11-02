@@ -221,16 +221,18 @@ describe("runInitCommand", () => {
       vi.stubGlobal("fetch", server.fetch);
       const handle = vi.fn(async () => {
         if (!connected) {
+          renderer.setupFlow.begin("");
           const provider = await renderer.setupFlow.readSelect({
             kind: "single",
             message: "Connect a model",
             options: [{ label: "Test connection", value: "test" }],
           });
+          renderer.setupFlow.end();
           expect(provider).toEqual(["test"]);
         }
         return { message: connected ? "Using existing connection." : "Model connected." };
       });
-      const readInput = vi.spyOn(renderer, "readInput");
+      const nextInput = vi.spyOn(renderer, "nextInput");
       deps.spawnPackageManager.mockImplementation(async (_manager, projectPath, args) => {
         expect(args).toContain("--onboard");
         const progress = startCliLiveRow(output, { output: screen, elapsed: true });
@@ -260,7 +262,7 @@ describe("runInitCommand", () => {
           expect(screen.snapshot()).not.toContain("Starting your agent");
           input.enter();
         }
-        await vi.waitFor(() => expect(readInput).toHaveBeenCalled());
+        await vi.waitFor(() => expect(nextInput).toHaveBeenCalled());
         expect(screen.snapshot()).not.toContain("/login");
         expect(screen.rawOutput()).not.toContain("Using existing connection.");
         expect(screen.rawOutput()).not.toContain("Model connected.");

@@ -315,30 +315,12 @@ describe("renderBlockLines", () => {
     ]);
   });
 
-  it("renders steered and queued messages without extra arrow rows", () => {
-    const steered = render({
-      kind: "user",
-      body: "need to be\n\nsuper accurate",
-      promptOrigin: "steer",
-    });
-    expect(steered).toEqual(["│ need to be", "│ ", "│ super accurate"]);
-
-    const queued = render({ kind: "user", body: "later then", promptOrigin: "queue" });
-    expect(queued).toEqual(["│ later then"]);
-
-    // An ordinary typed prompt keeps its bare bar.
-    expect(render({ kind: "user", body: "hello" })).toEqual(["│ hello"]);
-  });
-
-  it("colors the steered message gutter yellow", () => {
-    const colorTheme = createTheme({ color: true, unicode: true });
-    const rows = renderBlockLines(
-      { kind: "user", body: "go", promptOrigin: "steer" },
-      80,
-      colorTheme,
-      { activityPulse: "▪" },
-    );
-    expect(rows).toEqual(["\x1b[33m│\x1b[39m \x1b[1mgo\x1b[22m"]);
+  it("renders a multi-line message without extra arrow rows", () => {
+    expect(render({ kind: "user", body: "need to be\n\nsuper accurate" })).toEqual([
+      "│ need to be",
+      "│ ",
+      "│ super accurate",
+    ]);
   });
 
   it("bolds a sent user message behind an uncolored gutter", () => {
@@ -432,16 +414,6 @@ describe("renderBlockLines", () => {
       "│   sequence: 0",
       "│ }",
     ]);
-  });
-
-  it("renders a coalesced run's elided count under the section header", () => {
-    const lines = render({
-      kind: "log",
-      title: "stderr",
-      body: "newest line",
-      elided: 52,
-    });
-    expect(lines).toEqual(["○ stderr", "│ … (52 more)", "│ newest line"]);
   });
 
   it("renders a one-line log under its source header", () => {

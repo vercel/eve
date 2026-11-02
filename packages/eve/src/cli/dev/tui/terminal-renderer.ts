@@ -1,75 +1,17 @@
-import { StringDecoder } from "node:string_decoder";
-import type { DevDiagnostics } from "../diagnostics.js";
-
-import type {
-  AgentTUIInput,
-  AgentTUIInputContext,
-  AgentTUIInputOption,
-  AgentTUIInputQuestion,
-  AgentTUIInputQuestionResponse,
-  AgentTUIRenderer,
-  AgentTUISessionOptions,
-  AgentTUIToolApprovalRequest,
-  AgentTUIToolApprovalResponse,
-  CommandPresentation,
-} from "./runner.js";
-import type { AgentTUIConversationView, TokenUsage } from "./conversation-view.js";
-import { ConversationTranscript, turnActivity, type TranscriptOptions } from "./transcript.js";
-import { renderTaskPanelRows } from "./task-activity.js";
-import { interruptedError } from "./errors.js";
+import { eveVersionTag } from "#cli/banner.js";
 import {
-  argumentTypeaheadCompletion,
-  argumentTypeaheadFor,
-  argumentTypeaheadLoadingLabel,
-  argumentTypeaheadQuery,
-  moveArgumentTypeaheadSelection,
-  renderArgumentSuggestions,
-  selectedArgumentSuggestion,
-  type ArgumentTypeaheadState,
-  type PromptArgumentSuggestion,
-} from "./argument-typeahead.js";
+  isProgressPulseVisible,
+  PROGRESS_PULSE_ASCII_GLYPH,
+  PROGRESS_PULSE_GLYPH,
+} from "#cli/ui/progress-pulse.js";
 import {
-  dismissTypeahead,
-  inlineCommandHint,
-  isTypeaheadOpen,
-  moveTypeaheadSelection,
-  renderCommandSuggestions,
-  selectedTypeaheadCommand,
-  typeaheadCompletion,
-  typeaheadFor,
-  type CommandTypeaheadState,
-} from "./command-typeahead.js";
-import {
-  isPromptControlCommand,
-  parsePromptCommand,
-  promptCommandSpec,
-  PROMPT_COMMANDS,
-  type ArgumentTypeaheadCommand,
-  type PromptCommandSpec,
-} from "./prompt-commands.js";
-import {
-  enterBadge,
-  flowMessageRows,
-  renderAcknowledgeQuestion,
-  renderSelectQuestion,
-  renderTextQuestion,
-  type FlowPanelContent,
-  type FlowPanelIndicator,
-  type FlowPanelLine,
-  type FlowPanelStatus,
-  type SetupPanelOption,
-  type SetupSelectPanelState,
-} from "./setup-panel.js";
-import { renderFlowDrawer, renderTransientDrawer } from "./flow-drawer.js";
-import type {
-  SetupEditableSelectResult,
-  SetupFlowInterrupt,
-  SetupFlowRenderer,
-  SetupSelectRequest,
-  SetupSelectResult,
-} from "./setup-flow.js";
-import type { PlannerNavigation, SelectNotice } from "#setup/prompter.js";
+  clipVisible,
+  stripAnsi,
+  stripTerminalControls,
+  wrapVisibleLine,
+} from "#cli/ui/terminal-text.js";
 import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
+import type { PlannerNavigation } from "#setup/prompter.js";
 import {
   initialSelectState,
   orderedSelection,
@@ -78,194 +20,114 @@ import {
   selectValueAtCursor,
   type SelectState,
 } from "#setup/cli/select-state.js";
-import type {
-  AssistantResponseStatsMode,
-  LogDisplayMode,
-  SubagentDisplayMode,
-  TerminalPartDisplayMode,
-} from "./types.js";
-import type { AgentInfoResult } from "#client/index.js";
-import { initialPromptPlaceholder } from "./prompt-placeholder.js";
-import type { LogRecord } from "#internal/logging.js";
-import {
-  parseDevRebuildLogLine,
-  type DevRebuildLogUpdate,
-} from "#internal/nitro/host/dev-watcher-log.js";
+import { readGatewayServiceTier } from "#shared/gateway-service-tier.js";
 import { toErrorMessage } from "#shared/errors.js";
+
+import type { DevDiagnostics } from "../diagnostics.js";
+import { buildAgentHeader } from "./agent-header.js";
+import type { PromptArgumentSuggestion } from "./argument-typeahead.js";
 import {
-  type Block,
-  type DisplayBlock,
-  type BlockKind,
   renderAttentionRows,
   renderBlockLines,
+  type Block,
+  type BlockKind,
+  type DisplayBlock,
 } from "./blocks.js";
-import { formatDevRebuildStatus, summarizeChangedFiles } from "./dev-rebuild-status.js";
+import { copyTextToClipboard } from "./clipboard.js";
+import {
+  moveTypeaheadSelection,
+  renderCommandSuggestions,
+  selectedTypeaheadCommand,
+  typeaheadCompletion,
+  typeaheadFor,
+} from "./command-typeahead.js";
+import { Composer, promptInputRows } from "./composer.js";
+import type { AgentTUIConversationView, TokenUsage } from "./conversation-view.js";
+import { interruptedError } from "./errors.js";
+import { renderFlowDrawer, renderTransientDrawer } from "./flow-drawer.js";
+import {
+  applyLineEditorKey,
+  EMPTY_LINE,
+  KillRing,
+  lineOf,
+  movePromptLine,
+  type LineState,
+} from "./line-editor.js";
+import { nextLogDisplayMode, type LogDisplayMode } from "./log-display-mode.js";
+import { ingestLog, type BuildPhase } from "./logs.js";
+import { detectMarkdownRendering } from "./markdown.js";
+import { initialPromptPlaceholder } from "./prompt-placeholder.js";
+import {
+  PROMPT_COMMANDS,
+  type ArgumentTypeaheadCommand,
+  type PromptCommandSpec,
+} from "./prompt-commands.js";
 import {
   initialProviderPickerState,
   transitionProviderPicker,
   type ProviderPickerEvent,
 } from "./provider-picker.js";
-import { buildAgentHeader } from "./agent-header.js";
-import { detectMarkdownRendering } from "./markdown.js";
-import {
-  EMPTY_LINE,
-  KillRing,
-  PromptHistory,
-  applyLineEditorKey,
-  deleteForward,
-  layoutPromptInput,
-  lineOf,
-  movePromptLine,
-  visibleLine,
-  type LineState,
-} from "./line-editor.js";
-import { LiveRegion } from "#cli/ui/live-region.js";
-import { AltScreen } from "#cli/ui/alt-screen.js";
-import { copyTextToClipboard } from "./clipboard.js";
-import type { TraceViewerOpenOptions, TraceViewerRenderer } from "./traces/trace-viewer-session.js";
-import { TraceViewerSession } from "./traces/trace-viewer-session.js";
-import { buildStatusLine, type DevBuildStatus } from "./status-line.js";
-import { isLogVisible, nextLogDisplayMode } from "./log-display-mode.js";
-import { setConsoleRecordSubscriber, type ConsoleRecord } from "../console-records.js";
-import type { LogLevel } from "#internal/logging.js";
-import { format } from "node:util";
-import { createTheme, detectUnicode, type Theme } from "./theme.js";
-import {
-  clipVisible,
-  renderInputText,
-  renderInputWithBlockCursor,
-  stripAnsi,
-  wrapVisibleLine,
-  stripTerminalControls,
-} from "#cli/ui/terminal-text.js";
-import type { VercelStatusSnapshot } from "./vercel-status.js";
-import type { RemoteConnectionSnapshot } from "./remote-connection.js";
-import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
 import {
   fitQuestionPanel,
   inputContextLabel,
   renderQuestionPanel,
   renderQuestionPrompt,
 } from "./question-panel.js";
-import { TurnClock } from "./turn-clock.js";
-import { MessageQueue, renderMessageQueueRows } from "./message-queue.js";
-import { formatStoredDiagnostic, presentDiagnostic } from "./diagnostic-presentation.js";
+import type { RemoteConnectionSnapshot } from "./remote-connection.js";
+import type {
+  AgentTUIAgentHeader,
+  AgentTUIInput,
+  AgentTUIInputContext,
+  AgentTUIInputOption,
+  AgentTUIInputQuestion,
+  AgentTUIInputQuestionResponse,
+  AgentTUIToolApprovalRequest,
+  AgentTUIToolApprovalResponse,
+  CommandPresentation,
+} from "./runner.js";
+import {
+  enterBadge,
+  renderAcknowledgeQuestion,
+  renderSelectQuestion,
+  renderTextQuestion,
+  type FlowPanelContent,
+  type FlowPanelLine,
+  type FlowPanelStatus,
+  type SetupPanelOption,
+  type SetupSelectPanelState,
+} from "./setup-panel.js";
+import type {
+  SetupEditableSelectResult,
+  SetupFlowInterrupt,
+  SetupFlowRenderer,
+  SetupSelectRequest,
+  SetupSelectResult,
+} from "./setup-flow.js";
 import { reduceSetupSelectInput, setupSelectionIntent } from "./setup-selection-input.js";
-import {
-  isProgressPulseVisible,
-  PROGRESS_PULSE_ASCII_GLYPH,
-  PROGRESS_PULSE_GLYPH,
-} from "#cli/ui/progress-pulse.js";
-import { eveVersionTag } from "#cli/banner.js";
-import { readGatewayServiceTier } from "#shared/gateway-service-tier.js";
-import {
-  formatAssistantResponseStats,
-  formatTokenFlow,
-  formatTurnDuration,
-  isIncompleteOsc,
-  isIncompletePaste,
-  nextKey,
-  sanitizePastedText,
-  stripPasteStart,
-  stripPromptControlCharacters,
-  type TerminalKey,
-} from "./stream-format.js";
+import { buildStatusLine, type DevBuildStatus } from "./status-line.js";
+import { formatTokenFlow, formatTurnDuration, type TerminalKey } from "./stream-format.js";
+import { renderTaskPanelRows } from "./task-activity.js";
 import {
   BACKGROUND_COLOR_QUERY,
   parseBackgroundColorReply,
   type RgbColor,
 } from "./terminal-background.js";
+import { Terminal, type CapturedLog, type TerminalInput, type TerminalOutput } from "./terminal.js";
+import { createTheme, detectUnicode, type Theme } from "./theme.js";
+import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
+import { ConversationTranscript, turnActivity, type TranscriptOptions } from "./transcript.js";
+import { TurnClock } from "./turn-clock.js";
+import type { TraceViewerOpenOptions, TraceViewerRenderer } from "./traces/trace-viewer-session.js";
+import { TraceViewerSession } from "./traces/trace-viewer-session.js";
+import type { VercelStatusSnapshot } from "./vercel-status.js";
 
-type SetupOptionPanelState = Exclude<SetupSelectPanelState, { kind: "actions" }>;
-
-const ARGUMENT_CATALOG_LOADING_DELAY_MS = 500;
-
-export type TerminalInput = {
-  isTTY?: boolean;
-  on(event: "data", listener: (chunk: Buffer) => void): TerminalInput;
-  off(event: "data", listener: (chunk: Buffer) => void): TerminalInput;
-  resume(): TerminalInput;
-  pause(): TerminalInput;
-  setRawMode?: (mode: boolean) => TerminalInput;
-};
-
-export type TerminalOutput = {
-  isTTY?: boolean;
-  columns?: number;
-  rows?: number;
-  write(
-    chunk: string | Uint8Array,
-    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
-    callback?: (error?: Error | null) => void,
-  ): boolean;
-  on(event: "resize", listener: () => void): TerminalOutput;
-  off(event: "resize", listener: () => void): TerminalOutput;
-};
-
-function isMultiSelectRequest(
-  options: SetupSelectRequest,
-): options is Extract<SetupSelectRequest, { kind: "multi" | "searchable-multi" }> {
-  return options.kind === "multi" || options.kind === "searchable-multi";
-}
-
-function moveActionCursor(
-  cursor: number | undefined,
-  direction: "up" | "down",
-  actionCount: number,
-): number | undefined {
-  if (actionCount === 0) return undefined;
-  if (cursor === undefined) return direction === "down" ? 0 : actionCount - 1;
-  const delta = direction === "down" ? 1 : -1;
-  return (cursor + delta + actionCount) % actionCount;
-}
-
-type SetupFlowStatusState = { text: string; startedAtMs: number };
-
-type SetupFlowState = {
-  title: string;
-  navigation?: PlannerNavigation;
-  /** When the flow's pulse started, so its blink stays on a steady beat. */
-  startedAtMs: number;
-  lines: FlowPanelLine[];
-  summary?: { headline: string; facts: readonly { label: string; value: string }[] };
-  status?: SetupFlowStatusState;
-  /** Latest subprocess output line; replaced per write, never persisted. */
-  preview?: string;
-  /** Recent subprocess output, flushed as context when a warning settles it. */
-  outputBuffer: string[];
-  question?: (width: number) => string[];
-  questionTitle?: string;
-  /** First line produced after the previous task-list question settled. */
-  taskListLineStart?: number;
-  /** Task-list questions render their latest outcomes inside the question. */
-  hideLinesWhileQuestion?: boolean;
-  /**
-   * Fabricated by {@link TerminalRenderer.#requireSetupFlow} for a bare
-   * question without a begin/end pair; closed with the question.
-   */
-  implicit?: boolean;
-};
-
-/**
- * How much subprocess output a warning or error can pull in as its evidence.
- * Only the one-line preview is ever painted while the command runs, so the
- * cap costs nothing visually — it bounds how much of a failure's tail (e.g.
- * a `vercel deploy` build error) survives the settle.
- */
-const FLOW_OUTPUT_BUFFER_CAP = 40;
-const STATUS_LINE_LEFT_PADDING = "  ";
-
-const defaultAssistantResponseStats: AssistantResponseStatsMode = "tokensPerSecond";
+export type { TerminalInput, TerminalOutput };
 
 type TerminalRendererOptions = {
   input?: TerminalInput;
   output?: TerminalOutput;
-  tools?: TerminalPartDisplayMode;
-  reasoning?: TerminalPartDisplayMode;
-  subagents?: SubagentDisplayMode;
-  connectionAuth?: TerminalPartDisplayMode;
-  assistantResponseStats?: AssistantResponseStatsMode;
-  contextSize?: number;
+  /** Shows tool input/output, reasoning, and each subagent message and tool call in full. */
+  verbose?: boolean;
   captureForeignOutput?: boolean;
   logs?: LogDisplayMode;
   color?: boolean;
@@ -282,241 +144,145 @@ type TerminalRendererOptions = {
   onExitRequest?: () => void;
 };
 
-type AgentHeaderOptions = {
-  name: string;
-  serverUrl: string;
-  info?: AgentInfoResult;
-  localDevelopment?: boolean;
-};
-
-const caretBlinkMs = 500;
-const tickMs = 90;
-// Two rules, two padding rows, and one navigation row stay outside the body viewport.
-const hitlDrawerChromeRows = 5;
-// How long to wait on a lone `ESC` before treating it as the Escape key, so a
-// split arrow sequence (`ESC` then `[A`) has time to reassemble first.
-const escFlushMs = 30;
-// How long to wait, with no further input, before abandoning a bracketed paste
-// whose closing marker never arrived. Generous because the timer resets on every
-// read, so an in-flight paste keeps it alive; it only fires once input goes quiet.
-const incompletePasteFlushMs = 1_000;
-// How long the transient Ctrl+L log-mode hint stays in the status line after
-// the last cycle before it clears itself.
-const logLevelHintMs = 5_000;
-// Fast authored-source rebuilds skip their intermediate state to avoid a
-// distracting status-bar flash; genuinely slow builds still show progress.
-const devBuildProgressDelayMs = 250;
-const devBuildLoadedStatusMs = 4_000;
+/** Settles one surface's question; either call pops the surface off the stack. */
+interface Settle<T> {
+  done(value: T): void;
+  fail(error: unknown): void;
+}
 
 /**
- * The end-of-turn stats coda renders only for turns that were long or
- * expensive: past this wall-clock duration, or past this many input tokens
- * summed across the turn's own steps. A quick cheap exchange closes silently.
+ * Something that takes the keyboard on top of the composer: an approval, a
+ * question, a setup prompt, a panel, or a key trap. The top surface gets
+ * every key; rows say what it paints.
  */
+interface Surface {
+  key(key: TerminalKey): void;
+  /**
+   * The surface's painted rows. `drawer` rows replace the composer and keep the
+   * task panel above them; `panel` rows replace the whole footer; `flow` rows
+   * paint inside the open setup flow. Key traps paint nothing.
+   */
+  readonly placement?: "drawer" | "panel" | "flow";
+  rows?(width: number): string[];
+  /** Whether a text caret blinks while this surface is on top. */
+  caret?(): boolean;
+  dispose?(): void;
+}
+
+interface StackEntry {
+  readonly surface: Surface;
+  /** Settles the surface when the TUI closes. */
+  stop(): void;
+}
+
+type SetupFlowState = {
+  title: string;
+  navigation?: PlannerNavigation;
+  /** When the flow's pulse started, so its blink stays on a steady beat. */
+  startedAtMs: number;
+  lines: FlowPanelLine[];
+  summary?: { headline: string; facts: readonly { label: string; value: string }[] };
+  status?: { text: string; startedAtMs: number };
+  /** Latest subprocess output line; replaced per write, never persisted. */
+  preview?: string;
+  /** Recent subprocess output, pulled in as evidence when a warning settles it. */
+  outputBuffer: string[];
+  questionTitle?: string;
+  /** First line produced after the previous task-list question settled. */
+  taskListLineStart?: number;
+  /** Task-list questions render their latest outcomes inside the question. */
+  hideLinesWhileQuestion?: boolean;
+};
+
+/** Kind + title of the previously rendered block, for gap and run decisions. */
+type PreviousBlock = { kind: BlockKind; title?: string; subagentCallId?: string };
+
+/** How much subprocess output a warning or error can pull in as its evidence. */
+const FLOW_OUTPUT_BUFFER_CAP = 40;
+const STATUS_LINE_LEFT_PADDING = "  ";
+const tickMs = 90;
+const caretBlinkMs = 500;
+// Two rules, two padding rows, and one navigation row stay outside the body viewport.
+const drawerChromeRows = 5;
+const logLevelHintMs = 5_000;
+// Fast rebuilds skip their in-progress state; slow builds still show progress.
+const devBuildProgressDelayMs = 250;
+const devBuildLoadedStatusMs = 4_000;
+/** The end-of-turn coda renders only for turns that were long or expensive. */
 const turnStatsMinDurationMs = 10_000;
 const turnStatsMinInputTokens = 20_000;
 
-export class TerminalRenderer implements AgentTUIRenderer {
-  readonly #input: TerminalInput;
+/**
+ * The `eve dev` terminal UI. One state, one stack of surfaces on top of an
+ * always-open composer, and one view: every change updates state and repaints
+ * the live region. Finalized blocks move to native scrollback exactly once.
+ */
+export class TerminalRenderer {
+  readonly #terminal: Terminal;
   readonly #output: TerminalOutput;
-  readonly #live: LiveRegion;
-  readonly #altScreen: AltScreen;
   readonly #theme: Theme;
   readonly #renderMarkdown: boolean;
-  readonly #tools: TerminalPartDisplayMode;
-  readonly #reasoning: TerminalPartDisplayMode;
-  readonly #subagents: SubagentDisplayMode;
-  readonly #connectionAuth: TerminalPartDisplayMode;
-  readonly #assistantResponseStats: AssistantResponseStatsMode;
-  readonly #captureForeignOutput: boolean;
+  readonly #verbose: boolean;
   readonly #diagnostics?: DevDiagnostics;
-  readonly #availablePromptCommands: readonly PromptCommandSpec[];
-  /** Which captured log sources render. Mutable via {@link setLogDisplayMode}. */
+  readonly #onExitRequest?: () => void;
+  readonly #killRing = new KillRing();
+  readonly #composer: Composer;
+  readonly #stack: StackEntry[] = [];
+  readonly #inputs: AgentTUIInput[] = [];
+  #inputWaiter?: { resolve(input: AgentTUIInput | undefined): void; reject(error: Error): void };
   #logs: LogDisplayMode;
 
-  /** Live (uncommitted) blocks, in transcript order. */
+  /** Blocks not yet in scrollback, in transcript order. */
   #blocks: Block[] = [];
   readonly #blockById = new Map<string, Block>();
-  /** The invocation whose gutter awaits the command's outcome. */
-  #pendingCommandEcho: Block | undefined;
-  /** Section ids already committed to scrollback — never re-rendered. */
+  /** Conversation block ids already in scrollback, so a later snapshot never repeats them. */
   readonly #committedIds = new Set<string>();
-  /**
-   * Every committed block, in transcript order — including log blocks the
-   * current {@link LogDisplayMode} filters out. Committed *rows* are
-   * rendered under one specific log filter; this block history is what lets
-   * a `/loglevel` change re-render the whole committed transcript, hiding
-   * or restoring past log lines at their original positions.
-   */
-  readonly #transcriptBlocks: Block[] = [];
+  /** Conversation blocks currently live, so ones the projection drops can leave. */
+  #conversationBlockIds = new Set<string>();
+  /** Rows to write to scrollback on the next paint, ahead of the settled blocks. */
+  #pendingRows: string[] = [];
+  #lastCommitted?: PreviousBlock;
+  #pendingCommandEcho?: Block;
 
-  /** Monotonic counter behind every block's `updateSeq` activity stamp. */
-  #updateSequence = 0;
-  /** Projects the current session's conversation; reset at every context cut. */
   readonly #transcript = new ConversationTranscript();
   #view?: AgentTUIConversationView;
-  /** Live blocks whose content the conversation projection owns. */
-  #conversationBlockIds = new Set<string>();
-  /** Texts submitted while a turn ran, so their echoes use the steering gutter. */
-  readonly #steeredMessages: string[] = [];
-  #agentHeader?: AgentHeaderOptions;
-  #initialPromptPlaceholder = "Send a message…";
-  /** The agent's local subagents, whose tools render as delegations. */
-  #subagentNames?: readonly string[];
-  #startupPhase?: "starting" | "connecting" | "updating";
-  #startupEditor?: LineState;
-  #startupConsumer?: (key: TerminalKey) => void;
-  #startupStartedAt = 0;
-  #startupHeader?: { readonly name: string };
-  #agentHeaderRendered = false;
-  /** The last committed header body, to skip re-committing an unchanged banner. */
-  #agentHeaderBody?: string;
-  /**
-   * Committed transcript rows as rendered under the current log filter.
-   * Replayed wholesale when a `/loglevel` change re-renders the committed
-   * transcript from {@link #transcriptBlocks}.
-   */
-  readonly #committedTranscriptRows: string[] = [];
-
-  /**
-   * Kind and title of the last block committed to scrollback. Seeds the
-   * inter-block gap and log-run-continuation decisions for the next paint,
-   * so spacing stays stable as blocks move from the live region into
-   * scrollback.
-   */
-  #lastCommitted?: PreviousBlock;
-
-  /** Vercel segment of the bottom status line; pushed by the runner. */
-  #vercelStatus?: VercelStatusSnapshot;
-  /** Remote target and connection/authentication state; pushed by the runner. */
-  #remoteConnection?: RemoteConnectionSnapshot;
-  #inputText = "";
-  #inputCursor = 0;
-  readonly #promptHistory = new PromptHistory();
-  readonly #killRing = new KillRing();
-  #inputActive = false;
-  /**
-   * Command suggestions for the prompt draft. Only `readInput` sets this —
-   * `readInputQuestion` shares `#inputActive` and the footer's input row, and
-   * a `/`-prefixed freeform answer must never sprout suggestions.
-   */
-  #typeahead?: CommandTypeaheadState;
-  #argumentTypeahead?: ArgumentTypeaheadState;
-  readonly #argumentSuggestions?: TerminalRendererOptions["argumentSuggestions"];
-  readonly #argumentCatalogs = new Map<
-    ArgumentTypeaheadState["command"],
-    | { kind: "loading"; visible: boolean }
-    | { kind: "ready"; suggestions: readonly PromptArgumentSuggestion[] }
-  >();
-  readonly #argumentCatalogLoadingTimers = new Map<
-    ArgumentTypeaheadState["command"],
-    ReturnType<typeof setTimeout>
-  >();
-  /**
-   * Whether the empty input row invites with a rotating placeholder. Only
-   * the main chat prompt turns this on — a freeform question's empty input
-   * must not suggest unrelated things to try.
-   */
-  #promptPlaceholderActive = false;
-  /** Placeholder retires for good once the user has sent a first message. */
-  #hasUserMessage = false;
-  /** Armed when work starts; the end-of-turn stats line consumes it. */
   readonly #turnClock = new TurnClock();
-  #lastTurnStats?: { elapsedMs: number } & TokenUsage;
-  /** The composer's draft, kept while other input surfaces own the keyboard. */
-  #draft: LineState = EMPTY_LINE;
-  /** Replaces the open composer's line; set while {@link readInput} reads. */
-  #applyDraft?: (next: LineState) => void;
-  /** Set by a cancel key while work runs; a second Ctrl+C stops following. */
-  #cancelRequested = false;
-  /** Rejects the reader currently awaiting keys, so #stop never strands it. */
-  #rejectActiveReader?: (error: Error) => void;
-  /**
-   * A flowless setup spinner's text ("Checking the project…"). Rendered as
-   * its own status row — the text is the information — instead of the live
-   * turn bar the waiting indicator would otherwise show.
-   */
-  #flowlessStatus?: string;
+  #hasUserMessage = false;
+  #agentHeader?: AgentTUIAgentHeader;
+  #agentHeaderBody?: string;
+  #initialPromptPlaceholder = "Send a message…";
+  #subagentNames?: readonly string[];
   #title = "eve";
-  #isInteractive = false;
-  /**
-   * Whether this renderer ever ran a live session — the parting-line gate.
-   * `#isInteractive` is useless for that: Ctrl-C tears down via `#stop()`
-   * inside the reader before the runner's `shutdown()` ever observes it.
-   */
-  #everInteractive = false;
-  #partingLinePrinted = false;
+  #startupPhase?: "starting" | "connecting" | "updating";
+  #startupStartedAt = Date.now();
+  #flow?: SetupFlowState;
+  /** A setup status set with no flow open, such as reloading a model after `/login`. */
+  #flowlessStatus?: string;
+  #setupAttention?: string;
+  #vercelStatus?: VercelStatusSnapshot;
+  #remoteConnection?: RemoteConnectionSnapshot;
+  #build?: { status: DevBuildStatus; atMs: number };
+  #logHintUntil = 0;
+  #sessionId?: string;
+  #traceView?: TraceViewerSession;
+  #terminalBackground?: RgbColor;
+
+  #closed = false;
+  #everStarted = false;
+  #suspended = false;
   #exitRequested = false;
-  /** True after the first consecutive Ctrl+C at the idle chat prompt. */
-  #exitArmed = false;
-  /** Carries a pending-cancel interrupt into the next prompt as the first exit press. */
-  #armExitOnNextPrompt = false;
-  readonly #onExitRequest?: () => void;
-  #caretVisible = true;
   #spinnerIndex = 0;
   #activityPulseStartedAtMs = Date.now();
-  #caretTimer?: ReturnType<typeof setInterval>;
-  #tickTimer?: ReturnType<typeof setInterval>;
-  #logLevelHintTimer?: ReturnType<typeof setTimeout>;
-  /** Whether the transient Ctrl+L log-mode hint is currently shown. */
-  #logLevelHintActive = false;
-  /** Active per-mode key consumer (prompt, approval, question, streaming). */
-  #consumeKey?: (key: TerminalKey) => void;
-  /** Decoded input held while an escape sequence is still arriving. */
-  #keyBuffer = "";
-  #inputDecoder = new StringDecoder("utf8");
-  #keyFlushTimer?: ReturnType<typeof setTimeout>;
-  #onResize?: () => void;
+  #caretEpoch = Date.now();
+  #ticker?: { timer: ReturnType<typeof setInterval>; period: number };
   #painting = false;
   #paintAgain = false;
-  #contextSize?: number;
+  #lastFrame?: string;
 
-  #restoreLogCapture?: () => void;
-  #stdoutLogBuffer = "";
-  #stderrLogBuffer = "";
-  #delayedDevBuildError?: string;
-  /**
-   * The in-place dev rebuild status line. While the dev server's rebuild log
-   * lines are the newest transcript content, they all cycle through this one
-   * live block — only the latest state shows. Any other block pushed behind
-   * it settles the cycle: the status line finalizes, commits to scrollback as
-   * an ordinary log block, and the next rebuild line opens a fresh cycle.
-   */
-  #devRebuild?: { id: string; summary: string };
-  /** Log-filter-independent authored-source state shown in the bottom status bar. */
-  #devBuildStatus?: DevBuildStatus;
-  #devBuildStatusVisible = false;
-  #devBuildStatusTimer?: ReturnType<typeof setTimeout>;
-  /** Monotonic id source — committed cycle ids must never be reused. */
-  #devRebuildSequence = 0;
-  /** The open HITL drawer, painted above the input area. */
-  #hitlDrawer?: (width: number) => ReturnType<typeof renderTransientDrawer>;
-  #transientPanel?: (width: number) => ReturnType<typeof renderTransientDrawer>;
-  #transientPanelClose?: () => void;
-  /** The active setup flow's bordered panel: progress, question, status. */
-  #setupFlow?: SetupFlowState;
-  /** The clearable setup attention line (`⚠ … · /deploy`), rendered in the live footer. */
-  #setupAttention?: string;
-  /** Messages submitted while the agent starts, delivered once it is ready. */
-  readonly #startupQueue = new MessageQueue();
-  /** Server session id backing the conversation; named in the parting line. */
-  #sessionId?: string;
-  /** Armed by {@link SetupFlowRenderer.waitForInterrupt}; fired by the idle key trap. */
-  #flowInterrupt?: (interrupt: SetupFlowInterrupt) => void;
-  /** The installed working-state key consumer, so re-arming and disposal can recognize it. */
-  #flowIdleConsumer?: (key: TerminalKey) => void;
-  /** The open `/traces` viewer session, if the alt-screen viewer is active. */
-  #traceView?: TraceViewerSession;
-  /**
-   * The terminal's default background from its last OSC 11 reply. Cached so
-   * a reopened trace viewer paints its derived card surfaces immediately;
-   * every open re-probes in case the user switched terminal themes.
-   */
-  #terminalBackground?: RgbColor;
   readonly setupFlow: SetupFlowRenderer = {
-    begin: (title) => this.#beginSetupFlow(title),
-    setNavigation: (navigation) => this.#setSetupFlowNavigation(navigation),
-    end: (options) => this.#endSetupFlow(options?.preserveDiagnostics ?? true),
+    begin: (title) => this.#beginFlow(title),
+    setNavigation: (navigation) => this.#updateFlow((flow) => (flow.navigation = navigation)),
+    end: (options) => this.#endFlow(options?.preserveDiagnostics ?? true),
     readSelect: (options) => this.#readSetupSelect(options),
     readEditableSelect: (options) => this.#readSetupEditableSelect(options),
     readProviderPicker: (options) => this.#readProviderPicker(options),
@@ -537,555 +303,839 @@ export class TerminalRenderer implements AgentTUIRenderer {
     open: (options) => this.#openTraceViewer(options),
   };
 
-  constructor(options?: TerminalRendererOptions) {
-    this.#input = options?.input ?? process.stdin;
-    this.#output = options?.output ?? process.stdout;
-    // Bind the live region to the output's ORIGINAL `write` (captured here at
-    // construction, before `#installLogCapture` monkeypatches it). Otherwise
-    // every frame the live region paints would be intercepted as foreign log
-    // output and re-trigger a paint — unbounded recursion.
-    this.#live = new LiveRegion(this.#output);
-    this.#altScreen = new AltScreen(this.#output);
+  constructor(options: TerminalRendererOptions = {}) {
+    const output = options.output ?? process.stdout;
+    this.#output = output;
     this.#theme = createTheme({
-      color: options?.color ?? true,
-      unicode: options?.unicode ?? detectUnicode(),
+      color: options.color ?? true,
+      unicode: options.unicode ?? detectUnicode(),
     });
-    this.#renderMarkdown = options?.renderMarkdown ?? detectMarkdownRendering();
-    this.#tools = options?.tools ?? "auto-collapsed";
-    this.#reasoning = options?.reasoning ?? "auto-collapsed";
-    this.#subagents = options?.subagents ?? "collapsed";
-    this.#connectionAuth = options?.connectionAuth ?? "full";
-    this.#assistantResponseStats = options?.assistantResponseStats ?? defaultAssistantResponseStats;
-    this.#contextSize = options?.contextSize;
-    this.#captureForeignOutput = options?.captureForeignOutput ?? this.#output === process.stdout;
-    this.#diagnostics = options?.diagnostics;
-    this.#onExitRequest = options?.onExitRequest;
-    this.#argumentSuggestions = options?.argumentSuggestions;
-    this.#logs = options?.logs ?? "error";
-    this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
-  }
-
-  #syncTypeahead(text: string): void {
-    this.#typeahead = typeaheadFor(this.#availablePromptCommands, text, this.#typeahead);
-    const query = argumentTypeaheadQuery(text);
-    if (query === undefined || this.#argumentSuggestions === undefined) {
-      this.#argumentTypeahead = undefined;
-      return;
-    }
-    const catalog = this.#argumentCatalogs.get(query.command);
-    if (catalog === undefined) {
-      this.#argumentCatalogs.set(query.command, { kind: "loading", visible: false });
-      const command = query.command;
-      this.#argumentCatalogLoadingTimers.set(
-        command,
-        setTimeout(() => {
-          this.#argumentCatalogLoadingTimers.delete(command);
-          const pending = this.#argumentCatalogs.get(command);
-          if (pending?.kind !== "loading") return;
-          this.#argumentCatalogs.set(command, { kind: "loading", visible: true });
-          this.#paint();
-        }, ARGUMENT_CATALOG_LOADING_DELAY_MS),
-      );
-      void this.#argumentSuggestions(command)
-        .catch(() => [])
-        .then((suggestions) => {
-          const timer = this.#argumentCatalogLoadingTimers.get(command);
-          if (timer !== undefined) clearTimeout(timer);
-          this.#argumentCatalogLoadingTimers.delete(command);
-          this.#argumentCatalogs.set(command, { kind: "ready", suggestions });
-          if (this.#inputActive) this.#syncTypeahead(this.#inputText);
-          this.#paint();
-        });
-      this.#argumentTypeahead = undefined;
-      return;
-    }
-    if (catalog.kind === "loading") {
-      this.#argumentTypeahead = undefined;
-      return;
-    }
-    this.#argumentTypeahead = argumentTypeaheadFor(
-      query,
-      catalog.suggestions,
-      this.#argumentTypeahead,
+    this.#renderMarkdown = options.renderMarkdown ?? detectMarkdownRendering();
+    this.#verbose = options.verbose ?? false;
+    this.#logs = options.logs ?? "error";
+    this.#diagnostics = options.diagnostics;
+    this.#onExitRequest = options.onExitRequest;
+    this.#terminal = new Terminal(
+      {
+        input: options.input ?? process.stdin,
+        output,
+        captureForeignOutput: options.captureForeignOutput ?? output === process.stdout,
+        diagnostics: options.diagnostics,
+      },
+      {
+        key: (key) => this.#dispatchKey(key),
+        osc: (value) => this.#handleOscReply(value),
+        resize: () => this.#paint(),
+        log: (entry) => this.#log(entry),
+      },
     );
+    this.#composer = new Composer({
+      theme: this.#theme,
+      commands: options.availablePromptCommands ?? PROMPT_COMMANDS,
+      argumentSuggestions: options.argumentSuggestions,
+      killRing: this.#killRing,
+      working: () => this.#view?.working === true,
+      emit: (input) => this.#emitInput(input),
+      echoCommand: (text) => this.#pushCommandEcho(text),
+      sentMessage: () => {
+        this.#hasUserMessage = true;
+        this.#diagnostics?.recordPrompt();
+      },
+      exit: () => {
+        this.#requestExit();
+        this.#close();
+      },
+      cycleLogs: () => {
+        this.#logHintUntil = Date.now() + logLevelHintMs;
+        this.setLogDisplayMode(nextLogDisplayMode(this.#logs));
+      },
+      repaint: () => this.#paint(),
+    });
   }
 
-  #typeaheadDrawerRows(width: number): string[] {
-    const query = argumentTypeaheadQuery(this.#inputText);
-    const catalog = query === undefined ? undefined : this.#argumentCatalogs.get(query.command);
-    if (catalog?.kind === "loading" && catalog.visible && query !== undefined) {
-      return [
-        clip(
-          this.#theme.colors.dim(`Loading ${argumentTypeaheadLoadingLabel(query.command)}…`),
-          width,
-        ),
-      ];
+  // ---------------------------------------------------------------------------
+  // Lifecycle
+  // ---------------------------------------------------------------------------
+
+  /** Takes the terminal and opens the composer. Idempotent; a closed renderer stays closed. */
+  start(options: { readonly title?: string; readonly initialDraft?: string } = {}): void {
+    if (options.title !== undefined) this.#title = options.title;
+    if (options.initialDraft !== undefined && this.#composer.text.length === 0) {
+      this.#composer.setText(options.initialDraft);
     }
-    if (this.#argumentTypeahead !== undefined) {
-      return renderArgumentSuggestions(this.#argumentTypeahead, this.#theme, width);
-    }
-    return this.#typeahead !== undefined && isTypeaheadOpen(this.#typeahead)
-      ? renderCommandSuggestions(this.#typeahead, this.#theme, width)
-      : [];
+    if (this.#closed || this.#terminal.active) return;
+    this.#everStarted = true;
+    this.#terminal.start();
+    this.#paint();
   }
 
   setStartupPhase(phase: "starting" | "connecting" | "updating" | undefined): void {
+    if (phase !== undefined && this.#startupPhase === undefined)
+      this.#startupStartedAt = Date.now();
     this.#startupPhase = phase;
-    if (phase === undefined) this.#stopTicker();
-    else this.#startTicker();
     this.#paint();
   }
 
-  /**
-   * Commits the startup agent header (brand mark + resolved configuration) to
-   * scrollback before the first prompt. Later calls (dev HMR refreshing fields
-   * such as the model) commit a fresh header beneath the existing transcript
-   * only when the rendered header actually changed — every source
-   * reload re-sends it, and an identical banner repeated per reload is noise.
-   * Committed scrollback is never cleared or replayed.
-   */
-  renderAgentHeader(options: AgentHeaderOptions): void {
-    this.#startupHeader = undefined;
-    this.#title = options.name;
-    this.#agentHeader = options;
-    this.#subagentNames = options.info?.subagents.local.map((subagent) => subagent.name);
-    this.#initialPromptPlaceholder = initialPromptPlaceholder(
-      options.info,
-      options.localDevelopment === true,
-    );
-    this.#start();
-    const body = this.#renderAgentHeaderRows().join("\n");
-    if (this.#agentHeaderRendered) {
-      if (body !== this.#agentHeaderBody) {
-        this.#agentHeaderBody = body;
-        this.#pushBlock({ kind: "agent-header", body, live: false });
-      }
-      this.#paint();
-      return;
+  /** Last server session id the runner reported; named in the parting line. */
+  setSessionId(sessionId: string): void {
+    this.#sessionId = sessionId;
+  }
+
+  shutdown(): void {
+    this.#close();
+    // The parting line: the boot banner's dim counterpart, naming the session
+    // so the conversation the user just left can be found again.
+    if (this.#everStarted) {
+      this.#everStarted = false;
+      const session =
+        this.#sessionId === undefined ? "" : ` ${this.#theme.glyph.dot} session ${this.#sessionId}`;
+      this.#output.write(`${this.#theme.colors.dim(`${eveVersionTag()}${session}`)}\n`);
     }
-
-    this.#agentHeaderRendered = true;
-    this.#agentHeaderBody = body;
-    // Preserve the live presentation when the startup header enters scrollback.
-    this.#live.flush(this.#renderAgentHeaderRows(), this.#footerRows(this.#width()));
   }
 
-  beginStartupDraft(options: { initialDraft?: string; title: string }): void {
-    this.#start({ title: options.title });
-    this.#inputActive = true;
-    this.#promptPlaceholderActive = true;
-    this.#startupPhase = "starting";
-    this.#startupHeader = { name: options.title };
-    this.#startupStartedAt = Date.now();
-    let editor = lineOf(stripPromptControlCharacters(options.initialDraft ?? ""));
-    this.#startupEditor = editor;
-    this.#syncInput(editor);
-    this.#startCaretBlink();
-    this.#startTicker();
+  requestInterrupt(): void {
+    this.#close();
+  }
+
+  exitRequested(): boolean {
+    return this.#exitRequested;
+  }
+
+  #requestExit(): void {
+    this.#exitRequested = true;
+    this.#onExitRequest?.();
+  }
+
+  /** Settles every surface, rejects the pending input read, and restores the terminal. */
+  #close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    for (const entry of [...this.#stack].reverse()) entry.stop();
+    const waiter = this.#inputWaiter;
+    this.#inputWaiter = undefined;
+    waiter?.reject(interruptedError());
+    this.#stopTicker();
+    if (!this.#terminal.active) return;
+    // Settled blocks land in scrollback before the live region is wiped.
+    this.#settleCommandEcho();
     this.#paint();
-
-    const apply = (next: LineState) => {
-      editor = next;
-      this.#startupEditor = next;
-      this.#showCaret();
-      this.#syncInput(editor);
-      this.#paint();
-    };
-    this.#startupConsumer = (key) => {
-      if (key.type === "escape" && this.#flowInterrupt !== undefined) {
-        this.#flowInterrupt("escape");
-        return;
-      }
-      if (key.type === "ctrl-c" && this.#flowInterrupt !== undefined) {
-        this.#requestExit();
-        this.#flowInterrupt("ctrl-c");
-        return;
-      }
-      const edited = this.#killRing.apply(editor, key, { multiline: true });
-      if (edited !== undefined) {
-        apply(edited);
-        return;
-      }
-      if (key.type === "enter" && editor.text.trim().length > 0) {
-        if (this.#startupQueue.enqueue(editor.text)) apply(EMPTY_LINE);
-        return;
-      }
-      if (key.type === "ctrl-c") this.#onExitRequest?.();
-    };
-    this.#resumeStartupDraft();
+    this.#terminal.stop();
   }
 
-  #resumeStartupDraft(): void {
-    if (this.#startupEditor === undefined || this.#startupConsumer === undefined) return;
-    this.#clearKeyFlush();
-    this.#syncInput(this.#startupEditor);
-    this.#inputActive = true;
-    this.#consumeKey = this.#startupConsumer;
-    this.#attachInput();
-  }
-
-  finishStartupDraft(): { draft: string; queuedPrompt: string | undefined } {
-    const result = {
-      draft: this.#startupEditor?.text ?? this.#inputText,
-      queuedPrompt: this.#startupQueue.takePrompt(),
-    };
-    this.#startupEditor = undefined;
-    this.#startupConsumer = undefined;
-    this.#detachInput();
-    this.#stopCaretBlink();
-    this.#inputActive = false;
-    this.#promptPlaceholderActive = false;
-    return result;
-  }
+  // ---------------------------------------------------------------------------
+  // Input
+  // ---------------------------------------------------------------------------
 
   /**
-   * Opens the composer until the user submits, cancels work, or leaves. The
-   * composer stays usable while work runs: `Enter` submits (the runner steers),
-   * and `Esc` or `Ctrl+C` asks to cancel. Aborting `signal` keeps the draft for
-   * the next read, so other input surfaces can briefly take the keyboard.
+   * The next composer action. Actions taken while nothing reads queue here.
+   * Resolves `undefined` when `signal` aborts, and rejects once the TUI closes.
    */
-  async readInput(options?: AgentTUISessionOptions): Promise<AgentTUIInput | undefined> {
-    this.#start(options);
-    if (this.#view?.working !== true) this.#commitTurnStats();
-    this.#inputActive = true;
-    this.#promptPlaceholderActive = true;
-    this.#exitArmed = this.#armExitOnNextPrompt;
-    this.#armExitOnNextPrompt = false;
-    let editor: LineState =
-      options?.initialDraft === undefined
-        ? this.#draft
-        : lineOf(stripPromptControlCharacters(options.initialDraft));
-    this.#promptHistory.begin(editor.text);
-    this.#syncInput(editor);
-    this.#syncTypeahead(editor.text);
-    this.#startCaretBlink();
-    this.#paint();
-
-    return await new Promise((resolve, reject) => {
-      const signal = options?.signal;
-      const release = () => {
-        this.#applyDraft = undefined;
-        signal?.removeEventListener("abort", onAbort);
-        this.#typeahead = undefined;
-        this.#argumentTypeahead = undefined;
-        this.#inputActive = false;
-        this.#stopCaretBlink();
-        this.#detachInput();
-        this.#paint();
-      };
-      const finish = (input: AgentTUIInput | undefined) => {
-        release();
-        resolve(input);
-      };
-      const onAbort = () => finish(undefined);
-      signal?.addEventListener("abort", onAbort, { once: true });
-      if (signal?.aborted) {
-        onAbort();
-        return;
-      }
-      this.#rejectActiveReader = (error) => {
-        signal?.removeEventListener("abort", onAbort);
-        reject(error);
-      };
-      const apply = (next: LineState) => {
-        editor = next;
-        this.#draft = next;
-        this.#showCaret();
-        this.#syncInput(editor);
-        this.#syncTypeahead(next.text);
-        this.#paint();
-      };
-      this.#applyDraft = apply;
-      const recall = (entry: string | undefined) => {
-        if (entry !== undefined) apply(lineOf(entry));
-      };
-      const interrupt = () => {
-        this.#typeahead = undefined;
-        this.#stopCaretBlink();
-        this.#stop();
-        reject(interruptedError());
-      };
-      const cancel = () => {
-        this.#cancelRequested = true;
-        finish({ type: "cancel" });
-      };
-      const suggestions = () =>
-        this.#typeahead !== undefined && isTypeaheadOpen(this.#typeahead)
-          ? this.#typeahead
-          : undefined;
-      const argumentSuggestions = () =>
-        this.#argumentTypeahead?.suggestions.length ? this.#argumentTypeahead : undefined;
-      const highlighted = () => {
-        const open = suggestions();
-        return open === undefined ? undefined : selectedTypeaheadCommand(open);
-      };
-
-      this.#consumeKey = (key) => {
-        if (key.type !== "ctrl-c" && this.#exitArmed) {
-          this.#exitArmed = false;
-          this.#paint();
-        }
-        // Chat keeps pasted newlines and honors Shift+Enter. Setup-panel inputs
-        // stay single-line; freeform questions opt in separately below.
-        const edited = this.#killRing.apply(editor, key, { multiline: true });
-        if (edited !== undefined) {
-          apply(edited);
-          return;
-        }
-        const working = this.#view?.working === true;
-        switch (key.type) {
-          case "up":
-          case "ctrl-p": {
-            const argumentOpen = argumentSuggestions();
-            if (argumentOpen !== undefined) {
-              this.#argumentTypeahead = moveArgumentTypeaheadSelection(argumentOpen, -1);
-              this.#paint();
-              break;
-            }
-            const open = suggestions();
-            if (open !== undefined) {
-              this.#typeahead = moveTypeaheadSelection(open, -1);
-              this.#paint();
-              break;
-            }
-            // Within a multi-line buffer, ↑ walks to the row above; only at the
-            // top row does it hand off to prompt history.
-            const moved = movePromptLine(editor, "up");
-            if (moved !== undefined) apply(moved);
-            else recall(this.#promptHistory.previous(editor.text));
-            break;
-          }
-          case "down":
-          case "ctrl-n": {
-            const argumentOpen = argumentSuggestions();
-            if (argumentOpen !== undefined) {
-              this.#argumentTypeahead = moveArgumentTypeaheadSelection(argumentOpen, 1);
-              this.#paint();
-              break;
-            }
-            const open = suggestions();
-            if (open !== undefined) {
-              this.#typeahead = moveTypeaheadSelection(open, 1);
-              this.#paint();
-              break;
-            }
-            const moved = movePromptLine(editor, "down");
-            if (moved !== undefined) apply(moved);
-            else recall(this.#promptHistory.next());
-            break;
-          }
-          case "tab": {
-            const argumentOpen = argumentSuggestions();
-            const argumentSelected =
-              argumentOpen === undefined ? undefined : selectedArgumentSuggestion(argumentOpen);
-            if (argumentOpen !== undefined && argumentSelected !== undefined) {
-              apply(lineOf(argumentTypeaheadCompletion(argumentOpen, argumentSelected)));
-              break;
-            }
-            const selected = highlighted();
-            if (selected !== undefined) apply(lineOf(typeaheadCompletion(selected)));
-            break;
-          }
-          case "escape": {
-            if (this.#argumentTypeahead !== undefined) {
-              this.#argumentTypeahead = undefined;
-              this.#paint();
-              break;
-            }
-            const open = suggestions();
-            if (open !== undefined) {
-              this.#typeahead = dismissTypeahead(open);
-              this.#paint();
-              break;
-            }
-            if (working && !this.#cancelRequested) cancel();
-            break;
-          }
-          case "enter": {
-            const argumentOpen = argumentSuggestions();
-            const argumentSelected =
-              argumentOpen === undefined ? undefined : selectedArgumentSuggestion(argumentOpen);
-            const selected = highlighted();
-            // Complete only genuine prefixes: a draft that already parses
-            // (exact name, alias, or argument form) submits verbatim, so
-            // /quit echoes as the user typed it.
-            if (
-              argumentOpen !== undefined &&
-              argumentSelected?.next !== undefined &&
-              argumentOpen.completed.length === 0
-            ) {
-              apply(lineOf(`${argumentTypeaheadCompletion(argumentOpen, argumentSelected)} `));
-              break;
-            }
-            // `/add` and `/model` share their inline drawer whether the
-            // command was typed exactly or reached through slash completion.
-            if (
-              argumentOpen === undefined &&
-              selected !== undefined &&
-              this.#argumentSuggestions !== undefined &&
-              (selected.name === "add" ||
-                selected.name === "login" ||
-                selected.name === "loglevel" ||
-                selected.name === "model")
-            ) {
-              apply(lineOf(typeaheadCompletion(selected)));
-              break;
-            }
-            const prompt =
-              argumentOpen !== undefined && argumentSelected !== undefined
-                ? argumentTypeaheadCompletion(argumentOpen, argumentSelected)
-                : selected !== undefined && parsePromptCommand(editor.text) === null
-                  ? typeaheadCompletion(selected).trimEnd()
-                  : editor.text;
-            // An empty (or whitespace-only) buffer never submits.
-            if (prompt.trim().length === 0) break;
-            if (promptCommandSpec(prompt)?.spec.history !== "omit") this.#promptHistory.add(prompt);
-            this.#draft = EMPTY_LINE;
-            this.#syncInput(EMPTY_LINE);
-            if (isPromptControlCommand(prompt)) {
-              // Commands echo as their own line so the elbow-connected
-              // outcome has an invocation to hang under — never as a user
-              // chat message.
-              this.#pushCommandEcho(stripTerminalControls(prompt.trim()));
-              if (working && parsePromptCommand(prompt)?.type === "cancel") {
-                this.#cancelRequested = true;
-              }
-            } else {
-              this.#hasUserMessage = true;
-              this.#diagnostics?.recordPrompt();
-              if (working) this.#steeredMessages.push(prompt);
-            }
-            finish({ type: "submit", text: prompt });
-            break;
-          }
-          case "ctrl-d":
-            // EOF on an empty line quits; otherwise it forward-deletes.
-            if (editor.text.length === 0) {
-              this.#requestExit();
-              interrupt();
-            } else {
-              apply(deleteForward(editor));
-            }
-            break;
-          case "ctrl-l":
-            this.#cycleLogDisplayMode();
-            break;
-          case "ctrl-r":
-            this.#paint();
-            break;
-          case "ctrl-c":
-            if (working) {
-              // Once cancellation is pending, Ctrl+C is the hard escape hatch.
-              if (!this.#cancelRequested) {
-                cancel();
-                break;
-              }
-              this.#cancelRequested = false;
-              this.#armExitOnNextPrompt = true;
-              finish({ type: "interrupt" });
-              break;
-            }
-            if (this.#exitArmed) {
-              this.#requestExit();
-              interrupt();
-              break;
-            }
-            this.#exitArmed = true;
-            apply(EMPTY_LINE);
-            break;
-          default:
-            break;
-        }
-      };
-
-      this.#attachInput();
+  nextInput(signal?: AbortSignal): Promise<AgentTUIInput | undefined> {
+    if (this.#closed) return Promise.reject(interruptedError());
+    const queued = this.#inputs.shift();
+    if (queued !== undefined) return Promise.resolve(queued);
+    if (signal?.aborted === true) return Promise.resolve(undefined);
+    return new Promise((resolve, reject) => {
+      const waiter = { resolve, reject };
+      this.#inputWaiter = waiter;
+      signal?.addEventListener(
+        "abort",
+        () => {
+          if (this.#inputWaiter !== waiter) return;
+          this.#inputWaiter = undefined;
+          resolve(undefined);
+        },
+        { once: true },
+      );
     });
   }
 
+  #emitInput(input: AgentTUIInput): void {
+    const waiter = this.#inputWaiter;
+    this.#inputWaiter = undefined;
+    if (waiter === undefined) this.#inputs.push(input);
+    else waiter.resolve(input);
+  }
+
+  #dispatchKey(key: TerminalKey): void {
+    this.#killRing.interruptYank(key);
+    this.#caretEpoch = Date.now();
+    const top = this.#stack.at(-1);
+    if (top !== undefined) top.surface.key(key);
+    // An open setup flow covers the composer; keys it does not ask for are dropped.
+    else if (this.#flow === undefined) this.#composer.key(key);
+    this.#paint();
+  }
+
+  #handleOscReply(value: string): void {
+    const background = parseBackgroundColorReply(value);
+    if (background === undefined) return;
+    this.#terminalBackground = background;
+    this.#traceView?.setTerminalBackground(background);
+  }
+
   /**
-   * Reconciles the session's transcript with one conversation snapshot. Blocks
-   * keep their position once shown; a block leaves the live region when its
-   * part can no longer change.
+   * Pushes a surface and resolves with its answer. `onStop` is the answer when
+   * the TUI closes underneath it; without one the question rejects as interrupted.
+   */
+  #ask<T>(make: (settle: Settle<T>) => Surface, onStop?: () => T): Promise<T> {
+    if (this.#closed) {
+      return onStop === undefined ? Promise.reject(interruptedError()) : Promise.resolve(onStop());
+    }
+    return new Promise<T>((resolve, reject) => {
+      let entry: StackEntry | undefined;
+      const pop = (): boolean => {
+        const index = entry === undefined ? -1 : this.#stack.indexOf(entry);
+        if (index === -1) return false;
+        this.#stack.splice(index, 1);
+        entry!.surface.dispose?.();
+        this.#paint();
+        return true;
+      };
+      const settle: Settle<T> = {
+        done: (value) => {
+          if (pop()) resolve(value);
+        },
+        fail: (error) => {
+          if (pop()) reject(error);
+        },
+      };
+      const surface = make(settle);
+      entry = {
+        surface,
+        stop: () =>
+          onStop === undefined ? settle.fail(interruptedError()) : settle.done(onStop()),
+      };
+      this.#stack.push(entry);
+      this.#paint();
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Transcript
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Commits the agent header to scrollback, and again after a reload only when
+   * it changed: an identical banner repeated per reload is noise.
+   */
+  renderAgentHeader(header: AgentTUIAgentHeader): void {
+    this.#title = header.name;
+    this.#agentHeader = header;
+    this.#subagentNames = header.info?.subagents.local.map((subagent) => subagent.name);
+    this.#initialPromptPlaceholder = initialPromptPlaceholder(
+      header.info,
+      header.localDevelopment === true,
+    );
+    const body = this.#agentHeaderRows().join("\n");
+    if (body !== this.#agentHeaderBody) {
+      this.#agentHeaderBody = body;
+      this.#pushBlock({ kind: "agent-header", body, live: false });
+    }
+    this.#paint();
+  }
+
+  /**
+   * Reconciles the transcript with one conversation snapshot. Blocks keep
+   * their position once shown and leave the live region once final.
    */
   renderConversation(view: AgentTUIConversationView): void {
     const wasWorking = this.#view?.working === true;
     this.#view = view;
-    // A message queued during startup reaches the conversation without passing the prompt.
     if (view.conversation.messages.some((message) => message.role === "user")) {
       this.#hasUserMessage = true;
     }
-    const projected = this.#transcript.project(view, this.#transcriptOptions());
+    const projection = this.#transcript.project(view, this.#transcriptOptions());
     const ids = new Set<string>();
-    for (const [index, block] of projected.entries()) {
+    for (const [index, block] of projection.blocks.entries()) {
       const id = block.id!;
       if (this.#committedIds.has(id)) continue;
       ids.add(id);
       const existing = this.#blockById.get(id);
       if (existing === block) continue;
-      block.updateSeq = ++this.#updateSequence;
       if (existing !== undefined) {
         this.#blocks[this.#blocks.indexOf(existing)] = block;
         this.#blockById.set(id, block);
         continue;
       }
-      if (block.kind === "user") {
-        const steered = this.#steeredMessages.indexOf(block.body ?? "");
-        if (steered !== -1) {
-          this.#steeredMessages.splice(steered, 1);
-          block.promptOrigin = "steer";
-        }
-      }
-      this.#insertConversationBlock(block, projected.slice(index + 1));
+      // A new block goes before the next projected block still on screen, or at the live edge.
+      const next = projection.blocks
+        .slice(index + 1)
+        .find((candidate) => this.#blockById.has(candidate.id!));
+      const at = next === undefined ? -1 : this.#blocks.indexOf(this.#blockById.get(next.id!)!);
+      if (at === -1) this.#blocks.push(block);
+      else this.#blocks.splice(at, 0, block);
+      this.#blockById.set(id, block);
     }
     for (const id of this.#conversationBlockIds) {
       if (!ids.has(id)) this.#removeBlock(id);
     }
     this.#conversationBlockIds = ids;
+    for (const block of projection.arrivals) this.#pushBlock(block);
     if (view.working && !wasWorking) {
-      if (!this.#turnClock.armed) this.#turnClock.arm(view.data.usage);
-    } else if (!view.working && wasWorking) {
-      this.#cancelRequested = false;
-      if (this.#inputActive) this.#commitTurnStats();
+      if (!this.#turnClock.armed) this.#turnClock.arm(this.#usage());
+      this.#activityPulseStartedAtMs = Date.now();
     }
-    this.#syncActivityTicker();
+    if (!view.working) {
+      this.#composer.cancelRequested = false;
+      // Approvals answered mid-turn don't split the turn's coda.
+      if (this.#stack.length === 0) this.#commitTurnStats();
+    }
     this.#paint();
   }
 
   /**
-   * New conversation blocks go before the next transcript block still on screen, or join the
-   * live edge.
+   * Marks where a dead session was replaced mid-conversation. The old
+   * conversation's blocks settle as shown; a fresh session may reuse their ids.
    */
-  #insertConversationBlock(block: Block, following: readonly Block[]): void {
-    const next = following.find((candidate) => this.#blockById.has(candidate.id!));
-    const index = next === undefined ? -1 : this.#blocks.indexOf(this.#blockById.get(next.id!)!);
-    if (index === -1) {
-      this.#pushBlock(block);
+  renderSessionBoundary(): void {
+    this.#commitTurnStats();
+    const stopped = this.#transcript.stopWorking(this.#transcriptOptions());
+    for (const id of this.#conversationBlockIds) {
+      const block = this.#blockById.get(id);
+      if (block === undefined) continue;
+      this.#blockById.delete(id);
+      const { id: _id, ...settled } = block;
+      this.#blocks[this.#blocks.indexOf(block)] = { ...settled, live: false };
+    }
+    for (const { id: _id, ...line } of stopped) this.#pushBlock(line);
+    this.#committedIds.clear();
+    this.#clearConversationState();
+    const { colors: c, glyph: g } = this.#theme;
+    this.#pushBlock({
+      kind: "session-boundary",
+      body: c.dim(`${g.cornerOpen}${g.dash.repeat(2)} Session restarted, clear context.`),
+      live: false,
+    });
+    this.#paint();
+  }
+
+  /** `/new`: clears the screen and the conversation, keeping workspace state such as the model. */
+  reset(): void {
+    this.#blocks = [];
+    this.#blockById.clear();
+    this.#committedIds.clear();
+    this.#pendingRows = [];
+    this.#lastCommitted = undefined;
+    this.#agentHeaderBody = undefined;
+    this.#hasUserMessage = false;
+    this.#clearConversationState();
+    if (this.#terminal.active) this.#terminal.live.clearAll();
+    this.#lastFrame = undefined;
+    this.#paint();
+  }
+
+  /** The one authority for state that dies with a server-side conversation context. */
+  #clearConversationState(): void {
+    this.#transcript.reset();
+    this.#view = undefined;
+    this.#conversationBlockIds = new Set();
+    this.#composer.cancelRequested = false;
+    this.#turnClock.reset();
+  }
+
+  /** Commits one dim informational line. */
+  renderNotice(text: string): void {
+    const body = stripTerminalControls(text);
+    if (body.trim().length === 0) return;
+    this.#pushBlock({ kind: "notice", body, live: false });
+    this.#paint();
+  }
+
+  /** Commits one error block, such as a message the session did not accept. */
+  renderError(title: string, message: string): void {
+    const cleanTitle = stripTerminalControls(title);
+    const body = stripTerminalControls(message);
+    this.#diagnostics?.append({
+      source: "workflow",
+      summary: `${cleanTitle}: ${body}`,
+      detail: body,
+    });
+    this.#pushBlock({ kind: "error", title: cleanTitle, body, live: false });
+    this.#paint();
+  }
+
+  /** Replaces the composer's draft, e.g. with the command picked from `/help`. */
+  setDraft(text: string): void {
+    this.#composer.setText(text);
+    this.#paint();
+  }
+
+  /** Puts a cancelled turn's message back into an empty composer, with a notice. */
+  restoreDraft(text: string): void {
+    if (this.#composer.text.length > 0) return;
+    this.#composer.setText(text);
+    this.renderNotice(
+      "The turn was cancelled from outside this prompt, so its message is back in the input.",
+    );
+  }
+
+  /** Sets the clearable setup attention line above the prompt; `undefined` clears it. */
+  renderSetupWarning(text: string | undefined): void {
+    const content = text === undefined ? "" : stripTerminalControls(text);
+    this.#setupAttention = content.trim().length === 0 ? undefined : content;
+    this.#paint();
+  }
+
+  /** Echoes a slash-command invocation that was started without prompt input. */
+  renderCommandInvocation(text: string): void {
+    const content = stripTerminalControls(text);
+    if (content.trim().length === 0) return;
+    this.#pushCommandEcho(content);
+    this.#paint();
+  }
+
+  /** Completes the active command's transcript record in one operation. */
+  finishCommand(outcome: CommandPresentation): void {
+    const echo = this.#pendingCommandEcho;
+    if (outcome.kind === "dismiss") {
+      if (echo !== undefined) {
+        this.#pendingCommandEcho = undefined;
+        this.#blocks = this.#blocks.filter((block) => block !== echo);
+      }
+      this.#paint();
       return;
     }
-    if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
-    this.#blocks.splice(index, 0, block);
-    this.#blockById.set(block.id!, block);
+    this.#settleCommandEcho(outcome.summary);
+    if (echo !== undefined) echo.status = "done";
+    const body = outcome.message === undefined ? "" : stripAnsi(outcome.message);
+    if (body.trim().length > 0) {
+      // Work that streamed in while the command ran must not come between it and its result.
+      const at = echo === undefined ? -1 : this.#blocks.indexOf(echo);
+      const result: Block = { kind: "result", body, live: false };
+      if (at === -1) this.#pushBlock(result);
+      else this.#blocks.splice(at + 1, 0, result);
+    }
+    this.#paint();
+  }
+
+  /** The echo stays live until its command settles: its gutter pulses, then carries the outcome. */
+  #pushCommandEcho(body: string): void {
+    this.#settleCommandEcho();
+    const block: Block = { kind: "command", body, live: true };
+    this.#pendingCommandEcho = block;
+    this.#pushBlock(block);
+  }
+
+  #settleCommandEcho(summary?: string): void {
+    const block = this.#pendingCommandEcho;
+    if (block === undefined) return;
+    this.#pendingCommandEcho = undefined;
+    block.live = false;
+    if (summary !== undefined) block.result = stripTerminalControls(summary);
+  }
+
+  #pushBlock(block: Block): void {
+    this.#blocks.push(block);
+    if (block.id !== undefined) this.#blockById.set(block.id, block);
+  }
+
+  #removeBlock(id: string): void {
+    this.#blocks = this.#blocks.filter((block) => block.id !== id);
+    this.#blockById.delete(id);
+  }
+
+  /** Writes a block to scrollback now, ahead of anything still live. */
+  #commitNow(block: Block): void {
+    this.#pendingRows.push(
+      ...this.#renderBlock(block, this.#terminal.width(), this.#lastCommitted),
+    );
+    this.#lastCommitted = previousBlockOf(block);
+  }
+
+  /** The end-of-turn coda, for turns long or expensive enough to earn a row. */
+  #commitTurnStats(): void {
+    const settled = this.#turnClock.settle(this.#usage());
+    if (settled === undefined) return;
+    this.#diagnostics?.reportStats();
+    if (
+      settled.elapsedMs <= turnStatsMinDurationMs &&
+      settled.inputTokens <= turnStatsMinInputTokens
+    ) {
+      return;
+    }
+    const flow =
+      settled.inputTokens === 0 && settled.outputTokens === 0
+        ? ""
+        : ` (${formatTokenFlow(settled, this.#theme.glyph)})`;
+    this.#pushBlock({
+      kind: "turn-stats",
+      body: `Done in ${formatTurnDuration(settled.elapsedMs)}${flow}`,
+      live: false,
+    });
+  }
+
+  #usage(): TokenUsage {
+    return this.#view?.data.usage ?? { inputTokens: 0, outputTokens: 0 };
   }
 
   #transcriptOptions(): TranscriptOptions {
     return {
-      tools: this.#tools,
-      reasoning: this.#reasoning,
-      subagents: this.#subagents,
-      connectionAuth: this.#connectionAuth,
+      verbose: this.#verbose,
       subagentNames: this.#subagentNames,
       diagnosticsPath: this.#diagnostics?.displayPath,
       dot: this.#theme.glyph.dot,
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Logs
+  // ---------------------------------------------------------------------------
+
+  /** The log severity the transcript shows. */
+  logDisplayMode(): LogDisplayMode {
+    return this.#logs;
+  }
+
+  /** Switches which log lines show from now on; lines already hidden stay in the diagnostics log. */
+  setLogDisplayMode(mode: LogDisplayMode): void {
+    this.#logs = mode;
+    this.#paint();
+  }
+
+  /** Captured output lands in scrollback at once; it never waits behind live blocks. */
+  #log(entry: CapturedLog): void {
+    if (entry.source !== "eve") {
+      const detail = stripAnsi(entry.text);
+      this.#diagnostics?.append(
+        entry.level === undefined
+          ? { source: entry.source, detail }
+          : { source: entry.source, level: entry.level, detail },
+      );
+    }
+    const ingest = ingestLog(entry, {
+      mode: this.#logs,
+      diagnosticsPath: this.#diagnostics?.displayPath,
+    });
+    if (ingest.build !== undefined) this.#applyBuild(ingest.build);
+    for (const block of ingest.blocks) this.#commitNow(block);
+    this.#paint();
+  }
+
+  #applyBuild(build: BuildPhase): void {
+    const now = Date.now();
+    if (build.phase === "building") {
+      this.#build = { status: { phase: "building", summary: build.summary }, atMs: now };
+    } else if (build.phase === "failed") {
+      this.#build = undefined;
+    } else if (this.#build !== undefined) {
+      this.#build = { status: { ...this.#build.status, phase: "complete" }, atMs: now };
+    }
+  }
+
+  /** The build status while it should show: a slow rebuild in progress, or one that just finished. */
+  #visibleBuild(now = Date.now()): DevBuildStatus | undefined {
+    const build = this.#build;
+    if (build === undefined) return undefined;
+    const age = now - build.atMs;
+    if (build.status.phase === "building") {
+      return age >= devBuildProgressDelayMs ? build.status : undefined;
+    }
+    return age < devBuildLoadedStatusMs ? build.status : undefined;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Status pushed by the runner
+  // ---------------------------------------------------------------------------
+
+  setVercelStatus(status: VercelStatusSnapshot): void {
+    this.#vercelStatus = status;
+    this.#paint();
+  }
+
+  setRemoteConnectionStatus(status: RemoteConnectionSnapshot): void {
+    this.#remoteConnection = status;
+    this.#paint();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Drawers: approvals, questions, help, info
+  // ---------------------------------------------------------------------------
+
+  async readToolApproval(
+    request: AgentTUIToolApprovalRequest,
+  ): Promise<AgentTUIToolApprovalResponse> {
+    let cursor = 0;
+    return await this.#ask<AgentTUIToolApprovalResponse>((settle) => {
+      const approve = () => settle.done({ approved: true });
+      const deny = () => settle.done({ approved: false, reason: "Denied by user." });
+      return {
+        placement: "drawer",
+        rows: (width) =>
+          this.#drawer(
+            renderQuestionPanel(
+              {
+                prompt: request.prompt,
+                options: [
+                  { id: "yes", label: "Yes" },
+                  { id: "no", label: "No" },
+                ],
+                cursor,
+                allowFreeform: false,
+                editor: EMPTY_LINE,
+                caretVisible: false,
+                maxRows: this.#terminal.height() - drawerChromeRows,
+              },
+              this.#theme,
+              width,
+            ),
+            "y yes · n no · Ctrl-C cancel",
+            width,
+            request.context,
+          ),
+        key: (key) => {
+          switch (key.type) {
+            case "text": {
+              // An ordinary bracketed paste must not confirm by accident.
+              if (key.framing !== "unframed") return;
+              const value = key.value.toLowerCase();
+              if (value === "y") approve();
+              else if (value === "n") deny();
+              return;
+            }
+            case "up":
+            case "ctrl-p":
+              cursor = 0;
+              return;
+            case "down":
+            case "ctrl-n":
+              cursor = 1;
+              return;
+            case "enter":
+              if (cursor === 0) approve();
+              else deny();
+              return;
+            case "ctrl-c":
+              this.#close();
+              return;
+            default:
+              return;
+          }
+        },
+      };
+    });
+  }
+
+  /**
+   * Asks an agent's question in a drawer. Esc with nothing to clear dismisses
+   * it: it resolves `undefined` and the question stays open on the server.
+   */
+  async readInputQuestion(
+    question: AgentTUIInputQuestion,
+  ): Promise<AgentTUIInputQuestionResponse | undefined> {
+    const options = question.options ?? [];
+    const textOnly = options.length === 0;
+    const freeformRow = !textOnly && question.allowFreeform === true;
+    const rowCount = options.length + (freeformRow ? 1 : 0);
+    const prompt = stripTerminalControls(question.prompt);
+    let cursor = 0;
+    let editor = EMPTY_LINE;
+    const editing = () => textOnly || (freeformRow && cursor === options.length);
+    const record = (body: string) =>
+      this.#pushBlock({
+        kind: "question",
+        title: prompt,
+        body: `${this.#theme.colors.dim(this.#theme.glyph.elbow)}  ${body}`,
+        preformatted: true,
+        live: false,
+      });
+
+    return await this.#ask<AgentTUIInputQuestionResponse | undefined>((settle) => {
+      const answer = (resolved: { optionId?: string; text?: string; label: string }) => {
+        record(stripTerminalControls(resolved.label));
+        const response: AgentTUIInputQuestionResponse = {};
+        if (resolved.optionId !== undefined) response.optionId = resolved.optionId;
+        if (resolved.text !== undefined) response.text = resolved.text;
+        settle.done(response);
+      };
+      const dismiss = () => {
+        record(this.#theme.colors.dim("Skipped. The question stays open."));
+        settle.done(undefined);
+      };
+      return {
+        placement: "drawer",
+        caret: editing,
+        rows: (width) => {
+          const maxRows = this.#terminal.height() - drawerChromeRows;
+          if (!textOnly) {
+            return this.#drawer(
+              renderQuestionPanel(
+                {
+                  prompt,
+                  options,
+                  cursor,
+                  allowFreeform: freeformRow,
+                  editor,
+                  caretVisible: this.#caretVisible(),
+                  maxRows,
+                },
+                this.#theme,
+                width,
+              ),
+              "↑/↓ move · enter to select · esc to dismiss",
+              width,
+              question.context,
+            );
+          }
+          const input = promptInputRows({
+            ...editor,
+            width: Math.max(1, width - 2),
+            theme: this.#theme,
+            caretVisible: this.#caretVisible(),
+            ghost: "",
+            maxRows: 3,
+          });
+          return this.#drawer(
+            fitQuestionPanel(
+              [
+                ...renderQuestionPrompt(question.prompt, this.#theme, width),
+                "",
+                ...input.map((row) => `  ${row}`),
+              ],
+              maxRows,
+            ),
+            "Enter submit · Esc dismiss",
+            width,
+            question.context,
+          );
+        },
+        key: (key) => {
+          if (key.type === "ctrl-c") {
+            if (editing() && editor.text.length > 0) editor = EMPTY_LINE;
+            else this.#close();
+            return;
+          }
+          if (key.type === "escape") {
+            if (editing() && editor.text.length > 0) editor = EMPTY_LINE;
+            else dismiss();
+            return;
+          }
+          if (key.type === "enter") {
+            if (!editing()) {
+              const option = options[cursor];
+              if (option !== undefined) answer({ optionId: option.id, label: option.label });
+              return;
+            }
+            const resolved = resolveQuestionText(editor.text, question);
+            if (resolved !== undefined) answer(resolved);
+            return;
+          }
+          if (!textOnly) {
+            const intent = setupSelectionIntent(key, { textNavigation: !editing() });
+            if (intent?.kind === "move" && rowCount > 0) {
+              cursor = (cursor + (intent.direction === "up" ? -1 : 1) + rowCount) % rowCount;
+              return;
+            }
+          }
+          if (!editing()) return;
+          const edited = this.#killRing.apply(editor, key, { multiline: textOnly });
+          if (edited !== undefined) {
+            editor = edited;
+            return;
+          }
+          if (textOnly && (key.type === "up" || key.type === "down")) {
+            editor = movePromptLine(editor, key.type) ?? editor;
+          }
+        },
+      };
+    });
+  }
+
+  /** Lets `/help` select a command without leaving a transcript row. */
+  async choosePromptCommand(commands: readonly PromptCommandSpec[]): Promise<string | undefined> {
+    let state = typeaheadFor(commands, "/");
+    const choice = await this.#ask<string | undefined>(
+      (settle) => ({
+        placement: "panel",
+        rows: (width) => {
+          const rows = renderCommandSuggestions(state, this.#theme, width);
+          const visible = Math.max(1, this.#terminal.height() - 7);
+          const start = Math.max(
+            0,
+            Math.min(state.selectedIndex - visible + 1, rows.length - visible),
+          );
+          return this.#drawer(
+            rows.slice(start, start + visible),
+            "↑/↓ move · Enter select · Esc close",
+            width,
+          );
+        },
+        key: (key) => {
+          if (key.type === "up" || key.type === "ctrl-p") state = moveTypeaheadSelection(state, -1);
+          else if (key.type === "down" || key.type === "ctrl-n") {
+            state = moveTypeaheadSelection(state, 1);
+          } else if (key.type === "enter") {
+            const command = selectedTypeaheadCommand(state);
+            settle.done(command === undefined ? undefined : typeaheadCompletion(command));
+          } else if (key.type === "escape" || key.type === "ctrl-c") settle.done(undefined);
+        },
+      }),
+      () => undefined,
+    );
+    this.finishCommand({ kind: "dismiss" });
+    return choice;
+  }
+
+  /** Shows local application metadata without keeping it in the transcript. */
+  async showInfoPanel(text: string): Promise<void> {
+    const plainText = stripAnsi(text);
+    let scroll = 0;
+    const visible = () => Math.max(1, this.#terminal.height() - 7);
+    const infoRows = (width: number) =>
+      plainText
+        .split("\n")
+        .flatMap((line) =>
+          wrapVisibleLine(line, Math.max(1, width - 4)).map((part) => `  ${part}`),
+        );
+    await this.#ask<void>(
+      (settle) => ({
+        placement: "panel",
+        rows: (width) => {
+          const rows = infoRows(width);
+          scroll = Math.min(scroll, Math.max(0, rows.length - visible()));
+          return this.#drawer(
+            rows.slice(scroll, scroll + visible()),
+            rows.length > visible() ? "↑/↓ scroll · Esc close" : "Esc to close",
+            width,
+          );
+        },
+        key: (key) => {
+          if (key.type === "up" || key.type === "ctrl-p") scroll = Math.max(0, scroll - 1);
+          else if (key.type === "down" || key.type === "ctrl-n") {
+            const rows = infoRows(this.#terminal.width()).length;
+            scroll = Math.min(scroll + 1, Math.max(0, rows - visible()));
+          } else if (key.type === "escape" || key.type === "ctrl-c" || key.type === "enter") {
+            settle.done();
+          }
+        },
+      }),
+      () => undefined,
+    );
+    this.finishCommand({ kind: "dismiss" });
+  }
+
+  #drawer(
+    body: readonly string[],
+    controls: string,
+    width: number,
+    context?: AgentTUIInputContext,
+  ): string[] {
+    const label = context === undefined ? undefined : this.#inputContextLabel(context);
+    const drawer = renderTransientDrawer(
+      body,
+      [controls],
+      this.#theme,
+      width,
+      label,
+      false,
+      "left",
+    );
+    return [...drawer.rows, ...drawer.controls];
+  }
+
   /** Names the task that asked as its task lines do. */
-  #inputContextLabel(context: AgentTUIInputContext | undefined): string | undefined {
-    if (
-      context?.taskId === undefined ||
-      context.requester !== undefined ||
-      this.#view === undefined
-    ) {
+  #inputContextLabel(context: AgentTUIInputContext): string | undefined {
+    if (context.taskId === undefined || context.requester !== undefined || !this.#view) {
       return inputContextLabel(context, this.#theme);
     }
     const requester = this.#transcript.taskLabel(this.#view.conversation, context.taskId);
@@ -1095,725 +1145,36 @@ export class TerminalRenderer implements AgentTUIRenderer {
     );
   }
 
-  #syncInput(state: LineState): void {
-    this.#inputText = state.text;
-    this.#inputCursor = state.cursor;
-  }
+  // ---------------------------------------------------------------------------
+  // Setup flow
+  // ---------------------------------------------------------------------------
 
-  async readToolApproval(
-    request: AgentTUIToolApprovalRequest,
-    options?: AgentTUISessionOptions,
-  ): Promise<AgentTUIToolApprovalResponse> {
-    this.#start(options);
-    this.#inputActive = false;
-    let approvalCursor = 0;
-    this.#hitlDrawer = (width) =>
-      renderTransientDrawer(
-        renderQuestionPanel(
-          {
-            prompt: request.prompt,
-            options: [
-              { id: "yes", label: "Yes" },
-              { id: "no", label: "No" },
-            ],
-            cursor: approvalCursor,
-            allowFreeform: false,
-            editor: EMPTY_LINE,
-            caretVisible: false,
-            maxRows: this.#height() - hitlDrawerChromeRows,
-          },
-          this.#theme,
-          width,
-        ),
-        ["y yes · n no · Ctrl-C cancel"],
-        this.#theme,
-        width,
-        this.#inputContextLabel(request.context),
-        false,
-        "left",
-      );
-    this.#paint();
-
-    return await new Promise((resolve, reject) => {
-      const approve = () => {
-        this.#hitlDrawer = undefined;
-        this.#detachInput();
-        this.#paint();
-        resolve({ approved: true });
-      };
-      const deny = () => {
-        this.#hitlDrawer = undefined;
-        this.#detachInput();
-        this.#paint();
-        resolve({ approved: false, reason: "Denied by user." });
-      };
-      this.#rejectActiveReader = reject;
-      this.#consumeKey = (key) => {
-        switch (key.type) {
-          case "text": {
-            // This prevents ordinary bracketed paste from confirming by
-            // accident; terminal framing is not an authentication signal.
-            if (key.framing !== "unframed") break;
-            const value = key.value.toLowerCase();
-            if (value === "y") approve();
-            else if (value === "n") deny();
-            break;
-          }
-          case "up":
-          case "ctrl-p":
-            approvalCursor = 0;
-            this.#paint();
-            break;
-          case "down":
-          case "ctrl-n":
-            approvalCursor = 1;
-            this.#paint();
-            break;
-          case "enter":
-            if (approvalCursor === 0) approve();
-            else deny();
-            break;
-          case "ctrl-r":
-            this.#paint();
-            break;
-          case "ctrl-c":
-            this.#hitlDrawer = undefined;
-            this.#stop();
-            reject(interruptedError());
-            break;
-          default:
-            break;
-        }
-      };
-
-      this.#attachInput();
-    });
-  }
-
-  async readInputQuestion(
-    question: AgentTUIInputQuestion,
-    options?: AgentTUISessionOptions,
-  ): Promise<AgentTUIInputQuestionResponse | undefined> {
-    this.#start(options);
-    this.#inputActive = false;
-    this.#promptPlaceholderActive = false;
-
-    const optionList = question.options ?? [];
-    const hasOptions = optionList.length > 0;
-    const allowFreeform = question.allowFreeform === true || !hasOptions;
-    const hasFreeformRow = allowFreeform && hasOptions;
-    const totalRows = optionList.length + (hasFreeformRow ? 1 : 0);
-    const sectionKey = questionSectionId(question.requestId);
-
-    // Both question shapes use a drawer. Esc (with nothing to clear) dismisses
-    // the question: it resolves `undefined`, the runner returns to the
-    // prompt, and the server records the still-parked request as `ignored`
-    // when the user's next message resumes the turn.
-    let mode: "select" | "text" = hasOptions ? "select" : "text";
-    let cursorIndex = 0;
-    let editor = EMPTY_LINE;
-
-    const isOnFreeformRow = () => hasFreeformRow && cursorIndex === optionList.length;
-
-    // The panel closure reads the mutable interaction state at paint time,
-    // so key handlers only update it and repaint.
-    const selectDrawer = (width: number) =>
-      renderTransientDrawer(
-        [
-          ...renderQuestionPanel(
-            {
-              prompt: stripTerminalControls(question.prompt),
-              options: optionList,
-              cursor: cursorIndex,
-              allowFreeform: hasFreeformRow,
-              editor,
-              caretVisible: this.#caretVisible,
-              maxRows: this.#height() - hitlDrawerChromeRows,
-            },
-            this.#theme,
-            width,
-          ),
-        ],
-        ["↑/↓ move · enter to select · esc to dismiss"],
-        this.#theme,
-        width,
-        this.#inputContextLabel(question.context),
-        false,
-        "left",
-      );
-
-    const textPanel = (width: number) => {
-      const inputRows = promptInputRows({
-        text: editor.text,
-        cursor: editor.cursor,
-        width: Math.max(1, width - 2),
-        theme: this.#theme,
-        caretVisible: this.#caretVisible,
-        ghost: "",
-        maxRows: 3,
-      });
-      if (inputRows.at(-1) === "") inputRows.pop();
-      return renderTransientDrawer(
-        fitQuestionPanel(
-          [
-            ...renderQuestionPrompt(question.prompt, this.#theme, width),
-            "",
-            ...inputRows.map((row) => `  ${row}`),
-          ],
-          this.#height() - hitlDrawerChromeRows,
-        ),
-        ["Enter submit · Esc dismiss"],
-        this.#theme,
-        width,
-        this.#inputContextLabel(question.context),
-        false,
-        "left",
-      );
-    };
-
-    const syncFreeformCaret = () => {
-      if (isOnFreeformRow()) {
-        this.#startCaretBlink();
-      } else {
-        this.#stopCaretBlink();
-        this.#showCaret();
-      }
-    };
-
-    const enterSelectDrawer = () => {
-      mode = "select";
-      this.#inputActive = false;
-      this.#removeBlock(sectionKey);
-      this.#hitlDrawer = selectDrawer;
-      syncFreeformCaret();
-      this.#paint();
-    };
-
-    const enterTextMode = () => {
-      mode = "text";
-      this.#hitlDrawer = textPanel;
-      this.#inputActive = true;
-      this.#syncInput(editor);
-      this.#startCaretBlink();
-      this.#paint();
-    };
-
-    if (mode === "select") enterSelectDrawer();
-    else enterTextMode();
-
-    const finalize = (resolved: {
-      optionId?: string;
-      text?: string;
-      label: string;
-    }): AgentTUIInputQuestionResponse => {
-      this.#hitlDrawer = undefined;
-      this.#upsertBlock({
-        id: sectionKey,
-        kind: "question",
-        title: stripTerminalControls(question.prompt),
-        body: `${this.#theme.colors.dim(this.#theme.glyph.elbow)}  ${stripTerminalControls(resolved.label)}`,
-        preformatted: true,
-        live: false,
-      });
-      this.#inputActive = false;
-      this.#stopCaretBlink();
-      this.#detachInput();
-      this.#paint();
-      const response: AgentTUIInputQuestionResponse = {};
-      if (resolved.optionId !== undefined) response.optionId = resolved.optionId;
-      if (resolved.text !== undefined) response.text = resolved.text;
-      return response;
-    };
-
-    // Dismissal resolves `undefined` — no answer travels and the question stays
-    // open; the transcript records it compactly instead of keeping its options.
-    const dismiss = () => {
-      this.#hitlDrawer = undefined;
-      this.#upsertBlock({
-        id: sectionKey,
-        kind: "question",
-        title: stripTerminalControls(question.prompt),
-        body: `${this.#theme.colors.dim(this.#theme.glyph.elbow)}  ${this.#theme.colors.dim("Skipped. The question stays open.")}`,
-        preformatted: true,
-        live: false,
-      });
-      this.#inputActive = false;
-      this.#stopCaretBlink();
-      this.#detachInput();
-      this.#paint();
-      resolve(undefined);
-    };
-
-    const moveCursor = (delta: number) => {
-      if (totalRows === 0) return;
-      cursorIndex = (cursorIndex + delta + totalRows) % totalRows;
-      syncFreeformCaret();
-      this.#paint();
-    };
-
-    const selectOptionAt = (index: number) => {
-      const option = optionList[index];
-      if (option) resolve(finalize({ optionId: option.id, label: option.label }));
-    };
-
-    let resolve!: (value: AgentTUIInputQuestionResponse | undefined) => void;
-
-    return await new Promise<AgentTUIInputQuestionResponse | undefined>((res, reject) => {
-      this.#rejectActiveReader = reject;
-      resolve = res;
-      this.#consumeKey = (key) => {
-        if (key.type === "ctrl-c") {
-          const editing = mode === "text" || isOnFreeformRow();
-          if (editing && editor.text.length > 0) {
-            editor = EMPTY_LINE;
-            this.#showCaret();
-            if (mode === "text") this.#syncInput(editor);
-            this.#paint();
-            return;
-          }
-          this.#hitlDrawer = undefined;
-          this.#stopCaretBlink();
-          this.#stop();
-          reject(interruptedError());
-          return;
-        }
-
-        if (key.type === "ctrl-r") {
-          this.#paint();
-          return;
-        }
-
-        if (mode === "select") {
-          const textNavigation = setupSelectionIntent(key, {
-            textNavigation: !isOnFreeformRow(),
-          });
-          if (textNavigation?.kind === "move") {
-            moveCursor(textNavigation.direction === "up" ? -1 : 1);
-            return;
-          }
-
-          switch (key.type) {
-            case "up":
-            case "ctrl-p":
-              moveCursor(-1);
-              break;
-            case "down":
-            case "ctrl-n":
-              moveCursor(1);
-              break;
-            case "enter": {
-              if (isOnFreeformRow()) {
-                const resolvedText = resolveQuestionText(editor.text, question);
-                if (resolvedText !== undefined) resolve(finalize(resolvedText));
-                break;
-              }
-              selectOptionAt(cursorIndex);
-              break;
-            }
-            case "escape":
-              if (isOnFreeformRow() && editor.text.length > 0) {
-                editor = EMPTY_LINE;
-                this.#showCaret();
-                this.#paint();
-                break;
-              }
-              dismiss();
-              break;
-            default: {
-              if (isOnFreeformRow()) {
-                const edited = this.#killRing.apply(editor, key);
-                if (edited !== undefined) {
-                  editor = edited;
-                  this.#showCaret();
-                  this.#paint();
-                }
-              }
-              break;
-            }
-          }
-          return;
-        }
-
-        const edited = this.#killRing.apply(editor, key, { multiline: true });
-        if (edited !== undefined) {
-          editor = edited;
-          this.#showCaret();
-          this.#syncInput(editor);
-          this.#paint();
-          return;
-        }
-
-        switch (key.type) {
-          case "up":
-          case "down": {
-            const moved = movePromptLine(editor, key.type);
-            if (moved !== undefined) {
-              editor = moved;
-              this.#showCaret();
-              this.#syncInput(editor);
-              this.#paint();
-            }
-            break;
-          }
-          case "enter": {
-            const resolvedText = resolveQuestionText(editor.text, question);
-            if (resolvedText === undefined) break;
-            resolve(finalize(resolvedText));
-            break;
-          }
-          case "escape":
-            if (editor.text.length > 0) {
-              editor = EMPTY_LINE;
-              this.#showCaret();
-              this.#syncInput(editor);
-              this.#paint();
-              break;
-            }
-            dismiss();
-            break;
-          default:
-            break;
-        }
-      };
-
-      this.#attachInput();
-    });
-  }
-
-  setVercelStatus(status: VercelStatusSnapshot): void {
-    this.#vercelStatus = status;
-    // #paint self-guards on #isInteractive, so a probe resolving after
-    // shutdown is inert.
-    this.#paint();
-  }
-
-  setRemoteConnectionStatus(status: RemoteConnectionSnapshot): void {
-    this.#remoteConnection = status;
-    this.#paint();
-  }
-
-  reset(): void {
-    this.#blocks = [];
-    this.#blockById.clear();
-    this.#committedIds.clear();
-    this.#lastCommitted = undefined;
-    this.#committedTranscriptRows.length = 0;
-    this.#transcriptBlocks.length = 0;
-    // `/new` resets the conversation, not the workspace: keep #agentHeader
-    // (the status line's model segment reads it — the header is not re-sent
-    // after a reset) and #vercelStatus (link + pending-deploy outlive the
-    // conversation). The header *block* still leaves the transcript because
-    // its rows are only re-emitted via renderAgentHeader.
-    this.#agentHeaderRendered = false;
-    this.#agentHeaderBody = undefined;
-    this.#clearConversationState();
-    // A fresh conversation gets the invitation back.
-    this.#hasUserMessage = false;
-    this.#devRebuild = undefined;
-    if (this.#isInteractive) {
-      this.#live.clearAll();
-      this.#paint();
-    }
-  }
-
-  /**
-   * The mid-conversation session boundary: one opening-corner line marking
-   * where the server-side context was cut and a fresh session took over.
-   */
-  renderSessionBoundary(): void {
-    // The dying turn's stats coda closes before the boundary — it belongs
-    // to the session that ended, not the fresh one.
-    this.#commitTurnStats();
-    // Tasks die with the session; close their lines before the boundary.
-    const stopped = this.#transcript.stopWorking(this.#transcriptOptions());
-    // The old conversation's blocks settle as they are; a fresh session may
-    // reuse their ids, so they leave the projection anonymously.
-    for (const id of this.#conversationBlockIds) {
-      const block = this.#blockById.get(id);
-      if (block === undefined) continue;
-      this.#blockById.delete(id);
-      const index = this.#blocks.indexOf(block);
-      const { id: _id, ...settled } = block;
-      this.#blocks[index] = { ...settled, live: false };
-    }
-    for (const { id: _id, ...line } of stopped) this.#pushBlock(line);
-    this.#committedIds.clear();
-    this.#clearConversationState();
-
-    const c = this.#theme.colors;
-    const g = this.#theme.glyph;
-    const body = c.dim(`${g.cornerOpen}${g.dash.repeat(2)} Session restarted, clear context.`);
-    this.#pushBlock({ kind: "session-boundary", body, live: false });
-    this.#paint();
-  }
-
-  /**
-   * THE one authority for state scoped to a server-side conversation
-   * context. Called by both context cuts — `/new` and the
-   * mid-conversation session replacement (`renderSessionBoundary`) — so the
-   * two can never drift on what dies with the old context: write-diff
-   * bases (a fresh session may run a fresh sandbox, where stale bases
-   * render confidently wrong diffs), subagent call identity (ordinals must
-   * not count across a cut), tool-call ownership maps, and the turn clock.
-   */
-  #clearConversationState(): void {
-    this.#transcript.reset();
-    this.#view = undefined;
-    this.#conversationBlockIds = new Set();
-    this.#steeredMessages.length = 0;
-    this.#cancelRequested = false;
-    this.#turnClock.reset();
-    this.#syncActivityTicker();
-  }
-
-  /**
-   * Commits a single dim informational line to the transcript (e.g. the
-   * session-recovery notice after a terminal server failure). No-op when the
-   * text is blank.
-   */
-  renderNotice(text: string): void {
-    const content = stripTerminalControls(text);
-    if (content.trim().length === 0) return;
-    this.#start();
-    this.#pushBlock({ kind: "notice", body: content, live: false });
-    this.#paint();
-  }
-
-  /** Puts a cancelled turn's message back into an empty composer, with a notice. */
-  restoreDraft(text: string): void {
-    const apply = this.#inputActive ? this.#applyDraft : undefined;
-    if ((apply === undefined ? this.#draft.text : this.#inputText).length > 0) return;
-    const line = lineOf(stripPromptControlCharacters(text));
-    if (apply === undefined) this.#draft = line;
-    else apply(line);
-    this.renderNotice(
-      "The turn was cancelled from outside this prompt, so its message is back in the input.",
-    );
-  }
-
-  /**
-   * Sets the setup attention line (yellow `⚠`, commands blue) as a live footer
-   * element above the prompt. Unlike committed scrollback, it can be cleared:
-   * once the underlying issue is fixed (e.g. `/deploy` succeeds) the runner calls
-   * {@link clearSetupWarning} and the line disappears rather than lingering
-   * stale in the transcript.
-   */
-  renderSetupWarning(text: string): void {
-    const content = stripTerminalControls(text);
-    if (content.trim().length === 0) {
-      this.#clearSetupAttention();
-      return;
-    }
-    this.#start();
-    this.#setupAttention = content;
-    this.#paint();
-  }
-
-  /** Removes the setup attention line once its issue is resolved. */
-  clearSetupWarning(): void {
-    this.#clearSetupAttention();
-  }
-
-  #clearSetupAttention(): void {
-    if (this.#setupAttention === undefined) return;
-    this.#setupAttention = undefined;
-    this.#paint();
-  }
-
-  /** Echoes a slash-command invocation that was started without prompt input. */
-  renderCommandInvocation(text: string): void {
-    const content = stripTerminalControls(text);
-    if (content.trim().length === 0) return;
-    this.#start();
-    this.#pushCommandEcho(content);
-    this.#paint();
-  }
-
-  /** Lets `/help` select a command without leaving a transcript row. */
-  async choosePromptCommand(commands: readonly PromptCommandSpec[]): Promise<string | undefined> {
-    this.#start();
-    this.#inputActive = false;
-    let state = typeaheadFor(commands, "/");
-    this.#transientPanel = (width) => {
-      const rows = renderCommandSuggestions(state, this.#theme, width);
-      const visible = Math.max(1, this.#height() - 7);
-      const start = Math.max(0, Math.min(state.selectedIndex - visible + 1, rows.length - visible));
-      return renderTransientDrawer(
-        rows.slice(start, start + visible),
-        ["↑/↓ move · Enter select · Esc close"],
-        this.#theme,
-        width,
-      );
-    };
-    this.#paint();
-    return await new Promise((resolve) => {
-      this.#transientPanelClose = () => resolve(undefined);
-      this.#consumeKey = (key) => {
-        if (key.type === "up" || key.type === "ctrl-p") {
-          state = moveTypeaheadSelection(state, -1);
-          this.#paint();
-        } else if (key.type === "down" || key.type === "ctrl-n") {
-          state = moveTypeaheadSelection(state, 1);
-          this.#paint();
-        } else if (key.type === "enter") {
-          const command = selectedTypeaheadCommand(state);
-          this.#closeTransientPanel();
-          resolve(command === undefined ? undefined : typeaheadCompletion(command));
-        } else if (key.type === "escape" || key.type === "ctrl-c") {
-          this.#closeTransientPanel();
-          resolve(undefined);
-        }
-      };
-      this.#attachInput();
-    });
-  }
-
-  /** Shows local application metadata without retaining it in the transcript. */
-  async showInfoPanel(text: string): Promise<void> {
-    this.#start();
-    this.#inputActive = false;
-    const plainText = stripAnsi(text);
-    let scroll = 0;
-    const infoRows = (width: number) =>
-      plainText
-        .split("\n")
-        .flatMap((line) =>
-          wrapVisibleLine(line, Math.max(1, width - 4)).map((part) => `  ${part}`),
-        );
-    this.#transientPanel = (width) => {
-      const rows = infoRows(width);
-      const visible = Math.max(1, this.#height() - 7);
-      scroll = Math.min(scroll, Math.max(0, rows.length - visible));
-      return renderTransientDrawer(
-        rows.slice(scroll, scroll + visible),
-        [rows.length > visible ? "↑/↓ scroll · Esc close" : "Esc to close"],
-        this.#theme,
-        width,
-      );
-    };
-    this.#paint();
-    await new Promise<void>((resolve) => {
-      this.#transientPanelClose = resolve;
-      this.#consumeKey = (key) => {
-        if (key.type === "up" || key.type === "ctrl-p") {
-          scroll = Math.max(0, scroll - 1);
-          this.#paint();
-        } else if (key.type === "down" || key.type === "ctrl-n") {
-          const visible = Math.max(1, this.#height() - 7);
-          scroll = Math.min(scroll + 1, Math.max(0, infoRows(this.#width()).length - visible));
-          this.#paint();
-        } else if (key.type === "escape" || key.type === "ctrl-c" || key.type === "enter") {
-          this.#closeTransientPanel();
-          resolve();
-        }
-      };
-      this.#attachInput();
-    });
-  }
-
-  #closeTransientPanel(): void {
-    this.#transientPanel = undefined;
-    this.finishCommand({ kind: "dismiss" });
-    this.#consumeKey = undefined;
-    this.#transientPanelClose = undefined;
-    this.#detachInput();
-    this.#paint();
-  }
-
-  /** Completes the active command's transcript record in one operation. */
-  finishCommand(outcome: CommandPresentation): void {
-    if (outcome.kind === "dismiss") {
-      if (this.#removePendingCommandEcho()) this.#paint();
-      return;
-    }
-    const echo = this.#settleCommandEcho(outcome.summary);
-    if (echo !== undefined) echo.status = "done";
-    const content = outcome.message === undefined ? "" : stripAnsi(outcome.message);
-    if (content.trim().length === 0) {
-      if (echo !== undefined) this.#paint();
-      return;
-    }
-    this.#start();
-    const result: Block = { kind: "result", body: content, live: false };
-    this.#pushBlock(result);
-    // Work that streamed in while the command ran must not come between it and its result.
-    const echoIndex = echo === undefined ? -1 : this.#blocks.indexOf(echo);
-    if (echoIndex !== -1) {
-      this.#blocks.pop();
-      this.#blocks.splice(echoIndex + 1, 0, result);
-    }
-    this.#paint();
-  }
-
-  #removePendingCommandEcho(): boolean {
-    const block = this.#pendingCommandEcho;
-    if (block === undefined) return false;
-    this.#pendingCommandEcho = undefined;
-    this.#blocks = this.#blocks.filter((candidate) => candidate !== block);
-    return true;
-  }
-
-  /**
-   * The echo stays live, and so out of scrollback, until its command settles:
-   * its gutter pulses meanwhile, then carries the outcome.
-   */
-  #pushCommandEcho(body: string): void {
-    if (this.#pendingCommandEcho !== undefined) this.#settleCommandEcho();
-    const block: Block = { kind: "command", body, live: true };
-    this.#pendingCommandEcho = block;
-    this.#pushBlock(block);
-  }
-
-  #settleCommandEcho(summary?: string): Block | undefined {
-    const block = this.#pendingCommandEcho;
-    if (block === undefined) return undefined;
-    this.#pendingCommandEcho = undefined;
-    block.live = false;
-    if (summary !== undefined) block.result = stripTerminalControls(summary);
-    return block;
-  }
-
-  /**
-   * Opens the setup flow for one command. Until the flow ends,
-   * every flow line, question, and status renders inside it; the transcript
-   * above stays untouched.
-   */
-  #beginSetupFlow(title: string): void {
-    this.#start();
-    if (this.#startupEditor === undefined) this.#inputActive = false;
-    this.#setupFlow = {
+  /** Opens the setup flow; until it ends, its lines, questions, and status replace the composer. */
+  #beginFlow(title: string): void {
+    this.#flow = {
       title: stripTerminalControls(title),
       startedAtMs: Date.now(),
       lines: [],
       outputBuffer: [],
     };
-    // The ticker runs for the whole flow: the idle pulse, the status indicator,
-    // and the output preview all animate through it.
-    this.#startTicker();
     this.#paint();
   }
 
-  #setSetupFlowNavigation(navigation: PlannerNavigation | undefined): void {
-    if (this.#setupFlow === undefined) return;
-    this.#setupFlow.navigation = navigation;
+  #updateFlow(update: (flow: SetupFlowState) => void): void {
+    if (this.#flow === undefined) return;
+    update(this.#flow);
     this.#paint();
   }
 
   /**
-   * Closes the flow panel, optionally retaining its warning/error diagnostics.
-   * A diagnostic's pulled-in subprocess evidence persists with it, as one dim
-   * block directly above — a failed command must keep its evidence past the
-   * panel (the deploy box's rail contract), not just its exit-code summary.
+   * Closes the flow, optionally keeping its warnings and errors. A
+   * diagnostic's pulled-in subprocess output persists with it, as one dim
+   * block directly above: a failed command must keep its evidence.
    */
-  #endSetupFlow(preserveDiagnostics: boolean): void {
-    this.#flowInterrupt = undefined;
-    this.#disarmFlowIdleTrap();
-    const flow = this.#setupFlow;
+  #endFlow(preserveDiagnostics: boolean): void {
+    const flow = this.#flow;
     if (flow === undefined) return;
-    this.#setupFlow = undefined;
-    if (this.#startupEditor !== undefined) this.#resumeStartupDraft();
-    else this.#stopTicker();
-
+    this.#flow = undefined;
     if (preserveDiagnostics) {
       let evidence: string[] = [];
       for (const line of flow.lines) {
@@ -1832,35 +1193,68 @@ export class TerminalRenderer implements AgentTUIRenderer {
           }
           this.#pushBlock({ kind: "flow", title: line.tone, body: line.text, live: false });
         }
-        // Evidence binds only to the diagnostic that settled it; any other
-        // line in between orphans it.
         evidence = [];
       }
     }
     this.#paint();
   }
 
+  #requireFlow(): SetupFlowState {
+    if (this.#flow === undefined) throw new Error("A setup question needs an open setup flow.");
+    return this.#flow;
+  }
+
   /**
-   * Asks one select question inside the flow panel. Behavior comes from the
-   * shared select reducer (filter, cursor, toggle, locked rows, the
-   * multi-select Submit row). Resolves the chosen value keys, or `undefined`
-   * when the user cancels with Ctrl-C or Esc from an unfiltered list. Esc
-   * clears an active search first. One question at a time; it vanishes on
-   * resolve.
+   * Asks one setup question inside the flow. Ctrl+C both cancels the question
+   * and asks the TUI to exit; closing the TUI cancels it.
    */
-  async #readSetupSelect(opts: SetupSelectRequest): Promise<SetupSelectResult> {
-    const flow = this.#beginSetupQuestion(opts.message);
-    const multiple = isMultiSelectRequest(opts);
+  #askSetup<T>(
+    title: string,
+    make: (settle: Settle<T>, flow: SetupFlowState) => Omit<Surface, "placement">,
+    cancelled: T,
+  ): Promise<T> {
+    const flow = this.#requireFlow();
+    flow.questionTitle = stripTerminalControls(title);
+    // A question means the preceding background operation settled.
+    if (flow.status !== undefined) {
+      flow.status = undefined;
+      flow.summary = undefined;
+      flow.preview = undefined;
+    }
+    return this.#ask<T>(
+      (settle) => {
+        const surface = make(settle, flow);
+        return {
+          ...surface,
+          placement: "flow",
+          key: (key) => {
+            if (key.type === "ctrl-c") this.#requestExit();
+            surface.key(key);
+          },
+          dispose: () => {
+            surface.dispose?.();
+            flow.questionTitle = undefined;
+            flow.hideLinesWhileQuestion = false;
+          },
+        };
+      },
+      () => cancelled,
+    );
+  }
+
+  /**
+   * One select question. Behavior comes from the shared select reducer
+   * (filter, cursor, toggle, locked rows, the multi-select Submit row).
+   * Resolves the chosen values, or `undefined` on cancel.
+   */
+  #readSetupSelect(opts: SetupSelectRequest): Promise<SetupSelectResult> {
+    const multiple = opts.kind === "multi" || opts.kind === "searchable-multi";
     const searchAction = opts.kind === "search" ? opts.searchAction : undefined;
     const searchableField = opts.kind === "search" && opts.layout === undefined;
-    let selectOptions: readonly SetupPanelOption[] = opts.options;
-
-    const plannerNavigation = opts.navigation?.kind === "planner";
-    const initial: Parameters<typeof initialSelectState>[0] = {
-      options: selectOptions,
-      searchAction,
-      submitRow: multiple && !plannerNavigation,
-    };
+    const planner = opts.navigation?.kind === "planner" ? opts.navigation : undefined;
+    const submitRow = multiple && planner === undefined;
+    let options: readonly SetupPanelOption[] = opts.options;
+    const initial: Parameters<typeof initialSelectState>[0] = { options, searchAction, submitRow };
     if ("initialValue" in opts && opts.initialValue !== undefined) {
       initial.defaultValue = opts.initialValue;
     }
@@ -1872,417 +1266,304 @@ export class TerminalRenderer implements AgentTUIRenderer {
     let loading = false;
     let searchVersion = 0;
 
-    const isCurrentSearch = (version: number): boolean => version === searchVersion;
-    const clearSearch = (): void => {
-      searchVersion += 1;
-      loading = false;
-      select = reduceSelect(
-        select,
-        { type: "clear" },
-        {
-          options: selectOptions,
-          searchAction,
-          submitRow: multiple && !plannerNavigation,
-        },
-      );
-      this.#paint();
-    };
-    const loadSearch = async (
-      query: string,
-      load: (query: string) => Promise<readonly SetupPanelOption[]>,
-    ): Promise<void> => {
-      loading = true;
-      error = undefined;
-      const version = ++searchVersion;
-      this.#paint();
-
-      try {
-        const options = await load(query);
-        if (!isCurrentSearch(version)) return;
-
-        const filter = select.filter;
-        selectOptions = options;
-        select = {
-          ...initialSelectState({
-            options,
-            searchAction,
-            submitRow: multiple && !plannerNavigation,
-          }),
-          filter,
-        };
-      } catch (reason) {
-        if (isCurrentSearch(version)) error = toErrorMessage(reason);
-      } finally {
-        if (isCurrentSearch(version)) {
-          loading = false;
-          this.#paint();
+    return this.#askSetup<SetupSelectResult>(
+      opts.message,
+      (settle, flow) => {
+        let notices = opts.notices;
+        if (opts.kind === "task-list" || (opts.kind === "search" && opts.layout === "task-list")) {
+          const start = flow.taskListLineStart ?? flow.lines.length;
+          notices =
+            opts.notices ??
+            flow.lines
+              .slice(start)
+              .filter(
+                (line): line is FlowPanelLine & { tone: "success" | "warning" | "error" } =>
+                  line.tone === "success" || line.tone === "warning" || line.tone === "error",
+              )
+              .map((line) => ({ tone: line.tone, text: line.text }));
+          flow.taskListLineStart = flow.lines.length;
+          flow.hideLinesWhileQuestion = true;
         }
-      }
-    };
-
-    let notices = opts.notices;
-    if (opts.kind === "task-list" || (opts.kind === "search" && opts.layout === "task-list")) {
-      const start = flow.taskListLineStart ?? flow.lines.length;
-      const outcomes: SelectNotice[] = flow.lines
-        .slice(start)
-        .filter(
-          (line): line is FlowPanelLine & { tone: "success" | "warning" | "error" } =>
-            line.tone === "success" || line.tone === "warning" || line.tone === "error",
-        )
-        .map((line) => ({ tone: line.tone, text: line.text }));
-      notices = opts.notices ?? outcomes;
-      flow.taskListLineStart = flow.lines.length;
-      flow.hideLinesWhileQuestion = true;
-    }
-    const panelState = (): SetupOptionPanelState => {
-      const state: SetupOptionPanelState = { ...opts, message: "", options: selectOptions, select };
-      if (notices !== undefined && notices.length > 0) state.notices = notices;
-      if (error !== undefined) state.error = error;
-      if (loading) state.loadingFrame = this.#spinnerFrame();
-      if (searchableField) state.caretVisible = this.#caretVisible;
-      return state;
-    };
-    flow.question = (width) => renderSelectQuestion(panelState(), this.#theme, width);
-    if (searchableField) this.#startCaretBlink();
-    this.#paint();
-
-    const question = this.#captureSetupQuestion<SetupSelectResult>(
-      (key, settle) => {
-        const close = (value: SetupSelectResult): void => {
+        const loadSearch = async (
+          query: string,
+          load: (query: string) => Promise<readonly SetupPanelOption[]>,
+        ) => {
+          loading = true;
+          error = undefined;
+          const version = ++searchVersion;
+          try {
+            const loaded = await load(query);
+            if (version !== searchVersion) return;
+            options = loaded;
+            select = {
+              ...initialSelectState({ options, searchAction, submitRow }),
+              filter: select.filter,
+            };
+          } catch (reason) {
+            if (version === searchVersion) error = toErrorMessage(reason);
+          } finally {
+            if (version === searchVersion) {
+              loading = false;
+              this.#paint();
+            }
+          }
+        };
+        const close = (value: SetupSelectResult) => {
           searchVersion += 1;
-          settle(value);
+          settle.done(value);
         };
-        if (loading) {
-          if (key.type === "ctrl-c") close(undefined);
-          else if (key.type === "escape") clearSearch();
-          else if (key.type === "ctrl-r") this.#paint();
-          return;
-        }
-
-        const plannerStep = opts.navigation?.kind === "planner" ? opts.navigation : undefined;
-        const plannerDirection =
-          key.type === "left" &&
-          (plannerStep?.activeStep ?? 0) > (plannerStep?.firstNavigableStep ?? 0)
-            ? "back"
-            : key.type === "right" &&
-                plannerStep !== undefined &&
-                plannerStep.activeStep >= (plannerStep.firstNavigableStep ?? 0) &&
-                plannerStep.activeStep < plannerStep.steps.length - 1
-              ? "forward"
-              : undefined;
-        if (plannerDirection !== undefined) {
-          close({
-            kind: "navigate",
-            direction: plannerDirection,
-            values: multiple ? orderedSelection(selectOptions, select.selected) : [],
-          });
-          return;
-        }
-
-        const base = { key, options: selectOptions, searchAction, select };
-        const result = multiple
-          ? reduceSetupSelectInput({
-              ...base,
-              kind: opts.kind,
-              required: opts.required,
-              plannerNavigation: plannerNavigation || undefined,
-            })
-          : reduceSetupSelectInput({ ...base, kind: opts.kind });
-        switch (result.kind) {
-          case "cancel":
-            close(undefined);
-            return;
-          case "repaint":
-            this.#paint();
-            return;
-          case "update":
-            select = result.select;
-            error = undefined;
-            if (searchableField) this.#showCaret();
-            this.#paint();
-            return;
-          case "submit": {
-            const query = searchActionQuery(result.values[0] ?? "");
-            const load = searchAction?.load;
-            if (query === undefined || load === undefined) {
-              close(result.values);
+        return {
+          caret: () => searchableField,
+          rows: (width) => {
+            const state: Exclude<SetupSelectPanelState, { kind: "actions" }> = {
+              ...opts,
+              message: "",
+              options,
+              select,
+            };
+            if (notices !== undefined && notices.length > 0) state.notices = notices;
+            if (error !== undefined) state.error = error;
+            if (loading) state.loadingFrame = this.#spinnerFrame();
+            if (searchableField) state.caretVisible = this.#caretVisible();
+            return renderSelectQuestion(state, this.#theme, width);
+          },
+          key: (key) => {
+            if (loading) {
+              if (key.type === "ctrl-c") close(undefined);
+              else if (key.type === "escape") {
+                searchVersion += 1;
+                loading = false;
+                select = reduceSelect(
+                  select,
+                  { type: "clear" },
+                  { options, searchAction, submitRow },
+                );
+              }
               return;
             }
-
-            void loadSearch(query, load);
-            return;
-          }
-          case "error":
-            error = result.message;
-            this.#paint();
-            return;
-          case "ignore":
-            return;
-        }
+            const first = planner?.firstNavigableStep ?? 0;
+            const direction =
+              planner !== undefined && key.type === "left" && planner.activeStep > first
+                ? "back"
+                : planner !== undefined &&
+                    key.type === "right" &&
+                    planner.activeStep >= first &&
+                    planner.activeStep < planner.steps.length - 1
+                  ? "forward"
+                  : undefined;
+            if (direction !== undefined) {
+              close({
+                kind: "navigate",
+                direction,
+                values: multiple ? orderedSelection(options, select.selected) : [],
+              });
+              return;
+            }
+            const base = { key, options, searchAction, select };
+            const result = multiple
+              ? reduceSetupSelectInput({
+                  ...base,
+                  kind: opts.kind,
+                  required: opts.required,
+                  plannerNavigation: planner !== undefined || undefined,
+                })
+              : reduceSetupSelectInput({ ...base, kind: opts.kind });
+            switch (result.kind) {
+              case "cancel":
+                close(undefined);
+                return;
+              case "update":
+                select = result.select;
+                error = undefined;
+                return;
+              case "submit": {
+                const query = searchActionQuery(result.values[0] ?? "");
+                const load = searchAction?.load;
+                if (query === undefined || load === undefined) close(result.values);
+                else void loadSearch(query, load);
+                return;
+              }
+              case "error":
+                error = result.message;
+                return;
+              default:
+                return;
+            }
+          },
+        };
       },
-      searchableField ? () => this.#stopCaretBlink() : undefined,
+      undefined,
     );
-    return await question.promise;
   }
 
   /**
-   * An inert context row followed by a separate action menu beside the live flow
-   * spinner. Unlike {@link #readSetupSelect} it keeps the spinner running (the
-   * poll is still in flight) and returns synchronously with a `close()` so the
-   * caller can dismiss it the moment the poll wins the race.
+   * An inert context row and an action menu beside the live flow status.
+   * Returns at once with a `close()` so the caller can dismiss it when a
+   * concurrent wait wins.
    */
   #readSetupChoice(
     opts: Parameters<SetupFlowRenderer["readChoice"]>[0],
   ): ReturnType<SetupFlowRenderer["readChoice"]> {
-    this.#start();
-    const flow = this.#requireSetupFlow();
-    flow.status = {
-      text: stripTerminalControls(opts.status),
-      startedAtMs: Date.now(),
-    };
-    // No action is pre-selected: the user must move into the action group before
-    // Enter can act, rather than firing "Try again" by reflex.
+    const flow = this.#requireFlow();
+    flow.status = { text: stripTerminalControls(opts.status), startedAtMs: Date.now() };
+    // Nothing is preselected, so Enter cannot fire "Try again" by reflex.
     let cursor: number | undefined;
-    flow.question = (width) =>
-      renderSelectQuestion(
-        {
-          kind: "actions",
-          context: opts.context,
-          actions: opts.actions,
-          cursor,
-        },
-        this.#theme,
-        width,
-      );
-    this.#paint();
-
-    const question = this.#captureSetupQuestion<string | undefined>(
-      (key, settle) => {
-        const intent = setupSelectionIntent(key, { textNavigation: true });
-        switch (intent?.kind) {
-          case "cancel":
-            settle(undefined);
-            return;
-          case "move":
-            cursor = moveActionCursor(cursor, intent.direction, opts.actions.length);
-            this.#paint();
-            return;
-          case "repaint":
-            this.#paint();
-            return;
-          case "submit": {
-            if (cursor !== undefined) settle(opts.actions[cursor]!.value);
-            return;
-          }
-          case undefined:
-            return;
-        }
+    let close!: () => void;
+    const choice = this.#ask<string | undefined>(
+      (settle) => {
+        close = () => settle.done(undefined);
+        return {
+          placement: "flow",
+          rows: (width) =>
+            renderSelectQuestion(
+              { kind: "actions", context: opts.context, actions: opts.actions, cursor },
+              this.#theme,
+              width,
+            ),
+          key: (key) => {
+            if (key.type === "ctrl-c") this.#requestExit();
+            const intent = setupSelectionIntent(key, { textNavigation: true });
+            if (intent?.kind === "cancel") settle.done(undefined);
+            else if (intent?.kind === "move") {
+              const count = opts.actions.length;
+              if (count === 0) return;
+              const delta = intent.direction === "down" ? 1 : -1;
+              cursor =
+                cursor === undefined
+                  ? intent.direction === "down"
+                    ? 0
+                    : count - 1
+                  : (cursor + delta + count) % count;
+            } else if (intent?.kind === "submit" && cursor !== undefined) {
+              settle.done(opts.actions[cursor]!.value);
+            }
+          },
+          dispose: () => {
+            flow.status = undefined;
+          },
+        };
       },
-      () => {
-        flow.status = undefined;
-      },
+      () => undefined,
     );
-    return { choice: question.promise, close: () => question.settle(undefined) };
+    return { choice, close: () => close() };
   }
 
-  async #readSetupEditableSelect(opts: {
-    message: string;
-    options: readonly SetupPanelOption[];
-    initialValue?: string;
-    editable: {
-      value: string;
-      defaultValue: string;
-      formatHint: (value: string) => string;
-      validate?: (value: string) => string | undefined;
-    };
-  }): Promise<SetupEditableSelectResult | undefined> {
-    const flow = this.#beginSetupQuestion(opts.message);
-
+  #readSetupEditableSelect(
+    opts: Parameters<SetupFlowRenderer["readEditableSelect"]>[0],
+  ): Promise<SetupEditableSelectResult | undefined> {
     const initial: Parameters<typeof initialSelectState>[0] = { options: opts.options };
     if (opts.initialValue !== undefined) initial.defaultValue = opts.initialValue;
     let select = initialSelectState(initial);
     let editor = lineOf("");
     let error: string | undefined;
-
-    flow.question = (width) => {
-      const state: SetupSelectPanelState = {
-        kind: "inline-edit",
-        layout: "task-list",
-        message: "",
-        options: opts.options,
-        select,
-        edit: {
-          optionValue: opts.editable.value,
-          caretVisible: this.#caretVisible,
-          editor: {
-            kind: "rename",
-            editor,
-            defaultValue: opts.editable.defaultValue,
-            formatHint: opts.editable.formatHint,
-          },
-        },
-      };
-      if (error !== undefined) state.error = error;
-      return renderSelectQuestion(state, this.#theme, width);
-    };
-    // Hovering the editable row makes it a live field. The editor stays empty
-    // until typing starts, leaving the default as a placeholder with the caret
-    // at its start. Moving off the row clears the field and stops the blink.
+    // Hovering the editable row makes it a live field, empty until typing starts.
     const onEditableRow = () =>
       selectValueAtCursor([...opts.options], select.cursor) === opts.editable.value;
-    const syncEditableRow = () => {
-      if (onEditableRow()) {
-        this.#startCaretBlink();
-      } else {
-        editor = lineOf("");
-        this.#stopCaretBlink();
-      }
-    };
-    syncEditableRow();
-    this.#paint();
 
-    const question = this.#captureSetupQuestion<SetupEditableSelectResult | undefined>(
-      (key, settle) => {
-        const applyEditor = (next: LineState) => {
-          editor = next;
-          error = undefined;
-          this.#showCaret();
-          this.#paint();
-        };
-        const applySelect = (event: Parameters<typeof reduceSelect>[1]) => {
-          select = reduceSelect(select, event, { options: opts.options });
-          error = undefined;
-          syncEditableRow();
-          this.#paint();
-        };
-        const submit = () => {
-          const value = selectValueAtCursor([...opts.options], select.cursor);
-          if (value === undefined) return;
-          if (value !== opts.editable.value) {
-            settle({ kind: "selected", value });
+    return this.#askSetup<SetupEditableSelectResult | undefined>(
+      opts.message,
+      (settle) => ({
+        caret: onEditableRow,
+        rows: (width) => {
+          const state: SetupSelectPanelState = {
+            kind: "inline-edit",
+            layout: "task-list",
+            message: "",
+            options: opts.options,
+            select,
+            edit: {
+              optionValue: opts.editable.value,
+              caretVisible: this.#caretVisible(),
+              editor: {
+                kind: "rename",
+                editor,
+                defaultValue: opts.editable.defaultValue,
+                formatHint: opts.editable.formatHint,
+              },
+            },
+          };
+          if (error !== undefined) state.error = error;
+          return renderSelectQuestion(state, this.#theme, width);
+        },
+        key: (key) => {
+          const intent = setupSelectionIntent(key, { textNavigation: !onEditableRow() });
+          if (intent?.kind === "cancel") {
+            settle.done(undefined);
             return;
           }
-          const text = (editor.text || opts.editable.defaultValue).trim();
-          const invalid = opts.editable.validate?.(text);
-          if (invalid !== undefined) {
-            error = invalid;
-            this.#paint();
+          if (intent?.kind === "move") {
+            select = reduceSelect(select, { type: intent.direction }, { options: opts.options });
+            error = undefined;
+            if (!onEditableRow()) editor = lineOf("");
             return;
           }
-          settle(
-            text === opts.editable.defaultValue
-              ? { kind: "selected", value }
-              : { kind: "edited", value, text },
-          );
-        };
-
-        const intent = setupSelectionIntent(key, { textNavigation: !onEditableRow() });
-        switch (intent?.kind) {
-          case "cancel":
-            settle(undefined);
+          if (intent?.kind === "submit") {
+            const value = selectValueAtCursor([...opts.options], select.cursor);
+            if (value === undefined) return;
+            if (value !== opts.editable.value) {
+              settle.done({ kind: "selected", value });
+              return;
+            }
+            const text = (editor.text || opts.editable.defaultValue).trim();
+            error = opts.editable.validate?.(text);
+            if (error !== undefined) return;
+            settle.done(
+              text === opts.editable.defaultValue
+                ? { kind: "selected", value }
+                : { kind: "edited", value, text },
+            );
             return;
-          case "move":
-            applySelect({ type: intent.direction });
-            return;
-          case "submit":
-            submit();
-            return;
-          case "repaint":
-            this.#paint();
-            return;
-          case undefined:
-            break;
-        }
-
-        if (!onEditableRow()) return;
-        const edited = this.#killRing.apply(editor, key);
-        if (edited !== undefined) applyEditor(edited);
-      },
-      () => this.#stopCaretBlink(),
+          }
+          if (!onEditableRow()) return;
+          const edited = this.#killRing.apply(editor, key);
+          if (edited !== undefined) {
+            editor = edited;
+            error = undefined;
+          }
+        },
+      }),
+      undefined,
     );
-    return await question.promise;
   }
 
-  async #readProviderPicker(
-    opts: ProviderPickerRequest,
-  ): Promise<ProviderPickerChoice | undefined> {
+  #readProviderPicker(opts: ProviderPickerRequest): Promise<ProviderPickerChoice | undefined> {
     this.#killRing.clear();
-    const flow = this.#beginSetupQuestion(opts.message);
     let interaction = initialProviderPickerState(opts.options, opts.initialValue);
     let validation: AbortController | undefined;
+    const editing = () =>
+      interaction.phase.kind === "editing" || interaction.phase.kind === "invalid";
 
-    // The cursor row's Enter affordance: `↵ change` on the currently-active
-    // provider, a bare `↵` elsewhere. The key row's own phases (editing,
-    // validating, invalid) carry their badge on the input line instead.
-    const cursorBadge = (): string | undefined => {
-      if (interaction.phase.kind !== "inactive") return undefined;
-      const value = selectValueAtCursor([...opts.options], interaction.select.cursor);
-      const row = opts.options.find((option) => option.value === value);
-      if (row === undefined) return undefined;
-      return enterBadge(this.#theme, row.checked === true ? "change" : undefined);
-    };
-
-    flow.question = (width) => {
-      const badge = cursorBadge();
-      const panel: SetupSelectPanelState = {
-        kind: "inline-edit",
-        layout: "stacked",
-        message: "",
-        options: opts.options,
-        select: interaction.select,
-        edit: {
-          optionValue: "ai-gateway-key",
-          caretVisible: this.#caretVisible,
-          editor: { kind: "key", phase: interaction.phase },
-        },
-      };
-      if (badge !== undefined) panel.cursorBadge = badge;
-      return renderSelectQuestion(panel, this.#theme, width);
-    };
-
-    const syncCaret = () => {
-      if (interaction.phase.kind === "editing" || interaction.phase.kind === "invalid") {
-        this.#startCaretBlink();
-      } else {
-        this.#stopCaretBlink();
-      }
-    };
-    syncCaret();
-    this.#paint();
-
-    const question = this.#captureSetupQuestion<ProviderPickerChoice | undefined>(
-      (key, settle, reject) => {
+    return this.#askSetup<ProviderPickerChoice | undefined>(
+      opts.message,
+      (settle) => {
         const dispatch = (event: ProviderPickerEvent) => {
           const transition = transitionProviderPicker(interaction, event, opts.options);
           switch (transition.kind) {
             case "ignore":
               return;
+            case "cancel":
+              settle.done(undefined);
+              return;
+            case "settle":
+              settle.done(transition.result);
+              return;
             case "clear":
               validation?.abort();
               validation = undefined;
               interaction = transition.state;
-              syncCaret();
-              this.#paint();
-              return;
-            case "cancel":
-              settle(undefined);
               return;
             case "render":
               interaction = transition.state;
-              syncCaret();
-              this.#paint();
               return;
             case "validate": {
               interaction = transition.state;
-              syncCaret();
-              this.#paint();
               const controller = new AbortController();
               validation = controller;
               let result: ReturnType<typeof opts.validateInlineKey>;
               try {
                 result = opts.validateInlineKey(transition.key, controller.signal);
               } catch (error) {
-                reject(error);
+                settle.fail(error);
                 return;
               }
               void result.then(
@@ -2290,387 +1571,197 @@ export class TerminalRenderer implements AgentTUIRenderer {
                   if (validation !== controller || controller.signal.aborted) return;
                   validation = undefined;
                   dispatch({ type: "validated", validation: outcome });
+                  this.#paint();
                 },
                 (error: unknown) => {
                   if (validation !== controller || controller.signal.aborted) return;
                   validation = undefined;
-                  reject(error);
+                  settle.fail(error);
                 },
               );
               return;
             }
-            case "settle":
-              settle(transition.result);
-              return;
           }
         };
-
-        const intent = setupSelectionIntent(key, {
-          textNavigation: interaction.phase.kind === "inactive",
-        });
-        switch (intent?.kind) {
-          case "cancel":
-            dispatch({ type: "cancel" });
-            return;
-          case "move":
-            dispatch({ type: "move", direction: intent.direction });
-            return;
-          case "submit":
-            dispatch({ type: "submit" });
-            return;
-          case "repaint":
-            this.#paint();
-            return;
-          case undefined:
-            break;
-        }
-
-        if (interaction.phase.kind !== "editing" && interaction.phase.kind !== "invalid") return;
-        // Provider credentials must never enter the session kill ring.
-        const edited = applyLineEditorKey(interaction.phase.editor, key);
-        if (edited !== undefined) {
-          this.#showCaret();
-          dispatch({ type: "edit", editor: edited });
-        }
+        return {
+          caret: editing,
+          rows: (width) => {
+            // The cursor row's Enter affordance: `↵ change` on the active provider.
+            let badge: string | undefined;
+            if (interaction.phase.kind === "inactive") {
+              const value = selectValueAtCursor([...opts.options], interaction.select.cursor);
+              const row = opts.options.find((option) => option.value === value);
+              if (row !== undefined) {
+                badge = enterBadge(this.#theme, row.checked === true ? "change" : undefined);
+              }
+            }
+            const panel: SetupSelectPanelState = {
+              kind: "inline-edit",
+              layout: "stacked",
+              message: "",
+              options: opts.options,
+              select: interaction.select,
+              edit: {
+                optionValue: "ai-gateway-key",
+                caretVisible: this.#caretVisible(),
+                editor: { kind: "key", phase: interaction.phase },
+              },
+            };
+            if (badge !== undefined) panel.cursorBadge = badge;
+            return renderSelectQuestion(panel, this.#theme, width);
+          },
+          key: (key) => {
+            const intent = setupSelectionIntent(key, {
+              textNavigation: interaction.phase.kind === "inactive",
+            });
+            if (intent?.kind === "cancel") dispatch({ type: "cancel" });
+            else if (intent?.kind === "move")
+              dispatch({ type: "move", direction: intent.direction });
+            else if (intent?.kind === "submit") dispatch({ type: "submit" });
+            else if (editing() && "editor" in interaction.phase) {
+              // Provider credentials must never enter the session kill ring.
+              const edited = applyLineEditorKey(interaction.phase.editor, key);
+              if (edited !== undefined) dispatch({ type: "edit", editor: edited });
+            }
+          },
+          dispose: () => {
+            validation?.abort();
+            validation = undefined;
+          },
+        };
       },
-      () => {
-        validation?.abort();
-        validation = undefined;
-        this.#stopCaretBlink();
-      },
+      undefined,
     );
-    return await question.promise;
   }
 
   /**
-   * Asks one text question through the bordered setup panel. `mask` renders
-   * bullets (passwords); `validate` paints its message red inside the panel
-   * and keeps the prompt open. Resolves the submitted value (the default when
-   * submitted empty), or `undefined` on Esc/Ctrl-C.
+   * One text question. `mask` renders bullets; `validate` keeps the prompt
+   * open with its message. Resolves the value (the default when empty), or
+   * `undefined` on cancel.
    */
-  async #readSetupText(opts: {
-    message: string;
-    placeholder?: string;
-    defaultValue?: string;
-    mask?: boolean;
-    validate?: (value: string) => string | undefined;
-    notices?: readonly SelectNotice[];
-  }): Promise<string | undefined> {
+  #readSetupText(opts: Parameters<SetupFlowRenderer["readText"]>[0]): Promise<string | undefined> {
     if (opts.mask === true) this.#killRing.clear();
-    const flow = this.#beginSetupQuestion(opts.message);
-
     let editor: LineState = lineOf("");
     let error: string | undefined;
-
-    flow.question = (width) => {
-      const state: Parameters<typeof renderTextQuestion>[0] = {
-        message: "",
-        editor,
-        mask: opts.mask === true,
-      };
-      if (opts.placeholder !== undefined) state.placeholder = opts.placeholder;
-      else if (opts.defaultValue !== undefined) state.placeholder = opts.defaultValue;
-      if (opts.notices !== undefined) state.notices = opts.notices;
-      if (error !== undefined) state.error = error;
-      return renderTextQuestion(state, this.#theme, width, this.#caretVisible);
-    };
-    this.#startCaretBlink();
-    this.#paint();
-
-    const question = this.#captureSetupQuestion<string | undefined>(
-      (key, settle) => {
-        const apply = (next: LineState) => {
-          editor = next;
-          error = undefined;
-          this.#showCaret();
-          this.#paint();
-        };
-
-        const edited = opts.mask
-          ? applyLineEditorKey(editor, key)
-          : this.#killRing.apply(editor, key);
-        if (edited !== undefined) {
-          apply(edited);
-          return;
-        }
-        switch (key.type) {
-          case "ctrl-c":
-          case "escape":
-            settle(undefined);
-            return;
-          case "ctrl-r":
-            this.#paint();
-            return;
-          case "enter": {
+    return this.#askSetup<string | undefined>(
+      opts.message,
+      (settle) => ({
+        caret: () => true,
+        rows: (width) => {
+          const state: Parameters<typeof renderTextQuestion>[0] = {
+            message: "",
+            editor,
+            mask: opts.mask === true,
+          };
+          const placeholder = opts.placeholder ?? opts.defaultValue;
+          if (placeholder !== undefined) state.placeholder = placeholder;
+          if (opts.notices !== undefined) state.notices = opts.notices;
+          if (error !== undefined) state.error = error;
+          return renderTextQuestion(state, this.#theme, width, this.#caretVisible());
+        },
+        key: (key) => {
+          const edited = opts.mask
+            ? applyLineEditorKey(editor, key)
+            : this.#killRing.apply(editor, key);
+          if (edited !== undefined) {
+            editor = edited;
+            error = undefined;
+          } else if (key.type === "ctrl-c" || key.type === "escape") {
+            settle.done(undefined);
+          } else if (key.type === "enter") {
             const value = editor.text.length > 0 ? editor.text : (opts.defaultValue ?? "");
-            const invalid = opts.validate?.(value);
-            if (invalid !== undefined) {
-              error = invalid;
-              this.#paint();
-              return;
-            }
-            settle(value);
-            return;
+            error = opts.validate?.(value);
+            if (error === undefined) settle.done(value);
           }
-          default:
-            return;
-        }
-      },
-      () => this.#stopCaretBlink(),
+        },
+      }),
+      undefined,
     );
-    return await question.promise;
   }
 
-  /**
-   * Holds a static acknowledgement section in the flow panel until the user
-   * dismisses it. Enter and Esc both resolve — the text is the point; there
-   * is nothing to cancel, so this never returns a cancellation.
-   */
-  async #readSetupAcknowledge(opts: { message: string; lines: readonly string[] }): Promise<void> {
-    const flow = this.#beginSetupQuestion(opts.message);
-
-    flow.question = (width) =>
-      renderAcknowledgeQuestion({ message: "", lines: opts.lines }, this.#theme, width);
-    this.#paint();
-
-    const question = this.#captureSetupQuestion<void>((key, settle) => {
-      switch (key.type) {
-        case "enter":
-        case "escape":
-        case "ctrl-c":
-          settle();
-          return;
-        case "ctrl-r":
-          this.#paint();
-          return;
-        default:
-          return;
-      }
-    });
-    return await question.promise;
+  /** Static instructions held in the flow until Enter or Esc. */
+  #readSetupAcknowledge(opts: { message: string; lines: readonly string[] }): Promise<void> {
+    return this.#askSetup<void>(
+      opts.message,
+      (settle) => ({
+        rows: (width) =>
+          renderAcknowledgeQuestion({ message: "", lines: opts.lines }, this.#theme, width),
+        key: (key) => {
+          if (key.type === "enter" || key.type === "escape" || key.type === "ctrl-c") settle.done();
+        },
+      }),
+      undefined,
+    );
   }
 
-  /** Enters the common inactive-input state owned by an open setup question. */
-  #beginSetupQuestion(title: string): SetupFlowState {
-    this.#start();
-    this.#inputActive = false;
-    const flow = this.#requireSetupFlow();
-    flow.questionTitle = stripTerminalControls(title);
-    // A standard question means the preceding background operation settled.
-    // Clear its transient item summary and timer before painting the prompt.
-    if (flow.status !== undefined) {
-      flow.status = undefined;
-      flow.summary = undefined;
-      flow.preview = undefined;
-    }
-    return flow;
-  }
-
-  /** A flow is implicitly opened for a bare question (tests, future hosts). */
-  #requireSetupFlow(): SetupFlowState {
-    if (this.#setupFlow === undefined) {
-      this.#setupFlow = {
-        title: "",
-        startedAtMs: Date.now(),
-        lines: [],
-        outputBuffer: [],
-        // Fabricated for a bare question (no begin/end pair) — closed with
-        // the question, or it would mask the prompt's footer forever.
-        implicit: true,
-      };
-    }
-    return this.#setupFlow;
-  }
-
-  #closeSetupQuestion(): void {
-    if (this.#setupFlow?.implicit === true) {
-      // A flow fabricated for this one question dies with it.
-      this.#setupFlow = undefined;
-    } else if (this.#setupFlow !== undefined) {
-      this.#setupFlow.question = undefined;
-      this.#setupFlow.questionTitle = undefined;
-      this.#setupFlow.hideLinesWhileQuestion = false;
-    }
-    this.#consumeKey = undefined;
-    this.#detachInput();
-    // Back to the working state: the interrupt trap covers the gap until the
-    // next question (or the flow's end).
-    if (this.#startupEditor !== undefined) this.#resumeStartupDraft();
-    else if (this.#setupFlow !== undefined) this.#armFlowIdleTrap();
-    // The next phase paints its complete state; the flow ticker covers slow work.
-    if (this.#setupFlow === undefined) this.#paint();
-  }
-
-  /**
-   * Gives one setup question exclusive key ownership and a settle-once close
-   * function. Question-specific reducers stay with their callers; this owns
-   * only the repeated input attachment and panel teardown lifecycle.
-   */
-  #captureSetupQuestion<T>(
-    consume: (
-      key: TerminalKey,
-      settle: (value: T) => void,
-      reject: (error: unknown) => void,
-    ) => void,
-    beforeClose?: () => void,
-  ): { promise: Promise<T>; settle(value: T): void } {
-    let settled = false;
-    let resolve!: (value: T) => void;
-    let rejectPromise!: (error: unknown) => void;
-    const promise = new Promise<T>((resolvePromise, reject) => {
-      resolve = resolvePromise;
-      rejectPromise = reject;
-    });
-    const settle = (value: T): void => {
-      if (settled) return;
-      settled = true;
-      beforeClose?.();
-      this.#closeSetupQuestion();
-      resolve(value);
-    };
-    const reject = (error: unknown): void => {
-      if (settled) return;
-      settled = true;
-      beforeClose?.();
-      this.#closeSetupQuestion();
-      rejectPromise(error);
-    };
-    // See #armFlowIdleTrap: stale deferred keys die with the old consumer.
-    this.#clearKeyFlush();
-    this.#consumeKey = (key) => {
-      if (key.type === "ctrl-c") {
-        this.#requestExit();
-      }
-      consume(key, settle, reject);
-    };
-    this.#attachInput();
-    return { promise, settle };
-  }
-
-  /** See {@link SetupFlowRenderer.waitForInterrupt}. */
+  /** See {@link SetupFlowRenderer.waitForInterrupt}: a key trap under the flow's questions. */
   #waitForFlowInterrupt(options?: { interruptible?: boolean }): {
     promise: Promise<SetupFlowInterrupt>;
     dispose(): void;
   } {
-    let fire!: (interrupt: SetupFlowInterrupt) => void;
-    const promise = new Promise<SetupFlowInterrupt>((resolve) => {
-      fire = resolve;
-    });
-    this.#flowInterrupt = fire;
-    this.#armFlowIdleTrap(options?.interruptible ?? true);
-    return {
-      promise,
-      dispose: () => {
-        if (this.#flowInterrupt !== fire) return;
-        this.#flowInterrupt = undefined;
-        this.#disarmFlowIdleTrap();
+    const interruptible = options?.interruptible ?? true;
+    let dispose!: () => void;
+    const promise = this.#ask<SetupFlowInterrupt>(
+      (settle) => {
+        const surface: Surface = {
+          key: (key) => {
+            if (!interruptible || (key.type !== "ctrl-c" && key.type !== "escape")) return;
+            if (key.type === "ctrl-c") this.#requestExit();
+            settle.done(key.type === "ctrl-c" ? "ctrl-c" : "escape");
+          },
+        };
+        // Disposal pops the trap without settling, so the promise never resolves.
+        dispose = () => this.#dropSurface(surface);
+        return surface;
       },
-    };
+      () => "ctrl-c",
+    );
+    return { promise, dispose: () => dispose() };
   }
 
-  /**
-   * Installs the working-state key consumer (Ctrl-C/Esc fires the armed flow
-   * interrupt) while no question owns the keys. All other input is discarded:
-   * carrying typeahead keystrokes across an install into the next setup prompt
-   * makes that prompt feel laggy and can select an unintended answer. Questions
-   * overwrite `#consumeKey` for their lifetime; {@link #closeSetupQuestion}
-   * re-arms.
-   */
-  #armFlowIdleTrap(interruptible = true): void {
-    if (this.#startupEditor !== undefined) {
-      this.#resumeStartupDraft();
-      return;
-    }
-    if (this.#flowInterrupt === undefined) return;
-    const consumer = (key: TerminalKey): void => {
-      if (interruptible && (key.type === "ctrl-c" || key.type === "escape")) {
-        if (key.type === "ctrl-c") {
-          this.#requestExit();
-        }
-        const fire = this.#flowInterrupt;
-        this.#flowInterrupt = undefined;
-        this.#disarmFlowIdleTrap();
-        fire?.(key.type === "ctrl-c" ? "ctrl-c" : "escape");
-        return;
-      }
-      if (key.type === "ctrl-r") this.#paint();
-    };
-    this.#flowIdleConsumer = consumer;
-    // A deferred ESC/paste flush armed under the previous consumer must not
-    // fire into this one.
-    this.#clearKeyFlush();
-    this.#consumeKey = consumer;
-    this.#attachInput();
-  }
-
-  /** Removes the idle trap without touching a question's key consumer. */
-  #disarmFlowIdleTrap(): void {
-    if (this.#flowIdleConsumer === undefined) return;
-    if (this.#consumeKey === this.#flowIdleConsumer) {
-      this.#detachInput();
-    }
-    this.#flowIdleConsumer = undefined;
-  }
-
-  /**
-   * The flow's ephemeral one-line loading state: a message turns the footer
-   * status into the working indicator; `undefined` clears it. Nothing is ever
-   * committed to the transcript.
-   */
-  #setFlowStatus(status: string | undefined): void {
-    const content: SetupFlowStatusState | undefined =
-      status === undefined
-        ? undefined
-        : { text: stripTerminalControls(status), startedAtMs: Date.now() };
-    if (this.#setupFlow !== undefined) {
-      this.#setupFlow.status = content;
-      if (content === undefined) this.#setupFlow.preview = undefined;
-      this.#paint();
-      return;
-    }
-    if (this.#inputActive || this.#view?.working === true) {
-      // The prompt or a running turn owns the footer; a flowless spinner
-      // must not steal its ticker or indicator.
-      return;
-    }
-    if (content === undefined) {
-      this.#flowlessStatus = undefined;
-      this.#stopTicker();
-      this.#paint();
-      return;
-    }
-    this.#start();
-    this.#activityPulseStartedAtMs = Date.now();
-    this.#startTicker();
-    this.#flowlessStatus = content.text;
+  /** Pops a surface without settling it. */
+  #dropSurface(surface: Surface): void {
+    const index = this.#stack.findIndex((entry) => entry.surface === surface);
+    if (index === -1) return;
+    this.#stack.splice(index, 1);
     this.#paint();
   }
 
   /**
-   * Commits one persistent flow line to the transcript (progress the user
-   * must keep, like the Slack Connect URL), toned info/success/warning/error.
+   * The flow's one-line loading state; `undefined` clears it. With no flow
+   * open it shows above the prompt instead.
    */
+  #setFlowStatus(status: string | undefined): void {
+    const text = status === undefined ? undefined : stripTerminalControls(status);
+    if (this.#flow !== undefined) {
+      this.#flow.status = text === undefined ? undefined : { text, startedAtMs: Date.now() };
+      if (text === undefined) this.#flow.preview = undefined;
+    } else {
+      this.#flowlessStatus = text;
+    }
+    this.#paint();
+  }
+
+  /** Records one flow line; outside a flow it commits to the transcript. */
   #renderFlowLine(text: string, tone: "info" | "success" | "warning" | "error"): void {
     const content = stripTerminalControls(text);
     if (content.trim().length === 0) return;
-    const flow = this.#setupFlow;
-    if (flow !== undefined) {
-      // A line settles the output preview (the rail-log contract): it clears,
-      // and a warning or error first pulls the buffered subprocess output in
-      // as context — a failed command must keep its evidence.
-      flow.preview = undefined;
-      if (tone === "warning" || tone === "error") {
-        for (const buffered of flow.outputBuffer) {
-          flow.lines.push({ text: buffered, tone: "info", evidence: true });
-        }
-      }
-      flow.outputBuffer = [];
-      flow.lines.push({ text: content, tone });
+    const flow = this.#flow;
+    if (flow === undefined) {
+      this.#pushBlock({ kind: "flow", title: tone, body: content, live: false });
       this.#paint();
       return;
     }
-    this.#start();
-    this.#pushBlock({ kind: "flow", title: tone, body: content, live: false });
+    // A line settles the output preview; a warning or error first pulls the
+    // buffered subprocess output in as its evidence.
+    flow.preview = undefined;
+    if (tone === "warning" || tone === "error") {
+      for (const buffered of flow.outputBuffer) {
+        flow.lines.push({ text: buffered, tone: "info", evidence: true });
+      }
+    }
+    flow.outputBuffer = [];
+    flow.lines.push({ text: content, tone });
     this.#paint();
   }
 
@@ -2678,35 +1769,29 @@ export class TerminalRenderer implements AgentTUIRenderer {
     headline: string;
     facts: readonly { label: string; value: string }[];
   }): void {
-    const flow = this.#setupFlow;
-    if (flow === undefined) return;
-    flow.lines = [];
-    flow.outputBuffer = [];
-    flow.preview = undefined;
-    flow.status = undefined;
-    flow.summary =
-      content === undefined
-        ? undefined
-        : {
-            headline: stripTerminalControls(content.headline),
-            facts: content.facts.map((fact) => ({
-              label: stripTerminalControls(fact.label),
-              value: stripTerminalControls(fact.value),
-            })),
-          };
-    this.#paint();
+    this.#updateFlow((flow) => {
+      flow.lines = [];
+      flow.outputBuffer = [];
+      flow.preview = undefined;
+      flow.status = undefined;
+      flow.summary =
+        content === undefined
+          ? undefined
+          : {
+              headline: stripTerminalControls(content.headline),
+              facts: content.facts.map((fact) => ({
+                label: stripTerminalControls(fact.label),
+                value: stripTerminalControls(fact.value),
+              })),
+            };
+    });
   }
 
-  /**
-   * One line of subprocess output during a flow: shown as the transient
-   * preview (replaced per write), buffered so a settling warning can pull
-   * recent context in, never persisted on its own. Outside a flow it falls
-   * back to a dim transcript line.
-   */
+  /** One line of subprocess output: a transient preview, kept briefly as possible evidence. */
   #renderFlowOutput(text: string): void {
     const content = stripTerminalControls(text);
     if (content.trim().length === 0) return;
-    const flow = this.#setupFlow;
+    const flow = this.#flow;
     if (flow === undefined) {
       this.#renderFlowLine(content, "info");
       return;
@@ -2717,431 +1802,301 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  /** Gives an interactive subprocess a temporary screen, then restores the transcript. */
+  /** Gives an interactive subprocess the screen, then restores the transcript. */
   async #withInheritedStdio<T>(task: () => Promise<T>): Promise<T> {
-    // Setup questions can resolve from the first key in a buffered terminal
-    // chunk. The remaining bytes belong to the child process, not the next
-    // TUI question after it exits.
-    this.#keyBuffer = "";
-    this.#clearKeyFlush();
-    this.#flowInterrupt = undefined;
-    this.#disarmFlowIdleTrap();
-    this.#detachInput();
-    this.#clearTicker();
-    this.#live.clear();
-    this.#removeLogCapture();
-    this.#altScreen.enter({ cursor: "visible", mouse: false });
-    if (this.#input.isTTY) this.#input.setRawMode?.(false);
-    this.#input.pause();
+    this.#suspended = true;
+    this.#stopTicker();
     try {
-      return await task();
+      return await this.#terminal.suspend(task);
     } finally {
-      this.#altScreen.exit();
-      if (this.#input.isTTY) this.#input.setRawMode?.(true);
-      // The parent stream must remain paused while the child owns the terminal.
-      // Resume only after its raw mode and key consumer are ready again.
-      this.#input.resume();
-      this.#keyBuffer = "";
-      this.#clearKeyFlush();
-      this.#live.hideCursor();
-      this.#installLogCapture();
-      if (this.#setupFlow !== undefined) {
-        this.#startTicker();
-        this.#armFlowIdleTrap();
-      } else {
-        this.#syncActivityTicker();
-      }
-      this.#live.reset();
+      this.#suspended = false;
+      this.#lastFrame = undefined;
       this.#paint();
     }
   }
 
-  /** Last server session id the runner reported; named in the parting line. */
-  setSessionId(sessionId: string): void {
-    this.#sessionId = sessionId;
-  }
-
-  shutdown(): void {
-    this.#stop();
-    for (const timer of this.#argumentCatalogLoadingTimers.values()) clearTimeout(timer);
-    this.#argumentCatalogLoadingTimers.clear();
-    // The parting line: the boot banner's dim counterpart, written after the
-    // terminal is restored so it lands as the session's last scrollback row.
-    // Gated on the session having ever gone live (Ctrl-C stops the terminal
-    // inside the reader long before the runner's teardown reaches here) and
-    // printed at most once. Carries the session id so the conversation the
-    // user just left can be found again.
-    if (this.#everInteractive && !this.#partingLinePrinted) {
-      this.#partingLinePrinted = true;
-      const session =
-        this.#sessionId === undefined ? "" : ` ${this.#theme.glyph.dot} session ${this.#sessionId}`;
-      this.#output.write(`${this.#theme.colors.dim(`${eveVersionTag()}${session}`)}\n`);
-    }
-  }
-
-  requestInterrupt(): void {
-    if (this.#setupFlow !== undefined) this.#consumeKey?.({ type: "ctrl-c" });
-    this.#stop();
-  }
-
-  exitRequested(): boolean {
-    return this.#exitRequested;
-  }
-
-  #requestExit(): void {
-    this.#exitRequested = true;
-    this.#onExitRequest?.();
-  }
-
   // ---------------------------------------------------------------------------
-  // Trace viewer (alt-screen)
+  // Trace viewer (alternate screen)
   // ---------------------------------------------------------------------------
 
-  /**
-   * Opens the `/traces` viewer on the alternate screen and owns the keyboard
-   * until the user closes it. The transcript's live region stays untouched
-   * underneath — the terminal restores it on exit, so closing just repaints.
-   */
   async #openTraceViewer(options: TraceViewerOpenOptions): Promise<void> {
-    if (this.#traceView !== undefined || !this.#isInteractive) return;
+    if (this.#traceView !== undefined || !this.#terminal.active) return;
+    const alt = this.#terminal.alt;
     const session = new TraceViewerSession({
       ...options,
       theme: this.#theme,
-      dimensions: () => ({ width: this.#width(), height: this.#height() }),
-      paint: (rows) => this.#altScreen.paint(rows, this.#height()),
+      dimensions: () => ({ width: this.#terminal.width(), height: this.#terminal.height() }),
+      paint: (rows) => alt.paint(rows, this.#terminal.height()),
       tracingDisabled: process.env.EVE_TRACES === "off",
-      copyText: (text) => copyTextToClipboard(text, (chunk) => this.#altScreen.writeRaw(chunk)),
+      copyText: (text) => copyTextToClipboard(text, (chunk) => alt.writeRaw(chunk)),
       terminalBackground: this.#terminalBackground,
     });
     this.#traceView = session;
-    this.#altScreen.enter();
-    // Ask the terminal for its background so the viewer can derive card
-    // surfaces from the user's own palette. The reply arrives on stdin as an
-    // OSC key (see #drainKeys); terminals that never answer leave the viewer
-    // on its rail rendering, so no timeout is needed.
-    if (this.#theme.color) this.#altScreen.writeRaw(BACKGROUND_COLOR_QUERY);
-    await new Promise<void>((resolve) => {
-      this.#traceViewClose = resolve;
-      this.#consumeKey = (key) => {
-        if (session.handleKey(key) === "close") this.#closeTraceViewer();
-      };
-      this.#attachInput();
-      session.start();
-    });
+    alt.enter();
+    // The viewer derives card surfaces from the terminal's own background;
+    // terminals that never answer leave it on its plain rendering.
+    if (this.#theme.color) alt.writeRaw(BACKGROUND_COLOR_QUERY);
+    await this.#ask<void>(
+      (settle) => {
+        session.start();
+        return {
+          key: (key) => {
+            if (session.handleKey(key) === "close") settle.done();
+          },
+          dispose: () => {
+            this.#traceView = undefined;
+            session.dispose();
+            alt.exit();
+            this.#terminal.live.hideCursor();
+            this.#lastFrame = undefined;
+          },
+        };
+      },
+      () => undefined,
+    );
   }
-
-  #closeTraceViewer(): void {
-    const session = this.#traceView;
-    if (session === undefined) return;
-    this.#traceView = undefined;
-    session.dispose();
-    this.#detachInput();
-    this.#altScreen.exit();
-    // exit() shows the cursor; hide it before the repaint so it doesn't
-    // blink over the transcript while the live region re-anchors.
-    this.#live.hideCursor();
-    // The main screen comes back exactly as it was (the engine's live-region
-    // row count still matches it), so a normal paint re-anchors cleanly.
-    this.#paint();
-    this.#live.showCursor();
-    const resolve = this.#traceViewClose;
-    this.#traceViewClose = undefined;
-    resolve?.();
-  }
-
-  #traceViewClose?: () => void;
 
   // ---------------------------------------------------------------------------
-  // Lifecycle
+  // Painting
   // ---------------------------------------------------------------------------
 
-  #start(options?: AgentTUISessionOptions) {
-    this.#title = options?.title ?? this.#title;
-
-    if (this.#isInteractive) return;
-
-    this.#isInteractive = true;
-    this.#everInteractive = true;
-    this.#live.reset();
-    this.#live.hideCursor();
-    this.#installLogCapture();
-
-    if (this.#input.isTTY) {
-      this.#input.setRawMode?.(true);
-      this.#input.resume();
-      // Enable bracketed paste (DEC private mode 2004) so the terminal wraps
-      // pasted text in \x1b[200~ … \x1b[201~; the decoder then inserts a
-      // multi-line paste intact instead of each newline submitting the prompt.
-      // Routed through the live region's original `write` so the foreign-output
-      // capture installed just above can't swallow the control sequence.
-      this.#live.emitBracketedPaste(true);
-    }
-
-    this.#onResize = () => this.#paint();
-    this.#output.on("resize", this.#onResize);
-    process.on("exit", this.#onProcessExit);
-  }
-
-  /**
-   * Last-resort synchronous terminal restore for a forced `process.exit()`
-   * (the lifecycle's forced-exit backstop or a second Ctrl+C/SIGTERM) that
-   * preempts {@link #stop}. A shell left in raw mode with a hidden cursor and
-   * bracketed paste enabled is unusable; this runs on the process "exit"
-   * event, where only synchronous writes survive. Normal teardown removes it.
-   */
-  readonly #onProcessExit = () => {
-    if (!this.#isInteractive) return;
-    this.#altScreen.exit();
-    if (this.#input.isTTY) {
-      this.#live.emitBracketedPaste(false);
-      this.#input.setRawMode?.(false);
-    }
-    this.#live.showCursor();
-  };
-
-  #stop() {
-    this.#hitlDrawer = undefined;
-    const closeTransientPanel = this.#transientPanelClose;
-    if (closeTransientPanel !== undefined) {
-      this.#transientPanelClose = undefined;
-      this.#transientPanel = undefined;
-      this.finishCommand({ kind: "dismiss" });
-      this.#consumeKey = undefined;
-      closeTransientPanel();
-    }
-    // An open trace viewer must leave the alt screen before teardown, and its
-    // awaited `open()` resolves so the runner loop can observe the shutdown.
-    this.#closeTraceViewer();
-    // A reader still awaiting keys can never settle once input detaches;
-    // rejecting a promise that already settled is a no-op.
-    const rejectReader = this.#rejectActiveReader;
-    this.#rejectActiveReader = undefined;
-    rejectReader?.(interruptedError());
-    this.#detachInput();
-    this.#stopCaretBlink();
-    this.#clearTicker();
-    if (this.#logLevelHintTimer !== undefined) {
-      clearTimeout(this.#logLevelHintTimer);
-      this.#logLevelHintTimer = undefined;
-    }
-    this.#logLevelHintActive = false;
-    this.#clearDevBuildStatus();
-
-    if (!this.#isInteractive) return;
-
-    // Commit any leading finalized blocks (e.g. freshly captured log lines)
-    // before the live region is wiped, so they land in scrollback instead of
-    // vanishing with the repaint area. The in-place rebuild status and any
-    // open log run settle first so their last state survives as scrollback.
-    this.#settleDevRebuildStatus();
-    this.#settleCommandEcho();
-    for (const block of this.#blocks) {
-      if (block.kind === "log" && block.id === undefined) block.live = false;
-    }
-    this.#paint();
-
-    this.#live.clear();
-    this.#live.showCursor();
-    // Restore the real `process.stdout` before the trailing newline so it is
-    // not intercepted by the foreign-output capture.
-    this.#removeLogCapture();
-    this.#live.newline();
-
-    if (this.#input.isTTY) {
-      // Disable bracketed paste, restoring the terminal to how we found it.
-      this.#live.emitBracketedPaste(false);
-      this.#input.setRawMode?.(false);
-      this.#input.pause();
-    }
-
-    if (this.#onResize) {
-      this.#output.off("resize", this.#onResize);
-      this.#onResize = undefined;
-    }
-    process.off("exit", this.#onProcessExit);
-
-    this.#isInteractive = false;
-  }
-
-  #attachInput() {
-    // Idempotent: the flow idle trap and questions both attach; a double
-    // subscription would deliver every key twice.
-    this.#input.off("data", this.#feedRaw);
-    this.#input.on("data", this.#feedRaw);
-    // Replay keys carried over from the previous mode's detach. Deferred a
-    // microtask so the new mode finishes installing #consumeKey first.
-    if (this.#keyBuffer.length > 0) {
-      queueMicrotask(() => {
-        if (this.#consumeKey !== undefined && this.#keyBuffer.length > 0) {
-          this.#drainKeys();
-          this.#armKeyFlush();
-        }
-      });
-    }
-  }
-
-  #detachInput() {
-    this.#input.off("data", this.#feedRaw);
-    this.#clearKeyFlush();
-    // The undrained tail of the current chunk survives the handoff: a mode
-    // ending mid-chunk (Enter in a paste, `y` for the first of two queued
-    // approvals) must not eat the keys behind it. The next #attachInput
-    // drains the carry-over into the new consumer.
-    this.#consumeKey = undefined;
-  }
-
-  /**
-   * Buffers raw input and decodes it into keys, reassembling escape sequences
-   * that arrive split across reads. A lone trailing `ESC` is held briefly (see
-   * {@link escFlushMs}) in case it is the start of an arrow/function key.
-   */
-  readonly #feedRaw = (chunk: Buffer) => {
-    this.#clearKeyFlush();
-    this.#keyBuffer += this.#inputDecoder.write(chunk);
-    this.#drainKeys();
-    this.#armKeyFlush();
-  };
-
-  /**
-   * Arms a one-shot timer for an escape sequence that {@link nextKey} can't yet
-   * resolve, so the decoder never blocks all further input waiting on bytes that
-   * will not come. Re-armed on every read, so a sequence still in flight stays
-   * alive; it only fires once input goes quiet.
-   */
-  #armKeyFlush() {
-    // A lone trailing ESC may begin an arrow/function key; hold it briefly, then
-    // surface it as a bare Escape. This is the standard ESC-timeout heuristic: a
-    // lone ESC and the leading byte of a longer sequence are indistinguishable,
-    // so a paste whose `\x1b[200~` leader is split off by >escFlushMs (only under
-    // network/PTY fragmentation, never an atomically-delivered local paste) can
-    // be misread as Escape + literal text. Lengthening the timeout trades Escape
-    // latency for a smaller window; not worth it for a non-adversarial edge.
-    if (this.#keyBuffer === "\x1b") {
-      this.#keyFlushTimer = setTimeout(() => {
-        if (this.#keyBuffer !== "\x1b") return;
-        this.#keyBuffer = "";
-        this.#dispatchKey({ type: "escape" });
-      }, escFlushMs);
-      this.#keyFlushTimer.unref?.();
+  #paint(): void {
+    if (!this.#terminal.active || this.#suspended) return;
+    if (this.#painting) {
+      this.#paintAgain = true;
       return;
     }
-    // A bracketed paste whose closing marker never arrives would otherwise wedge
-    // input forever. Recover its sanitized payload without losing the paste
-    // framing that downstream consumers use to apply paste-safe behavior.
-    if (isIncompletePaste(this.#keyBuffer)) {
-      const stuck = this.#keyBuffer;
-      this.#keyFlushTimer = setTimeout(() => {
-        if (this.#keyBuffer !== stuck) return;
-        const value = sanitizePastedText(stripPasteStart(stuck));
-        this.#keyBuffer = "";
-        if (value.length > 0) {
-          this.#dispatchKey({ type: "text", value, framing: "bracketed-paste" });
-        }
-      }, incompletePasteFlushMs);
-      this.#keyFlushTimer.unref?.();
+    this.#painting = true;
+    try {
+      do {
+        this.#paintAgain = false;
+        this.#paintNow();
+      } while (this.#paintAgain);
+    } finally {
+      this.#painting = false;
+    }
+    this.#syncTicker();
+  }
+
+  #paintNow(): void {
+    if (this.#traceView !== undefined) {
+      this.#traceView.repaint();
       return;
     }
-    // An OSC reply whose terminator never arrives (a garbled terminal answer
-    // to the background probe) would otherwise wedge input forever; drop it.
-    if (isIncompleteOsc(this.#keyBuffer)) {
-      const stuck = this.#keyBuffer;
-      this.#keyFlushTimer = setTimeout(() => {
-        if (this.#keyBuffer !== stuck) return;
-        this.#keyBuffer = "";
-      }, incompletePasteFlushMs);
-      this.#keyFlushTimer.unref?.();
-    }
-  }
+    const width = this.#terminal.width();
+    const committed = this.#pendingRows;
+    this.#pendingRows = [];
+    let previous = this.#lastCommitted;
 
-  #dispatchKey(key: TerminalKey): void {
-    this.#killRing.interruptYank(key);
-    this.#consumeKey?.(key);
-  }
-
-  #drainKeys() {
-    while (this.#keyBuffer.length > 0) {
-      const token = nextKey(this.#keyBuffer);
-      if (token.incomplete) return;
-      this.#keyBuffer = this.#keyBuffer.slice(token.consumed);
-      if (token.key === undefined || token.key.type === "ignore") continue;
-      // OSC sequences are terminal replies (not keystrokes): route them to
-      // their handler instead of the active mode's key consumer.
-      if (token.key.type === "osc") {
-        this.#handleOscReply(token.key.value);
-        continue;
+    // The settled prefix moves to scrollback. Groups are contiguous runs, so
+    // committing a group commits exactly its members.
+    const groups = groupToolBlocksForDisplay(this.#blocks);
+    let settledGroups = 0;
+    let settledBlocks = 0;
+    for (const group of groups) {
+      if (group.display.live !== false) break;
+      settledGroups += 1;
+      settledBlocks += group.members.length;
+      committed.push(...this.#renderBlock(group.display, width, previous));
+      previous = previousBlockOf(group.display);
+      for (const member of group.members) {
+        if (member.id === undefined) continue;
+        if (this.#conversationBlockIds.has(member.id)) this.#committedIds.add(member.id);
+        this.#blockById.delete(member.id);
       }
-      this.#dispatchKey(token.key);
     }
-  }
+    this.#blocks.splice(0, settledBlocks);
+    this.#lastCommitted = previous;
 
-  /** Applies a terminal OSC reply; currently only the OSC 11 background probe. */
-  #handleOscReply(value: string): void {
-    const background = parseBackgroundColorReply(value);
-    if (background === undefined) return;
-    this.#terminalBackground = background;
-    this.#traceView?.setTerminalBackground(background);
-  }
-
-  #clearKeyFlush() {
-    if (this.#keyFlushTimer) {
-      clearTimeout(this.#keyFlushTimer);
-      this.#keyFlushTimer = undefined;
+    // Live rows are never partially committed: they may rewrap or grow next paint.
+    const footer = this.#footerRows(width);
+    const startupHeader =
+      this.#startupPhase !== undefined && this.#agentHeaderBody === undefined
+        ? this.#agentHeaderRows()
+        : [];
+    const live: string[] = [];
+    for (const { display } of groups.slice(settledGroups)) {
+      live.push(...this.#renderBlock(display, width, previous));
+      previous = previousBlockOf(display);
     }
+    const maxLiveRows = Math.max(0, this.#terminal.height() - startupHeader.length - footer.length);
+    const rows = [
+      ...startupHeader,
+      ...clipLiveRows(live, maxLiveRows, width, this.#theme),
+      ...footer,
+    ];
+    const frame = rows.join("\n");
+    if (committed.length === 0 && frame === this.#lastFrame) return;
+    this.#lastFrame = frame;
+    this.#terminal.live.flush(committed, rows);
   }
 
-  #startCaretBlink() {
-    this.#stopCaretBlink();
-    this.#showCaret();
-    this.#caretTimer = setInterval(() => {
-      this.#caretVisible = !this.#caretVisible;
-      this.#paint();
-    }, caretBlinkMs);
-    this.#caretTimer.unref?.();
-  }
-
-  #stopCaretBlink() {
-    if (this.#caretTimer) {
-      clearInterval(this.#caretTimer);
-      this.#caretTimer = undefined;
+  #renderBlock(block: DisplayBlock, width: number, previous: PreviousBlock | undefined): string[] {
+    const context: Parameters<typeof renderBlockLines>[3] = {
+      renderMarkdown: this.#renderMarkdown,
+      activityPulse: this.#pulse(this.#activityPulseStartedAtMs),
+    };
+    if (previous !== undefined) context.previous = previous;
+    if (this.#flow !== undefined) context.setupFlowOpen = true;
+    if (this.#stack.some((entry) => entry.surface.placement === "panel")) {
+      context.transientPanelOpen = true;
     }
-    this.#caretVisible = true;
+    const rows = renderBlockLines(block, width, this.#theme, context);
+    return (block.depth ?? 0) === 0 && leadsWithGap(block, previous) ? ["", ...rows] : rows;
   }
 
-  #showCaret() {
-    this.#caretVisible = true;
+  #agentHeaderRows(): string[] {
+    const input: Parameters<typeof buildAgentHeader>[0] = {
+      name: this.#agentHeader?.name ?? this.#title,
+      theme: this.#theme,
+      width: this.#terminal.width(),
+    };
+    if (this.#agentHeader?.info !== undefined) input.info = this.#agentHeader.info;
+    return buildAgentHeader(input);
   }
 
-  #startTicker() {
-    this.#clearTicker();
-    this.#tickTimer = setInterval(() => {
-      this.#spinnerIndex += 1;
-      this.#paint();
-    }, tickMs);
-    this.#tickTimer.unref?.();
-  }
-
-  #stopTicker() {
-    if (this.#hasLiveSessionActivity()) return;
-    this.#clearTicker();
-  }
-
-  #clearTicker() {
-    if (this.#tickTimer) {
-      clearInterval(this.#tickTimer);
-      this.#tickTimer = undefined;
+  #footerRows(width: number): string[] {
+    if (this.#flow !== undefined) return this.#flowRows(this.#flow, width);
+    const surface = this.#stack.findLast((entry) => entry.surface.rows !== undefined)?.surface;
+    if (surface?.placement === "panel") return surface.rows!(width);
+    if (surface?.placement === "drawer") {
+      // The request keeps priority; task activity uses what height remains.
+      const drawer = surface.rows!(width);
+      const available = this.#terminal.height() - drawer.length - 1;
+      const activity = available >= 4 ? this.#taskPanelRows(width, available + 1) : [];
+      return [...activity.slice(0, -1), ...drawer].map((row) => clipVisible(row, width));
     }
+    return this.#composerRows(width);
   }
 
-  /** Running work, or tasks still working after their turn ended; the task panel ticks. */
-  #hasLiveSessionActivity(): boolean {
-    return this.#view?.working === true || this.#transcript.tasks.length > 0;
+  #composerRows(width: number): string[] {
+    const c = this.#theme.colors;
+    const rows: string[] = [""];
+    if (this.#startupPhase === undefined && this.#setupAttention !== undefined) {
+      rows.push(...renderAttentionRows(this.#setupAttention, width, this.#theme), "");
+    }
+    const working = this.#view?.working === true;
+    const tasks = this.#taskPanelRows(width);
+    rows.push(...tasks);
+    if (working) {
+      if (tasks.length === 0) rows.push(this.#turnBar(width));
+      if (this.#composer.cancelRequested) {
+        rows.push(
+          clipVisible(
+            `${c.yellow(this.#theme.glyph.dotActive)} ${c.dim("Cancelling turn… · Ctrl+C to stop waiting, then again to exit")}`,
+            width,
+          ),
+        );
+      }
+      if (tasks.length === 0 || this.#composer.cancelRequested) rows.push("");
+    } else if (this.#flowlessStatus !== undefined) {
+      const pulse = this.#pulse(this.#activityPulseStartedAtMs);
+      rows.push(clipVisible(c.dim(`${pulse} ${this.#flowlessStatus}`), width), "");
+    }
+    // Messages sent while the agent starts wait here until the runner reads them.
+    if (this.#startupPhase !== undefined) {
+      const queued = this.#inputs.flatMap((input) => (input.type === "submit" ? [input.text] : []));
+      for (const text of queued) {
+        rows.push(clipVisible(c.dim(`${this.#theme.glyph.dot} Queued: ${firstLine(text)}`), width));
+      }
+      if (queued.length > 0) rows.push("");
+    }
+    if (this.#composer.exitArmed)
+      rows.push(clipVisible(c.dim("Press Ctrl+C again to exit"), width), "");
+
+    const drawer = this.#composer.drawerRows(width);
+    const status = this.#statusLine(width);
+    const rule = c.dim(this.#theme.glyph.dash.repeat(width));
+    // Keep one transcript row above the footer and one separator below the prompt.
+    const maxRows = Math.max(
+      1,
+      this.#terminal.height() -
+        2 -
+        rows.length -
+        drawer.length -
+        status.length -
+        (drawer.length > 0 ? 2 : 1),
+    );
+    rows.push(
+      ...this.#composer.promptRows({
+        width,
+        maxRows,
+        caretVisible: this.#stack.length === 0 && this.#caretVisible(),
+        placeholder: this.#hasUserMessage || working ? "" : this.#initialPromptPlaceholder,
+      }),
+    );
+    // Menus sit beneath the composer so opening one never moves the caret.
+    if (drawer.length > 0) rows.push(rule, ...drawer);
+    if (status.length > 0) rows.push(drawer.length > 0 ? rule : "", ...status);
+    else if (drawer.length === 0) rows.push("");
+    return rows;
   }
 
-  #taskPanelRows(width: number, maxRows = Math.max(8, Math.floor(this.#height() / 2))): string[] {
+  #flowRows(flow: SetupFlowState, width: number): string[] {
+    const indicator = { glyph: this.#pulse(flow.startedAtMs) };
+    let status: FlowPanelStatus | undefined;
+    if (flow.status !== undefined) {
+      const elapsedMs = Date.now() - flow.status.startedAtMs;
+      const elapsed = elapsedMs >= 5_000 ? ` ${formatTurnDuration(elapsedMs)}` : "";
+      status = { text: `${flow.status.text}${elapsed}`, indicator };
+    }
+    const question = this.#stack.findLast((entry) => entry.surface.placement === "flow")?.surface;
+    let content: FlowPanelContent;
+    if (question !== undefined) {
+      const rows = question.rows!(width);
+      content =
+        status === undefined
+          ? { kind: "question", title: flow.questionTitle, rows }
+          : { kind: "question", title: flow.questionTitle, rows, status };
+    } else if (status !== undefined) {
+      content =
+        flow.preview === undefined
+          ? { kind: "status", status }
+          : { kind: "status", status, preview: flow.preview };
+    } else if (flow.preview !== undefined) {
+      content = { kind: "preview", text: flow.preview, indicator };
+    } else {
+      content = { kind: "idle", indicator };
+    }
+    const lines: FlowPanelLine[] =
+      flow.summary !== undefined
+        ? [
+            { text: flow.summary.headline, tone: "success" },
+            ...flow.summary.facts.map((fact) => ({
+              text: `${fact.label}: ${fact.value}`,
+              tone: "info" as const,
+            })),
+          ]
+        : flow.hideLinesWhileQuestion === true
+          ? []
+          : flow.lines;
+    const drawer = renderFlowDrawer(
+      { title: flow.title, navigation: flow.navigation, lines, content },
+      this.#theme,
+      width,
+    );
+    // No status line under the flow: the flow mutates the very state it shows.
+    const rows = [...drawer.rows, ...drawer.controls];
+    if (this.#remoteConnection !== undefined) {
+      const line = buildStatusLine({
+        remote: this.#remoteConnection,
+        theme: this.#theme,
+        width: Math.max(1, width - STATUS_LINE_LEFT_PADDING.length),
+      });
+      if (line !== undefined)
+        rows.push("", clipVisible(`${STATUS_LINE_LEFT_PADDING}${line}`, width));
+    }
+    return rows;
+  }
+
+  #taskPanelRows(
+    width: number,
+    maxRows = Math.max(8, Math.floor(this.#terminal.height() / 2)),
+  ): string[] {
     const tasks = this.#transcript.tasks;
     if (tasks.length === 0) return [];
-    const working = this.#view?.working === true && this.#flowlessStatus === undefined;
     const now = Date.now();
+    const working = this.#view?.working === true;
     const activity =
       working && this.#view !== undefined ? turnActivity(this.#view, tasks) : "Working";
     return renderTaskPanelRows(tasks, {
@@ -3154,1193 +2109,123 @@ export class TerminalRenderer implements AgentTUIRenderer {
     });
   }
 
-  #syncActivityTicker(): void {
-    if (this.#hasLiveSessionActivity()) {
-      if (this.#tickTimer === undefined) {
-        this.#activityPulseStartedAtMs = Date.now();
-        this.#startTicker();
-      }
-    } else if (
-      this.#setupFlow === undefined &&
-      this.#startupPhase === undefined &&
-      this.#flowlessStatus === undefined
-    ) {
-      this.#clearTicker();
+  /** The one live turn bar above the composer; the end-of-turn coda is its settled form. */
+  #turnBar(width: number): string {
+    const elapsedMs = Math.max(0, Date.now() - (this.#turnClock.startedAtMs ?? Date.now()));
+    const marker = elapsedMs % 1000 < 500 ? (this.#theme.unicode ? "•" : "*") : " ";
+    const elapsed =
+      elapsedMs < 1000 ? "0s" : formatTurnDuration(Math.floor(elapsedMs / 1000) * 1000);
+    const activity =
+      this.#view === undefined ? "Thinking" : turnActivity(this.#view, this.#transcript.tasks);
+    const usage = this.#turnClock.usage(this.#usage());
+    const tokens =
+      usage.inputTokens > 0 || usage.outputTokens > 0
+        ? this.#theme.colors.dim(` (${formatTokenFlow(usage, this.#theme.glyph)})`)
+        : "";
+    return clipVisible(`${marker} ${activity} (${elapsed})${tokens}`, width);
+  }
+
+  /** The persistent bottom status line, or the startup progress while the agent starts. */
+  #statusLine(width: number): string[] {
+    if (this.#startupPhase !== undefined) {
+      const label = {
+        starting: "Starting agent…",
+        connecting: "Reading saved connection…",
+        updating: "Loading selected model…",
+      }[this.#startupPhase];
+      const pulse = this.#pulse(this.#startupStartedAt);
+      return [clipVisible(this.#theme.colors.dim(`${pulse} ${label}`), width)];
     }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Block management
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Appends a new block to the transcript. Any block other than the active
-   * dev rebuild status line settles that line first — the in-place cycle only
-   * runs while rebuild updates are the newest transcript content.
-   */
-  #pushBlock(block: Block) {
-    if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
-    block.updateSeq = ++this.#updateSequence;
-    this.#blocks.push(block);
-    if (block.id) this.#blockById.set(block.id, block);
-  }
-
-  /**
-   * Commits the end-of-turn coda — wall-clock duration plus token flow —
-   * when control returns to the composer. Approvals and questions answered
-   * mid-turn do not return to the composer, so one turn gets one line.
-   */
-  #commitTurnStats(): void {
-    const settled = this.#turnClock.settle(this.#usage());
-    if (settled === undefined) return;
-    this.#lastTurnStats = settled;
-    this.#diagnostics?.reportStats();
-
-    // Quick, cheap turns close silently — the coda earns its row only when
-    // the turn was long or expensive.
-    if (
-      settled.elapsedMs <= turnStatsMinDurationMs &&
-      settled.inputTokens <= turnStatsMinInputTokens
-    ) {
-      return;
-    }
-
-    let body = `Done in ${this.#turnStatsBody(settled)}`;
-    // Context fill is a different measurement than the turn's summed flow —
-    // it reads off the last step's absolute input — so it rides separately.
-    const contextTokens = this.#view?.data.lastStepUsage?.inputTokens ?? 0;
-    if (this.#contextSize !== undefined && this.#contextSize > 0 && contextTokens > 0) {
-      const fill = Math.round((contextTokens / this.#contextSize) * 100);
-      body += ` ${this.#theme.glyph.dot} ${fill}% context`;
-    }
-    this.#pushBlock({ kind: "turn-stats", body, live: false });
-  }
-
-  #usage(): TokenUsage {
-    return this.#view?.data.usage ?? { inputTokens: 0, outputTokens: 0 };
-  }
-
-  /** Commits one error block, such as a message the session did not accept. */
-  renderError(title: string, message: string): void {
-    this.#start();
-    this.#addErrorBlock(title, message);
-  }
-
-  #addErrorBlock(
-    title: string,
-    content: string,
-    extras: { detail?: string | undefined; hint?: string | undefined } = {},
-  ) {
-    const cleanTitle = stripTerminalControls(title);
-    const cleanBody = stripTerminalControls(content);
-    const cleanDetail =
-      extras.detail === undefined ? undefined : stripTerminalControls(extras.detail);
-    const cleanHint = extras.hint === undefined ? undefined : stripTerminalControls(extras.hint);
-    // Every error block lands in the log, detail or not, so the file is a
-    // complete failure record for the session. The hint stays a structured
-    // field of the record, mirroring the failure event's shape.
-    const entry = {
-      source: "workflow" as const,
-      summary: `${cleanTitle}: ${cleanBody}`,
-      detail: cleanDetail ?? cleanBody,
-    };
-    this.#diagnostics?.append(cleanHint === undefined ? entry : { ...entry, hint: cleanHint });
-    const block: Block = {
-      kind: "error",
-      title: cleanTitle,
-      body: cleanBody,
-      live: false,
-    };
-    if (cleanHint !== undefined) block.hint = cleanHint;
-    if (cleanDetail !== undefined) {
-      block.detail =
-        this.#diagnostics === undefined ? cleanDetail : `details: ${this.#diagnostics.displayPath}`;
-    }
-    this.#pushBlock(block);
-    this.#paint();
-  }
-
-  #upsertBlock(block: Block) {
-    if (block.id && this.#committedIds.has(block.id)) {
-      return;
-    }
-    const existing = block.id ? this.#blockById.get(block.id) : undefined;
-    if (existing) {
-      Object.assign(existing, block);
-      // An in-place update is activity: recency windows must treat this
-      // block as the newest, not leave it at its announce position.
-      existing.updateSeq = ++this.#updateSequence;
-      return;
-    }
-    this.#pushBlock(block);
-  }
-
-  #removeBlock(id: string) {
-    this.#blocks = this.#blocks.filter((candidate) => candidate.id !== id);
-    this.#blockById.delete(id);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Painting
-  // ---------------------------------------------------------------------------
-
-  #paint() {
-    if (!this.#isInteractive) return;
-
-    if (this.#painting) {
-      this.#paintAgain = true;
-      return;
-    }
-
-    this.#painting = true;
-    try {
-      do {
-        this.#paintAgain = false;
-        this.#paintNow();
-      } while (this.#paintAgain);
-    } finally {
-      this.#painting = false;
-    }
-  }
-
-  #paintNow() {
-    if (!this.#isInteractive) return;
-
-    // The alt-screen viewer owns the screen while open; resize and stray
-    // paint triggers repaint its frame instead of the transcript.
-    if (this.#traceView !== undefined) {
-      this.#traceView.repaint();
-      return;
-    }
-
-    const width = this.#width();
-    const footer = this.#footerRows(width);
-    const startupHeader = this.#startupHeader === undefined ? [] : this.#renderAgentHeaderRows();
-    const maxBlockRows = Math.max(0, this.#height() - startupHeader.length - footer.length);
-    const committed: string[] = [];
-    let previous = this.#lastCommitted;
-
-    // Commit the leading run of finalized blocks to scrollback. Filtered log
-    // blocks still enter the block history (so a later `/loglevel` can render
-    // them) but contribute no rows and leave `previous` untouched — gap and
-    // log-run decisions must behave as if the hidden block were not there.
-    const groups = groupToolBlocksForDisplay(this.#blocks);
-    let settled = 0;
-    // A group's display carries the liveness of its whole run (a counted
-    // subagent header stays live while its children stream), so the settled
-    // prefix is judged on displays, not on raw leading blocks.
-    while (settled < groups.length && groups[settled]!.display.live === false) settled += 1;
-
-    if (settled > 0) {
-      // Coalesced groups can skip interleaved members of another outcome or
-      // call, so committed members must be removed by identity.
-      const committedMembers = new Set(groups.slice(0, settled).flatMap((group) => group.members));
-      for (let i = this.#blocks.length - 1; i >= 0; i -= 1) {
-        if (committedMembers.has(this.#blocks[i]!)) this.#blocks.splice(i, 1);
-      }
-    }
-    for (const group of groups.slice(0, settled)) {
-      for (const block of group.members) {
-        this.#transcriptBlocks.push(block);
-        if (block.id) {
-          this.#committedIds.add(block.id);
-          this.#blockById.delete(block.id);
-        }
-      }
-      if (this.#isHiddenLog(group.display)) continue;
-      const rows = this.#renderBlock(group.display, width, previous);
-      previous = previousBlockOf(group.display);
-      this.#lastCommitted = previous;
-      committed.push(...rows);
-      this.#committedTranscriptRows.push(...rows);
-    }
-
-    // Flatten remaining live blocks. These rows are never partially committed:
-    // a live block may rewrap or receive new deltas on the next paint, and
-    // terminal scrollback cannot be corrected once written.
-    const flat: Array<{ block: Block; row: string }> = [];
-    for (const { display: block } of groups.slice(settled)) {
-      if (this.#isHiddenLog(block)) continue;
-      const rows = this.#renderBlock(block, width, previous);
-      previous = previousBlockOf(block);
-      for (let i = 0; i < rows.length; i += 1) {
-        flat.push({ block, row: rows[i]! });
-      }
-    }
-
-    const liveRows = [
-      ...startupHeader,
-      ...clipLiveRows(
-        flat.map((entry) => entry.row),
-        maxBlockRows,
-        width,
-        this.#theme,
-      ),
-      ...footer,
-    ];
-    if (committed.length > 0) {
-      this.#live.flush(committed, liveRows);
-    } else {
-      this.#live.update(liveRows);
-    }
-  }
-
-  #replayTranscript(): void {
-    if (!this.#isInteractive) return;
-    const width = this.#width();
-    const footer = this.#footerRows(width);
-    const maxBlockRows = Math.max(0, this.#height() - footer.length);
-    let previous = this.#lastCommitted;
-    const flat: string[] = [];
-
-    for (const { display: block } of groupToolBlocksForDisplay(this.#blocks)) {
-      if (this.#isHiddenLog(block)) continue;
-      const rows = this.#renderBlock(block, width, previous);
-      previous = previousBlockOf(block);
-      flat.push(...rows);
-    }
-
-    const liveRows = [...clipLiveRows(flat, maxBlockRows, width, this.#theme), ...footer];
-    this.#live.clearAll();
-    this.#live.flush(
-      [...this.#renderAgentHeaderRows(), ...this.#committedTranscriptRows],
-      liveRows,
-    );
-  }
-
-  /** The log sources the transcript currently renders. */
-  logDisplayMode(): LogDisplayMode {
-    return this.#logs;
-  }
-
-  /**
-   * Switches which captured log sources the transcript shows. Captured
-   * output is buffered in the block history regardless of mode, so the
-   * committed transcript is re-rendered under the new filter and replayed:
-   * hiding removes past log lines, showing restores them at their original
-   * positions.
-   */
-  setLogDisplayMode(mode: LogDisplayMode): void {
-    if (mode === this.#logs) return;
-    this.#logs = mode;
-    if (mode === "all") this.flushDelayedDevBuildErrors();
-    this.#rebuildCommittedTranscript();
-    if (this.#isInteractive) this.#replayTranscript();
-  }
-
-  flushDelayedDevBuildErrors(): void {
-    const body = this.#delayedDevBuildError;
-    if (body === undefined) return;
-    this.#delayedDevBuildError = undefined;
-    this.#pushBlock({ kind: "log", title: "stderr", logLevel: "error", body, live: false });
-    this.#paint();
-  }
-
-  /**
-   * Advances the log filter one step (Ctrl+L) and surfaces the new mode as a
-   * transient `logs: <mode>` status-line hint that clears itself after
-   * {@link logLevelHintMs} of no further cycling.
-   */
-  #cycleLogDisplayMode(): void {
-    this.#logLevelHintActive = true;
-    if (this.#logLevelHintTimer !== undefined) clearTimeout(this.#logLevelHintTimer);
-    this.#logLevelHintTimer = setTimeout(() => {
-      this.#logLevelHintActive = false;
-      this.#logLevelHintTimer = undefined;
-      this.#paint();
-    }, logLevelHintMs);
-    this.setLogDisplayMode(nextLogDisplayMode(this.#logs));
-    this.#paint();
-  }
-
-  /**
-   * Re-renders {@link #committedTranscriptRows} from the committed block
-   * history under the current log filter, rebuilding the `previous` chain so
-   * inter-block gaps and log-run labels match what a straight-through paint
-   * would have produced.
-   */
-  #rebuildCommittedTranscript(): void {
-    const width = this.#width();
-    this.#committedTranscriptRows.length = 0;
-    let previous: PreviousBlock | undefined;
-    // Committed log writes re-render at their committed positions —
-    // window-scoped stream coalescing would relocate every past write to
-    // the end of the transcript on a `/loglevel` toggle.
-    for (const { display: block } of groupToolBlocksForDisplay(this.#transcriptBlocks, {
-      logCoalescing: "runs",
-    })) {
-      if (this.#isHiddenLog(block)) continue;
-      const rows = this.#renderBlock(block, width, previous);
-      previous = previousBlockOf(block);
-      this.#committedTranscriptRows.push(...rows);
-    }
-    this.#lastCommitted = previous;
-  }
-
-  #renderAgentHeaderRows(): string[] {
-    const header = this.#agentHeader;
-    const startup = this.#startupHeader;
-    if (header === undefined && startup === undefined) return [];
-    const input: Parameters<typeof buildAgentHeader>[0] = {
-      name: header?.name ?? startup?.name,
+    const padding = this.#remoteConnection === undefined ? "" : STATUS_LINE_LEFT_PADDING;
+    const input: Parameters<typeof buildStatusLine>[0] = {
       theme: this.#theme,
-      width: this.#width(),
+      width: Math.max(1, width - padding.length),
     };
-    if (header?.info !== undefined) input.info = header.info;
-    return buildAgentHeader(input);
+    const build = this.#visibleBuild();
+    if (build !== undefined) input.devBuild = build;
+    if (Date.now() < this.#logHintUntil) input.logLevel = this.#logs;
+    const model = this.#agentHeader?.info?.agent.model;
+    if (model?.routing.kind === "dynamic") {
+      input.dynamicModel = true;
+      const modelId = this.#view?.data.modelId;
+      if (modelId !== undefined) input.model = modelId;
+    } else if (model?.id !== undefined) input.model = model.id;
+    // "provider-default" is the absent-setting sentinel, not a level worth showing.
+    if (model?.reasoning !== undefined && model.reasoning !== "provider-default") {
+      input.reasoning = model.reasoning;
+    }
+    if (readGatewayServiceTier(model?.providerOptions).kind === "priority") input.fastMode = true;
+    if (model?.endpoint !== undefined) input.endpoint = model.endpoint;
+    if (this.#vercelStatus !== undefined) input.vercel = this.#vercelStatus;
+    if (this.#remoteConnection !== undefined) input.remote = this.#remoteConnection;
+    const line = buildStatusLine(input);
+    return line === undefined ? [] : [clipVisible(`${padding}${line}`, width)];
   }
 
-  #renderBlock(block: DisplayBlock, width: number, previous: PreviousBlock | undefined): string[] {
-    const context: Parameters<typeof renderBlockLines>[3] = {
-      renderMarkdown: this.#renderMarkdown,
-      activityPulse: this.#progressPulseGlyph(
-        this.#activityPulseStartedAtMs,
-        this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
-      ),
-    };
-    if (previous !== undefined) context.previous = previous;
-    if (this.#setupFlow !== undefined) context.setupFlowOpen = true;
-    if (this.#transientPanel !== undefined) context.transientPanelOpen = true;
-    const rows = renderBlockLines(block, width, this.#theme, context);
-    if ((block.depth ?? 0) === 0 && leadsWithGap(block, previous)) {
-      return ["", ...rows];
-    }
-    return rows;
+  // ---------------------------------------------------------------------------
+  // Animation
+  // ---------------------------------------------------------------------------
+
+  #caretVisible(): boolean {
+    return Math.floor((Date.now() - this.#caretEpoch) / caretBlinkMs) % 2 === 0;
   }
 
   #spinnerFrame(): string {
     return this.#theme.spinner[this.#spinnerIndex % this.#theme.spinner.length] ?? "";
   }
 
-  #progressPulseGlyph(startedAtMs: number, glyph: string): string {
-    return isProgressPulseVisible(Date.now() - startedAtMs) ? glyph : " ";
+  #pulse(startedAtMs: number): string {
+    return isProgressPulseVisible(Date.now() - startedAtMs)
+      ? this.#theme.unicode
+        ? PROGRESS_PULSE_GLYPH
+        : PROGRESS_PULSE_ASCII_GLYPH
+      : " ";
   }
 
-  #setupFlowIndicator(flow: SetupFlowState): FlowPanelIndicator {
-    return {
-      glyph: this.#progressPulseGlyph(
-        flow.startedAtMs,
-        this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
-      ),
-    };
-  }
-
-  #footerRows(width: number): string[] {
-    const c = this.#theme.colors;
-    const rows: string[] = [""];
-
-    if (this.#transientPanel !== undefined) {
-      const drawer = this.#transientPanel(width);
-      return [...drawer.rows, ...drawer.controls];
-    }
-
-    // The request keeps priority; activity uses the remaining height and shares its top rule.
-    if (this.#hitlDrawer !== undefined) {
-      const drawer = this.#hitlDrawer(width);
-      const available = this.#height() - drawer.rows.length - drawer.controls.length - 1;
-      const activity = available >= 4 ? this.#taskPanelRows(width, available + 1) : [];
-      return [...activity.slice(0, -1), ...drawer.rows, ...drawer.controls].map((row) =>
-        clip(row, width),
-      );
-    }
-
-    const flow = this.#setupFlow;
-    if (flow !== undefined && (this.#startupEditor === undefined || flow.question !== undefined)) {
-      // No status line under an open flow panel: the flow is mutating the
-      // very state the line shows (link, pending deploy, model), so mid-flow
-      // values are guaranteed stale; it reappears, refreshed, when the
-      // panel closes.
-      const indicator = this.#setupFlowIndicator(flow);
-      let status: FlowPanelStatus | undefined;
-      if (flow.status !== undefined) {
-        const { startedAtMs, ...flowStatus } = flow.status;
-        const elapsedMs = Date.now() - startedAtMs;
-        const elapsed = elapsedMs >= 5_000 ? ` ${formatTurnDuration(elapsedMs)}` : "";
-        status = { ...flowStatus, text: `${flowStatus.text}${elapsed}`, indicator };
-      }
-      let content: FlowPanelContent;
-      // A live status indicator rides alongside an open question only when one is
-      // explicitly set (the install wait); ordinary questions leave it cleared,
-      // so their panels stay status-free as before.
-      if (flow.question !== undefined) {
-        const rows = flow.question(width);
-        content = { kind: "question", title: flow.questionTitle, rows };
-        if (status !== undefined) {
-          content = { kind: "question", title: flow.questionTitle, rows, status };
-        }
-      } else if (status !== undefined) {
-        content = { kind: "status", status };
-        if (flow.preview !== undefined) {
-          content = {
-            kind: "status",
-            status,
-            preview: flow.preview,
-          };
-        }
-      } else if (flow.preview !== undefined) {
-        content = { kind: "preview", text: flow.preview, indicator };
-      } else {
-        content = { kind: "idle", indicator };
-      }
-      const state: Parameters<typeof renderFlowDrawer>[0] = {
-        title: flow.title,
-        navigation: flow.navigation,
-        lines:
-          flow.summary === undefined
-            ? flow.hideLinesWhileQuestion === true
-              ? []
-              : flow.lines
-            : [
-                { text: flow.summary.headline, tone: "success" },
-                ...flow.summary.facts.map((fact) => ({
-                  text: `${fact.label}: ${fact.value}`,
-                  tone: "info" as const,
-                })),
-              ],
-        content,
-      };
-      const drawer = renderFlowDrawer(state, this.#theme, width);
-      // Setup owns the footer while open. Do not lead it with the ordinary
-      // transcript spacer: the drawer begins directly below the command echo.
-      if (rows.length === 1 && rows[0] === "") rows.length = 0;
-      rows.push(...drawer.rows);
-      if (drawer.controls.length > 0) rows.push(...drawer.controls);
-      this.#pushRemoteStatusLine(rows, width);
-      return rows;
-    }
-
-    if (flow !== undefined) {
-      rows.push(
-        ...flowMessageRows(flow.lines, this.#theme).map((row) =>
-          row.length === 0 ? "" : clip(` ${row}`, width),
-        ),
-      );
-    }
-
-    // The setup attention line rides above the pinned panels as a live
-    // element, so resolving its issue clears it instead of leaving it stale
-    // in scrollback.
-    if (this.#startupPhase === undefined && this.#setupAttention !== undefined) {
-      rows.push(...renderAttentionRows(this.#setupAttention, width, this.#theme), "");
-    }
-
-    // The task panel is the one region that redraws in place while tasks
-    // work, so it sits in the footer rather than the transcript.
-    const working = this.#view?.working === true && this.#flowlessStatus === undefined;
-    const taskRows = this.#taskPanelRows(width);
-    if (taskRows.length > 0) {
-      rows.push(...taskRows);
-    }
-
-    // Messages typed while the agent starts wait in a panel directly above
-    // the input because they hold the user's own undelivered words.
-    const queueRows = renderMessageQueueRows({
-      view: this.#startupQueue.view(),
-      width,
-      theme: this.#theme,
-    });
-    if (queueRows.length > 0) rows.push(...queueRows, "");
-
-    // While work runs, the one live turn bar rides above the composer. The
-    // `Done in … (↑ … ↓ …)` coda is this bar's settled form.
-    if (working) {
-      if (taskRows.length === 0) rows.push(this.#streamingTurnBar(width));
-      if (this.#cancelRequested) {
-        rows.push(
-          clip(
-            `${c.yellow(this.#theme.glyph.dotActive)} ${c.dim("Cancelling turn… · Ctrl+C to stop waiting, then again to exit")}`,
-            width,
-          ),
-        );
-      }
-      if (taskRows.length === 0 || this.#cancelRequested) rows.push("");
-    }
-
-    if (this.#inputActive) {
-      // A complete command can show its argument hint beside the caret while
-      // its matching suggestion remains visible beneath the prompt.
-      const inlineHint =
-        this.#typeahead !== undefined ? inlineCommandHint(this.#typeahead) : undefined;
-      const typeaheadRows = this.#typeaheadDrawerRows(width);
-      if (this.#exitArmed) {
-        rows.push(clip(c.dim("Press Ctrl+C again to exit"), width), "");
-      }
-      const ghost = inlineHint ? c.dim(` ${inlineHint}`) : "";
-      const statusRows: string[] = [];
-      this.#pushStatusLine(statusRows, width);
-      // Keep one transcript row above the footer and one separator below the
-      // prompt. Everything already in `rows` has higher-level footer ownership
-      // (attention or typeahead), so the prompt receives only what remains.
-      const maxPromptRows = Math.max(
-        1,
-        this.#height() -
-          1 -
-          rows.length -
-          1 -
-          typeaheadRows.length -
-          statusRows.length -
-          (typeaheadRows.length > 0 ? 2 : 0),
-      );
-      const promptRows: Parameters<typeof promptInputRows>[0] = {
-        text: this.#inputText,
-        cursor: this.#inputCursor,
-        width,
-        theme: this.#theme,
-        caretVisible: this.#caretVisible,
-        ghost,
-        maxRows: maxPromptRows,
-      };
-      // An empty chat prompt keeps the full-size prompt mark; the
-      // invitation text rides it only until the user's first message.
-      if (this.#promptPlaceholderActive && this.#inputText.length === 0) {
-        promptRows.placeholder =
-          this.#startupEditor !== undefined
-            ? "Message · Enter to queue"
-            : this.#hasUserMessage || working
-              ? ""
-              : this.#initialPromptPlaceholder;
-      }
-      const renderedPromptRows = promptInputRows(promptRows);
-      // The prompt helper ends with a footer spacer; a drawer owns that gap.
-      if (typeaheadRows.length > 0 && renderedPromptRows.at(-1) === "") renderedPromptRows.pop();
-      rows.push(...renderedPromptRows);
-      // Keep menus beneath the composer so opening them never moves the caret.
-      if (typeaheadRows.length > 0) rows.push(c.dim(this.#theme.glyph.dash.repeat(width)));
-      rows.push(...typeaheadRows);
-      if (typeaheadRows.length > 0 && statusRows.length > 0) {
-        rows.push(c.dim(this.#theme.glyph.dash.repeat(width)));
-      }
-      rows.push(...statusRows);
-      return rows;
-    }
-
-    // The composer is closed while a command or other surface runs. A kept
-    // draft stays visible so keys typed in this gap have somewhere to land.
-    if (working || this.#draft.text.length > 0) {
-      this.#pushDraftPrompt(rows, width, { inert: working, adjacent: taskRows.length > 0 });
-      this.#pushStatusLine(rows, width);
-      return rows;
-    }
-
-    // Interactive prompts, the flowless setup spinner, and transitional states
-    // render as a quiet dot-led status row.
-    const statusText = this.#flowlessStatus ?? "Ready";
-    const meta = this.#statusMeta();
-    const icon = c.dim(this.#theme.glyph.dot);
-    const line = meta
-      ? `${icon} ${statusText}  ${c.dim(this.#theme.glyph.dot)}  ${meta}`
-      : `${icon} ${statusText}`;
-    rows.push(clip(line, width));
-    this.#pushStatusLine(rows, width);
-    return rows;
-  }
-
-  #streamingTurnBar(width: number): string {
-    const c = this.#theme.colors;
-    const startedAtMs = this.#turnClock.startedAtMs ?? Date.now();
-    const elapsedMs = Math.max(0, Date.now() - startedAtMs);
-    const marker = elapsedMs % 1000 < 500 ? (this.#theme.unicode ? "•" : "*") : " ";
-    const elapsed =
-      elapsedMs < 1000 ? "0s" : formatTurnDuration(Math.floor(elapsedMs / 1000) * 1000);
-    const activity =
-      this.#view === undefined ? "Thinking" : turnActivity(this.#view, this.#transcript.tasks);
-    const label = `${activity} (${elapsed})`;
-    const { inputTokens, outputTokens } = this.#turnClock.usage(this.#usage());
-    const tokens =
-      inputTokens > 0 || outputTokens > 0
-        ? c.dim(` (${formatTokenFlow({ inputTokens, outputTokens }, this.#theme.glyph)})`)
-        : "";
-    return clip(`${marker} ${label}${tokens}`, width);
-  }
-
-  /** The settled coda's duration and optional token flow. */
-  #turnStatsBody(settled: { elapsedMs: number } & TokenUsage): string {
-    const { inputTokens, outputTokens } = settled;
-    const flow =
-      inputTokens === 0 && outputTokens === 0
-        ? ""
-        : ` (${formatTokenFlow({ inputTokens, outputTokens }, this.#theme.glyph)})`;
-    return `${formatTurnDuration(settled.elapsedMs)}${flow}`;
-  }
-
-  /** The kept draft as a prompt row, inert while work runs without the composer. */
-  #pushDraftPrompt(
-    rows: string[],
-    width: number,
-    options: { inert: boolean; adjacent?: boolean },
-  ): void {
-    if (!options.adjacent && rows.at(-1) !== "") rows.push("");
-    const prompt: Parameters<typeof promptInputRows>[0] = {
-      text: this.#draft.text,
-      cursor: this.#draft.cursor,
-      width,
-      theme: this.#theme,
-      caretVisible: true,
-      ghost: "",
-      maxRows: 4,
-      inert: options.inert,
-    };
-    if (options.inert && this.#draft.text.length === 0) prompt.placeholder = "";
-    rows.push(...promptInputRows(prompt));
-  }
-
-  /** Appends the persistent bottom status line below the prompt when it has content. */
-  #pushStatusLine(rows: string[], width: number): void {
-    if (this.#startupPhase !== undefined) {
-      const labels = {
-        starting: "Starting agent…",
-        connecting: "Reading saved connection…",
-        updating: "Loading selected model…",
-      };
-      const label = this.#setupFlow?.status?.text ?? labels[this.#startupPhase];
-      const pulse = this.#progressPulseGlyph(
-        this.#startupStartedAt,
-        this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
-      );
-      rows.push(clip(this.#theme.colors.dim(`${pulse} ${label}`), width));
-      return;
-    }
-    const padding = this.#remoteConnection === undefined ? "" : STATUS_LINE_LEFT_PADDING;
-    const contentWidth = Math.max(1, width - padding.length);
-    const input: Parameters<typeof buildStatusLine>[0] = {
-      theme: this.#theme,
-      width: contentWidth,
-    };
-    if (this.#devBuildStatusVisible && this.#devBuildStatus !== undefined) {
-      input.devBuild = this.#devBuildStatus;
-    }
-    if (this.#logLevelHintActive) input.logLevel = this.#logs;
-    const agentModel = this.#agentHeader?.info?.agent.model;
-    if (agentModel?.routing.kind === "dynamic") {
-      const modelId = this.#view?.data.modelId;
-      input.dynamicModel = true;
-      if (modelId !== undefined) input.model = modelId;
-    } else if (agentModel?.id !== undefined) input.model = agentModel.id;
-    // "provider-default" is the absent-setting sentinel, not a level worth showing.
-    if (agentModel?.reasoning !== undefined && agentModel.reasoning !== "provider-default") {
-      input.reasoning = agentModel.reasoning;
-    }
-    if (readGatewayServiceTier(agentModel?.providerOptions).kind === "priority") {
-      input.fastMode = true;
-    }
-    // The runner resolves model-provider state with `/info` before caching this
-    // header, so the status bar consumes that shared snapshot.
-    const endpoint = agentModel?.endpoint;
-    if (endpoint !== undefined) input.endpoint = endpoint;
-    // Token flow lives in the end-of-turn coda, not the persistent bar — a
-    // live counter mostly restates the last step's context size.
-    if (this.#vercelStatus !== undefined) input.vercel = this.#vercelStatus;
-    if (this.#remoteConnection !== undefined) input.remote = this.#remoteConnection;
-    const line = buildStatusLine(input);
-    if (line !== undefined) rows.push(clip(`${padding}${line}`, width));
-  }
-
-  #pushRemoteStatusLine(rows: string[], width: number): void {
-    if (this.#remoteConnection === undefined) return;
-    const contentWidth = Math.max(1, width - STATUS_LINE_LEFT_PADDING.length);
-    const line = buildStatusLine({
-      remote: this.#remoteConnection,
-      theme: this.#theme,
-      width: contentWidth,
-    });
-    if (line !== undefined) {
-      rows.push("", clip(`${STATUS_LINE_LEFT_PADDING}${line}`, width));
-    }
-  }
-
-  #statusMeta(): string {
-    const c = this.#theme.colors;
-    const parts: string[] = [];
-    // The running token total lives on the persistent status line below;
-    // this row keeps only the turn-scoped stats.
-    const turn = this.#lastTurnStats;
-    const stats =
-      turn === undefined
-        ? undefined
-        : formatAssistantResponseStats(
-            {
-              totalTokens: turn.inputTokens + turn.outputTokens,
-              outputTokens: turn.outputTokens,
-              tokensPerSecond:
-                turn.elapsedMs > 0 ? turn.outputTokens / (turn.elapsedMs / 1000) : undefined,
-            },
-            this.#assistantResponseStats,
-          );
-    if (stats) parts.push(stats);
-    return parts.length > 0 ? c.dim(parts.join(`  ${this.#theme.glyph.dot}  `)) : "";
-  }
-
-  #width(): number {
-    // `|| 80` (not `?? 80`) so a 0-column report (e.g. a sizeless PTY) falls
-    // back to a sane default instead of collapsing the layout.
-    return Math.max(20, this.#output.columns || 80);
-  }
-
-  #height(): number {
-    return Math.max(8, this.#output.rows || 24);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Foreign output capture
-  // ---------------------------------------------------------------------------
-
-  #installLogCapture(): void {
-    if (this.#restoreLogCapture !== undefined || !this.#captureForeignOutput) return;
-
-    this.#stdoutLogBuffer = "";
-    this.#stderrLogBuffer = "";
-
-    const capture = (target: NodeJS.WriteStream, source: "stdout" | "stderr"): (() => void) => {
-      const original = target.write.bind(target);
-      target.write = ((
-        chunk: string | Uint8Array,
-        encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
-        callback?: (error?: Error | null) => void,
-      ): boolean => {
-        const encoding = typeof encodingOrCallback === "string" ? encodingOrCallback : undefined;
-        const done = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
-        this.#handleForeignOutput(source, chunkToString(chunk, encoding));
-        done?.();
-        return true;
-      }) as typeof target.write;
-      return () => {
-        target.write = original;
-      };
-    };
-
-    const consoleMethods = ["error", "warn", "log", "info", "debug"] as const;
-    const originals = consoleMethods.map((method) => [method, console[method]] as const);
-    for (const method of consoleMethods) {
-      console[method] = (...args: unknown[]) =>
-        this.#displayConsoleRecord({
-          level: method === "log" ? "info" : method,
-          text: format(...args),
-        });
-    }
-    setConsoleRecordSubscriber((record) => this.#displayConsoleRecord(record));
-    const restoreStdout = capture(process.stdout, "stdout");
-    const restoreStderr = capture(process.stderr, "stderr");
-    // The recorder takes ownership of eve's own structured log records for
-    // the same window the stream capture is installed: it persists each one
-    // structured, then hands it here for display. Records never reach the
-    // console, so the stderr scrape below only carries genuinely foreign
-    // output.
-    this.#diagnostics?.subscribeLogRecords((record) => this.#displayLogRecord(record));
-    this.#restoreLogCapture = () => {
-      this.#diagnostics?.unsubscribeLogRecords();
-      setConsoleRecordSubscriber(undefined);
-      for (const [method, original] of originals) console[method] = original;
-      restoreStdout();
-      restoreStderr();
-    };
-  }
-
-  #removeLogCapture(): void {
-    const restore = this.#restoreLogCapture;
-    if (restore === undefined) return;
-    this.#restoreLogCapture = undefined;
-    restore();
-
-    if (this.#stdoutLogBuffer.length > 0) {
-      this.#diagnostics?.append({ source: "stdout", detail: this.#stdoutLogBuffer });
-      if (this.#shouldRenderLog()) process.stdout.write(`${this.#stdoutLogBuffer}\n`);
-      this.#stdoutLogBuffer = "";
-    }
-    if (this.#stderrLogBuffer.length > 0) {
-      this.#diagnostics?.append({ source: "stderr", detail: this.#stderrLogBuffer });
-      if (this.#shouldRenderLog()) process.stderr.write(`${this.#stderrLogBuffer}\n`);
-      this.#stderrLogBuffer = "";
-    }
-  }
-
-  /**
-   * Displays one structured record from eve's own logger (the diagnostics
-   * recorder already persisted it). Routed through the stderr path so
-   * `/loglevel` semantics and long-output collapsing match what the same
-   * record looked like when it arrived as scraped console output.
-   */
-  #displayLogRecord(record: LogRecord): void {
-    const fieldsText = record.fields === undefined ? "" : ` ${JSON.stringify(record.fields)}`;
-    this.#handleCapturedStderr(
-      `[eve:${record.namespace}] ${record.message}${fieldsText}`,
-      record.level,
+  /** Whether anything on screen moves with time, so the ticker runs fast. */
+  #animating(): boolean {
+    const now = Date.now();
+    return (
+      this.#startupPhase !== undefined ||
+      this.#flow !== undefined ||
+      this.#flowlessStatus !== undefined ||
+      this.#view?.working === true ||
+      this.#transcript.tasks.length > 0 ||
+      this.#pendingCommandEcho !== undefined ||
+      this.#composer.loading() ||
+      now < this.#logHintUntil ||
+      (this.#build !== undefined &&
+        (this.#build.status.phase === "building" ||
+          now - this.#build.atMs < devBuildLoadedStatusMs))
     );
-    this.#paint();
   }
 
-  #displayConsoleRecord(record: ConsoleRecord): void {
-    const source = record.level === "error" || record.level === "warn" ? "stderr" : "stdout";
-    this.#diagnostics?.append({ source, level: record.level, detail: record.text });
-    if (source === "stderr") this.#handleCapturedStderr(stripAnsi(record.text), record.level);
-    else this.#handleCapturedStdout(stripAnsi(record.text), record.level);
-    this.#paint();
-  }
-
-  #handleForeignOutput(source: "stdout" | "stderr", text: string): void {
-    const combined = (source === "stdout" ? this.#stdoutLogBuffer : this.#stderrLogBuffer) + text;
-    if (source === "stdout" && parseDevRebuildLogLine(combined.trimEnd()) !== undefined) {
-      this.#stdoutLogBuffer = "";
-      this.#diagnostics?.append({ source, detail: combined.trimEnd() });
-      this.#handleCapturedStdout(combined.trimEnd());
+  /** One ticker drives every animation: fast while something moves, slow for a blinking caret. */
+  #syncTicker(): void {
+    const top = this.#stack.at(-1)?.surface;
+    const caret = top === undefined ? this.#flow === undefined : top.caret?.() === true;
+    const period = this.#closed ? 0 : this.#animating() ? tickMs : caret ? caretBlinkMs : 0;
+    if (this.#ticker?.period === period) return;
+    this.#stopTicker();
+    if (period === 0) return;
+    const timer = setInterval(() => {
+      this.#spinnerIndex += 1;
       this.#paint();
-      return;
-    }
-    const lastNewline = combined.lastIndexOf("\n");
-    const remainder = lastNewline === -1 ? combined : combined.slice(lastNewline + 1);
-
-    if (source === "stdout") {
-      this.#stdoutLogBuffer = remainder;
-    } else {
-      this.#stderrLogBuffer = remainder;
-    }
-
-    if (lastNewline === -1) return;
-
-    const content = stripAnsi(combined.slice(0, lastNewline)).replace(/\s+$/u, "");
-    if (content.trim().length === 0) return;
-
-    // Each write commits immediately as its own finalized block — O(1) work
-    // per line and nothing held back in the live region while the TUI idles
-    // at the prompt under a chatty server. The run *visuals* (label once,
-    // hanging indent) come from render context: a log block painted directly
-    // after a same-source log block suppresses its label and gap. Blocks are
-    // created even for sources the current mode hides: the display filter is
-    // applied at render time, so `/loglevel` can reveal them later. The dev
-    // server's rebuild lifecycle lines are the one exception — they cycle
-    // through a single in-place status block instead of stacking.
-    // Capture at the dispatch point so every captured line — including
-    // sandbox and rebuild lines riding stdout — reaches the diagnostic log.
-    this.#diagnostics?.append({ source, detail: content });
-    if (source === "stdout") this.#handleCapturedStdout(content);
-    else this.#handleCapturedStderr(content);
-    this.#paint();
+    }, period);
+    timer.unref?.();
+    this.#ticker = { timer, period };
   }
 
-  /**
-   * Routes captured stdout lines: rebuild lifecycle lines update the in-place
-   * status block, every other line lands as an ordinary committed log block.
-   * Contiguous ordinary lines within one write stay one block, preserving the
-   * single-block-per-write shape for plain output.
-   */
-  #handleCapturedStdout(content: string, logLevel?: LogLevel): void {
-    let pending: string[] = [];
-    const flushPending = () => {
-      if (pending.length === 0) return;
-      const body = pending.join("\n");
-      pending = [];
-      if (body.trim().length === 0) return;
-      this.#pushBlock({ kind: "log", title: "stdout", logLevel, body, live: false });
-    };
-
-    for (const line of content.split("\n")) {
-      const sandboxMessage = parseSandboxLogLine(line.trimEnd());
-      if (sandboxMessage !== undefined) {
-        flushPending();
-        this.#pushBlock({ kind: "sandbox", logLevel, body: sandboxMessage, live: false });
-        continue;
-      }
-
-      const update = parseDevRebuildLogLine(line.trimEnd());
-      if (update === undefined) {
-        pending.push(line);
-        continue;
-      }
-      flushPending();
-      this.#applyDevRebuildUpdate(update, line.trimEnd());
-    }
-    flushPending();
-  }
-
-  #handleCapturedStderr(content: string, logLevel?: LogLevel): void {
-    const lines = content.split("\n");
-    const failedIndex = lines.findIndex((line) => {
-      return parseDevRebuildLogLine(line.trimEnd())?.kind === "failed";
-    });
-    if (failedIndex === -1) {
-      if (this.#diagnostics === undefined) {
-        this.#pushBlock({ kind: "log", title: "stderr", logLevel, body: content, live: false });
-        return;
-      }
-      const presentation = presentDiagnostic(content, this.#diagnostics.displayPath);
-      if (presentation.kind === "inline") {
-        this.#pushBlock({
-          kind: "log",
-          title: "stderr",
-          logLevel,
-          body: presentation.text,
-          live: false,
-        });
-        return;
-      }
-      this.#pushBlock({
-        kind: "log",
-        title: "stderr",
-        body: formatStoredDiagnostic(presentation),
-        logVisibility: "summary",
-        logLevel,
-        live: false,
-      });
-      this.#pushBlock({
-        kind: "log",
-        title: "stderr",
-        body: content,
-        logVisibility: "all-only",
-        logLevel,
-        live: false,
-      });
-      return;
-    }
-
-    const previous = lines.slice(0, failedIndex).join("\n");
-    if (previous.trim().length > 0) {
-      this.#pushBlock({ kind: "log", title: "stderr", logLevel, body: previous, live: false });
-    }
-    const failedBody = lines.slice(failedIndex).join("\n");
-    this.#handleDevRebuildFailure(failedBody);
-  }
-
-  #handleDevRebuildFailure(body: string): void {
-    this.#clearDevBuildStatus();
-    if (this.#logs === "all") {
-      if (body.trim().length === 0) return;
-      this.#pushBlock({ kind: "log", title: "stderr", logLevel: "error", body, live: false });
-      return;
-    }
-    this.#delayedDevBuildError = body;
-  }
-
-  /**
-   * Applies one parsed rebuild lifecycle line to the in-place status block:
-   * a "change detected" line opens (or rewrites) the cycle as
-   * `<files> changed · rebuilding…`, and an outcome line flips the same block
-   * to `· rebuilt` / `· reloading server…`. Only the latest state is ever
-   * visible. When no cycle is live — interleaved output settled it — an
-   * outcome line falls back to an ordinary log block so it isn't lost.
-   */
-  #applyDevRebuildUpdate(update: DevRebuildLogUpdate, line: string): void {
-    const cycle = this.#activeDevRebuildCycle();
-
-    if (update.kind === "failed") {
-      this.#handleDevRebuildFailure(line);
-      return;
-    }
-
-    if (update.kind === "rebuilding") {
-      const summary = summarizeChangedFiles(update.events, update.more);
-      this.#setDevBuildStatus({ phase: "building", summary });
-      if (cycle !== undefined) {
-        cycle.state.summary = summary;
-        cycle.block.body = formatDevRebuildStatus(summary, "rebuilding");
-        return;
-      }
-      const id = `dev-rebuild:${this.#devRebuildSequence}`;
-      this.#devRebuildSequence += 1;
-      this.#devRebuild = { id, summary };
-      this.#pushBlock({
-        kind: "log",
-        id,
-        title: "stdout",
-        body: formatDevRebuildStatus(summary, "rebuilding"),
-        live: true,
-      });
-      return;
-    }
-
-    const summary = cycle?.state.summary ?? this.#devBuildStatus?.summary;
-    if (summary !== undefined) this.#setDevBuildStatus({ phase: "complete", summary });
-    if (cycle !== undefined) {
-      cycle.block.body = formatDevRebuildStatus(cycle.state.summary, update.kind);
-      if (update.kind === "rebuilt") this.#delayedDevBuildError = undefined;
-      return;
-    }
-    if (update.kind === "rebuilt") this.#delayedDevBuildError = undefined;
-    this.#pushBlock({ kind: "log", title: "stdout", body: line, live: false });
-  }
-
-  #setDevBuildStatus(status: DevBuildStatus): void {
-    if (this.#devBuildStatusTimer !== undefined) clearTimeout(this.#devBuildStatusTimer);
-    this.#devBuildStatus = status;
-    this.#devBuildStatusVisible = status.phase === "complete";
-    this.#devBuildStatusTimer = setTimeout(
-      () => {
-        if (status.phase === "building") {
-          this.#devBuildStatusVisible = true;
-          this.#devBuildStatusTimer = undefined;
-        } else {
-          this.#clearDevBuildStatus();
-        }
-        this.#paint();
-      },
-      status.phase === "building" ? devBuildProgressDelayMs : devBuildLoadedStatusMs,
-    );
-  }
-
-  #clearDevBuildStatus(): void {
-    if (this.#devBuildStatusTimer !== undefined) clearTimeout(this.#devBuildStatusTimer);
-    this.#devBuildStatus = undefined;
-    this.#devBuildStatusVisible = false;
-    this.#devBuildStatusTimer = undefined;
-  }
-
-  /** The rebuild status block still cycling in place, if any. */
-  #activeDevRebuildCycle(): { state: { id: string; summary: string }; block: Block } | undefined {
-    const state = this.#devRebuild;
-    if (state === undefined) return undefined;
-    const block = this.#blockById.get(state.id);
-    if (block === undefined || block.live !== true) return undefined;
-    return { state, block };
-  }
-
-  /**
-   * Settles the in-place rebuild status: the live status block (if any)
-   * finalizes so it commits to scrollback, and the next rebuild line opens a
-   * fresh cycle.
-   */
-  #settleDevRebuildStatus(): void {
-    const active = this.#devRebuild;
-    if (active === undefined) return;
-    this.#devRebuild = undefined;
-    const block = this.#blockById.get(active.id);
-    if (block !== undefined) block.live = false;
-  }
-
-  #shouldRenderLog(level?: LogLevel): boolean {
-    return isLogVisible(this.#logs, level);
-  }
-
-  /** True for a buffered log or sandbox block the current display mode filters out. */
-  #isHiddenLog(block: Block): boolean {
-    if (block.kind === "sandbox") return !this.#shouldRenderLog(block.logLevel);
-    if (block.kind !== "log") return false;
-    if (block.logVisibility === "summary" && this.#logs === "all") return true;
-    if (block.logVisibility === "all-only") return this.#logs !== "all";
-    return !this.#shouldRenderLog(block.logLevel);
+  #stopTicker(): void {
+    if (this.#ticker === undefined) return;
+    clearInterval(this.#ticker.timer);
+    this.#ticker = undefined;
   }
 }
 
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
-
-function chunkToString(chunk: string | Uint8Array, encoding?: BufferEncoding): string {
-  return typeof chunk === "string" ? chunk : Buffer.from(chunk).toString(encoding);
-}
-
-function clip(line: string, width: number): string {
-  return clipVisible(line, width);
-}
-
-interface PromptInputRowsInput {
-  readonly text: string;
-  readonly cursor: number;
-  readonly width: number;
-  readonly theme: Theme;
-  readonly caretVisible: boolean;
-  readonly ghost: string;
-  readonly maxRows: number;
-  /**
-   * Present on an empty chat prompt: shows invitation text behind the caret.
-   * Non-empty text renders dim behind the caret; the empty string keeps the
-   * prompt mark with a bare caret (the post-first-message state).
-   */
-  placeholder?: string;
-  /** Anchored-but-inert prompt (streaming turn): typed drafts show a dim `❯`. */
-  inert?: boolean;
-}
-
-/**
- * Renders the prompt buffer as terminal rows, followed by a blank row that keeps
- * the persistent status visually separate. The buffer can carry newlines from
- * paste or Shift+Enter, so it renders one row per logical line and windows tall
- * input to `maxRows`, marking any hidden rows with an ellipsis.
- */
-function promptInputRows({
-  text,
-  cursor,
-  width,
-  theme,
-  caretVisible,
-  ghost,
-  maxRows,
-  placeholder,
-  inert,
-}: PromptInputRowsInput): string[] {
-  const c = theme.colors;
-
-  if (text.length === 0 && placeholder !== undefined) {
-    // The caret rests on the placeholder's first character, like the setup
-    // panel's text fields.
-    const body = renderInputWithBlockCursor({
-      ...visibleLine(
-        { text: placeholder, cursor: 0 },
-        Math.max(1, width - 3),
-        theme.glyph.ellipsis,
-      ),
-      visible: caretVisible,
-      inverse: c.inverse,
-      render: (segment) => c.dim(renderInputText(segment)),
-    });
-    return [clip(`${theme.glyph.prompt} ${body}`, width), ""];
-  }
-
-  const style = renderInputText;
-
-  const layout = layoutPromptInput({ text, cursor });
-  const visibleCount = Math.min(Math.max(1, maxRows), layout.rows.length);
-  const top = Math.max(
-    0,
-    Math.min(layout.caretRow - visibleCount + 1, layout.rows.length - visibleCount),
-  );
-  // An inert prompt's typed draft keeps the mark dim: the state is legible without claiming readiness.
-  const promptGlyph =
-    inert === true
-      ? c.dim(theme.glyph.prompt)
-      : text.startsWith("/")
-        ? theme.glyph.user
-        : theme.glyph.prompt;
-  const ellipsis = c.dim(theme.glyph.ellipsis);
-  // Reserve the gutter and the block cursor's trailing cell at end-of-line.
-  // The gutter sits at column 0, sharing a column with the conversation
-  // markers (`│`, `▲`).
-  const budget = Math.max(1, width - 3);
-  const out: string[] = [];
-  for (let r = top; r < top + visibleCount; r += 1) {
-    const row = layout.rows[r]!;
-    let gutter = r === 0 ? promptGlyph : " ";
-    if (r === top && top > 0) gutter = ellipsis;
-    else if (r === top + visibleCount - 1 && top + visibleCount < layout.rows.length) {
-      gutter = ellipsis;
-    }
-
-    let body: string;
-    if (r === layout.caretRow) {
-      // Window the active row so the caret remains visible on long lines.
-      const { before, under, after } = visibleLine(
-        { text: row.text, cursor: layout.caretOffset },
-        budget,
-        theme.glyph.ellipsis,
-      );
-      body = renderInputWithBlockCursor({
-        before,
-        under,
-        after,
-        visible: caretVisible,
-        inverse: c.inverse,
-        render: style,
-      });
-      // The argument hint trails the caret only on a single-line command draft.
-      if (ghost.length > 0 && layout.rows.length === 1) body += ghost;
-    } else {
-      body = style(row.text);
-    }
-    out.push(clip(`${gutter} ${body}`, width));
-  }
-  out.push("");
-  return out;
-}
-
-/** Kind + title of the previously rendered block, for gap / run decisions. */
-type PreviousBlock = { kind: BlockKind; title?: string; subagentCallId?: string };
 
 function previousBlockOf(block: Block): PreviousBlock {
   const previous: PreviousBlock = { kind: block.kind };
@@ -4350,70 +2235,33 @@ function previousBlockOf(block: Block): PreviousBlock {
 }
 
 /**
- * Decides whether a block gets a blank line above it. Top-level "speakers"
- * (user, assistant, reasoning, …) always breathe. The first tool block after
- * a user prompt breathes too; subsequent tool rows stay tight within the run.
- * Log sections breathe on both sides — every captured write renders as a
- * closed `○ <source> … └` section, so consecutive writes get air between
- * their corners and headers.
+ * Whether a block gets a blank line above it. Speakers always breathe; a tool
+ * run breathes after whoever spoke last and stays tight within the run.
  */
 function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolean {
-  // A tool run breathes after whoever spoke last — the prompt, the agent's
-  // own prose, or an answered question — and stays tight within the run.
   if (
     (block.kind === "tool" || block.kind === "task") &&
     (previous?.kind === "user" || previous?.kind === "assistant" || previous?.kind === "question")
   ) {
     return true;
   }
-  if (block.kind === "sandbox" && previous?.kind === "sandbox") {
-    return false;
-  }
-  if (previous?.kind === "sandbox" && block.kind !== "sandbox") return true;
-  if (previous?.kind === "log") return true;
+  if (block.kind === "sandbox") return previous?.kind !== "sandbox";
+  if (previous?.kind === "sandbox" || previous?.kind === "log") return true;
   switch (block.kind) {
-    case "user":
-    case "assistant":
-    case "reasoning":
-    case "error":
-    case "notice":
-    case "question":
-    case "connection-auth":
-    case "sandbox":
-    case "log":
-    // The echoed command is typed input — it gets the same air a user
-    // message does; flow warnings, the boot attention line, and a refreshed
-    // agent header breathe too.
-    case "command":
-    case "warning":
-    case "flow":
-    case "turn-stats":
-    case "session-boundary":
-    case "agent-header":
-      return true;
-    // The elbow result hangs tight under its invocation — never a gap.
-    default:
+    case "tool":
+    case "task":
+    case "result":
+    case "subagent-step":
+    case "subagent-tool":
       return false;
+    default:
+      return true;
   }
 }
 
-function parseSandboxLogLine(line: string): string | undefined {
-  const trimmed = line.trim();
-  if (!trimmed.startsWith("eve: ")) {
-    return undefined;
-  }
-
-  const message = trimmed.slice("eve: ".length);
-  return /\bsandbox\b/i.test(message) && !isLowValueSandboxLogLine(message) ? message : undefined;
-}
-
-function isLowValueSandboxLogLine(message: string): boolean {
-  return (
-    /^initializing (?:\d+ )?sandbox templates?\b/i.test(message) ||
-    /^initialized \d+ sandbox\b/i.test(message) ||
-    /^reused cached sandbox template\b/i.test(message) ||
-    /^sandbox template "[^"]+" \([^)]+\): (checking|reusing)\b/i.test(message)
-  );
+function firstLine(text: string): string {
+  const [line = ""] = stripTerminalControls(text).split("\n");
+  return line;
 }
 
 function clipLiveRows(
@@ -4424,28 +2272,12 @@ function clipLiveRows(
 ): string[] {
   if (maxRows <= 0) return [];
   if (rows.length <= maxRows) return [...rows];
-  if (maxRows <= 1) {
-    return [clip(hiddenRowsMarker(rows.length, theme), width)];
-  }
-
-  const visibleTailCount = maxRows - 1;
-  const hidden = rows.length - visibleTailCount;
-  return [
-    clip(hiddenRowsMarker(hidden, theme), width),
-    ...rows.slice(rows.length - visibleTailCount),
-  ];
-}
-
-function hiddenRowsMarker(hidden: number, theme: Theme): string {
-  const count = hidden.toLocaleString();
-  const noun = hidden === 1 ? "row" : "rows";
-  return theme.colors.dim(
-    `${theme.glyph.dot} ${theme.glyph.ellipsis} ${count} earlier ${noun} hidden while streaming`,
+  const tail = maxRows - 1;
+  const hidden = rows.length - tail;
+  const marker = theme.colors.dim(
+    `${theme.glyph.dot} ${theme.glyph.ellipsis} ${hidden.toLocaleString()} earlier ${hidden === 1 ? "row" : "rows"} hidden while streaming`,
   );
-}
-
-function questionSectionId(requestId: string): string {
-  return `question:${requestId}`;
+  return [clipVisible(marker, width), ...rows.slice(rows.length - tail)];
 }
 
 function resolveQuestionText(
@@ -4454,18 +2286,11 @@ function resolveQuestionText(
 ): { optionId?: string; text?: string; label: string } | undefined {
   const trimmed = rawText.trim();
   if (trimmed.length === 0) return undefined;
-
-  const normalized = trimmed.toLowerCase();
   const options = question.options ?? [];
-
-  if (options.length > 0) {
-    const matched = matchQuestionOption(normalized, options);
-    if (matched !== undefined) return { optionId: matched.id, label: matched.label };
-  }
-
+  const matched = matchQuestionOption(trimmed.toLowerCase(), options);
+  if (matched !== undefined) return { optionId: matched.id, label: matched.label };
   const acceptsFreeform = question.allowFreeform === true || options.length === 0;
-  if (acceptsFreeform) return { text: trimmed, label: trimmed };
-  return undefined;
+  return acceptsFreeform ? { text: trimmed, label: trimmed } : undefined;
 }
 
 function matchQuestionOption(
@@ -4476,9 +2301,8 @@ function matchQuestionOption(
   if (byId !== undefined) return byId;
   const byLabel = options.find((option) => option.label.toLowerCase() === normalized);
   if (byLabel !== undefined) return byLabel;
-  const numericIndex = Number(normalized);
-  if (Number.isInteger(numericIndex) && numericIndex > 0 && numericIndex <= options.length) {
-    return options[numericIndex - 1];
-  }
-  return undefined;
+  const index = Number(normalized);
+  return Number.isInteger(index) && index > 0 && index <= options.length
+    ? options[index - 1]
+    : undefined;
 }
