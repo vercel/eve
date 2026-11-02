@@ -1,4 +1,4 @@
-import type { Announcement } from "#harness/announcements.js";
+import { type Announcement, announcementDigest } from "#harness/announcements.js";
 import {
   createFrameworkUserMessage,
   type HarnessModelMessage,
@@ -23,13 +23,18 @@ export function announce(
   if (awaitsProviderToolResult(draft.record)) return draft;
   const added: HarnessModelMessage[] = [];
   let announced = draft.historyState.announcements;
+  let messages = draft.historyState.messages;
   let changed = false;
   for (const [key, announcement] of Object.entries(announcements)) {
     const previous = announced?.[key];
     if ((previous ?? announcement.initial) === announcement.value) continue;
     const content = announcement.render(previous);
+    const { [key]: _said, ...others } = messages ?? {};
+    messages = others;
     if (content !== undefined) {
-      added.push(createFrameworkUserMessage(announcement.kind ?? "context.state", content));
+      const message = createFrameworkUserMessage(announcement.kind ?? "context.state", content);
+      added.push(message);
+      messages = { ...messages, [key]: announcementDigest(message.kind, message.content) };
     }
     announced = { ...announced, [key]: announcement.value };
     changed = true;
@@ -39,7 +44,7 @@ export function announce(
   const index = at === -1 ? draft.record.length : at;
   return {
     ...draft,
-    historyState: { ...draft.historyState, announcements: announced },
+    historyState: { ...draft.historyState, announcements: announced, messages },
     record: [...draft.record.slice(0, index), ...added, ...draft.record.slice(index)],
   };
 }

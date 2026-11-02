@@ -89,6 +89,10 @@
       "announcements": {
         "eve.instructions:instructions/brief": "XDMXPTYCDRpXGjgnW-3Fg_",
         "instructions:viewer": "BatRFpAm4Wx_y9qb1kLiB-"
+      },
+      "messages": {
+        "eve.instructions:instructions/brief": "IJwuWThZSUlG3u1JzvevPL",
+        "instructions:viewer": "VGKsvOTYmnB1OQE12yjr_7"
       }
     },
     "eve.initiatorAuth": null,

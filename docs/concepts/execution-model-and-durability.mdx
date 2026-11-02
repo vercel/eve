@@ -239,7 +239,7 @@ A turn can hand work off to a [subagent](../subagents). Each subagent gets its o
 
 ## How eve orders session history
 
-Conversation history within a session is append-only. User-role instructions, static and dynamic, are added before a model call when their content changes, and again after a compaction or clear. Turns follow in order, and the tool calls inside a turn (plus their results) keep their order too.
+Conversation history within a session is append-only. User-role instructions, static and dynamic, are added before a model call when their content changes, and again after a compaction or clear that removes them. Turns follow in order, and the tool calls inside a turn (plus their results) keep their order too.
 
 ## What to read next
 

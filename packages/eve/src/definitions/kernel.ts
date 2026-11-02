@@ -8,6 +8,7 @@ import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
+import { announcementDigest } from "#harness/announcements.js";
 import { withUsageInEffect } from "#harness/usage-sink.js";
 import { sessionFrameOf } from "#definitions/frame.js";
 import { reportEffectFailure } from "#definitions/intents.js";
@@ -282,6 +283,12 @@ function announceHeldInstructions(
     announcements: {
       ...Object.fromEntries(held.map(({ content, key }) => [key, digestOf(content)])),
       ...history.announcements,
+    },
+    messages: {
+      ...Object.fromEntries(
+        held.map(({ content, key }) => [key, announcementDigest("context.instruction", content)]),
+      ),
+      ...history.messages,
     },
   });
 }
