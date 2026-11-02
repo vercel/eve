@@ -190,15 +190,15 @@ eve rebuilds a prepared environment only when the sandbox file or environment op
 
 ## Troubleshooting
 
-| What you see                                                                                                        | What to do                                                                                                   |
-| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `eve-code firewall credential delivery requires a sandbox provider with mutable network policy (setNetworkPolicy).` | Set `vercel.delivery: "command"`, or pass a top-level `broker` callback.                                     |
-| `The current caller is not authorized to access <repository>.`                                                      | Your `github.authorize` callback returned `false` for that caller and repository. Check the callback's rule. |
-| `Invalid extension config: eve-code no longer ships a worker subagent; ...`                                         | Remove the `worker` option from `code()`. To delegate work, use the built-in `agent` tool.                   |
+| What you see                                                                                                        | What to do                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `eve-code firewall credential delivery requires a sandbox provider with mutable network policy (setNetworkPolicy).` | Set `vercel.delivery: "command"`, or pass a top-level `broker` callback.                                                              |
+| `The current caller is not authorized to access <repository>.`                                                      | Your `github.authorize` callback returned `false` for that caller and repository. Check the callback's rule.                          |
+| `Invalid extension config: eve-code no longer ships a worker subagent; ...`                                         | Remove the `worker` option from `code()`. To delegate work, use the [built-in `agent` tool](/docs/subagents#the-built-in-agent-tool). |
 
 ## What to read next
 
 - [Extensions](/docs/extensions): mount, configure, and override extension packages
 - [Sandbox](/docs/sandbox): environments, preparation, and network policy
-- [Subagents](/docs/subagents): how declared subagents run and inherit configuration
+- [Subagents](/docs/subagents#the-built-in-agent-tool): delegate work to a child agent with the built-in `agent` tool
 - [Skills](/docs/skills): how the model loads skills on demand
