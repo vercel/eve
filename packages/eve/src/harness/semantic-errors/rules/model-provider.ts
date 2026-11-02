@@ -41,9 +41,7 @@ export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
     hint: "Review the request and its context against your model provider's content policy.",
   },
   {
-    // OpenAI rejects one prompt it flags for cybersecurity risk with a 400
-    // that would otherwise end the session. The refused prompt stays out of
-    // the history, so the rest of the conversation can continue.
+    // A 400 that would otherwise end the session; only the refused prompt fails.
     id: "model-request-cyber-policy-refused",
     name: "Model request refused",
     tags: ["model-provider", "recoverable"],

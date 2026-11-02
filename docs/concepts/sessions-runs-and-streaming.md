@@ -213,7 +213,7 @@ When a model call fails transiently before publishing anything, the run records 
 
 A provider `content-filter` response fails the run and turn with `MODEL_CALL_FAILED` and a `hint` to review the request against the provider's content policy. eve doesn't retry it; deltas already streamed stay visible, and the session can receive another message.
 
-OpenAI's refusal of a prompt it flags for cybersecurity risk (error code `cyber_policy`) also fails the run and turn with `MODEL_CALL_FAILED` and a `hint` to review the request against the provider's usage policies. The refused message is left out of the conversation history, and the session can receive another message.
+OpenAI's `cyber_policy` refusal of a prompt is handled the same way, and the refused message stays out of the conversation history.
 
 ## Query session state
 

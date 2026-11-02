@@ -287,18 +287,6 @@ describe("classifyModelCallError", () => {
     expect(classifyModelCallError(err)).toBe("terminal");
   });
 
-  it("returns recoverable when OpenAI refuses a prompt for cybersecurity risk", () => {
-    const err = Object.assign(new Error(cyberPolicyBody.message), {
-      ...cyberPolicyBody,
-      name: "AI_StreamProviderError",
-      isRetryable: false,
-      statusCode: 400,
-      data: { error: cyberPolicyBody, type: "error" },
-    });
-
-    expect(classifyModelCallError(err)).toBe("recoverable");
-  });
-
   // `@ai-sdk/openai` keeps the provider code only in the body: in `data` for an error frame
   // received before any output, and in the response body for an HTTP 400.
   it.each([
