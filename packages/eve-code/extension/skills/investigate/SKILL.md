@@ -11,6 +11,8 @@ Start at the observed effect and identify the code paths directly responsible. C
 
 Keep an explicit hypothesis at every branch and try to disprove it. Prefer the simplest explanation that accounts for all observed evidence. Do not jump to solutions before diagnosis.
 
+Before proposing a change, name the fundamental constraints, including the relevant data flows and the entry points that reach the affected code paths.
+
 ## Standards
 
 - Resolve every cited call frame and reference.
@@ -26,9 +28,5 @@ Keep an explicit hypothesis at every branch and try to disprove it. Prefer the s
 - Which source references remain unresolved?
 - Do the surrounding code and runtime state support the conclusion?
 - Does this explain both why the behavior occurs and why it began now?
-
-## Before proposing a change
-
-Name the fundamental constraints, including the relevant data flows and the entry points that reach the affected code paths.
 
 Return compact but complete evidence, the diagnosed mechanism, a decision tree when useful, and the smallest prognosis justified by the evidence.
