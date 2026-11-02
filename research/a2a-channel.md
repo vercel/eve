@@ -6,9 +6,9 @@ last_updated: "2026-10-30"
 
 # Experimental inbound A2A channel
 
-`a2aChannel` (`eve/experimental/channels/a2a`) publishes an eve agent as an
+`a2aChannel` (`eve/channels/a2a`) publishes an eve agent as an
 [A2A](https://a2a-protocol.org/) v1.0 server, JSON-RPC binding only. Usage, options, task states,
-and limitations are in `docs/experimental/a2a.mdx`; this note records the design decisions.
+and limitations are in `docs/channels/a2a.mdx`; this note records the design decisions.
 
 ## Model
 

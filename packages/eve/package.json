@@ -412,12 +412,6 @@
       "import": "./dist/src/public/experimental/sandbox/just-bash.js",
       "default": "./dist/src/public/experimental/sandbox/just-bash.js"
     },
-    "./experimental/channels/a2a": {
-      "eve-source": "./src/public/experimental/channels/a2a.ts",
-      "types": "./dist/src/public/experimental/channels/a2a.d.ts",
-      "import": "./dist/src/public/experimental/channels/a2a.js",
-      "default": "./dist/src/public/experimental/channels/a2a.js"
-    },
     "./experimental/channels/discord/gateway": {
       "eve-source": "./src/public/experimental/channels/discord/gateway.ts",
       "types": "./dist/src/public/experimental/channels/discord/gateway.d.ts",
@@ -461,6 +455,11 @@
       "types": "./dist/src/public/channels/mcp.d.ts",
       "import": "./dist/src/public/channels/mcp.js",
       "default": "./dist/src/public/channels/mcp.js"
+    },
+    "./channels/a2a": {
+      "types": "./dist/src/public/channels/a2a.d.ts",
+      "import": "./dist/src/public/channels/a2a.js",
+      "default": "./dist/src/public/channels/a2a.js"
     },
     "./channels/slack": {
       "types": "./dist/src/public/channels/slack/index.d.ts",

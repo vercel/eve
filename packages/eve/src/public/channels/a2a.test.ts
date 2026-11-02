@@ -4,7 +4,7 @@ import type { RouteHandlerArgs } from "#channel/routes.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { httpBasic, none } from "#public/channels/auth.js";
-import { A2A_AGENT_CARD_PATH, a2aChannel } from "#public/experimental/channels/a2a.js";
+import { A2A_AGENT_CARD_PATH, a2aChannel } from "#public/channels/a2a.js";
 
 describe("a2aChannel", () => {
   it("fails closed when auth is omitted, and rejects invalid config", () => {
