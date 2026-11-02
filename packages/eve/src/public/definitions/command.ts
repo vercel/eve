@@ -1,4 +1,5 @@
 import type { SessionAuthContext } from "#channel/types.js";
+import { COMMAND_NAME_PATTERN } from "#protocol/commands.js";
 
 /**
  * The conversation a command was run in, with the caller's auth already bound. Each method
@@ -93,8 +94,6 @@ export function defineCommand(definition: CommandDefinition): CommandDefinition 
   return definition;
 }
 
-const COMMAND_NAME = /^[a-z][a-z0-9-]{0,31}$/u;
-
 /**
  * Rejects names a person cannot type as `/name`, and names or aliases two commands share. The
  * 32-character cap matches Slack's slash commands.
@@ -106,7 +105,7 @@ export function assertCommandNames(
   const seen = new Map<string, string>();
   for (const [name, command] of Object.entries(commands ?? {})) {
     for (const token of [name, ...(command.aliases ?? [])]) {
-      if (!COMMAND_NAME.test(token)) {
+      if (!COMMAND_NAME_PATTERN.test(token)) {
         throw new Error(
           `Invalid ${channel} command name "${token}". Use up to 32 lowercase letters, digits, and hyphens, starting with a letter (for example "triage" or "open-issues"), without the slash.`,
         );

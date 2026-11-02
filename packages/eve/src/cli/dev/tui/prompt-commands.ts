@@ -1,5 +1,6 @@
 import type { ChannelCommandInfo } from "#client/commands.js";
 import { stripAnsi, stripTerminalControls } from "#cli/ui/terminal-text.js";
+import { COMMAND_NAME_PATTERN } from "#protocol/commands.js";
 
 export type PromptCommandExtensionName = "login" | "model" | "add" | "deploy";
 
@@ -264,11 +265,13 @@ export function withChannelPromptCommands(
   channel: readonly ChannelCommandInfo[],
 ): readonly PromptCommandSpec[] {
   const taken = new Set(builtins.flatMap((spec) => [spec.name, ...spec.aliases]));
+  // Names are rendered as typed, so one outside the command grammar is dropped, not cleaned.
+  const usable = (token: string) => COMMAND_NAME_PATTERN.test(token) && !taken.has(token);
   const added = channel
-    .filter((command) => !taken.has(command.name))
+    .filter((command) => usable(command.name))
     .map((command): PromptCommandSpec => ({
       name: command.name,
-      aliases: (command.aliases ?? []).filter((alias) => !taken.has(alias)),
+      aliases: (command.aliases ?? []).filter(usable),
       // The agent's text reaches the terminal, so it can't carry controls or break the row layout.
       description: terminalLine(command.description),
       argumentHint: command.input === undefined ? undefined : terminalLine(command.input.hint),
