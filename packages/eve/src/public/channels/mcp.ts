@@ -33,7 +33,10 @@ import {
 import type { TrustedForwarders } from "#channel/forwarded-principal.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { createMcpSkillsFeature } from "#internal/mcp/skills.js";
-import { validateMcpHttpRequest, validateMcpMetadataRequest } from "#internal/mcp/http-security.js";
+import {
+  validateHttpEndpointRequest,
+  validateHttpMetadataRequest,
+} from "#internal/http/request-guards.js";
 import {
   createMcpStreamableHttpServer,
   defineMcpTool,
@@ -162,7 +165,7 @@ function protectedResourceMetadataResponse(
   resourcePath: string,
   head: boolean,
 ): Response {
-  const securityFailure = validateMcpMetadataRequest(request);
+  const securityFailure = validateHttpMetadataRequest(request, "MCP");
   if (securityFailure !== undefined) return securityFailure;
   const resource =
     options.resource ?? new URL(resourcePath, new URL(request.url).origin).toString();
@@ -187,7 +190,7 @@ function protectedResourceMetadataResponse(
 }
 
 function protectedResourceMetadataOptionsResponse(request: Request): Response {
-  const securityFailure = validateMcpMetadataRequest(request);
+  const securityFailure = validateHttpMetadataRequest(request, "MCP");
   if (securityFailure !== undefined) return securityFailure;
   const headers = new Headers({
     "access-control-allow-methods": "GET, HEAD, OPTIONS",
@@ -375,7 +378,7 @@ async function authenticateMcpRequest(
   oauth: OAuthResourceOptions | undefined,
   publish: McpPublishOptions,
 ): Promise<Response> {
-  const securityFailure = validateMcpHttpRequest(request);
+  const securityFailure = validateHttpEndpointRequest(request, "MCP");
   if (securityFailure !== undefined) return securityFailure;
   const auth = await routeAuth(request, input.auth);
   if (auth instanceof Response) {

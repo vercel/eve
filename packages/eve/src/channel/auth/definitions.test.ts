@@ -22,6 +22,15 @@ describe("auth policy metadata", () => {
     expect(admitsAnonymousCallers(custom)).toBe(false);
   });
 
+  it("sees none() through the wrappers that compose a policy", () => {
+    const custom = () => null;
+    const oauth = { authorizationServers: ["https://issuer.example.com"] };
+    expect(admitsAnonymousCallers(oauthResource([custom, none()], oauth))).toBe(true);
+    expect(admitsAnonymousCallers(oauthResource(custom, oauth))).toBe(false);
+    expect(admitsAnonymousCallers(withAuthChallenges(none(), [{ scheme: "Bearer" }]))).toBe(true);
+    expect(admitsAnonymousCallers(withAuthChallenges(custom, [{ scheme: "Bearer" }]))).toBe(false);
+  });
+
   it("lists the challenges a policy's 401 advertises, deduped in walk order", () => {
     const basic = httpBasic({ password: "secret-password", username: "alice" });
     const bearer = jwtHmac({

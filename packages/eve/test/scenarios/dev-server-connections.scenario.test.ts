@@ -24,7 +24,7 @@ import {
   waitForCondition,
   waitForPath,
   withinDeadline,
-} from "./dev-server-harness.js";
+} from "#internal/testing/dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
 

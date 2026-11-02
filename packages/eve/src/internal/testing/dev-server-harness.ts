@@ -9,8 +9,8 @@ import {
   EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH,
   EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH,
   EVE_INFO_ROUTE_PATH,
-} from "../../src/protocol/routes.js";
-import type { AgentInfoResponse } from "../../src/internal/nitro/routes/agent-info/build-agent-info-response.js";
+} from "#protocol/routes.js";
+import type { AgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 
 /**
  * Handle to a spawned `eve dev --no-ui` process serving a scenario app.

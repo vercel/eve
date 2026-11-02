@@ -53,7 +53,10 @@ interface BaseChannelAddressDeliveryOptions {
  * Delivery options only framework channels pass.
  *
  * - `deliveryId`: a retried idempotency key is dropped as a duplicate, so a channel that hands out
- *   delivery IDs names the delivery itself: the retry's receipt is then the first attempt's.
+ *   delivery IDs names the delivery itself: the retry's receipt is then the first attempt's. It
+ *   comes with `idempotencyKey` and must be a function of it, one ID per key, so the queue's
+ *   deduping and the receipt agree. A channel that needs no particular shape uses
+ *   `deliveryIdForIdempotencyKey`, as eve-channel does; A2A encodes the client's `messageId`.
  * - `turnTarget`: the one turn a message may join, or `null` for a turn of its own (see
  *   `DeliverHookPayload.turnTarget`).
  */
@@ -127,6 +130,7 @@ export function createChannelAddress<TState = undefined>(input: {
         ...metadata,
       });
       const { deliveryId, turnTarget } = options as InternalChannelAddressDeliveryOptions;
+      validateNamedDeliveryId(deliveryId, options.idempotencyKey);
       const delivery = deliveryId === undefined ? minted : { ...minted, deliveryId };
       const payload = withValidatedHistory(normalizeSendInput(sendInput));
       const caller = sessionCallbackToTurnCaller(options.callback);
@@ -311,4 +315,31 @@ function withValidatedHistory(payload: SendPayload): SendPayload {
   const { history, ...rest } = payload;
   const validated = validateSessionHistory(history);
   return validated === undefined ? rest : { ...rest, history: validated };
+}
+
+/** Longest framework-named delivery ID: room for an encoded client ID, such as an A2A `messageId`. */
+const MAX_NAMED_DELIVERY_ID_LENGTH = 2048;
+
+/**
+ * A framework-named delivery ID: printable, bounded, and paired with the idempotency key it's
+ * derived from, so two distinct deliveries never share one receipt.
+ */
+function validateNamedDeliveryId(
+  deliveryId: string | undefined,
+  idempotencyKey: string | undefined,
+): void {
+  if (deliveryId === undefined) return;
+  if (idempotencyKey === undefined) {
+    throw new Error("deliveryId requires the idempotencyKey it is derived from.");
+  }
+  if (
+    typeof deliveryId !== "string" ||
+    deliveryId.length === 0 ||
+    deliveryId.length > MAX_NAMED_DELIVERY_ID_LENGTH ||
+    !/^[\x21-\x7e]+$/u.test(deliveryId)
+  ) {
+    throw new Error(
+      `deliveryId must be 1 to ${MAX_NAMED_DELIVERY_ID_LENGTH} printable ASCII characters without spaces.`,
+    );
+  }
 }
