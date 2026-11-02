@@ -20,7 +20,9 @@ the turn came from, so by default:
 - an internal user who mentions the agent inside a Connect channel gets a
   reply that external members can read;
 - an external member can click an approval card that was posted in a shared
-  channel.
+  channel;
+- a guest account, which is in the workspace but outside the organization, can
+  drive the agent like any member.
 
 Authors treat the workspace as an implicit trust boundary, and Slack Connect
 breaks it without any visible signal.
@@ -93,6 +95,8 @@ interface SlackAdmitRequest {
     | undefined;
   /** Memoized; `true` when the conversation cannot be classified, `false` without one. */
   isExternalConversation(): Promise<boolean>;
+  /** Memoized `users.info` guest check; `true` when the user cannot be classified, `false` without an actor. */
+  isGuest(): Promise<boolean>;
   /** Signed Slack payload (or the proactive target for `send`), for anything else. */
   readonly raw: Readonly<Record<string, unknown>>;
   /** Bot-token Slack Web API client, as on other Slack contexts. */
@@ -102,9 +106,10 @@ interface SlackAdmitRequest {
 type SlackAdmit = (request: SlackAdmitRequest) => boolean | Promise<boolean>;
 ```
 
-- `defaultSlackAdmit(request)` returns `false` when the request has a
-  conversation and `isExternalConversation()` resolves `true`; otherwise it
-  returns `true`.
+- `defaultSlackAdmit(request)` returns `false` when
+  `isExternalConversation()` or `isGuest()` resolves `true`; otherwise it
+  returns `true`. It checks the conversation first, so a Slack Connect
+  request costs no `users.info` call.
 - `admit` is the boundary. Message hooks still decide routing and the
   `{ auth }` result, but they no longer need to repeat access checks. An
   allowlist moves from three hooks into one function.
@@ -168,16 +173,27 @@ Evidence order, cheapest first:
 3. If the lookup fails (missing scope, API error, or a missing `channel` in the
    response), the answer is `true`. The check **fails closed**.
 
+### Guests
+
+`isGuest()` is `true` when `users.info` reports `is_restricted` (a
+multi-channel guest) or `is_ultra_restricted` (a single-channel guest). It
+caches verdicts per installation and user for five minutes (failed lookups for
+one minute) and fails closed. Requests without an actor, such as sends and
+events without a user, skip it.
+
 ### Scopes
 
 The envelope flag needs no scope. `conversations.info` needs `channels:read`,
-`groups:read`, `im:read`, and `mpim:read`, which the generated manifest used to
-add only with `codeChannels`. Those four are now in the base manifest.
+`groups:read`, `im:read`, and `mpim:read`, and `users.info` needs
+`users:read`. The generated manifest now always includes all five; it used to
+add the read scopes only with `codeChannels` and `users:read` only with
+`messageContext.users`.
 
-Interactions, slash commands, and sends have no envelope flag, so an app
-without these scopes refuses them under the default. The log line names the
-missing scopes and the reinstall step. Vercel Connect's default Slack
-connector scopes need the same audit.
+Vercel Connect's default Slack bot scopes include `channels:read`, `im:read`,
+and `users:read`, but not `groups:read` or `mpim:read`. On a default connector,
+interactions, slash commands, and sends in private channels and group DMs fail
+the conversation lookup and are refused. Vercel Connect's defaults should add
+the two scopes; until then, those apps need them added to the connector.
 
 ## Migration
 

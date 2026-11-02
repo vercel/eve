@@ -140,6 +140,18 @@ export function slackDriver(
         },
       };
     }
+    // The default admit asks whether a person is a guest and, for interactions, whether the
+    // conversation is shared through Slack Connect. Everyone here is an ordinary member.
+    if (method === "users.info") {
+      return {
+        body,
+        method,
+        response: { ok: true, user: { id: (body as { user?: unknown }).user } },
+      };
+    }
+    if (method === "conversations.info") {
+      return { body, method, response: { channel: { id: CHANNEL, is_private: false }, ok: true } };
+    }
     // Everything the bot shows in a code channel posts top-level; Slack has no thread to find.
     if (
       codeChannel &&
@@ -213,6 +225,7 @@ export function slackDriver(
             { is_bot: true, is_enterprise_install: false, team_id: TEAM, user_id: BOT },
           ],
           event_id: `Ev${ts}`,
+          is_ext_shared_channel: false,
           team_id: TEAM,
           type: "event_callback",
         }),

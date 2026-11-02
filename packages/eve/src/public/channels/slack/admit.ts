@@ -1,7 +1,8 @@
 /**
  * Slack admission: the one check every Slack surface passes before a hook
  * runs or eve posts somewhere new. The default keeps the agent out of Slack
- * Connect conversations, whose members include other organizations.
+ * Connect conversations, whose members include other organizations, and away
+ * from guest accounts.
  */
 import { createLogger, logError } from "#internal/logging.js";
 import {
@@ -53,6 +54,12 @@ export interface SlackAdmitRequest {
    * request and cached briefly per channel.
    */
   isExternalConversation(): Promise<boolean>;
+  /**
+   * Whether the actor is a multi-channel or single-channel guest. Returns
+   * `true` when Slack can't say, and `false` without an actor. Needs the
+   * `users:read` scope. Memoized per request and cached briefly per user.
+   */
+  isGuest(): Promise<boolean>;
   /** The signed Slack payload, or the receive target for `send`. */
   readonly raw: Readonly<Record<string, unknown>>;
   /** Bot-token Slack Web API access. */
@@ -64,12 +71,13 @@ export type SlackAdmit = (request: SlackAdmitRequest) => boolean | Promise<boole
 
 /**
  * Default `admit`: refuses requests from, and sends into, Slack Connect
- * conversations and conversations Slack can't classify. Requests without a
- * conversation, such as global shortcuts, pass.
+ * conversations, and refuses requests from guest accounts. Conversations and
+ * users Slack can't classify are refused too. Requests without a conversation
+ * or an actor skip that check.
  */
 export async function defaultSlackAdmit(request: SlackAdmitRequest): Promise<boolean> {
-  if (request.channelId === undefined) return true;
-  return !(await request.isExternalConversation());
+  if (await request.isExternalConversation()) return false;
+  return !(await request.isGuest());
 }
 
 /** The sharing flags Slack reports on a conversation object. */
@@ -160,6 +168,67 @@ async function classifyConversation(input: {
   }
 }
 
+// A user's guest status changes rarely, but it does change, so verdicts expire.
+const guestVerdicts = new Map<
+  string,
+  { readonly guest: boolean; readonly failed: boolean; readonly expiresAtMs: number }
+>();
+
+function cacheGuestVerdict(key: string, guest: boolean, failed: boolean): void {
+  const now = Date.now();
+  if (guestVerdicts.size >= MAX_CACHED_VERDICTS) {
+    for (const [cachedKey, verdict] of guestVerdicts) {
+      if (verdict.expiresAtMs <= now) guestVerdicts.delete(cachedKey);
+    }
+    if (guestVerdicts.size >= MAX_CACHED_VERDICTS) {
+      guestVerdicts.delete(guestVerdicts.keys().next().value!);
+    }
+  }
+  guestVerdicts.set(key, {
+    guest,
+    failed,
+    expiresAtMs: now + (failed ? FAILED_LOOKUP_TTL_MS : VERDICT_TTL_MS),
+  });
+}
+
+async function classifyGuest(input: {
+  readonly userId: string;
+  readonly installationTeamId: string | undefined;
+  readonly request: (operation: string, body: unknown) => Promise<SlackApiResponse>;
+}): Promise<boolean> {
+  const key = `${input.installationTeamId ?? ""}:${input.userId}`;
+  const cached = guestVerdicts.get(key);
+  if (cached !== undefined && cached.expiresAtMs > Date.now()) return cached.guest;
+
+  try {
+    const response = await input.request("users.info", { user: input.userId });
+    const user = response.user;
+    if (response.ok !== true || typeof user !== "object" || user === null) {
+      log.error(
+        response.error === "missing_scope"
+          ? "users.info needs the users:read scope to tell guests apart, so eve treats this user as a guest; add the scope and reinstall the Slack app"
+          : "users.info failed, so eve treats the user as a guest",
+        { error: response.error, userId: input.userId },
+      );
+      cacheGuestVerdict(key, true, true);
+      return true;
+    }
+    const flags = user as {
+      readonly is_restricted?: unknown;
+      readonly is_ultra_restricted?: unknown;
+    };
+    const guest = flags.is_restricted === true || flags.is_ultra_restricted === true;
+    cacheGuestVerdict(key, guest, false);
+    return guest;
+  } catch (error) {
+    logError(log, "users.info failed, so eve treats the user as a guest", error, {
+      userId: input.userId,
+    });
+    cacheGuestVerdict(key, true, true);
+    return true;
+  }
+}
+
 /**
  * Memoized `isExternalConversation()` for one conversation. Without a
  * conversation there is nothing to classify, so it resolves `false`.
@@ -191,6 +260,8 @@ export function createSlackAdmitRequest(input: {
   /** Shares a classifier the hook context also exposes; built from `slack` otherwise. */
   readonly isExternalConversation?: () => Promise<boolean>;
 }): SlackAdmitRequest {
+  const { actor } = input;
+  let guest: Promise<boolean> | undefined;
   return {
     kind: input.kind,
     channelId: input.channelId,
@@ -203,6 +274,15 @@ export function createSlackAdmitRequest(input: {
         installationTeamId: input.installationTeamId,
         request: input.slack.request,
       }),
+    isGuest: () =>
+      (guest ??=
+        actor === undefined
+          ? Promise.resolve(false)
+          : classifyGuest({
+              userId: actor.userId,
+              installationTeamId: input.installationTeamId,
+              request: input.slack.request,
+            })),
     raw: input.raw,
     slack: input.slack,
   };

@@ -44,7 +44,7 @@ Run `eve add channel/slack` again if setup stops partway or Slack events stop re
 
 Choose **Use portable credentials** when the agent doesn't run on Vercel or you can't use Vercel Connect. eve adds `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` to `.env.example` but doesn't create the Slack app. In [Slack app settings](https://api.slack.com/apps):
 
-1. Add the `app_mentions:read` and `chat:write` bot scopes, plus `channels:history`, `groups:history`, `im:history`, and `mpim:history` for DMs and [message edits](#message-edits), `channels:read`, `groups:read`, `im:read`, and `mpim:read` to [recognize Slack Connect conversations](#restrict-who-can-invoke-the-agent), `files:read` for inbound attachments, and `files:write` for long-response snippets.
+1. Add the `app_mentions:read` and `chat:write` bot scopes, plus `channels:history`, `groups:history`, `im:history`, and `mpim:history` for DMs and [message edits](#message-edits), `channels:read`, `groups:read`, `im:read`, and `mpim:read` to [recognize Slack Connect conversations](#restrict-who-can-invoke-the-agent), `users:read` to recognize guests, `files:read` for inbound attachments, and `files:write` for long-response snippets.
 2. Install the app, then set `SLACK_BOT_TOKEN` to its Bot User OAuth Token and `SLACK_SIGNING_SECRET` to the signing secret from **Basic Information**. Put both in `.env.local` for local development or in the deployed runtime's environment.
 3. Set the Request URL to `https://your-agent.example/eve/v1/slack` under **Event Subscriptions** (subscribe to `app_mention`, plus `message.channels`, `message.groups`, `message.im`, and `message.mpim` for DMs and message edits), **Interactivity & Shortcuts**, and each **Slash Command**.
 
@@ -230,11 +230,11 @@ export default slackChannel({
 });
 ```
 
-`teamId` is the workspace whose installation received the message, so key caches on it. `messageContext.users` adds the `users:read` scope to the app manifest, and `users:read.email` with `email: true`; reinstall the Slack app after enabling it. It is off by default because names and emails then reach model context, session history, and traces.
+`teamId` is the workspace whose installation received the message, so key caches on it. `messageContext.users` uses the `users:read` scope, which the generated manifest always includes. `email: true` adds `users:read.email`; reinstall the Slack app after enabling it. It is off by default because names and emails then reach model context, session history, and traces.
 
 #### Restrict who can invoke the agent
 
-A valid Slack signature proves that Slack sent the event, not that the sender should reach your agent. Slack Connect channels and DMs include people from other organizations, and anything the agent posts there is visible to them.
+A valid Slack signature proves that Slack sent the event, not that the sender should reach your agent. Slack Connect channels and DMs include people from other organizations, and anything the agent posts there is visible to them. Guest accounts are in your workspace but outside your organization.
 
 `admit(request)` is the channel's single access check. eve calls it before any hook, and before it starts a session somewhere new:
 
@@ -249,9 +249,15 @@ A valid Slack signature proves that Slack sent the event, not that the sender sh
 | `shortcut`     | `onShortcut` shortcuts                                                  | Dropped                                          |
 | `send`         | `receive`, `ctx.send()`, and `ctx.to()` starting a session in a channel | Throws before anything is posted                 |
 
-The default, `defaultSlackAdmit`, refuses requests from, and sends into, conversations shared with another organization through Slack Connect, including pending shares. It also refuses conversations Slack can't classify. Shared channels between workspaces of one Enterprise Grid org count as internal. Requests without a conversation, such as global shortcuts, pass.
+The default, `defaultSlackAdmit`, refuses:
 
-Events API callbacks say whether their conversation is externally shared. Interactions, slash commands, shortcuts, and sends don't, so eve looks the conversation up with `conversations.info`, which needs the `channels:read`, `groups:read`, `im:read`, and `mpim:read` scopes. The generated app manifest includes them. Without them, the default refuses those requests.
+- requests from, and sends into, conversations shared with another organization through Slack Connect, including pending shares. Shared channels between workspaces of one Enterprise Grid org count as internal.
+- requests from multi-channel and single-channel guests.
+- conversations and users Slack can't classify.
+
+Requests without a conversation, such as global shortcuts, skip the conversation check. Sends and events without a user skip the guest check.
+
+Events API callbacks say whether their conversation is externally shared. Interactions, slash commands, shortcuts, and sends don't, so eve looks the conversation up with `conversations.info`, which needs the `channels:read`, `groups:read`, `im:read`, and `mpim:read` scopes. The guest check calls `users.info`, which needs `users:read`. eve caches both answers for five minutes. The generated app manifest includes all five scopes. Without them, the default refuses the requests it can't classify.
 
 The request carries:
 
@@ -259,11 +265,12 @@ The request carries:
 - `channelId`, the conversation the request comes from or a send posts into
 - `installationTeamId`, the workspace that installed the app
 - `actor`, the Slack user's `userId` and, when Slack reports it, their `teamId`. It's `undefined` for sends.
-- `isExternalConversation()`, the check the default makes. It returns `true` when Slack can't classify the conversation.
+- `isExternalConversation()`, the conversation check the default makes. It returns `true` when Slack can't classify the conversation.
+- `isGuest()`, the guest check the default makes. It returns `true` when Slack can't classify the user, and `false` without an actor.
 - `raw`, the signed Slack payload, or the receive target for a send
 - `slack`, the workspace Slack API client
 
-Write your own `admit` to change the policy. Call `defaultSlackAdmit` from it to keep the Slack Connect check. This one adds a user allowlist:
+Write your own `admit` to change the policy. Call `defaultSlackAdmit` from it to keep the Slack Connect and guest checks. This one adds a user allowlist:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -280,11 +287,13 @@ export default slackChannel({
 });
 ```
 
-To serve a partner in one Slack Connect channel, admit it before the default:
+To serve a partner in one Slack Connect channel, admit it before the default. To let guests in but keep the Slack Connect check, skip `isGuest()`:
 
 ```ts
 admit: async (request) =>
   request.channelId === "C0PARTNER" || (await defaultSlackAdmit(request)),
+
+admit: async (request) => !(await request.isExternalConversation()),
 ```
 
 Pass `admit: () => true` to admit every request.

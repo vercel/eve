@@ -22,26 +22,37 @@ import {
 } from "#public/channels/slack/slackChannel.js";
 
 const SIGNING_SECRET = "test-signing-secret";
+/** Answers the default admit's guest check as a full member, then defers to `respond`. */
+function asMember<A extends unknown[]>(
+  respond: (request: string | URL | Request, ...rest: A) => Promise<Response>,
+) {
+  return async (request: string | URL | Request, ...rest: A): Promise<Response> =>
+    String(request).includes("users.info")
+      ? Response.json({ ok: true, user: { id: "U01" } })
+      : respond(request, ...rest);
+}
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.stubEnv("SLACK_SIGNING_SECRET", SIGNING_SECRET);
-  fetchMock = vi.fn(async (request: string | URL | Request) => {
-    const url = String(request);
-    if (url.includes("conversations.info"))
-      return Response.json({ channel: { is_private: false }, ok: true });
-    if (url.endsWith("files.getUploadURLExternal"))
-      return Response.json({
-        ok: true,
-        upload_url: "https://files.slack.com/upload/report",
-        file_id: "F01",
-      });
-    if (url.startsWith("https://files.slack.com/upload/")) return new Response("OK");
-    if (url.endsWith("files.completeUploadExternal"))
-      return Response.json({ ok: true, files: [{ id: "F01" }] });
-    return Response.json({ ok: true, ts: "1700000001.000001" });
-  });
+  fetchMock = vi.fn(
+    asMember(async (request: string | URL | Request) => {
+      const url = String(request);
+      if (url.includes("conversations.info"))
+        return Response.json({ channel: { is_private: false }, ok: true });
+      if (url.endsWith("files.getUploadURLExternal"))
+        return Response.json({
+          ok: true,
+          upload_url: "https://files.slack.com/upload/report",
+          file_id: "F01",
+        });
+      if (url.startsWith("https://files.slack.com/upload/")) return new Response("OK");
+      if (url.endsWith("files.completeUploadExternal"))
+        return Response.json({ ok: true, files: [{ id: "F01" }] });
+      return Response.json({ ok: true, ts: "1700000001.000001" });
+    }),
+  );
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -286,29 +297,31 @@ describe("slackChannel thread history", () => {
   it("adds earlier replies as history when a mention starts the thread's session", async () => {
     const threadTs = "1700000000.000001";
     const currentTs = "1700000000.000004";
-    fetchMock.mockImplementation(async (request: string | URL | Request) => {
-      const url = String(request);
-      if (url.includes("conversations.replies"))
-        return Response.json({
-          messages: [
-            { text: "Daily report?", thread_ts: threadTs, ts: threadTs, user: "U_ROOT" },
-            {
-              app_id: "A01",
-              bot_id: "B_AGENT",
-              text: "Deploys are green.",
-              thread_ts: threadTs,
-              ts: "1700000000.000002",
-              user: "U_BOT",
-            },
-            { text: "Thanks!", thread_ts: threadTs, ts: "1700000000.000003", user: "U_OTHER" },
-            { text: "Any flakes?", thread_ts: threadTs, ts: currentTs, user: "U_CURRENT" },
-          ],
-          ok: true,
-        });
-      if (url.includes("conversations.info"))
-        return Response.json({ channel: { is_private: false }, ok: true });
-      return Response.json({ ok: true, ts: "1700000001.000001" });
-    });
+    fetchMock.mockImplementation(
+      asMember(async (request: string | URL | Request) => {
+        const url = String(request);
+        if (url.includes("conversations.replies"))
+          return Response.json({
+            messages: [
+              { text: "Daily report?", thread_ts: threadTs, ts: threadTs, user: "U_ROOT" },
+              {
+                app_id: "A01",
+                bot_id: "B_AGENT",
+                text: "Deploys are green.",
+                thread_ts: threadTs,
+                ts: "1700000000.000002",
+                user: "U_BOT",
+              },
+              { text: "Thanks!", thread_ts: threadTs, ts: "1700000000.000003", user: "U_OTHER" },
+              { text: "Any flakes?", thread_ts: threadTs, ts: currentTs, user: "U_CURRENT" },
+            ],
+            ok: true,
+          });
+        if (url.includes("conversations.info"))
+          return Response.json({ channel: { is_private: false }, ok: true });
+        return Response.json({ ok: true, ts: "1700000001.000001" });
+      }),
+    );
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
       onAppMention: () => ({ auth: null }),
@@ -675,17 +688,19 @@ describe("slackChannel admit", () => {
   }
 
   function sharedConversationInfo(channel: string, flags: Record<string, boolean>): void {
-    fetchMock.mockImplementation(async (request: string | URL | Request, init?: RequestInit) => {
-      if (String(request).includes("conversations.info")) {
-        const contentType = init?.headers ? new Headers(init.headers).get("content-type") : null;
-        const body = decodeSlackApiBody(init!.body!, contentType) as { channel?: string };
-        return Response.json({
-          ok: true,
-          channel: body.channel === channel ? { is_private: false, ...flags } : {},
-        });
-      }
-      return Response.json({ ok: true, ts: "1700000001.000001" });
-    });
+    fetchMock.mockImplementation(
+      asMember(async (request: string | URL | Request, init?: RequestInit) => {
+        if (String(request).includes("conversations.info")) {
+          const contentType = init?.headers ? new Headers(init.headers).get("content-type") : null;
+          const body = decodeSlackApiBody(init!.body!, contentType) as { channel?: string };
+          return Response.json({
+            ok: true,
+            channel: body.channel === channel ? { is_private: false, ...flags } : {},
+          });
+        }
+        return Response.json({ ok: true, ts: "1700000001.000001" });
+      }),
+    );
   }
 
   it("keeps a Slack Connect mention from reaching the agent by default", async () => {
@@ -701,6 +716,37 @@ describe("slackChannel admit", () => {
     expect(onAppMention).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a guest's mention from reaching the agent by default", async () => {
+    fetchMock.mockImplementation(async (request: string | URL | Request) =>
+      String(request).includes("users.info")
+        ? Response.json({ ok: true, user: { id: "U_GUEST", is_restricted: true } })
+        : Response.json({ ok: true, ts: "1700000001.000001" }),
+    );
+    const onAppMention = vi.fn(() => ({ auth: null }));
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" }, onAppMention }),
+      signed(
+        JSON.stringify({
+          event: {
+            channel: "C01",
+            event_ts: "1700000000.000001",
+            text: "hello",
+            ts: "1700000000.000001",
+            type: "app_mention",
+            user: "U_GUEST",
+          },
+          event_id: "EvGuest",
+          is_ext_shared_channel: false,
+          team_id: "T01",
+          type: "event_callback",
+        }),
+      ),
+    );
+
+    expect(onAppMention).not.toHaveBeenCalled();
   });
 
   it("hands an authored admit the request and dispatches what it admits", async () => {

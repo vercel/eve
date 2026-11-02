@@ -12,7 +12,7 @@ export function defineSlackAppManifest(input: {
   readonly botName?: string;
   /** Adds the scopes, events, and feature flag Slack code channels need. */
   readonly codeChannels?: boolean;
-  /** Adds the `users:read` scope `messageContext.users` needs for names. */
+  /** Whether `messageContext.users` looks up names. `users:read` is always included. */
   readonly users?: boolean;
   /** Adds the `users:read.email` scope `messageContext.users.email` needs. */
   readonly userEmails?: boolean;
@@ -21,7 +21,8 @@ export function defineSlackAppManifest(input: {
     build(channelName) {
       const name = (input.botName ?? channelName).slice(0, 35);
       // Slack sends message edits only through the message events, which need the history scopes.
-      // The read scopes let `conversations.info` tell Slack Connect conversations apart.
+      // The read scopes let `conversations.info` tell Slack Connect conversations apart, and
+      // `users.info` tell guests apart.
       const botScopes = [
         "app_mentions:read" as const,
         "channels:history" as const,
@@ -33,7 +34,7 @@ export function defineSlackAppManifest(input: {
         "im:read" as const,
         "mpim:history" as const,
         "mpim:read" as const,
-        ...(input.users === true ? (["users:read"] as const) : []),
+        "users:read" as const,
         ...(input.users === true && input.userEmails === true
           ? (["users:read.email"] as const)
           : []),

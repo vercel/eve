@@ -28,6 +28,7 @@ describe("Slack app manifests", () => {
             "im:read",
             "mpim:history",
             "mpim:read",
+            "users:read",
           ],
         },
       },
@@ -73,6 +74,7 @@ describe("Slack app manifests", () => {
             "im:read",
             "mpim:history",
             "mpim:read",
+            "users:read",
             "code_channels:manage",
           ],
         },
@@ -93,7 +95,7 @@ describe("Slack app manifests", () => {
     });
   });
 
-  it("adds users:read for names and users:read.email only for emails", () => {
+  it("always adds users:read and adds users:read.email only for emails", () => {
     const botScopes = (options: { users?: boolean; userEmails?: boolean }) =>
       (
         defineSlackAppManifest(options).build("support") as {
@@ -101,7 +103,7 @@ describe("Slack app manifests", () => {
         }
       ).oauth_config.scopes.bot;
 
-    expect(botScopes({ users: true })).toContain("users:read");
+    expect(botScopes({})).toContain("users:read");
     expect(botScopes({ users: true })).not.toContain("users:read.email");
     expect(botScopes({ users: true, userEmails: true })).toEqual(
       expect.arrayContaining(["users:read", "users:read.email"]),

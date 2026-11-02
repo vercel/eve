@@ -859,8 +859,8 @@ export interface SlackChannelConfig {
      * `users.info` call. A lookup that fails or takes over two seconds is
      * left out, and the message is still delivered.
      *
-     * Adds the `users:read` scope to the app manifest, and `users:read.email`
-     * with `email: true`. Off by default: names and emails then reach model
+     * Needs the `users:read` scope, which the app manifest always includes,
+     * and adds `users:read.email` with `email: true`. Off by default: names and emails then reach model
      * context, session history, and traces.
      */
     readonly users?: SlackUsersOption;
