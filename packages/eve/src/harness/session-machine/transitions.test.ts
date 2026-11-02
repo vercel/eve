@@ -749,6 +749,45 @@ describe("routing answers", () => {
     expect(asks(ended)).toEqual([]);
   });
 
+  it("keeps mirroring a later call a running task took, after that call settles", () => {
+    const later = withPublished(busyTurn(), [
+      { type: "call.settled", data: { callId: "agent", outcome: "completed", output: {} } },
+      {
+        data: {
+          callId: "agent-2",
+          capability: { kind: "agent", name: "helper" },
+          owner: { runId },
+        },
+        scope: { runId, turnId },
+        type: "call.requested",
+      },
+      { data: { callId: "agent-2", taskId: "task-1" }, scope: { turnId }, type: "call.started" },
+      { type: "call.settled", data: { callId: "agent-2", outcome: "completed", output: {} } },
+    ]);
+    const { events } = relay(viewOf(later), {
+      payload: {
+        kind: "subagent-interaction",
+        callId: "agent-2",
+        childSessionId: "child-2",
+        subagentName: "helper",
+        events: [
+          {
+            type: "interaction.opened",
+            data: {
+              interactionId: "remote",
+              request: { kind: "question", prompt: "Continue?" },
+              subject: { turnId: "child-turn" },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(events).toMatchObject([
+      { type: "interaction.opened", data: { subject: { callId: "agent-2" } } },
+    ]);
+  });
+
   it("keeps mirroring a running task's questions after later turns prune the call that started it", () => {
     const endTurn = (session: HarnessSession, sequence: number) => {
       const turn = `turn_${sequence}`;
