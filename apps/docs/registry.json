@@ -104,7 +104,7 @@
       "title": "agent-browser",
       "description": "Add browser automation tools backed by agent-browser to an eve agent.",
       "dependencies": [
-        "@agent-browser/eve"
+        "@eve/agent-browser"
       ],
       "files": [
         {
@@ -1921,6 +1921,41 @@
       ]
     },
     {
+      "name": "connection/tavily",
+      "type": "registry:item",
+      "title": "Tavily",
+      "description": "Search the web, extract page content, crawl sites, and map URLs.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "tavily",
+              "tavily",
+              "tavily",
+              "--connection-method",
+              "mcp"
+            ]
+          },
+          "requires": ">=0.55.0"
+        }
+      },
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "files": [
+        {
+          "path": "registry/connections/tavily.ts",
+          "type": "registry:file",
+          "target": "agent/connections/tavily.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/ticket-tailor",
       "type": "registry:item",
       "title": "Ticket Tailor",
@@ -2723,20 +2758,27 @@
       "type": "registry:item",
       "title": "Telegram",
       "description": "Connect your agent to a Telegram bot for 1:1 and group chats.",
-      "envVars": {
-        "TELEGRAM_BOT_TOKEN": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/telegram.ts",
-          "type": "registry:file",
-          "target": "agent/channels/telegram.ts"
-        }
+      "dependencies": [
+        "@vercel/connect@>=2.7.0"
+      ],
+      "devDependencies": [
+        "vercel@>=58.7.0"
       ],
       "meta": {
         "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "setup",
+              "telegram"
+            ]
+          },
           "docs": "/docs/channels/telegram",
-          "implementation": "native"
+          "implementation": "native",
+          "requires": ">=1.0.0-rc.2"
         }
       }
     },

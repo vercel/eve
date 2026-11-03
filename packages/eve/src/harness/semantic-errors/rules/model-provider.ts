@@ -35,7 +35,7 @@ export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
   {
     id: "model-response-content-filtered",
     name: "Model response filtered",
-    tags: ["model-provider", "recoverable"],
+    tags: ["model-provider", "recoverable", "refused"],
     when: nameIs("ContentFilteredModelResponseError"),
     message: "The model provider filtered this response.",
     hint: "Review the request and its context against your model provider's content policy.",

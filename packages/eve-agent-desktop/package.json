@@ -1,0 +1,76 @@
+{
+  "name": "@eve/agent-desktop",
+  "version": "0.0.0",
+  "description": "eve extension that gives agents desktop computer-use tools backed by agent-desktop",
+  "keywords": [
+    "agent-desktop",
+    "computer-use",
+    "desktop-automation",
+    "eve",
+    "eve-extension",
+    "sandbox"
+  ],
+  "homepage": "https://agent-browser.dev/desktop",
+  "bugs": {
+    "url": "https://github.com/vercel/eve/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel/eve.git",
+    "directory": "packages/eve-agent-desktop"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "NOTICE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.mjs"
+    },
+    "./sandbox": {
+      "types": "./dist/sandbox/sandbox.d.ts",
+      "default": "./dist/sandbox/sandbox.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "eve extension build && tsc -p tsconfig.sandbox.json && node ../../scripts/copy-package-license.mjs .",
+    "test": "pnpm run build && pnpm run test:integration && pnpm run test:scenario",
+    "test:integration": "node --test \"test/integration/*.test.mjs\"",
+    "test:scenario": "node --test \"test/scenario/*.test.mjs\"",
+    "test:conformance": "node --test test/scenario/conformance.test.mjs",
+    "test:live": "node --test test/scenario/live.test.mjs",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "eve": "workspace:*",
+    "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "eve": ">=1.0.0-rc.1"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension"
+    }
+  }
+}

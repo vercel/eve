@@ -11,25 +11,32 @@ import { supersede } from "#harness/session-machine/cascade.js";
 import { rowOf, type Ref } from "#protocol/session-projection/tree.js";
 import {
   applyTransition,
+  commitTransitions,
   dropClosedRecords,
   saveTransition,
   sessionView,
 } from "#harness/session-machine/commit.js";
 import { currentProjection, saveSessionProjection } from "#harness/session-machine/current.js";
-import { fail, receive, stopInterruptedSteps } from "#harness/session-machine/transitions.js";
-import { replaceSessionHistory } from "#harness/compaction/step.js";
-import { controlAdmitted, fact } from "#harness/facts.js";
+import {
+  clearedByAttempt,
+  fail,
+  receive,
+  stopInterruptedSteps,
+} from "#harness/session-machine/transitions.js";
+import { changeHistory } from "#harness/session-machine/history.js";
+import { failInterruptedControl } from "#harness/session-machine/deliveries.js";
 import type {
+  Commit,
   ControlDelivery,
   HarnessSession,
   HarnessStepInput,
+  SessionPublication,
   SessionStateMap,
   StepResult,
 } from "#harness/types.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
 import { summarizeFailure } from "#execution/failure-summary.js";
 import { eventsOfLine } from "#protocol/session-lines.js";
-import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionOutcome } from "#protocol/session-events/families/session.js";
 import { activeTurnIdOf } from "#protocol/session-projection.js";
 
@@ -127,13 +134,13 @@ export async function recoverInterruptedStep(input: {
   readonly attempt: InterruptedAttempt;
   readonly ctx: ContextContainer;
   readonly publish: (
-    events: SessionEvent | readonly SessionEvent[],
+    publication: SessionPublication,
     session: HarnessSession,
   ) => Promise<HarnessSession>;
   readonly session: HarnessSession;
   readonly stepInput: HarnessStepInput | undefined;
   /** Admission facts no attempt wrote, which a step that ends here must still write. */
-  readonly admission: readonly SessionEvent[];
+  readonly admission: Commit;
   /** The control the step applies, with the delivery it arrived as. */
   readonly control?: {
     readonly kind: "clear" | "compact";
@@ -147,8 +154,8 @@ export async function recoverInterruptedStep(input: {
 > {
   const { attempt, ctx } = input;
   let session = input.session;
-  const publish = async (events: SessionEvent | readonly SessionEvent[]) => {
-    session = await input.publish(events, session);
+  const publish = async (publication: SessionPublication) => {
+    session = await input.publish(publication, session);
   };
   const view = () => sessionView(currentProjection(ctx), session.state);
   /** Closes, as superseded, what `which` selects of the open work the attempt introduced. */
@@ -195,13 +202,7 @@ export async function recoverInterruptedStep(input: {
     // A control applies once: a clear the attempt finished empties history now, and a control
     // it left unsettled settles failed rather than run again.
     if (attempt.cleared) {
-      const cleared = saveTransition(session, {
-        clearsHistory: true,
-        events: [],
-        signIns: [],
-        turn: { remembered: view().turn.remembered, suspended: [] },
-      });
-      session = replaceSessionHistory(cleared, []);
+      session = saveTransition(session, clearedByAttempt(view()));
     }
     const { delivery, kind } = input.control;
     const status =
@@ -209,14 +210,7 @@ export async function recoverInterruptedStep(input: {
         ? undefined
         : currentProjection(ctx).view.deliveries[delivery.deliveryId]?.status;
     if (delivery !== undefined && status !== "settled") {
-      await publish([
-        ...(status === undefined ? [controlAdmitted(delivery, kind)] : []),
-        fact("delivery.settled", {
-          deliveryId: delivery.deliveryId,
-          outcome: "failed",
-          reason: `${kind}-interrupted`,
-        }),
-      ]);
+      await publish(failInterruptedControl(delivery, kind, { recorded: status !== undefined }));
     }
     return finish({ next: null, session });
   }
@@ -224,19 +218,14 @@ export async function recoverInterruptedStep(input: {
   const { settledTurn } = attempt;
   if (settledTurn !== undefined && activeTurnIdOf(currentProjection(ctx)) === undefined) {
     // The checkpoint predates the step, so the history its input imported is not in it yet.
-    session = {
-      ...session,
-      history: [
-        ...session.history,
-        ...createImportedHistoryMessages(input.stepInput?.history ?? []),
-      ],
-    };
+    session = changeHistory(session, {
+      append: createImportedHistoryMessages(input.stepInput?.history ?? []),
+    });
     session = await preserveStoppedTurnMessage(ctx, session, input.stepInput);
     if (settledTurn.text !== undefined) {
-      session = {
-        ...session,
-        history: [...session.history, { content: settledTurn.text, role: "assistant" }],
-      };
+      session = changeHistory(session, {
+        append: [{ content: settledTurn.text, role: "assistant" }],
+      });
     }
     return finish({
       next: null,
@@ -273,7 +262,7 @@ export async function recoverInterruptedStep(input: {
   const interruptions = turnId === undefined ? 0 : turnInterruptions(session.state, turnId) + 1;
   session = saveTransition(session, stop);
   const note = interruptedAttemptNote(attempt.calls);
-  if (note !== undefined) session = { ...session, history: [...session.history, note] };
+  if (note !== undefined) session = changeHistory(session, { append: [note] });
   if (input.failed === undefined && interruptions <= MAX_TURN_INTERRUPTIONS) {
     // The answers the attempt applied leave the input.
     const { settledInteractions } = attempt;
@@ -292,7 +281,7 @@ export async function recoverInterruptedStep(input: {
   const deliveries = (input.stepInput?.deliveries ?? []).filter(
     ({ deliveryId }) => currentProjection(ctx).view.deliveries[deliveryId]?.status === "admitted",
   );
-  if (deliveries.length > 0) await publish(receive(view(), { deliveries }).events);
+  if (deliveries.length > 0) await publish(commitTransitions([receive(view(), { deliveries })]));
   const failing = activeTurnIdOf(currentProjection(ctx));
   if (failing === undefined) return finish({ next: null, session });
   session = await preserveStoppedTurnMessage(ctx, session, input.stepInput);

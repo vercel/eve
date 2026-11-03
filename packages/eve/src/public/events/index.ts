@@ -37,9 +37,16 @@ export {
   type ValueReference,
   type JsonValue,
   type UserPart,
+  type StoredLine,
+  type CommitLine,
+  type ProgressLine,
 } from "#protocol/session-events/envelope.js";
 
 export { isTerminal, isCompleted } from "#protocol/session-events/guards.js";
+
+export { createStreamChecker } from "./stream-checker.js";
+
+export type { StreamChecker, Violation, ViolationRule } from "#protocol/session-events/checker.js";
 
 export {
   type Fact,

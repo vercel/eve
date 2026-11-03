@@ -1,14 +1,11 @@
-import { jsonSchema } from "ai";
+import { APICallError, jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createTestKernel } from "#internal/testing/kernel.js";
 import type { HarnessSession } from "#harness/types.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-
-// The harness runs outside a workflow body here, where run attributes cannot be written.
-vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -54,13 +51,13 @@ async function runTurn(doStream: MockLanguageModelV3["doStream"]): Promise<Sessi
   vi.spyOn(console, "warn").mockImplementation(() => {});
   const events: SessionEvent[] = [];
   const session: HarnessSession = {
-    agent: { modelReference: { id: "m" }, system: "You help Alice.", tools: [] },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: "http:attempts",
     history: [],
     sessionId: "attempts",
   };
-  await createToolLoopHarness({
+  await createTestKernel({
+    agent: { model: { id: "m" } },
     handleEvent: eachEvent(async (event) => {
       events.push(event);
     }),
@@ -122,5 +119,89 @@ describe("model attempts", () => {
       { attempt: 1, runId: "run_1", type: "model.started" },
       { outcome: "completed", runId: "run_1", type: "model.settled" },
     ]);
+  });
+});
+
+describe("run attributes", () => {
+  it("tags the turn's run with what its model call spent, through the sink it's given", async () => {
+    const setAttributes = vi.fn(async () => {});
+    await createTestKernel({
+      agent: { model: { id: "m" } },
+      handleEvent: async () => {},
+      resolveModel: async () =>
+        new MockLanguageModelV3({ doStream: async () => streamOf(reply("Here it is.")) }),
+      setAttributes,
+      tools: new Map([
+        [
+          "lookup",
+          {
+            description: "Looks up a report.",
+            execute: async () => "The weekly summary.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "lookup",
+          },
+        ],
+      ]),
+    })(
+      {
+        compaction: {},
+        continuationToken: "http:attributes",
+        history: [],
+        sessionId: "attributes",
+      },
+      { message: "Alice asks for the weekly summary." },
+    );
+
+    expect(setAttributes).toHaveBeenCalledTimes(1);
+    expect(setAttributes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        "$eve.input_tokens": 10,
+        "$eve.output_tokens": 2,
+        "$eve.tool_count": 1,
+      }),
+    );
+  });
+});
+
+describe("a failed model call", () => {
+  it("keeps the person's message in history", async () => {
+    // The input joins history before the call, so a call that fails can't lose it.
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const events: SessionEvent[] = [];
+    const message = "Alice asks for the weekly summary.";
+    const result = await createTestKernel({
+      agent: { model: { id: "m" } },
+      handleEvent: eachEvent(async (event) => {
+        events.push(event);
+      }),
+      resolveModel: async () =>
+        new MockLanguageModelV3({
+          doStream: async () => {
+            throw new APICallError({
+              isRetryable: false,
+              message: "Bad Request",
+              requestBodyValues: {},
+              statusCode: 400,
+              url: "https://provider.example/v1/messages",
+            });
+          },
+        }),
+      tools: new Map(),
+    })(
+      {
+        compaction: {},
+        continuationToken: "http:failed-call",
+        history: [],
+        sessionId: "failed-call",
+      },
+      { message },
+    );
+
+    expect(events.find((event) => event.type === "model.settled")).toMatchObject({
+      data: { outcome: "failed" },
+    });
+    expect(result.session.history).toContainEqual(
+      expect.objectContaining({ content: message, role: "user" }),
+    );
   });
 });

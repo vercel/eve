@@ -3,9 +3,9 @@ import { streamSessionLines } from "#execution/session-event-stream.js";
 import { emptySessionView, foldLine } from "#protocol/session-projection/fold.js";
 import { snapshotOf } from "#protocol/session-projection/session-view.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
-import { openMemos } from "#reactions/records.js";
-import type { DynamicRemoteBinding } from "#reactions/remote.js";
-import { latestTurn } from "#reactions/turn.js";
+import { openMemos } from "#definitions/memos.js";
+import type { DynamicRemoteBinding } from "#definitions/remote.js";
+import { latestTurn } from "#definitions/turn.js";
 import { normalizeDynamicRemoteAgent } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { RemoteAgentCredentials } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
@@ -55,6 +55,11 @@ export async function remoteAgentCredentials(input: {
     messages: async () => {
       throw new Error(
         `"${label}" read ctx.messages() while eve rebuilt a remote agent's credentials for its child, where the conversation as it was isn't available. Decide from the conversation inside a memo, so the child keeps the decision.`,
+      );
+    },
+    getSandbox: () => {
+      throw new Error(
+        `"${label}" called ctx.getSandbox() while eve rebuilt a remote agent's credentials for its child, where the parent's sandbox isn't available. Read the sandbox inside a memo, so the child keeps what it read.`,
       );
     },
     model: { id: binding.model ?? "" },

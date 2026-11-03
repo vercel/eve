@@ -2,8 +2,14 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import type { ModelMessage } from "ai";
 
 import { signInInteractionId } from "#harness/interaction-facts.js";
-import { validateHarnessModelMessages } from "#harness/messages.js";
-import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
+import { changeHistory, type HistoryChange } from "./history.js";
+import type {
+  Commit,
+  HarnessSession,
+  HarnessSessionBase,
+  SessionPublication,
+  SessionStateMap,
+} from "#harness/types.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
 import { readHitlState, writeHitlState, type HitlStateChange } from "#harness/hitl/requests.js";
 import { readTurnState, writeTurnState, type TurnState } from "./state.js";
@@ -11,28 +17,71 @@ import type { SessionView } from "./view.js";
 
 // The save side of the machine. A transition returns the events that report what changed and
 // the execution state that follows; `applyTransition` publishes the events in order (the publish
-// sink folds each into the projection) and writes the rest. The turn state also has direct lifecycle helpers.
+// sink folds each into the projection) and writes the rest.
 // A private record lives only while the projection shows its owner open, so closing an owner is
 // one event: a transition reports it, and the save drops the record here.
 
-/** What a machine transition returns; approval storage still has direct writers. */
+declare const transitionBrand: unique symbol;
+
+/** What a machine transition returns. Only the kernel builds one, through `transition`. */
 export interface Transition extends HitlStateChange {
+  readonly [transitionBrand]: true;
   readonly turn: TurnState;
   readonly events: readonly SessionEvent[];
-  /** Messages the transition commits to the end of history. */
-  readonly commit?: readonly ModelMessage[];
-  /** The transition empties history, as `clear` does. */
-  readonly clearsHistory?: true;
+  /** How the transition changes history: messages it commits, or a clear's empty history. */
+  readonly history?: HistoryChange;
+}
+
+/** A change the kernel decided, as the transition the commit takes. Only the kernel calls this. */
+export function transition<T extends Omit<Transition, typeof transitionBrand>>(
+  change: T,
+): T & Transition {
+  return change as T & Transition;
+}
+
+/** Kernel facts that change nothing private, as a transition that keeps the turn as it is. */
+export function unchangedBy(commit: Commit, turn: TurnState): Transition {
+  return transition({ events: commit, turn });
 }
 
 /**
- * Publishes one event, or one transition's events as one commit; `messages` is the conversation as
- * of the commit, for the reactions that read it.
+ * Publishes one transition's facts as one commit, or one progress record; `messages` is the
+ * conversation as of the commit, for the reactions that read it.
  */
 export type Publish = (
-  publication: SessionEvent | readonly SessionEvent[],
+  publication: SessionPublication,
   messages?: readonly ModelMessage[],
 ) => Promise<void>;
+
+/**
+ * The facts a kernel transition built, as the one commit the sink takes. Only the kernel calls
+ * this; guard rule 51 counts any other caller.
+ */
+export function commitOf(facts: readonly SessionEvent[]): Commit {
+  return facts as Commit;
+}
+
+/** Transitions decided together, as the one commit their facts make. */
+export function commitTransitions(transitions: readonly Transition[]): Commit {
+  return commitOf(transitions.flatMap((transition) => transition.events));
+}
+
+/**
+ * Publications in order, with each run of commits joined into one, as one commit's facts are one
+ * line. Progress stays its own.
+ */
+export function joinCommits(publications: readonly SessionPublication[]): SessionPublication[] {
+  const joined: SessionPublication[] = [];
+  for (const publication of publications) {
+    const last = joined.at(-1);
+    if (Array.isArray(publication) && Array.isArray(last)) {
+      joined[joined.length - 1] = commitOf([...last, ...publication]);
+    } else if (!Array.isArray(publication) || publication.length > 0) {
+      joined.push(publication);
+    }
+  }
+  return joined;
+}
 
 export function sessionView(
   projection: SessionProjection,
@@ -63,7 +112,7 @@ export async function applyTransition<T extends { readonly state?: SessionStateM
   publish: Publish,
   messages?: readonly ModelMessage[],
 ): Promise<T> {
-  if (transition.events.length > 0) await publish(transition.events, messages);
+  if (transition.events.length > 0) await publish(commitOf(transition.events), messages);
   return saveTransition(session, transition);
 }
 
@@ -73,16 +122,21 @@ export function saveTransition<T extends { readonly state?: SessionStateMap }>(
   transition: Transition,
 ): T {
   const next = writeTurnState(writeHitlState(session, transition), transition.turn);
-  const commit = transition.commit ?? [];
-  if (transition.clearsHistory !== true && commit.length === 0) return next;
-  if (!("history" in session)) {
+  if (transition.history === undefined) return next;
+  if (!("history" in next)) {
     throw new Error("A transition that changes history needs the session's history.");
   }
-  const { history: previous } = session as T & Pick<HarnessSession, "history">;
-  const history = transition.clearsHistory
-    ? []
-    : validateHarnessModelMessages([...previous, ...commit]);
-  return { ...next, history };
+  return changeHistory(
+    next as T & Pick<HarnessSession, "compaction" | "history">,
+    transition.history,
+  );
+}
+
+/** The messages a transition commits to the end of history. */
+export function committedMessages(transition: Transition): readonly ModelMessage[] {
+  return transition.history !== undefined && "append" in transition.history
+    ? transition.history.append
+    : [];
 }
 
 /**

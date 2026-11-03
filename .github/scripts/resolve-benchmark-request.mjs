@@ -14,8 +14,9 @@ export const DEFAULT_HARNESSES = ["eve-code", "opencode", "pi"];
 /**
  * eve-bench datasets a benchmark can run, with the settings each was calibrated for.
  * swe-lean needs five attempts to separate a 10-15% token change from trial noise.
- * deepswe-lean resolves almost nothing at low reasoning, and its 20-minute trials
- * make three attempts the most that fits one job.
+ * deepswe-lean resolves almost nothing at low reasoning; its stored baselines use
+ * three attempts. eve-bench compares only whole-dataset results with matching
+ * attempts, so changing either count needs fresh baselines for every harness.
  */
 export const BENCHMARK_DATASETS = {
   "swe-lean": { reasoning: "low", attempts: "5" },
@@ -25,9 +26,30 @@ export const BENCHMARK_DATASETS = {
 /** The dataset of every automatic run and of a request that names none. */
 export const DEFAULT_DATASET = "swe-lean";
 
+/** The dataset of the weekly run on main, which keeps its baselines fresh. */
+export const SCHEDULED_DATASET = "deepswe-lean";
+
+/**
+ * Model families a benchmark can run; the workflow maps each to a model ID. The first is
+ * the default. eve-bench stores results per model, so families are never compared with
+ * each other. Only scheduled and dispatched runs cover every family: Vercel Sandbox
+ * limits how fast vCPUs can be allocated. A PR comment runs one family, because
+ * eve-bench keys its PR comment by harness and dataset only.
+ */
+export const BENCHMARK_MODEL_FAMILIES = ["anthropic", "openai"];
+
+export const DEFAULT_MODEL_FAMILY = BENCHMARK_MODEL_FAMILIES[0];
+
 function parseDataset(value) {
   if (!Object.hasOwn(BENCHMARK_DATASETS, value)) {
     throw new Error(`Supported benchmark datasets: ${Object.keys(BENCHMARK_DATASETS).join(", ")}.`);
+  }
+  return value;
+}
+
+function parseFamily(value) {
+  if (!BENCHMARK_MODEL_FAMILIES.includes(value)) {
+    throw new Error(`Supported benchmark models: ${BENCHMARK_MODEL_FAMILIES.join(", ")}.`);
   }
   return value;
 }
@@ -45,32 +67,62 @@ function parseHarnesses(names) {
   return harnesses;
 }
 
-/** `[<dataset>] [<harness>...]`, in any order; a dataset or the harness list may be omitted. */
+/** `[<dataset>] [model=<family>] [<harness>...]`, in any order; each part may be omitted. */
 function parseSelection(value) {
   const names = splitNames(value);
   const datasets = names.filter((name) => Object.hasOwn(BENCHMARK_DATASETS, name));
   if (datasets.length > 1) throw new Error("Name at most one benchmark dataset.");
-  const harnesses = names.filter((name) => !datasets.includes(name));
+  const models = names.filter((name) => name.startsWith("model="));
+  const family = models[0]?.slice("model=".length) ?? DEFAULT_MODEL_FAMILY;
+  // `model=anthropic,openai` splits into a model and a bare family name.
+  if (
+    models.length > 1 ||
+    !BENCHMARK_MODEL_FAMILIES.includes(family) ||
+    names.some((name) => BENCHMARK_MODEL_FAMILIES.includes(name))
+  ) {
+    throw new Error(
+      `A comment runs one model family: name one of ${BENCHMARK_MODEL_FAMILIES.map((name) => `model=${name}`).join(", ")}.`,
+    );
+  }
+  const harnesses = names.filter((name) => !datasets.includes(name) && !models.includes(name));
   return {
     dataset: datasets[0] ?? DEFAULT_DATASET,
     harnesses: harnesses.length ? parseHarnesses(harnesses) : DEFAULT_HARNESSES,
+    families: [family],
   };
 }
 
-function request({ dataset, harnesses }, sha, pr) {
+function request({ dataset, harnesses, families }, models, sha, pr) {
   return {
     harness: harnesses.join(","),
     slug: harnesses.join("+"),
+    // eve-bench builds the agent checkout only for eve-code and rejects agent
+    // inputs without it. Such a run is measured but never published or compared
+    // with stored results, which are keyed by the agent repository.
+    agentSource: harnesses.includes("eve-code"),
     dataset,
     ...BENCHMARK_DATASETS[dataset],
+    models: families.map((family) => {
+      const model = models?.[family];
+      if (typeof model !== "string" || !model) throw new Error(`No model is set for ${family}.`);
+      return { family, model };
+    }),
     sha,
     pr,
   };
 }
 
-export async function resolveBenchmarkRequest({ github, context }) {
+/**
+ * Resolves the triggering event into benchmark inputs, or null when it must not run.
+ * `models` maps every family in BENCHMARK_MODEL_FAMILIES to a model ID.
+ */
+export async function resolveBenchmarkRequest({ github, context, models }) {
   const { payload, eventName, repo, sha } = context;
-  let selection = { dataset: DEFAULT_DATASET, harnesses: DEFAULT_HARNESSES };
+  let selection = {
+    dataset: DEFAULT_DATASET,
+    harnesses: DEFAULT_HARNESSES,
+    families: BENCHMARK_MODEL_FAMILIES,
+  };
   let number = payload.pull_request?.number;
 
   if (eventName === "issue_comment") {
@@ -82,24 +134,34 @@ export async function resolveBenchmarkRequest({ github, context }) {
       username: payload.comment.user.login,
     });
     if (!["admin", "maintain", "write"].includes(data.permission)) return null;
-    const command = /^\/benchmark(?: +([a-z-]+(?:[ ,]+[a-z-]+)*))?$/u.exec(body);
-    if (!command) throw new Error("Use /benchmark [<dataset>] [<harness>[,<harness>...]].");
-    if (command[1]) selection = parseSelection(command[1]);
+    const command = /^\/benchmark(?: +([a-z=-]+(?:[ ,]+[a-z=-]+)*))?$/u.exec(body);
+    if (!command) {
+      throw new Error("Use /benchmark [<dataset>] [model=<family>] [<harness>[,<harness>...]].");
+    }
+    selection = command[1]
+      ? parseSelection(command[1])
+      : { ...selection, families: [DEFAULT_MODEL_FAMILY] };
     number = payload.issue.number;
+  } else if (eventName === "pull_request" || eventName === "push") {
+    selection.families = [DEFAULT_MODEL_FAMILY];
   } else if (eventName === "workflow_dispatch") {
+    const model = payload.inputs?.model || "all";
     selection = {
       dataset: parseDataset(payload.inputs?.dataset || DEFAULT_DATASET),
       harnesses: payload.inputs?.harness
         ? parseHarnesses(splitNames(payload.inputs.harness))
         : DEFAULT_HARNESSES,
+      families: model === "all" ? BENCHMARK_MODEL_FAMILIES : [parseFamily(model)],
     };
-  } else if (eventName !== "pull_request" && eventName !== "push") {
+  } else if (eventName === "schedule") {
+    selection.dataset = SCHEDULED_DATASET;
+  } else {
     return null;
   }
 
   if (!number) {
     if (!/^[a-f0-9]{40}$/u.test(sha)) throw new Error("Benchmark source must be an exact commit.");
-    return request(selection, sha, "");
+    return request(selection, models, sha, "");
   }
 
   const { data: pull } = await github.rest.pulls.get({ ...repo, pull_number: number });
@@ -113,5 +175,5 @@ export async function resolveBenchmarkRequest({ github, context }) {
     return null;
   if (eventName === "pull_request" && pull.head.sha !== payload.pull_request.head.sha) return null;
   if (!/^[a-f0-9]{40}$/u.test(pull.head.sha)) throw new Error("PR head must be an exact commit.");
-  return request(selection, pull.head.sha, String(number));
+  return request(selection, models, pull.head.sha, String(number));
 }

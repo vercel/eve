@@ -114,7 +114,7 @@ describe("Connect manifest compiler handoff", () => {
                 scopes: { bot: expect.arrayContaining(["app_mentions:read", "chat:write"]) },
               },
               settings: {
-                event_subscriptions: { bot_events: ["app_mention"] },
+                event_subscriptions: { bot_events: expect.arrayContaining(["app_mention"]) },
               },
             },
             service: "slack",

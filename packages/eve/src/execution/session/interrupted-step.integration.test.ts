@@ -1,7 +1,7 @@
+import { commitOf } from "#harness/session-machine/commit.js";
 import { expect, it, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
-import { createCompactionConfig } from "#execution/session.js";
 import {
   readInterruptedAttempt,
   recoverInterruptedStep,
@@ -18,8 +18,7 @@ it.each([
   "adopts a recorded $outcome session ending without restoring providers",
   async ({ outcome, isError }) => {
     const session: HarnessSession = {
-      agent: { system: "", tools: [], dynamicModel: true },
-      compaction: createCompactionConfig(),
+      compaction: {},
       continuationToken: "test",
       history: [],
       sessionId: "ended-session",
@@ -33,7 +32,7 @@ it.each([
     const publish = vi.fn(async () => session);
     const at = "2026-10-21T00:00:00.000Z";
     const result = await recoverInterruptedStep({
-      admission: [],
+      admission: commitOf([]),
       attempt: readInterruptedAttempt(0, [
         { position: 0, line: { at, facts: [started] } },
         { position: 1, line: { at, facts: [ended] } },
@@ -50,8 +49,7 @@ it.each([
 
 function openTurnSession(sessionId: string) {
   const session: HarnessSession = {
-    agent: { system: "", tools: [], dynamicModel: true },
-    compaction: createCompactionConfig(),
+    compaction: {},
     continuationToken: "test",
     history: [],
     sessionId,
@@ -66,7 +64,7 @@ it("fails the turn with what a step's last attempt threw", async () => {
   enterSessionProjection(ctx, session.state);
   const published: SessionEvent[] = [];
   const result = await recoverInterruptedStep({
-    admission: [],
+    admission: commitOf([]),
     attempt: readInterruptedAttempt(0, []),
     ctx,
     failed: { error: Object.assign(new Error("write failed"), { code: "ENOSPC" }) },
@@ -102,7 +100,7 @@ it("keeps the outcome of a turn an attempt settled when every attempt failed", a
   enterSessionProjection(ctx, recorded.state);
   const publish = vi.fn(async () => session);
   const result = await recoverInterruptedStep({
-    admission: [],
+    admission: commitOf([]),
     attempt: readInterruptedAttempt(0, [
       { position: 0, line: { at: "2026-10-21T00:00:00.000Z", facts: [settled] } },
     ]),
@@ -128,7 +126,7 @@ it("keeps a settled turn's imported history ahead of its message and reply", asy
     data: { kind: "text", partId: "p", value: "Hi Bob." },
   };
   const result = await recoverInterruptedStep({
-    admission: [],
+    admission: commitOf([]),
     attempt: readInterruptedAttempt(0, [
       { position: 0, line: { at: "2026-10-21T00:00:00.000Z", facts: [reply, settled] } },
     ]),

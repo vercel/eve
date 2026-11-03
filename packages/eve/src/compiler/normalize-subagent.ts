@@ -7,7 +7,11 @@ import {
 } from "#internal/authored-module.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
-import type { LocalSubagentSourceRef } from "#discover/manifest.js";
+import {
+  type AgentSourceKind,
+  type LocalSubagentSourceRef,
+  sourcesOf,
+} from "#discover/manifest.js";
 import type { AgentToolExposure } from "#shared/agent-definition.js";
 
 export type NormalizedSubagentConfig =
@@ -68,17 +72,18 @@ export function assertRemoteAgentDefinitionHasNoLocalPackageEntries(
   source: LocalSubagentSourceRef,
 ): void {
   const manifest = source.manifest;
+  const has = (kind: AgentSourceKind) => sourcesOf(manifest, kind).length > 0;
   const extraEntries = [
-    manifest.connections.length > 0 ? "connections/" : undefined,
-    manifest.hooks.length > 0 ? "hooks/" : undefined,
-    manifest.instructions.length > 0 ? "instructions" : undefined,
+    has("connection") ? "connections/" : undefined,
+    has("hook") ? "hooks/" : undefined,
+    has("instructions") ? "instructions" : undefined,
     manifest.lib.length > 0 ? "lib/" : undefined,
-    manifest.sandbox !== null ? "sandbox/" : undefined,
+    has("sandbox") ? "sandbox/" : undefined,
     manifest.sandboxWorkspaces.length > 0 ? "sandbox/workspace/" : undefined,
-    manifest.schedules.length > 0 ? "schedules/" : undefined,
-    manifest.skills.length > 0 ? "skills/" : undefined,
+    has("schedule") ? "schedules/" : undefined,
+    has("skill") ? "skills/" : undefined,
     manifest.subagents.length > 0 ? "subagents/" : undefined,
-    manifest.tools.length > 0 ? "tools/" : undefined,
+    has("tool") ? "tools/" : undefined,
   ].filter((entry) => entry !== undefined);
   if (extraEntries.length > 0) {
     throw new Error(

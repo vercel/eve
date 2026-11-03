@@ -9,7 +9,12 @@ vi.mock("./vercel.js", () => ({
   resolveVercelSession: mocks.session,
 }));
 vi.mock("./vercel-cli.js", () => ({ readVercelCliConnection: mocks.cli }));
-import { createDirectModelFetch, localGatewayModel, resolveModelApiKey } from "./transport.js";
+import {
+  createDirectModelFetch,
+  localGatewayDecisionModel,
+  localGatewayModel,
+  resolveModelApiKey,
+} from "./transport.js";
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubGlobal("fetch", mocks.fetch.mockResolvedValue(new Response("{}")));
@@ -60,6 +65,12 @@ describe("model credentials", () => {
     const model = localGatewayModel("openai/gpt-5.6-luna-fast");
     expect(JSON.stringify(model)).not.toContain("stored-secret");
     expect(mocks.session).not.toHaveBeenCalled();
+  });
+  it("leaves model ids to a custom AI SDK default provider", () => {
+    vi.stubEnv("EVE_MODEL_CONNECTION", "vercel");
+    vi.stubGlobal("AI_SDK_DEFAULT_PROVIDER", { languageModel: vi.fn() });
+    expect(localGatewayModel("openai/gpt-5.6-luna-fast")).toBeUndefined();
+    expect(localGatewayDecisionModel("typesafe-ai/jev")).toBeUndefined();
   });
 });
 

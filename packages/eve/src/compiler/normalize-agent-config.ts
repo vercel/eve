@@ -88,6 +88,7 @@ export async function compileAgentConfig(
   } = {};
 
   const compiledConfig: {
+    approval?: boolean;
     build?: CompiledAgentDefinition["build"];
     compaction: {
       model?: CompiledRuntimeModelReference;
@@ -113,6 +114,11 @@ export async function compileAgentConfig(
 
   if (definition.description !== undefined) {
     compiledConfig.description = definition.description;
+  }
+
+  // A function can't enter the manifest; the runtime loads it from the agent config module.
+  if (definition.approval !== undefined) {
+    compiledConfig.approval = true;
   }
 
   let dynamicModel: CompiledAgentDefinition["dynamicModel"] | undefined;

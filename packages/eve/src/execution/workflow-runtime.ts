@@ -50,7 +50,7 @@ import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { buildRunContext } from "#execution/runtime-context.js";
-import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import { agentLimits } from "#execution/effective-agent-config.js";
 import {
   assertSessionHistoryReadable,
   readSessionEventHistory,
@@ -188,12 +188,11 @@ export function createWorkflowRuntime(config: {
       run: input,
     });
     if (predecessor !== undefined) ctx.set(SessionPredecessorKey, predecessor);
-    const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
     const traceDecision = initializeSessionInstrumentation({
-      agentName: effectiveAgent.turnAgent.id,
+      agentName: bundle.turnAgent.id,
       ctx,
     });
-    const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
+    const sessionTimeoutMs = agentLimits(bundle, ctx)?.sessionTimeoutMs;
     // Workflow cannot purge inputs and outputs independently.
     const retention =
       bundle.resolvedAgent.config?.experimental?.workflow?.retention ??

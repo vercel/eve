@@ -80,7 +80,7 @@ different channel, pass that channel's id instead; the app must be a member of i
 People continue the fork under the channel's usual rules. By default, a reply in a channel thread
 reaches the agent only when it mentions the app. See
 [Continue conversations without repeated mentions](../channels/slack/reference#continue-conversations-without-repeated-mentions)
-to answer every reply in an active thread.
+to follow replies in an active thread.
 
 ### Fork into direct messages
 

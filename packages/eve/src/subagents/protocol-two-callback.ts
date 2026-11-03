@@ -12,7 +12,7 @@
 
 import { z } from "#compiled/zod/index.js";
 import type { RelayedInteractionEvent, SubagentInteractionHookPayload } from "#channel/types.js";
-import { fact } from "#harness/facts.js";
+import { relayEvent } from "#channel/relay-event.js";
 import type { InteractionKind } from "#protocol/session-events/families/interaction.js";
 import type { Answer, ResponseOutcome } from "#protocol/session-events/families/response.js";
 import {
@@ -219,7 +219,7 @@ export function readProtocolTwoInputCallback(
       childSessionId: data.childSessionId,
       events: data.event.requests.map((entry) => {
         const origin = { interactionId: entry.requestId, sessionId: data.childSessionId };
-        return fact("interaction.opened", {
+        return relayEvent("interaction.opened", {
           interactionId: entry.requestId,
           // A budget prompt asks about no call; the others ask about the call that asked.
           origin:
@@ -270,16 +270,13 @@ function authorizationEvents(
       // A candidate is an answer the child received: pending, it stands while the child checks
       // who gave it; otherwise the child turned it away and the request stays open.
       const { outcome, reason, requestId: interactionId } = event.data;
-      if (outcome === "pending") return [{ data: { interactionId }, type: "response.admitted" }];
+      if (outcome === "pending") return [relayEvent("response.admitted", { interactionId })];
       return [
-        {
-          data: {
-            interactionId,
-            outcome: CANDIDATE_OUTCOMES[outcome],
-            ...(reason !== undefined && { reason }),
-          },
-          type: "response.settled",
-        },
+        relayEvent("response.settled", {
+          interactionId,
+          outcome: CANDIDATE_OUTCOMES[outcome],
+          ...(reason !== undefined && { reason }),
+        }),
       ];
     }
     case "approval.settled":
@@ -291,7 +288,7 @@ function authorizationEvents(
         if (resolution.response?.optionId !== undefined)
           response.optionId = resolution.response.optionId;
         if (resolution.response?.text !== undefined) response.text = resolution.response.text;
-        return fact("interaction.settled", {
+        return relayEvent("interaction.settled", {
           interactionId: resolution.requestId,
           outcome: v26InteractionOutcome(resolution.outcome),
           ...(Object.keys(response).length > 0 && { response }),
@@ -301,7 +298,7 @@ function authorizationEvents(
       const principalId = event.data.principalId;
       const interactionId = signInId(childSessionId, event.data);
       return [
-        fact("interaction.opened", {
+        relayEvent("interaction.opened", {
           ...(principalId !== undefined && { audience: { principalIds: [principalId] } }),
           interactionId,
           origin: { interactionId, sessionId: childSessionId },
@@ -312,7 +309,7 @@ function authorizationEvents(
     }
     case "authorization.completed":
       return [
-        fact("interaction.settled", {
+        relayEvent("interaction.settled", {
           interactionId: signInId(childSessionId, event.data),
           outcome: v26SignInOutcome(event.data.outcome),
         }),

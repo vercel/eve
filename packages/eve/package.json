@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -526,12 +526,6 @@
       "import": "./dist/src/internal/scaffold.js",
       "default": "./dist/src/internal/scaffold.js"
     },
-    "./internal/code/prwatch": {
-      "eve-source": "./dist/src/extensions/code/extension/lib/prwatch.js",
-      "types": "./dist/src/extensions/code/extension/lib/prwatch.d.ts",
-      "import": "./dist/src/extensions/code/extension/lib/prwatch.js",
-      "default": "./dist/src/extensions/code/extension/lib/prwatch.js"
-    },
     "./internal/grep": {
       "eve-source": "./dist/src/internal/grep.js",
       "types": "./dist/src/internal/grep.d.ts",
@@ -662,12 +656,12 @@
     "@vercel/sandbox": "catalog:",
     "@vercel/schedules": "0.0.0-alpha.19",
     "@vercel/sdk": "1.28.8",
-    "@workflow/core": "5.2.3",
-    "@workflow/errors": "5.0.5",
+    "@workflow/core": "5.3.0",
+    "@workflow/errors": "5.1.0",
     "@workflow/serde": "5.0.0",
-    "@workflow/world": "5.0.5",
-    "@workflow/world-local": "5.1.2",
-    "@workflow/world-vercel": "5.2.3",
+    "@workflow/world": "5.1.0",
+    "@workflow/world-local": "5.2.0",
+    "@workflow/world-vercel": "5.3.0",
     "ai": "catalog:",
     "chat": "4.42.0",
     "chokidar": "5.0.0",

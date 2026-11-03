@@ -11,6 +11,7 @@ import {
 import { SHOPIFY_SETUP } from "./shopify/setup.js";
 import { SLACK_SETUP } from "./slack/setup.js";
 import { TEAMS_SETUP } from "./teams/setup.js";
+import { TELEGRAM_SETUP } from "./telegram/setup.js";
 import type { SetupIntegration } from "./types.js";
 import { WEB_SETUP } from "./web/setup.js";
 
@@ -25,6 +26,7 @@ const SETUP_INTEGRATIONS: readonly SetupIntegration[] = [
   LINQ_SETUP,
   PHOTON_SETUP,
   TEAMS_SETUP,
+  TELEGRAM_SETUP,
   SHOPIFY_SETUP,
   SELF_MODIFICATION_SETUP,
   SELF_MODIFICATION_PRODUCTION_SETUP,

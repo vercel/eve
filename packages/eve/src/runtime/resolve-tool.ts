@@ -1,5 +1,10 @@
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
-import { isFrameworkTool, frameworkTool } from "#tools/provided/framework-tool.js";
+import {
+  isFrameworkTool,
+  frameworkTool,
+  isInteractionOnly,
+  markInteractionOnly,
+} from "#tools/provided/framework-tool.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
@@ -99,7 +104,10 @@ export async function resolveToolDefinition(
       sourceKind: "module",
       ...extractOptionalHooks(resolvedRecord, definition),
     };
-    return isFrameworkTool(resolvedRecord) ? frameworkTool(resolved) : resolved;
+    const marked = isFrameworkTool(resolvedRecord) ? frameworkTool(resolved) : resolved;
+    // Checked on the authored executor, so only a definition that runs a built-in interaction
+    // executor is marked, never one that merely shares its name.
+    return isInteractionOnly(resolvedRecord.execute) ? markInteractionOnly(marked) : marked;
   } catch (error) {
     if (error instanceof ResolveAgentError) {
       throw error;

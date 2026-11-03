@@ -136,15 +136,16 @@
  *             read surface via index.ts or the Workflow-safe view.ts.
  *             Only commit.ts and checkpoint-migrations.ts import requests.ts
  *             for saving and legacy upgrades.
- *   rule 51 — Only the session machine (`harness/session-machine/`) and the
- *             human-in-the-loop lifecycle it delegates to
- *             (`harness/hitl/`) build lifecycle events and read the
- *             machine's private state. The guard checks only those imports;
- *             it does not prove every state change emits events (approval
- *             candidates are still written directly, and `matchSignIns`
- *             emits none). The model step's streamed content (its calls) is
- *             built where it streams, and their results where eve runs them
- *             (`call-executor.ts`).
+ *   rule 51 — Only the kernel (`harness/session-machine/`, `harness/hitl/`)
+ *             builds session facts and reads the machine's private state. A
+ *             file builds a fact when it imports a builder from
+ *             `harness/{facts,call-facts,interaction-facts}.ts`, calls
+ *             `fact("…")`, or writes a catalog fact type in value position.
+ *             The baseline counts the places that still do, per file; it is
+ *             computed from this rule's output and must match it exactly, so
+ *             it only shrinks. Relay payloads use `relayEvent`; translators of
+ *             earlier stream versions and code outside the session that names
+ *             its own events after facts are exempt.
  *   rule 52 — The tracing library in `packages/tracing/src/` imports only
  *             itself and external packages. eve reaches it only through the
  *             vendored root, delegation, otel, and ai-sdk entrypoints under
@@ -176,6 +177,31 @@
  *             eve-owned Nitro id uses `#eve/`, and nothing pins Nitro's
  *             private virtual ids. Files that predate the rule are baselined
  *             and may only leave the baseline.
+ *   rule 60 — Session history changes through `changeHistory`
+ *             (`harness/session-machine/history.ts`) or a transition's `history`.
+ *             Writing `{ ...session, history }` elsewhere, or `history: …` after a
+ *             session spread with other properties between, skips the checks and the
+ *             resets a rewrite needs. A spread under another name isn't caught.
+ *   rule 61 — No file in the kernel (`harness/`) imports the Workflow runtime
+ *             directly: no `#compiled/@workflow/*`, `#internal/workflow/*`,
+ *             `#internal/workflow-bundle/*`, `workflow`, `@workflow/*`, or
+ *             `#runtime/attributes/emit.js` import. The workflow wrapper in
+ *             `execution/` reads Workflow metadata and passes what the kernel
+ *             needs (its callback URL, attribute sink) in. The rule checks
+ *             direct imports only: `harness/` still reaches Workflow code
+ *             through `execution/` and `runtime/`.
+ *   rule 62 — Only the gate mints a `Clearance`: `mintClearance` is called
+ *             only in `harness/clearance.ts` and `harness/tools.ts`
+ *             (`decideApproval`), and nothing casts `as Clearance`. The
+ *             harness's `invokeTool` requires one before it runs a call. Two
+ *             paths run `execute` without taking one: `execution/invoke-tool.ts`
+ *             decides approval itself, and a catalog route's `runEntryCall` runs
+ *             only inside `invokeTool`.
+ *   rule 63 — `definitions/` reaches the kernel only through the modules it
+ *             offers definitions: announcements, messages, the session's
+ *             current view, provider tool history, the usage sink, the
+ *             pending-approvals note, and the harness's types. A definition
+ *             that needs more of the kernel asks for it here first.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -296,12 +322,16 @@ function isTsLike(relPath) {
  *   rule46: Violation[];
  *   rule47: Violation[];
  *   rule50: Violation[];
- *   rule51: Violation[];
+ *   rule51: { current: Map<string, number>; violations: Violation[] };
  *   rule52: Violation[];
  *   rule53: Violation[];
  *   rule57: Violation[];
  *   rule58: Violation[];
  *   rule59: { allowlist: Set<string>; violations: Violation[] };
+ *   rule60: Violation[];
+ *   rule61: Violation[];
+ *   rule62: Violation[];
+ *   rule63: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -336,7 +366,7 @@ async function scanRepo(state) {
     checkRule46(posix, lines, state.rule46);
     checkRule47(posix, lines, state.rule47);
     checkRule50(posix, lines, state.rule50);
-    checkRule51(posix, lines, state.rule51);
+    checkRule51(posix, content, lines, state.rule51);
     if (posix.startsWith("packages/tracing/src/")) {
       for (const [index, line] of lines.entries()) {
         const imports = [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)];
@@ -387,6 +417,10 @@ async function scanRepo(state) {
     checkRule57(posix, lines, state.rule57);
     checkRule58(posix, lines, state.rule58);
     checkRule59(posix, lines, state.rule59);
+    checkRule60(posix, content, state.rule60);
+    checkRule61(posix, lines, state.rule61);
+    checkRule62(posix, lines, state.rule62);
+    checkRule63(posix, lines, state.rule63);
   }
 }
 
@@ -751,24 +785,69 @@ function checkRule53(posix, lines, violations) {
   });
 }
 
-// ---------- Rule 51: the session machine owns lifecycle ----------
+// ---------- Rule 51: the kernel builds session facts ----------
 
 const SESSION_MACHINE_DIR = "packages/eve/src/harness/session-machine/";
-const LIFECYCLE_EVENT_BUILDER_RE =
-  /\bcreate(?:Session(?:Started|Waiting|Failed|Completed)|Turn(?:Started|Completed|Failed|Cancelled|Waiting)|MessageReceived|Step(?:Started|Failed)|Input(?:Requested|Resolved)|Authorization(?:Required|Completed)|Approval(?:Candidate|Settled)|Task(?:Started|Settled)|ContextCleared|ResultCompleted)Event\b/;
-const CALL_EVENT_BUILDER_RE = /\bcreateAction(?:Result|sRequested)Event\b/;
-/** Where the model step streams its calls, runs them, and reports the calls they made. */
-const STREAM_CONTENT_FILES = new Set([
-  "packages/eve/src/harness/call-executor.ts",
-  "packages/eve/src/harness/emission.ts",
-  "packages/eve/src/harness/nested-actions.ts",
-  "packages/eve/src/harness/step-hooks.ts",
-  "packages/eve/src/harness/stream-actions.ts",
+/** The modules that build facts. Importing one of their builders is building a fact. */
+const FACT_BUILDER_MODULE_RE =
+  /(?:#harness\/|\.\.?\/(?:\.\.\/)*)(?:facts|call-facts|interaction-facts)\.js$/;
+const KERNEL_COMMIT_MODULE_RE = /#harness\/session-machine\/commit\.js$/;
+const FACT_BUILDER_FILES = new Set([
+  "packages/eve/src/harness/facts.ts",
+  "packages/eve/src/harness/call-facts.ts",
+  "packages/eve/src/harness/interaction-facts.ts",
 ]);
+/** What those modules export that isn't a fact: values facts carry, ids, and progress. */
+const FACT_VALUE_HELPERS = new Set([
+  "announcedKind",
+  "callProgress",
+  "capabilityOf",
+  "defined",
+  "errorInfoOf",
+  "signInInteractionId",
+  "signInRequest",
+  "toJsonValue",
+  "usageOf",
+]);
+/**
+ * Files that build facts without writing them: translators that read stored streams of earlier
+ * versions, and code outside the session that builds its own events under the same names
+ * (instrumentation and traces, a client's local reader, evals, the CLI's fakes).
+ */
+const FACT_READER_PREFIXES = [
+  "packages/eve/src/execution/v26-history.ts",
+  "packages/eve/src/execution/v26-history.fixtures.ts",
+  "packages/eve/src/execution/legacy-session/snapshot.ts",
+  "packages/eve/src/instrumentation/",
+  "packages/eve/src/tracing/",
+  "packages/eve/src/client/",
+  "packages/eve/src/evals/",
+  "packages/eve/src/cli/",
+];
+const FACT_CATALOG_PATH = "packages/eve/src/protocol/session-events/catalog.ts";
+/** @type {RegExp | undefined} */
+let inlineFactRe;
 const MACHINE_PRIVATE_IMPORT_RE = /["']#harness\/session-machine\/(?:state|events)\.js["']/;
 
-/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
-function checkRule51(posix, lines, violations) {
+/** Matches a fact type in value position, `type: "call.started",`, from the catalog's fact types. */
+async function loadInlineFactRe() {
+  const catalog = await readFile(join(REPO_ROOT, FACT_CATALOG_PATH), "utf8");
+  const body = catalog.slice(catalog.indexOf("export const FACT_CATALOG"));
+  const types = [...body.slice(0, body.indexOf("\n};")).matchAll(/^\s+"([a-z]+\.[a-z]+)":/gm)].map(
+    (match) => match[1].replace(".", "\\."),
+  );
+  if (types.length === 0) throw new Error(`rule 51: no fact types found in ${FACT_CATALOG_PATH}`);
+  inlineFactRe = new RegExp(`\\btype:\\s*"(?:${types.join("|")})"\\s*(?:,|\\}|$)`);
+}
+
+/**
+ * Counts the places a file builds session facts: a builder imported from a fact module, `fact(…)`,
+ * or a fact written inline. The baseline is what still builds them outside the kernel.
+ *
+ * @param {string} posix @param {string} content @param {string[]} lines
+ * @param {{ current: Map<string, number>; violations: Violation[] }} state
+ */
+function checkRule51(posix, content, lines, state) {
   if (
     !posix.startsWith("packages/eve/src/") ||
     posix.startsWith(SESSION_MACHINE_DIR) ||
@@ -780,28 +859,40 @@ function checkRule51(posix, lines, violations) {
   )
     return;
   lines.forEach((line, idx) => {
-    const builder = LIFECYCLE_EVENT_BUILDER_RE.exec(line)?.[0];
-    const callBuilder = STREAM_CONTENT_FILES.has(posix)
-      ? undefined
-      : CALL_EVENT_BUILDER_RE.exec(line)?.[0];
-    if (builder !== undefined || callBuilder !== undefined) {
-      violations.push({
-        rule: 51,
-        file: posix,
-        line: idx + 1,
-        message: `uses ${builder ?? callBuilder} outside harness/session-machine/. Only the session machine builds lifecycle events: return them from a transition and publish what it returns with \`applyTransition\`.`,
-      });
-    }
-    if (MACHINE_PRIVATE_IMPORT_RE.test(line)) {
-      violations.push({
+    if (MACHINE_PRIVATE_IMPORT_RE.test(line))
+      state.violations.push({
         rule: 51,
         file: posix,
         line: idx + 1,
         message:
           "imports the session machine's private state or event builders. Read execution state through `#harness/session-machine/view.js`; change it with a transition.",
       });
-    }
   });
+  if (FACT_BUILDER_FILES.has(posix) || FACT_READER_PREFIXES.some((p) => posix.startsWith(p)))
+    return;
+  let count = 0;
+  for (const match of content.matchAll(
+    /import\s+(type\s+)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/g,
+  )) {
+    if (match[1] !== undefined) continue;
+    const names = match[2]
+      .split(",")
+      .map((raw) => raw.trim())
+      .filter((name) => name !== "" && !name.startsWith("type "))
+      .map((name) => name.split(/\s+as\s+/)[0]);
+    // The kernel's commit module brands facts and transitions; only the kernel may.
+    if (KERNEL_COMMIT_MODULE_RE.test(match[3]))
+      count += names.filter((name) => name === "transition").length;
+    if (!FACT_BUILDER_MODULE_RE.test(match[3])) continue;
+    count += names.filter((name) => !FACT_VALUE_HELPERS.has(name)).length;
+  }
+  for (const line of lines) {
+    if (/\bfact\(\s*["']/.test(line)) count++;
+    // Branding facts as a commit is the kernel's: `commitOf`, or a cast.
+    if (/\bcommitOf\b|\bas Commit\b/.test(line)) count++;
+    if (inlineFactRe?.test(line)) count++;
+  }
+  if (count > 0) state.current.set(posix, count);
 }
 
 // ---------- Rules 57–59: eve's Nitro host is configured through its spec ----------
@@ -875,6 +966,117 @@ function checkRule59(posix, lines, state) {
         "`#nitro/` id literal detected. Name eve-owned Nitro virtual modules under `#eve/`, and assert on routes and handler behavior rather than Nitro's private virtual ids.",
     });
   });
+}
+
+// ---------- Rule 60: one writer for session history ----------
+
+const HISTORY_OWNER = "packages/eve/src/harness/session-machine/history.ts";
+/** Assembles a legacy snapshot from stored history; it changes nothing. */
+const HISTORY_ASSEMBLY_FILES = new Set([
+  "packages/eve/src/execution/legacy-session/completion-step.ts",
+]);
+// A spread of a session followed, in the same object, by its history: with other properties between,
+// or the shorthand `{ ...session, history }`.
+const SESSION_HISTORY_WRITE_RE = /\.\.\.\s*(?:[\w.]*\.)?session(?![\w.])[^{}]*?\bhistory\s*[:,}]/g;
+
+/** @param {string} posix @param {string} content @param {Violation[]} violations */
+function checkRule60(posix, content, violations) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    posix === HISTORY_OWNER ||
+    HISTORY_ASSEMBLY_FILES.has(posix) ||
+    posix.startsWith("packages/eve/src/internal/testing/") ||
+    posix.endsWith(".test.ts")
+  )
+    return;
+  for (const match of content.matchAll(SESSION_HISTORY_WRITE_RE)) {
+    violations.push({
+      rule: 60,
+      file: posix,
+      line: content.slice(0, match.index).split("\n").length,
+      message:
+        "writes session history directly. Change it with `changeHistory(session, { append | extend | repaired | rewrite })` from `#harness/session-machine/history.js`, or return `history` from a transition.",
+    });
+  }
+}
+
+// ---------- Rule 61: the kernel doesn't reach the Workflow runtime ----------
+
+const WORKFLOW_RUNTIME_SPECIFIER_RE =
+  /^(?:#compiled\/@workflow\/|#internal\/workflow(?:-bundle)?\/|@workflow\/|workflow(?:\/|$)|#runtime\/attributes\/emit\.js$)/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule61(posix, lines, violations) {
+  if (!posix.startsWith("packages/eve/src/harness/") || posix.endsWith(".test.ts")) return;
+  for (const [index, line] of lines.entries()) {
+    const specifier = IMPORT_SPECIFIER_RE.exec(line)?.[1];
+    if (specifier === undefined || !WORKFLOW_RUNTIME_SPECIFIER_RE.test(specifier)) continue;
+    violations.push({
+      rule: 61,
+      file: posix,
+      line: index + 1,
+      message:
+        "imports the Workflow runtime into the kernel. Read it in the workflow wrapper under `execution/` and pass what the kernel needs through `KernelConfig` or the step's context.",
+    });
+  }
+}
+
+// ---------- Rule 62: only the gate mints a clearance ----------
+
+const CLEARANCE_MINTERS = new Set([
+  "packages/eve/src/harness/clearance.ts",
+  "packages/eve/src/harness/tools.ts",
+]);
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule62(posix, lines, violations) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    CLEARANCE_MINTERS.has(posix) ||
+    posix.endsWith(".test.ts") ||
+    posix.startsWith("packages/eve/src/internal/testing/")
+  )
+    return;
+  lines.forEach((line, idx) => {
+    if (!/\bmintClearance\b|\bas Clearance\b/.test(line)) return;
+    violations.push({
+      rule: 62,
+      file: posix,
+      line: idx + 1,
+      message:
+        "mints a clearance outside the gate. A call's clearance comes from `decideApproval` or `approvedClearance`.",
+    });
+  });
+}
+
+// ---------- Rule 63: definitions reach the kernel through what it offers them ----------
+
+const DEFINITION_KERNEL_MODULES = new Set([
+  "#harness/announcements.js",
+  "#harness/execute-tool.js",
+  "#harness/hitl/approval-prompt.js",
+  "#harness/messages.js",
+  "#harness/provider-tool-history.js",
+  "#harness/session-machine/current.js",
+  "#harness/session-machine/view.js",
+  "#harness/types.js",
+  "#harness/usage-sink.js",
+]);
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule63(posix, lines, violations) {
+  if (!posix.startsWith("packages/eve/src/definitions/") || posix.endsWith(".test.ts")) return;
+  for (const [index, line] of lines.entries()) {
+    const specifier = IMPORT_SPECIFIER_RE.exec(line)?.[1];
+    if (specifier === undefined || !specifier.startsWith("#harness/")) continue;
+    if (DEFINITION_KERNEL_MODULES.has(specifier)) continue;
+    violations.push({
+      rule: 63,
+      file: posix,
+      line: index + 1,
+      message: `imports ${specifier}, which the kernel doesn't offer definitions. Use a module rule 63 lists, or add one there deliberately.`,
+    });
+  }
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -1900,6 +2102,7 @@ function diffCounts(current, baseline) {
 // ---------- Entry point ----------
 
 async function main() {
+  await loadInlineFactRe();
   const baselineRaw = await readFile(BASELINE_PATH, "utf8");
   const baseline = JSON.parse(baselineRaw);
 
@@ -1933,7 +2136,10 @@ async function main() {
     rule46: /** @type {Violation[]} */ ([]),
     rule47: /** @type {Violation[]} */ ([]),
     rule50: /** @type {Violation[]} */ ([]),
-    rule51: /** @type {Violation[]} */ ([]),
+    rule51: {
+      current: /** @type {Map<string, number>} */ (new Map()),
+      violations: /** @type {Violation[]} */ ([]),
+    },
     rule52: /** @type {Violation[]} */ ([]),
     rule53: /** @type {Violation[]} */ ([]),
     rule57: /** @type {Violation[]} */ ([]),
@@ -1942,6 +2148,10 @@ async function main() {
       allowlist: new Set(baseline.rule59_nitroVirtualIdAllowlist),
       violations: /** @type {Violation[]} */ ([]),
     },
+    rule60: /** @type {Violation[]} */ ([]),
+    rule61: /** @type {Violation[]} */ ([]),
+    rule62: /** @type {Violation[]} */ ([]),
+    rule63: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2049,12 +2259,30 @@ async function main() {
   violations.push(...state.rule47);
   violations.push(...(await checkFrameworkActionIdentity()));
   violations.push(...state.rule50);
-  violations.push(...state.rule51);
+  violations.push(...state.rule51.violations);
+  const rule51Baseline = baseline.rule51_factBuildersByFile ?? {};
+  for (const file of new Set([...state.rule51.current.keys(), ...Object.keys(rule51Baseline)])) {
+    const now = state.rule51.current.get(file) ?? 0;
+    const was = rule51Baseline[file] ?? 0;
+    if (now === was) continue;
+    violations.push({
+      rule: 51,
+      file,
+      message:
+        now > was
+          ? `builds session facts in ${now} place${now === 1 ? "" : "s"} (baseline: ${was}). Only the kernel (\`harness/session-machine/\`, \`harness/hitl/\`) builds facts: return them from a transition and commit what it returns. A relay payload uses \`relayEvent\`.`
+          : `builds session facts in ${now} place${now === 1 ? "" : "s"}, fewer than its baseline (${was}). Lower \`rule51_factBuildersByFile\` in scripts/guard-invariants-baseline.json.`,
+    });
+  }
   violations.push(...state.rule52);
   violations.push(...state.rule53);
   violations.push(...state.rule57);
   violations.push(...state.rule58);
   violations.push(...state.rule59.violations);
+  violations.push(...state.rule60);
+  violations.push(...state.rule61);
+  violations.push(...state.rule62);
+  violations.push(...state.rule63);
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });
