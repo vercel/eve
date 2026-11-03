@@ -232,6 +232,7 @@ function createRegisteredHarnessToolDefinition(input: {
     deferred: def.deferred,
     description: def.description,
     endsTurn: def.endsTurn,
+    errorCode: def.errorCode,
     executeInput: def.executeInput,
     execute: resolveAuthoredExecute({
       rawExecute,

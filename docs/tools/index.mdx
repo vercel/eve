@@ -67,6 +67,7 @@ export default defineTool({
 | `toModelOutput`        | full return        | [Changes what the model sees](#shape-what-the-model-sees-with-tomodeloutput). |
 | `label`                | readable tool name | [Sets activity text](#label-tool-activity).                                   |
 | `endsTurn`             | `false`            | [Ends the turn after success](#end-the-turn-after-a-tool-call).               |
+| `errorCode`            | none               | [Reports a returned result as failed](#report-a-returned-failure).            |
 | `deferred`             | `false`            | [Leaves the tool out of the tool list](#keep-a-tool-out-of-the-tool-list).    |
 | `availableInSubagents` | `true`             | [Offers the tool in delegated sessions](#hide-a-tool-from-delegated-agents).  |
 
@@ -85,6 +86,16 @@ Protect non-idempotent operations, such as charges or emails, with the strongest
 After a crash, completed steps replay their saved result, and an interrupted step runs again. A call that the step already started doesn't run again. The model reads that the call may have taken effect and decides whether to repeat it. See [Crash recovery](/docs/concepts/execution-model-and-durability#resuming-after-a-crash).
 
 For one-way provider notifications, see [Durable cross-channel notifications](/docs/patterns/durable-cross-channel-notifications).
+
+### Report a returned failure
+
+Some tools return a failure the model needs to read in full, such as a command's exit code and output. Set `errorCode` to report it without throwing:
+
+```ts
+errorCode: (output) => (output.exitCode === 0 ? undefined : "command-failed"),
+```
+
+eve calls `errorCode` with the `execute` return. When it returns a code, `call.settled` has `outcome: "failed"` and `error.code` set to that code, and the tool's `execute_tool` span records it as `error.type`. The model still reads the result as usual, and `call.settled` still carries the full output. Return codes from a fixed set, never text from the output, so traces can count failures by code. [Direct `invokeTool` calls](/docs/channels/custom#describe-the-agent-and-run-tools-directly) ignore `errorCode`.
 
 ## Gate a tool on human approval
 

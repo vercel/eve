@@ -186,6 +186,44 @@ it("keeps a thrown tool error's name in the durable call ending", async () => {
   });
 });
 
+it.each([
+  [{ exitCode: 1, stderr: "rejected" }, "non-fast-forward"],
+  [{ exitCode: 0, stderr: "" }, undefined],
+])(
+  "settles a returned %j with the code its errorCode reports while the model reads the result",
+  async (output, code) => {
+    const events: import("#protocol/session-event.js").SessionEvent[] = [];
+    const results = await executeInlineCalls({
+      abortSignal: undefined,
+      approvalMemory: { pending: [], remembered: {} },
+      beforeExecute: () => {},
+      excludedCallIds: new Set(),
+      messages: [],
+      publish: async (publication) => {
+        events.push(...eventsOf(publication));
+      },
+      toolCalls: [{ input: {}, toolCallId: "call-1", toolName: "push", type: "tool-call" }],
+      tools: new Map([
+        [
+          "push",
+          {
+            name: "push",
+            description: "Push a branch",
+            inputSchema: jsonSchema({ type: "object" }),
+            execute: async () => output,
+            errorCode: (result: unknown) =>
+              (result as typeof output).exitCode === 0 ? undefined : "non-fast-forward",
+          },
+        ],
+      ]),
+    });
+    expect(results.parts[0]?.output).toEqual({ type: "json", value: output });
+    const settled = events.find((event) => event.type === "call.settled")?.data;
+    expect(settled).toMatchObject({ output, outcome: code === undefined ? "completed" : "failed" });
+    expect(settled?.error?.code).toBe(code);
+  },
+);
+
 it.each(["policy", "prompt"] as const)(
   "settles a broken deferred %s without losing a sibling's result",
   async (failureAt) => {

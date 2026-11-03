@@ -7,6 +7,7 @@ import {
   type GitHubConfig,
   type GitHubShellInput,
 } from "./github-shell.ts";
+import { githubErrorCode } from "./github-error-code.ts";
 import { githubShellInputSchema } from "./github-shell-schema.ts";
 
 const GH_TOOL_SCOPE = {
@@ -47,6 +48,7 @@ export function defineGhTool(
     approval: ({ toolInput }) => githubShellApproval(toolInput as GitHubShellInput | undefined),
     inputSchema: githubShellInputSchema,
     outputSchema: ghOutputSchema,
+    errorCode: githubErrorCode,
     label: {
       start: (input) => input.description,
     },

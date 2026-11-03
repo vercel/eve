@@ -21,6 +21,8 @@ export interface HarnessToolDefinition {
   readonly description: string;
   /** A successful call ends the turn without a final reply; see `ToolDefinition.endsTurn`. */
   readonly endsTurn?: InternalToolDefinition["endsTurn"];
+  /** Reads a returned result as a failure; see `ToolDefinition.errorCode`. */
+  readonly errorCode?: (output: unknown) => string | undefined;
   readonly execute?: (input: any, options: ToolExecuteOptions) => any;
   /** Optional JSON input substituted when this tool starts its workflow body. */
   readonly executeInput?: (input: unknown) => JsonValue;

@@ -74,6 +74,7 @@ export interface InternalToolLabelDefinition {
 
 export interface InternalToolDefinition extends ToolDefinitionBase {
   readonly endsTurn?: ToolDefinition["endsTurn"];
+  readonly errorCode?: ToolDefinition["errorCode"];
   label?: InternalToolLabelDefinition;
   name: string;
   inputSchema: JsonObject | null;
@@ -294,6 +295,15 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    */
   endsTurn?: boolean | ((output: TOutput) => boolean | Promise<boolean>);
   /**
+   * Reports a result that `execute` returned as a failure. eve calls it with
+   * the output after each call that returns one. Return a short code from a
+   * fixed set, such as `"non-fast-forward"`, and the call settles as
+   * `failed` with that `error.code`, which traces record as `error.type`.
+   * The model still reads the result, so it can recover. Return `undefined`
+   * for a success. Never build the code from output text.
+   */
+  errorCode?: (output: TOutput) => string | undefined;
+  /**
    * Optional per-tool approval gate. The return value determines whether
    * user approval is required before executing this tool.
    *
@@ -344,6 +354,7 @@ export function defineTool<
 >(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
   endsTurn?: ToolDefinition<unknown, StandardJSONSchemaV1.InferOutput<TOutputSchema>>["endsTurn"];
+  errorCode?: ToolDefinition<unknown, StandardJSONSchemaV1.InferOutput<TOutputSchema>>["errorCode"];
   inputSchema: TInputSchema;
   outputSchema: TOutputSchema;
   execute(input: StandardSchemaV1.InferOutput<TInputSchema>, ctx: ToolContext): TReturn;
@@ -367,6 +378,7 @@ export function defineTool<
 >(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
   endsTurn?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["endsTurn"];
+  errorCode?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["errorCode"];
   inputSchema: TSchema;
   outputSchema?: JsonObject;
   execute(input: StandardSchemaV1.InferOutput<TSchema>, ctx: ToolContext): TReturn;
@@ -390,6 +402,7 @@ export function defineTool<
 >(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
   endsTurn?: ToolDefinition<unknown, StandardJSONSchemaV1.InferOutput<TOutputSchema>>["endsTurn"];
+  errorCode?: ToolDefinition<unknown, StandardJSONSchemaV1.InferOutput<TOutputSchema>>["errorCode"];
   inputSchema: JsonObject;
   outputSchema: TOutputSchema;
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
@@ -410,6 +423,7 @@ export function defineTool<
 export function defineTool<TReturn>(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
   endsTurn?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["endsTurn"];
+  errorCode?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["errorCode"];
   inputSchema: JsonObject;
   outputSchema?: JsonObject;
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
