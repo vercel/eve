@@ -27,7 +27,7 @@ const SIGNATURE = DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER;
 // behavior per host; file gates let a test step a worker without timers.
 const WORKER_SOURCE = `
 import { existsSync } from "node:fs";
-import { appendFile, writeFile } from "node:fs/promises";
+import { appendFile } from "node:fs/promises";
 import { workerData } from "node:worker_threads";
 
 const id = crypto.randomUUID();
@@ -92,7 +92,7 @@ export default {
   },
   ipc: {
     async onClose() {
-      if (workerData.closeMarker) await writeFile(workerData.closeMarker, "closed");
+      if (workerData.closeMarker) await appendFile(workerData.closeMarker, id + "\\n");
     },
   },
 };
@@ -130,6 +130,10 @@ async function startSupervisor() {
     url,
     whoami: async (): Promise<Identity> => (await (await fetch(url("/"))).json()) as Identity,
   };
+}
+
+async function lines(path: string): Promise<string[]> {
+  return (await readFile(path, "utf8")).trim().split("\n");
 }
 
 async function open(gate: string): Promise<void> {
@@ -286,7 +290,7 @@ describe("dev host supervisor", () => {
   it("keeps a host's workspace until its last recycled or spare worker retires", async () => {
     const { host, path, supervisor, whoami } = await startSupervisor();
     const bootLog = path("boots.log");
-    const boots = async () => (await readFile(bootLog, "utf8")).trim().split("\n").length;
+    const boots = async () => (await lines(bootLog)).length;
     const disposeFirst = vi.fn(async () => undefined);
     const disposeSecond = vi.fn(async () => undefined);
 
@@ -312,6 +316,20 @@ describe("dev host supervisor", () => {
 
     await supervisor.close();
     expect(disposeSecond).toHaveBeenCalledOnce();
+  });
+
+  it("runs a discarded spare's close hooks", async () => {
+    const { host, path, supervisor } = await startSupervisor();
+    const bootLog = path("boots.log");
+    const closeMarker = path("closed.log");
+    await supervisor.swapTo(host({ bootLog, closeMarker }));
+    supervisor.prepareSpare();
+    await vi.waitFor(async () => expect(await lines(bootLog)).toHaveLength(2));
+
+    // A new host retires the active worker and discards the old host's spare.
+    await supervisor.swapTo(host());
+    const booted = await lines(bootLog);
+    await vi.waitFor(async () => expect((await lines(closeMarker)).sort()).toEqual(booted.sort()));
   });
 
   it("lets a swap already in flight win over a crash restart", async () => {
@@ -375,7 +393,7 @@ describe("dev host supervisor", () => {
     const startedAt = performance.now();
     await Promise.all([supervisor.close(), supervisor.close()]);
     expect(performance.now() - startedAt).toBeLessThan(DEV_SERVER_CLOSE_BUDGET_MS);
-    await expect(readFile(closeMarker, "utf8")).resolves.toBe("closed");
+    await expect(lines(closeMarker)).resolves.toHaveLength(1);
     await reader.cancel().catch(() => undefined);
   });
 

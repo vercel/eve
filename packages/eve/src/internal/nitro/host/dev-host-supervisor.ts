@@ -273,7 +273,7 @@ export class DevHostSupervisor implements DevHostSwitch {
 
     let worker = useSpare ? await this.#takeSpare(record) : undefined;
     if (this.#closed) {
-      await worker?.runner.close(new Error("Development server is closing."));
+      await worker?.runner.close();
       throw new Error("Development server is closed.");
     }
     if (worker === undefined) {
@@ -294,7 +294,7 @@ export class DevHostSupervisor implements DevHostSwitch {
     }
 
     if (this.#closed) {
-      await worker.runner.close(new Error("Development server is closing."));
+      await worker.runner.close();
       throw new Error("Development server closed before the worker was ready.");
     }
 
@@ -347,10 +347,11 @@ export class DevHostSupervisor implements DevHostSwitch {
     return spare.worker;
   }
 
+  /** A booted spare ran Nitro's plugins, so it shuts down gracefully and runs their close hooks. */
   #discardSpare(): void {
     const spare = this.#spare;
     this.#spare = undefined;
-    void spare?.worker.runner.close(new Error("Spare development worker discarded."));
+    void spare?.worker.runner.close();
   }
 
   #dispose(record: HostRecord): Promise<void> {
