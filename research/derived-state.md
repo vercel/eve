@@ -456,11 +456,11 @@ only writer of facts and turn every authored file into a `Definition` with a sta
 - **Built-in session labels (#5866).** Stronger guarantees for one use case, with eve enforcing that
   labels only grow. It puts a security vocabulary in core and doesn't help budgets, quotas, or usage.
   Here the taint extension owns that guarantee in its reducers.
-- **Atomic state writes, as Pi Durable does.** Pi's extension docs have authors rebuild state by
-  scanning the branch's tool-result `details` or `appendEntry` records. That is derivation done by
-  hand, with no merging across agents, and policies can't read it. Pi Durable fixes lost writes a
-  different way: it writes state documents in the same atomic commit as transcript entries. In eve,
-  that would mean a hook's `defineState` writes join the commit of the event that triggered the hook,
+- **Rebuilding state by hand.** Some agent frameworks have extensions rebuild their state by
+  scanning earlier tool results or custom transcript entries on load. That is derivation done by
+  hand, with no merging across agents, and policies can't read it.
+- **Atomic state writes.** Another fix for lost writes is to save state documents in the same
+  atomic commit as the transcript entries that caused them. In eve, that would mean a hook's `defineState` writes join the commit of the event that triggered the hook,
   and `defineState` gains `fromChild`, `fromParent`, `stream`, and `telemetry`. That closes the
   interruption and delegation gaps without a new concept, and author code barely changes. It isn't
   lighter, and pure reducers still win:
