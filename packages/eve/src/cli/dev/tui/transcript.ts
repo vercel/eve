@@ -63,7 +63,7 @@ export interface TranscriptOptions {
  * (a task's end line, an agent's own finished row). Arrivals are reported
  * once; the renderer appends them at the live edge.
  */
-export interface TranscriptProjection {
+interface TranscriptProjection {
   readonly blocks: Block[];
   readonly arrivals: Block[];
 }

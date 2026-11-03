@@ -22,7 +22,7 @@ import type { PromptCommandExtensionName } from "./prompt-commands.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
 import type { VercelStatusEffect } from "./vercel-status.js";
 
-export type TuiSetupCommand = Exclude<PromptCommandExtensionName, "model">;
+type TuiSetupCommand = Exclude<PromptCommandExtensionName, "model">;
 
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
   Pick<SetupFlowRenderer, "readProviderPicker" | "setNavigation" | "waitForInterrupt">;
@@ -75,7 +75,7 @@ export interface TuiSetupFlows {
 }
 
 /** Setup owns flow-close behavior; the command adapter receives only the transcript outcome. */
-export interface TuiSetupCommandResult extends PromptCommandOutcome {
+interface TuiSetupCommandResult extends PromptCommandOutcome {
   message: string;
   /** The user dismissed this setup step without completing it. */
   cancelled?: true;

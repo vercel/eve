@@ -271,7 +271,7 @@ export function firstLine(text: string): string | undefined {
   return line?.trim();
 }
 
-export type SubagentStep = {
+type SubagentStep = {
   readonly key: string;
   /** Where the step ends among its messages' parts, to order it among the agent's tool calls. */
   readonly order: number;

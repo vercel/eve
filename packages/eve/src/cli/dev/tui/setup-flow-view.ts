@@ -43,7 +43,7 @@ import type { AskSurface, Settle, Surface } from "./surface.js";
 import type { Theme } from "./theme.js";
 
 /** What the setup flow needs from the TUI that hosts it. */
-export interface SetupFlowHost {
+interface SetupFlowHost {
   readonly theme: Theme;
   readonly killRing: KillRing;
   readonly ask: AskSurface;

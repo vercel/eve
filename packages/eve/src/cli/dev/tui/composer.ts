@@ -55,7 +55,7 @@ const catalogLoadingDelayMs = 500;
 /** Commands whose argument drawer opens as soon as they are completed from the command list. */
 const ARGUMENT_DRAWER_COMMANDS = new Set(["add", "login", "loglevel", "model"]);
 
-export interface ComposerHost {
+interface ComposerHost {
   readonly theme: Theme;
   readonly commands: readonly PromptCommandSpec[];
   readonly argumentSuggestions?: (

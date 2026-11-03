@@ -145,7 +145,7 @@ export interface FlowPanelLine {
 }
 
 /** One already-resolved animation frame. */
-export interface FlowPanelIndicator {
+interface FlowPanelIndicator {
   glyph: string;
 }
 
@@ -228,7 +228,7 @@ function renderFlowPanelStatus(status: FlowPanelStatus, theme: Theme): string {
   return `${renderIndicator(status.indicator, theme)} ${theme.colors.dim(status.text)}`;
 }
 
-export function flowMessageRows(lines: readonly FlowPanelLine[], theme: Theme): string[] {
+function flowMessageRows(lines: readonly FlowPanelLine[], theme: Theme): string[] {
   const c = theme.colors;
   const rows: string[] = [];
   const recent = lines.slice(-FLOW_PANEL_LINE_CAP);

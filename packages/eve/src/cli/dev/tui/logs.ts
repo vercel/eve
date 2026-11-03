@@ -16,7 +16,7 @@ export type BuildPhase =
   | { readonly phase: "complete" | "failed" };
 
 /** What one captured log entry changes: transcript blocks to commit, and the build phase. */
-export interface LogIngest {
+interface LogIngest {
   readonly blocks: Block[];
   readonly build?: BuildPhase;
 }
@@ -101,7 +101,7 @@ function presentBody(
  * `tui/setup-panel.ts changed`: paths shrink to their last two components and
  * anything past three folds into `+N more`.
  */
-export function summarizeChangedFiles(events: readonly WatcherChangeEvent[], more: number): string {
+function summarizeChangedFiles(events: readonly WatcherChangeEvent[], more: number): string {
   const paths = [
     ...new Set(
       events.map((event) =>
