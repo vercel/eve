@@ -68,7 +68,7 @@ export function createAuthoredAssetImportPlugin(input: {
         const { path, suffix } = splitImportSuffix(source);
         const resolvedPath = isAbsolute(path) ? path : resolve(dirname(importer), path);
         // A dotted code import, such as `./schema.v1` or a `./helpers.v2/` index, is no asset.
-        if (statSync(resolvedPath, { throwIfNoEntry: false })?.isFile() !== true) {
+        if (!isFile(resolvedPath)) {
           return undefined;
         }
         const canonicalPath = toCanonicalPath(resolvedPath);
@@ -121,6 +121,15 @@ export function createAuthoredAssetImportPlugin(input: {
       },
     },
   };
+}
+
+/** Unreadable paths, such as one that is too long, fall through to the next resolver. */
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function toCanonicalPath(path: string): string {
