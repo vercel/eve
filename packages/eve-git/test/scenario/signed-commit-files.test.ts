@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -46,7 +46,7 @@ globalThis.fetch = async (url, init = {}) => {
     const { input } = JSON.parse(init.body).variables;
     const env = { ...process.env, GIT_INDEX_FILE: path.join(path.dirname(remote), "api-index") };
     git(["read-tree", input.expectedHeadOid], { env });
-    for (const { path: file } of input.fileChanges.deletions) git(["update-index", "--force-remove", "--", file], { env });
+    for (const { path: file } of input.fileChanges.deletions) git(["update-index", "-z", "--index-info"], { env, input: "0 " + "0".repeat(40) + "\t" + file + "\0" });
     for (const { path: file, contents } of input.fileChanges.additions) {
       const blob = git(["hash-object", "-w", "--stdin"], { input: Buffer.from(contents, "base64") });
       git(["update-index", "--add", "--cacheinfo", "100644," + blob + "," + file], { env });
@@ -94,7 +94,14 @@ afterEach(async () => {
 
 test("publishes literal stage-like paths and safely deletes non-regular entries", async () => {
   await writeFile(join(work, "file.txt"), "different staged contents\n");
-  const paths = ["0:file.txt", "1:file.txt", "2:file.txt", "3:file.txt", ":file.txt", "line\nbreak.txt"];
+  const paths = [
+    "0:file.txt",
+    "1:file.txt",
+    "2:file.txt",
+    "3:file.txt",
+    ":file.txt",
+    "line\nbreak.txt",
+  ];
   for (const path of paths) await writeFile(join(work, path), `contents of ${path}\n`);
   await rm(join(work, "existing.sh"));
   await rm(join(work, "existing-link"));
@@ -107,11 +114,19 @@ test("publishes literal stage-like paths and safely deletes non-regular entries"
   assert.equal(await git(remote, "rev-parse", "feature^{tree}"), expectedTree);
   assert.equal(await git(work, "rev-parse", "HEAD"), stdout.trim());
   assert.equal(await git(work, "status", "--porcelain"), "?? untracked.txt");
-  for (const path of paths) assert.equal(await readFile(join(work, path), "utf8"), `contents of ${path}\n`);
+  for (const path of paths)
+    assert.equal(await readFile(join(work, path), "utf8"), `contents of ${path}\n`);
   assert.equal(await readFile(join(work, "untracked.txt"), "utf8"), "preserve me\n");
 });
 
-for (const kind of ["new executable", "mode change", "executable edit", "new symlink", "type change", "submodule"] as const) {
+for (const kind of [
+  "new executable",
+  "mode change",
+  "executable edit",
+  "new symlink",
+  "type change",
+  "submodule",
+] as const) {
   test(`rejects a ${kind} before contacting GitHub and preserves the checkout`, async () => {
     let path = "changed";
     if (kind === "new executable") {
@@ -132,7 +147,14 @@ for (const kind of ["new executable", "mode change", "executable edit", "new sym
     }
     await git(work, "add", "-A");
     if (kind === "submodule") {
-      await git(work, "update-index", "--add", "--cacheinfo", `160000,${await git(work, "rev-parse", "HEAD")},${path}`);
+      await mkdir(join(work, path));
+      await git(
+        work,
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        `160000,${await git(work, "rev-parse", "HEAD")},${path}`,
+      );
     }
     await writeFile(join(work, "untracked.txt"), "preserve me\n");
     const before = {
@@ -164,8 +186,18 @@ async function git(cwd: string, ...args: string[]) {
 }
 
 async function publish() {
-  return execFileAsync(process.execPath, [script, "--repo", "owner/repo", "--branch", "feature", "-m", "publish files"], {
-    cwd: work,
-    env: { ...ENV, GH_TOKEN: "not-used", NODE_OPTIONS: `--require=${preload}`, FAKE_REMOTE: remote, FAKE_LOG: log },
-  });
+  return execFileAsync(
+    process.execPath,
+    [script, "--repo", "owner/repo", "--branch", "feature", "-m", "publish files"],
+    {
+      cwd: work,
+      env: {
+        ...ENV,
+        GH_TOKEN: "not-used",
+        NODE_OPTIONS: `--require=${preload}`,
+        FAKE_REMOTE: remote,
+        FAKE_LOG: log,
+      },
+    },
+  );
 }

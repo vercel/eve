@@ -100,7 +100,7 @@ function stagedChanges() {
     if (status === "A" || status === "M" || status === "T") {
       // FileAddition carries no mode, so it cannot express every index entry safely.
       if (newMode !== "100644" || (oldMode !== "000000" && oldMode !== "100644")) {
-        throw new Error("cannot safely publish " + JSON.stringify(path) + " (mode " + oldMode + " -> " + newMode + "); gh-signed-commit only adds or updates non-executable regular files. Use native git commit with a configured signing key and git push for executable files, symlinks, submodules, or mode changes. Your staged changes are preserved.");
+        throw new Error("cannot safely publish " + JSON.stringify(path) + " (mode " + oldMode + " -> " + newMode + "); gh-signed-commit only adds or updates non-executable regular files. Use native git commit -S with a configured signing key and git push for executable files, symlinks, submodules, or mode changes. Your staged changes are preserved.");
       }
       additions.push({ path, contents: git("show", ":0:" + path).toString("base64") });
     } else if (status === "D") deletions.push({ path });
