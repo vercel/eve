@@ -7,7 +7,8 @@ import type {
   SessionStateValues,
   WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
-import { produce, StateRefs } from "#compiled/@workflow/core/state.js";
+import { produce } from "#compiled/@workflow/core/state.js";
+import { workflowStateRefsEnabled } from "#execution/install-workflow-state-refs.js";
 import { diffValue, snapshotValue } from "#shared/value-delta.js";
 
 // Steps only: the workflow body applies what this returns with `applySessionStateDelta`, and
@@ -56,7 +57,7 @@ export async function withSessionStateDelta(
     });
   }
   // Stored values arrive frozen with state references; step code edits copies.
-  const byReference = StateRefs.enabled();
+  const byReference = workflowStateRefsEnabled();
   const given = byReference
     ? {
         ...input,
