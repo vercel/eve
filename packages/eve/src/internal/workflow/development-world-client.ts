@@ -119,7 +119,9 @@ export function createDevelopmentWorkflowWorld(): World {
     createQueueHandler,
     runs: forwarded.groups.runs as World["runs"],
     steps: forwarded.groups.steps as World["steps"],
-    events: forwarded.groups.events as World["events"],
+    // `subscribe` is an optional synchronous callback API that cannot ride
+    // request/response forwarding; the runtime falls back to polling.
+    events: forwarded.groups.events as Omit<World["events"], "subscribe">,
     hooks: forwarded.groups.hooks as World["hooks"],
     streams: {
       ...forwarded.groups.streams,
