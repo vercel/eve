@@ -10,7 +10,7 @@ description: "Record whose private data a session read, ask that person before w
 
 The extension is a proof of concept. It ships inside the `eve` package and uses only [tags](./human-in-the-loop#tag-entries-for-policies), [hooks](./guides/hooks), [state](./concepts/state), [`ctx.session.audience`](./guides/session-context#ctxsession), and the agent-wide `approval` policy. Read [Limits](#limits) before you rely on it.
 
-[`eve/extensions/taint`](./taint-extension) answers a different question: who could have written what the model read. Mount either one, or both.
+[`eve/extensions/taint`](./taint-extension) answers a different question. It applies the Rule of Two against prompt injection, and asks only when untrusted content, sensitive data, and an external effect meet. This extension also gates the cases with no attacker in the loop: a write built from someone's private data, and a personal read where others can see the reply. Mount either one, or both.
 
 ## Mount the extension
 
@@ -53,7 +53,7 @@ eve doesn't interpret tags. The extension reads three of them:
 | `effect:external` | The call changes state or sends data outside the session.                          |
 | `effect:export`   | The call moves data somewhere bulk or persistent: an export, upload, or share.     |
 
-`effect:external` and `effect:export` mean the same thing to the taint extension.
+`effect:external` and `effect:export` mean the same thing to the taint extension, and taint counts `reads:personal` as sensitive data.
 
 ```ts title="agent/connections/notes.ts"
 import { defineMcpClientConnection } from "eve/connections";
