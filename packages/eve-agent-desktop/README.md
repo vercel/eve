@@ -124,6 +124,8 @@ AGENT_DESKTOP_LIVE=1 pnpm --filter @eve/agent-desktop test:live
 
 Tests live in `test/integration/` and `test/scenario/`; see [AGENTS.md](https://github.com/vercel/eve/tree/main/packages/eve-agent-desktop/AGENTS.md). The last two commands are opt-in locally. On pull requests that touch this package, CI checks each tool's argv against the targeted CLI version and drives gnome-calculator on Ubuntu. The live check needs Ubuntu 24.04 or later and root or passwordless sudo; it installs desktop packages.
 
+The [agent CLI bump workflow](../../.github/workflows/agent-cli-bump.yml) checks npm daily and opens a PR that moves `AGENT_DESKTOP_VERSION` when a newer agent-desktop is released, so those CI checks run against the new CLI before merge. To bump by hand, run `node .github/scripts/agent-cli-bump.mjs sync agent-desktop [version]` from the repository root.
+
 ## License
 
 Apache-2.0

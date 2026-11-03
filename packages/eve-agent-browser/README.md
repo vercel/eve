@@ -147,7 +147,7 @@ Tests exercise the built extension against in-memory sandbox doubles. They don't
 
 The MCP catalog and sandbox command helpers in `extension/lib/mcp-tools.json`, `shared.ts`, and `version.ts` are copied from `vercel-labs/agent-browser` at commit `2d1271baefa026161de333a0da55c0f9e118a07f` (agent-browser 0.41.1), under Apache-2.0. The published sandbox helpers use these local copies, so consumers don't need `@agent-browser/sandbox`.
 
-The [agent-browser bump workflow](../../.github/workflows/agent-browser-bump.yml) checks npm daily and opens a PR that refreshes those files together when a newer agent-browser is released. To bump by hand, run `node .github/scripts/agent-browser-bump.mjs sync [version]` from the repository root. Either way, review the exposed tools against the catalog changes listed in the PR and run the package tests.
+The [agent CLI bump workflow](../../.github/workflows/agent-cli-bump.yml) checks npm daily and opens a PR that refreshes those files together when a newer agent-browser is released. To bump by hand, run `node .github/scripts/agent-cli-bump.mjs sync agent-browser [version]` from the repository root. Either way, review the exposed tools against the catalog changes listed in the PR and run the package tests.
 
 ## License
 
