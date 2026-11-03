@@ -10,14 +10,30 @@ import {
   packageImportName,
   resolveConfiguredExternalDependency,
 } from "#internal/authored-package-boundary.js";
-import type { RolldownOutputAsset, RolldownOutputChunk } from "#internal/bundler/nitro-rolldown.js";
+import { escapeRegex } from "#internal/bundler/filters.js";
+import type { RolldownOutputAsset, RolldownOutputChunk } from "#internal/bundler/rolldown.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
+
+/** The parts of a written Rolldown bundle the check reads. */
+export type CheckedBundle = Readonly<
+  Record<
+    string,
+    | Pick<RolldownOutputChunk, "code" | "dynamicImports" | "fileName" | "imports" | "type">
+    | Pick<RolldownOutputAsset, "fileName" | "type">
+  >
+>;
 
 interface ExternalImport {
   readonly chunk: string;
   readonly probe: string;
   readonly specifier: string;
 }
+
+/**
+ * Nitro resolves a traced external to this placeholder and rewrites it only
+ * while rendering, so chunk metadata keeps the placeholder.
+ */
+const NITRO_TRACED_ID_RE = /^nitro:traced\/\d+\/(.+)$/;
 
 /** Placed beside a chunk, so `import.meta.resolve` resolves exactly as that chunk's imports do. */
 const PROBE_SOURCE = "export const resolve = (specifier) => import.meta.resolve(specifier);\n";
@@ -35,7 +51,7 @@ const PROBE_SOURCE = "export const resolve = (specifier) => import.meta.resolve(
  */
 export async function checkExternalDependencyOutput(input: {
   readonly appRoot: string;
-  readonly bundle: Readonly<Record<string, RolldownOutputChunk | RolldownOutputAsset>>;
+  readonly bundle: CheckedBundle;
   readonly externalDependencies: readonly string[];
   readonly outputDir: string;
 }): Promise<void> {
@@ -47,12 +63,21 @@ export async function checkExternalDependencyOutput(input: {
       continue;
     }
     const probe = join(dirname(join(outputDir, output.fileName)), probeName);
-    for (const specifier of [...output.imports, ...output.dynamicImports]) {
+    for (const id of [...output.imports, ...output.dynamicImports]) {
+      const traced = NITRO_TRACED_ID_RE.exec(id)?.[1];
+      const specifier = traced ?? id;
       if (
-        resolveConfiguredExternalDependency(specifier, input.externalDependencies) !== undefined
+        resolveConfiguredExternalDependency(specifier, input.externalDependencies) === undefined
       ) {
-        externalImports.push({ chunk: output.fileName, probe, specifier });
+        continue;
       }
+      // Nitro renders a traced import as the bare specifier when the traced
+      // copy is hoisted, and otherwise as a relative path to that copy, which
+      // is inside the output by construction.
+      if (traced !== undefined && !importsSpecifier(output.code, traced)) {
+        continue;
+      }
+      externalImports.push({ chunk: output.fileName, probe, specifier });
     }
   }
   if (externalImports.length === 0) {
@@ -73,6 +98,13 @@ export async function checkExternalDependencyOutput(input: {
       );
     }
   });
+}
+
+/** Whether rendered chunk code imports `specifier`, statically or by a literal dynamic import. */
+function importsSpecifier(code: string, specifier: string): boolean {
+  return new RegExp(
+    String.raw`(?:\bfrom|\bimport)\s*\(?\s*(["'\`])${escapeRegex(specifier)}\1`,
+  ).test(code);
 }
 
 /**

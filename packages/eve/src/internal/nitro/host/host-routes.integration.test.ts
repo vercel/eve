@@ -190,6 +190,16 @@ describe("rendered host routes", () => {
     );
   });
 
+  it("answers HEAD on a WebSocket-only path with 405 without resolving its hooks", async () => {
+    const host = await serve({ mode: "production" });
+
+    const head = await host.fetch("/voice", { method: "HEAD" });
+
+    expect(head.status).toBe(405);
+    expect(head.headers.get("allow")).toBe("GET");
+    expect(routeModules.dispatchChannelWebSocketRequest).not.toHaveBeenCalled();
+  });
+
   it("sends CORS headers with the 405 for a cross-origin HEAD", async () => {
     const host = await serve({ mode: "production" });
 
@@ -204,15 +214,15 @@ describe("rendered host routes", () => {
     expect(routeModules.dispatchChannelRequest).not.toHaveBeenCalled();
   });
 
-  it("registers each channel route by method, with HEAD only on GET-only paths", async () => {
+  it("registers each channel route by method, and HEAD only where it is declared", async () => {
     const { routes } = await serve({ mode: "production" });
     const methodsAt = (route: string) =>
       routes.handlers.filter((entry) => entry.route === route).map((entry) => entry.method);
     const handlerAt = (route: string, method: string) =>
       routes.handlers.find((entry) => entry.route === route && entry.method === method)?.handler;
 
-    expect(methodsAt("/stream")).toEqual(["GET", "HEAD", "POST", "OPTIONS"]);
-    expect(handlerAt("/stream", "HEAD")).toBe(handlerAt("/stream", "GET"));
+    // The router sends HEAD to the GET route, whose guard rejects it.
+    expect(methodsAt("/stream")).toEqual(["GET", "POST", "OPTIONS"]);
     expect(methodsAt("/health")).toEqual(["GET", "HEAD"]);
     expect(handlerAt("/health", "HEAD")).not.toBe(handlerAt("/health", "GET"));
     // WebSocket upgrades arrive as GET.

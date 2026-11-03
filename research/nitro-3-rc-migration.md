@@ -1,15 +1,15 @@
 ---
 issue: "None (maintainer-requested migration plan)"
 status: in-progress
-last_updated: "2026-10-30"
+last_updated: "2026-11-03"
 ---
 
 # Nitro 3 RC migration and host foundation
 
 ## Decision
 
-Move eve from `nitro@3.0.260903-beta` to `nitro@3.0.261029-rc`. Replace the undeclared, transitive
-`rolldown@1.2.9` with an exact, eve-declared `rolldown@1.2.16`.
+Move eve from `nitro@3.0.260903-beta` to the Nitro 3 RC (`nitro@3.0.261103-rc` at the bump).
+Replace the undeclared, transitive `rolldown@1.2.9` with an exact, eve-declared `rolldown@1.2.16`.
 
 Use the migration to rebuild eve's host layer into a materially simpler, data-driven foundation:
 
@@ -59,7 +59,7 @@ from scratch and supersedes the outside pull request
 
 | Package      | Today (lockfile)                      | Target                   | Who declares it                    |
 | ------------ | ------------------------------------- | ------------------------ | ---------------------------------- |
-| `nitro`      | 3.0.260903-beta                       | 3.0.261029-rc            | eve, exact                         |
+| `nitro`      | 3.0.260903-beta                       | 3.0.261103-rc            | eve, exact                         |
 | `rolldown`   | 1.2.9, via pnpm hoist only            | 1.2.16                   | eve, exact (new)                   |
 | `h3`         | 2.0.1-rc.32                           | 2.0.8 (stable)           | Nitro                              |
 | `rou3`       | 0.9.2                                 | 1.0.x                    | Nitro                              |
@@ -77,15 +77,9 @@ Rolldown 1.2.16 rather than 1.2.15, for two reasons:
 - Vite 8.3.5 depends on `rolldown ~1.2.14`, so apps that also use Vite can dedupe to a single
   native binding.
 
-Every new release falls inside `minimumReleaseAge: 2880`:
-
-| Release             | Eligible from              |
-| ------------------- | -------------------------- |
-| Nitro RC            | about 2026-10-31 12:00 UTC |
-| Rolldown 1.2.16     | about 2026-10-31 14:31 UTC |
-| `env-runner@0.3.11` | about 2026-11-01 01:31 UTC |
-
-pnpm resolves `^0.3.10` to 0.3.10 until then. Wait for those times; add no release-age exclusions.
+Rolldown 1.2.16 and `env-runner@0.3.11` are past `minimumReleaseAge: 2880` at the bump. The bump
+takes the newest RC on the day it lands, so `pnpm-workspace.yaml` excludes `nitro` from the
+release-age window, as it already does for `workflow` and the AI SDK.
 
 ## What the RC changes for eve
 
@@ -537,7 +531,7 @@ implementation details to behavior.
 - **Docs for any behavior that needs a decision** below, once decided.
 - **`apps/frameworks/tanstack`:** move the `nitro` pin to the RC in the bump PR.
 - **After the first eve release on the RC:**
-  - bump `apps/docs/registry.json` to `nitro@3.0.261029-rc` and `vite@8.3.5`;
+  - bump `apps/docs/registry.json` to the RC eve ships (`nitro@3.0.261103-rc`) and `vite@8.3.5`;
   - bump `personal-agent-template`'s `rolldown` to `~1.2.16`;
   - let template lockfiles follow the eve version.
 - **Docs changes:** use the `technical-writing` skill and run `pnpm docs:check`.
@@ -573,6 +567,23 @@ clean base and stays focused on what needs the RC.
    - The packed host-build scenario.
    - `AGENTS.md`, research docs, the tanstack framework pin, and a `patch` changeset with credit.
 4. **Post-release pins:** registry, Vite, and templates.
+
+### Status
+
+PRs 1 and 2 landed as #5692 and #5698. The bump moves eve onto the RC with every correctness item
+above: `deps: { install: false, paths: { rolldown } }`, `buildPlugins`, Rolldown output types,
+traced placeholders, the storage guard, Rolldown pruned from hosted graphs, the deleted routing
+plugin and debug-name filter, vendored env-runner 0.3, sandbox shutdown through close hooks, and
+the packed host-build scenario.
+
+These simplifications don't depend on the RC and follow separately:
+
+- the host supervisor on `RunnerManager`; `DrainedNitroDevServer` stays and runs env-runner 0.3
+  runners;
+- one generated runtime plugin;
+- the shared authored-plugin factory with Rolldown plugin types;
+- one tsconfig resolver for authored and workflow builds (the host already sets
+  `typescript.tsconfigPaths: false`).
 
 Build each PR as ordered, individually reviewable commits. Upstream asks are filed as issues on
 Nitro and env-runner, not as eve PRs.
@@ -661,7 +672,8 @@ in CI.
 ## Upstream asks
 
 - **Nitro:**
-  - a `deps` switch that fails closed instead of auto-installing;
+  - a `deps` switch that fails closed instead of auto-installing (shipped in the RC as
+    `deps.install`);
   - a c12 switch to skip the main config file, so frameworks don't need to point `configFile`
     somewhere else;
   - a WebSocket resolver that rejects unmatched upgrades, or protocol-typed route entries;

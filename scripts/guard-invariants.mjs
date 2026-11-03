@@ -166,7 +166,7 @@
  *   rule 56 — Retired: dangling references to stripped declarations are caught
  *             by `packages/eve/test/scenarios/packed-public-types.scenario.test.ts`.
  *   rule 57 — No `rollup:before` hooks under `packages/eve/src`. eve's build
- *             plugins are one ordered list passed as `rolldownConfig.plugins`;
+ *             plugins are one ordered list passed as `buildPlugins`;
  *             hooks that splice plugins into Nitro's bundler config reorder
  *             them behind the host's back.
  *   rule 58 — No writes to `nitro.options` (assignment, `.push(`, `.unshift(`)
@@ -202,6 +202,10 @@
  *             current view, provider tool history, the usage sink, the
  *             pending-approvals note, and the harness's types. A definition
  *             that needs more of the kernel asks for it here first.
+ *   rule 64 — eve never resolves a package from Nitro's directory: no
+ *             `nitro/package.json` lookups in `packages/eve/src` outside test
+ *             helpers. eve declares what it builds with, such as `rolldown`,
+ *             and hands it to Nitro through `deps.paths`.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -332,6 +336,7 @@ function isTsLike(relPath) {
  *   rule61: Violation[];
  *   rule62: Violation[];
  *   rule63: Violation[];
+ *   rule64: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -421,6 +426,7 @@ async function scanRepo(state) {
     checkRule61(posix, lines, state.rule61);
     checkRule62(posix, lines, state.rule62);
     checkRule63(posix, lines, state.rule63);
+    checkRule64(posix, lines, state.rule64);
   }
 }
 
@@ -925,7 +931,7 @@ function checkRule57(posix, lines, violations) {
       file: posix,
       line: idx + 1,
       message:
-        "`rollup:before` hook detected. Add eve build plugins to the ordered list in internal/nitro/host/host-plugins.ts, which the host passes as `rolldownConfig.plugins`, instead of splicing them into Nitro's bundler config.",
+        "`rollup:before` hook detected. Add eve build plugins to the ordered list in internal/nitro/host/host-plugins.ts, which the host passes as `buildPlugins`, instead of splicing them into Nitro's bundler config.",
     });
   });
 }
@@ -945,6 +951,28 @@ function checkRule58(posix, lines, violations) {
       line: idx + 1,
       message:
         "`nitro.options` write detected. eve's host is configured entirely by the config passed to `createNitro`: derive the value in internal/nitro/host/host-spec.ts and render it in create-host-nitro.ts's `toNitroConfig`.",
+    });
+  });
+}
+
+const EVE_TESTING_DIR = "packages/eve/src/internal/testing/";
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule64(posix, lines, violations) {
+  if (!posix.startsWith(EVE_SRC_DIR) || posix.startsWith(EVE_TESTING_DIR)) return;
+  if (/\.test\.[cm]?ts$/.test(posix)) return;
+  lines.forEach((line, idx) => {
+    if (!line.includes("nitro/package.json")) return;
+    violations.push({
+      rule: 64,
+      file: posix,
+      line: idx + 1,
+      message:
+        "Package resolved through Nitro's directory. Nitro installs its builder and storage packages on demand, so a consumer install may not have them: declare the package in eve's own dependencies, resolve it from eve, and hand it to Nitro through `deps.paths`.",
     });
   });
 }
@@ -2152,6 +2180,7 @@ async function main() {
     rule61: /** @type {Violation[]} */ ([]),
     rule62: /** @type {Violation[]} */ ([]),
     rule63: /** @type {Violation[]} */ ([]),
+    rule64: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2283,6 +2312,7 @@ async function main() {
   violations.push(...state.rule61);
   violations.push(...state.rule62);
   violations.push(...state.rule63);
+  violations.push(...state.rule64);
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });

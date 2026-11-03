@@ -162,9 +162,11 @@ describe("startProductionServer", () => {
 
   it("keeps inherited variables that change how the built server listens or shuts down out of it", async () => {
     // srvx skips graceful shutdown, and so Nitro's close hooks, when CI or
-    // TEST is set; a socket path would replace the port eve waits on.
+    // TEST is set, and SERVER_SHUTDOWN_TIMEOUT would outlast eve's kill
+    // grace; a socket path would replace the port eve waits on.
     vi.stubEnv("CI", "1");
     vi.stubEnv("NITRO_UNIX_SOCKET", "/tmp/eve.sock");
+    vi.stubEnv("SERVER_SHUTDOWN_TIMEOUT", "60");
     vi.stubEnv("TEST", "1");
     const { startProductionServer } = await import("./start-production-server.js");
     const child = createChildProcess();
@@ -173,7 +175,12 @@ describe("startProductionServer", () => {
 
     const server = await startProductionServer("/tmp/app", { host: "127.0.0.1", port: 4321 });
     const { env } = mocks.spawn.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv };
-    expect({ CI: env.CI, NITRO_UNIX_SOCKET: env.NITRO_UNIX_SOCKET, TEST: env.TEST }).toEqual({});
+    expect({
+      CI: env.CI,
+      NITRO_UNIX_SOCKET: env.NITRO_UNIX_SOCKET,
+      SERVER_SHUTDOWN_TIMEOUT: env.SERVER_SHUTDOWN_TIMEOUT,
+      TEST: env.TEST,
+    }).toEqual({});
     await server.close();
   });
 

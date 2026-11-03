@@ -134,10 +134,12 @@ CI.
    public APIs. Wrap them in eve-owned surfaces so internals can change freely.
    Add runtime `dependencies` only as a last resort: prefer vendoring code or
    generated artifacts into the repository and listing the source package under
-   `devDependencies`. The `eve` package should aim to keep `nitro` as its only
-   runtime dependency. This keeps eve installs as small as possible and avoids
-   exposure to hijacked nested dependencies that are not pinned directly in the
-   main lockfile.
+   `devDependencies`. The `eve` package should aim to keep `nitro` and
+   `rolldown` as its only runtime dependencies. This keeps eve installs as
+   small as possible and avoids exposure to hijacked nested dependencies that
+   are not pinned directly in the main lockfile. eve hands its own `rolldown`
+   to Nitro through `deps.paths` and never lets Nitro resolve or install a
+   package on demand.
 
 6. **Stable APIs follow semantic versioning.** Break a stable public API only
    in a major release. Prefer additive changes; when a stable API needs an
@@ -162,6 +164,12 @@ CI.
     documentation. Comment only what the code cannot say itself — a non-obvious
     why, an invariant, a surprising edge case. Public API docs (principle 1) are
     the exception.
+
+11. **Configure Nitro from data.** eve's Nitro host is built from one typed host
+    spec, one ordered plugin list, and one route table. Follow the foundation
+    invariants in
+    [`research/nitro-3-rc-migration.md`](./research/nitro-3-rc-migration.md#foundation-invariants)
+    when touching `internal/nitro/`.
 
 Machine-checkable invariants are enforced by `pnpm guard:invariants`, which
 runs in the CI lint job. If the guard fails, fix the violation rather than

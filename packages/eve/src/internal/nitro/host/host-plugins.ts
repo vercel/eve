@@ -15,14 +15,10 @@ import { exactRegex, pathsRegex } from "#internal/bundler/filters.js";
 import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
 import { createHostedGraphPlugin } from "#internal/nitro/host/hosted-graph-plugin.js";
 import { workflowHandlerPath } from "#internal/nitro/host/host-routes.js";
-import { createNitroRoutingImportSpecifierPlugin } from "#internal/nitro/host/nitro-routing-import-specifier-plugin.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 import type { WorkflowArtifacts } from "#internal/workflow-bundle/builder.js";
-import type { NitroConfig } from "nitro/types";
+import type { NitroBuildPlugin } from "nitro/types";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
-
-/** Rolldown plugins as Nitro's config accepts them. */
-type HostBuildPlugins = NonNullable<NonNullable<NitroConfig["rolldownConfig"]>["plugins"]>;
 
 export interface HostPluginsInput {
   readonly appRoot: string;
@@ -31,19 +27,19 @@ export interface HostPluginsInput {
   readonly externals: ExternalsPolicy;
   readonly extensionMounts: readonly CompiledExtensionMount[];
   readonly extensionOverridePaths: ReadonlyMap<string, string>;
-  readonly instrumentationEntryPlugin?: HostBuildPlugins;
+  readonly instrumentationEntryPlugin?: NitroBuildPlugin;
   readonly instrumentationSourcePaths?: readonly string[];
   readonly workflowArtifacts: WorkflowArtifacts;
 }
 
 /**
- * eve's host build plugins in the order they must run, ahead of Nitro's own.
- * Step transforms and side-effect resolution come first so extension-mount
- * resolution never claims a workflow module.
+ * eve's host build plugins in the order they must run, all ahead of Nitro's
+ * own. Step transforms and side-effect resolution come first so
+ * extension-mount resolution never claims a workflow module.
  */
-export function createHostPlugins(input: HostPluginsInput): HostBuildPlugins {
+export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
   const { stepTargets, stepsPath, workflowsPath } = input.workflowArtifacts;
-  return [
+  const plugins: (NitroBuildPlugin | null)[] = [
     stepTargets.length === 0 ? null : createStepTransformPlugin(input.appRoot, stepTargets),
     createSideEffectModulesPlugin(input.appRoot, [
       ...stepTargets,
@@ -52,7 +48,6 @@ export function createHostPlugins(input: HostPluginsInput): HostBuildPlugins {
       workflowHandlerPath(input.workflowArtifacts),
       ...(input.instrumentationSourcePaths ?? []),
     ]),
-    createNitroRoutingImportSpecifierPlugin(),
     input.instrumentationEntryPlugin ?? null,
     createNodeEsmCompatBannerPlugin(),
     // Before Nitro's externals and tracing, so a pseudo-package never reaches
@@ -71,7 +66,10 @@ export function createHostPlugins(input: HostPluginsInput): HostBuildPlugins {
       authoredSourceOnly: true,
       packageRoot: input.authoredPackageRoot,
     }),
-  ].filter((plugin) => plugin !== null);
+  ];
+  return plugins
+    .filter((plugin) => plugin !== null)
+    .map((plugin) => ({ ...plugin, enforce: "pre" as const }));
 }
 
 function normalizePath(path: string): string {

@@ -1,6 +1,6 @@
 import { dirname, isAbsolute, resolve } from "node:path";
 
-import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk } from "#internal/bundler/rolldown.js";
 
 const ENTRY = "\0eve-test-entry";
 

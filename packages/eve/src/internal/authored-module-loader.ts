@@ -37,10 +37,7 @@ import {
 import { expectObjectRecord, interopAuthoredModuleNamespace } from "#internal/authored-module.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
-import {
-  buildSingleRolldownChunk,
-  buildWithNitroRolldown,
-} from "#internal/bundler/nitro-rolldown.js";
+import { buildSingleRolldownChunk, buildWithRolldown } from "#internal/bundler/rolldown.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import { prepareAuthoredWorkflowDirectives } from "#internal/workflow-bundle/authored-workflow-directives.js";
@@ -273,7 +270,7 @@ export async function bundleExtensionDistributionGraph(input: {
   ];
 
   try {
-    const result = await buildWithNitroRolldown({
+    const result = await buildWithRolldown({
       cwd: input.packageRoot,
       input: Object.fromEntries(input.entries.map((entry) => [entry.name, entry.path])),
       platform: "node",

@@ -32,7 +32,7 @@ export function renderRouteConfigModule(input: { readonly configPath: string }):
   ].join("\n");
 }
 
-/** Statements that run first in a GET handler whose path has no HEAD route. */
+/** Statements that run first in the GET handler of a path with no HEAD route. */
 function headGuard(allow: readonly string[] | undefined): {
   readonly imports: readonly string[];
   readonly statements: readonly string[];
@@ -111,12 +111,23 @@ export function renderChannelPreflightHandler(input: {
   ].join("\n");
 }
 
-export function renderChannelWebSocketHandler(input: { readonly routeKey: string }): string {
+/** A WebSocket-only channel path, with the HEAD guard when its path has no HEAD route. */
+export function renderChannelWebSocketHandler(input: {
+  readonly allow?: readonly string[];
+  readonly routeKey: string;
+}): string {
+  const guard = headGuard(input.allow);
+  const dispatch = `dispatchChannelWebSocketRequest(event, ${JSON.stringify(input.routeKey)}, config)`;
+  const hooks =
+    guard.statements.length === 0
+      ? `(event) => ${dispatch}`
+      : [`(event) => {`, ...guard.statements, `  return ${dispatch};`, `}`].join("\n");
   return [
+    ...guard.imports,
     `import { defineWebSocketHandler } from ${importNitroModule("nitro")};`,
     `import { dispatchChannelWebSocketRequest } from ${importSourceModule("src/internal/nitro/routes/channel-dispatch.ts")};`,
     importRouteConfig,
-    `export default defineWebSocketHandler((event) => dispatchChannelWebSocketRequest(event, ${JSON.stringify(input.routeKey)}, config));`,
+    `export default defineWebSocketHandler(${hooks});`,
   ].join("\n");
 }
 
