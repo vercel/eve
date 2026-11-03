@@ -53,6 +53,16 @@ describe("withSessionStateDelta", () => {
     expect(result.stateDelta.serializedContext).toBeUndefined();
   });
 
+  it("gives step code editable copies of frozen values when state references are off", async () => {
+    const serializedContext = Object.freeze({ count: 1 });
+    const result = await withSessionStateDelta({ serializedContext }, async (given) => {
+      (given.serializedContext as { count: number }).count = 2;
+      return { serializedContext: given.serializedContext };
+    });
+    expect(result.stateDelta.serializedContext).toEqual(diffValue({ count: 1 }, { count: 2 }));
+    expect(serializedContext.count).toBe(1);
+  });
+
   it("returns the usual structural delta when state references are off", async () => {
     const before = { count: 1, settings: { theme: "dark" } };
     const after = { ...before, count: 2 };

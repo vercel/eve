@@ -56,15 +56,14 @@ export async function withSessionStateDelta(
       sessionWritable,
     });
   }
-  // Stored values arrive frozen with state references; step code edits copies.
+  // Values rebuilt from state references are frozen, even after the setting is
+  // turned off, so step code always edits copies; `base` stays untouched.
+  const given = {
+    ...input,
+    serializedContext: snapshotValue(input.serializedContext),
+    sessionState: snapshotValue(input.sessionState),
+  };
   const byReference = workflowStateRefsEnabled();
-  const given = byReference
-    ? {
-        ...input,
-        serializedContext: base.serializedContext as SessionStateValues["serializedContext"],
-        sessionState: base.sessionState as SessionStateValues["sessionState"],
-      }
-    : input;
   const { serializedContext, sessionState, history, ...result } = await work(given);
   const candidateState = sessionState ?? base.sessionState;
   const next = {
