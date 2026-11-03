@@ -13,13 +13,9 @@ export {
   type RecallInboundResultOrPromise,
   type RecallReceiveTarget,
   type RecallRespondInput,
-} from "#public/channels/recall/recallChannel.js";
+} from "./recallChannel.js";
 
-export {
-  isAddressedTo,
-  recallMeetingAuth,
-  recallParticipantAuth,
-} from "#public/channels/recall/defaults.js";
+export { isAddressedTo, recallMeetingAuth, recallParticipantAuth } from "./defaults.js";
 
 export {
   callRecallApi,
@@ -38,7 +34,7 @@ export {
   type RecallBotConfigInput,
   type RecallFetch,
   type RecallSendChatMessageInput,
-} from "#public/channels/recall/api.js";
+} from "./api.js";
 
 export {
   parseRecallEvent,
@@ -49,10 +45,10 @@ export {
   type RecallParticipantEvent,
   type RecallSpeechEvent,
   type RecallStatusEvent,
-} from "#public/channels/recall/inbound.js";
+} from "./inbound.js";
 
 export {
   resolveRecallVerificationSecret,
   signRecallWebhook,
   verifyRecallWebhook,
-} from "#public/channels/recall/verify.js";
+} from "./verify.js";

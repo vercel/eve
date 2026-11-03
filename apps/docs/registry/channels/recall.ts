@@ -1,3 +1,3 @@
-import { recallChannel } from "eve/channels/recall";
+import { recallChannel } from "@eve/recall";
 
 export default recallChannel();

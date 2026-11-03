@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { withChannelConversation } from "#internal/testing/channel-conformance/harness.js";
-import { recallDriver } from "#internal/testing/channel-conformance/recall-driver.js";
+import { recallDriver } from "./recall-driver.js";
 
 const ASIDE = "I think the staging numbers looked fine";
 

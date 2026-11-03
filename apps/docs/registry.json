@@ -2909,6 +2909,7 @@
       "type": "registry:item",
       "title": "Recall.ai",
       "description": "Put your agent in Zoom, Google Meet, and Teams meetings through Recall.ai bots.",
+      "dependencies": ["@eve/recall@^0.1.0-rc.0"],
       "envVars": {
         "RECALL_API_KEY": "",
         "RECALL_WORKSPACE_VERIFICATION_SECRET": ""

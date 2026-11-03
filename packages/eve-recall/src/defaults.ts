@@ -1,22 +1,22 @@
-import type { Interaction } from "#channel/interaction-prompts.js";
-import { renderTextInteraction } from "#channel/resolve-text.js";
+import type { SessionAuthContext } from "eve/context";
+import type { Interaction } from "eve/events";
 import {
   postedIn,
   signInChallengeText,
   type SignIn,
   type SignInSurface,
-} from "#channel/sign-in.js";
-import { surfaceEvents } from "#channel/surface.js";
-import type { SessionAuthContext } from "#channel/types.js";
-import type { RecallParticipant } from "#public/channels/recall/inbound.js";
+  renderTextInteraction,
+  surfaceEvents,
+} from "eve/internal/channels";
+import type { RecallParticipant } from "./inbound.js";
 import type {
   RecallChannelEvents,
   RecallContext,
   RecallEventContext,
   RecallInboundResult,
   RecallRespondInput,
-} from "#public/channels/recall/recallChannel.js";
-import type { RecallMeetingEvent } from "#public/channels/recall/inbound.js";
+} from "./recallChannel.js";
+import type { RecallMeetingEvent } from "./inbound.js";
 
 const RECALL_AUTHENTICATOR = "recall-webhook";
 

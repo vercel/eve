@@ -1,5 +1,3 @@
-import { isObject } from "#shared/guards.js";
-
 /** A meeting participant as Recall reports them. Names and emails come from the meeting platform and are not verified. */
 export interface RecallParticipant {
   /** Recall's participant id, unique within one bot's meeting. */
@@ -137,4 +135,8 @@ function normalizeText(text: string): string {
     .replace(/\s+([,.!?;:])/gu, "$1")
     .replace(/\s+/gu, " ")
     .trim();
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -1,19 +1,20 @@
-import type { ChannelFrom } from "#channel/channel-operations.js";
-import type { PromptQueueState } from "#channel/prompt-queue.js";
-import type { RouteHandler } from "#channel/routes.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
-import { type ContextAccessor, ContextKey } from "#context/key.js";
-import { attachInputText } from "#internal/input-text.js";
-import { createLogger } from "#internal/logging.js";
-import type { SessionEvent } from "#protocol/session-event.js";
 import {
   type Channel,
   type ChannelContinuationOps,
-  type ChannelEventContext,
-  type ChannelEventOf,
+  type ChannelEvents,
+  type ChannelFrom,
   defineChannel,
   POST,
-} from "#public/definitions/channel.js";
+  type TurnPolicy,
+} from "eve/channels";
+import type { SessionAuthContext } from "eve/context";
+import {
+  type ContextAccessor,
+  ContextKey,
+  createLogger,
+  type PromptQueueState,
+  type RouteHandler,
+} from "eve/internal/channels";
 import {
   callRecallApi,
   createRecallBot,
@@ -28,19 +29,16 @@ import {
   startRecallOutputMedia,
   stopRecallOutputMedia,
   type RecallApiOptions,
-} from "#public/channels/recall/api.js";
+} from "./api.js";
 import {
   defaultEvents,
   defaultOnMeetingEvent,
   defaultShouldRespond,
   isAddressedTo,
   matchSpokenOption,
-} from "#public/channels/recall/defaults.js";
-import { parseRecallEvent, type RecallMeetingEvent } from "#public/channels/recall/inbound.js";
-import {
-  resolveRecallVerificationSecret,
-  verifyRecallWebhook,
-} from "#public/channels/recall/verify.js";
+} from "./defaults.js";
+import { parseRecallEvent, type RecallMeetingEvent } from "./inbound.js";
+import { resolveRecallVerificationSecret, verifyRecallWebhook } from "./verify.js";
 
 const log = createLogger("recall.channel");
 
@@ -80,6 +78,8 @@ export interface RecallChannelState extends PromptQueueState {
    * did. Cleared when the turn ends.
    */
   replyTo?: string | null;
+  /** @internal The request eve's prompt queue last showed, which a typed reply answers. */
+  shownPromptId?: string;
   /** The options of the prompt last shown, so a spoken or loosely typed reply can pick one. */
   shownOptions?: { requestId: string; options: { id: string; label: string }[] };
   /** Set while a bot `receive` sent is still joining; chat waits in `outbox` until it hears the meeting. */
@@ -175,22 +175,18 @@ export type RecallInboundResultOrPromise =
   | undefined
   | Promise<RecallInboundResult | undefined>;
 
-type RecallEventHandler<T extends SessionEvent["type"]> = (
-  event: ChannelEventOf<T>,
-  ctx: ChannelEventContext<RecallEventContext>,
-) => void | Promise<void>;
-
 /** Event handlers supported by `recallChannel({ events })`. */
-export interface RecallChannelEvents {
-  readonly "turn.started"?: RecallEventHandler<"turn.started">;
-  readonly "call.requested"?: RecallEventHandler<"call.requested">;
-  readonly "call.settled"?: RecallEventHandler<"call.settled">;
-  readonly "content.completed"?: RecallEventHandler<"content.completed">;
-  readonly "interaction.opened"?: RecallEventHandler<"interaction.opened">;
-  readonly "interaction.settled"?: RecallEventHandler<"interaction.settled">;
-  readonly "turn.settled"?: RecallEventHandler<"turn.settled">;
-  readonly "session.ended"?: RecallEventHandler<"session.ended">;
-}
+export type RecallChannelEvents = Pick<
+  ChannelEvents<RecallChannelContext>,
+  | "turn.started"
+  | "call.requested"
+  | "call.settled"
+  | "content.completed"
+  | "interaction.opened"
+  | "interaction.settled"
+  | "turn.settled"
+  | "session.ended"
+>;
 
 /** Target accepted by `receive(recall, { target })`: sends a new bot to a meeting. */
 export interface RecallReceiveTarget {
@@ -315,11 +311,15 @@ export function recallChannel(config: RecallChannelConfig = {}): RecallChannel {
       }
       const option =
         "text" in event ? shownOptionIn(channel.state, event.text, botName) : undefined;
-      // A pending prompt resolves against the delivery's own answer text, not a replacement's.
-      if (option !== undefined) attachInputText(payload, option.id);
-      if (transcript.length === 0) return;
+      if (option === undefined && transcript.length === 0) return;
       const { state: _state, ...delivery } = payload;
-      return { ...delivery, context: [...(payload.context ?? []), formatTranscript(transcript)] };
+      return {
+        ...delivery,
+        ...(option !== undefined && { answerText: option.id }),
+        ...(transcript.length > 0 && {
+          context: [...(payload.context ?? []), formatTranscript(transcript)],
+        }),
+      };
     },
 
     routes: [
@@ -413,20 +413,15 @@ async function dispatch(input: {
   if (result === null || result === undefined) return;
 
   try {
-    await input.from(event.botId).send(
-      result.message ?? formatMeetingEvent(event),
-      attachInputText(
-        {
-          auth: result.auth,
-          idempotencyKey: input.deliveryId ?? undefined,
-          context: [formatRecallContextBlock(event)],
-          state: { botId: event.botId, event, platform: null },
-          title: result.title,
-        },
-        // The speaker prefix stays model-visible; a pending prompt matches what they said.
-        answerTextOf(event, input.botName),
-      ),
-    );
+    await input.from(event.botId).send(result.message ?? formatMeetingEvent(event), {
+      // The speaker prefix stays model-visible; a pending prompt matches what they said.
+      answerText: answerTextOf(event, input.botName),
+      auth: result.auth,
+      idempotencyKey: input.deliveryId ?? undefined,
+      context: [formatRecallContextBlock(event)],
+      state: { botId: event.botId, event, platform: null },
+      title: result.title,
+    });
   } catch (error) {
     log.error("Recall delivery failed", { error });
   }

@@ -14,5 +14,5 @@
     "customConditions": ["eve-source"]
   },
   "include": ["src/**/*.ts", "bin/**/*.ts", "test/**/*.ts"],
-  "exclude": ["test/tui-client/**/*.ts"]
+  "exclude": ["test/tui-client/**/*.ts", "test/channels/**/*.ts"]
 }

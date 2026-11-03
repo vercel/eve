@@ -1,8 +1,5 @@
-import {
-  createWorkflowCallbackUrl,
-  resolveWorkflowCallbackBaseUrl,
-} from "#execution/workflow-callback-url.js";
-import { RECALL_REALTIME_EVENTS } from "#public/channels/recall/inbound.js";
+import { createWorkflowCallbackUrl, resolveWorkflowCallbackBaseUrl } from "eve/internal/channels";
+import { RECALL_REALTIME_EVENTS } from "./inbound.js";
 
 /** The channel's default webhook route. */
 export const DEFAULT_RECALL_ROUTE = "/eve/v1/recall";

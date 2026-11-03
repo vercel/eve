@@ -1,24 +1,27 @@
 ---
 issue: TBD
 status: implemented
-last_updated: "2026-10-19"
+last_updated: "2026-11-03"
 ---
 
 # Recall.ai meeting channel
 
 > **AI status:** Written entirely by AI; human review pending.
 
-`eve/channels/recall` turns a Recall.ai meeting bot into an eve channel. Each
-bot's meeting is one session. Speech and chat arrive through Recall's real-time
-webhooks, and the agent replies in the meeting chat. The channel lives in
-`packages/eve/src/public/channels/recall/`, is documented at
-`docs/channels/recall.mdx`, and passes the channel conformance suite in three
-columns (`recall`, `recall-speech`, `recall-google-meet`).
+`@eve/recall` turns a Recall.ai meeting bot into an eve channel. Each bot's
+meeting is one session. Speech and chat arrive through Recall's real-time
+webhooks, and the agent replies in the meeting chat. The channel ships as its
+own package in `packages/eve-recall/`, built on eve's public channel API and
+the private `eve/internal/channels` helpers
+([channel text answers](./channel-text-answers.md)), so it releases with eve.
+It is documented at `docs/channels/recall.mdx`, and passes the channel
+conformance suite in three columns (`recall`, `recall-speech`,
+`recall-google-meet`) from `packages/eve/test/channels/recall/`.
 
 ## Authoring API
 
 ```ts title="agent/channels/recall.ts"
-import { recallChannel } from "eve/channels/recall";
+import { recallChannel } from "@eve/recall";
 
 export default recallChannel();
 ```
@@ -61,7 +64,7 @@ discussion is meant for the bot:
 
 ```ts title="agent/channels/recall.ts"
 import { decide } from "eve/ai";
-import { recallChannel } from "eve/channels/recall";
+import { recallChannel } from "@eve/recall";
 
 export default recallChannel({
   async shouldRespond({ event, line, transcript, botName }) {
@@ -145,7 +148,7 @@ session, so another channel can hand a request into a meeting.
   turn is waiting on the question. Approvals and sign-ins don't stall, because
   the turn's own person steers a turn held on them even under `queue`; the
   same exemption doesn't yet cover a workflow tool's runtime wait. Recorded as
-  broken in the matrix and documented in `docs/channels/recall.mdx`; the fix
+  broken in the conformance suite and documented in `docs/channels/recall.mdx`; the fix
   belongs in the session core, not the channel.
 
 ## Output Media

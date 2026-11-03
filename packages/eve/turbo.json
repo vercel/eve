@@ -87,6 +87,7 @@
       "dependsOn": ["$TURBO_EXTENDS$", "build:compiled"],
       "inputs": [
         "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/packages/eve-recall/src/**",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
         "$TURBO_ROOT$/packages/eve-custom-skills/extension/**",
