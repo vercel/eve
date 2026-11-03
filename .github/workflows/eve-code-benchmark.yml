@@ -24,7 +24,7 @@ on:
       harness:
         description: Comma-separated harnesses to benchmark
         type: string
-        default: eve-code,opencode,pi
+        default: eve-code,opencode,pi,fx
       dataset:
         description: eve-bench dataset to run
         type: choice

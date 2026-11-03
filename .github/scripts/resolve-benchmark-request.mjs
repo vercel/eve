@@ -9,14 +9,8 @@ export const BENCHMARK_HARNESSES = [
   "oracle",
 ];
 
-/** Harnesses compared on every automatic run; eve-code against opencode and pi. */
-export const DEFAULT_HARNESSES = ["eve-code", "opencode", "pi"];
-
-/**
- * Harnesses of the weekly run on main. Its report is the docs' comparison, so every harness the
- * docs show is measured fresh there instead of depending on an older stored reference.
- */
-export const SCHEDULED_HARNESSES = [...DEFAULT_HARNESSES, "fx"];
+/** Harnesses compared on every automatic run; eve-code against opencode, pi, and fx. */
+export const DEFAULT_HARNESSES = ["eve-code", "opencode", "pi", "fx"];
 
 /**
  * eve-bench datasets a benchmark can run, with the settings each was calibrated for.
@@ -162,7 +156,6 @@ export async function resolveBenchmarkRequest({ github, context, models }) {
     };
   } else if (eventName === "schedule") {
     selection.dataset = SCHEDULED_DATASET;
-    selection.harnesses = SCHEDULED_HARNESSES;
   } else {
     return null;
   }

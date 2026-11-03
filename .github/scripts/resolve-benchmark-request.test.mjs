@@ -18,8 +18,8 @@ const openai = { family: "openai", model: models.openai };
 const sweLean = { dataset: "swe-lean", reasoning: "low", attempts: "5" };
 const deepsweLean = { dataset: "deepswe-lean", reasoning: "high", attempts: "3" };
 const defaults = {
-  harness: "eve-code,opencode,pi",
-  slug: "eve-code+opencode+pi",
+  harness: "eve-code,opencode,pi,fx",
+  slug: "eve-code+opencode+pi+fx",
   agentSource: true,
   ...sweLean,
   models: [anthropic],
@@ -78,8 +78,8 @@ function fixture({
 
 const resolve = (input) => resolveBenchmarkRequest(input);
 
-test("automatic PR runs compare eve-code with opencode and pi at the exact current PR head", async () => {
-  assert.deepEqual(DEFAULT_HARNESSES, ["eve-code", "opencode", "pi"]);
+test("automatic PR runs compare eve-code with opencode, pi, and fx at the exact current PR head", async () => {
+  assert.deepEqual(DEFAULT_HARNESSES, ["eve-code", "opencode", "pi", "fx"]);
   assert.equal(DEFAULT_MODEL_FAMILY, "anthropic");
   const input = fixture({ eventName: "pull_request" });
   assert.deepEqual(await resolve(input), { ...defaults, sha, pr: "42" });
@@ -353,12 +353,10 @@ test("pushes to main publish the default harnesses on the default model at the p
   assert.deepEqual(input.calls, []);
 });
 
-test("the weekly schedule publishes deepswe-lean for the default harnesses and fx on every model", async () => {
+test("the weekly schedule publishes deepswe-lean for the default harnesses on every model", async () => {
   const input = fixture({ eventName: "schedule" });
   assert.deepEqual(await resolve(input), {
     ...defaults,
-    harness: "eve-code,opencode,pi,fx",
-    slug: "eve-code+opencode+pi+fx",
     ...deepsweLean,
     models: [anthropic, openai],
     sha: input.context.sha,
