@@ -81,8 +81,12 @@ Handlers are keyed by event type, using the same names as [hooks](../guides/hook
 
 - Handlers must be pure. Don't do network or file I/O, read the clock, use randomness, or read
   `defineState`. Use `event.meta.at` for the time an event was recorded.
-- `subject.call` is present for `call.*` events. It has the call's `name`, `tags`, `input`, and
-  `remote`, as the model requested it.
+- `subject.call` is present for `call.*` events. It has the call's `name`, `kind`, `tags`, `turnId`,
+  `input`, and `remote`, as the model requested it. `kind` is `tool`, `agent`, `skill`, or
+  `control`. `turnId` is absent for calls no turn made.
+- An input or output too large for the session stream arrives as `inputRef` or `outputRef`, with its
+  size and a preview. Handlers can't fetch the full value, so bound what you need in the tool's
+  input schema.
 - Progress events such as `content.delta` and `call.progress` aren't available.
 - A handler that throws fails the turn before its next model call.
 - Values are JSON and can be up to 16 KB.
@@ -175,7 +179,9 @@ const total = (children: Record<string, number>) =>
 An [extension](../extensions) ships derived state under `extension/state/`. Its names take the
 mount path, like the extension's tools: `extension/state/exposure.ts` mounted as `taint` is
 `taint__exposure`. Derived state from an extension mounted on the root agent runs in every local
-child, the same as the root's own `agent/state/`.
+child, the same as the root's own `agent/state/`. The state's `name` property has its full mounted name, so
+code that refers to it doesn't rebuild the prefix. When one file is mounted more than once, reading
+`name` throws, and you pass the name you want instead.
 
 An extension can't set the agent's approval policy. Export a policy function and have the agent use
 it:

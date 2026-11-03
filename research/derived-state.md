@@ -68,7 +68,11 @@ export default defineDerivedState({
 - `initial` returns the value before the first event. Values are JSON.
 - `on` maps [fact event types](../docs/concepts/sessions-runs-and-streaming.md), the same names hooks
   use, to reducers `(value, event, subject) => next`. For `call.*` events, `subject.call` is the call
-  as it was requested: its `name`, `tags`, `input`, and whether it is `remote`. For
+  as it was requested: its `name`, `kind` (`tool`, `agent`, `skill`, or `control`), `tags`, `turnId`
+  when a turn made it, `input`, and whether it is `remote`. An input too large for the stream to
+  carry arrives as `inputRef`, with its size and a preview, and so does a large output on the
+  event; reducers can't fetch the full value, so a state that needs one should bound it in the
+  tool's schema. For
   `delivery.admitted`, `subject.delivery` has the message's `tags` (see
   [Message tags](#message-tags)). Progress events such as `content.delta` are not available.
 - `fromChild` and `fromParent` say how a value from another session combines with this one. Leaving
@@ -89,6 +93,11 @@ export default defineAgent({
     exposure.get() && toolTags?.includes("effect:external") ? "user-approval" : undefined,
 });
 ```
+
+The handle's `name` is the state's full name, including an extension's mount prefix, so code that
+refers to the state, such as a client calling `derivedState(view, name)`, doesn't rebuild the prefix
+by hand. When one file is mounted more than once, reading `name` throws and the caller passes the
+name it wants.
 
 There is no `update()`. To change derived state, do something that produces an event, usually a tool
 call. Values that come from outside the stream, such as an LLM judge's verdict in a hook, belong in
@@ -351,6 +360,8 @@ only writer of facts and turn every authored file into a `Definition` with a sta
 - Reducers over a child's full event stream. Children send values, not events.
 - Events written by authored code.
 - Showing derived state in `eve info` or the dev TUI.
+- Reading derived state from channel renderers and other server code that runs outside a session's
+  context. That can be a later layer on the same values.
 
 ## Rollout
 
