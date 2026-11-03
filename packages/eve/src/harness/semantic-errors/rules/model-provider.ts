@@ -44,7 +44,7 @@ export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
     // A 400 that would otherwise end the session; only the refused prompt fails.
     id: "model-request-cyber-policy-refused",
     name: "Model request refused",
-    tags: ["model-provider", "recoverable"],
+    tags: ["model-provider", "recoverable", "refused"],
     when: codeIs("cyber_policy"),
     message: "The model provider refused this request for possible cybersecurity risk.",
     hint: "Review the request against your model provider's usage policies.",
