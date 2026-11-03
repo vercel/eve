@@ -7,27 +7,37 @@ An assertion grades what an eval's `test(t)` function produced. Each assertion r
 
 ## Scoped assertions
 
-Scoped assertions take no value and are gates by default. Call them on `t` to check the whole run after `test` finishes. Call them on a session to check that session so far, or on a turn to check one reply. A run is **parked** when it stopped to wait on an approval or question that nobody answered (human-in-the-loop, or HITL, input).
+Scoped assertions take no value and are gates by default. Call them on `t` to check the whole run after `test` finishes. Call them on a session to check that session so far, or on a turn to check one reply. A run is **parked** when it stopped to wait on a request that nobody answered, such as an approval, a question, a sign-in, or a budget request (human-in-the-loop, or HITL, input).
 
-| Assertion                                             | Asserts                                                                       |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `t.succeeded()`                                       | The run did not fail and did not park on unanswered HITL input                |
-| `t.awaitingInput()`                                   | The run cleanly parked on HITL input                                          |
-| `t.messageIncludes(token)`                            | Joined assistant text contains `token` (string or RegExp)                     |
-| `turn.outputEquals(value)` / `.outputMatches(schema)` | Deep equality or Standard Schema validation of turn/session structured output |
-| `t.calledTool(name, opts?)`                           | A matching tool call completed (`input`, `output`, `status`, `count`)         |
-| `t.calledSkill(skill, opts?)`                         | A load of `skill` completed (`output`, `status`, `count`)                     |
-| `t.notCalledTool(name)`                               | No call to `name`, whatever its status                                        |
-| `t.toolOrder([...names])`                             | Tool requests appear in order                                                 |
-| `t.usedNoTools()`                                     | No tool calls at all; skill loads don't count                                 |
-| `t.maxToolCalls(n)`                                   | At most `n` tool calls; skill loads don't count                               |
-| `t.noFailedCalls()`                                   | No tool, subagent, or skill action reported a failure                         |
-| `t.calledAgent(name, opts?)`                          | A subagent delegation happened (identity, remote, output, status, count)      |
-| `t.event(type, opts?)` / `t.notEvent(type, opts?)`    | Typed event presence, data, and count matching                                |
-| `t.eventOrder([...matchers])`                         | Matching event groups occur in order                                          |
-| `t.eventsSatisfy(label, predicate)`                   | Escape hatch: any predicate over the typed event stream                       |
+| Assertion                                             | Asserts                                                                          |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `t.succeeded()`                                       | The run did not fail and did not park on unanswered HITL input                   |
+| `t.awaitingInput(filter?)`                            | The run cleanly parked on HITL input, and every pending request matches `filter` |
+| `t.messageIncludes(token)`                            | Joined assistant text contains `token` (string or RegExp)                        |
+| `turn.outputEquals(value)` / `.outputMatches(schema)` | Deep equality or Standard Schema validation of turn/session structured output    |
+| `t.calledTool(name, opts?)`                           | A matching tool call completed (`input`, `output`, `status`, `count`)            |
+| `t.calledSkill(skill, opts?)`                         | A load of `skill` completed (`output`, `status`, `count`)                        |
+| `t.notCalledTool(name)`                               | No call to `name`, whatever its status                                           |
+| `t.toolOrder([...names])`                             | Tool requests appear in order                                                    |
+| `t.usedNoTools()`                                     | No tool calls at all; skill loads don't count                                    |
+| `t.maxToolCalls(n)`                                   | At most `n` tool calls; skill loads don't count                                  |
+| `t.noFailedCalls()`                                   | No tool, subagent, or skill action reported a failure                            |
+| `t.calledAgent(name, opts?)`                          | A subagent delegation happened (identity, remote, output, status, count)         |
+| `t.event(type, opts?)` / `t.notEvent(type, opts?)`    | Typed event presence, data, and count matching                                   |
+| `t.eventOrder([...matchers])`                         | Matching event groups occur in order                                             |
+| `t.eventsSatisfy(label, predicate)`                   | Escape hatch: any predicate over the typed event stream                          |
 
 `succeeded()` passes when the session ended or is waiting for the next message. It fails when the run failed, an event reports an error, or the run is parked. Structured output assertions exist only on turns and sessions, where one output is unambiguous (see the [output schema guide](../guides/client/output-schema)).
+
+`awaitingInput()` passes when the run parked, whatever it waits for. Pass a filter to require that every pending request matches it, including requests an earlier turn left open. The filter takes the same fields as `session.requireInteraction` (see [the drive API](./cases#the-drive-api)): `kind` (`approval`, `question`, `sign-in`, or `budget`), `toolName`, `input`, `prompt`, `display`, and `optionIds`. When a turn may either finish or wait for approval, branch on its status:
+
+```ts
+const turn = await t.send("Triage the new GitHub issues.");
+if (turn.status === "awaiting-input") turn.awaitingInput({ kind: "approval", toolName: "deploy" });
+else turn.succeeded();
+```
+
+A turn parked on two `deploy` approvals passes. A turn that also asks a question fails, and the failure message lists each request that didn't match.
 
 ```ts
 await t.send("What is the weather in Brooklyn?");

@@ -1,6 +1,6 @@
 ---
 issue: "None (proposed in PR #5865)"
-status: proposed
+status: implemented
 last_updated: "2026-11-03"
 ---
 
@@ -72,7 +72,10 @@ Assertions don't see the session view, so `EveEvalDerivedFacts` gains a field
 next to `parked`:
 
 ```ts
-/** Requests still open at the end of the scope, from every session in it. */
+/**
+ * The unanswered requests the run ended parked on, from every session in it, including requests
+ * an earlier turn opened. Empty unless `parked`.
+ */
 readonly openInteractions: readonly Interaction[];
 ```
 

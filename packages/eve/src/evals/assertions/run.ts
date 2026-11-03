@@ -3,13 +3,16 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { failureOf } from "#client/session-utils.js";
 import { replyTextOf } from "#public/channels/reply.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import type { Interaction } from "#protocol/session-projection/reader.js";
 import {
   deepEquals,
   eventMatches,
+  interactionMatches,
   subagentCallMatches,
   testRegExp,
   toolCallMatches,
   type EveEvalCountMatcher,
+  type EveEvalInteractionMatchOptions,
   type EveEvalSkillLoadMatchOptions,
   type EveEvalSubagentCallMatchOptions,
   type EveEvalToolCallMatchOptions,
@@ -51,17 +54,26 @@ export function succeeded(): RunAssertion {
 }
 
 /**
- * Asserts the run ended cleanly parked on HITL input.
+ * Asserts the run ended cleanly parked on HITL input. With `filter`, every
+ * request the run parked on must match it.
  */
-export function awaitingInput(): RunAssertion {
+export function awaitingInput(filter: EveEvalInteractionMatchOptions = {}): RunAssertion {
   return {
     name: "awaitingInput",
     evaluate(result) {
       const failure = runFailure(result);
       if (failure !== undefined) return failure;
-      if (result.derived.parked) return PASS;
+      if (!result.derived.parked) {
+        return fail(
+          `expected the run to park on HITL input; it ended "${result.status}" with no pending requests`,
+        );
+      }
+      const unmatched = result.derived.openInteractions.filter(
+        (request) => !interactionMatches(request, filter),
+      );
+      if (unmatched.length === 0) return PASS;
       return fail(
-        `expected the run to park on HITL input; it ended "${result.status}" with no pending requests`,
+        `expected every pending request to match ${JSON.stringify(filter)}; unmatched: ${unmatched.map(formatPendingRequest).join("; ")}`,
       );
     },
   };
@@ -383,6 +395,16 @@ function joinCompletedMessages(events: readonly SessionStreamEvent[]): string {
     if (text !== undefined) parts.push(text);
   }
   return parts.join("\n");
+}
+
+function formatPendingRequest(request: Interaction): string {
+  const parts = [
+    `kind=${request.request.kind}`,
+    request.call === undefined ? undefined : `tool=${request.call.name}`,
+    `interactionId=${request.interactionId}`,
+    request.taskId === undefined ? undefined : `taskId=${request.taskId}`,
+  ];
+  return parts.filter((part) => part !== undefined).join(" ");
 }
 
 function failureDetail(prefix: string, code: string | undefined): string {

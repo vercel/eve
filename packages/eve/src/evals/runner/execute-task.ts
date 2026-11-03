@@ -221,6 +221,7 @@ export function combineDerivedFacts(
     interactions,
     // A session read in several handles is parked only if its merged stream still is.
     parked: derived.some((facts) => facts.parked),
+    openInteractions: derived.flatMap((facts) => facts.openInteractions),
     messageCount: sum(sessions, (session) => session.derived.messageCount),
     reasoningBlockCount: sum(sessions, (session) => session.derived.reasoningBlockCount),
     models: [...new Set(sessions.flatMap((session) => session.derived.models))],

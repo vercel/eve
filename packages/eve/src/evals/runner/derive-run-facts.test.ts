@@ -182,6 +182,7 @@ it("reads what a turn did: its calls by kind, the request it waits on, and its m
     interactions: [{ interactionId: "i_0" }],
     messageCount: 0,
     models: ["big-model"],
+    openInteractions: [{ call: { name: "deploy" }, interactionId: "i_0" }],
     parked: true,
     reasoningBlockCount: 1,
     skillLoads: [{ sessionId: "s", skill: "deploy-guide", status: "completed", turnIndex: 0 }],
@@ -218,6 +219,7 @@ it("counts a call an earlier turn asked for when this segment settles it, and th
     interactions: [],
     messageCount: 1,
     models: ["small-model"],
+    openInteractions: [],
     parked: false,
     toolCalls: [{ callId: "call_deploy", output: "deployed", status: "completed" }],
     usage: { inputTokens: 200, outputTokens: 20 },
@@ -340,6 +342,8 @@ it("reads a partial answer's segment as parked on the request it left open", () 
 
   expect(deriveRunFacts(segment, { usageEvents: all })).toMatchObject({
     interactions: [],
+    // The open request comes from the earlier segment.
+    openInteractions: [{ interactionId: "i_web" }],
     parked: true,
     toolCalls: [{ callId: "call_api", output: "deployed", status: "completed" }],
   });

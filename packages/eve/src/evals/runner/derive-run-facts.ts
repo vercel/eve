@@ -1,6 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
-import { callOutputSource } from "#protocol/session-projection/selectors.js";
+import { callOutputSource, openInteractions } from "#protocol/session-projection/selectors.js";
 import type { CallRow } from "#protocol/session-projection/tables.js";
 import { ownerOf } from "#protocol/session-projection/tree.js";
 import { interaction, type Interaction } from "#protocol/session-projection/reader.js";
@@ -138,6 +138,7 @@ export function deriveRunFacts(
     ];
   });
   const spent = Object.keys(view.usage.byKind).length > 0 ? view.usage.total : undefined;
+  const parked = endedParkedOnInput(events);
   return {
     toolCalls,
     toolCallCount: toolCalls.length,
@@ -145,7 +146,10 @@ export function deriveRunFacts(
     subagentCalls,
     subagentCallCount: subagentCalls.length,
     interactions,
-    parked: endedParkedOnInput(events),
+    parked,
+    openInteractions: parked
+      ? openInteractions(view).flatMap((row) => interaction(view, row.interactionId) ?? [])
+      : [],
     messageCount,
     reasoningBlockCount,
     models: [...models],
@@ -163,6 +167,7 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
     subagentCallCount: 0,
     interactions: [],
     parked: false,
+    openInteractions: [],
     messageCount: 0,
     reasoningBlockCount: 0,
     models: [],

@@ -66,8 +66,51 @@ describe("combineDerivedFacts", () => {
     ]);
 
     expect(held.derived.parked).toBe(true);
-    expect(combineDerivedFacts([held, resumed]).parked).toBe(false);
-    expect(combineDerivedFacts([held]).parked).toBe(true);
+    expect(combineDerivedFacts([held, resumed])).toMatchObject({
+      openInteractions: [],
+      parked: false,
+    });
+    expect(combineDerivedFacts([held])).toMatchObject({
+      openInteractions: [{ interactionId: "sign-in-1" }],
+      parked: true,
+    });
+  });
+
+  it("collects open requests only from the sessions that ended parked", () => {
+    const completed = handle(
+      0,
+      [
+        { data: { cause: { deliveryId: "d-1" }, follows: null, turnId }, type: "turn.started" },
+        { data: { outcome: "completed", turnId }, scope: { turnId }, type: "turn.settled" },
+      ],
+      { sessionId: "session-1" },
+    );
+    const parked = handle(
+      0,
+      [
+        { data: { cause: { deliveryId: "d-2" }, follows: null, turnId }, type: "turn.started" },
+        {
+          data: {
+            interactionId: "approval-1",
+            request: { kind: "approval", prompt: "Deploy?" },
+            subject: { turnId },
+          },
+          scope: { turnId },
+          type: "interaction.opened",
+        },
+        {
+          data: { awaiting: [{ interactionId: "approval-1" }], turnId },
+          scope: { turnId },
+          type: "turn.paused",
+        },
+      ],
+      { sessionId: "session-2" },
+    );
+
+    expect(combineDerivedFacts([completed, parked])).toMatchObject({
+      openInteractions: [{ interactionId: "approval-1" }],
+      parked: true,
+    });
   });
 
   it("keeps a recaptured session's latest usage by time, not by capture order", () => {

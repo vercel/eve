@@ -71,7 +71,7 @@ export interface EveEvalSubagentCallMatchOptions {
   readonly count?: EveEvalCountMatcher;
 }
 
-/** Constraints accepted by `requireInteraction`. */
+/** Constraints accepted by `requireInteraction` and `awaitingInput`. */
 export interface EveEvalInteractionMatchOptions {
   /** Matcher over the request's display hint. */
   readonly display?: EveEvalValueMatcher<Interaction["request"]["display"]>;
@@ -81,7 +81,7 @@ export interface EveEvalInteractionMatchOptions {
   readonly optionIds?: EveEvalValueMatcher<readonly string[]>;
   /** Matcher over the request prompt. */
   readonly prompt?: EveEvalValueMatcher<string>;
-  /** Required kind: `approval`, `question`, or `budget`. */
+  /** Required kind: `approval`, `question`, `sign-in`, or `budget`. */
   readonly kind?: Interaction["request"]["kind"];
   /** Required name of the tool the request asks about. */
   readonly toolName?: string;
