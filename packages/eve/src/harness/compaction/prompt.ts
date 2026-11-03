@@ -362,7 +362,7 @@ export function sliceUtf16Safe(value: string, limit: number): string {
 /**
  * Keeps the head and tail of an oversized tool payload, never exceeding
  * `limit`. Tool output often ends with what matters most: the failing test,
- * the error, or the `exitCode` and `status` that `bash` serializes last.
+ * the error, or the exit code that `bash` reports last.
  */
 export function clipMiddleUtf16Safe(value: string, limit: number): string {
   if (value.length <= limit) {

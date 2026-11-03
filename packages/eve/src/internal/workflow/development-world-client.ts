@@ -19,6 +19,7 @@ import {
 } from "#internal/workflow/development-generation-context.js";
 import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
 import { isMissingWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
+import { EVE_WORKFLOW_SPEC_VERSION } from "#internal/workflow/spec-version-default.js";
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
@@ -101,10 +102,15 @@ async function getGenerationAvailability(
 export function createDevelopmentWorkflowWorld(): World {
   const forwarded = buildForwardedOperations();
   const world = {
-    specVersion: 8 as SpecVersion,
+    specVersion: EVE_WORKFLOW_SPEC_VERSION as SpecVersion,
     // Every operation runs on the dev parent's local world, which supports
-    // both; session handoffs across reloads depend on them.
-    capabilities: { hookForceClaim: true, hookRetention: { active: true } },
+    // all of these. Session handoffs across reloads depend on the hook
+    // capabilities, and spec 9 runs depend on the in-band writer fence.
+    capabilities: {
+      hookForceClaim: true,
+      hookRetention: { active: true },
+      inBandFence: true,
+    },
     async getDeploymentId() {
       // Inside a pinned delivery, steps and child runs must record the
       // delivery's generation — not whatever is active — so replay after a
@@ -119,7 +125,9 @@ export function createDevelopmentWorkflowWorld(): World {
     createQueueHandler,
     runs: forwarded.groups.runs as World["runs"],
     steps: forwarded.groups.steps as World["steps"],
-    events: forwarded.groups.events as World["events"],
+    // `subscribe` is an optional synchronous callback API that cannot ride
+    // request/response forwarding; the runtime falls back to polling.
+    events: forwarded.groups.events as Omit<World["events"], "subscribe">,
     hooks: forwarded.groups.hooks as World["hooks"],
     streams: {
       ...forwarded.groups.streams,

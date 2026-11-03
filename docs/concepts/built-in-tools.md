@@ -36,12 +36,14 @@ eve add tool/bash
 export { default } from "eve/tools/bash";
 ```
 
-`bash` waits up to 30 seconds for a command. A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A command that is still running keeps running in the sandbox as its own process group and returns `status: "running"` with:
+`bash` waits up to 30 seconds for a command. The model can pass `timeout` to wait longer for a build or test suite, up to 120 seconds. Values above 120 wait 120, and values below 1 wait 1. The cap leaves room for the model call within the Vercel Functions time limit. A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A command that is still running keeps running in the sandbox as its own process group and returns `status: "running"` with:
 
 - `pid`: the process group id
 - `outputDirectory`: a directory under `/tmp/.eve/jobs/`
 - `stdout`, `stderr`, and `truncated`: the output so far
 - `message`: instructions for the model
+
+The model reads the result as plain text: `stdout`, then any `stderr` after a `[stderr]` line, then `[exit code: N]`. For a running command, `message` replaces the exit code line. Channels and hooks get the fields above on `call.settled`.
 
 The command writes to `stdout` and `stderr` files in `outputDirectory`, and its exit code to an `exit` file when it finishes. The model checks on or stops it with shell commands in later `bash` calls, so the tool's approval policy applies to them:
 
@@ -51,7 +53,7 @@ cat /tmp/.eve/jobs/3f9a1c2e/exit      # exit code, once the command has finished
 kill -- -4312                         # stop the command's whole process group
 ```
 
-The command runs across turns until it exits, the model stops it, or the sandbox stops, and its output files last until the sandbox stops. Cancelling a turn stops a command that hasn't yet returned `running`. The `just-bash` provider has no background processes, so it runs every command to completion.
+The command runs across turns until it exits, the model stops it, or the sandbox stops, and its output files last until the sandbox stops. Cancelling a turn stops a command that hasn't yet returned `running`. A message that arrives while `bash` waits reaches the model after the call returns, so a longer `timeout` can delay it. The `just-bash` provider has no background processes, so it runs every command to completion.
 
 Override its description, approval policy, or executor by wrapping the exported definition:
 
@@ -68,6 +70,10 @@ export default defineTool({
   },
 });
 ```
+
+A wrapper that spreads `bash` keeps its `timeout` input. If the wrapper supplies its own `execute` or input schema, forward `timeout` to `bash.execute` or remove it from the schema.
+
+The wrapper also keeps the plain-text view through the spread `toModelOutput`. If your `execute` returns a string, the model sees that text. Any other shape, including a `bash` result with extra fields, reaches the model as JSON; set your own [`toModelOutput`](../tools#shape-what-the-model-sees-with-tomodeloutput) to change that.
 
 Disable only `bash`:
 
@@ -449,7 +455,7 @@ export default defineTool({
 
 ### `grep`
 
-`grep` searches sandbox file contents with a regular expression. It searches the workspace root unless the model passes a directory or file inside the workspace. The code extension's `code__grep` tool behaves the same. Add it:
+`grep` searches sandbox file contents with a regular expression. It searches the workspace root unless the model passes a directory or file inside the workspace. Add it:
 
 ```sh
 eve add tool/grep

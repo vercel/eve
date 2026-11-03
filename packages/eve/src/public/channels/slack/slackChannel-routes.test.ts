@@ -13,13 +13,16 @@ import {
 } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
+import { slackRenderingHarness } from "#internal/testing/slack-rendering-harness.js";
 import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 import {
   slackChannel,
   type SlackChannelConfig,
   type SlackChannelState,
+  type SlackInboundMessageContext,
 } from "#public/channels/slack/slackChannel.js";
+import type { SlackMessage, SlackMessageEdit } from "#public/channels/slack/inbound.js";
 
 const SIGNING_SECRET = "test-signing-secret";
 
@@ -502,11 +505,10 @@ describe("slackChannel thread history", () => {
   });
 });
 
-describe("slackChannel message edits", () => {
-  const rootTs = "1700000000.000001";
+describe("slackChannel message status and guidance", () => {
+  const guidance = "This reply doesn't mention you. Answer only if it's meant for you.";
 
-  function edited(input: { readonly previousText?: string; readonly text: string }): Request {
-    const message = { text: input.text, thread_ts: rootTs, ts: "1700000000.000002", user: "U01" };
+  function channelMessage(input: { readonly ts: string; readonly threadTs?: string }): Request {
     return signed(
       JSON.stringify({
         api_app_id: "A01",
@@ -514,6 +516,172 @@ describe("slackChannel message edits", () => {
         event: {
           channel: "C01",
           channel_type: "channel",
+          text: "Alice, I can take the rollback.",
+          ...(input.threadTs !== undefined && { thread_ts: input.threadTs }),
+          ts: input.ts,
+          type: "message",
+          user: "U_BOB",
+        },
+        event_id: `Ev${input.ts}`,
+        team_id: "T01",
+        type: "event_callback",
+      }),
+    );
+  }
+  const rootTs = "1700000000.000001";
+  const threadReply = () => channelMessage({ ts: "1700000000.000003", threadTs: rootTs });
+
+  it("follows served threads with the documented onMessage hook", async () => {
+    const followGuidance =
+      "You are part of this Slack thread, so you see replies people send each other. This " +
+      "reply doesn't mention you. Answer only if it's meant for you; otherwise call `no_reply`.";
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onMessage(ctx, message) {
+        if (message.author?.isBot !== false) return null;
+        const auth = defaultSlackAuth(message, ctx);
+        const isDirectMessage = message.raw.channel_type === "im";
+        if (ctx.isBotMentioned() || ctx.slack.codeChannel || isDirectMessage) return { auth };
+        if (ctx.edit || (message.threadTs !== message.ts && (await ctx.isSubscribed()))) {
+          return { auth, status: "deferred", guidance: followGuidance };
+        }
+        return null;
+      },
+    });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+    const noSession = async () => undefined;
+
+    await firePost(channel, threadReply(), send);
+    await firePost(channel, channelMessage({ ts: "1700000000.000005" }), send);
+    await firePost(
+      channel,
+      channelMessage({ ts: "1700000000.000007", threadTs: "1700000000.000006" }),
+      send,
+      noSession,
+    );
+    // An unmentioned edit to the root of the thread the agent serves.
+    const root = {
+      text: "Who can take the rollback?",
+      thread_ts: rootTs,
+      ts: rootTs,
+      user: "U_BOB",
+    };
+    await firePost(
+      channel,
+      signed(
+        JSON.stringify({
+          api_app_id: "A01",
+          authorizations: [{ is_bot: true, user_id: "U_BOT" }],
+          event: {
+            channel: "C01",
+            channel_type: "channel",
+            message: { ...root, text: "Who can take the rollback today?", edited: { ts: "1.9" } },
+            previous_message: root,
+            subtype: "message_changed",
+            ts: "1700000000.000009",
+            type: "message",
+          },
+          event_id: "EvRootEdit",
+          team_id: "T01",
+          type: "event_callback",
+        }),
+      ),
+      send,
+    );
+
+    const deliveries = send.mock.calls as [string, ObservedChannelDelivery<SlackChannelState>][];
+    expect(deliveries.map(([address]) => address)).toEqual([`C01:${rootTs}`, `C01:${rootTs}`]);
+    for (const [, input] of deliveries) {
+      expect(input.auth?.principalId).toBe("slack:T01:U_BOB");
+      expect("message" in input && input.message).toEqual(
+        expect.stringContaining(`<guidance>\n${followGuidance}\n</guidance>`),
+      );
+    }
+    expect("message" in deliveries[1]![1] && deliveries[1]![1].message).toEqual(
+      expect.stringContaining("<slack_message_edit>"),
+    );
+    expect(slackCalls("assistant.threads.setStatus")).toEqual([]);
+  });
+
+  // Each step is followed by the thread statuses it set. Mentions are acknowledged before their
+  // hook runs, so `deferred` can only keep the rest of the turn quiet.
+  it.each<{
+    name: string;
+    request: () => Request;
+    status: "immediate" | "deferred";
+    trace: string;
+  }>([
+    {
+      name: "deferred reply",
+      request: threadReply,
+      status: "deferred",
+      trace: "post turn model tool model:Thinking...",
+    },
+    {
+      name: "immediate reply",
+      request: threadReply,
+      status: "immediate",
+      trace:
+        "post:Thinking... turn:Thinking... model:Thinking... tool:Get weather model:Get weather",
+    },
+    {
+      name: "deferred mention",
+      request: () => mention({ ts: "1700000000.000004", threadTs: "1700000000.000001" }),
+      status: "deferred",
+      trace: "post:Thinking... turn model tool model:Thinking...",
+    },
+  ])("$name", async ({ request, status, trace }) => {
+    const edits: unknown[] = [];
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onMessage: (ctx) => {
+        edits.push(ctx.edit);
+        return { auth: null, guidance, status };
+      },
+    });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+    const statuses = () =>
+      slackCalls("assistant.threads.setStatus").map(({ status }) => String(status));
+
+    await firePost(channel, request(), send);
+    const observed = [["post", ...statuses()].join(":")];
+    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    const harness = slackRenderingHarness(channel, {
+      channelId: "C01",
+      teamId: "T01",
+      threadTs: "1700000000.000001",
+    });
+    await harness.deliver(input);
+    for (const step of ["turn", "model", "tool", "model"] as const) {
+      const before = statuses().length;
+      await harness.step(step);
+      observed.push([step, ...statuses().slice(before)].join(":"));
+    }
+
+    expect(observed.join(" ")).toBe(trace);
+    expect(edits).toEqual([undefined]);
+    expect("message" in input && input.message).toEqual(
+      expect.stringContaining(`<guidance>\n${guidance}\n</guidance>`),
+    );
+  });
+});
+
+describe("slackChannel message edits", () => {
+  const rootTs = "1700000000.000001";
+
+  function edited(input: {
+    readonly channelType?: "channel" | "im";
+    readonly previousText?: string;
+    readonly text: string;
+  }): Request {
+    const message = { text: input.text, thread_ts: rootTs, ts: "1700000000.000002", user: "U01" };
+    return signed(
+      JSON.stringify({
+        api_app_id: "A01",
+        authorizations: [{ is_bot: true, user_id: "U_BOT" }],
+        event: {
+          channel: "C01",
+          channel_type: input.channelType ?? "channel",
           message: { ...message, edited: { ts: "1700000000.000009", user: "U01" } },
           ...(input.previousText !== undefined && {
             previous_message: { ...message, text: input.previousText },
@@ -522,7 +690,7 @@ describe("slackChannel message edits", () => {
           ts: "1700000000.000009",
           type: "message",
         },
-        event_id: "EvEdit",
+        event_id: `EvEdit:${input.text}`,
         team_id: "T01",
         type: "event_callback",
       }),
@@ -544,7 +712,7 @@ describe("slackChannel message edits", () => {
       ObservedChannelDelivery<SlackChannelState>,
     ];
     expect(address).toBe(`C01:${rootTs}`);
-    expect(input).toMatchObject({ state: { edit: true } });
+    expect(input).toMatchObject({ state: { quiet: true } });
     // The channel's `turnPolicy` applies, so a queued edit can't overtake the message it edits.
     expect(input).not.toHaveProperty("turnPolicy");
     expect(input).not.toHaveProperty("title");
@@ -609,38 +777,140 @@ describe("slackChannel message edits", () => {
     );
   });
 
-  it("drops an edit an authored mention hook would have checked, unless onEvent takes it", async () => {
-    const onAppMention = vi.fn(() => null);
-    const send = vi.fn();
-    const request = () =>
-      edited({ previousText: "<@U_BOT> hi", text: "<@U_BOT> please deploy production" });
+  type MessageHook = "onAppMention" | "onDirectMessage" | "onMessage" | "onMessageEdited";
+  const allHooks: readonly MessageHook[] = ["onAppMention", "onDirectMessage", "onMessage"];
+  const mentionEdit = { previousText: "<@U_BOT> hi", text: "<@U_BOT> hello" };
+  const dmEdit = { channelType: "im", previousText: "hi", text: "hello" } as const;
+  const otherEdit = { previousText: "Lunch?", text: "Lunch at noon?" };
+
+  // Each row authors a hook the edit must skip, so the default can't just be "no hooks".
+  it.each<{
+    name: string;
+    edit: Parameters<typeof edited>[0];
+    hooks: readonly MessageHook[];
+    reached: MessageHook | "default" | null;
+  }>([
+    {
+      name: "mention edit to onAppMention",
+      edit: mentionEdit,
+      hooks: allHooks,
+      reached: "onAppMention",
+    },
+    {
+      name: "mention edit to onMessage",
+      edit: mentionEdit,
+      hooks: ["onDirectMessage", "onMessage"],
+      reached: "onMessage",
+    },
+    {
+      name: "mention edit to the default",
+      edit: mentionEdit,
+      hooks: ["onDirectMessage"],
+      reached: "default",
+    },
+    {
+      name: "DM edit to onDirectMessage",
+      edit: dmEdit,
+      hooks: allHooks,
+      reached: "onDirectMessage",
+    },
+    {
+      name: "DM edit to onMessage",
+      edit: dmEdit,
+      hooks: ["onAppMention", "onMessage"],
+      reached: "onMessage",
+    },
+    { name: "DM edit to the default", edit: dmEdit, hooks: ["onAppMention"], reached: "default" },
+    { name: "other edit to onMessage", edit: otherEdit, hooks: allHooks, reached: "onMessage" },
+    {
+      name: "other edit, ignored",
+      edit: otherEdit,
+      hooks: ["onAppMention", "onDirectMessage"],
+      reached: null,
+    },
+    {
+      name: "DM mention edit to onDirectMessage",
+      edit: { ...dmEdit, previousText: "<@U_BOT> hi", text: "<@U_BOT> hello" },
+      hooks: allHooks,
+      reached: "onDirectMessage",
+    },
+    {
+      name: "onMessageEdited before onMessage",
+      edit: mentionEdit,
+      hooks: ["onMessage", "onMessageEdited"],
+      reached: "onMessageEdited",
+    },
+  ])("$name", async ({ edit, hooks, reached }) => {
+    const calls: string[] = [];
+    // Records the text each hook decided and the edit `ctx.edit` showed it.
+    const hook = (name: MessageHook) =>
+      name === "onMessageEdited"
+        ? (ctx: SlackInboundMessageContext, decided: SlackMessageEdit) => {
+            calls.push(`${name}: ${decided.message.text} @${ctx.edit?.editedTs}`);
+            return { auth: null };
+          }
+        : (ctx: SlackInboundMessageContext, message: SlackMessage) => {
+            calls.push(`${name}: ${message.text} @${ctx.edit?.editedTs}`);
+            return { auth: null };
+          };
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
 
     await firePost(
-      slackChannel({ credentials: { botToken: "xoxb-test" }, onAppMention }),
-      request(),
-      send,
-    );
-    const onEvent = vi.fn();
-    await firePost(
-      slackChannel({ credentials: { botToken: "xoxb-test" }, onAppMention, onEvent }),
-      request(),
+      slackChannel({
+        credentials: { botToken: "xoxb-test" },
+        ...Object.fromEntries(hooks.map((name) => [name, hook(name)])),
+      }),
+      edited(edit),
       send,
     );
 
-    expect(send).not.toHaveBeenCalled();
-    expect(onAppMention).not.toHaveBeenCalled();
-    expect(onEvent).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ subtype: "message_changed" }),
+    expect(calls).toEqual(
+      reached === null || reached === "default"
+        ? []
+        : [`${reached}: ${edit.text} @1700000000.000009`],
     );
+    expect(send).toHaveBeenCalledTimes(reached === null ? 0 : 1);
+    const auth = (send.mock.calls[0]?.[1] as ObservedChannelDelivery<SlackChannelState> | undefined)
+      ?.auth;
+    if (reached === "default") expect(auth?.principalId).toBe("slack:T01:U01");
   });
 
-  it("leaves an edit to an authored onEvent", async () => {
+  it("sends an edit's guidance from onMessage, ignoring its status, and drops what it drops", async () => {
+    const guidance = "This reply doesn't mention you. Answer only if it's meant for you.";
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onMessage: (_ctx, message) =>
+        message.text.includes("rollback") ? { auth: null, guidance, status: "immediate" } : null,
+    });
+    const send = vi.fn().mockResolvedValue({ sessionId: "s1" });
+
+    await firePost(channel, edited({ previousText: "Lunch?", text: "Lunch at noon?" }), send);
+    await firePost(
+      channel,
+      edited({ previousText: "I can take it", text: "I can take the rollback" }),
+      send,
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, input] = send.mock.calls[0]! as [string, ObservedChannelDelivery<SlackChannelState>];
+    expect(input).toMatchObject({ state: { quiet: true } });
+    expect("message" in input && input.message).toEqual(
+      expect.stringContaining(`<slack_message_edit>`),
+    );
+    expect("message" in input && input.message).toEqual(
+      expect.stringContaining(`<guidance>\n${guidance}\n</guidance>`),
+    );
+    expect(slackCalls("assistant.threads.setStatus")).toEqual([]);
+  });
+
+  it("leaves an edit to an authored onEvent before the hooks it would reach", async () => {
+    const onAppMention = vi.fn(() => ({ auth: null }));
+    const onMessage = vi.fn(() => ({ auth: null }));
     const onEvent = vi.fn();
     const send = vi.fn();
 
     await firePost(
-      slackChannel({ credentials: { botToken: "xoxb-test" }, onEvent }),
+      slackChannel({ credentials: { botToken: "xoxb-test" }, onAppMention, onEvent, onMessage }),
       edited({ previousText: "<@U_BOT> hi", text: "<@U_BOT> hello" }),
       send,
     );
@@ -649,6 +919,8 @@ describe("slackChannel message edits", () => {
       expect.anything(),
       expect.objectContaining({ subtype: "message_changed" }),
     );
+    expect(onAppMention).not.toHaveBeenCalled();
+    expect(onMessage).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
   });
 });

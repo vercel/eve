@@ -19,6 +19,8 @@ interface SlackModelMessageInput {
   readonly ts: string;
   /** Lines of the `<edit>` and `<diff>` blocks; present only for an edited message. */
   readonly editLines?: readonly string[];
+  /** App-written text from the message hook's result, rendered as a `<guidance>` block. */
+  readonly guidance?: string;
 }
 
 /**
@@ -34,6 +36,7 @@ function formatSlackModelMessage(input: SlackModelMessageInput): string {
     ...(input.isMentioned !== undefined ? [`mentioned: ${input.isMentioned}`] : []),
   ];
   const tag = input.editLines === undefined ? "slack_message" : "slack_message_edit";
+  const guidance = input.guidance?.trim();
   return [
     `<${tag}>`,
     "<sender>",
@@ -51,8 +54,9 @@ function formatSlackModelMessage(input: SlackModelMessageInput): string {
     `message_ts: ${input.ts}`,
     "</thread>",
     ...(input.editLines ?? []),
+    ...(guidance ? ["<guidance>", neutralizeBlockTags(guidance), "</guidance>"] : []),
     "<content>",
-    input.content,
+    neutralizeBlockTags(input.content),
     "</content>",
     `</${tag}>`,
   ].join("\n");
@@ -60,13 +64,23 @@ function formatSlackModelMessage(input: SlackModelMessageInput): string {
 
 // Profile fields are user-controlled; keep them from forging extra metadata lines.
 function oneLine(value: string): string {
-  return value.replace(/[\r\n]+/gu, " ");
+  return neutralizeBlockTags(value.replace(/[\r\n]+/gu, " "));
+}
+
+// Slack sends `&lt;` for a typed `<`, and the mrkdwn conversion decodes it, so message text could
+// otherwise close `<content>` and open a block that reads as eve's own, such as `<guidance>`.
+const BLOCK_TAG =
+  /<(?=\s*\/?\s*(?:slack_message_edit|slack_message|slack_thread_context|sender|bot|thread|edit|diff|guidance|content)\b)/giu;
+
+/** Encodes the `<` of eve's block tags, leaving other text and `<@U123>` mentions as they are. */
+function neutralizeBlockTags(value: string): string {
+  return value.replace(BLOCK_TAG, "&lt;");
 }
 
 /** Renders the triggering inbound Slack message as one attributed block. */
 export function formatSlackInboundMessage(
   context: SlackInboundContext,
-  message: { readonly text: string; readonly ts: string },
+  message: InboundMessageInput,
 ): string {
   return formatSlackModelMessage(inboundModelMessage(context, message));
 }
@@ -79,9 +93,7 @@ export function formatSlackInboundMessage(
  */
 export function formatSlackInboundMessageEdit(
   context: SlackInboundContext,
-  edit: {
-    readonly text: string;
-    readonly ts: string;
+  edit: InboundMessageInput & {
     readonly previousText: string | undefined;
     readonly editedTs: string;
   },
@@ -103,14 +115,21 @@ export function formatSlackInboundMessageEdit(
       `edited_ts: ${edit.editedTs}`,
       ...(diff === undefined ? [`diff: ${reason}`] : []),
       "</edit>",
-      ...(diff === undefined ? [] : ["<diff>", diff, "</diff>"]),
+      ...(diff === undefined ? [] : ["<diff>", neutralizeBlockTags(diff), "</diff>"]),
     ],
   });
 }
 
+interface InboundMessageInput {
+  readonly text: string;
+  readonly ts: string;
+  /** Trusted text from the message hook; never user-controlled. */
+  readonly guidance?: string;
+}
+
 function inboundModelMessage(
   context: SlackInboundContext,
-  message: { readonly text: string; readonly ts: string },
+  message: InboundMessageInput,
 ): SlackModelMessageInput {
   const senderInfo: SlackUserInfo = {
     ...(context.displayName && { displayName: context.displayName }),
@@ -121,6 +140,7 @@ function inboundModelMessage(
     botUserId: context.botUserId,
     channelId: context.channelId,
     content: slackModelContent(message.text),
+    guidance: message.guidance,
     isMentioned: context.isMentioned,
     senderId: context.userId || undefined,
     senderInfo,
