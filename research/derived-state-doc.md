@@ -142,7 +142,8 @@ export default defineDerivedState({
   it returns. A child whose value changes after it answers, such as a background task, sends its
   value again.
 - A child always sends its whole current value, not what changed. To add up values from children,
-  keep the latest one per child and sum when you read it. `source.sessionId` identifies the child:
+  keep the latest one per child and sum when you read it. `source.sessionId` identifies the child,
+  and `source.call` is the parent's call that delegated to it:
 
 ```ts title="agent/state/api-spend.ts"
 import { defineDerivedState } from "eve/context";
@@ -168,6 +169,26 @@ const total = (children: Record<string, number>) =>
   values from a parent only when its `trustedForwarders` accepts the caller.
 - eve doesn't stop a value from shrinking. For a value that guards an effect, combine with `||`, a
   set union, or `Math.max`, so a child can't clear what the parent learned.
+
+## Ship derived state in an extension
+
+An [extension](../extensions) ships derived state under `extension/state/`. Its names take the
+mount path, like the extension's tools: `extension/state/exposure.ts` mounted as `taint` is
+`taint__exposure`. Derived state from an extension mounted on the root agent runs in every local
+child, the same as the root's own `agent/state/`.
+
+An extension can't set the agent's approval policy. Export a policy function and have the agent use
+it:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { taintPolicy } from "eve/extensions/taint";
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+  approval: taintPolicy(),
+});
+```
 
 ## Show derived state in a client
 

@@ -46,7 +46,8 @@ parent. This proposal opens that mechanism to authors and moves eve's own values
 ## Authoring API
 
 A derived state is a file under `agent/state/`. Its name comes from its path, so
-`agent/state/exposure.ts` is `exposure`.
+`agent/state/exposure.ts` is `exposure`. Extensions ship them under `extension/state/`, named by
+mount path like their tools: `extension/state/exposure.ts` mounted as `taint` is `taint__exposure`.
 
 ```ts title="agent/state/exposure.ts"
 import { defineDerivedState } from "eve/context";
@@ -67,8 +68,9 @@ export default defineDerivedState({
 - `initial` returns the value before the first event. Values are JSON.
 - `on` maps [fact event types](../docs/concepts/sessions-runs-and-streaming.md), the same names hooks
   use, to reducers `(value, event, subject) => next`. For `call.*` events, `subject.call` is the call
-  as it was requested: its `name`, `tags`, `input`, and whether it is `remote`. Progress events such as
-  `content.delta` are not available.
+  as it was requested: its `name`, `tags`, `input`, and whether it is `remote`. For
+  `delivery.admitted`, `subject.delivery` has the message's `tags` (see
+  [Message tags](#message-tags)). Progress events such as `content.delta` are not available.
 - `fromChild` and `fromParent` say how a value from another session combines with this one. Leaving
   one out means values don't cross in that direction. See [Crossing agents](#crossing-agents).
 - `stream: true` sends the value to clients. `telemetry: true` records it on spans.
@@ -118,10 +120,10 @@ call. Values that come from outside the stream, such as an LLM judge's verdict i
   rename the file to recompute from history.
 - **Bounded.** Each value is capped in size (proposed 16 KB serialized) and is checkpointed with the
   session. Unknown fields on events are ignored, so reducers should tolerate missing optional fields.
-- **Scope.** States in the root agent's `agent/state/` run in the root session and in every local
-  child: declared and dynamic subagents, the `agent` tool, tasks, and `ctx.agent()`. A subagent's own
-  `agent/state/` adds states for that subagent and its children. A security value can't be skipped by
-  a subagent that forgets to declare it.
+- **Scope.** States in the root agent's `agent/state/`, and in extensions mounted on the root, run in
+  the root session and in every local child: declared and dynamic subagents, the `agent` tool, tasks,
+  and `ctx.agent()`. A subagent's own `agent/state/` and extensions add states for that subagent and
+  its children. A security value can't be skipped by a subagent that forgets to declare it.
 
 ### Crossing agents
 
@@ -141,9 +143,10 @@ child.reported { state: { exposure: true } } ◀──── later spend with no
   child's output enters the parent's context, and applies `fromChild`. A child that reports without
   a call to settle, such as a `serve` run after its reply, records `child.reported`.
 - **Values are cumulative.** A child sends its whole value every time, not a delta. `fromChild`
-  receives `{ sessionId, callId }` as a third argument, so a counter can keep the latest value per
-  child session and sum when read, instead of adding the same total twice. Sets, maxima, and flags
-  can ignore it.
+  receives `{ sessionId, callId, call }` as a third argument, where `call` is the delegating call as
+  requested, the same shape as `subject.call`. A counter keeps the latest value per child session and
+  sums when read, instead of adding the same total twice. Sets, maxima, and flags can ignore it. A
+  state can use `call` to drop a child's value for a specific delegating tool.
 - **Trust.** Local children are trusted. A remote agent accepts values going down only from a
   deployment its `trustedForwarders` approves, the same decision that covers forwarded identity and
   trace content limits. A parent accepts values coming up from a remote agent only for states it
@@ -154,6 +157,21 @@ child.reported { state: { exposure: true } } ◀──── later spend with no
 
 All three carriers are optional fields or informational facts, which stream version 27 allows a minor
 release to add.
+
+### Message tags
+
+Untrusted text also arrives as messages: a third party in a shared Slack thread, an inbound email, a
+webhook from a public repository. A channel can attach `tags` to a message when it sends it to the
+session, the same opaque strings tools use, and eve records them on its `delivery.admitted`. Built-in channels
+add none in this version.
+
+### Built-in tool tags
+
+Built-in tools have no tags today, so a state can only recognize `web_fetch` by name, which misses
+copies mounted under other names. eve gives the built-ins that reach the open web default tags:
+`web_fetch` and `web_search` get `reads:untrusted` and `effect:external`, and so does `bash` when
+its sandbox allows network access. An agent can replace a built-in's tags. These are the only tag
+strings eve chooses, as a documented convention. eve still doesn't interpret them.
 
 ## Clients and telemetry
 
@@ -206,6 +224,85 @@ Each of these is hard or unreliable with hooks and `defineState` today:
   read them from derived state. Scanning `ctx.view` doesn't work for this on the server, which prunes
   call rows from earlier turns.
 
+## Proof: a taint extension
+
+The second acceptance test is that taint tracking ships as an extension with no taint-specific code
+in eve. Mounting the extension tracks exposure in every run, through subagents, and on traces.
+Enforcing it is one line in `agent.ts`.
+
+```ts title="extension/state/exposure.ts"
+import { defineDerivedState } from "eve/context";
+
+type Exposure = { readonly exposed: boolean; readonly sources: readonly string[] };
+
+const add = (s: Exposure, source: string): Exposure =>
+  s.sources.includes(source)
+    ? { ...s, exposed: true }
+    : { exposed: true, sources: [...s.sources, source].slice(-20) };
+const merge = (s: Exposure, other: Exposure): Exposure =>
+  other.sources.reduce(add, { ...s, exposed: s.exposed || other.exposed });
+const untrusted = (tags: readonly string[] = []) => tags.includes("reads:untrusted");
+
+export default defineDerivedState({
+  initial: (): Exposure => ({ exposed: false, sources: [] }),
+  on: {
+    // the model reads a call's output unless the call was rejected before it ran
+    "call.settled": (s, event, { call }) =>
+      event.data.outcome !== "rejected" && untrusted(call.tags) ? add(s, call.name) : s,
+    "delivery.admitted": (s, _event, { delivery }) =>
+      untrusted(delivery.tags) ? add(s, "message") : s,
+  },
+  fromChild: merge,
+  fromParent: merge,
+  stream: true,
+  telemetry: true,
+});
+```
+
+```ts title="extension/policy.ts"
+import type { ApprovalContext } from "eve/tools/approval";
+import exposure from "./state/exposure";
+
+export function taintPolicy({ exportTag = "effect:export", externalTag = "effect:external" } = {}) {
+  return ({ toolTags }: ApprovalContext) => {
+    const { exposed, sources } = exposure.get();
+    if (!exposed) return undefined;
+    if (toolTags?.includes(exportTag))
+      return { type: "denied", reason: `Read untrusted content from ${sources.join(", ")}.` };
+    return toolTags?.includes(externalTag) ? "user-approval" : undefined;
+  };
+}
+```
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { taintPolicy } from "eve/extensions/taint";
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+  approval: taintPolicy(),
+});
+```
+
+- **Every run.** The state runs in the root and every local child, so a subagent can't launder what
+  it read, and a child started by an exposed parent starts exposed.
+- **Enforcement.** The agent-wide policy keeps the stricter of its answer and the tool's own. An
+  approval that is still waiting is checked again against the exposure when someone answers it.
+- **Hiding export tools.** Denying returns the reason to the model. To remove the tools from the
+  model's list instead, a dynamic tools function reads `exposure.get()`.
+- **Declassifying.** A `fromChild` that skips merging when `call.name` is a reader subagent with a
+  bounded output schema is an extension option, not an eve rule.
+
+It doesn't cover:
+
+- **Memory.** Text captured in an exposed session comes back clean in later sessions, because recall
+  isn't a call.
+- **Workflow code.** A `ctx.agent()` call from workflow code isn't gated, so an effect taken directly
+  in workflow code bypasses the policy. A local child's own calls are gated.
+- **Remote agents without the extension.** Values cross only when both deployments mount it under
+  the same name. Otherwise, tag the remote agent `reads:untrusted` so the call itself exposes the
+  parent.
+
 ## Fit with the kernel and definitions
 
 The [session kernel doc](https://github.com/vercel/eve/pull/5644) and its stack make the kernel the
@@ -226,6 +323,7 @@ only writer of facts and turn every authored file into a `Definition` with a sta
 
 - **Built-in session labels (#5866).** Stronger guarantees for one use case, with eve enforcing that
   labels only grow. It puts a security vocabulary in core and doesn't help budgets, quotas, or usage.
+  Here the taint extension owns that guarantee in its reducers.
 - **`defineState` that propagates, with replayed hooks.** Hooks do I/O, so replaying them is unsafe,
   and state would still need its own transport.
 - **A separate `defineDelegation` with named entries.** An earlier draft. It repeats each name in
@@ -239,8 +337,12 @@ only writer of facts and turn every authored file into a `Definition` with a sta
 
 - **Naming.** `defineDerivedState` in `agent/state/`, or a separate `agent/derived/` slot to keep
   `defineState` handles distinct.
-- **Ignoring a child's value.** Whether a delegating tool whose `outputSchema` has only bounded
-  fields can drop a child's exposure, as #5866's declassification does.
+- **Declassification in the taint extension.** Whether it offers dropping a child's exposure for
+  delegating tools whose `outputSchema` has only bounded fields, and how it checks that.
+- **Built-in channel tags.** Whether built-in channels tag messages from someone other than the
+  session's caller, such as other people in a shared Slack thread.
+- **Extension state names across deployments.** Remote matching depends on both sides mounting the
+  extension under the same name. A state could instead declare a name that ignores the mount.
 - **History cost.** Whether computing a new state from full history needs a cap for very long
   sessions, and what it falls back to.
 
@@ -255,7 +357,8 @@ only writer of facts and turn every authored file into a `Definition` with a sta
 1. Built-in reducers move onto the definition shape, with no public API.
 2. `defineDerivedState` in one session, with `stream` and `telemetry`, exported as experimental.
 3. `fromChild` and `fromParent` for local children, then eve's usage on the same transport.
-4. Remote agents, and an exposure library in `eve/tools/approval`.
+4. Message tags, built-in tool tags, and `eve/extensions/taint` on public APIs only.
+5. Remote agents.
 
 ## User docs
 
