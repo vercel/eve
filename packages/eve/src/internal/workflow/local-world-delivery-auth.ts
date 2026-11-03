@@ -73,7 +73,12 @@ async function reenqueueActiveRuns(world: LocalWorld): Promise<void> {
     });
     for (const run of page.data) {
       try {
-        await world.queue(`${prefix}${run.workflowName}` as ValidQueueName, { runId: run.runId });
+        await world.releaseOrphanedSteps(run.runId);
+        await world.queue(`${prefix}${run.workflowName}` as ValidQueueName, {
+          runId: run.runId,
+          ...(typeof run.specVersion === "number" && { runSpecVersion: run.specVersion }),
+          recovery: true,
+        });
       } catch (error) {
         console.warn(`[eve] Failed to re-enqueue workflow run ${run.runId}:`, error);
       }

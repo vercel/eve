@@ -21,6 +21,7 @@ function createFakeWorld() {
   }> = [];
   const start = vi.fn(async () => {});
   const world = {
+    releaseOrphanedSteps: vi.fn(async (_runId: string) => {}),
     queue: async (
       name: string,
       message: unknown,
@@ -40,12 +41,12 @@ function createFakeWorld() {
         pagination.cursor === undefined
           ? {
               cursor: "page_2",
-              data: [{ runId: "wrun_1", workflowName: "entry" }],
+              data: [{ runId: "wrun_1", workflowName: "entry", specVersion: 9 }],
               hasMore: true,
             }
           : {
               cursor: null,
-              data: [{ runId: "wrun_2", workflowName: "other" }],
+              data: [{ runId: "wrun_2", workflowName: "other", specVersion: 8 }],
               hasMore: false,
             },
       ),
@@ -112,12 +113,12 @@ describe("authenticateLocalWorkflowDeliveries", () => {
     expect(enqueued).toEqual([
       {
         name: "__evetest_wkf_workflow_entry",
-        message: { runId: "wrun_1" },
+        message: { runId: "wrun_1", runSpecVersion: 9, recovery: true },
         headers: { [LOCAL_WORKFLOW_DELIVERY_HEADER]: SECRET },
       },
       {
         name: "__evetest_wkf_workflow_other",
-        message: { runId: "wrun_2" },
+        message: { runId: "wrun_2", runSpecVersion: 8, recovery: true },
         headers: { [LOCAL_WORKFLOW_DELIVERY_HEADER]: SECRET },
       },
     ]);

@@ -1,4 +1,4 @@
-import { relative } from "node:path";
+import { join, relative } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 
 import {
@@ -6,19 +6,20 @@ import {
   buildUniqueSymbolStub,
   collectFilesRecursively,
   createDeclarationCopier,
+  rewriteImportSource,
 } from "../_shared.mjs";
+
+const WORKFLOW_ENTRY_DECLARATION = `export * from "./workflow/index.js";\n`;
 
 async function discoverDeclarationFiles({ distDir }) {
   const files = await collectFilesRecursively(distDir, [".d.ts"]);
-  return (
-    files
-      .map((file) => relative(distDir, file).replaceAll("\\", "/"))
-      // eve flattens dist/workflow/index.js to workflow.js, so workflow.d.ts
-      // is owned by the shim entry below instead of upstream's VM-runner file.
-      .filter((file) => file !== "workflow.d.ts")
-      .sort()
-      .map((file) => ({ source: file, output: file }))
-  );
+  return files
+    .map((file) => relative(distDir, file).replaceAll("\\", "/"))
+    .sort()
+    .map((file) => ({
+      source: file,
+      output: file === "workflow.d.ts" ? "_workflow-vm.d.ts" : file,
+    }));
 }
 
 function buildMsStub(names, moduleName) {
@@ -144,17 +145,18 @@ function stubCoreWorldFactories() {
   };
 }
 
-// @workflow/core@5.0.0-beta.40 lazy-loads the optional QuickJS runtime, but
-// Rolldown still emits it as a reachable chunk and Nitro packages that chunk
-// into every eve function. eve only supports the Node.js workflow VM, so keep
-// the lazy boundary while replacing its target with a small, explicit error.
+// @workflow/core lazy-loads the optional QuickJS runtime from both spec 8 and
+// spec 9. Rolldown still emits that target as a reachable chunk, which Nitro
+// packages into every eve function. eve only supports the Node.js workflow VM.
 const CORE_QUICKJS_ENTRYPOINT_STUB_ID = "\0eve-core-quickjs-entrypoint-stub";
 
 function stubCoreQuickJSEntrypoint() {
   return {
     name: "eve:stub-core-quickjs-entrypoint",
     resolveId(source, importer) {
-      if (source !== "./runtime/quickjs-entrypoint.js") return null;
+      if (source !== "./runtime/quickjs-entrypoint.js" && source !== "./quickjs-entrypoint.js") {
+        return null;
+      }
       if (typeof importer !== "string") return null;
       if (!importer.replaceAll("\\", "/").includes("/@workflow/core/")) return null;
       return CORE_QUICKJS_ENTRYPOINT_STUB_ID;
@@ -186,7 +188,7 @@ export default {
     {
       entry: "dist/workflow/index.js",
       outputPath: "workflow",
-      declaration: `export * from "./workflow/index.js";\n`,
+      declaration: WORKFLOW_ENTRY_DECLARATION,
     },
     {
       input: "@workflow/core/runtime",
@@ -199,11 +201,22 @@ export default {
   ],
   async copyDeclarations(context) {
     await copyDeclarations(context);
+    // The SDK's VM-runner declaration is imported by its runtime types, but
+    // eve's flattened public workflow entry also needs workflow.d.ts.
+    await writeFile(
+      join(context.destinationRoot, "workflow.d.ts"),
+      WORKFLOW_ENTRY_DECLARATION,
+      "utf8",
+    );
     // Workflow runs in Node, where Request.duplex is always "half". DOM's
     // Request type deliberately lacks that Node-only property; do not augment it.
     for (const path of await collectFilesRecursively(context.destinationRoot, [".d.ts"])) {
       const source = await readFile(path, "utf8");
-      const portable = source.replace(/Request\[(?:"duplex"|'duplex')\]/g, '"half"');
+      const portable = rewriteImportSource(
+        source.replace(/Request\[(?:"duplex"|'duplex')\]/g, '"half"'),
+        "../../workflow.js",
+        "../../_workflow-vm.js",
+      );
       if (source !== portable) await writeFile(path, portable);
     }
   },

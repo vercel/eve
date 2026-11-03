@@ -325,7 +325,7 @@ describe("parent development Workflow World", () => {
               null,
               {
                 eventType: "run_created",
-                specVersion: 6,
+                specVersion: deploymentId === "retained" ? 9 : 6,
                 eventData: {
                   deploymentId,
                   executionContext: {},
@@ -340,13 +340,15 @@ describe("parent development Workflow World", () => {
     } finally {
       await first.close();
     }
-    const deliveries: string[] = [];
+    const deliveries: Array<{ runId: string; runSpecVersion?: number; recovery?: boolean }> = [];
     process.env.WORKFLOW_LOCAL_BASE_URL = "http://eve-dev.local";
     globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
       const message = JSON.parse(new TextDecoder().decode(init?.body as Uint8Array)) as {
         runId: string;
+        runSpecVersion?: number;
+        recovery?: boolean;
       };
-      deliveries.push(message.runId);
+      deliveries.push(message);
       return Response.json({ ok: true });
     }) as typeof fetch;
     let activeGenerationId = "retained";
@@ -359,8 +361,12 @@ describe("parent development Workflow World", () => {
     try {
       await restarted.start();
       await expect
-        .poll(() => [...deliveries].sort())
+        .poll(() => deliveries.map((delivery) => delivery.runId).sort())
         .toEqual([runIds[0], runIds[2], runIds[3], runIds[4]].sort());
+      expect(deliveries.find((delivery) => delivery.runId === runIds[0])).toMatchObject({
+        runSpecVersion: 9,
+        recovery: true,
+      });
       expect(warning).toHaveBeenCalledWith(
         expect.stringContaining('"invalid-json": Development generation metadata is invalid.'),
       );

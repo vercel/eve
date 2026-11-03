@@ -7,7 +7,7 @@ import { listDevelopmentGenerationIds } from "#internal/nitro/dev-runtime-genera
 import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
 import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
 import type { ValidQueueName, World } from "#compiled/@workflow/world/index.js";
-import { createWorld } from "#compiled/@workflow/world-local/index.js";
+import { createWorld, type LocalWorld } from "#compiled/@workflow/world-local/index.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
   displayLocalWorkflowWorldDataDirectory,
@@ -70,7 +70,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   readonly #appRoot: string;
   readonly #resolveActiveGenerationId: () => string;
   readonly #transportSecret: string;
-  readonly #world: World;
+  readonly #world: LocalWorld;
   readonly #resume: boolean;
   // Owned by the host, not a worker: rebuilds preserve the startup admission decision.
   readonly #unrecoveredGenerations = new Map<
@@ -370,7 +370,7 @@ async function reenqueueActiveDevelopmentRuns(input: {
   readonly enqueue: World["queue"];
   readonly canRecover: (generationId: string) => Promise<boolean>;
   readonly prefix: string;
-  readonly world: World;
+  readonly world: LocalWorld;
 }): Promise<void> {
   for (const status of ["pending", "running"] as const) {
     let cursor: string | undefined;
@@ -391,8 +391,11 @@ async function reenqueueActiveDevelopmentRuns(input: {
       }
       for (const run of page.data) {
         if (!(await input.canRecover(run.deploymentId))) continue;
+        await input.world.releaseOrphanedSteps(run.runId);
         await input.enqueue(`${input.prefix}${run.workflowName}` as ValidQueueName, {
           runId: run.runId,
+          ...(typeof run.specVersion === "number" && { runSpecVersion: run.specVersion }),
+          recovery: true,
         });
       }
       cursor = page.hasMore ? (page.cursor ?? undefined) : undefined;

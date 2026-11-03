@@ -319,21 +319,35 @@ type Note = 'request from "./not-an-import"';`,
   });
 
   it("copies @workflow/core declaration files from the installed package", async () => {
-    const [indexDts, createHookDts, workflowDts, workflowIndexDts, runtimeRunDts] =
-      await Promise.all([
-        readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/index.d.ts"), "utf8"),
-        readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/create-hook.d.ts"), "utf8"),
-        readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/workflow.d.ts"), "utf8"),
-        readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/workflow/index.d.ts"), "utf8"),
-        readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/runtime/run.d.ts"), "utf8"),
-      ]);
+    const [
+      indexDts,
+      createHookDts,
+      workflowDts,
+      workflowVmDts,
+      workflowIndexDts,
+      runtimeRunDts,
+      suspensionDts,
+    ] = await Promise.all([
+      readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/index.d.ts"), "utf8"),
+      readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/create-hook.d.ts"), "utf8"),
+      readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/workflow.d.ts"), "utf8"),
+      readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/_workflow-vm.d.ts"), "utf8"),
+      readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/workflow/index.d.ts"), "utf8"),
+      readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/runtime/run.d.ts"), "utf8"),
+      readFile(
+        join(COMPILED_VENDOR_ROOT, "@workflow/core/runtime/spec9/suspension-handler.d.ts"),
+        "utf8",
+      ),
+    ]);
 
     expect(indexDts).toContain("Core utilities intended for import by user");
     expect(indexDts).toContain("from '#compiled/@workflow/errors/index.js'");
     expect(createHookDts).toContain("Creates a {@link Hook}");
     expect(workflowDts).toBe(`export * from "./workflow/index.js";\n`);
+    expect(workflowVmDts).toContain("export type PendingQueueDrain");
     expect(workflowIndexDts).toContain("from '#compiled/@workflow/errors/index.js'");
     expect(runtimeRunDts).toContain("from '../_workflow-serde.js'");
+    expect(suspensionDts).toContain("from '../../_workflow-vm.js'");
   });
 
   it("vendors the Workflow world targets selected by generated Nitro plugins", async () => {
@@ -344,6 +358,11 @@ type Note = 'request from "./not-an-import"';`,
 
     expect(localWorld).toContain("createWorld");
     expect(vercelWorld).toContain("createWorld");
+  });
+
+  it("omits the unsupported QuickJS snapshot codec from the compiled Workflow bundle", async () => {
+    const chunks = await readdir(join(COMPILED_VENDOR_ROOT, "_chunks/workflow"));
+    expect(chunks.some((chunk) => chunk.startsWith("quickjs-snapshot-codec-"))).toBe(false);
   });
 
   it("copies the complete stable @vercel/sandbox declaration tree", async () => {
