@@ -22,7 +22,9 @@ import { isMissingWorkflowRunError } from "#internal/workflow/is-inactive-workfl
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
+  DEVELOPMENT_WORKFLOW_IN_BAND_FENCE_ENV,
   DEVELOPMENT_WORKFLOW_SECRET_ENV,
+  DEVELOPMENT_WORKFLOW_SPEC_VERSION_ENV,
   DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
   DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
@@ -100,11 +102,18 @@ async function getGenerationAvailability(
  */
 export function createDevelopmentWorkflowWorld(): World {
   const forwarded = buildForwardedOperations();
+  const configuredSpecVersion = Number(process.env[DEVELOPMENT_WORKFLOW_SPEC_VERSION_ENV]);
   const world = {
-    specVersion: 8 as SpecVersion,
+    specVersion: (Number.isInteger(configuredSpecVersion) && configuredSpecVersion > 0
+      ? configuredSpecVersion
+      : 8) as SpecVersion,
     // Every operation runs on the dev parent's local world, which supports
     // both; session handoffs across reloads depend on them.
-    capabilities: { hookForceClaim: true, hookRetention: { active: true } },
+    capabilities: {
+      hookForceClaim: true,
+      hookRetention: { active: true },
+      inBandFence: process.env[DEVELOPMENT_WORKFLOW_IN_BAND_FENCE_ENV] === "1",
+    },
     async getDeploymentId() {
       // Inside a pinned delivery, steps and child runs must record the
       // delivery's generation — not whatever is active — so replay after a

@@ -17,6 +17,12 @@ On the local and Postgres worlds, a new build on the same eve version resumes ex
 
 All three support compaction handoff, which moves a session to a fresh run while keeping its ID, event stream, and addresses; the Postgres world needs `@workflow/world-postgres` 5.0.4 or later. Vercel Workflow also supports moving eligible idle sessions between deployments. See [Execution model and durability](../../concepts/execution-model-and-durability#compaction-handoff).
 
+## Opt in to Spec9
+
+The bundled Workflow SDK creates Spec8 runs by default. To try experimental Spec9, set `WORKFLOW_SPEC_VERSION=9` in your agent's runtime environment. Set it on your Vercel project for a Vercel deployment, or in the local environment before starting `eve dev` or `eve start`. eve does not set this variable for applications. The Vercel, local, and Postgres worlds support the required in-band writer fence; a custom world must declare and implement it before it can create Spec9 runs.
+
+The setting affects new runs only. Existing runs keep their original spec version. If several deployments or processes share a world, upgrade all of them before opting in. Do not roll back to a Workflow SDK version that cannot read Spec9 while Spec9 runs remain. See [Workflow's Spec9 opt-in guide](https://workflow-sdk.dev/docs/changelog/spec-9#opting-in).
+
 ## Use the local world
 
 The local world is the default for `eve start` and needs no configuration. It stores run state under `.eve/.workflow-data` in the app directory. Mount that directory on persistent storage so runs survive process and container replacement.

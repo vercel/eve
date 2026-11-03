@@ -366,16 +366,17 @@ async function startNitroDevelopmentServer(
     });
     const workflowTransportSecret = randomBytes(32).toString("base64url");
     devServer.setClientAddressSecret(workflowTransportSecret);
-    restoreWorkflowTransportEnvironment = installWorkflowTransportEnvironment(
-      project.appRoot,
-      workflowTransportSecret,
-    );
     const workflowWorld = createDevelopmentWorkflowWorld({
       appRoot: project.appRoot,
       preparedHost,
       resume: options.resume,
       transportSecret: workflowTransportSecret,
     });
+    restoreWorkflowTransportEnvironment = installWorkflowTransportEnvironment(
+      project.appRoot,
+      workflowTransportSecret,
+      workflowWorld,
+    );
     if (workflowWorld !== undefined) {
       cleanup.defer(async () => await workflowWorld.close());
     }

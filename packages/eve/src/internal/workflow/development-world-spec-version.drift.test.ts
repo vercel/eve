@@ -4,19 +4,15 @@ import { describe, expect, it } from "vitest";
 import { createDevelopmentWorkflowWorld } from "#internal/workflow/development-world-client.js";
 
 /**
- * Guards the development World's hard-coded `specVersion` against drift
- * from `SPEC_VERSION_CURRENT`.
+ * Guards the development World's fallback `specVersion` against drift
+ * from `SPEC_VERSION_CURRENT` when parent metadata is unavailable.
  *
- * The shim forwards every operation to the real `@workflow/world-local`
- * running in the CLI parent, and that World reports `SPEC_VERSION_CURRENT`.
- * The shim cannot import the constant at runtime — `@workflow/world` is
- * vendored type-only, so a value import would pull it into the runtime
- * bundle (see `scripts/vendor-compiled/@workflow/world.mjs`) — so the
- * number is duplicated and this test is what keeps the two agreeing.
+ * In normal development, the shim advertises the parent's effective version.
+ * It cannot import the default constant at runtime: `@workflow/world` is
+ * vendored type-only (see `scripts/vendor-compiled/@workflow/world.mjs`).
  *
- * If this fails after a `@workflow/*` bump, the world the runtime talks to
- * started stamping a different version than the shim advertises: update the
- * literal in `development-world-client.ts` to match.
+ * If this fails after a `@workflow/*` bump, update the fallback literal in
+ * `development-world-client.ts` to match.
  */
 describe("development World specVersion drift guard", () => {
   it("matches @workflow/world's SPEC_VERSION_CURRENT", () => {

@@ -18,6 +18,8 @@ export function usesParentDevelopmentWorkflowWorld(
   return resolveWorkflowWorldImport(configuredWorld ?? "local") === "@workflow/world-local";
 }
 export const DEVELOPMENT_WORKFLOW_SECRET_ENV = "EVE_DEV_WORKFLOW_TRANSPORT_SECRET";
+export const DEVELOPMENT_WORKFLOW_SPEC_VERSION_ENV = "EVE_DEV_WORKFLOW_SPEC_VERSION";
+export const DEVELOPMENT_WORKFLOW_IN_BAND_FENCE_ENV = "EVE_DEV_WORKFLOW_IN_BAND_FENCE";
 export const DEVELOPMENT_WORKER_APP_ROOT_ENV = "EVE_DEV_WORKER_APP_ROOT";
 export const DEVELOPMENT_WORKFLOW_STREAM_ROUTE = `${DEVELOPMENT_WORKFLOW_WORLD_ROUTE}/stream`;
 export const DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER = "x-eve-dev-workflow-transport";

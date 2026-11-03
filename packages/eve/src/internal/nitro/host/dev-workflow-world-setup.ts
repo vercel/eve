@@ -9,7 +9,9 @@ import {
 } from "#internal/workflow/development-world-server.js";
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
+  DEVELOPMENT_WORKFLOW_IN_BAND_FENCE_ENV,
   DEVELOPMENT_WORKFLOW_SECRET_ENV,
+  DEVELOPMENT_WORKFLOW_SPEC_VERSION_ENV,
   usesParentDevelopmentWorkflowWorld,
 } from "#internal/workflow/development-world-protocol.js";
 
@@ -50,11 +52,24 @@ export function createDevelopmentWorkflowWorld(input: {
   });
 }
 
-export function installWorkflowTransportEnvironment(appRoot: string, secret: string): () => void {
+export function installWorkflowTransportEnvironment(
+  appRoot: string,
+  secret: string,
+  world: ParentDevelopmentWorkflowWorld | undefined,
+): () => void {
   const previousSecret = process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
   const previousAppRoot = process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV];
+  const previousSpecVersion = process.env[DEVELOPMENT_WORKFLOW_SPEC_VERSION_ENV];
+  const previousInBandFence = process.env[DEVELOPMENT_WORKFLOW_IN_BAND_FENCE_ENV];
   process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = secret;
   process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] = appRoot;
+  if (world !== undefined) {
+    process.env[DEVELOPMENT_WORKFLOW_SPEC_VERSION_ENV] = String(world.specVersion);
+    process.env[DEVELOPMENT_WORKFLOW_IN_BAND_FENCE_ENV] = world.inBandFence ? "1" : "0";
+  } else {
+    delete process.env[DEVELOPMENT_WORKFLOW_SPEC_VERSION_ENV];
+    delete process.env[DEVELOPMENT_WORKFLOW_IN_BAND_FENCE_ENV];
+  }
   return () => {
     if (previousSecret === undefined) {
       delete process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
@@ -65,6 +80,16 @@ export function installWorkflowTransportEnvironment(appRoot: string, secret: str
       delete process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV];
     } else {
       process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] = previousAppRoot;
+    }
+    if (previousSpecVersion === undefined) {
+      delete process.env[DEVELOPMENT_WORKFLOW_SPEC_VERSION_ENV];
+    } else {
+      process.env[DEVELOPMENT_WORKFLOW_SPEC_VERSION_ENV] = previousSpecVersion;
+    }
+    if (previousInBandFence === undefined) {
+      delete process.env[DEVELOPMENT_WORKFLOW_IN_BAND_FENCE_ENV];
+    } else {
+      process.env[DEVELOPMENT_WORKFLOW_IN_BAND_FENCE_ENV] = previousInBandFence;
     }
   };
 }

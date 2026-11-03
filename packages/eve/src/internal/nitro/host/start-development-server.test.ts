@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => {
     suspend: vi.fn(async () => undefined),
   };
   const mocksWorldInstance = {
+    specVersion: 8,
+    inBandFence: true,
     reconcileExpiredRuns: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
     handleRequest: vi.fn(async () => undefined),
@@ -331,6 +333,8 @@ describe("createDevelopmentServer", () => {
     expect(mocks.worldInstance.start).toHaveBeenCalledOnce();
     expect(process.env.EVE_DEV_WORKFLOW_TRANSPORT_SECRET).toEqual(expect.any(String));
     expect(process.env.EVE_DEV_WORKER_APP_ROOT).toBe("/tmp/eve-test");
+    expect(process.env.EVE_DEV_WORKFLOW_SPEC_VERSION).toBe("8");
+    expect(process.env.EVE_DEV_WORKFLOW_IN_BAND_FENCE).toBe("1");
     expect(process.env.WORKFLOW_LOCAL_BASE_URL).toBe("http://127.0.0.1:42123");
     expect(process.env.PORT).toBe("42123");
 
@@ -344,6 +348,8 @@ describe("createDevelopmentServer", () => {
     expect(process.env.PORT).toBeUndefined();
     expect(process.env.EVE_DEV_WORKFLOW_TRANSPORT_SECRET).toBeUndefined();
     expect(process.env.EVE_DEV_WORKER_APP_ROOT).toBeUndefined();
+    expect(process.env.EVE_DEV_WORKFLOW_SPEC_VERSION).toBeUndefined();
+    expect(process.env.EVE_DEV_WORKFLOW_IN_BAND_FENCE).toBeUndefined();
     expect(process.env.EVE_DEVELOPMENT_SANDBOX_RUN_ID).toBeUndefined();
     expect(mocks.worldInstance.close).toHaveBeenCalledOnce();
   });

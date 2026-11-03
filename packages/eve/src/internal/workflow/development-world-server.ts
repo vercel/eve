@@ -47,6 +47,8 @@ import {
  * call arrives back on the listener within milliseconds.
  */
 export interface ParentDevelopmentWorkflowWorld {
+  readonly specVersion: number;
+  readonly inBandFence: boolean;
   close(): Promise<void>;
   handleRequest(request: Request): Promise<Response | undefined>;
   start(): Promise<void>;
@@ -79,6 +81,14 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   #closed = false;
   #started = false;
   #reconciliation: Promise<void> = Promise.resolve();
+
+  get specVersion(): number {
+    return this.#world.specVersion;
+  }
+
+  get inBandFence(): boolean {
+    return this.#world.capabilities?.inBandFence === true;
+  }
 
   constructor(input: {
     readonly agentName: string;

@@ -10,6 +10,7 @@ import {
   activateDevelopmentGeneration,
   createDevelopmentGenerationPruner,
 } from "#internal/nitro/development-generation.js";
+import { installWorkflowTransportEnvironment } from "#internal/nitro/host/dev-workflow-world-setup.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { getDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
@@ -27,7 +28,9 @@ import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
+  DEVELOPMENT_WORKFLOW_IN_BAND_FENCE_ENV,
   DEVELOPMENT_WORKFLOW_SECRET_ENV,
+  DEVELOPMENT_WORKFLOW_SPEC_VERSION_ENV,
   DEVELOPMENT_WORKFLOW_STREAM_ROUTE,
   DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
@@ -52,6 +55,8 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
   delete process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
   delete process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV];
+  delete process.env[DEVELOPMENT_WORKFLOW_SPEC_VERSION_ENV];
+  delete process.env[DEVELOPMENT_WORKFLOW_IN_BAND_FENCE_ENV];
   delete process.env.WORKFLOW_LOCAL_BASE_URL;
   for (const name of LOCAL_DELIVERY_TIMEOUT_ENV_NAMES) {
     const originalValue = originalLocalDeliveryTimeoutEnv.get(name);
@@ -64,6 +69,35 @@ afterEach(() => {
 });
 
 describe("parent development Workflow World", () => {
+  it("advertises an opted-in Spec9 World to the development worker", async () => {
+    const previousSpecVersion = process.env.WORKFLOW_SPEC_VERSION;
+    process.env.WORKFLOW_SPEC_VERSION = "9";
+    const appRoot = await createScratchDirectory("eve-parent-workflow-spec9-");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    connectWorkerToWorld(world, appRoot);
+
+    try {
+      const worker = createDevelopmentWorkflowWorld();
+      expect(worker.specVersion).toBe(9);
+      expect(worker.capabilities?.inBandFence).toBe(true);
+      const created = await worker.events.create(null, {
+        eventType: "run_created",
+        specVersion: worker.specVersion,
+        eventData: {
+          deploymentId: "generation-a",
+          executionContext: {},
+          input: new Uint8Array(),
+          workflowName: workflowEntryReference.workflowId,
+        },
+      });
+      expect(created.run.specVersion).toBe(9);
+    } finally {
+      await world.close();
+      if (previousSpecVersion === undefined) delete process.env.WORKFLOW_SPEC_VERSION;
+      else process.env.WORKFLOW_SPEC_VERSION = previousSpecVersion;
+    }
+  });
+
   it("defaults local delivery timeouts to unbounded", async () => {
     for (const name of LOCAL_DELIVERY_TIMEOUT_ENV_NAMES) {
       delete process.env[name];
@@ -818,8 +852,7 @@ describe("parent development Workflow World", () => {
  * the parent listener without binding a port.
  */
 function connectWorkerToWorld(world: ParentDevelopmentWorkflowWorld, appRoot: string): void {
-  process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = SECRET;
-  process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] = appRoot;
+  installWorkflowTransportEnvironment(appRoot, SECRET, world);
   process.env.WORKFLOW_LOCAL_BASE_URL = "http://eve-dev.local";
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const request = new Request(input, init);
