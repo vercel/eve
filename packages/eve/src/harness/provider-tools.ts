@@ -15,7 +15,15 @@ import type { WebSearchSelection } from "#shared/web-search.js";
 /**
  * The provider backend resolved for one web search tool invocation.
  */
-type WebSearchBackend = "anthropic" | "exa" | "google" | "openai" | "parallel" | "browserbase";
+type WebSearchBackend =
+  | "anthropic"
+  | "exa"
+  | "google"
+  | "openai"
+  | "parallel"
+  | GatewaySchemaBackend;
+
+type GatewaySchemaBackend = "browserbase" | "tako";
 
 /**
  * Maps an upstream identifier back to the framework tool name that injected it: a provider tool
@@ -58,7 +66,7 @@ export function resolveFrameworkToolFromUpstreamType(type: string): string | nul
  * will be injected for `backend`.
  */
 export function resolveWebSearchOutputSchema(
-  backend: Exclude<WebSearchBackend, "browserbase">,
+  backend: Exclude<WebSearchBackend, GatewaySchemaBackend>,
 ): JsonObject {
   switch (backend) {
     case "anthropic":
@@ -118,6 +126,10 @@ export async function resolveWebSearchProviderTool(
       const { gateway } = await import("ai");
       return gateway.tools.browserbaseSearch();
     }
+    case "tako": {
+      const { gateway } = await import("ai");
+      return gateway.tools.takoSearch();
+    }
     case "openai": {
       const { openai } = await import("#compiled/@ai-sdk/openai/index.js");
       return attachWebSearchOutputSchema(openai.tools.webSearch({}) as ToolSet[string], backend);
@@ -159,7 +171,7 @@ export async function resolveWebSearchProviderTool(
 
 function attachWebSearchOutputSchema(
   tool: ToolSet[string],
-  backend: Exclude<WebSearchBackend, "browserbase">,
+  backend: Exclude<WebSearchBackend, GatewaySchemaBackend>,
 ): ToolSet[string] {
   return {
     ...tool,

@@ -115,7 +115,7 @@ describe("normalizeToolDefinition", () => {
     expect(entry).toEqual({ kind: "disabled" });
   });
 
-  it.each(["exa", "parallel", "browserbase", "native"] as const)(
+  it.each(["exa", "parallel", "browserbase", "tako", "native"] as const)(
     "normalizes the %s web search provider",
     (provider) => {
       expect(normalizeToolDefinition(webSearch({ provider }), FAILURE_MESSAGE)).toEqual({
@@ -137,7 +137,7 @@ describe("normalizeToolDefinition", () => {
         { fallback: "native", kind: "eve:web-search-tool", provider: "native" },
         FAILURE_MESSAGE,
       ),
-    ).toThrow('Expected "fallback" to be one of: exa, parallel, browserbase');
+    ).toThrow('Expected "fallback" to be one of: exa, parallel, browserbase, tako');
   });
 
   it("rejects a fallback for a provider that serves every Gateway model", () => {
