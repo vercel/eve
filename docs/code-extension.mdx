@@ -88,6 +88,8 @@ export default git({});
 
 Configure `github` to get GitHub tokens through Vercel Connect instead. The extension then adds the authenticated `git__gh` tool and tells the agent to use it for every authenticated GitHub operation. `git__pr` switches to `gh-signed-commit` for repositories that require verified signatures.
 
+`gh-signed-commit` adds or updates non-executable regular files and deletes tracked entries. It rejects additions or updates involving executable files, symlinks, submodules, or file-mode changes before contacting GitHub. Your staged changes remain intact. For those changes, use native `git commit -S` with a configured signing key, then `git push` through the authenticated tool.
+
 | Option                 | Required      | Effect                                                                                     |
 | ---------------------- | ------------- | ------------------------------------------------------------------------------------------ |
 | `github.connector`     | With `github` | Connector that mints a GitHub token                                                        |
