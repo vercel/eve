@@ -456,8 +456,29 @@ only writer of facts and turn every authored file into a `Definition` with a sta
 - **Built-in session labels (#5866).** Stronger guarantees for one use case, with eve enforcing that
   labels only grow. It puts a security vocabulary in core and doesn't help budgets, quotas, or usage.
   Here the taint extension owns that guarantee in its reducers.
-- **`defineState` that propagates, with replayed hooks.** Hooks do I/O, so replaying them is unsafe,
-  and state would still need its own transport.
+- **Atomic state writes, as Pi Durable does.** Pi's extension docs have authors rebuild state by
+  scanning the branch's tool-result `details` or `appendEntry` records. That is derivation done by
+  hand, with no merging across agents, and policies can't read it. Pi Durable fixes lost writes a
+  different way: it writes state documents in the same atomic commit as transcript entries. In eve,
+  that would mean a hook's `defineState` writes join the commit of the event that triggered the hook,
+  and `defineState` gains `fromChild`, `fromParent`, `stream`, and `telemetry`. That closes the
+  interruption and delegation gaps without a new concept, and author code barely changes. It isn't
+  lighter, and pure reducers still win:
+  - **Same transport.** Propagation, merge functions, streaming, and telemetry are identical. The
+    only saving is the reducer API.
+  - **Only reducers fit inside the commit.** To land in the triggering event's commit, the hook has
+    to run before the commit is sealed. eve's hooks are asynchronous and do I/O, and the kernel runs
+    effects after commits, so a slow or failing webhook would hold or fail the commit. Code that can
+    run there safely is synchronous and does no I/O, which is a reducer. Atomic writes help only
+    state written by the code that produces the event, such as a tool's `execute`, and eve already
+    saves those with the tool's step.
+  - **Backfill.** A written value starts at `initial` on the deploy that adds it, so a taint state
+    added mid-session misses every earlier read. A reducer computes from the session's history.
+  - **Kernel and client.** A reducer is a pure function of the stream, so the kernel and clients can
+    run the same code, as eve's usage does today, and anyone can recompute a value from the stream to
+    audit it. A written value can only be trusted.
+  - **eve's own values.** Usage, the usage-limit window, and the counters are already reducers.
+    Atomic writes can't absorb them, so eve would keep two mechanisms.
 - **A separate `defineDelegation` with named entries.** An earlier draft. It repeats each name in
   `send`, `return`, and `accept`, which can drift, and its only use without a derived state was a
   budget, which is itself derived from usage.
@@ -468,7 +489,8 @@ only writer of facts and turn every authored file into a `Definition` with a sta
 ## Open questions
 
 - **Naming.** `defineDerivedState` in `agent/state/`, or a separate `agent/derived/` slot to keep
-  `defineState` handles distinct.
+  `defineState` handles distinct. A lighter option keeps one concept: `defineState` accepts `on`, and
+  a state with reducers has no `update()`.
 - **Declassification in the taint extension.** Whether it offers dropping a child's exposure for
   delegating tools whose `outputSchema` has only bounded fields, and how it checks that.
 - **Built-in channel tags.** Whether built-in channels tag messages from someone other than the
