@@ -2777,7 +2777,8 @@
             ]
           },
           "docs": "/docs/channels/telegram",
-          "implementation": "native"
+          "implementation": "native",
+          "requires": ">=1.0.0-rc.2"
         }
       }
     },
