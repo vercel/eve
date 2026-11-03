@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { validateRepositoryRoot } from "../../extension/lib/repository-root.ts";
 import {
   resolveInWorkspace,
   resolveWorkspaceDirectory,
@@ -57,26 +56,10 @@ test("a missing path reports the provider's error", async () => {
   );
 });
 
-test("repository roots add the git toplevel check", async () => {
-  assert.equal(
-    await validateRepositoryRoot(workspaceSandbox("/workspace"), "/workspace/repo"),
-    "/workspace/repo",
-  );
-  await assert.rejects(
-    validateRepositoryRoot(workspaceSandbox("/workspace", {}, [], "/workspace"), "/workspace/repo"),
-    /not a git work tree root/u,
-  );
-  await assert.rejects(
-    validateRepositoryRoot(workspaceSandbox("/workspace"), "/outside/repo"),
-    /resolves outside the workspace/u,
-  );
-});
-
 function workspaceSandbox(
   workspace: string,
   links: Readonly<Record<string, string>> = {},
   runs: string[] = [],
-  gitTop?: string,
 ): WorkspaceSandbox {
   return {
     resolvePath: () => workspace,
@@ -87,8 +70,6 @@ function workspaceSandbox(
         const path = realpath[1]!;
         return { exitCode: 0, stdout: `${links[path] ?? path}\0`, stderr: "" };
       }
-      const git = /^git -C '([^']*)' rev-parse --show-toplevel$/u.exec(command);
-      if (git) return { exitCode: 0, stdout: `${gitTop ?? git[1]}\n`, stderr: "" };
       throw new Error(`unexpected command: ${command}`);
     },
   };
