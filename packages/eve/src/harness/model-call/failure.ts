@@ -14,7 +14,12 @@ import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream
 import { fail } from "#harness/session-machine/transitions.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { changeHistory } from "#harness/session-machine/history.js";
-import { type HarnessModelMessage, TOOL_RESULT_BOUNDARY, turnAnchorOf } from "#harness/messages.js";
+import {
+  createFrameworkUserMessage,
+  type HarnessModelMessage,
+  TOOL_RESULT_BOUNDARY,
+  turnAnchorOf,
+} from "#harness/messages.js";
 
 const log = createLogger("harness.tool-loop");
 
@@ -103,13 +108,20 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
       session: step.session,
     };
   if (summary?.tags.includes("refused") === true && turnId !== undefined) {
-    step.session = changeHistory(step.session, {
-      rewrite: historyBeforeTurn(step.session.history, turnId),
-    });
+    const before = historyBeforeTurn(step.session.history, turnId);
+    if (before.length < step.session.history.length) {
+      step.session = changeHistory(step.session, { rewrite: [...before, REFUSED_TURN_NOTE] });
+    }
   }
   step.session = { ...step.session, outputSchema: undefined };
   return { next: null, session: step.session, settledTurn: { isError: true, output } };
 }
+
+// The model learns a turn was refused, so it doesn't repeat it unaware, without reading what it said.
+const REFUSED_TURN_NOTE = createFrameworkUserMessage(
+  "context.instruction",
+  "The model provider refused the previous turn, so its messages were removed from this conversation, and the turn ended with an error.",
+);
 
 /**
  * History as it stood before the turn's input joined it. A refused turn's input stays in the

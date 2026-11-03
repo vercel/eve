@@ -1477,6 +1477,8 @@ describe("models that fail", () => {
     expect(nextPrompt).toContain("Alice asks about pricing.");
     expect(nextPrompt).not.toContain("incident report");
     expect(nextPrompt).not.toContain("The report says");
+    // In their place, the model reads that a turn was refused.
+    expect(nextPrompt).toContain("The model provider refused the previous turn");
   });
 
   it("fails the turn when the account can't pay, and the session takes the next message", async () => {
