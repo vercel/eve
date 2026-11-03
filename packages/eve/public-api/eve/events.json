@@ -192,6 +192,7 @@
   "interactions",
   "isCompleted",
   "isTerminal",
+  "nextPrompt",
   "openInteractions",
   "part",
   "parts",

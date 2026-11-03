@@ -441,14 +441,17 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     },
 
     async deliver(payload: DeliverPayload, adapterCtx) {
+      const answerText = readInputText(payload);
       const replacement = await definition.deliver?.(
-        payload as ChannelDelivery<TState>,
+        (answerText === undefined
+          ? payload
+          : { ...payload, answerText }) as ChannelDelivery<TState>,
         adapterCtx as TCtx & ChannelContext,
       );
       const delivered = defaultDeliverResult(replacement ?? payload);
       if (delivered === undefined) return undefined;
       return attachClientContext(
-        attachInputText(delivered, readInputText(payload)),
+        attachInputText(delivered, replacement?.answerText ?? answerText),
         readClientContext(payload),
       );
     },

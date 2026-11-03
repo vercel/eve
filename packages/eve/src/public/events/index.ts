@@ -219,6 +219,7 @@ export {
   interaction,
   interactions,
   openInteractions,
+  nextPrompt,
   delivery,
   deliveries,
   queue,
