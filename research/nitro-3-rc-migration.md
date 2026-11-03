@@ -204,8 +204,8 @@ named output shims (Vercel crons, service fallback) ──► publish
 | `workflow-bundle/builder.ts`        | Returns step targets as data, writes one workflow directory, and owns its external lists.                                                                               | Regex re-parsing of `steps.mjs`, duplicate `steps.mjs` and `workflows.mjs` copies, and the build queue.                                    |
 | `bundler/rolldown.ts`               | eve's Rolldown loader with types from `"rolldown"`.                                                                                                                     | The `nitro-rolldown` wrappers and hand-written option shapes.                                                                              |
 | `bundler/authored-plugins.ts`       | One authored-source plugin factory for the authored module graph, loader, extension builds, workflow builder, and host.                                                 | Five hand-ordered lists.                                                                                                                   |
-| `nitro/runtime/`                    | One generated eve runtime plugin, plus a lifecycle plugin that uses only close hooks.                                                                                   | Several side-effect plugins that talk through `process.env` and globals, and the signal handler with `process.exit`.                       |
-| `nitro/dev/host-supervisor.ts`      | Readiness-gated swaps, the spare worker, host refcounts, crash restart, and close, all on `RunnerManager`.                                                              | `DrainedNitroDevServer`.                                                                                                                   |
+| `nitro/host/runtime-plugin.ts`      | One generated eve runtime plugin, plus a lifecycle plugin that uses only close hooks.                                                                                   | Several side-effect plugins that talk through `process.env` and globals, and the signal handler with `process.exit`.                       |
+| `nitro/host/dev-host-supervisor.ts` | Readiness-gated swaps, the spare worker, host refcounts, crash restart, and close, all on `RunnerManager`.                                                              | `DrainedNitroDevServer`.                                                                                                                   |
 | `nitro/dev/dev-runner.ts`           | `EveDevRunner extends NodeWorkerEnvRunner`, with a 15-second `shutdown` default.                                                                                        | The copied worker lifecycle.                                                                                                               |
 | `internal/extension/`               | The extension producer modules (build config, declarations, distribution, workspace extensions, state usage), which don't use Nitro.                                    | Their current home under `nitro/host/`.                                                                                                    |
 
@@ -576,14 +576,22 @@ traced placeholders, the storage guard, Rolldown pruned from hosted graphs, the 
 plugin and debug-name filter, vendored env-runner 0.3, sandbox shutdown through close hooks, and
 the packed host-build scenario.
 
-These simplifications don't depend on the RC and follow separately:
+A follow-up PR stacked on the bump completes the simplifications that don't depend on the RC:
 
-- the host supervisor on `RunnerManager`; `DrainedNitroDevServer` stays and runs env-runner 0.3
-  runners;
-- one generated runtime plugin;
-- the shared authored-plugin factory with Rolldown plugin types;
-- one tsconfig resolver for authored and workflow builds (the host already sets
-  `typescript.tsconfigPaths: false`).
+- `DevHostSupervisor` (`nitro/host/dev-host-supervisor.ts`) replaces `DrainedNitroDevServer`. It
+  keeps readiness-gated swaps with rollback, the spare worker, host refcounts, crash restart, and
+  the close sequence, and leaves request routing, exchange counting, and drain retirement to
+  env-runner's public `RunnerManager`. The rebuild coordinator depends on the narrow
+  `DevHostSwitch` port. Its scenario runs on real worker threads.
+- One generated `#eve/runtime` plugin (`nitro/host/runtime-plugin.ts`) installs the compiled
+  artifacts, the Workflow world, local tracing, and the workflow sandbox runtime. Boot failures
+  stay fatal. Instrumentation, skill files, local schedules, and the sandbox-shutdown close hook
+  stay separate plugins.
+- `bundler/authored-plugins.ts` gives every authored-source build one plugin list. Builds that
+  also bundle dependencies (the workflow driver and the host) resolve imports from authored
+  source only. Plugin factories and build options use Rolldown's types.
+- Host, authored, and workflow builds read one tsconfig: the authored package's own
+  `tsconfig.json` or `jsconfig.json`.
 
 Build each PR as ordered, individually reviewable commits. Upstream asks are filed as issues on
 Nitro and env-runner, not as eve PRs.
