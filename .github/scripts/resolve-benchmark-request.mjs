@@ -5,6 +5,7 @@ export const BENCHMARK_HARNESSES = [
   "claude-code",
   "pi",
   "hermes",
+  "fx",
   "oracle",
 ];
 
