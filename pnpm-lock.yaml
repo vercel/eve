@@ -2079,6 +2079,19 @@ importers:
         specifier: npm:typescript@6.0.3
         version: typescript@6.0.3
 
+  packages/eve-private-context:
+    dependencies:
+      eve:
+        specifier: workspace:*
+        version: link:../eve
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.5
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   packages/eve-untrusted-content:
     dependencies:
       eve:

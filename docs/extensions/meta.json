@@ -1,5 +1,10 @@
 {
   "title": "Extensions",
   "defaultOpen": true,
-  "pages": ["../code-extension", "../untrusted-content-extension", "../guides/self-modification"]
+  "pages": [
+    "../code-extension",
+    "../untrusted-content-extension",
+    "../private-context-extension",
+    "../guides/self-modification"
+  ]
 }

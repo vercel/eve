@@ -376,6 +376,12 @@
       "import": "./dist/src/extensions/git/extension/lib/sandbox.js",
       "default": "./dist/src/extensions/git/extension/lib/sandbox.js"
     },
+    "./extensions/private-context": {
+      "eve-source": "./dist/src/extensions/private-context/extension/extension.js",
+      "types": "./dist/src/extensions/private-context/extension/extension.d.ts",
+      "import": "./dist/src/extensions/private-context/extension/extension.js",
+      "default": "./dist/src/extensions/private-context/extension/extension.js"
+    },
     "./extensions/untrusted-content": {
       "eve-source": "./dist/src/extensions/untrusted-content/extension/extension.js",
       "types": "./dist/src/extensions/untrusted-content/extension/extension.d.ts",
@@ -768,6 +774,9 @@
       },
       "./extensions/git": {
         "dist": "./dist/src/extensions/git/extension"
+      },
+      "./extensions/private-context": {
+        "dist": "./dist/src/extensions/private-context/extension"
       },
       "./extensions/untrusted-content": {
         "dist": "./dist/src/extensions/untrusted-content/extension"

@@ -1,0 +1,31 @@
+{
+  "name": "@eve/private-context",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Source of the eve/extensions/private-context extension: records whose private data a session read, so an agent-wide approval policy can ask before writes and deny personal reads in public conversations.",
+  "type": "module",
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "pnpm run test:unit",
+    "test:unit": "node --test \"test/unit/*.test.ts\"",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "eve": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension"
+    }
+  }
+}
