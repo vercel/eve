@@ -89,6 +89,27 @@ test("requests the caller's token and sign-in without repository details", async
 });
 
 test("maps Connect errors to eve authorization errors", async () => {
+  const noChallenge = connectUserAuthorization(
+    "github/acme-bot",
+    client({
+      async startAuthorization() {
+        return {
+          request: "r",
+          verifier: "v",
+          connector: { id: "c", uid: "github/acme-bot", type: "github" },
+        } as unknown as Awaited<ReturnType<ConnectUserClient["startAuthorization"]>>;
+      },
+    }).value,
+  );
+  await assert.rejects(
+    noChallenge.startAuthorization({
+      principal: USER,
+      connection: CONNECTION,
+      callbackUrl: "https://agent.example/callback",
+    }),
+    { name: "ConnectionAuthorizationFailedError", reason: "missing_challenge", retryable: false },
+  );
+
   const missingGrant = connectUserAuthorization(
     "github/acme-bot",
     client({
