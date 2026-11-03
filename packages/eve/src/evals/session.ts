@@ -359,7 +359,7 @@ export class EvalSessionDriver implements EveEvalSession {
     const sessionId = this.id;
     return {
       view: this.view,
-      derived: deriveRunFacts(this.#events, { sessionId }),
+      derived: deriveRunFacts(this.#events, { sessionId, usageEvents: this.#readEvents() }),
       events: [...this.#events],
       primary: this.#primary,
       sessionId,

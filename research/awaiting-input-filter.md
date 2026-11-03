@@ -67,6 +67,9 @@ until the rest of their batch is decided:
   everything the eval read of the session. A request an earlier turn opened
   counts.
 - **Session scope:** the same, at the end of the session so far.
+- **Unread requests:** when a pause lists a request the eval never read, such
+  as after attaching at a later `startIndex`, the list is unknown and a filtered
+  `awaitingInput()` fails.
 - **Eval scope:** the requests of every session in the eval. A session that
   completed contributes none, so at eval scope a completed session A and a
   session B parked on an approval pass `awaitingInput({ kind: "approval" })`.

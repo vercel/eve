@@ -112,7 +112,8 @@ export interface EveEvalDerivedFacts {
   readonly parked: boolean;
   /**
    * The unanswered requests the run ended parked on, from every session in it, including requests
-   * an earlier turn opened. Empty unless `parked`.
+   * an earlier turn opened. Empty unless `parked`, and empty when the eval didn't read every request
+   * the run waits on, such as after attaching at a later `startIndex`.
    */
   readonly openInteractions: readonly Interaction[];
   readonly messageCount: number;

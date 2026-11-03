@@ -209,6 +209,7 @@ export function combineDerivedFacts(
   const skillLoads = derived.flatMap((facts) => facts.skillLoads);
   const subagentCalls = derived.flatMap((facts) => facts.subagentCalls);
   const interactions = derived.flatMap((facts) => facts.interactions);
+  const parked = derived.filter((facts) => facts.parked);
   const failureCode = sessions.find((session) => session.derived.failureCode !== undefined)?.derived
     .failureCode;
 
@@ -220,8 +221,10 @@ export function combineDerivedFacts(
     subagentCallCount: subagentCalls.length,
     interactions,
     // A session read in several handles is parked only if its merged stream still is.
-    parked: derived.some((facts) => facts.parked),
-    openInteractions: derived.flatMap((facts) => facts.openInteractions),
+    parked: parked.length > 0,
+    openInteractions: parked.every((facts) => facts.openInteractions.length > 0)
+      ? parked.flatMap((facts) => facts.openInteractions)
+      : [],
     messageCount: sum(sessions, (session) => session.derived.messageCount),
     reasoningBlockCount: sum(sessions, (session) => session.derived.reasoningBlockCount),
     models: [...new Set(sessions.flatMap((session) => session.derived.models))],

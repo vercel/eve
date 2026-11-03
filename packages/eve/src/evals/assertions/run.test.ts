@@ -132,6 +132,29 @@ it("awaitingInput shows RegExp matchers in its failure message", async () => {
   expect(outcome.message).toContain('{"prompt":"/publish/u"}');
 });
 
+it("awaitingInput with a filter fails a run parked on requests the eval didn't read", async () => {
+  const events = stampTestEvents([
+    {
+      data: { awaiting: [{ interactionId: "i_unread" }], turnId: "turn_0" },
+      scope: { turnId: "turn_0" },
+      type: "turn.paused",
+    },
+  ]);
+  const subject = {
+    derived: deriveRunFacts(events),
+    events,
+    output: undefined,
+    status: "awaiting-input" as const,
+  };
+
+  expect((await awaitingInput().evaluate(subject)).score).toBe(1);
+  expect((await awaitingInput({}).evaluate(subject)).score).toBe(1);
+  expect(await awaitingInput({ kind: "approval" }).evaluate(subject)).toMatchObject({
+    score: 0,
+    message: expect.stringContaining("didn't read"),
+  });
+});
+
 it("awaitingInput with a filter fails a run that did not park", async () => {
   const events = stampTestEvents(testTurnFacts(0, "Done.", ["d_0"]));
   const subject = {

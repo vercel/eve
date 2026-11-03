@@ -37,7 +37,7 @@ if (turn.status === "awaiting-input") turn.awaitingInput({ kind: "approval", too
 else turn.succeeded();
 ```
 
-A turn parked on two `deploy` approvals passes. A turn that also asks a question fails, and the failure message lists each request that didn't match.
+A turn parked on two `deploy` approvals passes. A turn that also asks a question fails, and the failure message lists each request that didn't match. A filter also fails when the run waits on a request the eval never read, such as after attaching at a later `startIndex`.
 
 ```ts
 await t.send("What is the weather in Brooklyn?");

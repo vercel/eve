@@ -69,9 +69,13 @@ export function awaitingInput(filter: EveEvalInteractionMatchOptions = {}): RunA
           `expected the run to park on HITL input; it ended "${result.status}" with no pending requests`,
         );
       }
-      const unmatched = result.derived.openInteractions.filter(
-        (request) => !interactionMatches(request, filter),
-      );
+      const pending = result.derived.openInteractions;
+      if (pending.length === 0 && Object.keys(filter).length > 0) {
+        return fail(
+          "the run parked on requests this eval didn't read; attach from an earlier startIndex to check them against the filter",
+        );
+      }
+      const unmatched = pending.filter((request) => !interactionMatches(request, filter));
       if (unmatched.length === 0) return PASS;
       return fail(
         `expected every pending request to match ${formatInteractionFilter(filter)}; unmatched: ${unmatched.map(formatPendingRequest).join("; ")}`,

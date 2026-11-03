@@ -374,3 +374,28 @@ it("reads only the requests the last pause waits on, not every open request", ()
 
   expect(deriveRunFacts(events).openInteractions).toMatchObject([{ interactionId: "i_approval" }]);
 });
+
+it("lists no requests when the pause names one this read didn't see", () => {
+  // The read starts after `i_unread` opened, as an attach at a later stream index does.
+  const events = stream([
+    {
+      data: {
+        interactionId: "i_read",
+        request: { kind: "approval", prompt: "Deploy?" },
+        subject: turn0,
+      },
+      scope: turn0,
+      type: "interaction.opened",
+    },
+    {
+      data: {
+        awaiting: [{ interactionId: "i_unread" }, { interactionId: "i_read" }],
+        turnId: "turn_0",
+      },
+      scope: turn0,
+      type: "turn.paused",
+    },
+  ] as SessionEvent[]);
+
+  expect(deriveRunFacts(events)).toMatchObject({ openInteractions: [], parked: true });
+});

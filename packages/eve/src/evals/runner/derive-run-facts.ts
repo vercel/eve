@@ -139,6 +139,7 @@ export function deriveRunFacts(
   });
   const spent = Object.keys(view.usage.byKind).length > 0 ? view.usage.total : undefined;
   const awaited = awaitedInteractionIds(events);
+  const waitingOn = awaited.flatMap((interactionId) => interaction(view, interactionId) ?? []);
   return {
     toolCalls,
     toolCallCount: toolCalls.length,
@@ -147,7 +148,8 @@ export function deriveRunFacts(
     subagentCallCount: subagentCalls.length,
     interactions,
     parked: awaited.length > 0,
-    openInteractions: awaited.flatMap((interactionId) => interaction(view, interactionId) ?? []),
+    // A pause can list a request opened before the events this scope read; the list is then unknown.
+    openInteractions: waitingOn.length === awaited.length ? waitingOn : [],
     messageCount,
     reasoningBlockCount,
     models: [...models],

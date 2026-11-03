@@ -113,6 +113,45 @@ describe("combineDerivedFacts", () => {
     });
   });
 
+  it("lists no open requests when one parked session's requests weren't read", () => {
+    const read = handle(
+      0,
+      [
+        {
+          data: {
+            interactionId: "approval-1",
+            request: { kind: "approval", prompt: "Deploy?" },
+            subject: { turnId },
+          },
+          scope: { turnId },
+          type: "interaction.opened",
+        },
+        {
+          data: { awaiting: [{ interactionId: "approval-1" }], turnId },
+          scope: { turnId },
+          type: "turn.paused",
+        },
+      ],
+      { sessionId: "session-1" },
+    );
+    const unread = handle(
+      5,
+      [
+        {
+          data: { awaiting: [{ interactionId: "question-1" }], turnId },
+          scope: { turnId },
+          type: "turn.paused",
+        },
+      ],
+      { sessionId: "session-2" },
+    );
+
+    expect(combineDerivedFacts([read, unread])).toMatchObject({
+      openInteractions: [],
+      parked: true,
+    });
+  });
+
   it("keeps a recaptured session's latest usage by time, not by capture order", () => {
     // The second capture is an earlier snapshot of the same session.
     const fuller = handle(0, [spent(10, 0.25), spent(20, 0.5)], {
