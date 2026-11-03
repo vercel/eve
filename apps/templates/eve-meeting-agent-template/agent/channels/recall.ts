@@ -1,5 +1,5 @@
 import { decide } from "eve/ai";
-import { recallChannel } from "eve/channels/recall";
+import { recallChannel } from "@eve/recall";
 
 // Lines that don't start a turn are kept as recent transcript for the next
 // one, so "open a ticket for that" has context.
