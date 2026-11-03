@@ -64,7 +64,7 @@ describe("tool-result media staging", () => {
     });
     const session = withOpenTurn(
       {
-        agent: { modelReference: { id: "media-test" }, system: "Test assistant", tools: [] },
+        agent: { modelReference: { id: "media-test" }, tools: [] },
         compaction: { recentWindowSize: 10, threshold: 100_000 },
         continuationToken: "http:media-test",
         sessionId: "media-test",

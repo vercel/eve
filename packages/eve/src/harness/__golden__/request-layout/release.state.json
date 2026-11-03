@@ -161,9 +161,6 @@
     "sessionId": "wrun_<ulid0>",
     "snapshot": {
       "session": {
-        "agent": {
-          "system": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nTool execution\nTool calls in one response run in parallel, so batch only calls that don't depend on each other.\n\nAvailable skills\nListed skills are available in this run. Do not claim a listed skill is inaccessible unless activation or workspace inspection actually fails.\nDynamic skill announcements replace earlier dynamic skills and override static skills with the same name. Static skills omitted from a dynamic announcement remain available.\nIf the user names a skill or the request clearly matches one of the descriptions below, load it with eve__skill({ name }) before proceeding.\nIf multiple skills match, activate the minimal set that covers the task. After activation, follow the returned instructions instead of improvising around them.\nIf activation fails, say so briefly and continue with the best available alternative.\nSkill files live under `$HOME/.agents/skills/<skill>/`, with `skills/<skill>/` under the workspace root as the fallback when `$HOME` is unavailable.\nWhen a loaded SKILL.md mentions sibling files such as `references/foo.md`, resolve them relative to the directory containing that specific SKILL.md.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)"
-        },
         "compaction": {
           "lastKnownInputTokens": 1,
           "lastKnownPromptMessageCount": 4,

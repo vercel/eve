@@ -1,3 +1,4 @@
+import { stepCatalog } from "#definitions/step.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import { appendTaskContext } from "#execution/tasks/model-step.js";
 import {
@@ -66,7 +67,7 @@ async function settleHistory(
     const taskContext = await appendTaskContext({
       messages,
       session: step.session,
-      tools: step.config.tools,
+      tools: await stepCatalog(step, { endsTurn: false }),
     });
     step.session = taskContext.session;
     // A turn a task's result starts brings no input of its own: what eve adds for the turn

@@ -19,7 +19,6 @@ function createSession(): HarnessSession {
   return {
     agent: {
       modelReference: { id: "integration-model" },
-      system: "You are a test assistant.",
       tools: [],
     },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
@@ -238,7 +237,6 @@ describe("tool loop cancellation (real AI SDK)", () => {
       ...createSession(),
       agent: {
         modelReference: { id: "integration-model" },
-        system: "You are a test assistant.",
         tools: [
           {
             description: "Waits until the turn is cancelled.",

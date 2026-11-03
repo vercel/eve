@@ -1,4 +1,5 @@
 import { stageAttachmentsToSandbox, stageToolResultMedia } from "#harness/attachment-staging.js";
+import { stepCatalog } from "#definitions/step.js";
 import { forgetFinishedRuns, runtimeResultCalls } from "#harness/coordination.js";
 import {
   anchorToTurn,
@@ -47,7 +48,7 @@ export async function settleRuntimeWork(
   const finished = forgetFinishedRuns(step.session, ready, runtime.event.turnId);
   step.session = finished.session;
   await step.apply(finishRun(step.view(), { requestIds: finished.requestIds }));
-  const results = await runtimeResultCalls(ready, step.config.tools);
+  const results = await runtimeResultCalls(ready, await stepCatalog(step, { endsTurn: false }));
   const staged = await stageToolResultMedia([
     { role: "tool", content: results.map(({ part }) => part) },
   ]);

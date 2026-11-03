@@ -33,7 +33,7 @@ describe("sandbox terminal cleanup after a failed scope", () => {
           },
         });
         const checkpoint: HarnessSession = {
-          agent: { modelReference: { id: "unused" }, system: "", tools: [] },
+          agent: { modelReference: { id: "unused" }, tools: [] },
           compaction: { recentWindowSize: 10, threshold: 100_000 },
           continuationToken: "sandbox-initialization",
           history: [],

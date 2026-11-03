@@ -32,7 +32,7 @@ import type { HarnessSession } from "#harness/types.js";
 import { withOpenTurn, withPublished, withQueuedInput } from "#internal/testing/session-machine.js";
 
 const BASE: HarnessSession = {
-  agent: { modelReference: { id: "test" }, system: "", tools: [] },
+  agent: { modelReference: { id: "test" }, tools: [] },
   compaction: { recentWindowSize: 10, threshold: 0.8 },
   continuationToken: "test",
   history: [],

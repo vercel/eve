@@ -8,7 +8,6 @@ function session(): HarnessSession {
   return {
     agent: {
       modelReference: { id: "test-model" },
-      system: "You are a test assistant.",
       tools: [],
     },
     compaction: { recentWindowSize: 10, threshold: 100_000 },

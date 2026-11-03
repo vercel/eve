@@ -1,5 +1,4 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
-import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
 import type {
   CompactionConfig,
   CompactionState,
@@ -62,7 +61,7 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   const session: {
     -readonly [K in keyof HarnessSession]: HarnessSession[K];
   } = {
-    agent: createSessionAgent(turnAgent, createSessionSystemPrompt(turnAgent), tools),
+    agent: createSessionAgent(turnAgent, tools),
     compaction: createCompactionConfig({
       contextWindowTokens: turnAgent.model?.contextWindowTokens,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
@@ -84,13 +83,11 @@ export function createSession(input: CreateSessionInput): HarnessSession {
 
 function createSessionAgent(
   turnAgent: RuntimeTurnAgent,
-  system: string,
   tools: readonly SessionToolDefinition[],
 ): SessionAgent {
   const base = {
     compactionModelReference: turnAgent.compactionModel,
     reasoning: turnAgent.reasoning,
-    system,
     tools,
   };
 
@@ -117,24 +114,13 @@ export function refreshSessionFromTurnAgent(input: {
 }): HarnessSession {
   return {
     ...input.session,
-    agent: createSessionAgent(
-      input.turnAgent,
-      createSessionSystemPrompt(input.turnAgent),
-      createSessionToolDefinitions(input.turnAgent),
-    ),
+    agent: createSessionAgent(input.turnAgent, createSessionToolDefinitions(input.turnAgent)),
     compaction: createCompactionConfig({
       contextWindowTokens: input.turnAgent.model?.contextWindowTokens,
       previous: input.session.compaction,
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
   };
-}
-
-function createSessionSystemPrompt(turnAgent: RuntimeTurnAgent): string {
-  const skillSection = formatAvailableSkillsSection(turnAgent.listedSkills ?? []);
-  const blocks =
-    skillSection === null ? turnAgent.instructions : [...turnAgent.instructions, skillSection];
-  return blocks.join("\n\n");
 }
 
 /**
@@ -150,8 +136,7 @@ export function mintSubagentContinuationToken(suffix?: string): string {
  * Projects a {@link HarnessSessionBase} to {@link DurableSession}.
  *
  * Drops fields rebuilt every turn from `bundle.turnAgent`; keeps
- * `agent.system` and `compaction.lastKnown*` so compaction stays
- * informed after rehydration.
+ * `compaction.lastKnown*` so compaction stays informed after rehydration.
  */
 export function projectToDurableSession(session: HarnessSessionBase): DurableSession {
   const {
@@ -161,7 +146,6 @@ export function projectToDurableSession(session: HarnessSessionBase): DurableSes
     ...measured
   } = session.compaction;
   return {
-    agent: { system: session.agent.system },
     continuationToken: session.continuationToken,
     sessionId: session.sessionId,
     ...(Object.values(measured).some((value) => value !== undefined) && { compaction: measured }),
@@ -185,10 +169,10 @@ export function hydrateDurableSession(input: {
   };
 }): HarnessSessionBase {
   const { durable, turnAgent } = input;
-  const { agent, compaction, ...saved } = durable;
+  const { compaction, ...saved } = durable;
   return {
     ...saved,
-    agent: createSessionAgent(turnAgent, agent.system, createSessionToolDefinitions(turnAgent)),
+    agent: createSessionAgent(turnAgent, createSessionToolDefinitions(turnAgent)),
     compaction: createCompactionConfig({
       contextWindowTokens: turnAgent.model?.contextWindowTokens,
       previous: compaction,

@@ -52,7 +52,6 @@ describe("ChatGPT streamed reasoning replay", () => {
     const session: HarnessSession = {
       agent: {
         modelReference: { id: "chatgpt-reasoning-test" },
-        system: "Check the invoice.",
         tools: [
           {
             name: "get_invoice",

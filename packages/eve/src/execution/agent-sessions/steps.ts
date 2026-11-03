@@ -52,7 +52,7 @@ import {
   startRemoteAgentSession,
 } from "#execution/agent-sessions/remote.js";
 import { remoteAgentCredentials } from "#execution/agent-sessions/remote-credentials.js";
-import type { DynamicRemoteBinding } from "#reactions/remote.js";
+import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import type { RemoteAgentCredentials } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";

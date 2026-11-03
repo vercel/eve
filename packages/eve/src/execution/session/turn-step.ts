@@ -1,6 +1,6 @@
 import { checksSessionEvents } from "#shared/dev-checks.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
-import { channelOf } from "#reactions/frame.js";
+import { channelOf } from "#definitions/frame.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import type { Commit, HandleEventFn } from "#harness/types.js";
@@ -85,8 +85,8 @@ import { getAdapterKind } from "#channel/adapter.js";
 import { admitDeliveries } from "#harness/session-machine/deliveries.js";
 import { eventsOf } from "#harness/publication.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
-import { applyReactionEffects, restoreReactions } from "#reactions/runner.js";
-import { bindMemoryInstrumentation } from "#reactions/kinds/memory.js";
+import { installDefinitions, restoreDefinitions } from "#definitions/kernel.js";
+import { bindMemoryInstrumentation } from "#memory/definition.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
@@ -541,7 +541,7 @@ async function runSessionStepBody(
 
     const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
     let restoration: Promise<void> | undefined;
-    const prepareReactions = (session: HarnessSession): Promise<void> => {
+    const prepareDefinitions = (session: HarnessSession): Promise<void> => {
       ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
       return (restoration ??= (async () => {
         try {
@@ -552,7 +552,7 @@ async function runSessionStepBody(
                 bundle.compiledArtifactsSource,
               );
           await contextStorage.run(ctx, () =>
-            restoreReactions(ctx, { abortSignal, conversation: session.history, revision }),
+            restoreDefinitions(ctx, { abortSignal, conversation: session.history, revision }),
           );
         } catch (error) {
           await instrumentation?.flush();
@@ -572,7 +572,7 @@ async function runSessionStepBody(
         failed: input.recover,
         publish: async (events, session) => {
           const scoped = await withContextScope(ctx, session, async (current) => {
-            await prepareReactions(current);
+            await prepareDefinitions(current);
             const emit = createTurnEventHandler({
               abortSignal,
               canCancelTurn: false,
@@ -601,7 +601,7 @@ async function runSessionStepBody(
       initialSession = recovered.session;
       resolved = recovered.stepInput;
     }
-    await prepareReactions(initialSession);
+    await prepareDefinitions(initialSession);
 
     try {
       await publishAdmission(runtimeIdentity);
@@ -690,7 +690,7 @@ async function runSessionStepBody(
                 ? { ...enrichedSession, outputSchema: resolved.outputSchema }
                 : enrichedSession;
             // The scope's providers start empty; the slots fill what they own.
-            await applyReactionEffects(ctx);
+            await installDefinitions(ctx);
             // A sign-in completes before the turn it resumes, in the first call only.
             const completions =
               firstCall && completedAuths !== undefined

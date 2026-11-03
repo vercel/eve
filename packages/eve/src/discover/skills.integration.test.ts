@@ -91,8 +91,8 @@ describe("discoverSkills (memory)", () => {
       createAgentSourceManifest({
         agentRoot: project.agentRoot,
         appRoot: project.appRoot,
-        skills: result.skills,
-      }).skills,
+        sources: result.skills,
+      }).sources,
     ).toEqual(result.skills);
   });
 

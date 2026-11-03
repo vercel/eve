@@ -17,8 +17,8 @@ import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { always } from "#tools/approval/policies.js";
 
 /** Alice's session over `input`, with the session context approval policies read. */
-function session(input: Parameters<typeof catalogContext>[0]) {
-  const context = catalogContext(input);
+async function session(input: Parameters<typeof catalogContext>[0]) {
+  const context = await catalogContext(input);
   context.ctx.set(SessionKey, {
     auth: { current: null, initiator: null },
     sessionId: "catalog-session",
@@ -46,7 +46,7 @@ describe("agent approval in the step catalog", () => {
       name: "crm",
       tools: [{ ...connectionTool("delete_account"), annotations: { destructiveHint: true } }],
     });
-    const { decide } = session({
+    const { decide } = await session({
       approval,
       connections: [crm],
       tools: [
@@ -77,7 +77,7 @@ describe("agent approval in the step catalog", () => {
       name: "crm",
       tools: [connectionTool("delete_account")],
     });
-    const { decide } = session({
+    const { decide } = await session({
       approval: ({ toolName }) =>
         toolName.endsWith("__delete_account")
           ? { type: "denied", reason: "No deletes." }
@@ -89,7 +89,7 @@ describe("agent approval in the step catalog", () => {
   });
 
   it("can't loosen an entry's own gate", async () => {
-    const { decide } = session({
+    const { decide } = await session({
       approval: () => "approved",
       tools: [inlineTool("deploy", { approval: always() })],
     });
@@ -97,8 +97,8 @@ describe("agent approval in the step catalog", () => {
     expect(await decide("deploy")).toEqual(ASKS);
   });
 
-  it("leaves task controls and connection sign-in ungated", () => {
-    const { catalog } = session({
+  it("leaves task controls and connection sign-in ungated", async () => {
+    const { catalog } = await session({
       approval: () => "user-approval",
       connections: [fakeConnection({ name: "crm", tools: [connectionTool("search")] })],
       tools: [workflowTool("crawl", "task")],
@@ -109,8 +109,8 @@ describe("agent approval in the step catalog", () => {
     expect(catalog.get("crm")?.approval).toBeUndefined();
   });
 
-  it("leaves interaction-only executors ungated, but not tools that merely share their names", () => {
-    const { catalog } = session({
+  it("leaves interaction-only executors ungated, but not tools that merely share their names", async () => {
+    const { catalog } = await session({
       approval: () => "user-approval",
       tools: [
         inlineTool("no_reply", { frameworkTool: true, interactionOnly: true }),
@@ -125,9 +125,9 @@ describe("agent approval in the step catalog", () => {
     expect(catalog.get("ask_question")?.approval).toBeDefined();
   });
 
-  it("changes nothing for an agent without a policy", () => {
+  it("changes nothing for an agent without a policy", async () => {
     const tool = inlineTool("bash");
-    const { catalog } = catalogContext({ tools: [tool] });
+    const { catalog } = await catalogContext({ tools: [tool] });
 
     expect(catalog.get("bash")).toBe(tool);
   });

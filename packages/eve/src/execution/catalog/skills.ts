@@ -13,7 +13,7 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { skillTarget } from "#shared/action-request-name.js";
 import { stripSkillFrontmatter } from "#shared/skill-package.js";
 import { toInputSchema } from "#tools/schema.js";
-import { dynamicSkillManifest } from "#reactions/kinds/skill.js";
+import { dynamicSkillManifest } from "#definitions/skills.js";
 
 import { closestNames } from "./rank.js";
 

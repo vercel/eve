@@ -74,7 +74,7 @@ describe("tool stubs through eve__tool", () => {
           catalog,
           ctx,
           run: inSession,
-        } = catalogContext({
+        } = await catalogContext({
           connections: [linear],
           tools: [
             inlineTool("refund_invoice", {

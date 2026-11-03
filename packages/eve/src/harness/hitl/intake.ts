@@ -1,7 +1,7 @@
 import { approvedClearance } from "#harness/clearance.js";
 import { transition } from "#harness/session-machine/commit.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
-import { buildStepCatalog } from "#execution/catalog/step-catalog.js";
+import { stepCatalog } from "#definitions/step.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 import { collectWorkflowCalls } from "#harness/coordination.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
@@ -376,27 +376,23 @@ async function restoreTools(
   step: Step,
   parked: SuspendedStep | undefined,
 ): Promise<HarnessToolLookup> {
-  const { config } = step;
   const at = parked?.event ?? step.position();
   const key = stepKey(at);
   const cache = restoredTools.get(step) ?? { tools: new Map<string, HarnessToolLookup>() };
   restoredTools.set(step, cache);
   const restored = cache.tools.get(key);
   if (restored !== undefined && cache.last === key) return restored;
-  const tools = buildStepCatalog({
-    agentTools: config.tools,
-    ctx: step.ctx,
-    endsTurn: false,
-    session: step.session,
-  });
+  const tools = await stepCatalog(step, { endsTurn: false });
   cache.tools.set(key, tools);
   cache.last = key;
   return tools;
 }
 
+const NO_TOOLS: HarnessToolLookup = new Map();
+
 /** The entries a parked step's calls run with: those of the step that asked. */
 function toolsOf(step: Step, parked: SuspendedStep | undefined): HarnessToolLookup {
-  return (parked && restoredTools.get(step)?.tools.get(stepKey(parked.event))) ?? step.config.tools;
+  return (parked && restoredTools.get(step)?.tools.get(stepKey(parked.event))) ?? NO_TOOLS;
 }
 
 const STEERED_SIGN_IN_REASON = "Cancelled because a new message arrived.";

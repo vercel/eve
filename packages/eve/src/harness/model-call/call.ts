@@ -63,12 +63,8 @@ import {
   recoverModelCall,
   rethrowNoOutputAsEmptyResponse,
 } from "./recovery.js";
-import {
-  modelInstructions,
-  requestMessages,
-  type RequestMessages,
-  withTrailingUserNote,
-} from "./request.js";
+import { stepDraft, stepMessages, stepSystem } from "#definitions/step.js";
+import { modelInstructions, type RequestMessages, withTrailingUserNote } from "./request.js";
 import { answerSkippedToolCalls, extractToolResultCallIds, withCallResults } from "./response.js";
 import { ALLOW_RETRY, runModelCallWithRetries, STOP_RETRY } from "./retry.js";
 import { withUniqueCallIds } from "./unique-call-ids.js";
@@ -108,7 +104,6 @@ interface ModelCallerInput {
   readonly generation: GenerationSteering;
   readonly turnMessages: readonly HarnessModelMessage[];
   readonly approvalMemory: ApprovalMemory;
-  readonly pendingApprovalsNote: string | undefined;
   /** The prompt as the step started it, projected for the model. */
   readonly projectedMessages: HarnessModelMessage[];
   /** Requests a run to replace one an attempt gave up. */
@@ -134,6 +129,8 @@ export class ModelCaller {
   /** The messages the latest attempt sent, after attachments were hydrated. */
   modelMessages: ModelMessage[] = [];
   requestEnvelopeTokens = 0;
+  /** The step's system prompt, from its harness's plan. */
+  private system: string | readonly string[] = "";
   /** Usage of a call steering interrupted, which the steered step still counts. */
   private interruptedUsage: TokenUsageDelta | undefined;
   private compactionFailure: { readonly error: unknown } | undefined;
@@ -163,7 +160,11 @@ export class ModelCaller {
     );
     this.projectedMessages = input.projectedMessages;
     this.turnMessages = input.turnMessages;
-    this.request = this.buildRequest();
+    this.request = {
+      history: prompt.messages,
+      historyState: step.ctx?.get(HistoryStateKey) ?? {},
+      nonSystemMessages: input.projectedMessages,
+    };
   }
 
   /** Calls the model, retrying transient failures. */
@@ -262,14 +263,26 @@ export class ModelCaller {
     this.interruptedUsage = undefined;
   }
 
-  private buildRequest(): RequestMessages {
-    return requestMessages(this.step, {
+  /** The call's system prompt and messages, from the step's harness. */
+  private async buildRequest(): Promise<void> {
+    const { prompt, step } = this;
+    const call = {
       catalog: this.input.catalog,
-      messages: this.prompt.messages,
-      pendingApprovalsNote: this.input.pendingApprovalsNote,
-      projectedMessages: this.projectedMessages,
-      turnMessages: this.turnMessages,
+      currentInput: new Set(this.turnMessages),
+      historyState: step.ctx?.get(HistoryStateKey) ?? {},
+      record: prompt.messages,
+    };
+    const draft = await stepDraft(step, call);
+    this.system = await stepSystem(step, draft);
+    const messages = await stepMessages(draft, {
+      call,
+      project: (record) => projectPrompt({ ...prompt, messages: [...record] }),
     });
+    this.request = {
+      history: messages.record,
+      historyState: messages.historyState,
+      nonSystemMessages: messages.view,
+    };
   }
 
   /**
@@ -288,8 +301,7 @@ export class ModelCaller {
       instructions: modelInstructions({
         anthropicCache: this.profile.anthropicCache,
         extraSystemNote,
-        session: this.step.session,
-        systemMessages: this.request.systemMessages,
+        instructions: this.system,
       }),
       messages: asSystem ? [...messages] : withTrailingUserNote(messages, note),
     };
@@ -301,7 +313,7 @@ export class ModelCaller {
       disabledProviderTools: options.disabledProviderTools,
       profile: this.profile,
     });
-    this.request = this.buildRequest();
+    await this.buildRequest();
     this.requestEnvelopeTokens = await estimateRequestEnvelope({
       history: this.projectedMessages,
       ...this.framing(options, this.request.nonSystemMessages),

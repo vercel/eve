@@ -4,7 +4,7 @@ import type { ControlDelivery } from "#harness/types.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
-import { runReactions, type RunReactionsInput } from "#reactions/runner.js";
+import { runEffects, type RunEffectsInput } from "#definitions/kernel.js";
 import { AuthKey, InitiatorAuthKey, ParentSessionKey, SessionKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -326,10 +326,10 @@ interface StreamWriter extends SessionEventWriter {
 export interface SessionEventDispatcher {
   /** The context delivery hands the channel adapter; a turn step also hands it to `adapter.deliver`. */
   readonly adapterCtx: ChannelAdapterContext;
-  /** Runs the session's reactions after written events; see `reactions/runner.ts`. */
+  /** Runs the effects of written events; see `definitions/kernel.ts`. */
   react(
     written: readonly WrittenEvent[],
-    options?: Omit<RunReactionsInput, "written">,
+    options?: Omit<RunEffectsInput, "written">,
   ): Promise<void>;
 }
 
@@ -609,7 +609,7 @@ function createSessionEventDispatcher(input: {
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const deliveryCtx = inputSource === undefined ? adapterCtx : { ...adapterCtx, inputSource };
   // Commits react one at a time, in order. Inline tool calls publish concurrently, and a slow
-  // reaction to an earlier commit must not write its slot over a later commit's.
+  // effect of an earlier commit must not write its slot over a later commit's.
   let reacting: Promise<void> = Promise.resolve();
 
   return {
@@ -640,7 +640,7 @@ function createSessionEventDispatcher(input: {
     },
     react(written, options) {
       if (written.length === 0) return Promise.resolve();
-      const reacted = reacting.then(() => runReactions(ctx, { ...options, written }));
+      const reacted = reacting.then(() => runEffects(ctx, { ...options, written }));
       reacting = reacted.catch(() => undefined);
       return reacted;
     },

@@ -68,7 +68,7 @@ function readGatewayMetadata(
  */
 export async function recordModelUsage(
   step: Step,
-  input: { readonly model: LanguageModel },
+  input: { readonly model: LanguageModel; readonly tools: number },
 ): Promise<void> {
   const { setAttributes } = step.config;
   if (setAttributes === undefined) return;
@@ -80,7 +80,7 @@ export async function recordModelUsage(
     "$eve.cache_read_tokens": usage.cacheReadTokens,
     "$eve.cache_write_tokens": usage.cacheWriteTokens,
     "$eve.cost_usd": usage.costUsd,
-    "$eve.tool_count": step.config.tools.size,
+    "$eve.tool_count": input.tools,
   };
   await setAttributes(attributes);
 }

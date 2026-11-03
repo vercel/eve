@@ -40,7 +40,7 @@ import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 import { resolveWorkflowAgentMetadata } from "#execution/agent-sessions/metadata.js";
-import { readDynamicSubagentSelections } from "#reactions/kinds/subagent.js";
+import { readDynamicSubagentSelections } from "#definitions/subagents.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 

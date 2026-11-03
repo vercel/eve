@@ -9,10 +9,11 @@ import {
   SessionCallbackKey,
   SessionPredecessorKey,
 } from "#context/keys.js";
-import { takeTurnFailure } from "#reactions/intents.js";
-import { takeUserInstructionMessages } from "#reactions/kinds/instructions.js";
-import { isDynamicModelSelectionError } from "#reactions/kinds/model.js";
-import { evaluateValues, isReactionFailedError } from "#reactions/runner.js";
+import { takeTurnFailure } from "#definitions/intents.js";
+import { takeUserInstructionMessages } from "#definitions/instructions.js";
+import { isDynamicModelSelectionError } from "#definitions/model.js";
+import { DefinitionFailedError } from "#definitions/kernel.js";
+import { evaluateStepValues } from "#definitions/step.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import {
   applyTransition,
@@ -164,22 +165,19 @@ export async function prepareModelCall(
   const ctx = step.ctx as ContextContainer | undefined;
   if (ctx === undefined) return undefined;
   throwIfTurnAborted(step.config.abortSignal);
+  const conversation = validateHarnessModelMessages(withClientContext(preview));
   try {
-    await evaluateValues(ctx, {
-      abortSignal: step.config.abortSignal,
-      conversation: validateHarnessModelMessages(withClientContext(preview)),
-    });
+    await evaluateStepValues(step, { abortSignal: step.config.abortSignal, conversation });
   } catch (error) {
-    if (!isReactionFailedError(error)) throw error;
+    if (!(error instanceof DefinitionFailedError)) throw error;
     return failTurn(step, error, "REACTION_FAILED");
   }
-  const instructionMessages = takeUserInstructionMessages(ctx);
-  step.session = changeHistory(step.session, { append: instructionMessages });
+  step.session = changeHistory(step.session, { append: takeUserInstructionMessages(ctx) });
   return undefined;
 }
 
 /** A hook failed during the turn: the turn fails. Returns the step's result then. */
-export async function failTurnForReaction(step: Step): Promise<StepResult | undefined> {
+export async function failTurnForEffect(step: Step): Promise<StepResult | undefined> {
   const reason = takeTurnFailure(step.ctx as ContextContainer | undefined);
   if (reason === undefined) return undefined;
   return failTurn(step, new Error(reason), "HOOK_FAILED");

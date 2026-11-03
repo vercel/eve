@@ -2,11 +2,8 @@ import type { LanguageModel } from "ai";
 import { handleStepResult } from "#harness/step/after-model.js";
 
 import { HistoryStateKey } from "#context/keys.js";
-import {
-  buildStepCatalog,
-  recordOfferedCatalogTools,
-  type StepCatalog,
-} from "#execution/catalog/step-catalog.js";
+import { recordOfferedCatalogTools, type StepCatalog } from "#execution/catalog/step-catalog.js";
+import { stepCatalog } from "#definitions/step.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import { enforceBudget, humanInputContext } from "#harness/hitl/index.js";
@@ -82,15 +79,10 @@ export async function runModelStep(
   // Dynamic tools and subagents were evaluated before the run was requested, so the step's calls
   // resolve once, against this catalog.
   const endsTurn = !step.hasDelegatedCaller && step.session.outputSchema === undefined;
-  const catalog = buildStepCatalog({
-    agentTools: step.config.tools,
-    ctx: step.ctx,
-    endsTurn,
-    session: step.session,
-  });
+  const catalog = await stepCatalog(step, { endsTurn });
   recordOfferedCatalogTools(step.ctx, catalog);
   step.frameworkToolNames = frameworkToolNames(catalog);
-  const { approvalMemory, pendingApprovalsNote } = humanInputContext(step);
+  const { approvalMemory } = humanInputContext(step);
   const caller = new ModelCaller(step, prompt, {
     approvalMemory,
     catalog,
@@ -101,7 +93,6 @@ export async function runModelStep(
       if ("failed" in next) throw new Error("The model run's replacement found no model.");
     },
     startRun: async (attempt) => await startRun(step, attempt),
-    pendingApprovalsNote,
     projectedMessages,
     turnMessages: input.turn.messages,
   });
@@ -117,7 +108,7 @@ export async function runModelStep(
     return reportModelCallFailure(step, error);
   }
 
-  await recordModelUsage(step, { model: run.model });
+  await recordModelUsage(step, { model: run.model, tools: catalog.advertised.size });
   caller.clearInterruptedUsage();
 
   let stepResult: StepResult;

@@ -15,7 +15,7 @@ interface UsageSink {
    * Set inside a reaction, such as a hook: its publish waits for the reactions queued behind the
    * one running, so recording doesn't wait for it.
    */
-  readonly inReaction?: true;
+  readonly inEffect?: true;
 }
 
 const SINK = Symbol.for("eve.usageSink");
@@ -43,11 +43,11 @@ export function withUsageCall<T>(callId: string, fn: () => T): T {
  * Runs a reaction's `fn`, where usage it records is published without waiting on reactions. A
  * reaction can start inside a tool's call, from its progress, but what it spends isn't the call's.
  */
-export function withUsageInReaction<T>(fn: () => T): T {
+export function withUsageInEffect<T>(fn: () => T): T {
   const sink = contextScopeValue<UsageSink>(SINK);
   if (sink === undefined) return fn();
   const { callId: _callId, ...rest } = sink;
-  return withContextScopeValue(SINK, { ...rest, inReaction: true }, fn);
+  return withContextScopeValue(SINK, { ...rest, inEffect: true }, fn);
 }
 
 /**
@@ -64,7 +64,7 @@ export async function recordUsage(
   const published = sink.publish(
     recordUsageFact({ callId: sink.callId, kind: options.kind ?? "auxiliary", usage: counted }),
   );
-  if (sink.inReaction !== true) return await published;
+  if (sink.inEffect !== true) return await published;
   sink.pending.push(
     published.catch((error: unknown) => log.error("recording usage failed", { error })),
   );

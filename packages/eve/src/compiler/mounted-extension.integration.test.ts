@@ -1,4 +1,5 @@
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { declared } from "#runtime/types.js";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -695,7 +696,7 @@ describe("mounted extension via directory form with override", () => {
     const legacy = graph.root.agent.tools.find((entry) => entry.name === "crm__crm_legacy");
     expect(legacy).toBeUndefined();
 
-    const pulse = graph.root.agent.dynamicToolResolvers.find(
+    const pulse = declared(graph.root.agent, "tool").find(
       (resolver) => resolver.slug === "crm__crm_pulse",
     );
     expect(pulse).toBeUndefined();

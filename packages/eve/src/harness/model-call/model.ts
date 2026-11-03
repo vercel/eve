@@ -3,7 +3,7 @@ import { gateway, type LanguageModel, type LanguageModelMiddleware, wrapLanguage
 import type { CompactionConfig, HarnessSession, KernelConfig } from "#harness/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { contextStorage } from "#context/container.js";
-import { getEffectiveModelSelection } from "#reactions/kinds/model.js";
+import { getEffectiveModelSelection } from "#definitions/model.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { appendPackageUserAgent } from "#internal/user-agent.js";
 

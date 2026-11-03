@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { compiledOf } from "../../../eve/dist/src/compiler/manifest.js";
 import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,8 +60,8 @@ test("built worker keeps explicit read tools without shell or write capabilities
       diagnostics.filter((item) => item.severity === "error"),
       [],
     );
-    assert.ok(!manifest.dynamicSkills.some((entry) => entry.slug === "code__pr"));
-    assert.ok(!manifest.dynamicInstructions.some((entry) => entry.slug === "code__github"));
+    assert.ok(!compiledOf(manifest, "skill").some((entry) => entry.slug === "code__pr"));
+    assert.ok(!compiledOf(manifest, "instructions").some((entry) => entry.slug === "code__github"));
     const worker = manifest.subagents.find((item) => item.name === "code__worker");
     assert.ok(worker);
     assert.equal(worker.configResolver, undefined);

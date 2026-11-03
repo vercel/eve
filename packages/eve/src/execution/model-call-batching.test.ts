@@ -8,7 +8,7 @@ describe("model call batching and steering", () => {
     const session: HarnessSession = {
       sessionId: "session",
       continuationToken: "session",
-      agent: { modelReference: { id: "mock" }, system: "Test", tools: [] },
+      agent: { modelReference: { id: "mock" }, tools: [] },
       history: [],
       compaction: { threshold: 100000, recentWindowSize: 10 },
     };

@@ -17,7 +17,7 @@ export const connectionProvider: FrameworkContextProvider<ConnectionRegistry> = 
     const agent = node.agent;
     if (agent === undefined) return undefined;
     const connections = agent.connections;
-    if (connections.length === 0 && (agent.dynamicConnectionResolvers?.length ?? 0) === 0) {
+    if (connections.length === 0 && !agent.definitions.some(({ kind }) => kind === "connection")) {
       return undefined;
     }
 
