@@ -182,6 +182,14 @@ copies mounted under other names. eve gives the built-ins that reach the open we
 its sandbox allows network access. An agent can replace a built-in's tags. These are the only tag
 strings eve chooses, as a documented convention. eve still doesn't interpret them.
 
+### Session audience
+
+A channel's `audience()` already classifies each session as `public`, `private`, or `unknown` when
+it starts, for trace content and run-data retention. Local children inherit it, and remote agents
+accept it under `trustedForwarders`. Today it lives only in eve's internal state, so neither
+reducers nor policies can read it. eve records it as an optional `audience` field on
+`session.started`, and exposes it as `ctx.session.audience`, including on `ApprovalContext`.
+
 ## Clients and telemetry
 
 Clients fold the stream themselves and don't have the agent's reducers. A state with `stream: true`
@@ -312,6 +320,49 @@ It doesn't cover:
   the same name. Otherwise, tag the remote agent `reads:untrusted` so the call itself exposes the
   parent.
 
+## Audience and taint
+
+Audience and taint answer different questions, and a policy combines them:
+
+|                | Audience                                   | Taint                                      |
+| -------------- | ------------------------------------------ | ------------------------------------------ |
+| Question       | who can read the conversation              | who could have written what the model read |
+| Protects       | confidentiality                            | integrity                                  |
+| Set by         | the channel, once, when the session starts | tagged results and messages, as they land  |
+| Crosses agents | inherited, `trustedForwarders` for remote  | `fromParent`/`fromChild`, same trust gate  |
+
+They don't imply each other. A company's public Slack channel has a public audience and trusted
+writers. A Slack Connect DM has a private audience and an outside writer. A public GitHub repository
+has a public audience and untrusted writers, so it needs both:
+
+- **Integrity.** The GitHub channel tags messages from public repositories, or from people who
+  aren't collaborators, `reads:untrusted`. The taint extension exposes the session from its first
+  message, per message rather than per session.
+- **Confidentiality.** When the audience isn't private, the reply is itself a path out: whatever the
+  model reads can end up in a public comment. A policy gates tools that read private data whether or
+  not the session is exposed.
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { taintPolicy } from "eve/extensions/taint";
+
+const taint = taintPolicy();
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+  approval: (ctx) => {
+    if (ctx.session.audience !== "private" && ctx.toolTags?.includes("reads:private"))
+      return { type: "denied", reason: "This conversation is visible outside the team." };
+    return taint(ctx);
+  },
+});
+```
+
+Reading audience in a policy changes what a misclassification costs. Today the docs say audience
+controls what traces capture and grants no authorization. Once a policy reads it, a session wrongly
+classified `private` can reach private data. Policies should treat `unknown` like `public`, as the
+example does, and the docs must say so.
+
 ## Fit with the kernel and definitions
 
 The [session kernel doc](https://github.com/vercel/eve/pull/5644) and its stack make the kernel the
@@ -352,6 +403,13 @@ only writer of facts and turn every authored file into a `Definition` with a sta
   session's caller, such as other people in a shared Slack thread.
 - **Extension state names across deployments.** Remote matching depends on both sides mounting the
   extension under the same name. A state could instead declare a name that ignores the mount.
+- **GitHub audience.** The GitHub channel doesn't classify audience today, so a public repository's
+  session is `unknown`. Classifying it from the repository's visibility and tagging its messages are
+  channel changes alongside this proposal.
+- **Audience as derived state.** Audience is one value fixed at session start, inherited by local
+  children and forwarded under `trustedForwarders`, which is the shape of a built-in derived state.
+  Moving it would replace its own baggage member and propagation, but trace export reads it outside
+  any session, so it waits until that path can read derived state.
 - **History cost.** Whether computing a new state from full history needs a cap for very long
   sessions, and what it falls back to.
 
@@ -368,7 +426,8 @@ only writer of facts and turn every authored file into a `Definition` with a sta
 1. Built-in reducers move onto the definition shape, with no public API.
 2. `defineDerivedState` in one session, with `stream` and `telemetry`, exported as experimental.
 3. `fromChild` and `fromParent` for local children, then eve's usage on the same transport.
-4. Message tags, built-in tool tags, and `eve/extensions/taint` on public APIs only.
+4. Message tags, built-in tool tags, `ctx.session.audience`, and `eve/extensions/taint` on public
+   APIs only.
 5. Remote agents.
 
 ## User docs
