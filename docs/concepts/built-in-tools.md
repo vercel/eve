@@ -453,7 +453,7 @@ export default defineTool({
 
 ### `grep`
 
-`grep` searches sandbox file contents with a regular expression. It searches the workspace root unless the model passes a directory or file inside the workspace. The code extension's `code__grep` tool behaves the same. Add it:
+`grep` searches sandbox file contents with a regular expression. It searches the workspace root unless the model passes a directory or file inside the workspace. Add it:
 
 ```sh
 eve add tool/grep
