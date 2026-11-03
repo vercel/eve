@@ -7,6 +7,7 @@ import {
 import * as selectors from "./selectors.js";
 import {
   interaction as showInteraction,
+  promptQueueHead,
   type Interaction,
 } from "#protocol/session-projection/reader.js";
 import type { Capability } from "#protocol/session-events/families/call.js";
@@ -190,6 +191,16 @@ export function openInteractions(
       .openInteractions(sessionTables(view), filter)
       .flatMap((row) => interaction(view, row.interactionId) ?? []),
   );
+}
+
+/**
+ * The open request a typed reply answers now: a budget prompt first, then the oldest request with
+ * no answer waiting. A channel that can only show text shows this one alone, so a reply answers
+ * the request the person sees.
+ */
+export function nextPrompt(view: SessionView): Interaction | undefined {
+  const row = promptQueueHead(sessionTables(view));
+  return row === undefined ? undefined : interaction(view, row.interactionId);
 }
 
 export function delivery(view: SessionView, deliveryId: string): DeliveryObservation | undefined {

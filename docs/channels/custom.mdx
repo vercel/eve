@@ -204,10 +204,10 @@ Message sends use the channel's `turnPolicy`, which defaults to `"steer"`; see [
 
 Every `send()` and `respond()` passes its `state` option to the channel's `deliver(payload, channel)` hook as `payload.state`, including sends to an existing session. Use it for per-message values such as a message's author. The hook decides what to merge into `channel.state`; eve seeds `channel.state` from `state` only when `send()` creates the session.
 
-The payload is `ChannelDelivery<TState>` from `eve/channels`: `message`, `answers`, `context`, `outputSchema`, and `state?: Partial<TState>`. The hook's return value decides what reaches the session:
+The payload is `ChannelDelivery<TState>` from `eve/channels`: `message`, `answers`, `context`, `outputSchema`, `answerText`, and `state?: Partial<TState>`. The hook's return value decides what reaches the session:
 
 - Return nothing to keep it unchanged.
-- Return a replacement with `message`, `answers`, `context`, or `outputSchema` to change it. Other fields, including `state`, are not accepted; change saved state through `channel.state`.
+- Return a replacement with `message`, `answers`, `context`, `outputSchema`, or `answerText` to change it. Other fields, including `state`, are not accepted; change saved state through `channel.state`. A replacement without `answerText` keeps the delivery's.
 - Return `{}` to ignore it.
 
 The `state` you pass to `defineChannel(...)` is the starting value of every session's `channel.state`, and must be plain JSON-like data. eve restores any top-level field from it that a session's state is missing, so a field you add in a later deploy also appears in existing sessions, including in `context(state)` and event handlers. A field you `delete` comes back the same way; to clear one, set it to `null` or `undefined`. eve doesn't merge nested objects: a saved object replaces the starting object whole.
@@ -246,6 +246,43 @@ export default defineChannel({
 ```
 
 The same override works on fixed `Session.send(...)` and cross-channel `to(...).send(...)`. `respond(...)` never joins a running turn; it sends only the answers it names. Use `cancel()` to stop work without a replacement message.
+
+### Typed answers
+
+When a turn waits on an approval or a question, a message whose text matches an option answers it; see [Human-in-the-loop](/docs/human-in-the-loop#follow-up-messages). If your channel wraps what the person wrote before the model reads it, such as with their name, pass the bare text as `answerText`. The pending request resolves against `answerText`, and the model still reads the wrapped `message`:
+
+```ts
+await from(body.threadId).send(`${body.author}: ${body.text}`, {
+  answerText: body.text,
+  auth: null,
+});
+```
+
+A channel that can only show text should show one request at a time, the one a typed reply answers. Read it from the session with `nextPrompt(view)` from `eve/events`, for example in a `committed` handler, and show it again whenever it changes:
+
+```ts
+import { defineChannel } from "eve/channels";
+import { nextPrompt } from "eve/events";
+
+export default defineChannel({
+  state: { shown: null as string | null },
+  events: {
+    async committed(_line, { channel, view }) {
+      const prompt = nextPrompt(view);
+      if (prompt === undefined || prompt.interactionId === channel.state.shown) return;
+      channel.state.shown = prompt.interactionId;
+      const options = (prompt.request.options ?? []).map(
+        (option, index) => `${index + 1}. ${option.label}`,
+      );
+      // postToThread stands in for your platform's send call.
+      await postToThread([prompt.request.prompt, ...options].join("\n"));
+    },
+  },
+  routes: [/* your routes */],
+});
+```
+
+A reply of `1`, an option's label, or its ID answers the request. Showing a different request than `nextPrompt(view)` returns makes a reply answer one the person didn't see.
 
 ## Operation semantics
 
