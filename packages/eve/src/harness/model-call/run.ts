@@ -2,7 +2,7 @@ import type { LanguageModel } from "ai";
 import { handleStepResult } from "#harness/step/after-model.js";
 
 import { HistoryStateKey } from "#context/keys.js";
-import { recordOfferedCatalogTools, type StepCatalog } from "#execution/catalog/step-catalog.js";
+import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import { stepCatalog } from "#definitions/step.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
@@ -79,9 +79,7 @@ export async function runModelStep(
   const projectedMessages = projectPrompt(prompt);
   // Dynamic tools and subagents were evaluated before the run was requested, so the step's calls
   // resolve once, against this catalog.
-  const endsTurn = !step.hasDelegatedCaller && step.session.outputSchema === undefined;
-  const catalog = await stepCatalog(step, { endsTurn });
-  recordOfferedCatalogTools(step.ctx, catalog);
+  const catalog = await stepCatalog(step);
   step.frameworkToolNames = frameworkToolNames(catalog);
   const { approvalMemory } = humanInputContext(step);
   const caller = new ModelCaller(step, prompt, {
@@ -122,7 +120,7 @@ export async function runModelStep(
         prompt.clientContext === undefined || prompt.clientContext.messages.length === 0
           ? caller.modelMessages.length
           : undefined,
-      endsTurnTools: endsTurnTools(catalog, endsTurn),
+      endsTurnTools: endsTurnTools(catalog, step.endsTurn),
       promptMessages: caller.request.history,
       requestEnvelopeTokens: caller.requestEnvelopeTokens,
       result,

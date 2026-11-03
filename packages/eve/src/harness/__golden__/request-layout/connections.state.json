@@ -82,6 +82,9 @@
     "eve.historyState": {
       "announcements": {
         "catalog": "{\"connections\":{\"items\":[{\"description\":\"Linear issues for the release team.\",\"name\":\"linear\"},{\"description\":\"Alice's Notion workspace.\",\"name\":\"notion\"}],\"more\":false},\"kinds\":[],\"namespaces\":{\"items\":[],\"more\":false}}"
+      },
+      "messages": {
+        "catalog": "1XA5v7FHJ-iBX-W8FyiFC0"
       }
     },
     "eve.initiatorAuth": null,
@@ -90,12 +93,6 @@
         "contextWindowTokens": 200000,
         "id": "eve-test/layout"
       }
-    },
-    "eve.offeredCatalogTools": {
-      "connections": true,
-      "searchableSkills": false,
-      "skills": false,
-      "tools": true
     },
     "eve.otelTraceEnabled": false,
     "eve.reactions": {
@@ -129,6 +126,16 @@
               "url": "https://mcp.notion.example/mcp"
             }
           ]
+        },
+        "eve.catalog": {
+          "digest": "KrH36F1Zk9OV4Q_e0rW8Vz",
+          "since": 1,
+          "value": {
+            "connections": true,
+            "searchableSkills": false,
+            "skills": false,
+            "tools": true
+          }
         },
         "model:agent": {
           "digest": "1qJ47UPfGIJVLn1ESASMhk",

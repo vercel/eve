@@ -144,8 +144,8 @@ export async function weighResponders(
   view: SessionView,
   input: {
     readonly now: number;
-    /** The entries of the step that asked, which carry the policy. */
-    readonly toolsOf: (step: SuspendedStep | undefined) => Promise<HarnessToolLookup>;
+    /** The entries parked calls run with, which carry the policy. */
+    readonly tools: () => Promise<HarnessToolLookup>;
   },
 ): Promise<WeighedResponders> {
   const tables = view.projection.view;
@@ -181,7 +181,7 @@ export async function weighResponders(
       request,
       responseId,
       step,
-      toolsOf: input.toolsOf,
+      tools: input.tools,
     });
     switch (weighed.kind) {
       case "allowed":
@@ -266,11 +266,11 @@ async function weigh(input: {
   readonly request: ApprovalAsk;
   readonly responseId: string;
   readonly step: SuspendedStep;
-  readonly toolsOf: (step: SuspendedStep | undefined) => Promise<HarnessToolLookup>;
+  readonly tools: () => Promise<HarnessToolLookup>;
 }): Promise<Weighed> {
   let tools: HarnessToolLookup;
   try {
-    tools = await input.toolsOf(input.step);
+    tools = await input.tools();
   } catch (error) {
     // A resolver or its infrastructure failed: the entry may still exist, so the request waits.
     logError(log, "approval tools could not be restored", error, {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { sessionSkills } from "#execution/catalog/skills.js";
 import {
   beforeModelCall,
+  callSkills,
   evaluationError,
   definitionSession,
 } from "#internal/testing/definition-session.js";
@@ -15,7 +15,6 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { evaluateValues } from "#definitions/step.js";
 import { installDefinitions, restoreDefinitions } from "./kernel.js";
 import { forgetSessionLive } from "#definitions/state.js";
-import { dynamicSkillManifest } from "./skills.js";
 
 /**
  * A sandbox that records the paths written to it, under its own identity. Queued work runs in
@@ -113,6 +112,7 @@ function session(skills?: readonly object[]) {
     sessionId: ctx.get(SessionIdKey),
   } as never);
   ctx.set(BundleKey, {
+    graph: { nodesByNodeId: new Map() },
     resolvedAgent: {
       definitions: (
         skills ?? [
@@ -152,7 +152,7 @@ describe("dynamic skill files", () => {
 
     await contextStorage.run(ctx, () => evaluateValues(ctx, { conversation: [] }));
 
-    expect(Object.values(dynamicSkillManifest(ctx)).flat()[0]?.markdown).toBe("# Policy");
+    expect((await callSkills(ctx)).get("policy")?.markdown).toBe("# Policy");
     expect(box.written).toEqual([]);
     release();
     await box.access.settle();
@@ -233,12 +233,9 @@ describe("dynamic skill files", () => {
     ctx.set(SandboxKey, box.access as never);
     await step(ctx, box, () => evaluateValues(ctx, { conversation: [] }));
 
-    const manifest = dynamicSkillManifest(ctx);
-    expect(
-      Object.values(manifest)
-        .flat()
-        .map((skill) => skill.description),
-    ).toEqual(["The first policy."]);
+    expect([...(await callSkills(ctx)).values()].map((skill) => skill.description)).toEqual([
+      "The first policy.",
+    ]);
     expect(box.written).toEqual([
       "/home/user/.agents/skills/policy/SKILL.md",
       "/home/user/.agents/skills/policy/references/first.md",
@@ -264,11 +261,7 @@ describe("dynamic skill names", () => {
       skills: [{ evaluate, extensionNamespace, slug: "policy" }],
     });
     await beforeModelCall(ctx);
-    expect(
-      Object.values(dynamicSkillManifest(ctx))
-        .flat()
-        .map(({ name }) => name),
-    ).toEqual(expected);
+    expect([...(await callSkills(ctx)).keys()]).toEqual(expected);
   });
 
   it.each([
@@ -288,11 +281,34 @@ describe("dynamic skill names", () => {
     });
     await beforeModelCall(ctx);
 
-    expect(sessionSkills(ctx).get("policy")?.description).toBe("The dynamic policy.");
+    expect((await callSkills(ctx)).get("policy")?.description).toBe("The dynamic policy.");
   });
 });
 
 describe("dynamic skill files after a change", () => {
+  it("replaces files when an earlier definition starts offering the same skill", async () => {
+    let offered = false;
+    const first = policySkill("first", "first");
+    const ctx = session([
+      { ...first, evaluate: () => (offered ? first.evaluate() : null) },
+      policySkill("second", "second"),
+    ]);
+    const box = sandbox("box");
+    ctx.set(SandboxKey, box.access as never);
+    await step(ctx, box, () => evaluateValues(ctx, { conversation: [] }));
+    expect((await callSkills(ctx)).get("policy")?.description).toBe("The second policy.");
+
+    const before = box.written.length;
+    offered = true;
+    await step(ctx, box, () => evaluateValues(ctx, { conversation: [] }));
+
+    expect((await callSkills(ctx)).get("policy")?.description).toBe("The first policy.");
+    expect(box.written.slice(before)).toEqual([
+      "/home/user/.agents/skills/policy/SKILL.md",
+      "/home/user/.agents/skills/policy/references/first.md",
+    ]);
+  });
+
   it("removes a withdrawn package from the sandbox", async () => {
     let offered = true;
     const ctx = session([

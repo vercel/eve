@@ -1,6 +1,7 @@
+import type { CatalogSkill } from "#execution/catalog/skills.js";
+import type { Announcement } from "#harness/announcements.js";
 import { createLogger } from "#internal/logging.js";
 import {
-  type CallInput,
   type Contribution,
   type ContributionValues,
   type Draft,
@@ -18,21 +19,19 @@ const log = createLogger("definitions");
  * The call the contributions make, in definition order. What they add is collected; then each
  * arranges the draft the ones before it left, and sees everything collected.
  */
-export function draftOf(contributions: readonly Contribution[], call?: CallInput): Draft {
+export function draftOf(contributions: readonly Contribution[]): Draft {
   let draft: Draft = {
+    announcements: once(async () => announcementsOf(await collect(contributions, "announcements"))),
     context: once(async () => (await collect(contributions, "context")).flat()),
-    record: once(() =>
-      call === undefined ? undefined : { historyState: call.historyState, record: call.record },
-    ),
     system: once(async () => (await collect(contributions, "system")).flat()),
     tools: once(async () => mergeTools(await collect(contributions, "tools"))),
   };
   for (const { arrange } of contributions) {
     if (arrange === undefined) continue;
-    const { context, record, system, tools } = arrange(draft);
+    const { announcements, context, system, tools } = arrange(draft);
     draft = {
+      announcements: announcements === undefined ? draft.announcements : once(announcements),
       context: context === undefined ? draft.context : once(context),
-      record: record === undefined ? draft.record : once(record),
       system: system === undefined ? draft.system : once(system),
       tools: tools === undefined ? draft.tools : once(tools),
     };
@@ -52,7 +51,7 @@ export async function decideModel(
 }
 
 /** One field of every contribution that adds to it, in order: each made before the next. */
-async function collect<F extends "context" | "effects" | "system" | "tools">(
+async function collect<F extends "announcements" | "context" | "effects" | "system" | "tools">(
   contributions: readonly Contribution[],
   field: F,
 ): Promise<ContributionValues[F][]> {
@@ -69,8 +68,8 @@ export async function collectEffects(contributions: readonly Contribution[]) {
 }
 
 /**
- * Tools join by name: two definitions can't take one name, and the first keeps it. A definition
- * that means to replace a tool arranges the draft instead. Connections and skills join.
+ * Tools and skills join by name: two definitions can't take one name, and the first keeps it. A
+ * definition that means to replace a tool arranges the draft instead. Connections join.
  */
 function mergeTools(added: readonly ToolContribution[]): ToolTable {
   const entries = new Map<string, ToolEntry>();
@@ -86,9 +85,43 @@ function mergeTools(added: readonly ToolContribution[]): ToolTable {
       entries.set(name, entry);
     }
   }
+  const skills = new Map<string, CatalogSkill>();
+  for (const { skills: more } of added) {
+    for (const [name, skill] of more ?? []) {
+      const taken = skills.get(name);
+      if (taken === undefined) skills.set(name, skill);
+      // The agent's own skills join last, so a dynamic skill keeps a name they share, quietly.
+      else if (skill.source !== undefined) {
+        log.error(
+          `Skill "${name}" from "${skill.source}" collides with the one from "${taken.source ?? ""}"; the first keeps it.`,
+        );
+      }
+    }
+  }
   return {
     connections: added.flatMap(({ connections }) => connections ?? []),
     entries,
-    skills: new Map(added.flatMap(({ skills }) => [...(skills ?? [])])),
+    skills,
   };
+}
+
+/** Announcements by key: two definitions can't announce under one key, and the first keeps it. */
+function announcementsOf(
+  added: readonly Readonly<Record<string, Announcement>>[],
+): Readonly<Record<string, Announcement>> {
+  const keys = new Set<string>();
+  return Object.fromEntries(
+    added.flatMap((announcements) =>
+      Object.entries(announcements).filter(([key]) => claim(keys, key, "announcement")),
+    ),
+  );
+}
+
+function claim(taken: Set<string>, name: string, kind: string): boolean {
+  if (!taken.has(name)) {
+    taken.add(name);
+    return true;
+  }
+  log.error(`Two definitions make the ${kind} "${name}"; the first keeps it.`);
+  return false;
 }

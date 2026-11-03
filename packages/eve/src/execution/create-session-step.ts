@@ -56,7 +56,6 @@ export async function createSessionStep(input: {
 
   const session = createSession({
     continuationToken: input.continuationToken,
-    initialMessages: bundle.turnAgent.initialMessages,
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,

@@ -1,8 +1,8 @@
-import type { AlsContext } from "#context/container.js";
-import { createFrameworkUserMessage, type UserModelMessage } from "#harness/messages.js";
 import { normalizeInstructionsDefinition } from "#internal/authored-definition/core.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
-import { readDefinitionsState, slotsOf, writeDefinitionsState } from "#definitions/state.js";
+import type { AlsContext } from "#context/container.js";
+import type { Announcement } from "#harness/announcements.js";
+import { digestOf } from "#definitions/state.js";
 import { agentInstructionsOf, renderInstructionsBlock } from "#runtime/prompt/compose.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedDynamicDefinition } from "#runtime/types.js";
@@ -12,9 +12,19 @@ import { authoredEvaluate, type Definition, section, SECTION_ORDER } from "./def
 
 type Instruction = { readonly role: "system" | "user"; readonly content: string };
 
-/** The agent's static system instructions, as one block of eve's default prompt. */
+/**
+ * The agent's static instructions: its system instructions as one block of eve's default prompt,
+ * and its user instructions announced, as dynamic ones are.
+ */
 export const instructions: Definition = {
   contribute: ({ container }) => ({
+    announcements: () =>
+      Object.fromEntries(
+        staticUserInstructions(container).map(({ content, key }) => [
+          key,
+          userInstruction(content, digestOf(content)),
+        ]),
+      ),
     system: () => {
       const block = agentInstructionsOf(container.get(BundleKey)?.resolvedAgent.instructions);
       return [
@@ -45,8 +55,8 @@ export const workspace: Definition = {
 
 /**
  * A `defineDynamic()` in `agent/instructions/`. A system instruction is a part of the system
- * prompt of its own while its definition returns it; a user instruction joins the conversation
- * when its content changes, and stays there.
+ * prompt of its own while its definition returns it; a user instruction is announced: it joins the
+ * conversation when its content changes, and stays there.
  */
 export function instructionsDefinition(
   resolver: ResolvedDynamicDefinition<"instructions">,
@@ -54,22 +64,36 @@ export function instructionsDefinition(
   const id = `instructions:${resolver.slug}`;
   const evaluate = authoredEvaluate(resolver.evaluate);
   return {
-    contribute: (ctx) => ({
-      system: async () => {
-        const kept = await ctx.keep(async (evaluation) => ({
+    contribute: (ctx) => {
+      const kept = async () =>
+        await ctx.keep(async (evaluation) => ({
           value: instructionOf(resolver, await evaluate(evaluation)),
         }));
-        const instruction = kept?.value as Instruction | null | undefined;
-        return instruction?.role === "system" && instruction.content !== ""
-          ? [
-              section(id, instruction.content, {
-                order: SECTION_ORDER.dynamicInstructions,
-                part: "own",
-              }),
-            ]
-          : [];
-      },
-    }),
+      return {
+        announcements: async () => {
+          const value = (await kept())?.value;
+          if (value === undefined) return {};
+          const instruction = value as Instruction | null;
+          return {
+            [id]: userInstruction(
+              instruction?.role === "user" ? instruction.content : undefined,
+              digestOf(value),
+            ),
+          };
+        },
+        system: async () => {
+          const instruction = (await kept())?.value as Instruction | null | undefined;
+          return instruction?.role === "system" && instruction.content !== ""
+            ? [
+                section(id, instruction.content, {
+                  order: SECTION_ORDER.dynamicInstructions,
+                  part: "own",
+                }),
+              ]
+            : [];
+        },
+      };
+    },
     id,
     label: resolver.logicalPath,
   };
@@ -94,30 +118,26 @@ function instructionOf(
 }
 
 /**
- * User instructions whose content differs from what their definition last added; records each
- * one's digest. A definition that returns `null`, or a system instruction, resets it, so the same
- * content returned later joins again. The digests outlive deployments: new code doesn't add the
- * same text again.
+ * A user instruction, announced under its digest, which the same content repeats. Without content
+ * the key forgets it, so the same content returned later joins again.
  */
-export function takeUserInstructionMessages(ctx: AlsContext): UserModelMessage[] {
-  const state = readDefinitionsState(ctx);
-  const appended: Record<string, string> = { ...state.appended };
-  const messages: UserModelMessage[] = [];
-  let changed = false;
-  for (const { id, slot } of slotsOf(ctx, "instructions")) {
-    const instruction = slot.value as Instruction | null;
-    if (instruction?.role !== "user") {
-      if (appended[id] !== undefined) {
-        delete appended[id];
-        changed = true;
-      }
-      continue;
-    }
-    if (appended[id] === slot.digest) continue;
-    appended[id] = slot.digest;
-    changed = true;
-    messages.push(createFrameworkUserMessage("context.instruction", instruction.content));
-  }
-  if (changed) writeDefinitionsState(ctx, { ...state, appended });
-  return messages;
+function userInstruction(content: string | undefined, digest: string): Announcement {
+  return {
+    initial: "",
+    kind: "context.instruction",
+    render: () => content,
+    value: content === undefined ? "" : digest,
+  };
+}
+
+/** The agent's static user instructions, each under its announcement's key. */
+export function staticUserInstructions(
+  container: Pick<AlsContext, "get">,
+): readonly { readonly key: string; readonly content: string }[] {
+  return (container.get(BundleKey)?.resolvedAgent.instructions ?? []).flatMap((entry) => {
+    const content = entry.content.trim();
+    return entry.role === "user" && content.length > 0
+      ? [{ content, key: `eve.instructions:${entry.name}` }]
+      : [];
+  });
 }

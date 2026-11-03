@@ -24,8 +24,7 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { defineTool } from "#tools/definition.js";
 import { runApprovedCalls } from "#harness/hitl/approved-calls.js";
 import { takeTurnFailure } from "#definitions/intents.js";
-import { takeUserInstructionMessages } from "./instructions.js";
-import { dynamicTools } from "#internal/testing/definition-session.js";
+import { announcedNext, dynamicTools } from "#internal/testing/definition-session.js";
 import { DefinitionFailedError, restoreDefinitions, runEffects } from "./kernel.js";
 import {
   MEMOS_CAP,
@@ -63,6 +62,7 @@ function session(
   const ctx = new ContextContainer();
   ctx.set(SessionIdKey, `session-${Math.random()}`);
   ctx.set(BundleKey, {
+    graph: { nodesByNodeId: new Map() },
     nodeId: "root",
     resolvedAgent: {
       definitions: [
@@ -102,7 +102,7 @@ async function commit(ctx: ContextContainer, input: Parameters<typeof runEffects
 
 /** Evaluates the values before a model call, inside the session's context. */
 async function beforeCall(ctx: ContextContainer, conversation: readonly ModelMessage[] = []) {
-  await contextStorage.run(ctx, async () => await evaluateValues(ctx, { conversation }));
+  return await contextStorage.run(ctx, async () => await evaluateValues(ctx, { conversation }));
 }
 
 const countTool = (count: unknown) =>
@@ -531,10 +531,7 @@ describe("evaluateValues", () => {
       [],
       [() => (brief === null ? null : defineInstructions({ content: brief, role: "user" }))],
     );
-    const taken = async () => {
-      await beforeCall(ctx);
-      return takeUserInstructionMessages(ctx).map((message) => message.content);
-    };
+    const taken = async () => await announcedNext(ctx);
 
     expect(await taken()).toHaveLength(1);
     // The same content, evaluated again, adds nothing.

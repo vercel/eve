@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  announcedNext,
   beforeModelCall,
   evaluationError,
   definitionSession,
 } from "#internal/testing/definition-session.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { stepSystem } from "#definitions/step.js";
-import { takeUserInstructionMessages } from "./instructions.js";
+import { restoreDefinitions } from "#definitions/kernel.js";
+import { contextStorage } from "#context/container.js";
+import { createFrameworkUserMessage } from "#harness/messages.js";
 
 /** The system prompt's parts after its first: the dynamic system instructions. */
 const system = async (ctx: ReturnType<typeof definitionSession>["ctx"]) => {
@@ -51,12 +54,21 @@ describe("dynamic instructions", () => {
         { evaluate: () => defineInstructions({ content: "\n", role: "user" }), slug: "blank" },
       ],
     });
-    await beforeModelCall(ctx);
-
+    expect(await announcedNext(ctx)).toEqual(["Alice prefers tables."]);
     expect(await system(ctx)).toEqual([]);
-    expect(takeUserInstructionMessages(ctx).map(({ content }) => content)).toEqual([
-      "Alice prefers tables.",
-    ]);
+  });
+
+  it("announces static user instructions once, as it does dynamic ones", async () => {
+    const { ctx } = definitionSession({ userInstructions: ["  Pinned policy.  ", " \n "] });
+    expect(await announcedNext(ctx)).toEqual(["Pinned policy."]);
+    expect(await announcedNext(ctx)).toEqual([]);
+  });
+
+  it("doesn't announce a static user instruction a session from before holds in its history", async () => {
+    const { ctx } = definitionSession({ userInstructions: ["Pinned policy."] });
+    const conversation = [createFrameworkUserMessage("context.instruction", "Pinned policy.")];
+    await contextStorage.run(ctx, () => restoreDefinitions(ctx, { conversation }));
+    expect(await announcedNext(ctx)).toEqual([]);
   });
 
   it("rejects a value without defineInstructions()", async () => {

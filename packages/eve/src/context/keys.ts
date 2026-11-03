@@ -120,12 +120,14 @@ export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDel
 export interface HistoryState {
   /** Last announced value per keyed announcement (see `#harness/announcements.js`). */
   readonly announcements?: Readonly<Record<string, string>>;
+  /** The digest of the message each key's announcement last added, which a rewrite looks for. */
+  readonly messages?: Readonly<Record<string, string>>;
 }
 export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
 /**
  * The catalog tools a session's tool list has offered. Each stays offered for
  * the rest of the session, so the tool list never drops a catalog tool that
- * earlier calls named. Compaction keeps it, unlike {@link HistoryStateKey}.
+ * earlier calls named. eve's catalog definition keeps it.
  */
 export interface OfferedCatalogTools {
   /** `eve__tool` mentions connected services, and `eve__search` their sign-in entries. */
@@ -137,9 +139,6 @@ export interface OfferedCatalogTools {
   /** `eve__tool`. */
   readonly tools: boolean;
 }
-export const OfferedCatalogToolsKey = new ContextKey<OfferedCatalogTools>(
-  "eve.offeredCatalogTools",
-);
 export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationProjection>(
   "eve.channelInstrumentation",
 );
@@ -251,8 +250,6 @@ export interface DurableDynamicSkillMetadata {
    */
   readonly revision?: string;
 }
-
-export type DynamicSkillManifest = Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>;
 
 /**
  * Durable map from dynamic skill name to the serialized sandbox session state

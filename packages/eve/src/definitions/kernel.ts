@@ -3,12 +3,13 @@ import type { ModelMessage } from "ai";
 import { sandboxOf } from "#context/build-callback-context.js";
 import type { ContextContainer } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
-import { SessionIdKey } from "#context/keys.js";
+import { HistoryStateKey, SessionIdKey } from "#context/keys.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
+import { announcementDigest } from "#harness/announcements.js";
 import { withUsageInEffect } from "#harness/usage-sink.js";
 import { sessionFrameOf } from "#definitions/frame.js";
 import { reportEffectFailure } from "#definitions/intents.js";
@@ -43,6 +44,7 @@ import {
 import { chooseModel, effectiveModelId } from "./model.js";
 import { sessionDefinitions } from "./agent.js";
 import { bindOpeningCancel, settleHookCommands } from "./hooks.js";
+import { staticUserInstructions } from "./instructions.js";
 
 // The kernel asks definitions what they add, on two schedules. Before each model call it evaluates
 // what they keep, with the conversation that call reads; everything else reads what that left,
@@ -223,6 +225,7 @@ export async function restoreDefinitions(
     readonly revision?: string;
   } = {},
 ): Promise<void> {
+  announceHeldInstructions(ctx, input.conversation);
   const before = readDefinitionsState(ctx);
   if (input.revision !== undefined && input.revision !== before.revision) {
     const moved = before.revision !== undefined && before.memos !== undefined;
@@ -249,6 +252,46 @@ export async function restoreDefinitions(
   const draft = draftOf(contributions);
   await draft.tools();
   await draft.system();
+}
+
+/**
+ * Sessions from before static user instructions were announced started their history with them.
+ * One the history still holds counts as announced, so the same content doesn't join again. It
+ * needs the deployment's files, so it can't move with the rest into the checkpoint upgrade.
+ */
+function announceHeldInstructions(
+  ctx: ContextContainer,
+  conversation: readonly ModelMessage[] | undefined,
+): void {
+  const history = ctx.get(HistoryStateKey) ?? {};
+  const unannounced = staticUserInstructions(ctx).filter(
+    ({ key }) => history.announcements?.[key] === undefined,
+  );
+  if (unannounced.length === 0) return;
+  const said = new Set(
+    (conversation ?? []).flatMap((message) =>
+      message.role === "user" &&
+      (message as { readonly kind?: string }).kind === "context.instruction" &&
+      typeof message.content === "string"
+        ? [message.content]
+        : [],
+    ),
+  );
+  const held = unannounced.filter(({ content }) => said.has(content));
+  if (held.length === 0) return;
+  ctx.set(HistoryStateKey, {
+    ...history,
+    announcements: {
+      ...Object.fromEntries(held.map(({ content, key }) => [key, digestOf(content)])),
+      ...history.announcements,
+    },
+    messages: {
+      ...Object.fromEntries(
+        held.map(({ content, key }) => [key, announcementDigest("context.instruction", content)]),
+      ),
+      ...history.messages,
+    },
+  });
 }
 
 /**
@@ -340,6 +383,10 @@ async function evaluate(
         ),
     );
     memos.close();
+  }
+  // Nothing kept, and nothing before: the session holds no slot for it.
+  if (value === null && previous === undefined && result.live === undefined) {
+    return { changed: false, kept: { value } };
   }
   const unchanged = previous?.digest === digest;
   if (!unchanged && previous !== undefined && run.mode === "restore") {

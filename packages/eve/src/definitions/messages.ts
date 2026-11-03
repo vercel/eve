@@ -1,4 +1,4 @@
-import type { Announcement } from "#harness/announcements.js";
+import { type Announcement, announcementDigest } from "#harness/announcements.js";
 import {
   createFrameworkUserMessage,
   type HarnessModelMessage,
@@ -11,9 +11,9 @@ import type { AnchoredEntry, CallRecord } from "./definition.js";
 
 /**
  * Announcements join the record ahead of the turn's input, or at its end on a step that continues
- * from tool results: only a changed value adds a message, so the prompt before it stays cached. A
- * provider tool's pending result must open the next response, so then nothing joins; the next
- * request carries them.
+ * from tool results, in the order the definitions made them: only a changed value adds a message,
+ * so the prompt before it stays cached. A provider tool's pending result must open the next
+ * response, so then nothing joins; the next request carries them.
  */
 export function announce(
   draft: CallRecord,
@@ -23,19 +23,28 @@ export function announce(
   if (awaitsProviderToolResult(draft.record)) return draft;
   const added: HarnessModelMessage[] = [];
   let announced = draft.historyState.announcements;
-  for (const key of Object.keys(announcements).sort()) {
-    const announcement = announcements[key]!;
+  let messages = draft.historyState.messages;
+  let changed = false;
+  for (const [key, announcement] of Object.entries(announcements)) {
     const previous = announced?.[key];
-    if (previous === announcement.value) continue;
-    added.push(createFrameworkUserMessage("context.state", announcement.render(previous)));
+    if ((previous ?? announcement.initial) === announcement.value) continue;
+    const content = announcement.render(previous);
+    const { [key]: _said, ...others } = messages ?? {};
+    messages = others;
+    if (content !== undefined) {
+      const message = createFrameworkUserMessage(announcement.kind ?? "context.state", content);
+      added.push(message);
+      messages = { ...messages, [key]: announcementDigest(message.kind, message.content) };
+    }
     announced = { ...announced, [key]: announcement.value };
+    changed = true;
   }
-  if (added.length === 0) return draft;
+  if (!changed) return draft;
   const at = draft.record.findIndex((message) => currentInput.has(message));
   const index = at === -1 ? draft.record.length : at;
   return {
     ...draft,
-    historyState: { ...draft.historyState, announcements: announced },
+    historyState: { ...draft.historyState, announcements: announced, messages },
     record: [...draft.record.slice(0, index), ...added, ...draft.record.slice(index)],
   };
 }

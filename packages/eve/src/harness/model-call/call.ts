@@ -266,7 +266,6 @@ export class ModelCaller {
   private async buildRequest(): Promise<void> {
     const { prompt, step } = this;
     const call = {
-      catalog: this.input.catalog,
       currentInput: new Set(this.turnMessages),
       historyState: step.ctx.get(HistoryStateKey) ?? {},
       record: prompt.messages,
@@ -338,10 +337,9 @@ export class ModelCaller {
     }
     if (compacted === undefined) return tools;
     compactPrompt(step, prompt, compacted);
-    // Compaction cleared what earlier requests announced, so this request announces it again. A
-    // step that continues from tool results has no input of its own, so the announcement goes
-    // before the turn's input, not after those results where the model reads it as the newest
-    // message.
+    // This request announces again what the compaction dropped. A step that continues from tool
+    // results has no input of its own, so the announcement goes before the turn's input, not after
+    // those results where the model reads it as the newest message.
     const turnInput = compactedTurnInput(prompt.messages);
     this.turnMessages =
       turnInput === undefined ? this.input.turnMessages : [...this.input.turnMessages, turnInput];

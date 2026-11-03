@@ -14,22 +14,6 @@ describe("createSession", () => {
     expect(session.history).toEqual([]);
     expect(session.continuationToken).toBe("root-token");
   });
-
-  it("starts with a copy of the agent's initial messages", () => {
-    const initialMessages = [
-      { content: "Pinned tenant policy.", kind: "user" as const, role: "user" as const },
-    ];
-    const session = createSession({
-      continuationToken: "root-token",
-      initialMessages,
-      sessionId: "sess-root",
-    });
-    initialMessages[0] = { content: "mutated", kind: "user" as const, role: "user" };
-
-    expect(session.history).toEqual([
-      { content: "Pinned tenant policy.", kind: "user", role: "user" },
-    ]);
-  });
 });
 
 describe("durable sessions", () => {

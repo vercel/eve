@@ -261,7 +261,7 @@ export default defineDynamic(async (ctx) => {
 });
 ```
 
-Before a turn's first model call, new user content joins just before the turn's input; mid-turn changes append at the current position. Returning `null` adds nothing and resets content tracking, so returning the earlier content later adds it again, but it doesn't remove earlier history. Clear, compaction, and deployment changes don't re-append unchanged content.
+Before a turn's first model call, new user content joins just before the turn's input; mid-turn changes append at the current position. Returning `null` adds nothing and resets content tracking, so returning the earlier content later adds it again, but it doesn't remove earlier history. Unchanged content isn't added again after a deployment, or after a compaction that keeps it in the history; a clear or compaction that removes it adds it again.
 
 ## Errors and recovery
 

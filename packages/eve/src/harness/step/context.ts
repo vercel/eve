@@ -1,7 +1,6 @@
 import { unchangedBy } from "#harness/session-machine/commit.js";
 import type { ModelChoice } from "#definitions/model.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import { changeHistory } from "#harness/session-machine/history.js";
 import type { ModelMessage } from "ai";
 
 import type { AlsContext, ContextContainer } from "#context/container.js";
@@ -12,7 +11,6 @@ import {
   SessionPredecessorKey,
 } from "#context/keys.js";
 import { takeTurnFailure } from "#definitions/intents.js";
-import { takeUserInstructionMessages } from "#definitions/instructions.js";
 import { isDynamicModelSelectionError } from "#definitions/model.js";
 import { DefinitionFailedError } from "#definitions/kernel.js";
 import { evaluateStepValues } from "#definitions/step.js";
@@ -74,6 +72,8 @@ export interface Step {
    * text there narrates; a person reads it as a reply.
    */
   readonly finalReplyOnly: boolean;
+  /** A tool's `endsTurn` applies: a root turn without an output schema. */
+  readonly endsTurn: boolean;
   view(): SessionView;
   position(): TurnPosition;
   /** Publishes a transition, or kernel facts that change nothing private, as one commit. */
@@ -110,6 +110,7 @@ export function createStep(input: {
     instrumentation: input.instrumentation,
     hasDelegatedCaller,
     finalReplyOnly: hasDelegatedCaller || ctx?.get(ScheduleIdKey) !== undefined,
+    endsTurn: !hasDelegatedCaller && input.session.outputSchema === undefined,
     view: () => sessionView(live.read(), step.session.state),
     position: () => turnPosition(live.read()),
     async apply(change, messages) {
@@ -164,8 +165,7 @@ export async function openTurn(
 
 /**
  * Before a model call: the session's dynamic values are evaluated with the conversation the call
- * reads, and user-role instructions from new occurrences join history, ahead of the turn's input
- * on its first call. A value that fails fails the turn; returns the step's result then.
+ * reads. A value that fails fails the turn; returns the step's result then.
  */
 export async function prepareModelCall(
   step: Step,
@@ -179,9 +179,6 @@ export async function prepareModelCall(
     if (!(error instanceof DefinitionFailedError)) throw error;
     return failTurn(step, error, "REACTION_FAILED");
   }
-  step.session = changeHistory(step.session, {
-    append: takeUserInstructionMessages(step.ctx as ContextContainer),
-  });
   return undefined;
 }
 

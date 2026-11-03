@@ -7,7 +7,6 @@ import { collectWorkflowCalls } from "#harness/coordination.js";
 import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import { completeSignIn, runnableCalls, settle } from "#harness/session-machine/transitions.js";
 import {
-  stepForRequest,
   type ApprovedCall,
   type SessionView,
   type SuspendedStep,
@@ -18,6 +17,7 @@ import type { Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
 import { SessionLimitDeclinedError, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { HarnessToolLookup, HarnessStepInput, StepResult } from "#harness/types.js";
+import type { StepCatalog } from "#execution/catalog/step-catalog.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ClearedBy } from "#protocol/session-events/families/call.js";
 import {
@@ -85,17 +85,15 @@ export async function admitHumanInput(
   // Answers a response policy weighs meet it first, as a responder's sign-in callback resumes.
   const weighed = await weighResponders(step.view(), {
     now: Date.now(),
-    toolsOf: (parked) => restoreTools(step, parked),
+    tools: () => toolsOf(step),
   });
   await step.apply(weighed);
   if (weighed.unavailable.length > 0) {
+    const searchable = (await toolsOf(step)).get(SEARCH_TOOL_NAME) !== undefined;
     await step.apply(
       withdrawUnavailable(step.view(), {
         interactionIds: weighed.unavailable,
-        searchable: (request) =>
-          toolsOf(step, stepForRequest(step.view(), request.interactionId)).get(
-            SEARCH_TOOL_NAME,
-          ) !== undefined,
+        searchable,
       }),
     );
   }
@@ -168,8 +166,8 @@ export async function settleHumanInput(
 ): Promise<HumanDecisions> {
   const limit = settleLimit(step.view());
   if (limit.events.length > 0) await step.apply(limit);
-  // Approved calls run with the tools of the step that asked, built before anything runs.
-  for (const parked of step.view().turn.suspended) await restoreTools(step, parked);
+  // Approved calls run with the step's tools, built before anything runs.
+  if (step.view().turn.suspended.length > 0) await toolsOf(step);
   const settled = settleApprovals(step.view(), {
     steer: intake.steer,
   });
@@ -219,7 +217,7 @@ async function runApproved(
   const local: { approvals: ApprovedCall[]; tools: HarnessToolLookup }[] = [];
   const claimed = new Set<string>();
   for (const [parked, approvals] of byStep) {
-    const tools = toolsOf(step, parked);
+    const tools = await toolsOf(step);
     const workflows = new Map<string, { approval: ApprovedCall; clearedBy?: ClearedBy }>();
     for (const approval of approvals) {
       const tool = tools.get(approval.call.toolName);
@@ -360,39 +358,20 @@ function reportingOnce(view: SessionView, call: ApprovedCall, claimed: Set<strin
   return { ...call, signIns };
 }
 
-// A step's catalog is built once per suspended step. Restoring a step's tools runs its
-// resolvers, so a step's tools restore again only after another step's.
-const restoredTools = new WeakMap<
-  Step,
-  { readonly tools: Map<string, HarnessToolLookup>; last?: string }
->();
+// Parked calls run with the catalog the step builds as it resumes them: what the session's
+// definitions keep, the same for every parked step. A call whose entry is gone can't run; one
+// whose entry changed since it was offered fails, as its version says. Built once per step.
+const stepTools = new WeakMap<Step, Promise<StepCatalog>>();
 
-function stepKey(at: { readonly turnId: string; readonly stepIndex: number }): string {
-  return `${at.turnId}:${at.stepIndex}`;
-}
-
-/** The entries of the step that asked, built once per step; the running step's without one. */
-async function restoreTools(
-  step: Step,
-  parked: SuspendedStep | undefined,
-): Promise<HarnessToolLookup> {
-  const at = parked?.event ?? step.position();
-  const key = stepKey(at);
-  const cache = restoredTools.get(step) ?? { tools: new Map<string, HarnessToolLookup>() };
-  restoredTools.set(step, cache);
-  const restored = cache.tools.get(key);
-  if (restored !== undefined && cache.last === key) return restored;
-  const tools = await stepCatalog(step, { endsTurn: false });
-  cache.tools.set(key, tools);
-  cache.last = key;
+function toolsOf(step: Step): Promise<StepCatalog> {
+  let tools = stepTools.get(step);
+  if (tools === undefined) {
+    tools = stepCatalog(step);
+    stepTools.set(step, tools);
+    // A failure leaves the next ask to build it again.
+    tools.catch(() => stepTools.delete(step));
+  }
   return tools;
-}
-
-const NO_TOOLS: HarnessToolLookup = new Map();
-
-/** The entries a parked step's calls run with: those of the step that asked. */
-function toolsOf(step: Step, parked: SuspendedStep | undefined): HarnessToolLookup {
-  return (parked && restoredTools.get(step)?.tools.get(stepKey(parked.event))) ?? NO_TOOLS;
 }
 
 const STEERED_SIGN_IN_REASON = "Cancelled because a new message arrived.";

@@ -7,6 +7,7 @@ import {
   rememberDecision,
 } from "#approval/evaluation.js";
 
+import { pendingApprovals } from "./approval-prompt.js";
 import type { ResponderCheck } from "./responders.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
@@ -129,15 +130,6 @@ export function openDeferredApprovals(view: SessionView): Transition {
       : step.requests.map((ask) => approvalOpened(ask)),
   );
   return transition({ events, turn: view.turn });
-}
-
-/** The step's approvals nobody has settled: open, or not asked yet. */
-export function pendingApprovals(view: SessionView, step: SuspendedStep): readonly ApprovalAsk[] {
-  const tables = view.projection.view;
-  return step.requests.filter((request) => {
-    const row = tables.interactions[request.interactionId];
-    return row === undefined || row.status === "open";
-  });
 }
 
 /** Approved workflow and agent calls join the runs their requesting steps wait on. */
@@ -366,7 +358,8 @@ export function withdrawUnavailable(
   view: SessionView,
   input: {
     readonly interactionIds: readonly string[];
-    readonly searchable: (request: ApprovalAsk) => boolean;
+    /** The step offers `eve__search`, which an unavailable tool's message points to. */
+    readonly searchable: boolean;
   },
 ): Transition {
   const tables = view.projection.view;
@@ -378,7 +371,7 @@ export function withdrawUnavailable(
     for (const request of pendingApprovals(view, step)) {
       if (!gone.has(request.interactionId)) continue;
       const { callId, toolName } = request.call;
-      const message = unavailableToolMessage(toolName, input.searchable(request));
+      const message = unavailableToolMessage(toolName, input.searchable);
       const failed = failedCall({ callId, message, toolName });
       messages = withResult(messages, failed.part);
       responses.closeOthers(request.interactionId, undefined);

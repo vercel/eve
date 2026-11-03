@@ -1,7 +1,3 @@
-import type { HarnessModelMessage } from "#harness/messages.js";
-
-import { createFrameworkUserMessage } from "#harness/messages.js";
-
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import type { ResolvedAgent, ResolvedAgentDefinition } from "#runtime/types.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
@@ -34,7 +30,6 @@ export type RuntimeDynamicModelReference = Readonly<ModuleSourceRef>;
  */
 interface RuntimeTurnAgentBase {
   readonly id: string;
-  readonly initialMessages?: readonly HarnessModelMessage[];
   /**
    * Optional model used only for compaction summaries.
    *
@@ -90,9 +85,6 @@ export function createResolvedRuntimeTurnAgent(input: {
   }
   const base: RuntimeTurnAgentBase = {
     id,
-    initialMessages: agent.instructions
-      .filter((entry) => entry.role === "user" && entry.content.trim().length > 0)
-      .map((entry) => createFrameworkUserMessage("context.instruction", entry.content.trim())),
     compactionModel: config?.compaction?.model,
     nodeId: input.nodeId,
     reasoning: config?.reasoning,

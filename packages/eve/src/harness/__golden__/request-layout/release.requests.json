@@ -554,6 +554,24 @@
       {
         "content": [
           {
+            "text": "Release brief: v2.3 ships Friday.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Alice is on the release team.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
             "text": "Did it ship?",
             "type": "text"
           }

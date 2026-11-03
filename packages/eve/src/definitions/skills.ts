@@ -4,11 +4,9 @@ import {
   DynamicSkillSandboxKey,
   SandboxKey,
   type DurableDynamicSkillMetadata,
-  type DynamicSkillManifest,
 } from "#context/keys.js";
 import { SKILL_NAME_PATTERN, SKILL_NAME_RULE } from "#discover/grammar.js";
-import { createLogger } from "#internal/logging.js";
-import type { ResolvedDynamicDefinition } from "#runtime/types.js";
+import { declared, type ResolvedDynamicDefinition } from "#runtime/types.js";
 import type { SandboxState } from "#sandbox/state.js";
 import { parseJsonValue } from "#shared/json.js";
 import { isBrandedSkillEntry, type SkillPackageDefinition } from "#shared/skill-definition.js";
@@ -17,50 +15,55 @@ import {
   normalizeSkillPackage,
   removeSkillPackageFromSandbox,
   skillPackageRevision,
+  stripSkillFrontmatter,
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
-import { sessionSkills } from "#execution/catalog/skills.js";
-import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
+import { formatAvailableSkillsSection, skillFilePath } from "#execution/skills/instructions.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { slotsOf, slotValueOf } from "#definitions/state.js";
 import { namedEntries, type EntryKind } from "./named.js";
 import {
   authoredEvaluate,
   type Definition,
-  once,
   type Section,
   section,
   SECTION_ORDER,
 } from "./definition.js";
 
-const log = createLogger("dynamic-skills");
-
 /**
- * The skills the session can load: the agent's own, and those its dynamic files keep, which take a
- * name from the agent's. The agent's own that aren't deferred are listed.
+ * The agent's own skills: each joins the call's skills, after the dynamic ones, which take a name
+ * from them; the ones that aren't deferred are listed in eve's default prompt, as the call has
+ * them.
  */
 export const skills: Definition = {
-  contribute: ({ container }) => ({
-    arrange: (draft) => {
-      const all = once(async () => {
-        // The dynamic skills join the session's manifest as the draft's tools are made.
-        await draft.tools();
-        return sessionSkills(container);
-      });
-      return {
+  contribute: ({ container }) => {
+    const own = container.get(BundleKey)?.resolvedAgent.skills ?? [];
+    return {
+      tools: () => ({
+        skills: new Map(
+          own.map((skill) => [
+            skill.name,
+            {
+              deferred: skill.deferred === true,
+              description: skill.description,
+              markdown: skill.content,
+              name: skill.name,
+              path: skillFilePath(skill.name),
+            },
+          ]),
+        ),
+      }),
+      arrange: (draft) => ({
         system: async () => {
-          const own = new Set(
-            (container.get(BundleKey)?.resolvedAgent.skills ?? []).map(({ name }) => name),
-          );
+          const names = new Set(own.map(({ name }) => name));
           const listed = skillsSection(
-            [...(await all()).values()].filter(({ name }) => own.has(name)),
+            [...(await draft.tools()).skills.values()].filter(({ name }) => names.has(name)),
           );
           return [...(await draft.system()), ...(listed === undefined ? [] : [listed])];
         },
-        tools: async () => ({ ...(await draft.tools()), skills: await all() }),
-      };
-    },
-  }),
+      }),
+    };
+  },
   id: "eve.skills",
   label: "the agent's skills",
 };
@@ -86,15 +89,16 @@ function skillsSection(
 /**
  * A `defineDynamic()` in `agent/skills/`: one skill named after the file, or a map of them. It
  * keeps what the model sees: each skill's name, description, markdown, and a revision of its
- * files, which the session's manifest lists. The files themselves are built again wherever a
+ * files, and each joins the call's skills. The files themselves are built again wherever a
  * sandbox needs them, not stored.
  */
 export function skillDefinition(resolver: ResolvedDynamicDefinition<"skill">): Definition {
+  const id = skillId(resolver);
   const evaluate = authoredEvaluate(resolver.evaluate);
   return {
     contribute: (ctx) => ({
       tools: async () => {
-        await ctx.keep(async (evaluation) => {
+        const kept = await ctx.keep(async (evaluation) => {
           const skills = namedEntries(resolver, await evaluate(evaluation), SKILLS).map(
             ({ entry, name }) =>
               normalizeSkillPackage({ ...(entry as SkillPackageDefinition), name }),
@@ -106,58 +110,62 @@ export function skillDefinition(resolver: ResolvedDynamicDefinition<"skill">): D
             ...(withFiles.length > 0 && { live: withFiles }),
           };
         });
-        return {};
+        const own = slotValueOf<readonly DurableDynamicSkillMetadata[] | null>(kept?.value ?? null);
+        return {
+          skills: new Map(
+            (own ?? []).map((skill) => [
+              skill.name,
+              {
+                deferred: skill.deferred === true,
+                description: skill.description,
+                markdown: stripSkillFrontmatter(skill.markdown),
+                name: skill.name,
+                path: skill.revision === undefined ? undefined : skillFilePath(skill.name),
+                source: id,
+              },
+            ]),
+          ),
+        };
       },
     }),
-    id: `skill:${resolver.extensionNamespace ?? ""}:${resolver.slug}`,
+    id,
     install: syncDynamicSkillFiles,
     label: resolver.logicalPath,
   };
 }
 
 /**
- * The dynamic skills the session keeps, by definition. A dynamic skill overrides a same-named
- * authored one; when two definitions name the same skill, the first keeps it.
+ * Each dynamic skill definition's kept skills, read by kind, for writing their files: when two
+ * name the same skill, the first keeps it, as it does in the call, so the sandbox holds the files
+ * of the skill whose metadata the model sees.
  */
-export function dynamicSkillManifest(ctx: Pick<ContextReader, "get">): DynamicSkillManifest {
-  const manifest: Record<string, readonly DurableDynamicSkillMetadata[]> = {};
-  for (const { id, skills } of ownedSkills(ctx, (name, id, owner) =>
-    log.error(`Dynamic skill "${name}" from "${id}" collides with "${owner}".`),
-  )) {
-    if (skills.length > 0) manifest[id] = skills;
-  }
-  return manifest;
-}
-
-/**
- * Each skill slot with the skills it keeps: when two slots name the same skill, the first keeps
- * it. The manifest and the sandbox both read this, so the model sees the metadata of the skill
- * whose files the sandbox holds.
- */
-function ownedSkills(
-  ctx: Pick<ContextReader, "get">,
-  onCollision?: (name: string, id: string, owner: string) => void,
-): {
+function ownedSkills(ctx: Pick<ContextReader, "get">): {
   readonly id: string;
   readonly live?: unknown;
   readonly skills: DurableDynamicSkillMetadata[];
 }[] {
-  const owners = new Map<string, string>();
-  return slotsOf(ctx, "skill").map(({ id, live, slot }) => ({
-    id,
-    live,
-    skills: (slotValueOf<readonly DurableDynamicSkillMetadata[] | null>(slot.value) ?? []).filter(
-      (skill) => {
-        const owner = owners.get(skill.name);
-        if (owner === undefined) {
-          owners.set(skill.name, id);
+  const bundle = ctx?.get(BundleKey);
+  if (bundle === undefined) return [];
+  const owners = new Set<string>();
+  const slots = new Map(slotsOf(ctx, "skill").map((slot) => [slot.id, slot]));
+  return declared(bundle.resolvedAgent, "skill").flatMap((resolver) => {
+    const kept = slots.get(skillId(resolver));
+    if (kept === undefined) return [];
+    const { id, live, slot } = kept;
+    return [
+      {
+        id,
+        live,
+        skills: (
+          slotValueOf<readonly DurableDynamicSkillMetadata[] | null>(slot.value) ?? []
+        ).filter((skill) => {
+          if (owners.has(skill.name)) return false;
+          owners.add(skill.name);
           return true;
-        }
-        onCollision?.(skill.name, id, owner);
-        return false;
+        }),
       },
-    ),
-  }));
+    ];
+  });
 }
 
 /**
@@ -245,6 +253,10 @@ export async function syncDynamicSkillFiles(ctx: ContextContainer): Promise<void
     }
     ctx.set(DynamicSkillSandboxKey, next);
   });
+}
+
+function skillId(resolver: ResolvedDynamicDefinition<"skill">): string {
+  return `skill:${resolver.extensionNamespace ?? ""}:${resolver.slug}`;
 }
 
 const SKILLS: EntryKind = {
