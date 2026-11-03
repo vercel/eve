@@ -320,6 +320,8 @@ export interface WrittenEvent {
 interface StreamWriter extends SessionEventWriter {
   /** Writes one line: one chunk, so a crash leaves all of it or none. */
   write(bytes: Uint8Array): Promise<void>;
+  /** Waits until every line written so far is stored. A write resolves once it is buffered. */
+  durable(): Promise<void>;
 }
 
 /** Dispatches a session's written events to its channel and stream-event hooks. */
@@ -516,6 +518,10 @@ function sameLine(orphaned: StoredLine, line: StoredLine<SessionEvent, SessionEv
   );
 }
 
+function startsApprovedCall(event: SessionEvent): boolean {
+  return event.type === "call.started" && event.data.clearedBy !== undefined;
+}
+
 export function openSessionEventPublisher(input: {
   readonly cancelTurn?: () => void;
   readonly ctx: ContextContainer;
@@ -598,6 +604,10 @@ export function openSessionEventPublisher(input: {
         written.push({ event, position: event.meta.position, progress, view }),
       );
     }
+    // A call that needed approval runs as soon as its start is published. Store the start first,
+    // so a crash after the call's side effect recovers it as interrupted: never as a call that did
+    // not run, and never by running it again.
+    if (events.some(startsApprovedCall)) await writer.durable();
     await dispatcher.deliver(written);
     return written;
   };
@@ -684,6 +694,10 @@ function createSessionEventDispatcher(input: {
 
 function openSessionEventWriter(sessionWritable: WritableStream<Uint8Array>): StreamWriter {
   const streamWriter = sessionWritable.getWriter();
+  // The workflow stream's durability barrier. A stream without one has nothing to wait for.
+  const drain = Reflect.get(sessionWritable, Symbol.for("WORKFLOW_STREAM_DRAIN")) as
+    | (() => Promise<void>)
+    | undefined;
 
   let released = false;
   const release = (): void => {
@@ -694,6 +708,9 @@ function openSessionEventWriter(sessionWritable: WritableStream<Uint8Array>): St
   return {
     async write(bytes) {
       await streamWriter.write(bytes);
+    },
+    async durable() {
+      await drain?.call(sessionWritable);
     },
     close: async () => {
       try {

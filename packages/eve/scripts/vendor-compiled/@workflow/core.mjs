@@ -172,11 +172,49 @@ function stubCoreQuickJSEntrypoint() {
   };
 }
 
+// A step's stream writes are acknowledged once buffered. Core keeps the barrier that waits for
+// them to be stored on the server sink, and the writable a step holds does not expose it, so a
+// step cannot make one event durable before it goes on. eve needs that before an approved tool
+// call runs (#5841). This exposes the barrier the way vercel/workflow#4876 did; the build fails
+// when the snippet moves, so a core bump cannot silently drop it. Remove once core exposes it.
+const STEP_WRITABLE_RETURN = "    return tracked;\n}";
+
+function exposeStepWritableDrain() {
+  let patched = false;
+  return {
+    name: "eve:expose-step-writable-drain",
+    transform(code, id) {
+      if (!id.replaceAll("\\", "/").endsWith("/@workflow/core/dist/flushable-stream.js")) {
+        return null;
+      }
+      if (code.split(STEP_WRITABLE_RETURN).length !== 2) {
+        throw new Error("@workflow/core trackFlushableWritable changed; update the drain patch.");
+      }
+      patched = true;
+      const next = code.replace(
+        STEP_WRITABLE_RETURN,
+        [
+          "    Object.defineProperty(tracked, STREAM_DRAIN_SYMBOL, {",
+          "        value: () => drainFlushableSnapshot(state),",
+          "        enumerable: false,",
+          "        writable: false,",
+          "    });",
+          STEP_WRITABLE_RETURN,
+        ].join("\n"),
+      );
+      return { code: next, map: null };
+    },
+    buildEnd() {
+      if (!patched) throw new Error("@workflow/core step writable drain patch was not applied.");
+    },
+  };
+}
+
 export default {
   packageName: "@workflow/core",
   compiledPath: "@workflow/core",
   chunkGroup: "workflow",
-  plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint()],
+  plugins: [stubCoreWorldFactories(), stubCoreQuickJSEntrypoint(), exposeStepWritableDrain()],
   entries: [
     { entry: "dist/serialization.js", outputPath: "serialization" },
     { entry: "dist/runtime/helpers.js", outputPath: "runtime/helpers" },

@@ -395,7 +395,7 @@ it("does not run an approved call again when the step that ran it is interrupted
 });
 
 // #5841: `call.started` is still buffered when the tool runs, so a crash right after loses it.
-it.fails("does not run an approved call again when the process dies as it starts", async () => {
+it("does not run an approved call again when the process dies as it starts", async () => {
   const { prompts, ran } = await withInterruptedSession(
     "retry-approved-crash",
     {
