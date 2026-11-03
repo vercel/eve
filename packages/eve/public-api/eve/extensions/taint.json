@@ -1,0 +1,10 @@
+[
+  "EXPORT_TAG",
+  "EXTERNAL_TAG",
+  "Exposure",
+  "TaintPolicyOptions",
+  "UNTRUSTED_TAG",
+  "default",
+  "taintPolicy",
+  "taintRuntimeContext"
+]

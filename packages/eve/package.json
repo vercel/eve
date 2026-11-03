@@ -376,6 +376,12 @@
       "import": "./dist/src/extensions/git/extension/lib/sandbox.js",
       "default": "./dist/src/extensions/git/extension/lib/sandbox.js"
     },
+    "./extensions/taint": {
+      "eve-source": "./dist/src/extensions/taint/extension/extension.js",
+      "types": "./dist/src/extensions/taint/extension/extension.d.ts",
+      "import": "./dist/src/extensions/taint/extension/extension.js",
+      "default": "./dist/src/extensions/taint/extension/extension.js"
+    },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
       "import": "./dist/src/public/extension/index.js",
@@ -762,6 +768,9 @@
       },
       "./extensions/git": {
         "dist": "./dist/src/extensions/git/extension"
+      },
+      "./extensions/taint": {
+        "dist": "./dist/src/extensions/taint/extension"
       },
       "./extensions/computer-use": {
         "dist": "./dist/src/computer-use/extension"
