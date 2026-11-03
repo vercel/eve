@@ -29,6 +29,8 @@ export interface HostPluginsInput {
   readonly extensionOverridePaths: ReadonlyMap<string, string>;
   readonly instrumentationEntryPlugin?: NitroBuildPlugin;
   readonly instrumentationSourcePaths?: readonly string[];
+  /** Generated modules eve's runtime plugin imports only for their side effects. */
+  readonly runtimeModules: readonly string[];
   readonly workflowArtifacts: WorkflowArtifacts;
 }
 
@@ -47,6 +49,7 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
       workflowsPath,
       workflowHandlerPath(input.workflowArtifacts),
       ...(input.instrumentationSourcePaths ?? []),
+      ...input.runtimeModules,
     ]),
     input.instrumentationEntryPlugin ?? null,
     createNodeEsmCompatBannerPlugin(),

@@ -11,6 +11,7 @@ import {
 } from "#internal/nitro/host/externals-policy.js";
 import { createHostRouteTable, type HostRouteTable } from "#internal/nitro/host/host-routes.js";
 import type { PreparedApplicationHost } from "#internal/nitro/host/types.js";
+import type { HostRuntime } from "#internal/nitro/host/runtime-plugin.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { usesLocalVercelSchedules } from "#internal/schedules/consumer-route.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
@@ -33,16 +34,12 @@ export interface HostDirectories {
   readonly outputDir: string;
 }
 
-/** Nitro runtime plugins eve installs, in load order. */
+/** Nitro runtime plugins eve installs after its own runtime plugin, in load order. */
 export type HostRuntimePlugin =
-  | "compiled-artifacts"
   | "instrumentation"
   | "local-schedules"
-  | "local-tracing"
   | "sandbox-shutdown"
-  | "skill-files"
-  | "workflow-sandbox"
-  | "workflow-world";
+  | "skill-files";
 
 /** Everything eve's Nitro host serves and bundles, derived from the compiled agent. */
 export interface HostSpec {
@@ -58,6 +55,8 @@ export interface HostSpec {
   readonly instrumented: boolean;
   readonly preset: "vercel" | undefined;
   readonly routes: HostRouteTable;
+  /** What eve's generated runtime plugin installs. */
+  readonly runtime: HostRuntime;
   readonly runtimePlugins: readonly HostRuntimePlugin[];
   /** Skills a production build embeds; dev reads the compile directory. */
   readonly skills: readonly string[];
@@ -105,11 +104,7 @@ export function createHostSpec(
     vercel: preset === "vercel",
   });
   const runtimePlugins: HostRuntimePlugin[] = [
-    ...(development && !instrumented ? (["local-tracing"] as const) : []),
-    "compiled-artifacts",
     ...(development ? [] : (["skill-files"] as const)),
-    "workflow-world",
-    ...(hasWorkflowProgram(manifest) ? (["workflow-sandbox"] as const) : []),
     ...(instrumented ? (["instrumentation"] as const) : []),
     ...(development && usesLocalVercelSchedules(manifest) ? (["local-schedules"] as const) : []),
     ...(development ? [] : (["sandbox-shutdown"] as const)),
@@ -137,6 +132,10 @@ export function createHostSpec(
     },
     preset,
     routes,
+    runtime: {
+      localTracing: development && !instrumented,
+      workflowSandbox: hasWorkflowProgram(manifest),
+    },
     runtimePlugins,
     skills: development ? [] : manifest.skills.map((skill) => skill.name),
     vercel: createEveVercelOptions({
