@@ -191,4 +191,41 @@ export async function deliver() {
       true,
     );
   });
+
+  // #5847: the Nitro host and workflow bundles skip node_modules assets, so a
+  // relative ?raw import into an installed package fails to load.
+  it.fails("embeds ?raw assets from node_modules imported by workflow and step modules", async () => {
+    const app = await scenarioApp({
+      name: "workflow-dependency-raw-assets",
+      installDependencies: true,
+      dependencies: { "raw-assets": "file:./vendor/raw-assets" },
+      files: {
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
+        "agent/instructions.md": "Call the probe tool.",
+        "agent/tools/probe.ts":
+          'import { defineWorkflowTool } from "eve/tools"; import { run } from "../../lib/run"; export default defineWorkflowTool({ description: "Probe", inputSchema: {}, execute: run });',
+        "lib/run.ts":
+          'import header from "../node_modules/raw-assets/workflow.txt?raw"; import { readPrompt } from "./step"; export async function run() { "use workflow"; return header + (await readPrompt()); }',
+        "lib/step.ts":
+          'import prompt from "../node_modules/raw-assets/step.md?raw"; export async function readPrompt() { "use step"; return prompt; }',
+        "vendor/raw-assets/package.json": JSON.stringify({ name: "raw-assets", version: "1.0.0" }),
+        "vendor/raw-assets/workflow.txt": WORKFLOW_ASSET_MARKER,
+        "vendor/raw-assets/step.md": STEP_ASSET_MARKER,
+      },
+    });
+    const outputDir = await buildApplication(await realpath(app.appRoot), {
+      skipSandboxPrewarm: false,
+    });
+    const serverFiles = await readdir(join(outputDir, "server"), { recursive: true });
+    const serverCode = await Promise.all(
+      serverFiles
+        .filter((file) => file.endsWith(".mjs"))
+        .map((file) => readFile(join(outputDir, "server", file), "utf8")),
+    );
+    expect(serverCode.some((code) => code.includes(STEP_ASSET_MARKER))).toBe(true);
+    expect(serverCode.some((code) => workflowCode(code).includes(WORKFLOW_ASSET_MARKER))).toBe(
+      true,
+    );
+  });
 });
