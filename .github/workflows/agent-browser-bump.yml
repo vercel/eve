@@ -1,0 +1,91 @@
+name: agent-browser bump
+
+# @eve/agent-browser vendors one agent-browser release's MCP catalog and sandbox
+# helpers. When npm has a newer release, this opens a PR that retargets the
+# package at it, so the extension never falls behind the CLI it installs.
+on:
+  schedule:
+    - cron: "0 15 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: agent-browser version to target (defaults to npm latest)
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-browser-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    if: github.repository == 'vercel/eve' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Main only accepts changes through a pull request with passing checks, so
+    # the job commits to a bot branch and opens a PR with GITHUB_TOKEN, like the
+    # Version Packages and eve-code benchmark snapshot PRs.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+
+      - name: Sync vendored agent-browser files
+        id: sync
+        env:
+          VERSION: ${{ inputs.version }}
+        run: node .github/scripts/agent-browser-bump.mjs sync "$VERSION" > "$RUNNER_TEMP/summary.md"
+
+      # The branch restarts from main on every bump, so the PR holds one commit
+      # and never conflicts. createCommitOnBranch commits are signed by GitHub,
+      # which satisfies the signed-commit rule without a bot signing key.
+      - name: Open bump pull request
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: bot/agent-browser-bump
+          VERSION: ${{ steps.sync.outputs.version }}
+          PIN: packages/eve-agent-browser/extension/lib/version.ts
+        run: |
+          set -euo pipefail
+          pr=$(gh pr list -R "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json url -q '.[0].url // empty')
+          pinned=$(gh api "repos/$GITHUB_REPOSITORY/contents/$PIN?ref=$BRANCH" -H "Accept: application/vnd.github.raw" 2>/dev/null || true)
+          if [ -n "$pr" ] && grep -qF "\"$VERSION\"" <<<"$pinned"; then
+            echo "::notice::$pr already targets agent-browser $VERSION."
+            exit 0
+          fi
+
+          head=$(git rev-parse HEAD)
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" -f sha="$head" -F force=true > /dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$head" > /dev/null
+          fi
+          mapfile -t files < <(git ls-files --modified --others --exclude-standard)
+          HEAD_OID="$head" node .github/scripts/agent-browser-bump.mjs commit-payload "${files[@]}" > "$RUNNER_TEMP/commit.json"
+          gh api graphql --input "$RUNNER_TEMP/commit.json" -q .data.createCommitOnBranch.commit.url
+
+          {
+            cat "$RUNNER_TEMP/summary.md"
+            echo
+            echo "GitHub holds workflow runs on pull requests that \`GITHUB_TOKEN\` opens until a maintainer approves them. Select **Approve workflows to run** to run the required checks, as on the Version Packages PR."
+            echo
+            echo "Every bump resets \`$BRANCH\` to \`main\`. Push follow-up fixes here only after the last bump you expect, or the next run discards them."
+          } > "$RUNNER_TEMP/body.md"
+          title="chore(agent-browser): target agent-browser $VERSION"
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" -R "$GITHUB_REPOSITORY" --title "$title" --body-file "$RUNNER_TEMP/body.md"
+          else
+            pr=$(gh pr create -R "$GITHUB_REPOSITORY" --base main --head "$BRANCH" --title "$title" --body-file "$RUNNER_TEMP/body.md")
+          fi
+          echo "Bump pull request: $pr"
