@@ -363,6 +363,78 @@ controls what traces capture and grants no authorization. Once a policy reads it
 classified `private` can reach private data. Policies should treat `unknown` like `public`, as the
 example does, and the docs must say so.
 
+### Private context
+
+The same shape protects data flowing the other way. In a DM with a company knowledge agent, the
+person's private Notion pages and Slack DM history can enter the context. Any later write, to a
+company channel, an issue, or an email, could share them. Tag the tools that read personal data, and
+track whose data the session holds:
+
+```ts title="agent/state/personal.ts"
+import { defineDerivedState } from "eve/context";
+
+type Personal = {
+  readonly caller?: string;
+  readonly owners: readonly string[];
+  readonly sources: readonly string[];
+};
+
+const union = (a: readonly string[], b: readonly string[]) => [...new Set([...a, ...b])];
+const merge = (s: Personal, other: Personal): Personal => ({
+  ...s,
+  owners: union(s.owners, other.owners),
+  sources: union(s.sources, other.sources),
+});
+
+export default defineDerivedState({
+  initial: (): Personal => ({ owners: [], sources: [] }),
+  on: {
+    // calls run as the person who sent the turn's message, so reads are their data
+    "delivery.admitted": (s, event) => ({ ...s, caller: event.data.principal?.principalId }),
+    "call.settled": (s, event, { call }) =>
+      event.data.outcome === "completed" && (call.tags ?? []).includes("reads:personal")
+        ? merge(s, { owners: [s.caller ?? "unknown"], sources: [call.name] })
+        : s,
+  },
+  fromChild: merge,
+  fromParent: merge,
+  telemetry: true,
+});
+```
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import personal from "./state/personal";
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+  approval: ({ toolTags, toolAnnotations }) => {
+    if (personal.get().sources.length === 0) return undefined;
+    const writes =
+      toolTags?.includes("effect:external") ||
+      // untagged connection tools count as writes unless the server says they only read
+      (toolTags === undefined && toolAnnotations?.readOnlyHint !== true);
+    return writes ? "user-approval" : undefined;
+  },
+});
+```
+
+- A subagent that reads the person's pages exposes the parent when its answer arrives, so a summary
+  can't carry the data out unflagged.
+- "Whose data" assumes the reading tool uses the caller's own credentials, as per-user connection
+  auth does. A tool that reads through a shared account needs a different tag.
+- Memory isn't covered. A capture from this session into memory other people can recall shares the
+  data with no call to gate. That gap is wider here than for taint.
+
+This works with today's approval API, with two limits that belong to a separate approval change:
+
+- **No reason.** The agent-wide `approval` is a function, and its `"user-approval"` result can't
+  carry text. The person sees the tool's own prompt, not "this may share personal information from
+  `notion__search`". `"user-approval"` should accept a `reason`.
+- **No responders.** Only a tool's object form can restrict who may answer. In a shared thread,
+  someone other than the data's owner could approve sharing it. The agent-wide policy should be able
+  to name who may answer, here `personal.get().owners`.
+
 ## Fit with the kernel and definitions
 
 The [session kernel doc](https://github.com/vercel/eve/pull/5644) and its stack make the kernel the
@@ -410,6 +482,8 @@ only writer of facts and turn every authored file into a `Definition` with a sta
   children and forwarded under `trustedForwarders`, which is the shape of a built-in derived state.
   Moving it would replace its own baggage member and propagation, but trace export reads it outside
   any session, so it waits until that path can read derived state.
+- **Approval follow-up.** The reason and responder limits in [Private context](#private-context) are
+  approval API changes, proposed separately. Neither blocks derived state.
 - **History cost.** Whether computing a new state from full history needs a cap for very long
   sessions, and what it falls back to.
 
