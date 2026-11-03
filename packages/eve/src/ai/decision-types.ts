@@ -87,4 +87,9 @@ export interface DecisionOptions<Questions extends Readonly<Record<string, Decis
   /** Maximum retries for transient provider failures. Defaults to 2. */
   readonly maxRetries?: number;
   readonly signal?: AbortSignal;
+  /**
+   * Provider-specific request options, keyed by provider, such as
+   * `{ gateway: { zeroDataRetention: true } }` for AI Gateway.
+   */
+  readonly providerOptions?: Record<string, JsonObject>;
 }
