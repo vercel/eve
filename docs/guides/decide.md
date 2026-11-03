@@ -47,6 +47,27 @@ export default defineAgent({
 
 The fallback applies only to decider failures. When eve switches, it logs a warning with the decider error and the fallback model. Invalid prompts and cancelled turns don't use the fallback; see [Runtime behavior](#runtime-behavior).
 
+## Set decider provider options
+
+`modelOptions.providerOptions` applies to the decider's call. To keep it on Gateway providers with zero data retention:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { auto } from "eve/models";
+
+export default defineAgent({
+  model: auto({
+    modelOptions: { providerOptions: { gateway: { zeroDataRetention: true } } },
+    options: {
+      "openai/gpt-6-sol": "Difficult reasoning and engineering tasks",
+      "openai/gpt-6-luna": "Routine tasks where fast completion matters",
+    },
+  }),
+});
+```
+
+An option's own `modelOptions` still configures the model it selects.
+
 ## Use a provider directly
 
 Install the provider package and pass its decision model. The provider owns its credentials and settings.
@@ -135,7 +156,7 @@ export default defineTool({
 
 The choice above is typed as `"billing" | "support"`. Each answer appears under its question's key in `result.answers`, and `usage` holds normalized token usage. To use that choice to delegate while keeping specialist subagents out of the parent model's tools, see [Route to a hidden subagent with Jev](/docs/tools/workflows#route-to-a-hidden-subagent-with-jev).
 
-`decide` accepts `model`, `state`, `questions`, `maxRetries`, and `signal`; pass `signal: ctx.abortSignal` to cancel with the tool call. Import `DecisionModel`, `DecisionState`, `DecisionStatePart`, `DecisionInput`, `DecisionQuestion`, `DecisionAnswer`, `DecisionOptions`, and `DecisionResult` from `eve/ai` to type reusable configs and handlers.
+`decide` accepts `model`, `state`, `questions`, `maxRetries`, `signal`, and `providerOptions`; pass `signal: ctx.abortSignal` to cancel with the tool call. Import `DecisionModel`, `DecisionState`, `DecisionStatePart`, `DecisionInput`, `DecisionQuestion`, `DecisionAnswer`, `DecisionOptions`, and `DecisionResult` from `eve/ai` to type reusable configs and handlers.
 
 A model instance must implement decision model specification `v4`, the version AI SDK 7 supports. A matching `provider`, `modelId`, and `specificationVersion` alone is not enough. If the installed `ai` package does not export a decision API, `decide` throws an error that names the missing export. Validation, retries, and provider errors follow AI SDK semantics.
 

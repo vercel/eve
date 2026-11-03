@@ -87,4 +87,6 @@ export interface DecisionOptions<Questions extends Readonly<Record<string, Decis
   /** Maximum retries for transient provider failures. Defaults to 2. */
   readonly maxRetries?: number;
   readonly signal?: AbortSignal;
+  /** Provider-specific options, keyed by provider. */
+  readonly providerOptions?: Record<string, JsonObject>;
 }
