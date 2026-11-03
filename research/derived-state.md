@@ -390,7 +390,7 @@ export default defineDerivedState({
   initial: (): Personal => ({ owners: [], sources: [] }),
   on: {
     // calls run as the person who sent the turn's message, so reads are their data
-    "delivery.admitted": (s, event) => ({ ...s, caller: event.data.principal?.principalId }),
+    "delivery.admitted": (s, event) => ({ ...s, caller: event.data.principal?.id }),
     "call.settled": (s, event, { call }) =>
       event.data.outcome === "completed" && (call.tags ?? []).includes("reads:personal")
         ? merge(s, { owners: [s.caller ?? "unknown"], sources: [call.name] })
