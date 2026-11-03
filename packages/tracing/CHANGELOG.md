@@ -1,5 +1,13 @@
 # @vercel/agent-runs
 
+## 1.0.0-rc.0
+
+Released 2026-10-30 · [Compare with 0.0.4](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%400.0.4...%40vercel%2Fagent-runs%401.0.0-rc.0)
+
+### Breaking Changes
+
+- `@vercel/agent-runs` 1.0 puts its public API under semantic versioning, so it changes incompatibly only in a major release. ([#5620](https://github.com/vercel/eve/pull/5620))
+
 ## 0.0.4
 
 Released 2026-10-29 · [Compare with 0.0.3](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%400.0.3...%40vercel%2Fagent-runs%400.0.4)

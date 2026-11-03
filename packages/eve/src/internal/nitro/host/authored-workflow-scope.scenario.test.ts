@@ -79,7 +79,6 @@ export async function deliver() {
           compiledArtifactsBootstrapPath: host.compiledArtifacts.bootstrapPath,
           outDir: workspace.workflow.buildDir,
           rootDir: resolvePackageRoot(),
-          watch: false,
           authoredWorkflowModules: host.compiledArtifacts.authoredWorkflowModules,
         });
         await builder.build();
@@ -140,7 +139,6 @@ export async function deliver() {
         compiledArtifactsBootstrapPath: host.compiledArtifacts.bootstrapPath,
         outDir: workspace.workflow.buildDir,
         rootDir: resolvePackageRoot(),
-        watch: false,
         authoredWorkflowModules: host.compiledArtifacts.authoredWorkflowModules,
       });
       await builder.build();

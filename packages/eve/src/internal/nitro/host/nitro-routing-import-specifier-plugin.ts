@@ -1,34 +1,21 @@
-import type { Nitro } from "nitro/types";
-
 import { normalizeGeneratedEsmImportSpecifiers } from "#internal/application/import-specifier.js";
+import { exactRegex } from "#internal/bundler/filters.js";
 
 /**
- * Patches Nitro's generated routing modules before Rollup/Rolldown resolves
- * their imports so raw Windows drive-letter paths become valid file URLs.
+ * Rewrites Nitro's generated routing modules before the bundler resolves their
+ * imports so raw Windows drive-letter paths become valid file URLs.
  */
-export function addNitroRoutingImportSpecifierPlugin(nitro: Nitro): void {
-  nitro.hooks.hook("rollup:before", (_nitro, config) => {
-    if (!Array.isArray(config.plugins)) {
-      return;
-    }
-
-    config.plugins.unshift({
-      name: "eve:nitro-routing-import-specifiers",
-      transform(code: string, id: string) {
-        if (id !== "#nitro/virtual/routing" && id !== "#nitro/virtual/routing-meta") {
-          return null;
-        }
-
-        const nextCode = normalizeGeneratedEsmImportSpecifiers(code);
-        if (nextCode === code) {
-          return null;
-        }
-
-        return {
-          code: nextCode,
-          map: null,
-        };
+export function createNitroRoutingImportSpecifierPlugin() {
+  return {
+    name: "eve:nitro-routing-import-specifiers",
+    transform: {
+      filter: {
+        id: [exactRegex("#nitro/virtual/routing"), exactRegex("#nitro/virtual/routing-meta")],
       },
-    });
-  });
+      handler(code: string) {
+        const nextCode = normalizeGeneratedEsmImportSpecifiers(code);
+        return nextCode === code ? null : { code: nextCode, map: null };
+      },
+    },
+  };
 }

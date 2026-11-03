@@ -1,8 +1,4 @@
-import {
-  type BundlerDefaultLogHandler,
-  onVendoredDependencyLog,
-} from "#internal/bundler/vendored-dependency-log.js";
-import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
+import { onVendoredDependencyLog } from "#internal/bundler/vendored-dependency-log.js";
 
 // Nitro's default `codeSplitting` group names chunks with a function and no
 // `debugName`. Newer Rolldown releases warn about the missing timing label on
@@ -10,10 +6,11 @@ import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banne
 // cannot set it for Nitro.
 const MISSING_CODE_SPLITTING_GROUP_DEBUG_NAME = "MISSING_CODE_SPLITTING_GROUP_DEBUG_NAME";
 
-function onNitroBundlerLog(
-  level: string,
-  log: unknown,
-  defaultHandler: BundlerDefaultLogHandler,
+/** Bundler log handler for eve's Nitro host builds. */
+export function onNitroBundlerLog<Level extends string, Log>(
+  level: Level,
+  log: Log,
+  defaultHandler: (level: Level, log: Log) => void,
 ): void {
   if (
     level === "warn" &&
@@ -22,15 +19,4 @@ function onNitroBundlerLog(
     return;
   }
   onVendoredDependencyLog(level, log, defaultHandler);
-}
-
-/**
- * Creates eve-owned Nitro bundler overrides that must apply to both Rollup
- * and Rolldown hosted builds.
- */
-export function createNitroBundlerConfig(plugins: readonly object[]): Record<string, unknown> {
-  return {
-    onLog: onNitroBundlerLog,
-    plugins: [createNodeEsmCompatBannerPlugin(), ...plugins],
-  };
 }

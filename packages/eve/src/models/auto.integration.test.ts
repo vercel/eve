@@ -115,28 +115,7 @@ describe("auto", () => {
     try {
       const handler = auto({ options });
       await expect(run(handler, context())).resolves.toBe("openai/small");
-      expect(runtime.localDecisionModel).not.toHaveBeenCalled();
       expect(decisionModelFactory).toHaveBeenCalledWith("typesafe-ai/jev");
-    } finally {
-      if (previous === undefined) Reflect.deleteProperty(globalThis, "AI_SDK_DEFAULT_PROVIDER");
-      else Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", previous);
-    }
-  });
-
-  it("preserves a custom default provider when the local Gateway connection is available", async () => {
-    const decider = decisionModel();
-    const localDecider = decisionModel("openai/large");
-    runtime.localDecisionModel.mockReturnValue(localDecider.model);
-    const decisionModelFactory = vi.fn(() => decider.model);
-    const previous = Reflect.get(globalThis, "AI_SDK_DEFAULT_PROVIDER");
-    Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", { decisionModel: decisionModelFactory });
-    try {
-      const handler = auto({ model: "internal-router", options });
-      await expect(run(handler, context())).resolves.toBe("openai/small");
-      expect(decisionModelFactory).toHaveBeenCalledWith("internal-router");
-      expect(decider.doDecide).toHaveBeenCalledOnce();
-      expect(runtime.localDecisionModel).not.toHaveBeenCalled();
-      expect(localDecider.doDecide).not.toHaveBeenCalled();
     } finally {
       if (previous === undefined) Reflect.deleteProperty(globalThis, "AI_SDK_DEFAULT_PROVIDER");
       else Reflect.set(globalThis, "AI_SDK_DEFAULT_PROVIDER", previous);

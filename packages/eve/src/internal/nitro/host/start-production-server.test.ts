@@ -160,6 +160,23 @@ describe("startProductionServer", () => {
     },
   );
 
+  it("keeps inherited variables that change how the built server listens or shuts down out of it", async () => {
+    // srvx skips graceful shutdown, and so Nitro's close hooks, when CI or
+    // TEST is set; a socket path would replace the port eve waits on.
+    vi.stubEnv("CI", "1");
+    vi.stubEnv("NITRO_UNIX_SOCKET", "/tmp/eve.sock");
+    vi.stubEnv("TEST", "1");
+    const { startProductionServer } = await import("./start-production-server.js");
+    const child = createChildProcess();
+    (child.stdout as PassThrough).write("Listening on http://127.0.0.1:4321/\n");
+    mocks.spawn.mockReturnValueOnce(child);
+
+    const server = await startProductionServer("/tmp/app", { host: "127.0.0.1", port: 4321 });
+    const { env } = mocks.spawn.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv };
+    expect({ CI: env.CI, NITRO_UNIX_SOCKET: env.NITRO_UNIX_SOCKET, TEST: env.TEST }).toEqual({});
+    await server.close();
+  });
+
   it("uses PORT when no explicit port is provided", async () => {
     const { startProductionServer } = await import("./start-production-server.js");
     const child = createChildProcess();

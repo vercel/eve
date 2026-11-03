@@ -1,4 +1,4 @@
-import { isAbsolute, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
 
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
@@ -26,6 +26,7 @@ import {
 } from "#compiler/normalize-helpers.js";
 import type { AgentModuleBinding } from "#compiler/source-graph.js";
 import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -87,6 +88,7 @@ export async function compileAgentConfig(
   } = {};
 
   const compiledConfig: {
+    approval?: boolean;
     build?: CompiledAgentDefinition["build"];
     compaction: {
       model?: CompiledRuntimeModelReference;
@@ -112,6 +114,11 @@ export async function compileAgentConfig(
 
   if (definition.description !== undefined) {
     compiledConfig.description = definition.description;
+  }
+
+  // A function can't enter the manifest; the runtime loads it from the agent config module.
+  if (definition.approval !== undefined) {
+    compiledConfig.approval = true;
   }
 
   let dynamicModel: CompiledAgentDefinition["dynamicModel"] | undefined;
@@ -345,17 +352,11 @@ function resolveTopLevelAgentRoot(manifest: AgentSourceManifest): string {
   const nestedAgentRoot = resolve(appRoot, "agent");
   const agentRoot = resolve(manifest.agentRoot);
 
-  if (isPathInsideOrEqual(nestedAgentRoot, agentRoot)) {
+  if (isPathInsideOrEqual(agentRoot, nestedAgentRoot)) {
     return nestedAgentRoot;
   }
 
   return appRoot;
-}
-
-function isPathInsideOrEqual(parentPath: string, childPath: string): boolean {
-  const relativePath = relative(parentPath, childPath);
-
-  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
 
 async function withCompiledRuntimeModelLimits(

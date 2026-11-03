@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { type ParseError, parse as parseJsonc } from "#compiled/jsonc-parser/index.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 type RolldownResolveResult = {
   readonly id: string;
@@ -325,13 +326,4 @@ function isPackageImport(source: string): boolean {
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
-
-  return (
-    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
-  );
 }

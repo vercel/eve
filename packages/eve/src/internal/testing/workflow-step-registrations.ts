@@ -12,7 +12,6 @@ import {
   WORKFLOW_VIRTUAL_ENTRY_ID,
   type WorkflowBundleDiscoveredEntries,
 } from "#internal/workflow-bundle/builder-support.js";
-import { WORKFLOW_STEP_EXTERNAL_PACKAGES } from "#internal/workflow-bundle/vercel-workflow-output.js";
 import type { WorkflowManifest } from "#internal/workflow-bundle/workflow-builders.js";
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
@@ -86,6 +85,12 @@ export async function bundleWorkflowStepRegistrations(input: {
   await mkdir(dirname(input.outfile), { recursive: true });
   await atomicWriteFile(input.outfile, chunk.code);
 }
+
+// just-bash is an optional peer dependency (the opt-in local sandbox engine)
+// loaded lazily from the application's install, and it exposes native
+// optional codecs for xz/zstd support. Step bundles must neither fail
+// resolving an absent optional install nor inline platform `.node` artifacts.
+const WORKFLOW_STEP_EXTERNAL_PACKAGES = ["@mongodb-js/zstd", "just-bash", "node-liblzma"] as const;
 
 function isWorkflowStepExternalPackage(source: string): boolean {
   return WORKFLOW_STEP_EXTERNAL_PACKAGES.some(

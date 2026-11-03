@@ -129,6 +129,44 @@ describe("createStreamChecker", () => {
     expect(rulesOf(lines)).toEqual(["closure"]);
   });
 
+  it("accepts a call and a reply the turn makes without a run, and refuses a part it can't place", () => {
+    const part = (scope?: object) => ({
+      data: { kind: "text", partId: "p_own", phase: "reply", value: "Done." },
+      ...(scope !== undefined && { scope }),
+      type: "content.completed",
+    });
+    const ownTurn = (...facts: unknown[]) => [
+      ...repliedTurn().slice(0, 2),
+      ...commits(
+        [
+          {
+            data: {
+              callId: "c_0",
+              capability: { kind: "tool", name: "deploy" },
+              owner: turn,
+            },
+            scope: turn,
+            type: "call.requested",
+          },
+          { data: { callId: "c_0" }, scope: turn, type: "call.started" },
+          { data: { callId: "c_0", outcome: "completed" }, scope: turn, type: "call.settled" },
+          ...facts,
+        ],
+        [
+          { data: { outcome: "completed", turnId: "turn_0" }, scope: turn, type: "turn.settled" },
+          {
+            data: { deliveryId: "d_0", outcome: "handled", turnId: "turn_0" },
+            type: "delivery.settled",
+          },
+        ],
+      ),
+    ];
+    expect(rulesOf(ownTurn(part(turn)))).toEqual([]);
+    expect(rulesOf(ownTurn(part()))).toEqual(["schema"]);
+    expect(rulesOf(ownTurn(part({ turnId: "turn_9" })))).toEqual(["introduce-before-reference"]);
+    expect(rulesOf([...ownTurn(), ...commits([part(turn)])])).toEqual(["closure"]);
+  });
+
   it("accepts a run's attempts in order, and refuses one out of order or after it settled", () => {
     const started = (attempt: number) => ({
       data: { attempt, modelId: "m", runId: "run_0" },

@@ -36,7 +36,7 @@ export function isExtensionModule(path: string, root: string): boolean {
 export function createExtensionMountPlugin(
   mounts: readonly Mount[],
   overridePaths: ReadonlyMap<string, string> = new Map(),
-): Record<string, unknown> | null {
+) {
   if (mounts.length === 0) return null;
   // Every import in the bundle resolves through this plugin, and each JS
   // realpath walks the whole path. One plugin instance serves one build.

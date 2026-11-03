@@ -74,7 +74,8 @@ export class DrainedNitroDevServer {
   readonly #listeners = new Set<{ beginClose(): Promise<void>; destroySockets(): void }>();
   readonly #logger: DevServerLogger;
   #active: RunnerSlot | undefined;
-  #activeWaiters: Array<() => void> = [];
+  /** Settles when a runner attaches or the server closes; created on demand. */
+  #activeChange: PromiseWithResolvers<void> | undefined;
   #closePromise: Promise<void> | undefined;
   #closed = false;
   #clientAddressSecret: string | undefined;
@@ -337,15 +338,21 @@ export class DrainedNitroDevServer {
   }
 
   async waitForActiveRunner(timeoutMs: number = RUNNER_READY_TIMEOUT_MS): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (this.#active === undefined && !this.#closed) {
-      if (Date.now() >= deadline) {
-        throw new Error("Timed out waiting for the development worker to become ready.");
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error("Timed out waiting for the development worker to become ready.")),
+        timeoutMs,
+      );
+    });
+    try {
+      // A runner can attach and exit before this waiter resumes, so re-check.
+      while (this.#active === undefined && !this.#closed) {
+        this.#activeChange ??= Promise.withResolvers<void>();
+        await Promise.race([this.#activeChange.promise, timedOut]);
       }
-      await new Promise<void>((resolvePromise) => {
-        this.#activeWaiters.push(resolvePromise);
-        setTimeout(resolvePromise, 100);
-      });
+    } finally {
+      clearTimeout(timer);
     }
     if (this.#closed) {
       throw new Error("Development server is closed.");
@@ -556,8 +563,7 @@ export class DrainedNitroDevServer {
   }
 
   #wakeActiveWaiters(): void {
-    for (const wake of this.#activeWaiters.splice(0)) {
-      wake();
-    }
+    this.#activeChange?.resolve();
+    this.#activeChange = undefined;
   }
 }

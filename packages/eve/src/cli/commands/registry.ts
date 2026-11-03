@@ -249,7 +249,8 @@ function assertCompatibleEveVersion(requiredVersion: string | undefined): void {
   if (semver.validRange(requiredVersion) === null) {
     throw new Error(`Registry item has an invalid eve version requirement: ${requiredVersion}.`);
   }
-  if (semver.subset(installedVersion, requiredVersion)) return;
+  // Without includePrerelease, no prerelease such as 1.0.0-rc.0 satisfies `>=0.30.0`.
+  if (semver.subset(installedVersion, requiredVersion, { includePrerelease: true })) return;
   throw new Error(
     `This registry item requires eve ${requiredVersion}, but this project is using eve ${installedVersion}. Upgrade eve and run the command again.`,
   );

@@ -226,7 +226,7 @@ function chatSdkDriverWith(input: {
           });
         });
       } else {
-        // The wiring docs/channels/chat-sdk.mdx shows: a mention starts the session, and
+        // The wiring docs/channels/chat-sdk/index.mdx shows: a mention starts the session, and
         // subscribing lets the rest of the thread continue it without one.
         bridge.bot.onNewMention(async (thread, message) => {
           await thread.subscribe();

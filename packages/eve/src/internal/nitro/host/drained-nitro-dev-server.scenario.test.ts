@@ -132,6 +132,32 @@ describe("drained Nitro dev server", () => {
     await server.close();
   });
 
+  it("holds a request that arrives before any worker until one attaches", async () => {
+    const { createRunner } = createRunnerFactory(
+      async (_request, runnerIndex) => new Response(`runner-${String(runnerIndex)}`),
+    );
+    const server = new DrainedNitroDevServer(LOGGER, createRunner);
+    const listener = await listen(server);
+    // Control routes run just before a request waits for a worker.
+    const admitted = Promise.withResolvers<void>();
+    server.setControlHandler(async () => {
+      admitted.resolve();
+      return undefined;
+    });
+
+    const early = fetch(new URL("/", listener.url));
+    await withinDeadline(admitted.promise, "Timed out waiting for the early request.");
+    await server.replaceWorker(replacement("/tmp/first.mjs"));
+    await expect(
+      withinDeadline(
+        early.then(async (response) => await response.text()),
+        "Timed out waiting for the early request to reach the first worker.",
+      ),
+    ).resolves.toBe("runner-0");
+
+    await server.close();
+  });
+
   it("drains the retired worker and disposes it after its last exchange settles", async () => {
     let releaseFirstResponse: (() => void) | undefined;
     const { createRunner, runners } = createRunnerFactory(async (_request, runnerIndex) => {

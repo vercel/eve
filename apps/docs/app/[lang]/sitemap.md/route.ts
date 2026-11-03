@@ -8,14 +8,10 @@ import { integrationSource } from "@/lib/integrations/source";
 const sitemapRoute = createSitemapMarkdownRoute({
   config,
   sources: [{ source: geistdocsSource }, { source: integrationSource }],
-  transform: (markdown, { lang }) =>
+  transform: (markdown) =>
     transformSitemapMarkdown(markdown, {
       resolveTitle: (title, url) =>
-        resolveDocsPageTitle({
-          pageTitle: title,
-          pageUrl: url,
-          tree: geistdocsSource.source.getPageTree(lang),
-        }) ?? title,
+        resolveDocsPageTitle({ pageTitle: title, pageUrl: url }) ?? title,
     }),
 });
 

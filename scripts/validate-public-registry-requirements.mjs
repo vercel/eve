@@ -23,7 +23,7 @@ function compareVersions(left, right) {
   if (left.prerelease === right.prerelease) return 0;
   if (left.prerelease === undefined) return 1;
   if (right.prerelease === undefined) return -1;
-  return left.prerelease.localeCompare(right.prerelease, "en");
+  return left.prerelease.localeCompare(right.prerelease, "en", { numeric: true });
 }
 
 export function validatePublicRegistryRequirements(registry, eveVersion) {

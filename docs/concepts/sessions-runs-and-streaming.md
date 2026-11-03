@@ -15,7 +15,7 @@ Authored channels also use channel-local continuation tokens. A token addresses 
 
 A session completes after 30 idle days by default. Set `limits.sessionTimeoutMs` in `agent.ts` to change the window, or `false` to disable it. The idle window restarts each time a turn ends. A session never expires while a turn is open. At expiration, eve emits `session.ended` with `outcome: "completed"` and releases the session's channel addresses. The next qualifying channel message then starts a fresh session. Stored data follows the session's [run-data retention policy](../agent-config#run-data-retention). Outside development, the default policy requests deletion when private and unknown-audience sessions end, if the Workflow world supports deletion. See [Agent config](../agent-config#runtime-limits).
 
-React, Vue, and Svelte apps use [`useEveAgent()`](../guides/frontend/overview) instead of calling these routes directly. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
+React, Vue, and Svelte apps use [`useEveAgent()`](/docs/guides/frontend) instead of calling these routes directly. Next.js and Nuxt apps can proxy them to the eve runtime from the same origin.
 
 ## Start a session
 
@@ -69,7 +69,7 @@ Each entry in `facts` is an event, and events are grouped into families. Most ev
 | `delivery`    | `delivery.admitted`, `delivery.consumed`, `delivery.settled`         | One accepted message, answer, control, or callback. `delivery.consumed` carries the `parts` a turn received, and any `history` the delivery imported; `delivery.settled` reports what became of it.                                                                                                               |
 | `turn`        | `turn.started`, `turn.paused`, `turn.settled`                        | A turn. `turn.paused` lists the requests for input it's `awaiting`. `turn.settled` has `outcome` `"completed"`, `"failed"`, or `"cancelled"` and, when completed, the `reply` part ids.                                                                                                                           |
 | `model`       | `model.requested`, `model.started`, `model.retried`, `model.settled` | One model run, for a turn or a context change. `model.started` names the `modelId` and `attempt` for each attempt. `model.retried` records a failed attempt that runs again. `model.settled` carries `outcome` and `finishReason`.                                                                                |
-| `content`     | `content.completed`                                                  | One finished part of model output: `kind` `"text"`, `"reasoning"`, `"result"`, or `"file"`, its `value`, and its `phase`: `"reply"` or `"narration"`.                                                                                                                                                             |
+| `content`     | `content.completed`                                                  | One finished part of output: `kind` `"text"`, `"reasoning"`, `"result"`, or `"file"`, its `value`, and its `phase`: `"reply"` or `"narration"`.                                                                                                                                                                   |
 | `call`        | `call.requested`, `call.started`, `call.settled`                     | One tool, agent, or skill call. `call.requested` names the tool, agent, or skill in `capability` (`remote: true` for a remote agent) and its `input`. `call.started` carries `taskId` for a task and `clearedBy` when an approval or policy let it run. `call.settled` carries `outcome` and `output` or `error`. |
 | `task`        | `task.started`, `task.ended`                                         | Work that outlives the call that started it, such as an agent tool's child session. See [Task events](#task-facts).                                                                                                                                                                                               |
 | `interaction` | `interaction.opened`, `interaction.settled`                          | A person's approval, question, budget prompt, or sign-in.                                                                                                                                                                                                                                                         |
@@ -77,6 +77,8 @@ Each entry in `facts` is an event, and events are grouped into families. Most ev
 | `child`       | `child.opened`, `child.sent`                                         | A child session a call opened. `child.opened` carries its `sessionId`, `name`, and `stream` path. `child.sent` links a delivery the child accepted, as `childDeliveryId`, to the `callId` that sent it.                                                                                                           |
 | `context`     | `context.started`, `context.settled`                                 | A context change: `kind` `"compaction"` or `"clear"`.                                                                                                                                                                                                                                                             |
 | `usage`       | `usage.recorded`                                                     | Model spend, tied to the run, call, or context change that spent it.                                                                                                                                                                                                                                              |
+
+A call's `owner` says what made it: a model run (`{ runId }`), the call it runs inside (`{ callId }`), or its turn (`{ turnId }`) for a call no model run asked for. A part names the `runId` of the model run that wrote it. A part its turn wrote without one has no `runId`, and its `scope.turnId` names the turn.
 
 Progress records come in three types:
 
@@ -108,13 +110,16 @@ Within stream version 27, a later minor release can add:
 - informational event types, such as a new family or a row update like `model.retried`;
 - progress record types;
 - optional fields;
-- outcomes, interaction kinds, context-change kinds, displays, and option styles.
+- outcomes, interaction kinds, context-change kinds, displays, and option styles;
+- call owners. A call whose owner a reader doesn't know still belongs to the session.
 
 A new event type is never the only way an item opens or ends. A minor release never removes or renames an event type or field, and never adds a required field. It never changes what an event means or whether it opens, updates, or ends its item. Any other change is a new stream version, which readers refuse.
 
 Readers ignore event types, progress types, and fields they don't know. An ending event with an unknown outcome still ends its row and keeps the outcome as sent. The TypeScript types name only current values, so keep a default branch when you switch on an outcome, kind, display, or style.
 
 After a reconnect, `foldEvents` skips positions it has already seen. It ignores a repeated start or end of a row it holds, and an update can't reopen an ended row. It doesn't deduplicate progress and usage at new positions.
+
+`createStreamChecker()` from `eve/events` checks a stream against these lifecycle rules, one stored line at a time from the first: an item is introduced before a fact names it by ID or owner, it ends once with an outcome from its set, and a session has one open turn at a time. `check(line, position)` returns the line's violations, each with its `rule` and a `message`, and skips a position it has already checked. It checks how facts relate, not their fields, so pass records shaped as their types describe.
 
 `session.started` and `turn.started` carry an optional `data.trace` with W3C trace coordinates: `traceId`, `spanId`, and `traceFlags`. Use them to correlate stream consumers, such as eval reporters, with an observability backend. An uninstrumented target omits it.
 
@@ -407,7 +412,7 @@ Requests without the parameter get no header. `follow=false` instead bounds the 
 
 ## Use the client from TypeScript
 
-`eve/client` wraps these routes in a typed client for scripts, server-to-server calls, tests, evals, and custom UIs. Start with the [Client SDK](../guides/client/overview) guide, which covers sending messages, session state, streaming, and per-turn `outputSchema` results.
+`eve/client` wraps these routes in a typed client for scripts, server-to-server calls, tests, evals, and custom UIs. Start with the [Client SDK](/docs/guides/client) guide, which covers sending messages, session state, streaming, and per-turn `outputSchema` results.
 
 ## Read a session in process
 
@@ -468,6 +473,6 @@ Channels and hooks observe what was written and can't change it.
 ## What to read next
 
 - [Execution model & durability](./execution-model-and-durability): how a session survives restarts and how parked work resumes.
-- [Channels](../channels/overview): how platform addresses map to sessions.
-- [Client SDK](../guides/client/overview): call these routes from scripts and server-side code.
-- [Frontend](../guides/frontend/overview): `useEveAgent` instead of raw routes.
+- [Channels](/docs/channels): how platform addresses map to sessions.
+- [Client SDK](/docs/guides/client): call these routes from scripts and server-side code.
+- [Frontend](/docs/guides/frontend): `useEveAgent` instead of raw routes.

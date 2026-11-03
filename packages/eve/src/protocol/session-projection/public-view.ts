@@ -276,13 +276,16 @@ export function runs(
 }
 
 export function part(view: SessionView, partId: string): ContentObservation | undefined {
-  const row = sessionTables(view).parts[partId];
+  const tables = sessionTables(view);
+  const row = tables.parts[partId];
   if (row === undefined) return undefined;
   const { runId, kind, phase, value, valueRef, interrupted, mediaType, fallbackText, startedAt } =
     row;
+  const turnId = selectors.partTurn(tables, row);
   return frozen({
     partId,
-    runId,
+    ...(runId !== undefined && { runId }),
+    ...(turnId !== undefined && { turnId }),
     kind,
     phase,
     value,
@@ -302,7 +305,7 @@ export function parts(
   return frozen(
     Object.values(tables.parts).flatMap((row) => {
       if (filter.runId !== undefined && row.runId !== filter.runId) return [];
-      if (filter.turnId !== undefined && selectors.runTurn(tables, row.runId) !== filter.turnId)
+      if (filter.turnId !== undefined && selectors.partTurn(tables, row) !== filter.turnId)
         return [];
       if (filter.kind !== undefined && row.kind !== filter.kind) return [];
       return part(view, row.partId) ?? [];

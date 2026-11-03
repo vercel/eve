@@ -1,6 +1,6 @@
 # @eve/code Extension Package
 
-This private package is the source of the `eve/extensions/code` extension for CLI-based coding work. It contributes one patch editing primitive, sandbox `grep`, shared PR-watch primitives, investigation and review skills, instruction fragments, a read-only worker subagent, Connect-backed authentication hooks, and consumer sandbox helpers. Durable `prwatch` / `prwatch_delete` wrappers currently live beside e0's consumer mount because eve workflow directives are application-only.
+This private package is the source of the `eve/extensions/code` extension for CLI-based coding work. It contributes one patch editing primitive, investigation and review skills, instruction fragments, Connect-backed authentication hooks, and consumer sandbox helpers.
 
 Before writing code, read the installed eve package docs for extensions, hooks, tools, skills, subagents, and sandboxes as applicable.
 
@@ -12,6 +12,8 @@ Before writing code, read the installed eve package docs for extensions, hooks, 
 - Broker credentials without placing them in model-authored URLs or arguments.
 - Use real `git`, `gh`, and `vc` CLIs rather than bespoke repository lifecycle tools.
 - Keep `apply_patch` as the only extension-owned file editing primitive.
+- Do not mount `grep`. Keep exporting it from `eve/extensions/code/tools` for consumers that mount it themselves.
+- Delegation uses eve's built-in `agent` tool. The removed `worker` config is rejected with a migration hint; do not add an extension-owned worker subagent back.
 - Keep shared implementation under `extension/lib/`; filesystem paths define contribution names.
 - Computer use lives in `@eve/computer-use` (`eve/extensions/computer-use`). Import its public helpers directly; do not add computer-use code or re-exports here.
 

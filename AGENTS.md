@@ -139,8 +139,13 @@ CI.
    exposure to hijacked nested dependencies that are not pinned directly in the
    main lockfile.
 
-6. **Pre-1.0: prefer breaking changes.** Favor correctness and simplicity over
-   backwards compatibility. No legacy fallback logic.
+6. **Stable APIs follow semantic versioning.** Break a stable public API only
+   in a major release. Prefer additive changes; when a stable API needs an
+   incompatible replacement, ship the replacement beside it, mark the old API
+   `@deprecated`, and remove it in the next major release. The
+   [stability policy](./docs/reference/typescript-api.md#stability-policy)
+   defines which surfaces carry this promise; experimental and internal APIs
+   do not.
 
 7. **Derive names from file paths.** Connection names, tool names, and similar
    identifiers come from the filesystem path (e.g.
@@ -254,9 +259,11 @@ live under `packages/eve/test/tui-client` and run with `pnpm test:tui`. See
 ## Changesets
 
 Every PR that touches the published `eve` package must include a
-changeset (`pnpm changeset`). Because eve is pre-1.0, use `patch` in most
-cases, including bug fixes and new features. Use `minor` only when the change
-breaks a public API. Start the changeset body with one sentence for someone
+changeset (`pnpm changeset`). Choose the bump by semantic versioning: `patch`
+for bug fixes and changes that add no public API, `minor` for new features and
+other backward-compatible public API additions, and `major` only when the
+change breaks a stable public API. Changes to experimental APIs never need
+`major`. Start the changeset body with one sentence for someone
 reading release notes; put migration details and contributor thanks in later
 paragraphs. For PRs with changesets, use `feat:`, `perf:`, `fix:`,
 `docs(feature):`, `docs(bugfix):`, or an internal type (`chore:`, `refactor:`,
@@ -264,8 +271,8 @@ paragraphs. For PRs with changesets, use `feat:`, `perf:`, `fix:`,
 allowed for all types except `docs`, where the scope selects the feature or bug
 fix section. CI checks the PR title because GitHub uses it as the squash-merge
 subject. Keep the prefix in the squash commit; its subject determines the
-release section. A `minor` or `major` changeset always appears under Breaking
-Changes, and other internal changes are omitted from the release notes. Run `pnpm guard:invariants` to validate changeset summaries. See
+release section. A `major` changeset always appears under Breaking Changes,
+and other internal changes are omitted from the release notes. Run `pnpm guard:invariants` to validate changeset summaries. See
 [Changeset summaries](./CONTRIBUTING.md#changeset-summaries).
 
 Docs-only, internal-tooling, and fixture changes do not need a changeset. When

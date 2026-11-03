@@ -47,6 +47,9 @@ export function defineGhTool(
     approval: ({ toolInput }) => githubShellApproval(toolInput as GitHubShellInput | undefined),
     inputSchema: githubShellInputSchema,
     outputSchema: ghOutputSchema,
+    label: {
+      start: (input) => input.description,
+    },
     execute(input, ctx) {
       return executeGitHubShell(input, github(), {
         context: ctx,

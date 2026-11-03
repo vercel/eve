@@ -27,7 +27,7 @@ import {
 } from "#internal/nitro/development-generation.js";
 import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
 import {
-  activateDevelopmentRuntimeArtifactsSnapshotTransaction,
+  activateDevelopmentRuntimeArtifactsSnapshot as activateSnapshot,
   pruneDevelopmentRuntimeArtifactsSnapshots,
   readDevelopmentRuntimeArtifactsSnapshotRoot,
   readDevelopmentRuntimeArtifactsRevision,
@@ -38,13 +38,6 @@ import {
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 
 const createScratchDirectory = useTemporaryDirectories();
-
-async function activateSnapshot(
-  input: Parameters<typeof activateDevelopmentRuntimeArtifactsSnapshotTransaction>[0],
-): Promise<void> {
-  const activation = await activateDevelopmentRuntimeArtifactsSnapshotTransaction(input);
-  activation.commit();
-}
 
 async function markSnapshotMaterialized(
   snapshot: DevelopmentRuntimeArtifactsSnapshot,
@@ -178,39 +171,6 @@ describe("development runtime artifact snapshots", () => {
     expect(readDevelopmentRuntimeArtifactsRevision(appRoot)).toEqual({
       revision: snapshot.runtimeAppRoot,
     });
-  });
-
-  it("restores the prior runtime pointer when activation is rolled back", async () => {
-    const appRoot = await createScratchDirectory("eve-dev-runtime-activation-rollback-");
-    const agentRoot = join(appRoot, "agent");
-    const compileDirectoryPath = join(appRoot, ".eve", "compile");
-    await mkdir(agentRoot, { recursive: true });
-    await mkdir(compileDirectoryPath, { recursive: true });
-    await writeFile(join(appRoot, "package.json"), '{"type":"module"}\n');
-    await writeFile(
-      join(compileDirectoryPath, "compiled-agent-manifest.json"),
-      `${JSON.stringify({ agentRoot, appRoot }, null, 2)}\n`,
-    );
-    const compileResult = {
-      paths: { compileDirectoryPath },
-      project: { appRoot },
-    } as CompileAgentResult;
-    const first = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
-    const second = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
-    await activateSnapshot({
-      appRoot,
-      snapshot: await markSnapshotMaterialized(first),
-    });
-
-    const activation = await activateDevelopmentRuntimeArtifactsSnapshotTransaction({
-      appRoot,
-      snapshot: await markSnapshotMaterialized(second),
-    });
-    expect(readDevelopmentRuntimeArtifactsRevision(appRoot).revision).toBe(second.runtimeAppRoot);
-    await activation.rollback();
-
-    expect(readDevelopmentRuntimeArtifactsRevision(appRoot).revision).toBe(first.runtimeAppRoot);
-    expect(existsSync(join(second.snapshotRoot, "activated"))).toBe(false);
   });
 
   it("stages package-less flat markdown agents with generated runtime package metadata", async () => {
@@ -796,28 +756,6 @@ describe("development runtime artifact snapshots", () => {
         routed: "router:session-auth",
       });
     });
-  });
-
-  it("keeps compatibility with v1 dev runtime pointers", async () => {
-    const appRoot = await createScratchDirectory("eve-dev-runtime-artifacts-pointer-v1-");
-    const runtimeAppRoot = join(appRoot, ".eve", "dev-runtime", "snapshots", "legacy");
-    const pointerPath = resolveDevelopmentRuntimeArtifactsPointerPath(appRoot);
-
-    await mkdir(join(appRoot, ".eve", "dev-runtime"), { recursive: true });
-    await writeFile(
-      pointerPath,
-      `${JSON.stringify(
-        {
-          appRoot: runtimeAppRoot,
-          kind: "eve-dev-runtime-artifacts-pointer",
-          version: 1,
-        },
-        null,
-        2,
-      )}\n`,
-    );
-
-    expect(readDevelopmentRuntimeArtifactsSnapshotRoot(pointerPath)).toBe(runtimeAppRoot);
   });
 
   it("uses workspace tsconfig topology without retaining it in runtime snapshots", async () => {

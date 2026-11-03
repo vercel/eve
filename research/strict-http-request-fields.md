@@ -1,14 +1,14 @@
 ---
 issue: "None (maintainer proposal; related PR #4930)"
 status: in-progress
-last_updated: "2026-10-21"
+last_updated: "2026-10-29"
 ---
 
 # Reject unknown HTTP request fields
 
 ## Decision
 
-Before 1.0, reject unrecognized top-level fields in framework-owned HTTP JSON
+Reject unrecognized top-level fields in framework-owned HTTP JSON
 request bodies with **400 Bad Request**. Name the unknown field and list the
 accepted fields for the matched route. This PR implements the breaking change for
 session creation, follow-up messages and answers, and session controls.
@@ -40,7 +40,7 @@ Content-Type: application/json
 ```
 
 The accepted-field list must describe the actual route and supported protocol,
-including any recognized protocol-specific fields. The combined pre-1.0 cleanup
+including any recognized protocol-specific fields. The combined 1.0 API cleanup
 uses `answers` for follow-up responses.
 
 For multiple unknown fields, identify them in a deterministic order and include

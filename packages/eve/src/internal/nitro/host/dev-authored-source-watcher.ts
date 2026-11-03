@@ -15,6 +15,7 @@ import {
   formatChangeDetectedLogLine,
   type WatcherChangeEvent,
 } from "#internal/nitro/host/dev-watcher-log.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 const DEBOUNCE_MS = 120;
 const WATCHED_LOCKFILE_NAMES = [
@@ -343,13 +344,5 @@ function shouldIgnoreWatcherPath(
         WATCHER_IGNORED_DIRECTORY_NAMES.has(part) ||
         part.startsWith(EXTENSION_BUILD_STAGING_DIRECTORY_PREFIX),
     ) || workspaceExtensions.some((extension) => isPathInsideOrEqual(path, extension.config.outDir))
-  );
-}
-
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
-  return (
-    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
   );
 }

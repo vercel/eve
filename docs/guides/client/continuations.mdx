@@ -49,7 +49,7 @@ const response = await session.send("Now shorten it.");
 console.log((await response.result()).reply);
 ```
 
-Pass the whole saved state so its optional [`inbox`](./overview#faster-sends-with-inbox) value
+Pass the whole saved state so its optional [`inbox`](/docs/guides/client#faster-sends-with-inbox) value
 reaches later sends. `attach()` performs no request. Every later operation targets exactly
 `saved.sessionId` and never creates a replacement.
 

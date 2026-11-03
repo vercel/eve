@@ -6,6 +6,8 @@ import type {
   WorkflowProgramInput,
 } from "#execution/dynamic-workflow/schema.js";
 import { runJsProgram } from "#execution/dynamic-workflow/workflow.js";
+// Installs the `run` runtime, as eve's host does for agents with a generated-program tool.
+import "#internal/nitro/host/workflow-sandbox-runtime-plugin.js";
 
 const continuationSecurity = {
   maxAgeMs: 60_000,

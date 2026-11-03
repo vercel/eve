@@ -1,5 +1,75 @@
 # eve
 
+## 1.0.0-rc.2
+
+Released 2026-11-02 · [Compare with 1.0.0-rc.1](https://github.com/vercel/eve/compare/eve%401.0.0-rc.1...eve%401.0.0-rc.2)
+
+### Features
+
+- Set `approval` in `agent.ts` to gate every tool, connection, and subagent call from one policy.
+  The agent's policy runs beside each entry's own `approval` and the stricter result wins, so it can add a gate but never remove one. Subagent sessions inherit the root agent's policy. Thanks @kingztech2019 and @taoufik-ia for the proposals in #145 and #2673. ([#5793](https://github.com/vercel/eve/pull/5793))
+- Slack sends a person's edit to a message the agent serves to that thread's session, as a `<slack_message_edit>` with a diff of the changed lines and the full edited text, and `slackChannel({ onMessageEdited })` decides which edits reach the agent.
+  An edit follows the channel's `turnPolicy` like any message: by default it joins a running turn, and if the agent already replied, it starts a new turn, which shows no thread status until its first tool call finishes; add the `no_reply` tool so the agent can stay quiet when an edit changes nothing. By default, eve sends edits to DMs, code channel messages, and messages that mention the agent before or after the edit. With an authored `onAppMention`, `onDirectMessage`, or `onMessage`, edits need their own `onMessageEdited`, so they can't skip those hooks' checks; until then they go to `onEvent` or are dropped.
+  The generated Slack app manifest now subscribes to the `message.channels`, `message.groups`, `message.im`, and `message.mpim` events and adds the `channels:history`, `groups:history`, `im:history`, and `mpim:history` scopes, which Slack requires to send edits. Reinstall the Slack app to grant them. With these events, the default handler also answers DMs without extra setup, and an authored `onEvent` receives every message event in channels the app has joined. ([#5796](https://github.com/vercel/eve/pull/5796))
+- Add the Tavily MCP integration to the registry, so `eve add connection/tavily` connects web search, extraction, crawling, and URL mapping through Vercel Connect OAuth. ([#5731](https://github.com/vercel/eve/pull/5731))
+- Dynamic functions can read the session's sandbox with `ctx.getSandbox()`, the same handle tools and hooks get.
+  eve runs dynamic functions before every model call, so read the sandbox inside `ctx.memo`, keyed on what would change the files, such as the latest checkout call in `ctx.view`. `ctx.getSandbox()` isn't available while choosing the model. ([#5802](https://github.com/vercel/eve/pull/5802))
+- `eve add channel/telegram` now offers guided setup with Vercel Connect or portable credentials.
+  With Connect, it stores the bot token in a Telegram connector and routes the connector's triggers to `/eve/v1/telegram`, so Connect registers and verifies the webhook. With portable credentials, it writes the bot token and a generated webhook secret to `.env.local`. ([#5810](https://github.com/vercel/eve/pull/5810))
+- Session events can now record a call or a content part that its turn made without a model run: `call.requested` accepts an `owner` of `{ turnId }`, and `content.completed` leaves out `runId`, with `scope.turnId` naming the turn.
+  The fold, the client's conversation, and the Slack channel place both under their turn. `ContentCompletedData.runId` is optional and `CallOwner` has a third variant in TypeScript, so code that reads `runId` as always present or switches over owners needs a default branch. Stream version 27 also now allows a later release to add call owners, and a reader treats a call whose owner it doesn't know as the session's. ([#5771](https://github.com/vercel/eve/pull/5771))
+
+### Bug Fixes
+
+- `eve dev` now resolves a string agent model through a custom `globalThis.AI_SDK_DEFAULT_PROVIDER`, as `eve start` does, instead of routing it to the local AI Gateway connection. ([#5789](https://github.com/vercel/eve/pull/5789))
+- Only sign-ins the runtime starts can hold a turn.
+  A tool result shaped like a sign-in request, such as JSON from an MCP or OpenAPI connection, no longer opens a sign-in or changes who the turn runs as. ([#5790](https://github.com/vercel/eve/pull/5790))
+- Deliver Slack DM thread replies posted with "Also send to direct message" to the agent.
+  Thanks @dohooo for reporting this in #5774. ([#5776](https://github.com/vercel/eve/pull/5776))
+
+## 1.0.0-rc.1
+
+Released 2026-10-31 · [Compare with 1.0.0-rc.0](https://github.com/vercel/eve/compare/eve%401.0.0-rc.0...eve%401.0.0-rc.1)
+
+### Features
+
+- Removed the Build an Agent tutorial from the docs, and the link to it from the README that `eve init` writes; the old tutorial URLs redirect to the matching guides. ([#5717](https://github.com/vercel/eve/pull/5717))
+
+### Bug Fixes
+
+- Default scaffolded projects to `@vercel/connect@2.7.0` and require `^2.7.0` for the optional `@vercel/connect` peer.
+  Earlier `@vercel/connect` releases reject eve 1.0 prereleases as a peer, which made `npm install` fail with `ERESOLVE` on freshly scaffolded projects. ([#5733](https://github.com/vercel/eve/pull/5733))
+
+## 1.0.0-rc.0
+
+Released 2026-10-30 · [Compare with 0.91.0](https://github.com/vercel/eve/compare/eve%400.91.0...eve%401.0.0-rc.0)
+
+### Breaking Changes
+
+- eve 1.0 puts stable APIs under semantic versioning: they change incompatibly only in a major release, and a deprecated API keeps working until the next one.
+  The [stability policy](https://eve.dev/docs/reference/typescript-api#stability-policy) lists which APIs are stable and which are experimental. To move an existing project, follow [Upgrade to 1.0](https://eve.dev/docs/guides/upgrade). ([#5620](https://github.com/vercel/eve/pull/5620))
+
+### Features
+
+- Setup prompts for coding agents from a prerelease eve CLI now use its dist-tag, such as `npx eve@rc init`, instead of `npx eve@latest`. ([#5620](https://github.com/vercel/eve/pull/5620))
+- `eve add` now installs a registry item on an eve prerelease, such as `1.0.0-rc.0`, when that version meets the item's minimum eve version.
+  Previously no prerelease satisfied a requirement such as `>=0.62.0`, so every item that declared one failed with "This registry item requires eve". ([#5620](https://github.com/vercel/eve/pull/5620))
+
+### Bug Fixes
+
+- A `HEAD` request to a channel path that declares `GET` but not `HEAD` now gets `405 Method Not Allowed` with an `Allow` header instead of `404`, and the `GET` handler doesn't run.
+  Declare `HEAD()` on a path to answer `HEAD` requests there, under any parameter name: `HEAD("/items/:itemId")` answers for `GET("/items/:id")`. Paths that already declare `HEAD()`, such as `/` and `/eve/v1/health`, are unchanged. On a CORS-enabled path, the `405` carries the CORS headers, so a browser can read it.
+  `eve build` and `eve dev` no longer merge the app root's `nitro.config`, `.nitrorc`, or `.env` files into eve's own Nitro host, and no longer serve an app-root `server.*` or `index.html` as a catch-all in front of eve's routes. A Nitro app that shares its root with an eve agent, such as a TanStack Start host, keeps its Nitro configuration to itself. eve still loads `.env`, `.env.local`, `.env.development`, and `.env.development.local` for `eve dev` through its own environment handling, and still serves files in an app-root `public/` directory as static files.
+  `eve dev` now rebuilds its host when a connection turns on events or an extension mount changes the package export it imports. Before, those edits reused the running host, so the event receiver route or the new mount stayed missing until `eve dev` restarted. ([#5692](https://github.com/vercel/eve/pull/5692))
+- Background work a channel route registers with `waitUntil` while its streamed response is still being sent now runs to completion on hosted platforms, instead of being dropped.
+  Channel route `params` keep encoded path separators (`%2F` and `%5C`) encoded, so a param can no longer contain a `/` or `\` that the request path never had. Other percent-encoded characters are still decoded, so `/files/caf%C3%A9` gives `café`; a handler that expected `%2F` decoded to `/` must now decode it itself.
+  Agent text that mentions a Nitro build constant such as `import.meta.dev` now reaches production builds unchanged, instead of being rewritten to its value or failing the build. Skill files are embedded in the server bundle instead of Nitro server assets, so hosted output no longer ships Nitro's storage layer unless authored code imports Nitro storage itself.
+  A channel path that declares both `GET()` and `WS()` now accepts WebSocket upgrades, which the `GET` route used to answer as a plain HTTP request. WebSocket routes register for `GET` only, the method an upgrade uses. Because one handler serves both, the two routes must name their path parameters the same way; `eve build` rejects a pair such as `GET("/rooms/:id")` and `WS("/rooms/:room")`.
+  Vercel service builds keep the schedule consumer function and its queue trigger, so dynamic schedules deliver their occurrences.
+  `eve start` now runs the server's shutdown hooks, such as flushing instrumentation, when it stops the server in an environment that sets `CI`. The built server no longer inherits `CI` or `NITRO_UNIX_SOCKET` from `eve start`.
+  A server without eve's workflow program runtime installed now fails a generated workflow program with an error that explains why, instead of importing the runtime from a path hosted output can't resolve. ([#5698](https://github.com/vercel/eve/pull/5698))
+- Show the expected GitHub-side result as the gh tool's activity label instead of the generic tool name. ([#5668](https://github.com/vercel/eve/pull/5668))
+
 ## 0.91.0
 
 Released 2026-10-30 · [Compare with 0.90.0](https://github.com/vercel/eve/compare/eve%400.90.0...eve%400.91.0)

@@ -5,7 +5,7 @@
  * This module is the single import path for local-engine functionality
  * from the public surface, so the hosted (Vercel) server bundle can
  * prune all of it by stubbing one module — see
- * `createCompiledSandboxProviderPrunePlugin`. Anything exported here
+ * `createHostedGraphPlugin`. Anything exported here
  * must also exist on that stub.
  */
 import {

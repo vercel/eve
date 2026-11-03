@@ -13,10 +13,9 @@
  *
  *   2. For roots whose ordering is driven by `meta.json` (i.e. /docs),
  *      every site-page markdown file must be reachable from the sidebar nav
- *      — either listed by slug in an ancestor `meta.json#pages`, covered
- *      by a `"..."` token in that array, or explicitly allowed as a
- *      footer-only page. Otherwise the page renders at its URL but never
- *      appears in the sidebar (easy to miss in review).
+ *      — either listed by slug in an ancestor `meta.json#pages` or covered
+ *      by a `"..."` token in that array. Otherwise the page renders at its
+ *      URL but never appears in the sidebar (easy to miss in review).
  *
  * Files intentionally not part of the site (the top-level engineer-facing
  * README.md in each root) are skipped via isExcluded().
@@ -34,16 +33,10 @@ const ROOTS = [
   },
 ];
 
-const SIDEBAR_EXEMPT_PAGES = new Set([
-  // Linked from the global footer instead of the docs sidebar.
-  "responsible-use.md",
-]);
-
 // Only the top-level README.md is excluded. Nested READMEs (e.g.
 // channels/README.md) are site pages and must carry a `url:` frontmatter
 // override, validated below.
 const isExcluded = (relPath) => relPath === "README.md";
-const isSidebarExempt = (relPath) => SIDEBAR_EXEMPT_PAGES.has(relPath);
 
 function walkMarkdown(dir) {
   const out = [];
@@ -180,7 +173,7 @@ for (const root of ROOTS) {
         issue: `frontmatter missing \`${field}\``,
       });
     }
-    if (nav && !isSidebarExempt(relPath) && !isCoveredByNav(relPath, nav)) {
+    if (nav && !isCoveredByNav(relPath, nav)) {
       failures.push({
         root: root.label,
         file: relPath,
@@ -298,7 +291,7 @@ function checkRepositoryMarkdownLinks(absPath) {
 }
 
 function checkChannelHubLinks(rootDir) {
-  const hubPath = resolve(rootDir, "channels/overview.mdx");
+  const hubPath = resolve(rootDir, "channels/index.mdx");
   const source = readFileSync(hubPath, "utf8");
   const linkedRoutes = new Set();
   const linkRe = /\]\((\s*[^)]+?)\s*\)/g;
@@ -307,18 +300,18 @@ function checkChannelHubLinks(rootDir) {
   while ((match = linkRe.exec(source)) !== null) {
     const target = match[1].trim().split("#")[0].split("?")[0];
     if (!target || (!target.startsWith("./") && !target.startsWith("/docs/"))) continue;
-    linkedRoutes.add(new URL(target, "https://eve.dev/docs/channels/overview").pathname);
+    linkedRoutes.add(new URL(target, "https://eve.dev/docs/channels").pathname);
   }
 
   const meta = loadMetaJson(resolve(rootDir, "channels"));
   for (const slug of meta?.pages ?? []) {
-    if (typeof slug !== "string" || slug === "overview") continue;
+    if (typeof slug !== "string") continue;
     const expected = `/docs/channels/${slug}`;
     if (linkedRoutes.has(expected)) continue;
 
     failures.push({
       root: "docs",
-      file: "channels/overview.mdx",
+      file: "channels/index.mdx",
       issue: `channel hub does not link to canonical child route \`${expected}\``,
     });
   }
@@ -346,7 +339,7 @@ process.stderr.write(
     "  1. Start with frontmatter containing `title` and `description`.",
     "  2. Be reachable from the sidebar nav via an ancestor meta.json —",
     '     either listed by slug in `pages[]`, or covered by a `"..."`',
-    "     wildcard entry, unless explicitly allowed as footer-only.",
+    "     wildcard entry.",
     "",
     "Files intentionally kept off the site (engineer-facing READMEs, etc.)",
     "should be excluded by updating isExcluded() in scripts/check-docs.mjs.",
