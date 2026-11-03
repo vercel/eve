@@ -337,14 +337,14 @@ the managed display and driver after opening each session sandbox.
 
 ### Browser automation
 
-The experimental `@eve/agent-browwser` package provides 42 browser tools backed by agent-browser. It runs Chromium inside the agent's sandbox and adds instructions for observing pages with snapshots, acting on element refs, and checking the result.
+The experimental `@eve/agent-browser` package provides 42 browser tools backed by agent-browser. It runs Chromium inside the agent's sandbox and adds instructions for observing pages with snapshots, acting on element refs, and checking the result.
 
 ```bash
-pnpm add @eve/agent-browwser
+pnpm add @eve/agent-browser
 ```
 
 ```ts title="agent/extensions/browser.ts"
-import browser from "@eve/agent-browwser";
+import browser from "@eve/agent-browser";
 
 export default browser({
   allowedDomains: ["example.com", "*.example.com"],
@@ -352,7 +352,7 @@ export default browser({
 });
 ```
 
-Configure an [agent sandbox](/docs/sandbox) with real process execution, such as Vercel Sandbox or Docker. On first use, the extension installs agent-browser, Chromium, and its system libraries. System dependency installation requires apt or dnf and sudo. For prepared templates, call `installAgentBrowser` from `@eve/agent-browwser/sandbox` in the environment's `prepare` callback.
+Configure an [agent sandbox](/docs/sandbox) with real process execution, such as Vercel Sandbox or Docker. On first use, the extension installs agent-browser, Chromium, and its system libraries. System dependency installation requires apt or dnf and sudo. For prepared templates, call `installAgentBrowser` from `@eve/agent-browser/sandbox` in the environment's `prepare` callback.
 
 The filename supplies the namespace: this mount adds `browser__open`, `browser__snapshot`, `browser__click`, and the other browser tools. Core tools are listed every turn; additional inspection and interaction tools are deferred and discoverable through `eve__search`. Cookie, storage, and saved-auth-state commands aren't exposed to the model.
 

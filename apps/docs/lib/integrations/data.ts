@@ -1988,7 +1988,7 @@ The extension installs agent-browser automatically on first use and runs it insi
     quickStart: `Mount the extension under \`agent/extensions/\`:
 
 \`\`\`ts title="agent/extensions/browser.ts"
-import browser from "@eve/agent-browwser";
+import browser from "@eve/agent-browser";
 
 export default browser({});
 \`\`\`
@@ -1997,7 +1997,7 @@ The filename supplies the \`browser\` namespace. The extension adds tools such a
     configure: `Restrict browser access to the sites the agent needs with the extension's domain allow-list:
 
 \`\`\`ts title="agent/extensions/browser.ts"
-import browser from "@eve/agent-browwser";
+import browser from "@eve/agent-browser";
 
 export default browser({
   allowedDomains: ["example.com", "*.example.com"],

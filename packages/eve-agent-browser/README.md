@@ -1,20 +1,20 @@
-# @eve/agent-browwser
+# @eve/agent-browser
 
 An [eve](https://eve.dev) extension that gives your agent 42 browser automation tools backed by [agent-browser](https://agent-browser.dev), running inside the agent's sandbox. Tools cover navigation, accessibility snapshots with element refs, form interaction, screenshots, JavaScript evaluation, tabs, and network and console inspection.
 
-This package ports [`@agent-browser/eve`](https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve) into the eve workspace. It targets agent-browser 0.41.1 and requires eve 1.0.0-rc.1 or later. The npm package name is `@eve/agent-browwser`.
+This package ports [`@agent-browser/eve`](https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve) into the eve workspace. It targets agent-browser 0.41.1 and requires eve 1.0.0-rc.1 or later.
 
 ## Install and mount
 
 ```bash
-pnpm add @eve/agent-browwser
+pnpm add @eve/agent-browser
 ```
 
 Create a mount file under `agent/extensions/`. Its filename supplies the tool namespace:
 
 ```ts
 // agent/extensions/browser.ts
-import browser from "@eve/agent-browwser";
+import browser from "@eve/agent-browser";
 
 export default browser({});
 ```
@@ -29,7 +29,7 @@ For production, install the browser in the environment's `prepare` callback so n
 
 ```ts
 // agent/sandbox.ts
-import { installAgentBrowser } from "@eve/agent-browwser/sandbox";
+import { installAgentBrowser } from "@eve/agent-browser/sandbox";
 import { defineSandbox } from "eve/sandbox";
 import { VercelSandbox } from "eve/sandbox/vercel";
 
@@ -101,14 +101,14 @@ Use a directory mount to gate or replace individual tools:
 
 ```ts
 // agent/extensions/browser/extension.ts
-import browser from "@eve/agent-browwser";
+import browser from "@eve/agent-browser";
 
 export default browser({});
 ```
 
 ```ts
 // agent/extensions/browser/tools/eval.ts
-import { eval as evaluate } from "@eve/agent-browwser/tools";
+import { eval as evaluate } from "@eve/agent-browser/tools";
 import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
 
@@ -136,9 +136,9 @@ Run from the eve repository root:
 
 ```bash
 pnpm install
-pnpm exec turbo run build --filter=@eve/agent-browwser
-pnpm --filter @eve/agent-browwser test
-pnpm --filter @eve/agent-browwser typecheck
+pnpm exec turbo run build --filter=@eve/agent-browser
+pnpm --filter @eve/agent-browser test
+pnpm --filter @eve/agent-browser typecheck
 ```
 
 Tests exercise the built extension against in-memory sandbox doubles. They don't launch Chromium or verify a live sandbox provider.

@@ -459,7 +459,7 @@ importers:
       '@chat-adapter/x':
         specifier: 4.42.0
         version: 4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
-      '@eve/agent-browwser':
+      '@eve/agent-browser':
         specifier: workspace:*
         version: link:../../packages/eve-agent-browser
       '@getdial/chat-sdk-adapter':

@@ -104,7 +104,7 @@
       "title": "agent-browser",
       "description": "Add browser automation tools backed by agent-browser to an eve agent.",
       "dependencies": [
-        "@eve/agent-browwser"
+        "@eve/agent-browser"
       ],
       "files": [
         {

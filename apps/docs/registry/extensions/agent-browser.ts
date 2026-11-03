@@ -1,3 +1,3 @@
-import browser from "@eve/agent-browwser";
+import browser from "@eve/agent-browser";
 
 export default browser({});

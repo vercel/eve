@@ -1,5 +1,5 @@
 {
-  "name": "@eve/agent-browwser",
+  "name": "@eve/agent-browser",
   "version": "0.0.0",
   "description": "eve extension that gives agents browser automation tools backed by agent-browser",
   "keywords": [

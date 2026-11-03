@@ -7,10 +7,10 @@ import test from "node:test";
 // loads an extension's modules so `defineExtension` can capture it; emulate that
 // here before importing the built dist so the mount factory calls below
 // (`extension({ ... })`) bind config that the tools then read.
-globalThis[Symbol.for("eve.ext-config-scope")] = "@eve/agent-browwser.test";
+globalThis[Symbol.for("eve.ext-config-scope")] = "@eve/agent-browser.test";
 
-const { default: extension } = await import("@eve/agent-browwser");
-const tools = await import("@eve/agent-browwser/tools");
+const { default: extension } = await import("@eve/agent-browser");
+const tools = await import("@eve/agent-browser/tools");
 const { AGENT_BROWSER_SANDBOX_VERSION } = await import("../dist/sandbox/version.js");
 const { default: catalog } = await import("../extension/lib/mcp-tools.json", {
   with: { type: "json" },
@@ -317,7 +317,7 @@ test("fails loudly when the sandbox runs another agent-browser minor", async () 
   const sandbox = fakeSandbox({ respond: () => ({ stdout: OK({}, "9.9.0") }) });
   await assert.rejects(
     () => tools.close.execute({}, fakeCtx(sandbox)),
-    /agent-browser 9\.9\.0 in the sandbox does not match @eve\/agent-browwser/,
+    /agent-browser 9\.9\.0 in the sandbox does not match @eve\/agent-browser/,
   );
 });
 

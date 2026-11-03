@@ -107,7 +107,7 @@ function assertMatchingVersion(installed: string | undefined): void {
 
 function versionMismatchError(installed: string): Error {
   return new Error(
-    `agent-browser ${installed} in the sandbox does not match @eve/agent-browwser ${AGENT_BROWSER_SANDBOX_VERSION}. Install agent-browser@${AGENT_BROWSER_SANDBOX_VERSION} or set installSpec to it.`,
+    `agent-browser ${installed} in the sandbox does not match @eve/agent-browser ${AGENT_BROWSER_SANDBOX_VERSION}. Install agent-browser@${AGENT_BROWSER_SANDBOX_VERSION} or set installSpec to it.`,
   );
 }
 
