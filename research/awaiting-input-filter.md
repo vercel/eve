@@ -1,5 +1,5 @@
 ---
-issue: TBD
+issue: "None (proposed in PR #5865)"
 status: proposed
 last_updated: "2026-11-03"
 ---
