@@ -1,5 +1,14 @@
 # @vercel/agent-runs
 
+## 1.0.0-rc.1
+
+Released 2026-11-03 · [Compare with 1.0.0-rc.0](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.0...%40vercel%2Fagent-runs%401.0.0-rc.1)
+
+### Bug Fixes
+
+- Fix durable agent traces keeping every finished turn that called tools in parallel: each one stayed in the session's serialized context, so step inputs grew with every turn.
+  A checkpoint this process had already written, read back through another execution context, was treated as another process's write and forked the turn's trace tree; the stale copy then overwrote the tool completions and the checkpoint was never deleted. A replaced tree now also stops persisting. ([#5835](https://github.com/vercel/eve/pull/5835))
+
 ## 1.0.0-rc.0
 
 Released 2026-10-30 · [Compare with 0.0.4](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%400.0.4...%40vercel%2Fagent-runs%401.0.0-rc.0)
