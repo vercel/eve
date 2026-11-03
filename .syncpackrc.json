@@ -20,7 +20,6 @@
       "dependencies": ["eve"],
       "packages": [
         "eve-code",
-        "@eve/agent-desktop",
         "gadget-extension",
         "gizmo-extension",
         "js-only-extension",
