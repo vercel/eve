@@ -83,6 +83,7 @@ export async function compileAgentConfig(
         })
       : undefined;
   const compaction: {
+    compact?: boolean;
     model?: CompiledRuntimeModelReference;
     thresholdPercent?: number;
   } = {};
@@ -90,6 +91,7 @@ export async function compileAgentConfig(
   const compiledConfig: {
     build?: CompiledAgentDefinition["build"];
     compaction: {
+      compact?: boolean;
       model?: CompiledRuntimeModelReference;
       thresholdPercent?: number;
     };
@@ -173,6 +175,9 @@ export async function compileAgentConfig(
   if (definition.compaction?.threshold !== undefined) {
     compaction.thresholdPercent = definition.compaction.threshold;
   }
+
+  // The runtime loads `compaction.compact` from the agent config module.
+  if (definition.compaction?.compact !== undefined) compaction.compact = true;
 
   if (dynamicModel !== undefined) {
     return { ...compiledConfig, dynamicModel };
@@ -306,6 +311,7 @@ async function normalizeAuthoredModelReference(input: {
           ...sourceBackedModel,
           id: providerResult.slug,
           contextWindowTokens: providerResult.contextWindowTokens,
+          maxOutputTokens: providerResult.maxOutputTokens,
         };
       }
     } catch {
@@ -384,6 +390,7 @@ async function withCompiledRuntimeModelLimits(
   return {
     ...model,
     contextWindowTokens: limits.contextWindowTokens,
+    maxOutputTokens: limits.maxOutputTokens,
   };
 }
 

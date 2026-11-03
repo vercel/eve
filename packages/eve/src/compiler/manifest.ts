@@ -566,6 +566,7 @@ const modelRoutingSchema = z.union([
 const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReference> = z
   .object({
     contextWindowTokens: z.number().int().positive().optional(),
+    maxOutputTokens: z.number().int().positive().optional(),
     id: z.string(),
     source: moduleSourceRefSchema.optional(),
     sourceField: z.literal("compaction.model").optional(),
@@ -601,6 +602,7 @@ const compiledAgentWorkflowDefinitionSchema = z
 
 const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompactionDefinition> = z
   .object({
+    compact: z.boolean().optional(),
     model: compiledRuntimeModelReferenceSchema.optional(),
     thresholdPercent: z.number().finite().min(0).max(1).optional(),
   })
@@ -1207,6 +1209,7 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
                 : [...config.build.externalDependencies],
           },
     compaction: {
+      compact: config.compaction?.compact,
       model:
         config.compaction?.model === undefined
           ? undefined
@@ -1338,6 +1341,9 @@ function cloneCompiledRuntimeModelReference(
   };
   if (model.contextWindowTokens !== undefined) {
     clone.contextWindowTokens = model.contextWindowTokens;
+  }
+  if (model.maxOutputTokens !== undefined) {
+    clone.maxOutputTokens = model.maxOutputTokens;
   }
   if (model.providerOptions !== undefined) {
     clone.providerOptions = { ...model.providerOptions };

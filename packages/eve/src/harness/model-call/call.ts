@@ -28,6 +28,7 @@ import {
   ContentFilteredModelResponseError,
   EmptyModelResponseError,
   ModelStreamStalledError,
+  isContextOverflowError,
 } from "#harness/model-call/errors.js";
 import { type ModelProfile, resolveModelProfile } from "#harness/model-profile.js";
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
@@ -95,7 +96,7 @@ const MODEL_OUTPUT_TIMEOUT_MS = 10 * 60_000;
 export interface ModelCallOptions {
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly extraSystemNote?: string;
-  readonly retryReason?: "empty-response";
+  readonly retryReason?: "empty-response" | "context-overflow";
   readonly trailingUserNote?: string;
 }
 
@@ -136,6 +137,8 @@ export class ModelCaller {
   /** Usage of a call steering interrupted, which the steered step still counts. */
   private interruptedUsage: TokenUsageDelta | undefined;
   private compactionFailure: { readonly error: unknown } | undefined;
+  /** The provider rejected the last attempt as too long, so the next one compacts first. */
+  private overflowPending = false;
   /** Tries at this model step, across the runs a retry after output replaced. */
   private attemptIndex = 0;
   /** The attempt the stream last heard start, until it hears how it ended. */
@@ -186,6 +189,17 @@ export class ModelCaller {
         if (this.compactionFailure !== undefined) throw this.compactionFailure.error;
         throwIfTurnAborted(this.step.config.abortSignal);
         this.input.generation.check();
+        // The provider measured the request over the context window: compact, then try once more.
+        if (
+          options.retryReason !== "context-overflow" &&
+          !this.acceptedOutput &&
+          isContextOverflowError(error)
+        ) {
+          await this.prepareRetry(error);
+          options = { ...options, retryReason: "context-overflow" };
+          this.overflowPending = true;
+          continue;
+        }
         const recovery = recoverModelCall(error, options, diagnostics);
         if (recovery === undefined) throw error;
         await this.prepareRetry(error);
@@ -318,12 +332,18 @@ export class ModelCaller {
         messages: prompt.messages,
         model: this.input.model,
         promptMessages: withClientContext(prompt),
+        request: {
+          instructions: this.framing(options, this.request.nonSystemMessages).instructions,
+          tools,
+        },
         requestEnvelopeTokens: this.requestEnvelopeTokens,
+        ...(this.overflowPending && { overflow: true as const }),
       });
     } catch (error) {
       this.compactionFailure = { error };
       throw error;
     }
+    this.overflowPending = false;
     if (compacted === undefined) return tools;
     compactPrompt(step, prompt, compacted);
     // Compaction cleared what earlier requests announced, so this request announces it again. A
