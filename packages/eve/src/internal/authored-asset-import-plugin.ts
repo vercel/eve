@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 
@@ -67,8 +67,8 @@ export function createAuthoredAssetImportPlugin(input: {
 
         const { path, suffix } = splitImportSuffix(source);
         const resolvedPath = isAbsolute(path) ? path : resolve(dirname(importer), path);
-        // An extensionless code import with a dotted name, such as `./schema.v1`, is no asset.
-        if (!existsSync(resolvedPath)) {
+        // A dotted code import, such as `./schema.v1` or a `./helpers.v2/` index, is no asset.
+        if (statSync(resolvedPath, { throwIfNoEntry: false })?.isFile() !== true) {
           return undefined;
         }
         const canonicalPath = toCanonicalPath(resolvedPath);
