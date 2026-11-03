@@ -19,14 +19,6 @@
       "role": "assistant"
     },
     {
-      "content": "Did QA pass?",
-      "kind": "user",
-      "metadata": {
-        "eve.turn": "turn_0"
-      },
-      "role": "user"
-    },
-    {
       "content": "Is it out?",
       "kind": "user",
       "metadata": {
@@ -184,7 +176,7 @@
         },
         "compaction": {
           "lastKnownInputTokens": 1,
-          "lastKnownPromptMessageCount": 6,
+          "lastKnownPromptMessageCount": 5,
           "requestEnvelopeTokens": 2046
         },
         "continuationToken": "http:layout-memory",

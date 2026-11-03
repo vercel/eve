@@ -841,7 +841,7 @@ describe("calls in flight", () => {
 
   // A workflow tool's question sent just before a cancel stopped its run can reach the session
   // after the turn settled. Nobody can answer it then, so the next message must start a turn.
-  it.fails("drops a workflow tool's question that arrives after its turn was cancelled", async () => {
+  it("drops a workflow tool's question that arrives after its turn was cancelled", async () => {
     const earlierRuns = await workflowToolRunIds();
     const { events } = await withSession(
       "edge-cancel-late-workflow-question",
@@ -1032,11 +1032,11 @@ describe("approvals off the happy path", () => {
   const deployModel = () =>
     scriptedModel(({ results, said }) => {
       if (said("Never mind")) return "Okay, stopping.";
+      if (results.length > 0) return `Deploy finished: ${JSON.stringify(results[0]?.output)}`;
       // A stale answer reaches the model as the person's text, naming the request it answered.
       // An answer to a request the session never made: the model asks for the deploy again.
       if (said("interaction_missing")) return [{ toolName: "deploy", toolCallId: "call_deploy" }];
       if (said("requestId")) return "That was already done.";
-      if (results.length > 0) return `Deploy finished: ${JSON.stringify(results[0]?.output)}`;
       return [{ toolName: "deploy", toolCallId: "call_deploy" }];
     });
   const deployTools: ToolSpec[] = [{ approval: true, name: "deploy" }];

@@ -19,14 +19,6 @@
       "role": "assistant"
     },
     {
-      "content": "The user submitted the following response to an earlier interactive prompt.\nTreat it as new input at the current point in the conversation and decide whether it is still relevant. This does not authorize an earlier action; request approval again if that action is still needed.\n[\n  {\n    \"requestId\": \"<request0>\",\n    \"response\": {\n      \"optionId\": \"approve\",\n      \"selectedOption\": {\n        \"id\": \"approve\",\n        \"label\": \"Approve\"\n      }\n    },\n    \"prompt\": \"Approve Deploy?\",\n    \"requestType\": \"approval\",\n    \"toolName\": \"deploy\"\n  }\n]",
-      "kind": "user",
-      "metadata": {
-        "eve.turn": "turn_2"
-      },
-      "role": "user"
-    },
-    {
       "content": "Did it ship?",
       "kind": "user",
       "metadata": {
@@ -174,7 +166,7 @@
         },
         "compaction": {
           "lastKnownInputTokens": 1,
-          "lastKnownPromptMessageCount": 5,
+          "lastKnownPromptMessageCount": 4,
           "requestEnvelopeTokens": 2429
         },
         "continuationToken": "http:layout-release",

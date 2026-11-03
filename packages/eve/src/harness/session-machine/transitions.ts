@@ -532,9 +532,20 @@ export function relay(
         };
   const events: SessionEvent[] = [];
   const upsert: Record<string, Relay> = {};
+  // A serving task can keep using a child after replying to the call that opened it, whether the
+  // task started with that call or took it later, and after later turns pruned the call.
+  const served = tables.calls[payload.callId];
+  const running = (taskId: string | undefined) =>
+    taskId !== undefined && tables.tasks[taskId]?.status === "running";
+  const serving =
+    (served !== undefined && (served.status !== "settled" || running(served.taskId))) ||
+    Object.values(tables.tasks).some(
+      (task) => task.status === "running" && task.startedBy.callId === payload.callId,
+    );
   for (const event of payload.events) {
     const interactionId = event.data.interactionId;
     const mirror = tables.interactions[interactionId];
+    if (event.type === "interaction.opened" && !serving) continue;
     if (
       event.type !== "interaction.opened" &&
       (mirror?.origin === undefined ||

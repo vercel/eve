@@ -132,6 +132,7 @@ interface CompactionHeuristicInput {
   readonly previousCheckpoint: string | undefined;
   readonly recent: readonly ModelMessage[];
   readonly replay: ModelMessage | undefined;
+  readonly resume: boolean;
   readonly tokenEstimateAdjustment: number;
 }
 
@@ -168,11 +169,8 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
           createFrameworkUserMessage("context.compaction", COMPACTION_CHECKPOINT_MARKER),
           { content: input.previousCheckpoint, role: "assistant" },
         ];
-  const capped = withResumptionGuard(
-    [...checkpointHead, ...capToolResults(input.older), ...input.recent],
-    input.replay,
-    input.config.threshold,
-  );
+  const kept = [...checkpointHead, ...capToolResults(input.older), ...input.recent];
+  const capped = input.resume ? resumeAfter(kept, input.replay, input.config.threshold) : kept;
 
   // Evaluate on the same ruler shouldCompact uses (envelope included):
   // capping can be a near no-op when the older region holds few large
@@ -221,15 +219,22 @@ export async function compactMessages(
   summarize: CompactionSummarizer,
   forceSummary = false,
   historyInputTokenCount?: number,
+  /**
+   * Whether a request is waiting on the next model call. Between turns every request has its
+   * answer, and the next turn's input follows the summary: nothing is replayed or prompted.
+   */
+  resume = true,
 ): Promise<ModelMessage[]> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
+  const withResumptionGuard: typeof resumeAfter = (kept, replay, threshold) =>
+    resume ? resumeAfter(kept, replay, threshold) : kept;
   const budget = keptTailBudget(config);
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
 
   // The current request is replayed after every compaction. One over the tail
   // budget keeps its start and end; the cut-out middle goes to the summarizer.
   const planTail = (history: readonly ModelMessage[]) => {
-    const index = findLastRealUserIndex(history);
+    const index = resume ? findLastRealUserIndex(history) : -1;
     const current = history[index];
     const fit = current === undefined ? undefined : fitCurrentMessage(current, budget);
     const replay = fit?.replay ?? current;
@@ -266,6 +271,7 @@ export async function compactMessages(
         previousCheckpoint,
         recent,
         replay: first.replay,
+        resume,
         tokenEstimateAdjustment,
       });
       if (outcome.type === "within-limit") {
@@ -459,7 +465,7 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
  * "Continue." when the last real user message still survives in the kept
  * messages (the model was mid-work on it) or none exists.
  */
-function withResumptionGuard(
+function resumeAfter(
   messages: ModelMessage[],
   replay: ModelMessage | undefined,
   threshold: number,

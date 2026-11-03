@@ -79,15 +79,6 @@
       {
         "content": [
           {
-            "text": "QA passed.",
-            "type": "text"
-          }
-        ],
-        "role": "assistant"
-      },
-      {
-        "content": [
-          {
             "text": "Alice prefers short answers.",
             "type": "text"
           }
@@ -97,11 +88,11 @@
       {
         "content": [
           {
-            "text": "Did QA pass?",
+            "text": "QA passed.",
             "type": "text"
           }
         ],
-        "role": "user"
+        "role": "assistant"
       },
       {
         "content": [
