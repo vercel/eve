@@ -13,6 +13,8 @@ import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { fail } from "#harness/session-machine/transitions.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
+import { changeHistory } from "#harness/session-machine/history.js";
+import { type HarnessModelMessage, TOOL_RESULT_BOUNDARY, turnAnchorOf } from "#harness/messages.js";
 
 const log = createLogger("harness.tool-loop");
 
@@ -100,8 +102,29 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
         : { done: true, output: "" },
       session: step.session,
     };
+  if (summary?.tags.includes("refused") === true && turnId !== undefined) {
+    step.session = changeHistory(step.session, {
+      rewrite: historyBeforeTurn(step.session.history, turnId),
+    });
+  }
   step.session = { ...step.session, outputSchema: undefined };
   return { next: null, session: step.session, settledTurn: { isError: true, output } };
+}
+
+/**
+ * History as it stood before the turn's input joined it. A refused turn's input stays in the
+ * stream, but the model doesn't read it again: sent with the next turn, it would be refused too.
+ */
+function historyBeforeTurn(
+  history: readonly HarnessModelMessage[],
+  turnId: string,
+): HarnessModelMessage[] {
+  const input = history.findIndex((message) => turnAnchorOf(message) === turnId);
+  if (input === -1) return [...history];
+  const boundary = history[input - 1];
+  const start =
+    boundary?.role === "assistant" && boundary.content === TOOL_RESULT_BOUNDARY ? input - 1 : input;
+  return history.slice(0, start);
 }
 
 /**
