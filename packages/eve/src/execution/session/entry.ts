@@ -31,6 +31,7 @@ import { hasDelegatedSessionContext } from "#execution/delegated-session-context
 import type { AgentSessionRuntimeOverrides } from "#execution/agent-sessions/runtime-overrides.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { attachInputText, readInputText } from "#internal/input-text.js";
 import { closeSessionStreamStep } from "#execution/close-session-stream-step.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
 import {
@@ -511,13 +512,16 @@ function createInitialDelivery(
     kind: "deliver",
     payloads: [
       attachClientContext(
-        {
-          message: input.input.message,
-          context: input.input.context,
-          history: input.input.history,
-          outputSchema: input.input.outputSchema,
-          state: input.input.state,
-        },
+        attachInputText(
+          {
+            message: input.input.message,
+            context: input.input.context,
+            history: input.input.history,
+            outputSchema: input.input.outputSchema,
+            state: input.input.state,
+          },
+          readInputText(input.input),
+        ),
         readClientContext(input.input),
       ),
     ],
