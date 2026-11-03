@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import type { ValidQueueName } from "#compiled/@workflow/world/index.js";
 import type { LocalWorld } from "#compiled/@workflow/world-local/index.js";
 import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
+import { reenqueueRecoveredLocalRun } from "#internal/workflow/local-world-recovery.js";
 import {
   workflowQueuePrefix,
   WORKFLOW_QUEUE_NAMESPACE_ENV,
@@ -73,7 +74,12 @@ async function reenqueueActiveRuns(world: LocalWorld): Promise<void> {
     });
     for (const run of page.data) {
       try {
-        await world.queue(`${prefix}${run.workflowName}` as ValidQueueName, { runId: run.runId });
+        await reenqueueRecoveredLocalRun({
+          enqueue: world.queue,
+          queueName: `${prefix}${run.workflowName}` as ValidQueueName,
+          run,
+          world,
+        });
       } catch (error) {
         console.warn(`[eve] Failed to re-enqueue workflow run ${run.runId}:`, error);
       }

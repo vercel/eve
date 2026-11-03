@@ -5,6 +5,8 @@ const EVE_BIN_PATH = fileURLToPath(new URL("../../bin/eve.js", import.meta.url))
 
 export interface RunningEveStart {
   readonly url: string;
+  /** SIGKILLs `eve start` and its server child at once, as a lost host would. */
+  crash(): Promise<void>;
   stderr(): string;
   stdout(): string;
   stop(): Promise<void>;
@@ -17,6 +19,8 @@ export async function startPackagedEveStart(appRoot: string): Promise<RunningEve
     [EVE_BIN_PATH, "start", "--host", "127.0.0.1", "--port", "0"],
     {
       cwd: appRoot,
+      // Its own process group, so `crash()` reaches the server child too.
+      detached: true,
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
@@ -47,6 +51,12 @@ export async function startPackagedEveStart(appRoot: string): Promise<RunningEve
   }
 
   return {
+    async crash() {
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      process.kill(-child.pid!, "SIGKILL");
+      await exited;
+    },
     stderr: () => stderr,
     stdout: () => stdout,
     async stop() {
