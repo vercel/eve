@@ -106,6 +106,16 @@ import {
 } from "#public/channels/slack/model-context.js";
 import { isPrivateSlackConversation } from "#public/channels/slack/privacy.js";
 import {
+  createSlackAdmitRequest,
+  defaultSlackAdmit,
+  isSlackRequestAdmitted,
+  slackAdmitMissingScopes,
+  slackConversationClassifier,
+  type SlackAdmit,
+  type SlackAdmitActor,
+  type SlackAdmitKind,
+} from "#public/channels/slack/admit.js";
+import {
   createSlackUserResolver,
   resolveSlackUsers,
   withSlackUserInfo,
@@ -553,6 +563,12 @@ export interface SlackInboundMessageContext extends SlackContext, SlackSessionOp
    * Unknown conversation types fail closed and return `true`.
    */
   isDMOrPrivateChannel(): Promise<boolean>;
+  /**
+   * Returns whether the conversation is shared with another organization
+   * through Slack Connect. Unclassifiable conversations fail closed and return
+   * `true`. The same check `defaultSlackAdmit` makes.
+   */
+  isExternalConversation(): Promise<boolean>;
   /** Returns whether this message belongs to a thread with an active eve session. */
   isSubscribed(): Promise<boolean>;
   /**
@@ -778,6 +794,21 @@ export interface SlackChannelConfig {
 
   /** Override the default webhook route path (`/eve/v1/slack`). */
   readonly route?: string;
+
+  /**
+   * Decides whether a Slack request may reach the agent. eve calls it before
+   * any hook for messages, edits, `onEvent` callbacks, approval and question
+   * answers, `onInteraction` actions, slash commands, and shortcuts, and
+   * before a `receive` or `ctx.send` posts into a conversation. Return `false`,
+   * or throw, to drop the request: no turn, no acknowledgement, and an answer's
+   * request stays open. A refused send throws.
+   *
+   * Defaults to {@link defaultSlackAdmit}, which refuses Slack Connect
+   * conversations and conversations Slack can't classify. Call it from your
+   * own function to narrow or widen that policy, or pass `() => true` to admit
+   * every request.
+   */
+  readonly admit?: SlackAdmit;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
 
@@ -829,8 +860,8 @@ export interface SlackChannelConfig {
      * `users.info` call. A lookup that fails or takes over two seconds is
      * left out, and the message is still delivered.
      *
-     * Adds the `users:read` scope to the app manifest, and `users:read.email`
-     * with `email: true`. Off by default: names and emails then reach model
+     * Needs the `users:read` scope, which the app manifest always includes,
+     * and adds `users:read.email` with `email: true`. Off by default: names and emails then reach model
      * context, session history, and traces.
      */
     readonly users?: SlackUsersOption;
@@ -1196,6 +1227,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
 
     receive(input, { from }) {
       return receiveOnSlack(input, {
+        admit: config.admit ?? defaultSlackAdmit,
         from,
         api,
         codeChannels: config.codeChannels === true,
@@ -1230,6 +1262,7 @@ function defaultOnAnswers(ctx: SlackAnswerContext): SlackAnswerResult {
 async function receiveOnSlack(
   input: GenericReceiveInput<SlackReceiveTarget>,
   deps: {
+    readonly admit: SlackAdmit;
     readonly from: ChannelFrom<SlackChannelState>;
     readonly api: SlackTransportOptions | undefined;
     /** Whether `slackChannel({ codeChannels: true })` enabled code channels. */
@@ -1255,6 +1288,27 @@ async function receiveOnSlack(
     typeof receiveTarget.installationTeamId === "string"
       ? receiveTarget.installationTeamId
       : deps.installationTeamId;
+  const sendRequest = createSlackAdmitRequest({
+    kind: "send",
+    channelId,
+    installationTeamId,
+    actor: undefined,
+    raw: receiveTarget,
+    slack: buildSlackWorkspaceHandle({
+      api: deps.api,
+      botToken: deps.credentials?.botToken,
+      installationTeamId,
+      teamId: deps.teamId,
+    }),
+  });
+  if (!(await isSlackRequestAdmitted(deps.admit, sendRequest))) {
+    const missing = slackAdmitMissingScopes(sendRequest);
+    throw new Error(
+      missing.length > 0
+        ? `slackChannel().receive: eve can't tell whether Slack conversation ${channelId} is shared through Slack Connect because the Slack app is missing the ${missing.join(", ")} scope. Add it and reinstall the Slack app.`
+        : `slackChannel().receive: the admit hook refused to post in Slack conversation ${channelId}. By default eve doesn't post in Slack Connect conversations.`,
+    );
+  }
   const initialMessage = receiveTarget.initialMessage;
   if (initialMessage && requestedThreadTs.length > 0) {
     throw new Error(
@@ -1483,6 +1537,37 @@ async function handleEventPost(input: {
   const receivingBotUserId = slackEventReceivingBotUserId(envelope);
   const installationTeamId = slackEventInstallationTeamId(envelope);
 
+  const workspace = buildSlackWorkspaceHandle({
+    api: input.api,
+    botToken: config.credentials?.botToken,
+    installationTeamId,
+    teamId: typeof envelope.team_id === "string" ? envelope.team_id : undefined,
+  });
+  const conversationId = slackEventConversationId(envelope.event);
+  const classifyConversation = slackConversationClassifier({
+    channelId: conversationId,
+    installationTeamId,
+    extSharedChannel:
+      typeof envelope.is_ext_shared_channel === "boolean"
+        ? envelope.is_ext_shared_channel
+        : undefined,
+    request: workspace.request,
+  });
+
+  const admitted = (kind: SlackAdmitKind) =>
+    isSlackRequestAdmitted(
+      config.admit ?? defaultSlackAdmit,
+      createSlackAdmitRequest({
+        kind,
+        channelId: conversationId,
+        installationTeamId,
+        actor: slackEventActor(envelope.event),
+        raw: envelope,
+        slack: workspace,
+        classifyConversation,
+      }),
+    );
+
   // Slack requires an agent to stop when a person stops a code channel session.
   // The stop names the channel, or a thread in it; both are the channel's one session.
   const stopped = envelope.event;
@@ -1505,6 +1590,8 @@ async function handleEventPost(input: {
     const onEvent = config.onEvent;
     input.waitUntil(
       (async () => {
+        // Someone `admit` refuses can't stop a session either.
+        if (!(await admitted("event"))) return;
         // A threaded stop needs the code channel lookup, which must not hold Slack's ack.
         if (
           stopped.thread_ts !== undefined &&
@@ -1512,6 +1599,9 @@ async function handleEventPost(input: {
         ) {
           if (onEvent === undefined) return;
           await dispatchSlackEvent({
+            admit: config.admit ?? defaultSlackAdmit,
+            // The stop was admitted before anything ran.
+            admitted: async () => true,
             api: input.api,
             from: input.from,
             resolveSession: input.resolveSession,
@@ -1543,6 +1633,8 @@ async function handleEventPost(input: {
   // 3) the built-in mention/DM defaults.
   let dispatch: (() => Promise<void>) | null = null;
   let builtinDefault: (() => Promise<void>) | null = null;
+  let dispatchKind: SlackAdmitKind = "message";
+  let builtinKind: SlackAdmitKind = "message";
 
   const dispatchInput = (kind: SlackMessageKind, message: SlackMessage) => ({
     api: input.api,
@@ -1555,6 +1647,7 @@ async function handleEventPost(input: {
     resolveSession: input.resolveSession,
     credentials: config.credentials,
     installationTeamId,
+    isExternalConversation: async () => (await classifyConversation()).flagged,
     kind,
     message,
     received: input.received,
@@ -1600,8 +1693,13 @@ async function handleEventPost(input: {
       config.onAppMention !== undefined ||
       config.onDirectMessage !== undefined ||
       config.onMessage !== undefined;
-    if (config.onMessageEdited !== undefined) dispatch = dispatchEdit(config.onMessageEdited);
-    else if (!authorsMessages) builtinDefault = dispatchEdit(defaultOnMessageEdited);
+    if (config.onMessageEdited !== undefined) {
+      dispatch = dispatchEdit(config.onMessageEdited);
+      dispatchKind = "edit";
+    } else if (!authorsMessages) {
+      builtinDefault = dispatchEdit(defaultOnMessageEdited);
+      builtinKind = "edit";
+    }
   }
 
   const onMessage = config.onMessage;
@@ -1622,6 +1720,8 @@ async function handleEventPost(input: {
       ? undefined
       : () =>
           dispatchSlackEvent({
+            admit: config.admit ?? defaultSlackAdmit,
+            admitted: () => admitted("event"),
             api: input.api,
             from: input.from,
             resolveSession: input.resolveSession,
@@ -1657,13 +1757,63 @@ async function handleEventPost(input: {
 
   // Specialized handlers retain their bot/subtype filters. onMessage receives
   // newly posted messages except this app's own; onEvent is the raw fallback.
-  dispatch ??= dispatchOnEvent ?? builtinDefault;
+  let kind: SlackAdmitKind = dispatchKind;
+  if (dispatch === null && dispatchOnEvent !== undefined) {
+    dispatch = dispatchOnEvent;
+    kind = "event";
+  } else if (dispatch === null) {
+    dispatch = builtinDefault;
+    kind = builtinKind;
+  }
   if (dispatch === null) return new Response("ok");
 
   if (isDuplicateEvent(envelope, payload.retry, input.handledEvents)) return new Response("ok");
 
-  input.waitUntil(dispatch());
+  const run = dispatch;
+  // The conversation lookup can call Slack, so admission runs after the ack.
+  input.waitUntil(
+    (async () => {
+      // `onEvent` admits itself, wherever it runs from.
+      if (kind === "event" || (await admitted(kind))) await run();
+    })(),
+  );
   return new Response("ok");
+}
+
+/** The conversation an Events API callback happened in, when it names one. */
+function slackEventConversationId(event: SlackEvent): string | undefined {
+  const nested = (value: unknown, key: string): unknown =>
+    typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)[key]
+      : undefined;
+  const candidates = [
+    event.channel,
+    // `file_shared` and similar events.
+    event.channel_id,
+    // Reactions, pins, and stars.
+    nested(event.item, "channel"),
+    // Assistant thread events.
+    nested(event.assistant_thread, "channel_id"),
+  ];
+  return candidates.find(
+    (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0,
+  );
+}
+
+/** The Slack user behind an Events API callback, when it names one. */
+function slackEventActor(event: SlackEvent): SlackAdmitActor | undefined {
+  // An edit nests its author under `message`.
+  const source =
+    typeof event.message === "object" && event.message !== null && typeof event.user !== "string"
+      ? (event.message as Record<string, unknown>)
+      : event;
+  // `file_shared` and similar events name the user as `user_id`.
+  const userId = typeof source.user === "string" ? source.user : source.user_id;
+  if (typeof userId !== "string" || userId.length === 0) return undefined;
+  const teamId = [source.user_team, source.team].find(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
+  return teamId === undefined ? { userId } : { userId, teamId };
 }
 
 /** Whether this process already handled the event; marks it handled otherwise. */
@@ -1736,6 +1886,7 @@ async function dispatchSlackMessage(input: {
   readonly credentials: SlackChannelCredentials | undefined;
   readonly handler: NonNullable<SlackChannelConfig["onMessage"]>;
   readonly installationTeamId: string | undefined;
+  readonly isExternalConversation: () => Promise<boolean>;
   readonly kind: SlackMessageKind;
   readonly message: SlackMessage;
   /** Set when `message` is an edited message rather than a new one. */
@@ -1872,6 +2023,7 @@ async function dispatchSlackMessage(input: {
     ...sessionOperations,
     isBotMentioned: () => isBotMentioned,
     isDMOrPrivateChannel,
+    isExternalConversation: input.isExternalConversation,
     isSubscribed: async () => (await sessionOperations.resolveSession()) !== undefined,
     openCodeChannel,
     slack,
@@ -1984,6 +2136,9 @@ async function acknowledgeMessage(
 
 /** Runs a generic Events API handler with an imperative Slack operation surface. */
 async function dispatchSlackEvent(input: {
+  readonly admit: SlackAdmit;
+  /** Admits the event itself as `kind: "event"`. */
+  readonly admitted: () => Promise<boolean>;
   readonly api: SlackTransportOptions | undefined;
   readonly from: ChannelFrom<SlackChannelState>;
   readonly resolveSession: ChannelResolveSession;
@@ -1993,6 +2148,7 @@ async function dispatchSlackEvent(input: {
   readonly handler: NonNullable<SlackChannelConfig["onEvent"]>;
   readonly installationTeamId: string | undefined;
 }): Promise<void> {
+  if (!(await input.admitted())) return;
   const eventTeamId = input.envelope.event.team_id;
   const teamId =
     typeof eventTeamId === "string"
@@ -2021,6 +2177,7 @@ async function dispatchSlackEvent(input: {
       await receiveOnSlack(
         { ...toSessionSendOptions(options), target: options.target, message },
         {
+          admit: input.admit,
           from: input.from,
           api: input.api,
           codeChannels: input.codeChannels,

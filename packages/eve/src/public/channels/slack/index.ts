@@ -77,6 +77,14 @@ export { type SlackFetch, type SlackTransportOptions } from "#public/channels/sl
 
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 
+export {
+  defaultSlackAdmit,
+  type SlackAdmit,
+  type SlackAdmitActor,
+  type SlackAdmitKind,
+  type SlackAdmitRequest,
+} from "#public/channels/slack/admit.js";
+
 export { type SlackUserInfo } from "#public/channels/slack/user-info.js";
 
 export {

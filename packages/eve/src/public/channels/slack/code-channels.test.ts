@@ -20,6 +20,16 @@ import { emptySessionView } from "#protocol/session-projection/fold.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
 const SIGNING_SECRET = "test-signing-secret";
+/** Answers the default admit's guest check as a full member, then defers to `respond`. */
+function asMember<A extends unknown[]>(
+  respond: (request: string | URL | Request, ...rest: A) => Promise<Response>,
+) {
+  return async (request: string | URL | Request, ...rest: A): Promise<Response> =>
+    String(request).includes("users.info")
+      ? Response.json({ ok: true, user: { id: "U01", is_restricted: false } })
+      : respond(request, ...rest);
+}
+
 let fetchMock: ReturnType<typeof vi.fn>;
 let counter = 0;
 afterEach(() => {
@@ -77,6 +87,7 @@ function buildEventBody(
     authorizations: options.authorizations,
     event,
     event_id: options.eventId ?? `Ev${++counter}`,
+    is_ext_shared_channel: false,
     team_id: "T01",
     type: "event_callback",
   });
@@ -186,21 +197,24 @@ describe("slackChannel() code channels", () => {
 
   // Each test uses its own channel ids: eve caches code channel detection per process.
   function useCodeChannels(codeChannelIds: readonly string[]): void {
-    fetchMock = vi.fn(async (request: string | URL | Request, init?: RequestInit) => {
-      if (!String(request).includes("conversations.info")) {
-        return Response.json({ ok: true, ts: "1700000001.000001" });
-      }
-      const { channel } = decodeBody(init);
-      return Response.json({
-        ok: true,
-        channel: codeChannelIds.includes(String(channel))
-          ? {
-              is_private: false,
-              properties: { record_channel: { record_type: "agent_channel" } },
-            }
-          : { is_private: false },
-      });
-    });
+    fetchMock = vi.fn(
+      asMember(async (request: string | URL | Request, init?: RequestInit) => {
+        if (!String(request).includes("conversations.info")) {
+          return Response.json({ ok: true, ts: "1700000001.000001" });
+        }
+        const { channel } = decodeBody(init);
+        return Response.json({
+          ok: true,
+          channel: codeChannelIds.includes(String(channel))
+            ? {
+                is_ext_shared: false,
+                is_private: false,
+                properties: { record_channel: { record_type: "agent_channel" } },
+              }
+            : { is_ext_shared: false, is_private: false },
+        });
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
   }
 
@@ -226,10 +240,16 @@ describe("slackChannel() code channels", () => {
   }
 
   it("lets a mention hook open a code channel and start its session there", async () => {
-    fetchMock = vi.fn(async (url: string | URL | Request) =>
-      String(url).endsWith("/agents.conversations.create")
-        ? Response.json({ ok: true, channel_id: "C_CODE_OPENED" })
-        : Response.json({ ok: true, channel: { is_private: false }, ts: "1700000001.000001" }),
+    fetchMock = vi.fn(
+      asMember(async (url: string | URL | Request) =>
+        String(url).endsWith("/agents.conversations.create")
+          ? Response.json({ ok: true, channel_id: "C_CODE_OPENED" })
+          : Response.json({
+              ok: true,
+              channel: { is_ext_shared: false, is_private: false },
+              ts: "1700000001.000001",
+            }),
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
     const channel = slackChannel({
@@ -417,6 +437,25 @@ describe("slackChannel() code channels", () => {
     expect(events).toEqual(["C_ORDINARY_ON_EVENT"]);
   });
 
+  it("admits the onEvent fallback for an ordinary channel message as an event", async () => {
+    useCodeChannels([]);
+    const onEvent = vi.fn();
+    const channel = slackChannel({
+      admit: (request) => request.kind !== "event",
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onAppMention: () => null,
+      onEvent,
+    });
+
+    await firePost(
+      channel,
+      buildSignedRequest({ body: channelMessage({ channel: "C_EVENT_REFUSED", user: "U_ALICE" }) }),
+    );
+
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
   it("treats a code channel as an ordinary channel without codeChannels", async () => {
     useCodeChannels(["C_CODE_OFF"]);
     const isCodeChannel = vi.fn();
@@ -439,15 +478,17 @@ describe("slackChannel() code channels", () => {
     const initialTime = Date.now();
     const now = vi.spyOn(Date, "now").mockReturnValue(initialTime);
     let lookupSucceeds = false;
-    fetchMock = vi.fn(async (request: string | URL | Request) =>
-      String(request).includes("conversations.info")
-        ? lookupSucceeds
-          ? Response.json({
-              ok: true,
-              channel: { properties: { record_channel: { record_type: "agent_channel" } } },
-            })
-          : Response.json({ ok: false, error: "missing_scope" })
-        : Response.json({ ok: true, ts: "1700000001.000001" }),
+    fetchMock = vi.fn(
+      asMember(async (request: string | URL | Request) =>
+        String(request).includes("conversations.info")
+          ? lookupSucceeds
+            ? Response.json({
+                ok: true,
+                channel: { properties: { record_channel: { record_type: "agent_channel" } } },
+              })
+            : Response.json({ ok: false, error: "missing_scope" })
+          : Response.json({ ok: true, ts: "1700000001.000001" }),
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
     const isCodeChannel = vi.fn();
@@ -586,6 +627,24 @@ describe("slackChannel() code channels", () => {
 
     expect(cancel).toHaveBeenCalledWith("code:C_CODE_STOP", undefined);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("ignores a stop from someone admit refuses", async () => {
+    useCodeChannels([]);
+    const channel = slackChannel({
+      admit: (request) => request.actor?.userId !== "U_REFUSED",
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+    });
+    const body = buildEventBody({
+      channel: "C_CODE_REFUSED_STOP",
+      type: "agent_session_stopped",
+      user: "U_REFUSED",
+    });
+
+    const { cancel } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(cancel).not.toHaveBeenCalled();
   });
 
   // A turn that died without ending leaves `processing` up, which never times out.
@@ -777,10 +836,12 @@ describe("slackChannel() code channels", () => {
 
 describe("code channel regressions", () => {
   it("skips the deleted-root check in a code channel", async () => {
-    fetchMock = vi.fn(async (url: string | URL | Request) =>
-      String(url).includes("chat.getPermalink")
-        ? Response.json({ ok: false, error: "message_not_found" })
-        : Response.json({ ok: true, ts: "1.1" }),
+    fetchMock = vi.fn(
+      asMember(async (url: string | URL | Request) =>
+        String(url).includes("chat.getPermalink")
+          ? Response.json({ ok: false, error: "message_not_found" })
+          : Response.json({ ok: true, ts: "1.1" }),
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
     const { channel } = renderingHarness();
@@ -789,7 +850,7 @@ describe("code channel regressions", () => {
     expect(slackCalls("chat.postMessage")).toHaveLength(1);
   });
   it("cancels a code channel's session from onEvent", async () => {
-    fetchMock = vi.fn(async () => Response.json({ ok: true, ts: "1.1" }));
+    fetchMock = vi.fn(asMember(async () => Response.json({ ok: true, ts: "1.1" })));
     vi.stubGlobal("fetch", fetchMock);
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
@@ -822,10 +883,16 @@ describe("slackChannel().receive code channels", () => {
   }
 
   function stubSlack(createdChannelId: string, isPrivate = false): void {
-    fetchMock = vi.fn(async (url: string | URL | Request) =>
-      String(url).endsWith("/agents.conversations.create")
-        ? Response.json({ ok: true, channel_id: createdChannelId })
-        : Response.json({ ok: true, channel: { is_private: isPrivate }, ts: "1700000001.000001" }),
+    fetchMock = vi.fn(
+      asMember(async (url: string | URL | Request) =>
+        String(url).endsWith("/agents.conversations.create")
+          ? Response.json({ ok: true, channel_id: createdChannelId })
+          : Response.json({
+              ok: true,
+              channel: { is_ext_shared: false, is_private: isPrivate },
+              ts: "1700000001.000001",
+            }),
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
   }

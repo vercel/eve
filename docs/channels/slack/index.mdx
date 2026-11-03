@@ -46,7 +46,7 @@ export default slackChannel();
 
 In [Slack app settings](https://api.slack.com/apps):
 
-1. Add the `app_mentions:read` and `chat:write` bot scopes, plus `channels:history`, `groups:history`, `im:history`, and `mpim:history` for DMs and message edits, `files:read` for inbound files, and `files:write` for long replies.
+1. Add the `app_mentions:read` and `chat:write` bot scopes, plus `channels:history`, `groups:history`, `im:history`, and `mpim:history` for DMs and message edits, `channels:read`, `groups:read`, `im:read`, and `mpim:read` to recognize Slack Connect conversations, `users:read` to recognize guests, `files:read` for inbound files, and `files:write` for long replies.
 2. Install the app. Set `SLACK_BOT_TOKEN` to its Bot User OAuth Token and `SLACK_SIGNING_SECRET` to the signing secret from **Basic Information**, in `.env.local` and in your host's environment.
 3. Set `https://your-agent.example/eve/v1/slack` as the Request URL under **Event Subscriptions** (subscribe to `app_mention`, plus `message.channels`, `message.groups`, `message.im`, and `message.mpim` for DMs and message edits), **Interactivity & Shortcuts**, and each **Slash Command**.
 
@@ -199,7 +199,7 @@ export default slackChannel({
 });
 ```
 
-This adds the `users:read` scope, plus `users:read.email` with `email: true`, so reinstall the Slack app after enabling it. It's off by default because names and emails then reach model context, session history, and traces. See [Add sender names and emails](/docs/channels/slack/reference#add-sender-names-and-emails) for caching and custom lookups.
+It uses the `users:read` scope, which the generated manifest always includes. `email: true` adds `users:read.email`, so reinstall the Slack app after enabling it. It's off by default because names and emails then reach model context, session history, and traces. See [Add sender names and emails](/docs/channels/slack/reference#add-sender-names-and-emails) for caching and custom lookups.
 
 ## Human-in-the-loop interactions
 
@@ -342,27 +342,26 @@ Images, PDFs, audio, and other files attached to a message reach the agent. When
 
 ## Restrict access
 
-A valid Slack signature proves the event came from Slack, not that the sender should reach your agent. Slack Connect can deliver events from people outside your workspace. To allow only certain people, check them in every inbound hook you enable, and in `onAnswers` so nobody else can click an approval:
+A valid Slack signature proves the event came from Slack, not that the sender should reach your agent. By default, the agent ignores Slack Connect conversations, which include people from other organizations, and guest accounts. It doesn't answer them, take their approvals, or start sessions in Slack Connect conversations.
+
+`admit` is the channel's one access check. It runs before every hook, so a policy written once also covers DMs, edits, approval clicks, and slash commands. To allow only certain people, call the default from your own `admit`:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
-import { defaultSlackAuth, slackChannel, type SlackMessage } from "eve/channels/slack";
+import { defaultSlackAdmit, slackChannel } from "eve/channels/slack";
 
 const allowedUsers = new Set(["U01234567"]);
-const isAllowed = (message: SlackMessage) => allowedUsers.has(message.author?.userId ?? "");
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  onAppMention: (ctx, message) =>
-    isAllowed(message) ? { auth: defaultSlackAuth(message, ctx) } : null,
-  onDirectMessage: (ctx, message) =>
-    isAllowed(message) ? { auth: defaultSlackAuth(message, ctx) } : null,
-  onAnswers: (ctx, submission) =>
-    allowedUsers.has(submission.user.id) ? { auth: ctx.defaultAuth } : null,
+  async admit(request) {
+    if (!(await defaultSlackAdmit(request))) return false;
+    return request.kind === "send" || allowedUsers.has(request.actor?.userId ?? "");
+  },
 });
 ```
 
-Keep authorization checks inside sensitive tools too. The [reference](/docs/channels/slack/reference#restrict-who-can-invoke-the-agent) adds per-conversation allowlists.
+Pass `admit: () => true` to serve Slack Connect users and guests. Keep authorization checks inside sensitive tools too. The [reference](/docs/channels/slack/reference#restrict-who-can-invoke-the-agent) covers every request kind and the scopes the default needs.
 
 ## Reference
 

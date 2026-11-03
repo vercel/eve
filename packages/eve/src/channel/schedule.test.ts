@@ -44,7 +44,7 @@ function makeSlackChannelEntry(): {
   definition: CompiledChannel;
   resolved: ResolvedChannelDefinition;
 } {
-  const channel = slackChannel();
+  const channel = slackChannel({ admit: () => true });
   if (!isCompiledChannel(channel))
     throw new Error("expected a compiled slack channel for this test");
   return {

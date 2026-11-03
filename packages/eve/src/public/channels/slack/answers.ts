@@ -1,4 +1,5 @@
 import { createLogger } from "#internal/logging.js";
+import { admitSlackInteraction } from "#public/channels/slack/admit.js";
 import { buildSlackBinding } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import type {
@@ -18,11 +19,27 @@ export async function authorizeAnswer(input: {
     readonly config: SlackChannelConfig;
     readonly onAnswers: NonNullable<SlackChannelConfig["onAnswers"]>;
   };
+  /** The conversation holding the answered card. */
+  readonly conversationId: string;
   readonly installationTeamId: string | null | undefined;
+  readonly raw: Readonly<Record<string, unknown>>;
   readonly submission: SlackAnswerSubmission;
   readonly target: SlackSessionTarget;
   readonly teamId: string | null | undefined;
 }): Promise<SlackAnswerResult> {
+  const admitted = await admitSlackInteraction({
+    admit: input.deps.config.admit,
+    api: input.deps.api,
+    botToken: input.deps.config.credentials?.botToken,
+    kind: "answer",
+    channelId: input.conversationId,
+    installationTeamId: input.installationTeamId ?? undefined,
+    teamId: input.teamId ?? undefined,
+    userId: input.submission.user.id,
+    raw: input.raw,
+  });
+  if (!admitted) return null;
+
   const { channelId, codeChannel, threadTs = "" } = input.target;
   const defaultAuth = buildSlackAuthContext({
     channelId,
