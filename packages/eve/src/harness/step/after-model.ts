@@ -155,7 +155,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   // History grows by append only; nothing rewrites earlier messages mid-turn,
   // so the prompt prefix stays stable and the provider's prompt cache keeps
   // hitting across steps. Compaction is the sole mechanism that ever rewrites
-  // history, and it runs before the model call (see `maybeCompact`).
+  // history, and it runs before the model call (see `compactIfDue`).
   // An `eve__reply` call is terminal even when the model emits it alongside
   // executing tools: continuing the loop would leave the no-execute call as a
   // dangling tool_use the next provider call rejects, and drop the result.

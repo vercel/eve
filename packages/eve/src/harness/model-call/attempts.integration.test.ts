@@ -2,13 +2,10 @@ import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createKernel } from "#harness/kernel.js";
 import type { HarnessSession } from "#harness/types.js";
 import { eachEvent } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-
-// The harness runs outside a workflow body here, where run attributes cannot be written.
-vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -60,7 +57,7 @@ async function runTurn(doStream: MockLanguageModelV3["doStream"]): Promise<Sessi
     history: [],
     sessionId: "attempts",
   };
-  await createToolLoopHarness({
+  await createKernel({
     handleEvent: eachEvent(async (event) => {
       events.push(event);
     }),
@@ -122,5 +119,46 @@ describe("model attempts", () => {
       { attempt: 1, runId: "run_1", type: "model.started" },
       { outcome: "completed", runId: "run_1", type: "model.settled" },
     ]);
+  });
+});
+
+describe("run attributes", () => {
+  it("tags the turn's run with what its model call spent, through the sink it's given", async () => {
+    const setAttributes = vi.fn(async () => {});
+    await createKernel({
+      handleEvent: async () => {},
+      resolveModel: async () =>
+        new MockLanguageModelV3({ doStream: async () => streamOf(reply("Here it is.")) }),
+      setAttributes,
+      tools: new Map([
+        [
+          "lookup",
+          {
+            description: "Looks up a report.",
+            execute: async () => "The weekly summary.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "lookup",
+          },
+        ],
+      ]),
+    })(
+      {
+        agent: { modelReference: { id: "m" }, system: "You help Alice.", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100_000 },
+        continuationToken: "http:attributes",
+        history: [],
+        sessionId: "attributes",
+      },
+      { message: "Alice asks for the weekly summary." },
+    );
+
+    expect(setAttributes).toHaveBeenCalledTimes(1);
+    expect(setAttributes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        "$eve.input_tokens": 10,
+        "$eve.output_tokens": 2,
+        "$eve.tool_count": 1,
+      }),
+    );
   });
 });

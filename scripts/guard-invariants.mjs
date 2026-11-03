@@ -181,6 +181,13 @@
  *             Writing `{ ...session, history }` elsewhere, or `history: …` after a
  *             session spread with other properties between, skips the checks and the
  *             resets a rewrite needs. A spread under another name isn't caught.
+ *   rule 61 — The kernel (`harness/`) doesn't reach the Workflow runtime:
+ *             no `#compiled/@workflow/*`, `#internal/workflow/*`,
+ *             `#internal/workflow-bundle/*`, `workflow`, `@workflow/*`, or
+ *             `#runtime/attributes/emit.js` import. The workflow wrapper in
+ *             `execution/` reads Workflow metadata and passes what the kernel
+ *             needs (its callback URL, attribute sink) in, so the kernel can run
+ *             under another driver.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -308,6 +315,7 @@ function isTsLike(relPath) {
  *   rule58: Violation[];
  *   rule59: { allowlist: Set<string>; violations: Violation[] };
  *   rule60: Violation[];
+ *   rule61: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -394,6 +402,7 @@ async function scanRepo(state) {
     checkRule58(posix, lines, state.rule58);
     checkRule59(posix, lines, state.rule59);
     checkRule60(posix, content, state.rule60);
+    checkRule61(posix, lines, state.rule61);
   }
 }
 
@@ -912,6 +921,27 @@ function checkRule60(posix, content, violations) {
       line: content.slice(0, match.index).split("\n").length,
       message:
         "writes session history directly. Change it with `changeHistory(session, { append | extend | repaired | rewrite })` from `#harness/session-machine/history.js`, or return `history` from a transition.",
+    });
+  }
+}
+
+// ---------- Rule 61: the kernel doesn't reach the Workflow runtime ----------
+
+const WORKFLOW_RUNTIME_SPECIFIER_RE =
+  /^(?:#compiled\/@workflow\/|#internal\/workflow(?:-bundle)?\/|@workflow\/|workflow(?:\/|$)|#runtime\/attributes\/emit\.js$)/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule61(posix, lines, violations) {
+  if (!posix.startsWith("packages/eve/src/harness/") || posix.endsWith(".test.ts")) return;
+  for (const [index, line] of lines.entries()) {
+    const specifier = IMPORT_SPECIFIER_RE.exec(line)?.[1];
+    if (specifier === undefined || !WORKFLOW_RUNTIME_SPECIFIER_RE.test(specifier)) continue;
+    violations.push({
+      rule: 61,
+      file: posix,
+      line: index + 1,
+      message:
+        "imports the Workflow runtime into the kernel. Read it in the workflow wrapper under `execution/` and pass what the kernel needs through `KernelConfig` or the step's context.",
     });
   }
 }
@@ -1982,6 +2012,7 @@ async function main() {
       violations: /** @type {Violation[]} */ ([]),
     },
     rule60: /** @type {Violation[]} */ ([]),
+    rule61: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2096,6 +2127,7 @@ async function main() {
   violations.push(...state.rule58);
   violations.push(...state.rule59.violations);
   violations.push(...state.rule60);
+  violations.push(...state.rule61);
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });

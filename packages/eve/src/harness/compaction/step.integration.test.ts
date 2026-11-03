@@ -7,7 +7,7 @@ import * as compaction from "#harness/compaction/engine.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createKernel } from "#harness/kernel.js";
 import { eventsOf } from "#harness/publication.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
@@ -107,7 +107,7 @@ async function compactWith(
     ],
     sessionId: "compaction-session",
   };
-  return createToolLoopHarness({
+  return createKernel({
     compactOnly: true,
     handleEvent: (publication) => handleEvent(eventsOf(publication)),
     resolveModel: async () => model,
@@ -134,7 +134,7 @@ describe("compaction summary call", () => {
       );
       const doStream = vi.fn(async () => summaryStream());
       const events: SessionEvent[] = [];
-      const run = createToolLoopHarness({
+      const run = createKernel({
         handleEvent: async (publication) => void events.push(...eventsOf(publication)),
         resolveModel: async () => new MockLanguageModelV3({ doStream }),
         tools: new Map(),
@@ -201,7 +201,7 @@ describe("compaction summary call", () => {
     const events: SessionEvent[] = [];
 
     const result = await contextStorage.run(new ContextContainer(), async () => {
-      let stepped = await createToolLoopHarness({
+      let stepped = await createKernel({
         handleEvent: foldingHandler(async (event) => void events.push(event)),
         resolveModel: async () => model,
         tools: new Map(),
@@ -233,7 +233,7 @@ describe("compaction summary call", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const doStream = vi.fn(async () => summaryStream());
     const events: SessionEvent[] = [];
-    const result = await createToolLoopHarness({
+    const result = await createKernel({
       handleEvent: async (publication) => void events.push(...eventsOf(publication)),
       resolveModel: async () => new MockLanguageModelV3({ doStream }),
       tools: new Map(),
@@ -415,7 +415,7 @@ describe("compaction summary call", () => {
       ],
       sessionId: "compaction-capped",
     };
-    await createToolLoopHarness({
+    await createKernel({
       handleEvent: async (publication) => {
         const facts = eventsOf(publication);
         events.push(...facts);
@@ -475,7 +475,7 @@ describe("announcements after a compaction during a turn", () => {
     ]);
 
     await contextStorage.run(new ContextContainer(), async () => {
-      let stepped = await createToolLoopHarness({
+      let stepped = await createKernel({
         handleEvent: foldingHandler(),
         resolveModel: async () => model,
         tools,

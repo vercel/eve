@@ -37,7 +37,7 @@ import type {
   StepFn,
   HarnessStepInput,
   StepResult,
-  ToolLoopHarnessConfig,
+  KernelConfig,
 } from "#harness/types.js";
 import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
@@ -54,7 +54,7 @@ const eveVersion = resolveInstalledPackageInfo().version;
  * turn, runs the work those answers approved, then makes one model step and acts on its response.
  * Every lifecycle change goes through the session machine (`Step.apply`).
  */
-export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
+export function createKernel(config: KernelConfig): StepFn {
   config.instrumentation?.installAiSdkWarningLogger();
 
   async function runStep(

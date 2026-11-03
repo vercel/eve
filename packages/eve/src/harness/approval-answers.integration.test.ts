@@ -6,8 +6,8 @@ import type { ApprovalResponsePolicy } from "#approval/definition.js";
 import { contextStorage } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
-import type { HarnessSession, HarnessStepInput, ToolLoopHarnessConfig } from "#harness/types.js";
+import { createKernel } from "#harness/kernel.js";
+import type { HarnessSession, HarnessStepInput, KernelConfig } from "#harness/types.js";
 import {
   createApprovalContext,
   textStreamResult,
@@ -17,8 +17,6 @@ import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { createProjectionRecorder } from "#internal/testing/session-projection-recorder.js";
 import { eachEvent, parkedSteps } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
-
-vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 function gated(name: string, response?: ApprovalResponsePolicy): HarnessToolDefinition {
   return {
@@ -51,7 +49,7 @@ function setup(tools: readonly HarnessToolDefinition[]) {
     provider: "eve-integration-mock",
   });
   const recorder = createProjectionRecorder();
-  const config: ToolLoopHarnessConfig = {
+  const config: KernelConfig = {
     capabilities: { requestInput: true },
     handleEvent: eachEvent(async (event) => {
       recorder.record(event);
@@ -75,7 +73,7 @@ function setup(tools: readonly HarnessToolDefinition[]) {
   const sandbox = mockSandbox();
   ctx.set(SandboxKey, sandbox.access);
   const step = (current: HarnessSession, input?: HarnessStepInput) =>
-    contextStorage.run(ctx, () => createToolLoopHarness(config)(current, input));
+    contextStorage.run(ctx, () => createKernel(config)(current, input));
   /** The approval the step asked for `toolName`'s call. */
   const approvalOf = (toolName: string): string => {
     const opened = events.find(
