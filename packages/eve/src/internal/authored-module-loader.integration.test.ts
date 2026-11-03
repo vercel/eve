@@ -334,28 +334,33 @@ export const result = true;
     expect(moduleNamespace.result).toBe("local-dotted-basename");
   });
 
-  it("resolves extensionless relative directory imports to index modules", async () => {
-    const app = await createApp({
-      files: {
-        "agent/tools/use_helpers.ts": [
-          'import { helperValue } from "./helpers";',
-          "",
-          "export const result = helperValue;",
-          "",
-        ].join("\n"),
-        "agent/tools/helpers/index.ts": ['export const helperValue = "directory-index";', ""].join(
-          "\n",
-        ),
-      },
-      name: "directory-index-import",
-    });
+  // A dotted directory name looks like an asset import until its index resolves.
+  it.each(["helpers", "helpers.v2"])(
+    "resolves extensionless relative directory imports to index modules (%s)",
+    async (directory) => {
+      const app = await createApp({
+        files: {
+          "agent/tools/use_helpers.ts": [
+            `import { helperValue } from "./${directory}";`,
+            "",
+            "export const result = helperValue;",
+            "",
+          ].join("\n"),
+          [`agent/tools/${directory}/index.ts`]: [
+            'export const helperValue = "directory-index";',
+            "",
+          ].join("\n"),
+        },
+        name: "directory-index-import",
+      });
 
-    const moduleNamespace = await loadAuthoredModuleNamespace(
-      join(app.appRoot, "agent", "tools", "use_helpers.ts"),
-    );
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "tools", "use_helpers.ts"),
+      );
 
-    expect(moduleNamespace.result).toBe("directory-index");
-  });
+      expect(moduleNamespace.result).toBe("directory-index");
+    },
+  );
 
   it("resolves extensionless CommonJS requires with dotted JavaScript basenames", async () => {
     const app = await createApp({
