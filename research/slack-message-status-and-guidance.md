@@ -264,8 +264,8 @@ async onMessage(ctx, message) {
 
 ### Edits
 
-Today an authored `onAppMention`, `onDirectMessage`, or `onMessage` turns off the default edit
-hook, so an app that follows threads silently loses edit steering.
+In 1.0.0-rc.2, an authored `onAppMention`, `onDirectMessage`, or `onMessage` turns off the
+default edit hook, so an app that follows threads silently loses edit steering.
 
 The default edit hook instead runs the message hook a new message of the same kind would reach,
 on the edited message:
