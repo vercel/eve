@@ -4,12 +4,13 @@ export const GH_SIGNED_COMMIT_SOURCE = String.raw`#!/usr/bin/env node
 const { execFileSync } = require("node:child_process");
 
 const args = process.argv.slice(2);
-const options = { base: undefined, body: undefined };
+const options = { body: undefined };
 for (let i = 0; i < args.length; i += 1) {
   const value = args[i];
   if (value === "--repo") options.repo = args[++i];
   else if (value === "--branch") options.branch = args[++i];
-  else if (value === "--base") options.base = args[++i];
+  // Accepted for existing invocations; new branches start at local HEAD.
+  else if (value === "--base") i += 1;
   else if (value === "-m") options.message = args[++i];
   else if (value === "-b") options.body = args[++i];
   else fail("unknown argument: " + value);
@@ -36,16 +37,30 @@ async function main() {
   if (changes.additions.length === 0 && changes.deletions.length === 0) {
     throw new Error("no staged changes; stage files with git add before running gh-signed-commit");
   }
+  const localHead = git("rev-parse", "HEAD").toString().trim();
   let head = await branchHead(options.branch);
+  // The commit is the remote tip plus the staged diff against local HEAD. If the
+  // two differ, every remote change missing locally would be committed reversed.
+  if (head !== null && head !== localHead) {
+    throw new Error(
+      "local HEAD " + localHead + " is not the tip of " + options.branch + " (" + head + "), so committing would revert the remote changes missing locally. " +
+        "Run git pull --ff-only origin " + options.branch + " through the authenticated gh tool, then run gh-signed-commit again. " +
+        "gh-signed-commit publishes only staged changes, never local commits.",
+    );
+  }
   if (head === null) {
-    const base = options.base || (await request("GET", "/repos/" + owner + "/" + repo)).default_branch;
-    const baseHead = await branchHead(base);
-    if (baseHead === null) throw new Error("base ref not found: " + base);
+    // Like git push, start the branch at local HEAD, not at a newer base tip.
+    if (!(await commitExists(localHead))) {
+      throw new Error(
+        "local HEAD " + localHead + " does not exist on GitHub. gh-signed-commit publishes only staged changes, never local commits: " +
+          "run git reset --soft with the pushed commit your local commits started from, keeping their changes staged, then run gh-signed-commit again.",
+      );
+    }
     await request("POST", "/repos/" + owner + "/" + repo + "/git/refs", {
       ref: "refs/heads/" + options.branch,
-      sha: baseHead,
+      sha: localHead,
     });
-    head = baseHead;
+    head = localHead;
   }
 
   const query = "mutation CreateCommitOnBranch($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }";
@@ -116,6 +131,13 @@ async function branchHead(branch) {
   const payload = await response.json();
   if (!response.ok) throw new Error("GitHub ref lookup failed: " + response.status);
   return payload.object.sha;
+}
+
+async function commitExists(sha) {
+  const response = await fetch(api + "/repos/" + owner + "/" + repo + "/git/commits/" + sha, { headers });
+  if (response.status === 404 || response.status === 422) return false;
+  if (!response.ok) throw new Error("GitHub commit lookup failed: " + response.status);
+  return true;
 }
 
 async function request(method, path, body) {

@@ -49,10 +49,10 @@ export function githubInstructions(github: boolean, callerScoped = false): strin
 const SIGNED_COMMIT = `Stage only the intended changes. Repositories that require verified commits must use:
 
 \`\`\`sh
-gh-signed-commit --repo owner/name --branch <branch> --base <base> -m "<headline>" [-b "<body>"]
+gh-signed-commit --repo owner/name --branch <branch> -m "<headline>" [-b "<body>"]
 \`\`\`
 
-The command commits only staged changes and synchronizes the checkout to the signed remote commit. Then write the PR body to a file and create one draft:`;
+The command commits only staged changes on top of local HEAD, creating a new branch there, and synchronizes the checkout to the signed remote commit. It refuses when local HEAD is not the existing branch tip; run \`git pull --ff-only origin <branch>\` through the \`gh\` tool, then rerun it. Then write the PR body to a file and create one draft:`;
 
 const PLAIN_COMMIT = `Stage only the intended changes, commit them, and push the branch. Then write the PR body to a file and create one draft:`;
 
