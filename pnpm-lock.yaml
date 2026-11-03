@@ -2091,9 +2091,6 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
-      typescript-compiler:
-        specifier: npm:typescript@6.0.3
-        version: typescript@6.0.3
 
   packages/eve-computer-use:
     dependencies:

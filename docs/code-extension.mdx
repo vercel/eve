@@ -3,7 +3,7 @@ title: "Code Extension"
 description: "Mount eve's coding extension, eve-code, and see its latest benchmark results against other coding agent harnesses."
 ---
 
-`eve/extensions/code` (eve-code) turns an eve agent into a coding agent. It ships inside the `eve` package, so you mount it without installing anything else. The extension adds an `apply_patch` file-editing tool, coding skills, and helpers that install coding tools in the sandbox. GitHub and pull request work lives in the companion [`eve/extensions/git`](#publish-with-the-git-extension) extension.
+`eve/extensions/code` (eve-code) turns an eve agent into a coding agent. It ships inside the `eve` package, so you mount it without installing anything else. The extension adds coding instructions, coding skills, and helpers that install coding tools in the sandbox. For file edits, add the built-in [`edit_file`](#add-editing-and-search-tools) tool. GitHub and pull request work lives in the companion [`eve/extensions/git`](#publish-with-the-git-extension) extension.
 
 ## Benchmark results
 
@@ -42,7 +42,7 @@ The workflow skips incomplete runs, single-task runs, and pull request runs. Res
 
 ## Mount the extension
 
-Create an extension file in your agent. The file name sets the prefix of every tool and skill the extension adds, such as `code__apply_patch`:
+Create an extension file in your agent. The file name sets the prefix of every skill the extension adds, such as `code__investigate`:
 
 ```ts title="agent/extensions/code.ts"
 import code from "eve/extensions/code";
@@ -152,27 +152,16 @@ export default git({
 });
 ```
 
-## Override bundled tools
+## Add editing and search tools
 
-`eve/extensions/code/tools` exports the `apply_patch` and `grep` tool definitions. Import `apply_patch` in an override to change its approval or other options without copying the implementation. With the file mount above, name the override after the qualified tool, `code__apply_patch`:
-
-```ts title="agent/tools/code__apply_patch.ts"
-import { apply_patch } from "eve/extensions/code/tools";
-import { defineTool } from "eve/tools";
-import { always } from "eve/tools/approval";
-
-export default defineTool({ ...apply_patch, approval: always() });
-```
-
-`agent/extensions/code/tools/apply_patch.ts` works only when the mount is a directory, `agent/extensions/code/extension.ts`.
-
-To give the model a structured content-search tool, add the built-in [`grep`](/docs/concepts/built-in-tools#grep) tool:
+The extension adds no tools. Add the built-in [`edit_file`](/docs/concepts/built-in-tools#edit_file) tool for targeted file edits and the built-in [`grep`](/docs/concepts/built-in-tools#grep) tool for structured content search:
 
 ```sh
+eve add tool/edit_file
 eve add tool/grep
 ```
 
-The command writes `agent/tools/grep.ts`, which re-exports `eve/tools/grep`. The `grep` export from `eve/extensions/code/tools` is the same definition.
+The commands write `agent/tools/edit_file.ts` and `agent/tools/grep.ts`, which re-export `eve/tools/edit_file` and `eve/tools/grep`. The `grep` export from `eve/extensions/code/tools` is the same definition.
 
 For a custom GitHub command tool, `eve/extensions/git/sandbox` exports `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`. `executeGitHubShell` parses the command, calls `authorize`, and installs the credential rules. `dependencies` supply the session ID and sandbox access. Use `githubShellApproval` as the tool's approval policy so invalid commands are still rejected.
 
@@ -194,7 +183,7 @@ export const environment = VercelSandbox.environment({
 export default defineSandbox(() => environment.open());
 ```
 
-Preparation installs `gh`, wrappers for `gh`, `vc`, and `gh-signed-commit`, and TypeScript diagnostics. With the git extension's `github` configured, repositories that require verified signatures can use `gh-signed-commit` through the `gh` tool after staging changes.
+Preparation installs `gh` and wrappers for `gh`, `vc`, and `gh-signed-commit`. With the git extension's `github` configured, repositories that require verified signatures can use `gh-signed-commit` through the `gh` tool after staging changes.
 
 eve rebuilds a prepared environment only when the sandbox file or environment options change. A change to an imported helper or to the eve version doesn't rebuild it.
 

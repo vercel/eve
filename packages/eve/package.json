@@ -178,6 +178,11 @@
       "import": "./dist/src/public/tools/write-file.js",
       "default": "./dist/src/public/tools/write-file.js"
     },
+    "./tools/edit_file": {
+      "types": "./dist/src/public/tools/edit-file.d.ts",
+      "import": "./dist/src/public/tools/edit-file.js",
+      "default": "./dist/src/public/tools/edit-file.js"
+    },
     "./tools/web_fetch": {
       "types": "./dist/src/public/tools/web-fetch.d.ts",
       "import": "./dist/src/public/tools/web-fetch.js",
@@ -531,12 +536,6 @@
       "types": "./dist/src/internal/grep.d.ts",
       "import": "./dist/src/internal/grep.js",
       "default": "./dist/src/internal/grep.js"
-    },
-    "./internal/workspace": {
-      "eve-source": "./dist/src/internal/workspace.js",
-      "types": "./dist/src/internal/workspace.d.ts",
-      "import": "./dist/src/internal/workspace.js",
-      "default": "./dist/src/internal/workspace.js"
     },
     "./internal/git": {
       "eve-source": "./dist/src/internal/git.js",
