@@ -29,8 +29,9 @@ export function createAuthoredPlugins(input: AuthoredPluginsInput): Plugin[] {
   const authoredSourceOnly = input.authoredSourceOnly ?? false;
   const extensions = input.extensions ?? RESOLVE_EXTENSIONS;
   return [
-    createAuthoredRelativeExtensionResolverPlugin({ authoredSourceOnly, extensions }),
+    // First, so no other resolver claims an asset import before its package-root check.
     createAuthoredAssetImportPlugin({ authoredSourceOnly, packageRoot: input.packageRoot }),
+    createAuthoredRelativeExtensionResolverPlugin({ authoredSourceOnly, extensions }),
     createAuthoredPackageTsConfigPathsPlugin({
       appPackageRoot: input.packageRoot,
       authoredSourceOnly,

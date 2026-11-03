@@ -1605,34 +1605,37 @@ export const result = true;
     });
   });
 
-  it("rejects asset imports outside the authored package", async () => {
-    const app = await createApp({
-      files: {
-        "agent/tools/outside_asset.ts": `export default {};
+  it.each(["?raw", ""])(
+    "rejects asset imports outside the authored package (%j)",
+    async (suffix) => {
+      const app = await createApp({
+        files: {
+          "agent/tools/outside_asset.ts": `export default {};
 `,
-      },
-      name: "outside-asset-import",
-    });
-    const outsideFileName = `${basename(app.appRoot)}.txt`;
-    const outsidePath = join(app.appRoot, "..", outsideFileName);
-    const modulePath = join(app.appRoot, "agent", "tools", "outside_asset.ts");
+        },
+        name: "outside-asset-import",
+      });
+      const outsideFileName = `${basename(app.appRoot)}.txt`;
+      const outsidePath = join(app.appRoot, "..", outsideFileName);
+      const modulePath = join(app.appRoot, "agent", "tools", "outside_asset.ts");
 
-    try {
-      await Promise.all([
-        writeFile(outsidePath, "outside\n"),
-        writeFile(
-          modulePath,
-          `import value from "../../../${outsideFileName}?raw";\nexport default value;\n`,
-        ),
-      ]);
+      try {
+        await Promise.all([
+          writeFile(outsidePath, "outside\n"),
+          writeFile(
+            modulePath,
+            `import value from "../../../${outsideFileName}${suffix}";\nexport default value;\n`,
+          ),
+        ]);
 
-      await expect(loadAuthoredModuleNamespace(modulePath)).rejects.toThrow(
-        /resolves outside package root/,
-      );
-    } finally {
-      await rm(outsidePath, { force: true });
-    }
-  });
+        await expect(loadAuthoredModuleNamespace(modulePath)).rejects.toThrow(
+          /resolves outside package root/,
+        );
+      } finally {
+        await rm(outsidePath, { force: true });
+      }
+    },
+  );
 
   it("loads ?raw imports inside a symlinked workspace package", async () => {
     const app = await createApp({
