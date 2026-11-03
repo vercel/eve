@@ -119,6 +119,8 @@ Readers ignore event types, progress types, and fields they don't know. An endin
 
 After a reconnect, `foldEvents` skips positions it has already seen. It ignores a repeated start or end of a row it holds, and an update can't reopen an ended row. It doesn't deduplicate progress and usage at new positions.
 
+`createStreamChecker()` from `eve/events` checks a stream against these lifecycle rules, one stored line at a time from the first: an item is introduced before a fact names it by ID or owner, it ends once with an outcome from its set, and a session has one open turn at a time. `check(line, position)` returns the line's violations, each with its `rule` and a `message`, and skips a position it has already checked. It checks how facts relate, not their fields, so pass records shaped as their types describe.
+
 `session.started` and `turn.started` carry an optional `data.trace` with W3C trace coordinates: `traceId`, `spanId`, and `traceFlags`. Use them to correlate stream consumers, such as eval reporters, with an observability backend. An uninstrumented target omits it.
 
 ### Streamed output
