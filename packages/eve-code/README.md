@@ -75,13 +75,38 @@ The `typescript-compiler` development alias supplies the JavaScript compiler API
 
 ## Benchmarks
 
-eve-code is benchmarked with [eve-bench](https://github.com/vercel-labs/eve-bench#readme) on the SWE-lean dataset. eve-bench owns datasets, execution, comparisons, and reports; this package keeps no benchmark runner of its own.
+eve-code is benchmarked with [eve-bench](https://github.com/vercel-labs/eve-bench#readme) on the SWE-lean and DeepSWE-lean datasets. eve-bench owns datasets, execution, comparisons, and reports; this package keeps no benchmark runner of its own.
 
 ### In CI
 
-The `eve-code > Benchmark harness` workflow runs whenever `packages/eve-code/**` changes. It benchmarks the PR head's eve-code, opencode, and pi together, using the model in the `EVE_CODE_BENCH_MODEL` repository variable. Every trial runs in its own Vercel Sandbox, and all of them start at once, so a run takes about as long as its slowest trial. Each harness is compared with its own latest result from `main`. The report covers resolved tasks, latency, and token usage. It goes to the job summary and a PR comment.
+The `eve-code` workflow benchmarks eve-code, opencode, and pi together, with one `Benchmark harness (<family>)` job per model family:
 
-Comment `/benchmark` to re-run the default harnesses, or `/benchmark <harness>[,<harness>...]` to choose, for example `/benchmark codex,eve-code`. You need write access to the repository. Every push to `main` that touches eve-code publishes fresh results to the eve-bench result store, which is where later PRs get their baselines.
+| Family      | Model                                                                             |
+| ----------- | --------------------------------------------------------------------------------- |
+| `anthropic` | `EVE_CODE_BENCH_MODEL` repository variable, default `anthropic/claude-sonnet-5.5` |
+| `openai`    | `EVE_CODE_BENCH_OPENAI_MODEL` repository variable, default `openai/gpt-6.1-sol`   |
+
+Every trial runs in its own Vercel Sandbox, up to 16 at a time per harness. Each harness is compared with its own latest result from `main` on the same dataset and model, never with another model's results. The report covers resolved tasks, latency, and token usage. It goes to the job summary and, on PRs, a PR comment.
+
+| Trigger                                | Dataset      | Models                 | Publishes baselines |
+| -------------------------------------- | ------------ | ---------------------- | ------------------- |
+| PR that changes `packages/eve-code/**` | SWE-lean     | `anthropic`            | No                  |
+| `/benchmark` comment on a PR           | chosen       | `anthropic`, or chosen | No                  |
+| Push to `main` that changes eve-code   | SWE-lean     | `anthropic`            | Yes                 |
+| Weekly, Monday 06:00 UTC, on `main`    | DeepSWE-lean | both, one after other  | Yes                 |
+| Manual dispatch                        | chosen       | both, or chosen        | Only on `main`      |
+
+Vercel Sandbox limits how fast a team can allocate vCPUs, so the two families never run at the same time: a run that covers both runs them one after the other, each with its own 120-minute job limit. Two benchmarks that start at the same time from different runs can still hit that limit and lose trials to HTTP 429 errors. A newer PR head or comment cancels an older PR run; runs on `main` queue behind each other instead.
+
+PRs get their baselines from the eve-bench result store. SWE-lean baselines for `anthropic` come from every push to `main`. DeepSWE-lean baselines, and all `openai` baselines, come from the weekly run, so a PR's delta there can include eve-code changes merged since. The DeepSWE-lean results in the docs come from the `anthropic` report of the latest weekly or dispatched run on `main`.
+
+Main accepts changes only through a pull request with passing required checks. So the `Refresh docs benchmark results` job does not commit the docs snapshot to `main`. It resets the `bot/eve-code-benchmark-snapshot` branch to `main`, commits the new `apps/docs/lib/evals/eve-code-benchmark.json` there, and opens or updates the `chore: refresh eve-code benchmark results` pull request with auto-merge on. Like the changesets Version Packages PR, that pull request is opened with `GITHUB_TOKEN`. GitHub holds its workflow runs until a maintainer approves them, so the required checks start only after a maintainer selects **Approve workflows to run** on it. A maintainer then approves the pull request, and auto-merge squashes it. The job opens no pull request when the snapshot is unchanged.
+
+Comment `/benchmark [<dataset>] [model=<family>] [<harness>[,<harness>...]]` to run a benchmark on a PR. Every part is optional and can come in any order, for example `/benchmark`, `/benchmark codex,eve-code`, or `/benchmark deepswe-lean model=openai`. You need write access to the repository. A comment runs one model family, because each harness and dataset gets a single PR comment that the latest run replaces.
+
+eve-bench keys stored results by the agent repository, which only an eve-code run provides. A run without `eve-code`, such as a `harness=opencode` dispatch or `/benchmark opencode`, only measures the harnesses it names. It reports to the job summary and posts no PR comment. It is not compared with stored results and does not publish. To re-baseline one competitor on `main`, dispatch it together with eve-code, for example `harness=eve-code,opencode`.
+
+Each dataset's attempts per task (5 for SWE-lean, 3 for DeepSWE-lean) match its stored baselines. eve-bench compares only whole-dataset results with the same attempts, so changing the count means re-baselining every harness on both models.
 
 ### Locally
 
@@ -103,4 +128,4 @@ eve-bench trials logs https://github.com/vercel/eve/actions/runs/<id>
 eve-bench trials logs https://github.com/vercel/eve/actions/runs/<id> --harness eve-code --task <task>
 ```
 
-The report's Diagnostics section prints this command with the run URL filled in. The download uses the GitHub CLI and needs read access to this repository. The raw files (`agent.log`, `events.ndjson`, `observability.ndjson`, `verifier.log`) are cached under `~/.cache/eve-bench/runs/`.
+The report's Diagnostics section prints this command with the run URL filled in. Each model family uploads its own artifact, named `<dataset>-<harnesses>-<family>`, for example `deepswe-lean-eve-code+opencode+pi-openai`. For a run that covered both families, add `--artifact <name>` to the printed command so it reads only that family's trials. The download uses the GitHub CLI and needs read access to this repository. The raw files (`agent.log`, `events.ndjson`, `observability.ndjson`, `verifier.log`) are cached under `~/.cache/eve-bench/runs/`.

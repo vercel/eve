@@ -31,12 +31,12 @@ The line on each correctness row shows the 95% interval. When the lines of two h
 <details>
 <summary>How the results update</summary>
 
-1. A maintainer runs the `eve-code` workflow on `main` with the `deepswe-lean` dataset.
-2. The workflow runs eve-code, opencode, and pi. It saves each complete result in the eve-bench result store.
-3. The workflow commits a summary of the result to `main`.
-4. The next docs deployment shows the new results.
+1. The `eve-code` workflow runs on `main` with the `deepswe-lean` dataset every Monday at 06:00 UTC. A maintainer can also start it manually on `main`.
+2. The workflow runs eve-code, opencode, and pi on each benchmark model, one model at a time. It saves each complete result in the eve-bench result store.
+3. The workflow opens a pull request with a summary of the default Anthropic model's result. This page shows only that model.
+4. After a maintainer approves and merges the pull request, the next docs deployment shows the new results.
 
-The workflow skips incomplete runs, single-task runs, and pull request runs. Results can be older than `main`, because a maintainer starts each run. Select a harness name to open the GitHub Actions run for that result.
+The workflow skips incomplete runs, single-task runs, and pull request runs. Results can be a week or more older than `main`, because the workflow runs weekly and each refresh waits for review. Select a harness name to open the GitHub Actions run for that result.
 
 </details>
 
