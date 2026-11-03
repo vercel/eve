@@ -13,8 +13,10 @@ import type {
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import { callProgress } from "#harness/call-facts.js";
+import { openChild, recordChildSent } from "#harness/session-machine/children.js";
 import { storedProjection } from "#harness/session-machine/view.js";
-import type { SessionEvent } from "#protocol/session-event.js";
+import type { Commit, SessionPublication } from "#harness/types.js";
+import type { Progress } from "#protocol/session-events/facts.js";
 import {
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
@@ -30,7 +32,7 @@ function workflowToolRunReportEvents(
   state: SessionStepState,
   from: WorkflowToolRunRef,
   update: JsonValue,
-): SessionEvent[] {
+): Progress[] {
   const { view } = storedProjection(readDurableSession(state.sessionState).state);
   const call = view?.calls[from.callId];
   const settled = view !== undefined && (call === undefined || call.status === "settled");
@@ -45,7 +47,7 @@ function workflowToolRunReportEvents(
 async function childOpenedEvent(
   parentSessionId: string,
   { from, session }: WorkflowToolRunAgentStartedMessage,
-): Promise<SessionEvent> {
+): Promise<Commit> {
   const stream =
     session.kind === "remote"
       ? createEveSubagentStreamRoutePath({
@@ -68,32 +70,17 @@ async function childOpenedEvent(
     if (session.earlierProtocol !== undefined) binding.earlierProtocol = session.earlierProtocol;
     await recordRemoteChildBinding(parentSessionId, binding);
   }
-  const scope: { turnId: string; taskId?: string } = { turnId: from.turnId };
-  if (from.taskId !== undefined) scope.taskId = from.taskId;
-  return {
-    data: {
-      name: session.name,
-      owner: { callId: from.callId },
-      sessionId: session.sessionId,
-      stream,
-    },
-    scope,
-    type: "child.opened",
-  };
+  return openChild(
+    { name: session.name, owner: { callId: from.callId }, sessionId: session.sessionId, stream },
+    { taskId: from.taskId, turnId: from.turnId },
+  );
 }
 
-function childSentEvent({
-  deliveryId,
-  from,
-  sessionId,
-}: WorkflowToolRunAgentSentMessage): SessionEvent {
-  const scope: { turnId: string; taskId?: string } = { turnId: from.turnId };
-  if (from.taskId !== undefined) scope.taskId = from.taskId;
-  return {
-    data: { callId: from.callId, childDeliveryId: deliveryId, sessionId },
-    scope,
-    type: "child.sent",
-  };
+function childSentEvent({ deliveryId, from, sessionId }: WorkflowToolRunAgentSentMessage): Commit {
+  return recordChildSent(
+    { callId: from.callId, childDeliveryId: deliveryId, sessionId },
+    { taskId: from.taskId, turnId: from.turnId },
+  );
 }
 
 /** A run's message the session applies as it reads it, which answers no call a turn waits on. */
@@ -119,7 +106,7 @@ export async function applyRunMessagesStep(
     let state: SessionStepState = target;
     let cancelled = false;
     // Consecutive starts and reports publish together, as one turn's events do.
-    let events: SessionEvent[] = [];
+    let events: SessionPublication[] = [];
     const publish = async (): Promise<void> => {
       if (events.length === 0) return;
       const published = await publishSessionEvents(state, events, { canCancelTurn });

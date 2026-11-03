@@ -169,6 +169,40 @@ eve handles each recorded line of the stream in this order:
 
 Hooks run after the line is saved, so a hook that throws can't corrupt the stream. [Dynamic functions](./dynamic-capabilities) don't subscribe to events; they run before each model call.
 
+The turn waits for a line's hooks before it continues. A `turn.started` hook finishes before the turn's first model call, so [state](../concepts/state) it writes is what the turn's dynamic functions, tools, and [OpenTelemetry `runtimeContext`](../observability/otel#add-runtime-context) read. This lets a hook decide something once per turn, such as a model rollout keyed on the session, and every model call of the turn use it:
+
+```ts title="agent/lib/turn-model.ts"
+import { defineState } from "eve/context";
+
+export const turnModel = defineState("my-agent.turn-model", () => "openai/gpt-5.4-mini");
+```
+
+```ts title="agent/hooks/choose-model.ts"
+import { defineHook } from "eve/hooks";
+import { modelForSession } from "../lib/rollout";
+import { turnModel } from "../lib/turn-model";
+
+export default defineHook({
+  events: {
+    async "turn.started"(_event, ctx) {
+      const model = await modelForSession(ctx.session.id);
+      turnModel.update(() => model);
+    },
+  },
+});
+```
+
+```ts title="agent/agent.ts"
+import { defineAgent, defineDynamic } from "eve";
+import { turnModel } from "./lib/turn-model";
+
+export default defineAgent({
+  model: defineDynamic(() => turnModel.get()),
+});
+```
+
+A message that steers a running turn doesn't start a new turn, so the hook doesn't run again until the next one.
+
 ## What happens when a hook throws
 
 An unhandled error fails the running turn before its next model call, or when the turn would end. Between turns, eve only logs the error. Catch errors from optional audit or metrics work if the turn should continue. To stop without a failure, call [`ctx.cancel(reason?)`](#cancel-the-running-turn-from-a-hook).

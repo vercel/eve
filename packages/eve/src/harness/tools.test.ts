@@ -1,3 +1,4 @@
+import { mintClearance } from "#harness/clearance.js";
 import { asSchema, type JSONSchema7, jsonSchema, type LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -72,14 +73,16 @@ async function resolveApproval(
   };
   const ctx = new ContextContainer();
   ctx.set(SessionKey, activeSession);
-  return contextStorage.run(ctx, () =>
-    decideApproval(definition, {
+  // The approval decision; the clearance a cleared call gets is the gate's, tested on its own.
+  return contextStorage.run(ctx, async () => {
+    const { clearance: _clearance, ...decision } = await decideApproval(definition, {
       abortSignal: options.abortSignal,
       approvalMemory: options.approvalMemory,
       callId: "call_1",
       input,
-    }),
-  );
+    });
+    return decision;
+  });
 }
 
 async function executeSdkTool(input: {
@@ -90,11 +93,13 @@ async function executeSdkTool(input: {
   readonly toolInput?: unknown;
 }): Promise<unknown> {
   if (!isRunnableTool(input.tool)) throw new TypeError("Missing runnable test tool.");
-  return await invokeTool(input.tool, input.toolInput ?? {}, {
-    abortSignal: input.abortSignal,
-    messages: input.messages ?? [],
-    toolCallId: input.toolCallId ?? "call_1",
-  });
+  const toolCallId = input.toolCallId ?? "call_1";
+  return await invokeTool(
+    input.tool,
+    input.toolInput ?? {},
+    { abortSignal: input.abortSignal, messages: input.messages ?? [], toolCallId },
+    mintClearance(toolCallId),
+  );
 }
 
 async function projectSdkToolOutput(input: {
@@ -200,7 +205,12 @@ describe("buildToolSet", () => {
     await contextStorage.run(ctx, async () => {
       const definition = tools.get("stream_progress");
       if (!isRunnableTool(definition)) throw new TypeError("Missing runnable test tool.");
-      const output = invokeTool(definition, {}, { messages: [], toolCallId: "call_stream" });
+      const output = invokeTool(
+        definition,
+        {},
+        { messages: [], toolCallId: "call_stream" },
+        mintClearance("call_stream"),
+      );
       expect(isAsyncIterable(output)).toBe(true);
 
       const values: unknown[] = [];

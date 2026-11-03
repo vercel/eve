@@ -119,6 +119,8 @@ Readers ignore event types, progress types, and fields they don't know. An endin
 
 After a reconnect, `foldEvents` skips positions it has already seen. It ignores a repeated start or end of a row it holds, and an update can't reopen an ended row. It doesn't deduplicate progress and usage at new positions.
 
+`createStreamChecker()` from `eve/events` checks a stream against these lifecycle rules, one stored line at a time from the first: an item is introduced before a fact names it by ID or owner, it ends once with an outcome from its set, and a session has one open turn at a time. `check(line, position)` returns the line's violations, each with its `rule` and a `message`, and skips a position it has already checked. It checks how facts relate, not their fields, so pass records shaped as their types describe.
+
 `session.started` and `turn.started` carry an optional `data.trace` with W3C trace coordinates: `traceId`, `spanId`, and `traceFlags`. Use them to correlate stream consumers, such as eval reporters, with an observability backend. An uninstrumented target omits it.
 
 ### Streamed output
@@ -214,7 +216,7 @@ A cancelled turn isn't a failure. It ends with `outcome: "cancelled"` and a `cau
 
 When a model call fails transiently before publishing anything, the run records `model.retried` and tries again. Once it has published output, the run ends `abandoned` with its unfinished calls, and a new run tries again.
 
-A provider `content-filter` response fails the run and turn with `MODEL_CALL_FAILED` and a `hint` to review the request against the provider's content policy. eve doesn't retry it; deltas already streamed stay visible, and the session can receive another message.
+A provider `content-filter` response fails the run and turn with `MODEL_CALL_FAILED` and a `hint` to review the request against the provider's content policy. eve doesn't retry it; deltas already streamed stay visible, and the session can receive another message. A refusal note replaces the turn's input in conversation history, and the refused response's partial output stays out of history. Completed tool calls and their results stay, so the model knows which actions already ran. Removing the input doesn't guarantee recovery: retained history or tool results can still trigger the provider's filter. Other failed model calls keep the turn's input in history.
 
 ## Query session state
 
@@ -371,9 +373,9 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/end \
   -d '{"reason":"Start over"}'
 ```
 
-Compaction summarizes history without adding a user message. If a turn is active, eve queues the request until that turn ends. User-role instructions are ordinary history and may be summarized; system-role instructions stay outside it. Recalled [memory](../memory) stays outside history, so the summary never includes it, and a memory provider can capture history before compaction rewrites it. On the stream, compaction is a context change: `context.started` and `context.settled` with `kind: "compaction"`, around the summary's model run. If summarization fails before a checkpoint, the compaction ends `failed` and the session keeps its previous history.
+Compaction summarizes history without adding a user message. If a turn is active, eve queues the request until that turn ends. User-role instructions are ordinary history and may be summarized, and eve adds them again before the next model call; system-role instructions stay outside it. Recalled [memory](../memory) stays outside history, so the summary never includes it, and a memory provider can capture history before compaction rewrites it. On the stream, compaction is a context change: `context.started` and `context.settled` with `kind: "compaction"`, around the summary's model run. If summarization fails before a checkpoint, the compaction ends `failed` and the session keeps its previous history.
 
-Clear removes model-message history in place, including static and dynamic user-role instructions. It keeps the session identity, system-role instructions, tools, skills, [`defineState`](./state) values, limits, and sandbox. Unchanged user-role instructions aren't inserted again. Clear doesn't delete data from a memory provider's external store, and the next turn recalls again. Approvals, the session-limit prompt, and sign-ins the cleared history asked for are withdrawn. Unlike a compaction, clear doesn't wait for a running turn. It cancels the turn, which ends `cancelled`, stops the calls it waits on, and ends working tasks with `task.ended`. A stopped task never reports into the cleared conversation. On the stream, clear is a context change with `kind: "clear"`.
+Clear removes model-message history in place, including static and dynamic user-role instructions. It keeps the session identity, system-role instructions, tools, skills, [`defineState`](./state) values, limits, and sandbox. eve adds user-role instructions again before the next model call. Clear doesn't delete data from a memory provider's external store, and the next turn recalls again. Approvals, the session-limit prompt, and sign-ins the cleared history asked for are withdrawn. Unlike a compaction, clear doesn't wait for a running turn. It cancels the turn, which ends `cancelled`, stops the calls it waits on, and ends working tasks with `task.ended`. A stopped task never reports into the cleared conversation. On the stream, clear is a context change with `kind: "clear"`.
 
 A cancel stops turns, not a compaction or clear. A cancel that arrives while either runs ends `ignored`, and the compaction or clear finishes. A cancel, clear, or compact sent to a prewarmed session before its first message ends `ignored` once the session starts.
 

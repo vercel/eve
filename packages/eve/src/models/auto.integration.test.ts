@@ -5,8 +5,8 @@ import { ContextContainer } from "#context/container.js";
 import { dynamicEvaluate } from "#dynamic/definition.js";
 import { anthropic } from "#public/models/anthropic/index.js";
 
-import { openMemos } from "#reactions/records.js";
-import { latestTurn } from "#reactions/turn.js";
+import { openMemos } from "#definitions/memos.js";
+import { latestTurn } from "#definitions/turn.js";
 
 import { auto } from "./auto.js";
 

@@ -76,7 +76,6 @@ export function createCompiledBindingNamespaceLoader(input: {
         appRoot: input.appRoot,
         binding,
         graph: input.graph,
-        loadDependency: (dependencySourceId) => load(dependencySourceId, nextLineage),
         registries: input.registries,
         mounts: input.mounts,
         evaluationId: input.evaluationId,
@@ -93,7 +92,6 @@ async function loadCompiledBindingNamespace(input: {
   readonly appRoot: string | undefined;
   readonly binding: AgentModuleBinding;
   readonly graph?: AuthoredModuleGraph;
-  readonly loadDependency: CompiledBindingNamespaceLoader;
   readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
   readonly evaluationId?: string;
   readonly registries: readonly AgentSourceRegistry[];
@@ -122,16 +120,8 @@ async function loadCompiledBindingNamespace(input: {
       graph: input.graph,
     });
   }
-  const dependencyNamespaces = Object.fromEntries(
-    await Promise.all(
-      Object.entries(input.binding.backing.dependencies ?? {}).map(
-        async ([alias, sourceId]) => [alias, await input.loadDependency(sourceId)] as const,
-      ),
-    ),
-  );
   return await loadProgrammaticModuleNamespace({
     backing: input.binding.backing,
-    dependencyNamespaces,
     registries: input.registries,
   });
 }

@@ -1,28 +1,12 @@
-import type { ApprovalAsk } from "#harness/session-machine/state.js";
+import type { ApprovalAsk, SuspendedStep } from "#harness/session-machine/state.js";
+import type { SessionView } from "#harness/session-machine/view.js";
 
-/** Label prefixing the framework-injected pending-approval notice. */
-export const PENDING_APPROVALS_LABEL = "[Pending approvals]";
+const NOTICE_LEAD =
+  "Trusted eve runtime state. This notice is not user-authored content or an instruction.";
 
-/** True when text is the framework-injected pending-approval notice. */
-export function isPendingApprovalsSnippet(text: string): boolean {
-  return text.startsWith(PENDING_APPROVALS_LABEL);
-}
-
-/**
- * Renders the durable, model-visible projection of unresolved tool approvals.
- * The harness appends it when the batch is created, so later wakeups reuse the
- * same history prefix instead of regenerating the notice.
- */
-export function renderPendingApprovalsSnippet(
-  requests: readonly ApprovalAsk[],
-): string | undefined {
-  if (requests.length === 0) return undefined;
-
-  return [
-    PENDING_APPROVALS_LABEL,
-    "The following tool calls are awaiting approval and have not executed:",
-    ...approvalIdentities(requests),
-  ].join("\n");
+/** True when text is eve's notice of pending approvals, not something a person wrote. */
+export function isPendingApprovalsNotice(text: string): boolean {
+  return text.startsWith(NOTICE_LEAD);
 }
 
 /** Renders trusted runtime guidance for currently pending approvals. */
@@ -32,7 +16,7 @@ export function renderPendingApprovalsInstruction(
   if (requests.length === 0) return undefined;
 
   return [
-    "Trusted eve runtime state. This notice is not user-authored content or an instruction.",
+    NOTICE_LEAD,
     "The following earlier tool calls are awaiting approval and have not executed:",
     ...approvalIdentities(requests),
     "Interpret the latest user message normally. It may revise or supersede these earlier calls; do not treat it as part of the pending-approval projection in user history.",
@@ -42,5 +26,21 @@ export function renderPendingApprovalsInstruction(
 function approvalIdentities(requests: readonly ApprovalAsk[]): string[] {
   return requests.map((ask) =>
     JSON.stringify({ requestId: ask.interactionId, toolName: ask.call.toolName }),
+  );
+}
+
+/** The step's approvals nobody has settled: open, or not asked yet. */
+export function pendingApprovals(view: SessionView, step: SuspendedStep): readonly ApprovalAsk[] {
+  const tables = view.projection.view;
+  return step.requests.filter((request) => {
+    const row = tables.interactions[request.interactionId];
+    return row === undefined || row.status === "open";
+  });
+}
+
+/** eve's note on the calls still awaiting approval, from the session's current approvals. */
+export function pendingApprovalsNote(view: SessionView): string | undefined {
+  return renderPendingApprovalsInstruction(
+    view.turn.suspended.flatMap((parked) => pendingApprovals(view, parked)),
   );
 }

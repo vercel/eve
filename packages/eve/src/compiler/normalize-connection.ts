@@ -4,24 +4,18 @@ import {
   normalizeMcpClientConnectionDefinition,
   normalizeOpenApiConnectionDefinition,
 } from "#internal/authored-definition/connection.js";
-import type {
-  CompiledConnectionDefinition,
-  CompiledDynamicConnectionDefinition,
-} from "#compiler/manifest.js";
+import type { CompiledConnectionDefinition, CompiledDefinition } from "#compiler/manifest.js";
 import {
+  dynamicDefinition,
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
 import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import { extractVercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
-import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
 type CompiledConnectionEntry =
   | { readonly kind: "connection"; readonly definition: CompiledConnectionDefinition }
-  | {
-      readonly kind: "dynamic-connection";
-      readonly definition: CompiledDynamicConnectionDefinition;
-    };
+  | { readonly kind: "dynamic"; readonly definition: CompiledDefinition };
 
 /**
  * Compiles one authored connection module into the serializable metadata
@@ -54,19 +48,8 @@ export async function compileConnectionDefinition(
   });
   const message = `Expected the connection export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
 
-  if (isDynamicSentinel(loaded)) {
-    assertDynamicSentinelKeys(loaded, message);
-    return {
-      kind: "dynamic-connection",
-      definition: {
-        exportName: source.exportName,
-        logicalPath: source.logicalPath,
-        slug: source.connectionName,
-        sourceId: source.sourceId,
-        sourceKind: "module",
-      },
-    };
-  }
+  const dynamic = dynamicDefinition("connection", source, loaded, source.connectionName);
+  if (dynamic !== undefined) return { definition: dynamic, kind: "dynamic" };
 
   // A connection's own name is the entry that signs the user in to it.
   const reservation = eveNamespaceReservation(source.connectionName);

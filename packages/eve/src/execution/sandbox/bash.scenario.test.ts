@@ -14,7 +14,7 @@ import { createConnectionSession } from "./session.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
-// Real `bash -lc` on the host stands in for a sandbox; fake timers skip the 30-second yield.
+// Real `bash -lc` on the host stands in for a sandbox; fake timers skip the wait before the yield.
 describe("executeBashOnSandbox with a real shell", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -41,16 +41,22 @@ describe("executeBashOnSandbox with a real shell", () => {
     const { home, launches, sandbox } = await createHostSandbox();
     await writeFile(join(home, ".bash_profile"), 'echo "Welcome to the sandbox"\n');
     const pidFile = join(home, "child.pid");
+    let returned = false;
 
     const call = executeBashOnSandbox(sandbox, {
       command: `echo first; sleep 60 & echo $! > ${pidFile}; wait`,
+    }).finally(() => {
+      returned = true;
     });
     const childPid = await readPid(pidFile);
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(returned).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
     const result = await call;
 
     if (result.status !== "running") throw new Error(`expected running: ${JSON.stringify(result)}`);
     expect(result).toMatchObject({ stderr: "", stdout: "first\n", truncated: false });
+    expect(result.message).toContain("still running after 30 seconds");
     expect(result.message).toContain(`kill -- -${result.pid}`);
     // The call's stream ends at the yield; only the command keeps running.
     await launches[0];
@@ -59,12 +65,71 @@ describe("executeBashOnSandbox with a real shell", () => {
     await runHostBash(`kill -- -${result.pid}`, home);
 
     await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 10_000 });
-    const exitFile = join(result.outputDirectory, "exit");
-    await vi.waitFor(() => expect(readFileSync(exitFile, "utf8").trim()).toBe("143"), {
-      timeout: 10_000,
+    const waited = await executeBashOnSandbox(sandbox, { command: waitCommand(result.message) });
+    expect(waited.stdout.trim().split("\n").at(-1)).toBe("143");
+    await rm(result.outputDirectory, { force: true, recursive: true });
+  });
+
+  it("ends the suggested wait when the process group dies without an exit code", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { home, sandbox } = await createHostSandbox();
+    const pidFile = join(home, "child.pid");
+
+    const call = executeBashOnSandbox(sandbox, {
+      command: `sleep 60 & echo $! > ${pidFile}; wait`,
+      timeout: 1,
+    });
+    await readPid(pidFile);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const result = await call;
+    if (result.status !== "running") throw new Error(`expected running: ${JSON.stringify(result)}`);
+    // SIGKILL stops the whole group before it can write its exit file.
+    await runHostBash(`kill -9 -- -${result.pid}`, home);
+
+    const waited = await executeBashOnSandbox(sandbox, { command: waitCommand(result.message) });
+
+    expect(waited).toMatchObject({
+      status: "completed",
+      stdout: `process group ${result.pid} exited without an exit code\n`,
     });
     await rm(result.outputDirectory, { force: true, recursive: true });
   });
+
+  it.each([
+    { timeout: 120, waitSeconds: 120 },
+    { timeout: 3_600, waitSeconds: 120 },
+    { timeout: 0, waitSeconds: 1 },
+    { timeout: Number.NaN, waitSeconds: 30 },
+  ])(
+    "waits $waitSeconds seconds for timeout $timeout before leaving the command running",
+    async ({ timeout, waitSeconds }) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const { home, sandbox } = await createHostSandbox();
+      const pidFile = join(home, "child.pid");
+      let returned = false;
+
+      const call = executeBashOnSandbox(sandbox, {
+        command: `sleep 60 & echo $! > ${pidFile}; wait`,
+        timeout,
+      }).finally(() => {
+        returned = true;
+      });
+      await readPid(pidFile);
+      await vi.advanceTimersByTimeAsync(waitSeconds * 1000 - 1);
+      expect(returned).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await call;
+
+      if (result.status !== "running")
+        throw new Error(`expected running: ${JSON.stringify(result)}`);
+      expect(result.message).toContain(`still running after ${waitSeconds} seconds`);
+      await runHostBash(`kill -- -${result.pid}`, home);
+      // The killed group writes its exit file after the kill returns; removing the
+      // directory before that races with the write.
+      await executeBashOnSandbox(sandbox, { command: waitCommand(result.message) });
+      await rm(result.outputDirectory, { force: true, recursive: true });
+    },
+  );
 
   it("stops the command's process group when the call is aborted", async () => {
     const { home, sandbox } = await createHostSandbox();
@@ -129,6 +194,13 @@ async function createHostSandbox(): Promise<{
     },
   });
   return { home, launches, sandbox };
+}
+
+/** The single-call wait the `running` message suggests to the model. */
+function waitCommand(message: string): string {
+  const command = /run `(while [^`]+)`/u.exec(message)?.[1];
+  if (command === undefined) throw new Error(`no wait command in: ${message}`);
+  return command;
 }
 
 async function runHostBash(command: string, home: string): Promise<void> {

@@ -209,7 +209,7 @@ const discovered = await discoverAgent({ appRoot: process.cwd(), agentRoot: proc
 assert.deepEqual(discovered.diagnostics.filter((entry) => entry.severity === "error"), []);
 const compiled = await compileAgentManifest(discovered.manifest);
 assert.deepEqual(compiled.subagents.map((entry) => entry.name), ["self-modification-remote__agent"]);
-const slugs = compiled.subagents[0].agent.dynamicTools.map((tool) => tool.slug);
+const slugs = compiled.subagents[0].agent.definitions.filter((entry) => entry.kind === "tool").map((tool) => tool.slug);
 assert.ok(slugs.includes("publish") && slugs.includes("registry_add"));
 `,
     );

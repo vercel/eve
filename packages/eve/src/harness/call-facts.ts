@@ -1,6 +1,5 @@
-import type { SessionEvent } from "#protocol/session-event.js";
 import type { Cause, ErrorInfo, JsonValue } from "#protocol/session-events/envelope.js";
-import type { FactOf } from "#protocol/session-events/facts.js";
+import type { FactOf, Progress } from "#protocol/session-events/facts.js";
 import type {
   Capability,
   CapabilityKind,
@@ -94,8 +93,11 @@ export function callSettledFrom(
 }
 
 /** A call's partial output, as progress. */
-export function callProgress(callId: string, output: unknown, label?: string): SessionEvent {
-  return { data: defined({ callId, output: toJsonValue(output), label }), type: "call.progress" };
+export function callProgress(callId: string, output: unknown, label?: string): Progress {
+  return {
+    data: defined({ callId, output: toJsonValue(output), label }),
+    type: "call.progress",
+  } as Progress;
 }
 
 /** A value as the wire carries it: JSON, with anything else as its string form. */

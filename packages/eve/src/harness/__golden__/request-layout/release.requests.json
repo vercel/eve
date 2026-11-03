@@ -1,0 +1,595 @@
+[
+  {
+    "prompt": [
+      {
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nTool execution\nTool calls in one response run in parallel, so batch only calls that don't depend on each other.\n\nAvailable skills\nListed skills are available in this run. Do not claim a listed skill is inaccessible unless activation or workspace inspection actually fails.\nDynamic skill announcements replace earlier dynamic skills and override static skills with the same name. Static skills omitted from a dynamic announcement remain available.\nIf the user names a skill or the request clearly matches one of the descriptions below, load it with eve__skill({ name }) before proceeding.\nIf multiple skills match, activate the minimal set that covers the task. After activation, follow the returned instructions instead of improvising around them.\nIf activation fails, say so briefly and continue with the best available alternative.\nSkill files live under `$HOME/.agents/skills/<skill>/`, with `skills/<skill>/` under the workspace root as the fallback when `$HOME` is unavailable.\nWhen a loaded SKILL.md mentions sibling files such as `references/foo.md`, resolve them relative to the directory containing that specific SKILL.md.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.\n\nTasks\n- A call that returns \"Started task <id>\" is a task: it keeps working while you continue. Every agent call is a task.\n- Each result arrives once, in a <task_result> message. Until then you know nothing about it, so don't guess or report its result.\n- Ending your reply doesn't end your turn. While tasks work, eve holds your turn and calls you again with each result.\n- If you have nothing to tell the person until a result arrives, call eve__task_wait. Start every independent task first, then wait.\n- If the person should hear from you now, for example to confirm work is underway when they don't need the result yet, reply. When results arrive, report them without repeating yourself.\n- Don't redo work you delegated. Never use sleep or shell commands to wait for a task.\n- To correct or continue an agent, or any task that accepts more input, call its tool again with its taskId. A new message never stops your tasks: answer it if it asks you something, decide whether it changes the work, then keep each task, correct an agent by taskId, or stop a task with eve__task_cancel.",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "text": "Release brief: v2.3 ships Friday.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Alice is on the release team.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "What's in the release?",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "tools": [
+      "bash",
+      "read_file",
+      "write_file",
+      "web_fetch",
+      "agent",
+      "lookup",
+      "deploy",
+      "eve__task_wait",
+      "eve__task_cancel",
+      "eve__skill"
+    ]
+  },
+  {
+    "prompt": [
+      {
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nTool execution\nTool calls in one response run in parallel, so batch only calls that don't depend on each other.\n\nAvailable skills\nListed skills are available in this run. Do not claim a listed skill is inaccessible unless activation or workspace inspection actually fails.\nDynamic skill announcements replace earlier dynamic skills and override static skills with the same name. Static skills omitted from a dynamic announcement remain available.\nIf the user names a skill or the request clearly matches one of the descriptions below, load it with eve__skill({ name }) before proceeding.\nIf multiple skills match, activate the minimal set that covers the task. After activation, follow the returned instructions instead of improvising around them.\nIf activation fails, say so briefly and continue with the best available alternative.\nSkill files live under `$HOME/.agents/skills/<skill>/`, with `skills/<skill>/` under the workspace root as the fallback when `$HOME` is unavailable.\nWhen a loaded SKILL.md mentions sibling files such as `references/foo.md`, resolve them relative to the directory containing that specific SKILL.md.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.\n\nTasks\n- A call that returns \"Started task <id>\" is a task: it keeps working while you continue. Every agent call is a task.\n- Each result arrives once, in a <task_result> message. Until then you know nothing about it, so don't guess or report its result.\n- Ending your reply doesn't end your turn. While tasks work, eve holds your turn and calls you again with each result.\n- If you have nothing to tell the person until a result arrives, call eve__task_wait. Start every independent task first, then wait.\n- If the person should hear from you now, for example to confirm work is underway when they don't need the result yet, reply. When results arrive, report them without repeating yourself.\n- Don't redo work you delegated. Never use sleep or shell commands to wait for a task.\n- To correct or continue an agent, or any task that accepts more input, call its tool again with its taskId. A new message never stops your tasks: answer it if it asks you something, decide whether it changes the work, then keep each task, correct an agent by taskId, or stop a task with eve__task_cancel.",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "text": "Release brief: v2.3 ships Friday.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Alice is on the release team.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "What's in the release?",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "input": {},
+            "toolCallId": "call-lookup",
+            "toolName": "lookup",
+            "type": "tool-call"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "output": {
+              "type": "json",
+              "value": {
+                "changes": 3
+              }
+            },
+            "toolCallId": "call-lookup",
+            "toolName": "lookup",
+            "type": "tool-result"
+          }
+        ],
+        "role": "tool"
+      }
+    ],
+    "tools": [
+      "bash",
+      "read_file",
+      "write_file",
+      "web_fetch",
+      "agent",
+      "lookup",
+      "deploy",
+      "eve__task_wait",
+      "eve__task_cancel",
+      "eve__skill"
+    ]
+  },
+  {
+    "prompt": [
+      {
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nTool execution\nTool calls in one response run in parallel, so batch only calls that don't depend on each other.\n\nAvailable skills\nListed skills are available in this run. Do not claim a listed skill is inaccessible unless activation or workspace inspection actually fails.\nDynamic skill announcements replace earlier dynamic skills and override static skills with the same name. Static skills omitted from a dynamic announcement remain available.\nIf the user names a skill or the request clearly matches one of the descriptions below, load it with eve__skill({ name }) before proceeding.\nIf multiple skills match, activate the minimal set that covers the task. After activation, follow the returned instructions instead of improvising around them.\nIf activation fails, say so briefly and continue with the best available alternative.\nSkill files live under `$HOME/.agents/skills/<skill>/`, with `skills/<skill>/` under the workspace root as the fallback when `$HOME` is unavailable.\nWhen a loaded SKILL.md mentions sibling files such as `references/foo.md`, resolve them relative to the directory containing that specific SKILL.md.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.\n\nTasks\n- A call that returns \"Started task <id>\" is a task: it keeps working while you continue. Every agent call is a task.\n- Each result arrives once, in a <task_result> message. Until then you know nothing about it, so don't guess or report its result.\n- Ending your reply doesn't end your turn. While tasks work, eve holds your turn and calls you again with each result.\n- If you have nothing to tell the person until a result arrives, call eve__task_wait. Start every independent task first, then wait.\n- If the person should hear from you now, for example to confirm work is underway when they don't need the result yet, reply. When results arrive, report them without repeating yourself.\n- Don't redo work you delegated. Never use sleep or shell commands to wait for a task.\n- To correct or continue an agent, or any task that accepts more input, call its tool again with its taskId. A new message never stops your tasks: answer it if it asks you something, decide whether it changes the work, then keep each task, correct an agent by taskId, or stop a task with eve__task_cancel.",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "text": "Release brief: v2.3 ships Friday.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Alice is on the release team.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "What's in the release?",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "input": {},
+            "toolCallId": "call-lookup",
+            "toolName": "lookup",
+            "type": "tool-call"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "output": {
+              "type": "json",
+              "value": {
+                "changes": 3
+              }
+            },
+            "toolCallId": "call-lookup",
+            "toolName": "lookup",
+            "type": "tool-result"
+          }
+        ],
+        "role": "tool"
+      },
+      {
+        "content": [
+          {
+            "text": "Three changes.",
+            "type": "text"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "Deploy it.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "tools": [
+      "bash",
+      "read_file",
+      "write_file",
+      "web_fetch",
+      "agent",
+      "lookup",
+      "deploy",
+      "eve__task_wait",
+      "eve__task_cancel",
+      "eve__skill"
+    ]
+  },
+  {
+    "prompt": [
+      {
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nTool execution\nTool calls in one response run in parallel, so batch only calls that don't depend on each other.\n\nAvailable skills\nListed skills are available in this run. Do not claim a listed skill is inaccessible unless activation or workspace inspection actually fails.\nDynamic skill announcements replace earlier dynamic skills and override static skills with the same name. Static skills omitted from a dynamic announcement remain available.\nIf the user names a skill or the request clearly matches one of the descriptions below, load it with eve__skill({ name }) before proceeding.\nIf multiple skills match, activate the minimal set that covers the task. After activation, follow the returned instructions instead of improvising around them.\nIf activation fails, say so briefly and continue with the best available alternative.\nSkill files live under `$HOME/.agents/skills/<skill>/`, with `skills/<skill>/` under the workspace root as the fallback when `$HOME` is unavailable.\nWhen a loaded SKILL.md mentions sibling files such as `references/foo.md`, resolve them relative to the directory containing that specific SKILL.md.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.\n\nTasks\n- A call that returns \"Started task <id>\" is a task: it keeps working while you continue. Every agent call is a task.\n- Each result arrives once, in a <task_result> message. Until then you know nothing about it, so don't guess or report its result.\n- Ending your reply doesn't end your turn. While tasks work, eve holds your turn and calls you again with each result.\n- If you have nothing to tell the person until a result arrives, call eve__task_wait. Start every independent task first, then wait.\n- If the person should hear from you now, for example to confirm work is underway when they don't need the result yet, reply. When results arrive, report them without repeating yourself.\n- Don't redo work you delegated. Never use sleep or shell commands to wait for a task.\n- To correct or continue an agent, or any task that accepts more input, call its tool again with its taskId. A new message never stops your tasks: answer it if it asks you something, decide whether it changes the work, then keep each task, correct an agent by taskId, or stop a task with eve__task_cancel.",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "text": "Release brief: v2.3 ships Friday.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Alice is on the release team.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "What's in the release?",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "input": {},
+            "toolCallId": "call-lookup",
+            "toolName": "lookup",
+            "type": "tool-call"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "output": {
+              "type": "json",
+              "value": {
+                "changes": 3
+              }
+            },
+            "toolCallId": "call-lookup",
+            "toolName": "lookup",
+            "type": "tool-result"
+          }
+        ],
+        "role": "tool"
+      },
+      {
+        "content": [
+          {
+            "text": "Three changes.",
+            "type": "text"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "Deploy it.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "input": {},
+            "toolCallId": "call-deploy",
+            "toolName": "deploy",
+            "type": "tool-call"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "output": {
+              "reason": "Ignored because the user continued without responding.",
+              "type": "execution-denied"
+            },
+            "toolCallId": "call-deploy",
+            "toolName": "deploy",
+            "type": "tool-result"
+          }
+        ],
+        "role": "tool"
+      },
+      {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "Bob: hold on until QA signs off.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "tools": [
+      "bash",
+      "read_file",
+      "write_file",
+      "web_fetch",
+      "agent",
+      "lookup",
+      "deploy",
+      "eve__task_wait",
+      "eve__task_cancel",
+      "eve__skill"
+    ]
+  },
+  {
+    "prompt": [
+      {
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nTool execution\nTool calls in one response run in parallel, so batch only calls that don't depend on each other.\n\nAvailable skills\nListed skills are available in this run. Do not claim a listed skill is inaccessible unless activation or workspace inspection actually fails.\nDynamic skill announcements replace earlier dynamic skills and override static skills with the same name. Static skills omitted from a dynamic announcement remain available.\nIf the user names a skill or the request clearly matches one of the descriptions below, load it with eve__skill({ name }) before proceeding.\nIf multiple skills match, activate the minimal set that covers the task. After activation, follow the returned instructions instead of improvising around them.\nIf activation fails, say so briefly and continue with the best available alternative.\nSkill files live under `$HOME/.agents/skills/<skill>/`, with `skills/<skill>/` under the workspace root as the fallback when `$HOME` is unavailable.\nWhen a loaded SKILL.md mentions sibling files such as `references/foo.md`, resolve them relative to the directory containing that specific SKILL.md.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.\n\nTasks\n- A call that returns \"Started task <id>\" is a task: it keeps working while you continue. Every agent call is a task.\n- Each result arrives once, in a <task_result> message. Until then you know nothing about it, so don't guess or report its result.\n- Ending your reply doesn't end your turn. While tasks work, eve holds your turn and calls you again with each result.\n- If you have nothing to tell the person until a result arrives, call eve__task_wait. Start every independent task first, then wait.\n- If the person should hear from you now, for example to confirm work is underway when they don't need the result yet, reply. When results arrive, report them without repeating yourself.\n- Don't redo work you delegated. Never use sleep or shell commands to wait for a task.\n- To correct or continue an agent, or any task that accepts more input, call its tool again with its taskId. A new message never stops your tasks: answer it if it asks you something, decide whether it changes the work, then keep each task, correct an agent by taskId, or stop a task with eve__task_cancel.",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "text": "Release brief: v2.3 ships Friday.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Alice is on the release team.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "What's in the release?",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "input": {},
+            "toolCallId": "call-lookup",
+            "toolName": "lookup",
+            "type": "tool-call"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "output": {
+              "type": "json",
+              "value": {
+                "changes": 3
+              }
+            },
+            "toolCallId": "call-lookup",
+            "toolName": "lookup",
+            "type": "tool-result"
+          }
+        ],
+        "role": "tool"
+      },
+      {
+        "content": [
+          {
+            "text": "Three changes.",
+            "type": "text"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "Deploy it.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "input": {},
+            "toolCallId": "call-deploy",
+            "toolName": "deploy",
+            "type": "tool-call"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "output": {
+              "reason": "Ignored because the user continued without responding.",
+              "type": "execution-denied"
+            },
+            "toolCallId": "call-deploy",
+            "toolName": "deploy",
+            "type": "tool-result"
+          }
+        ],
+        "role": "tool"
+      },
+      {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "Bob: hold on until QA signs off.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Noted, Bob.",
+            "type": "text"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "The user submitted the following response to an earlier interactive prompt.\nTreat it as new input at the current point in the conversation and decide whether it is still relevant. This does not authorize an earlier action; request approval again if that action is still needed.\n[\n  {\n    \"requestId\": \"<request0>\",\n    \"response\": {\n      \"optionId\": \"approve\",\n      \"selectedOption\": {\n        \"id\": \"approve\",\n        \"label\": \"Approve\"\n      }\n    },\n    \"prompt\": \"Approve Deploy?\",\n    \"requestType\": \"approval\",\n    \"toolName\": \"deploy\"\n  }\n]",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "tools": [
+      "bash",
+      "read_file",
+      "write_file",
+      "web_fetch",
+      "agent",
+      "lookup",
+      "deploy",
+      "eve__task_wait",
+      "eve__task_cancel",
+      "eve__skill"
+    ]
+  },
+  {
+    "prompt": [
+      {
+        "content": "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.\n\nInclude:\n\n- Current progress and key decisions made\n- Important context, constraints, or user preferences\n- What remains to be done, with clear next steps\n- Any critical data, examples, or references needed to continue\n\nBe concise, structured, and focused on helping the next LLM seamlessly continue the work. Write in the same language as the conversation. Do not continue the conversation, answer its questions, or invent facts. Only output the handoff summary.",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "text": "<previous-checkpoint>\n(none)\n</previous-checkpoint>\n\n<conversation>\nConversation transcript:\n### user\nRelease brief: v2.3 ships Friday.\n\n### user\nAlice is on the release team.\n\n### user\nWhat's in the release?\n\n### assistant\nCalled lookup with {}\n\n### tool\nTool lookup returned {\"type\":\"json\",\"value\":{\"changes\":3}}\n\n### assistant\nThree changes.\n\n### user\nDeploy it.\n\n### assistant\nCalled deploy with {}\n\n### tool\nTool deploy returned {\"reason\":\"Ignored because the user continued without responding.\",\"type\":\"execution-denied\"}\n\n### assistant\n…\n\n### user\nBob: hold on until QA signs off.\n\n### assistant\nNoted, Bob.\n\n### user\nThe user submitted the following response to an earlier interactive prompt.\nTreat it as new input at the current point in the conversation and decide whether it is still relevant. This does not authorize an earlier action; request approval again if that action is still needed.\n[\n  {\n    \"requestId\": \"<request0>\",\n    \"response\": {\n      \"optionId\": \"approve\",\n      \"selectedOption\": {\n        \"id\": \"approve\",\n        \"label\": \"Approve\"\n      }\n    },\n    \"prompt\": \"Approve Deploy?\",\n    \"requestType\": \"approval\",\n    \"toolName\": \"deploy\"\n  }\n]\n</conversation>\n\nUpdate the previous checkpoint with the newer information in the conversation. If there is no previous checkpoint, create one from the conversation.\n\nMake completed work explicit so the next model does not repeat it. Keep completed work separate from current and remaining work, and do not describe completed work as pending unless later messages show it must be redone. Preserve exact file paths, function names, commands, error messages, identifiers, and measured values when they are needed to continue.\n\nLarge tool outputs are the main thing to compress: reduce each to the findings the next model needs — what was searched or read, what it established, and the exact identifiers involved — rather than reproducing the output. The next model cannot see the originals, so nothing it would need to act on may be lost.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "tools": []
+  },
+  {
+    "prompt": [
+      {
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nTool execution\nTool calls in one response run in parallel, so batch only calls that don't depend on each other.\n\nAvailable skills\nListed skills are available in this run. Do not claim a listed skill is inaccessible unless activation or workspace inspection actually fails.\nDynamic skill announcements replace earlier dynamic skills and override static skills with the same name. Static skills omitted from a dynamic announcement remain available.\nIf the user names a skill or the request clearly matches one of the descriptions below, load it with eve__skill({ name }) before proceeding.\nIf multiple skills match, activate the minimal set that covers the task. After activation, follow the returned instructions instead of improvising around them.\nIf activation fails, say so briefly and continue with the best available alternative.\nSkill files live under `$HOME/.agents/skills/<skill>/`, with `skills/<skill>/` under the workspace root as the fallback when `$HOME` is unavailable.\nWhen a loaded SKILL.md mentions sibling files such as `references/foo.md`, resolve them relative to the directory containing that specific SKILL.md.\n- rollback: Roll a release back. (path: $HOME/.agents/skills/rollback/SKILL.md)\n\nToday is Thursday.\n\nTasks\n- A call that returns \"Started task <id>\" is a task: it keeps working while you continue. Every agent call is a task.\n- Each result arrives once, in a <task_result> message. Until then you know nothing about it, so don't guess or report its result.\n- Ending your reply doesn't end your turn. While tasks work, eve holds your turn and calls you again with each result.\n- If you have nothing to tell the person until a result arrives, call eve__task_wait. Start every independent task first, then wait.\n- If the person should hear from you now, for example to confirm work is underway when they don't need the result yet, reply. When results arrive, report them without repeating yourself.\n- Don't redo work you delegated. Never use sleep or shell commands to wait for a task.\n- To correct or continue an agent, or any task that accepts more input, call its tool again with its taskId. A new message never stops your tasks: answer it if it asks you something, decide whether it changes the work, then keep each task, correct an agent by taskId, or stop a task with eve__task_cancel.",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "text": "Summary of our conversation so far:",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Summary of the conversation so far.",
+            "type": "text"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "Deployed.",
+            "type": "text"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "Release brief: v2.3 ships Friday.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Alice is on the release team.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "Did it ship?",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "tools": [
+      "bash",
+      "read_file",
+      "write_file",
+      "web_fetch",
+      "agent",
+      "lookup",
+      "deploy",
+      "eve__task_wait",
+      "eve__task_cancel",
+      "eve__skill"
+    ]
+  }
+]

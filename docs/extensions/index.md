@@ -319,7 +319,7 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
-Hooks and instruction fragments add to the agent's own, so you can't replace them. A dynamic tool wins over a static tool with the same name, so replace a dynamic tool with a dynamic definition in the same file. `disableTool()` removes either kind.
+Hooks and instruction fragments add to the agent's own, so you can't replace them. At runtime, static tools keep their names when a dynamic definition returns the same name. Configure approvals on the static definition, not on a same-named dynamic tool. `disableTool()` removes either kind.
 
 You can also override from the agent root with the prefixed name. `agent/tools/crm__search.ts` replaces the extension's `tools/search.ts`, and wins over a directory-mount override.
 
@@ -334,6 +334,70 @@ For a custom sandbox, `eve/extensions/computer-use/sandbox` exports
 in the environment's preparation callback to install desktop packages and the
 driver; it requires an apt-based image with root or passwordless sudo. Start
 the managed display and driver after opening each session sandbox.
+
+### Accessibility-based desktop tools
+
+The experimental `@eve/agent-desktop` package provides separate tools for reading native accessibility trees, acting on element refs, and taking screenshots. Use it for desktop apps that expose accessibility information; use `eve/extensions/computer-use` for coordinate-based computer use.
+
+Install the package alongside `eve`:
+
+```bash
+pnpm add @eve/agent-desktop
+```
+
+Install agent-desktop in your [sandbox environment's](/docs/sandbox) `prepare` callback. The extension requires Ubuntu 24.04 or later, apt, and root or passwordless sudo. Include `AGENT_DESKTOP_REVALIDATION_KEY` in the environment options so the prepared template rebuilds when the package's agent-desktop version or desktop packages change:
+
+```ts title="agent/sandbox.ts"
+import { AGENT_DESKTOP_REVALIDATION_KEY, installAgentDesktop } from "@eve/agent-desktop/sandbox";
+import { defineSandbox } from "eve/sandbox";
+import { VercelSandbox } from "eve/sandbox/vercel";
+
+export const environment = VercelSandbox.environment({
+  env: { AGENT_DESKTOP_REVALIDATION_KEY },
+  prepare: async (sandbox) => {
+    await installAgentDesktop(sandbox, { extraPackages: ["gnome-calculator"] });
+  },
+});
+
+export default defineSandbox(() => environment.open());
+```
+
+Then mount it in your agent:
+
+```ts title="agent/extensions/desktop.ts"
+import desktop from "@eve/agent-desktop";
+
+export default desktop({});
+```
+
+The tools don't install anything at tool time; when agent-desktop is missing or on a different minor version, they fail with setup guidance. They start a headless desktop on display `:100` when a session needs one, so the extension can be mounted beside `eve/extensions/computer-use`, which uses `:99`. The agent gets `desktop__launch`, `desktop__snapshot`, `desktop__click`, and other namespaced tools, with instructions for the observe, act, and verify loop.
+
+Headless actions use accessibility APIs by default. Set `headed: true` only when the agent may use physical pointer and keyboard input. The tools preserve agent-desktop's retry guidance when an action fails.
+
+`@eve/agent-desktop/sandbox` also exports `startDesktop` to start the desktop eagerly after opening a session sandbox. See the [package README](https://github.com/vercel/eve/tree/main/packages/eve-agent-desktop#prepare) for setup, configuration, and tool overrides.
+
+### Browser automation
+
+The experimental `@eve/agent-browser` package provides 42 browser tools backed by agent-browser. It runs Chromium inside the agent's sandbox and adds instructions for observing pages with snapshots, acting on element refs, and checking the result.
+
+```bash
+pnpm add @eve/agent-browser
+```
+
+```ts title="agent/extensions/browser.ts"
+import browser from "@eve/agent-browser";
+
+export default browser({
+  allowedDomains: ["example.com", "*.example.com"],
+  contentBoundaries: true,
+});
+```
+
+Configure an [agent sandbox](/docs/sandbox) with real process execution, such as Vercel Sandbox or Docker. On first use, the extension installs agent-browser, Chromium, and its system libraries. System dependency installation requires apt or dnf and sudo. For prepared templates, call `installAgentBrowser` from `@eve/agent-browser/sandbox` in the environment's `prepare` callback.
+
+The filename supplies the namespace: this mount adds `browser__open`, `browser__snapshot`, `browser__click`, and the other browser tools. Core tools are listed every turn; additional inspection and interaction tools are deferred and discoverable through `eve__search`. With `contentBoundaries: true`, results retain the CLI's boundary metadata and model output includes page-content markers. Cookie, storage, and saved-auth-state commands aren't exposed to the model.
+
+See [sandbox environment preparation](/docs/sandbox#prepare-a-reusable-environment) for template setup and the [package README](https://github.com/vercel/eve/tree/main/packages/eve-agent-browser) for configuration, screenshots, version matching, and tool overrides.
 
 ### Use an extension tool result in a hook
 

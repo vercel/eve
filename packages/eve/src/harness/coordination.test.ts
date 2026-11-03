@@ -246,8 +246,7 @@ describe("createCoordinationRequestFromToolCall", () => {
 
 function createParkedSession(): HarnessSession {
   const base: HarnessSession = {
-    agent: { modelReference: { id: "test-model" }, system: "", tools: [] },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: "http:test-session",
     history: [{ content: "delegate this", kind: "user", role: "user" }],
     sessionId: "test-session",

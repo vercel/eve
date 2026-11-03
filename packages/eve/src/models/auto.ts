@@ -7,7 +7,7 @@ import {
   type DynamicSentinel,
   type DynamicTurn,
 } from "#dynamic/definition.js";
-import { turnInputText } from "#reactions/turn.js";
+import { turnInputText } from "#definitions/turn.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";
 import type {
