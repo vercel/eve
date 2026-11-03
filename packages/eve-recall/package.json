@@ -1,0 +1,58 @@
+{
+  "name": "@eve/recall",
+  "version": "0.0.0",
+  "description": "Recall.ai meeting channel for eve agents: Zoom, Google Meet, and Microsoft Teams meetings through Recall.ai bots",
+  "keywords": [
+    "eve",
+    "eve-channel",
+    "google-meet",
+    "meeting-bot",
+    "microsoft-teams",
+    "recall.ai",
+    "zoom"
+  ],
+  "homepage": "https://eve.dev/docs/channels/recall",
+  "bugs": {
+    "url": "https://github.com/vercel/eve/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vercel/eve.git",
+    "directory": "packages/eve-recall"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "NOTICE"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/copy-package-license.mjs .",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "eve": "workspace:*",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "eve": ">=1.0.0-rc.3"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

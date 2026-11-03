@@ -1,5 +1,4 @@
-import { recallChannel } from "#public/channels/recall/index.js";
-import { signRecallWebhook } from "#public/channels/recall/verify.js";
+import { recallChannel, signRecallWebhook } from "@eve/recall";
 import {
   type ChannelDriver,
   type PlatformCall,

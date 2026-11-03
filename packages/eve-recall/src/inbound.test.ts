@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseRecallEvent } from "#public/channels/recall/inbound.js";
+import { parseRecallEvent } from "./inbound.js";
 
 const bot = { id: "bot_1", metadata: { requestedBy: "alice", ignored: 3 } };
 const participant = {

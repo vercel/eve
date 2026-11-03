@@ -21,7 +21,6 @@ import { githubDriver } from "#internal/testing/channel-conformance/github-drive
 import { linearDriver } from "#internal/testing/channel-conformance/linear-driver.js";
 import { linqDriver } from "#internal/testing/channel-conformance/linq-driver.js";
 import { photonDriver } from "#internal/testing/channel-conformance/photon-driver.js";
-import { recallDriver } from "#internal/testing/channel-conformance/recall-driver.js";
 import { slackDriver } from "#internal/testing/channel-conformance/slack-driver.js";
 import { teamsDriver } from "#internal/testing/channel-conformance/teams-driver.js";
 import { telegramDriver } from "#internal/testing/channel-conformance/telegram-driver.js";
@@ -73,7 +72,7 @@ function unnamedAnsweredPrompts(
   );
 }
 
-interface ConformanceChannel {
+export interface ConformanceChannel {
   readonly driver: () => ChannelDriver | ClientDriver;
   /**
    * A DM column beside the channel's shared-thread column. It runs only rules
@@ -166,31 +165,6 @@ const DISCORD_SERVER_SIGN_IN = signInKeptPrivate(
   "a server channel gets a link-free status whose button reveals the challenge to its person alone; the driver does not press it to show the initial challenge",
   ...SIGN_IN_SHOWN_RULES,
 );
-
-const RECALL_BROKEN = {
-  "a message while a question without free text is pending withdraws it, and the next message gets a reply":
-    {
-      reason:
-        "the queue turn policy holds the message until the turn ends, but the turn is waiting on the question",
-      symptom: /Timed out waiting for a reply to/u,
-    },
-} satisfies Partial<Record<ContractRuleName, BrokenCell>>;
-
-const RECALL_SPEECH_ONE_LINE =
-  "transcribed speech arrives as one line, which can't carry the test model's multi-line request for parallel calls";
-const RECALL_SPEECH_UNSUPPORTED = {
-  "text replies answer two pending approvals one at a time, in the order shown":
-    RECALL_SPEECH_ONE_LINE,
-  "text replies answer a question and an approval raised together, in the order shown":
-    RECALL_SPEECH_ONE_LINE,
-} satisfies Partial<Record<ContractRuleName, string>>;
-
-const RECALL_PRIVATE_CHAT =
-  "only Zoom's meeting chat reaches one participant, so elsewhere the channel won't post a sign-in link or code everyone would see";
-const RECALL_NO_PRIVATE_CHAT = {
-  "a sign-in names the service and shows its sign-in link": RECALL_PRIVATE_CHAT,
-  "a sign-in shows its confirmation code": RECALL_PRIVATE_CHAT,
-} satisfies Partial<Record<ContractRuleName, string>>;
 
 const SLACK_BROKEN = {
   "text replies answer two pending approvals one at a time, in the order shown": {
@@ -293,19 +267,6 @@ const channelConformance = {
   linq: [{ driver: linqDriver, broken: LINQ_SIGN_IN_NOT_PRIVATE }],
   "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
   photon: [{ driver: photonDriver }],
-  recall: [
-    { driver: () => recallDriver(), broken: RECALL_BROKEN },
-    {
-      driver: () => recallDriver({ input: "speech" }),
-      broken: RECALL_BROKEN,
-      unsupported: RECALL_SPEECH_UNSUPPORTED,
-    },
-    {
-      driver: () => recallDriver({ platform: "google_meet" }),
-      broken: RECALL_BROKEN,
-      unsupported: RECALL_NO_PRIVATE_CHAT,
-    },
-  ],
   slack: [{ driver: slackDriver, broken: SLACK_BROKEN, unsupported: SIGN_IN_SENT_PRIVATELY }],
   "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
   "slack-code-channel": [
@@ -442,7 +403,11 @@ function cellOf(entry: ConformanceChannel, rule: (typeof channelContract)[number
  * separate files let vitest run channels in parallel workers.
  */
 export function describeChannelConformance(channel: keyof typeof channelConformance): void {
-  const entries: readonly ConformanceChannel[] = channelConformance[channel];
+  describeConformance(channelConformance[channel]);
+}
+
+/** Holds each driver to the contract, for a channel outside eve's own table such as a workspace package's. */
+export function describeConformance(entries: readonly ConformanceChannel[]): void {
   describe.each(entries.map((entry) => ({ entry, name: entry.driver().name })))(
     "$name channel contract",
     ({ entry }) => {

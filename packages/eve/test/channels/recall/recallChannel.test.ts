@@ -1,18 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { readInputText } from "#internal/input-text.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
-import { resolveRecallWebhookUrl, sendRecallChatMessage } from "#public/channels/recall/api.js";
-import { matchSpokenOption, recallSignIns } from "#public/channels/recall/defaults.js";
 import {
   recallChannel,
   type RecallChannelConfig,
   type RecallHandle,
-} from "#public/channels/recall/recallChannel.js";
-import { signRecallWebhook } from "#public/channels/recall/verify.js";
+  signRecallWebhook,
+} from "@eve/recall";
 
 const SECRET = `whsec_${Buffer.from("recall-test-secret").toString("base64")}`;
 const participant = { id: 7, is_host: false, name: "Alice", platform: "desktop" };
@@ -51,18 +49,6 @@ function chat(text: string, to: string, from: { name: string } = participant): s
   });
 }
 
-/** Event-handler context with a stubbed chat send that answers `sent` for each call in turn. */
-function handlerContext(state: Record<string, unknown>, sent: boolean[] = []) {
-  const sendChatMessage = vi.fn(async () => sent.shift() ?? true);
-  const recall = {
-    botId: "bot_1",
-    platform: "zoom",
-    sendChatMessage,
-    supportsDirectMessages: true,
-  };
-  return { channel: { recall, state } as never, sendChatMessage };
-}
-
 async function post(request: Request, config: RecallChannelConfig = {}) {
   const channel = recallChannel({ credentials: { verificationSecret: SECRET }, ...config });
   if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
@@ -92,7 +78,7 @@ describe("recallChannel webhook", () => {
     const [address, delivery] = send.mock.calls[0]!;
     expect(address).toBe("bot_1");
     expect(delivery.message).toBe("Alice: Eve, approve.");
-    expect(readInputText(delivery)).toBe("approve");
+    expect(delivery.answerText).toBe("approve");
     expect(delivery.auth.principalId).toBe("recall:bot_1:7");
     // Recall retries with the same webhook id, so the session drops the repeat.
     expect(delivery.idempotencyKey).toBe("msg_1");
@@ -299,20 +285,6 @@ describe("recallChannel own messages", () => {
 });
 
 describe("recallChannel spoken answers", () => {
-  it.each([
-    ["Okay Eve, approve.", "approve"],
-    ["Eve, approve it", "approve"],
-    ["Eve, one", "approve"],
-    ["eve option two please", "cancel"],
-    ["let's go with the first", "approve"],
-    ["the first one", "approve"],
-    ["Eve, the second one", "cancel"],
-    ["neither, approve is wrong", undefined],
-    ["Eve, what does it deploy?", undefined],
-  ])("reads %j as %s", (said, picked) => {
-    expect(matchSpokenOption(said, "eve", approvalOptions)?.id).toBe(picked);
-  });
-
   it("answers the prompt on screen with what a natural reply picks", async () => {
     const meeting = liveChannel({
       botId: "bot_1",
@@ -375,82 +347,5 @@ describe("recallChannel receive", () => {
       "Deploy release v2.4 to production?",
       "Deployed.",
     ]);
-  });
-});
-
-describe("recall sign-in", () => {
-  const signIn = {
-    displayName: "Linear",
-    interactionId: "interaction_1",
-    name: "linear",
-    principalId: "recall:bot_1:7",
-    url: "https://auth.example.com/device",
-    userCode: "ABCD",
-  };
-
-  it("keeps the link out of shared chat when the private send fails", async () => {
-    const { channel, sendChatMessage } = handlerContext({}, [false]);
-    const surface = recallSignIns(channel);
-
-    const delivered = await surface.deliverPrivately!(signIn);
-    await surface.postStatus!(signIn, delivered);
-
-    expect(sendChatMessage).toHaveBeenCalledTimes(2);
-    const shared = sendChatMessage.mock.calls[1] as unknown[];
-    expect(shared).toHaveLength(1);
-    expect(shared[0]).toContain("can't deliver a private link");
-    expect(shared[0]).not.toContain("ABCD");
-  });
-});
-
-describe("resolveRecallWebhookUrl", () => {
-  afterEach(() => vi.unstubAllEnvs());
-
-  function deployment(env: string) {
-    vi.stubEnv("RECALL_WEBHOOK_URL", "");
-    vi.stubEnv("WORKFLOW_LOCAL_BASE_URL", "");
-    vi.stubEnv("VERCEL_ENV", env);
-    vi.stubEnv("VERCEL_URL", "agent-abc123.vercel.app");
-    vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "agent.vercel.app");
-    vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "bypass");
-  }
-
-  it("points a preview's bots at the preview, without the deployment's bypass secret", () => {
-    deployment("preview");
-    expect(resolveRecallWebhookUrl()).toBe("https://agent-abc123.vercel.app/eve/v1/recall");
-  });
-
-  it("points production bots at the production URL, under the agent's route prefix", () => {
-    deployment("production");
-    vi.stubEnv("EVE_PUBLIC_ROUTE_PREFIX", "/support");
-    expect(resolveRecallWebhookUrl()).toBe("https://agent.vercel.app/support/eve/v1/recall");
-  });
-
-  it("prefers RECALL_WEBHOOK_URL, and asks for it outside a deployment", () => {
-    deployment("development");
-    expect(() => resolveRecallWebhookUrl()).toThrow(/RECALL_WEBHOOK_URL/u);
-    vi.stubEnv("RECALL_WEBHOOK_URL", "https://tunnel.example/eve/v1/recall");
-    expect(resolveRecallWebhookUrl()).toBe("https://tunnel.example/eve/v1/recall");
-  });
-});
-
-describe("sendRecallChatMessage", () => {
-  it("splits a message at line breaks to fit Google Meet's 500-character chat", async () => {
-    const bodies: { message: string }[] = [];
-    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
-      bodies.push(JSON.parse(String(init?.body)) as { message: string });
-      return new Response("{}");
-    });
-    const line = "x".repeat(300);
-
-    await sendRecallChatMessage({
-      apiKey: "key",
-      botId: "bot_1",
-      fetch: fetch as never,
-      message: `${line}\n${line}`,
-      platform: "google_meet",
-    });
-
-    expect(bodies.map(({ message }) => message)).toEqual([line, line]);
   });
 });

@@ -16,10 +16,10 @@ The Recall.ai channel puts your agent in a video meeting as a bot. [Recall.ai](h
 eve add channel/recall
 ```
 
-This writes `agent/channels/recall.ts`:
+This installs the `@eve/recall` package and writes `agent/channels/recall.ts`:
 
 ```ts title="agent/channels/recall.ts"
-import { recallChannel } from "eve/channels/recall";
+import { recallChannel } from "@eve/recall";
 
 export default recallChannel();
 ```
@@ -70,7 +70,7 @@ A new bot can't post to the chat until the meeting admits it, which can take min
 To create bots elsewhere, such as in a tool or for Recall's calendar auto-join, build the request body with `recallBotConfig` and send it with `createRecallBot`. The config subscribes the bot to every real-time event the channel understands and turns on Recall's low-latency streaming transcription.
 
 ```ts
-import { createRecallBot, recallBotConfig, resolveRecallWebhookUrl } from "eve/channels/recall";
+import { createRecallBot, recallBotConfig, resolveRecallWebhookUrl } from "@eve/recall";
 
 const bot = await createRecallBot({
   body: recallBotConfig({
@@ -100,7 +100,7 @@ The model sees speech as `Alice: ...` and chat as `Alice (in chat):` followed by
 
 ```ts title="agent/channels/recall.ts"
 import { decide } from "eve/ai";
-import { recallChannel } from "eve/channels/recall";
+import { recallChannel } from "@eve/recall";
 
 export default recallChannel({
   async shouldRespond({ event, line, transcript, botName }) {
@@ -128,7 +128,7 @@ Each participant is the principal `recall:<botId>:<participantId>` with `princip
 To treat the whole meeting as one principal instead, return `recallMeetingAuth(event)` from `onMeetingEvent`. With one principal, the `queue` turn policy can batch a burst of lines from different speakers into one turn.
 
 ```ts
-import { recallChannel, recallMeetingAuth } from "eve/channels/recall";
+import { recallChannel, recallMeetingAuth } from "@eve/recall";
 
 export default recallChannel({
   onMeetingEvent: (_ctx, event) =>

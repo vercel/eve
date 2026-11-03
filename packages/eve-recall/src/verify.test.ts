@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { signRecallWebhook, verifyRecallWebhook } from "#public/channels/recall/verify.js";
+import { signRecallWebhook, verifyRecallWebhook } from "./verify.js";
 
 const SECRET = `whsec_${Buffer.from("recall-test-secret").toString("base64")}`;
 const NOW = 1_800_000_000_000;
