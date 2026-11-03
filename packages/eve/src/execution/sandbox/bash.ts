@@ -225,7 +225,7 @@ async function claimRunningJob(
   return {
     ...formatStreams({ stderr: raw.stderr, stdout }, omitted),
     message:
-      `The command is still running after ${BASH_YIELD_SECONDS} seconds as process group ${pid}; stdout and stderr show its output so far. ` +
+      `The command is still running after ${BASH_YIELD_SECONDS} seconds as process group ${pid}; this result includes its output so far. ` +
       `It keeps writing to ${directory}/stdout and ${directory}/stderr, and writes its exit code to ${directory}/exit when it finishes. ` +
       `Check on it with later commands such as \`tail ${directory}/stdout\` or \`cat ${directory}/exit\`, and stop it with \`kill -- -${pid}\`.`,
     outputDirectory: directory,
