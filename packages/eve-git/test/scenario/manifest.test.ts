@@ -6,7 +6,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { after, before, test } from "node:test";
 
 import type { CompilerDiagnostic } from "../../../eve/dist/src/compiler/diagnostics.js";
-import { ROOT_COMPILED_AGENT_NODE_ID } from "../../../eve/dist/src/compiler/manifest.js";
+import {
+  compiledOf,
+  ROOT_COMPILED_AGENT_NODE_ID,
+} from "../../../eve/dist/src/compiler/manifest.js";
 import { compileAgentManifest } from "../../../eve/dist/src/compiler/normalize-manifest.js";
 import { discoverAgent } from "../../../eve/dist/src/discover/discover-agent.js";
 import { bundleAuthoredModuleMapForGeneration } from "../../../eve/dist/src/internal/authored-module-loader.js";
@@ -70,9 +73,9 @@ async function compileConsumer(name: string, gitConfig: string) {
 
 test("built extension mounts as git with only session-resolved GitHub contributions", async () => {
   const { manifest } = await compileConsumer("git-manifest-consumer", "{}");
-  assert.ok(manifest.dynamicSkills.some((entry) => entry.slug === "git__pr"));
-  assert.ok(manifest.dynamicInstructions.some((entry) => entry.slug === "git__github"));
-  assert.ok(manifest.dynamicTools.some((entry) => entry.slug === "git__gh"));
+  assert.ok(compiledOf(manifest, "skill").some((entry) => entry.slug === "git__pr"));
+  assert.ok(compiledOf(manifest, "instructions").some((entry) => entry.slug === "git__github"));
+  assert.ok(compiledOf(manifest, "tool").some((entry) => entry.slug === "git__gh"));
   assert.ok(!manifest.tools.some((tool) => tool.name.startsWith("git__")));
 });
 
@@ -81,7 +84,7 @@ test("git__gh resolves an executable tool when GitHub is configured", async () =
     "git-gh-consumer",
     '{ github: { connector: "github/acme-bot", authorize: () => true, async broker() {}, principalType: "app" } }',
   );
-  const resolver = manifest.dynamicTools.find((entry) => entry.slug === "git__gh");
+  const resolver = compiledOf(manifest, "tool").find((entry) => entry.slug === "git__gh");
   assert.ok(resolver);
 
   // Evaluate the packaged resolver through the app bundle, not its source export.

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { CompiledSandboxDefinition } from "#compiler/manifest.js";
 import type { ModuleBackedDefinitionLoadOptions } from "#compiler/normalize-helpers.js";
-import type { SandboxSourceRef } from "#discover/manifest.js";
+import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { getAuthoredModuleExport } from "#internal/authored-module.js";
 import { getBoundSandboxEnvironment, isSandboxEnvironment } from "#shared/sandbox-environment.js";
 
@@ -11,7 +11,7 @@ const SELECTOR = Symbol.for("eve.sandbox-selector");
 
 export async function compileSandboxDefinition(
   _agentRoot: string,
-  source: SandboxSourceRef,
+  source: ModuleSourceRef,
   options: ModuleBackedDefinitionLoadOptions,
 ): Promise<CompiledSandboxDefinition> {
   const namespace = await options.loadNamespace(source.sourceId);

@@ -1,6 +1,6 @@
 import { readDurableSession } from "#execution/durable-session-read.js";
 import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
-import { pendingContinuation } from "#reactions/continuation.js";
+import { pendingContinuation } from "#definitions/continuation.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { storedProjection } from "#harness/session-machine/view.js";

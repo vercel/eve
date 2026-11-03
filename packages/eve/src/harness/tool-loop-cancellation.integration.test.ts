@@ -4,15 +4,11 @@ import { jsonSchema, type LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createTestKernel, type TestKernelConfig } from "#internal/testing/kernel.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
-import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
-
-// The harness runs outside a workflow body here, where run attributes cannot
-// be written; the attribute contract is covered by emit.test.ts.
-vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -21,12 +17,7 @@ const FAILURE_EVENT_TYPES = ["step.failed", "turn.failed", "session.failed"] as 
 
 function createSession(): HarnessSession {
   return {
-    agent: {
-      modelReference: { id: "integration-model" },
-      system: "You are a test assistant.",
-      tools: [],
-    },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: "http:integration-session",
     history: [],
     sessionId: "integration-session",
@@ -47,9 +38,10 @@ function createEventCollector(): {
 function createConfig(
   model: LanguageModel,
   emit: HarnessEmitFn,
-  overrides?: Partial<ToolLoopHarnessConfig>,
-): ToolLoopHarnessConfig {
+  overrides?: Partial<TestKernelConfig>,
+): TestKernelConfig {
   return {
+    agent: { model: { id: "integration-model" } },
     handleEvent: emit,
     resolveModel: vi.fn().mockResolvedValue(model),
     tools: new Map(),
@@ -83,7 +75,7 @@ describe("tool loop cancellation (real AI SDK)", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
+    const runStep = createTestKernel(
       createConfig(model, emit, { abortSignal: abortController.signal }),
     );
 
@@ -112,7 +104,7 @@ describe("tool loop cancellation (real AI SDK)", () => {
       },
     });
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
+    const runStep = createTestKernel(
       createConfig(model, emit, { abortSignal: abortController.signal }),
     );
 
@@ -135,7 +127,7 @@ describe("tool loop cancellation (real AI SDK)", () => {
     const logs = captureLogRecords();
     const cancellation = new TurnCancelledError();
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
+    const runStep = createTestKernel(
       createConfig(new MockLanguageModelV3(), emit, {
         abortSignal: new AbortController().signal,
         resolveModel: vi.fn().mockRejectedValue(cancellation),
@@ -152,7 +144,7 @@ describe("tool loop cancellation (real AI SDK)", () => {
 
   it("fails the session when the model resolver throws an ordinary error", async () => {
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
+    const runStep = createTestKernel(
       createConfig(new MockLanguageModelV3(), emit, {
         abortSignal: new AbortController().signal,
         resolveModel: vi.fn().mockRejectedValue(new Error("No provider for integration-model.")),
@@ -208,7 +200,7 @@ describe("tool loop cancellation (real AI SDK)", () => {
       doStream,
     });
 
-    const tools: ToolLoopHarnessConfig["tools"] = new Map([
+    const tools: TestKernelConfig["tools"] = new Map([
       [
         "wait_for_cancel",
         {
@@ -234,23 +226,12 @@ describe("tool loop cancellation (real AI SDK)", () => {
     ]);
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
+    const runStep = createTestKernel(
       createConfig(model, emit, { abortSignal: abortController.signal, tools }),
     );
 
     const session: HarnessSession = {
       ...createSession(),
-      agent: {
-        modelReference: { id: "integration-model" },
-        system: "You are a test assistant.",
-        tools: [
-          {
-            description: "Waits until the turn is cancelled.",
-            inputSchema: { type: "object" },
-            name: "wait_for_cancel",
-          },
-        ],
-      },
     };
 
     await expect(runStep(session, { message: "wait for cancel" })).rejects.toBe(cancellation);
@@ -295,14 +276,16 @@ describe("tool loop cancellation (real AI SDK)", () => {
       });
 
     const inert = createEventCollector();
-    const inertResult = await createToolLoopHarness(
+    const inertResult = await createTestKernel(
       createConfig(buildModel(), inert.emit, { abortSignal: new AbortController().signal }),
     )(createSession(), { message: "Hi" });
 
     const bare = createEventCollector();
-    const bareResult = await createToolLoopHarness(createConfig(buildModel(), bare.emit))(
+    const bareResult = await createTestKernel(createConfig(buildModel(), bare.emit))(
       createSession(),
-      { message: "Hi" },
+      {
+        message: "Hi",
+      },
     );
 
     expect(inertResult.next).toBe(bareResult.next);

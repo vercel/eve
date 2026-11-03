@@ -1,5 +1,5 @@
 import { ParentSessionKey } from "#context/keys.js";
-import { readDynamicSubagentSelections } from "#reactions/kinds/subagent.js";
+import { readDynamicSubagentSelections } from "#definitions/subagents.js";
 import type { ContextReader } from "#context/key.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";

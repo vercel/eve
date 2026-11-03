@@ -43,5 +43,6 @@
     "packages/eve/src/tools/provided/workflow.ts",
     "packages/eve/src/tools/provided/write-file.ts"
   ],
-  "rule59_nitroVirtualIdAllowlist": []
+  "rule59_nitroVirtualIdAllowlist": [],
+  "rule51_factBuildersByFile": {}
 }

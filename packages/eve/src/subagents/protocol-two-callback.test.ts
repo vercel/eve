@@ -12,8 +12,7 @@ import {
 } from "#subagents/protocol-two-callback.js";
 
 const BASE: HarnessSession = {
-  agent: { modelReference: { id: "test" }, system: "", tools: [] },
-  compaction: { recentWindowSize: 10, threshold: 0.8 },
+  compaction: {},
   continuationToken: "test",
   history: [],
   sessionId: "parent-session",

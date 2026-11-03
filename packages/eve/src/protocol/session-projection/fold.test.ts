@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { StoredLine, UserPart } from "#protocol/session-events/envelope.js";
-import { turnInput } from "#reactions/turn.js";
+import { turnInput } from "#definitions/turn.js";
 import {
   emptySessionView,
   emptyPreviews,

@@ -19,10 +19,8 @@ type ModuleBacking =
     }
   | {
       readonly kind: "programmatic";
-      readonly dependencies?: Readonly<Record<string, string>>;
       readonly mountId?: string;
       readonly moduleId: string;
-      readonly parameters?: Readonly<Record<string, unknown>>;
       readonly registryId: string;
       readonly revision: string;
       readonly semanticRevision?: string;

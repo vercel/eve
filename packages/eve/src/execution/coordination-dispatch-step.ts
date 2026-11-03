@@ -4,7 +4,6 @@ import {
   prepareCoordinationDispatch,
   type CoordinationDispatchInput,
   type CoordinationDispatchResult,
-  type PendingDispatchFacts,
 } from "#execution/coordination-dispatch-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { commitSessionStep, type SessionStepState } from "#execution/publish-session-events.js";
@@ -27,12 +26,15 @@ import {
 import { readTaskTable, type TaskTable } from "#execution/tasks/table.js";
 import { captureAgentSessionContext } from "#execution/agent-sessions/context.js";
 import { sessionView } from "#harness/session-machine/commit.js";
-import { startTask, type TaskCallStart } from "#harness/session-machine/transitions.js";
+import {
+  startDispatchedCalls,
+  startTask,
+  type PendingDispatch,
+  type TaskCallStart,
+} from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { HarnessSessionBase } from "#harness/types.js";
-import type { FactOf } from "#protocol/session-events/facts.js";
-import { callSettledFrom, callStarted } from "#harness/call-facts.js";
 import { copyView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
@@ -55,25 +57,11 @@ export async function dispatchCoordinationStep(
  * checkpointed first, so retrying the publication cannot start those runs again.
  */
 export async function publishDispatchedCallsStep(
-  input: SessionStepState & { readonly pending: PendingDispatchFacts },
+  input: SessionStepState & { readonly pending: PendingDispatch },
 ): Promise<SessionStateTransition> {
   "use step";
   return await withSessionStateDelta(input, ({ pending, ...target }) =>
-    commitSessionStep(
-      target,
-      (view) => {
-        // One introduction per task in this commit, based on the public table, not the private
-        // runtime address the dispatch already recorded.
-        const introducedTasks = new Set(Object.keys(view.projection.view.tasks));
-        const events = [
-          ...pending.executing,
-          ...pending.started.flatMap((task) => startTask(view, task, introducedTasks).events),
-          ...pending.refused,
-        ];
-        return [{ events, turn: view.turn }];
-      },
-      { origin: "own" },
-    ),
+    commitSessionStep(target, (view) => [startDispatchedCalls(view, pending)], { origin: "own" }),
   );
 }
 
@@ -97,8 +85,8 @@ async function dispatchCoordination(
   let nextSession: HarnessSessionBase = session;
   const results: RuntimeActionResult[] = [];
   const started: TaskCallStart[] = [];
-  const refused: FactOf<"call.settled">[] = [];
-  const executing: FactOf<"call.started">[] = [];
+  const refused: PendingDispatch["refused"][number][] = [];
+  const executing: PendingDispatch["executing"][number][] = [];
   // Prospective facts for this admission batch use the same fold as committed facts. This
   // shadow is never saved: limits count work actually started earlier in the batch without
   // introducing a private lifecycle counter or treating undispatched intents as queued work.
@@ -131,7 +119,7 @@ async function dispatchCoordination(
     if (dispatched.result !== undefined) results.push(dispatched.result);
     // A call the turn waits on runs from now, in its own run; a task's call starts with its task.
     else if (task.entry.entryPoint === "execute")
-      executing.push(callStarted(task.callId, { clearedBy: task.clearedBy }));
+      executing.push({ callId: task.callId, clearedBy: task.clearedBy });
     if (dispatched.started !== undefined) {
       started.push(dispatched.started);
       const shadow = sessionView(
@@ -145,12 +133,7 @@ async function dispatchCoordination(
       );
     }
     if (dispatched.refusal !== undefined && dispatched.result !== undefined)
-      refused.push(
-        callSettledFrom(dispatched.result, {
-          rejected: true,
-          cause: { policy: dispatched.refusal },
-        }),
-      );
+      refused.push({ policy: dispatched.refusal, result: dispatched.result });
   }
 
   return {

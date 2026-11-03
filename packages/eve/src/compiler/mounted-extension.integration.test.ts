@@ -1,4 +1,5 @@
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { declared } from "#runtime/types.js";
 import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
@@ -6,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import { compiledOf, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { bundleAuthoredModuleMapForGeneration } from "#internal/authored-module-loader.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
@@ -257,7 +258,9 @@ describe("mounted extension via authored-source loader", () => {
     try {
       // Each mounted authentication hook requests a token for its own connector.
       const authenticate = (map: typeof moduleMap, mount: string) => {
-        const hook = manifest.hooks.find((entry) => entry.slug === `${mount}__authenticate`)!;
+        const hook = compiledOf(manifest, "hook").find(
+          (entry) => entry.slug === `${mount}__authenticate`,
+        )!;
         const definition = map.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[hook.sourceId]!
           .default as {
           events: Record<string, (event: unknown, ctx: object) => Promise<void>>;
@@ -710,7 +713,7 @@ describe("mounted extension via directory form with override", () => {
     const legacy = graph.root.agent.tools.find((entry) => entry.name === "crm__crm_legacy");
     expect(legacy).toBeUndefined();
 
-    const pulse = graph.root.agent.dynamicToolResolvers.find(
+    const pulse = declared(graph.root.agent, "tool").find(
       (resolver) => resolver.slug === "crm__crm_pulse",
     );
     expect(pulse).toBeUndefined();

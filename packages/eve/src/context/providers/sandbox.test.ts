@@ -20,15 +20,7 @@ vi.mock("../../execution/sandbox/ensure.js", () => ({
 
 function createHarnessSession(): HarnessSession {
   return {
-    agent: {
-      modelReference: { id: "openai/gpt-5.4" },
-      system: "",
-      tools: [],
-    },
-    compaction: {
-      recentWindowSize: 0,
-      threshold: 0,
-    },
+    compaction: {},
     continuationToken: "",
     history: [],
     sessionId: "session_1",

@@ -25,11 +25,11 @@ describe("durable session checkpoints", () => {
       snapshot: { session: projectToDurableSession(session) },
     });
     expect(readDurableSession(state)).toBe(state.snapshot.session);
-    expect(state.snapshot.session.agent).toEqual({ system: "test system" });
+    expect(state.snapshot.session).not.toHaveProperty("agent");
     expect(state.snapshot.session).not.toHaveProperty("history");
   });
 
-  it("refreshes projections when replacing session program memory", () => {
+  it("refreshes projections when replacing the persisted session state", () => {
     const state = createDurableSessionState({
       session: buildSession({ sessionId: "session", continuationToken: "old" }),
     });
@@ -56,22 +56,7 @@ function buildSession(input: {
   withRefreshableAgent?: boolean;
 }): HarnessSession {
   return {
-    agent: {
-      compactionModelReference: input.withRefreshableAgent
-        ? { id: "compaction-model", contextWindowTokens: 200_000 }
-        : undefined,
-      modelReference: { id: "test-model", contextWindowTokens: 200_000 },
-      system: "test system",
-      tools: input.withRefreshableAgent
-        ? [{ description: "", inputSchema: { type: "object" }, name: "test" }]
-        : [],
-    },
-    compaction: {
-      lastKnownInputTokens: 100,
-      lastKnownPromptMessageCount: 3,
-      recentWindowSize: 10,
-      threshold: 180_000,
-    },
+    compaction: { lastKnownInputTokens: 100, lastKnownPromptMessageCount: 3 },
     continuationToken: input.continuationToken,
     history: [{ content: "hi", kind: "user", role: "user" }],
     sessionId: input.sessionId,
