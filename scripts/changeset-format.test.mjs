@@ -408,7 +408,7 @@ for (const mode of ["stable", "rc"]) {
     await release({ [desktopCommit]: 10 });
     const releasedManifest = await readFile(join(root, "packages/desktop/package.json"), "utf8");
     const releasedNotes = await readFile(join(root, "packages/desktop/CHANGELOG.md"), "utf8");
-    assert.equal(JSON.parse(releasedManifest).version, mode === "stable" ? "0.1.0" : "0.1.0-rc.0");
+    assert.equal(JSON.parse(releasedManifest).version, mode === "stable" ? "0.0.1" : "0.0.1-rc.0");
     assert.match(releasedNotes, /Add the experimental `@eve\/agent-desktop` extension/u);
     git("add", ".");
     git("commit", "-qm", "chore: Version packages");

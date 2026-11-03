@@ -1,5 +1,5 @@
 ---
-"@eve/agent-desktop": minor
+"@eve/agent-desktop": patch
 ---
 
 Add the experimental `@eve/agent-desktop` extension for accessibility-based desktop automation in Linux sandboxes.
