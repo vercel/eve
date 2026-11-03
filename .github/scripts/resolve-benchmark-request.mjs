@@ -23,7 +23,7 @@ export const BENCHMARK_DATASETS = {
 };
 
 /** The dataset of every automatic run and of a request that names none. */
-export const DEFAULT_DATASET = "swe-lean";
+export const DEFAULT_DATASET = "deepswe-lean";
 
 function parseDataset(value) {
   if (!Object.hasOwn(BENCHMARK_DATASETS, value)) {

@@ -12,7 +12,7 @@ import {
 
 const sweLean = { dataset: "swe-lean", reasoning: "low", attempts: "5" };
 const deepsweLean = { dataset: "deepswe-lean", reasoning: "high", attempts: "3" };
-const defaults = { harness: "eve-code,opencode,pi", slug: "eve-code+opencode+pi", ...sweLean };
+const defaults = { harness: "eve-code,opencode,pi", slug: "eve-code+opencode+pi", ...deepsweLean };
 
 const sha = "a".repeat(40);
 const pull = {
@@ -86,7 +86,7 @@ for (const harness of BENCHMARK_HARNESSES) {
     assert.deepEqual(await resolve(fixture({ body: `/benchmark ${harness}` })), {
       harness,
       slug: harness,
-      ...sweLean,
+      ...deepsweLean,
       sha,
       pr: "42",
     });
@@ -117,24 +117,27 @@ test("manual dispatch offers exactly the datasets the resolver accepts", async (
 });
 
 test("a comment can select a dataset, with the default harnesses or its own list", async () => {
-  assert.deepEqual(await resolve(fixture({ body: "/benchmark deepswe-lean" })), {
+  assert.deepEqual(await resolve(fixture({ body: "/benchmark swe-lean" })), {
     ...defaults,
-    ...deepsweLean,
+    ...sweLean,
     sha,
     pr: "42",
   });
   for (const body of [
-    "/benchmark deepswe-lean eve-code,pi",
-    "/benchmark eve-code pi deepswe-lean",
-    "/benchmark eve-code, deepswe-lean, pi",
+    "/benchmark swe-lean eve-code,pi",
+    "/benchmark eve-code pi swe-lean",
+    "/benchmark eve-code, swe-lean, pi",
   ]) {
     const result = await resolve(fixture({ body }));
     assert.deepEqual(
       [result.dataset, result.reasoning, result.attempts, result.harness, result.slug],
-      ["deepswe-lean", "high", "3", "eve-code,pi", "eve-code+pi"],
+      ["swe-lean", "low", "5", "eve-code,pi", "eve-code+pi"],
     );
   }
-  assert.equal((await resolve(fixture({ body: "/benchmark swe-lean pi" }))).dataset, "swe-lean");
+  assert.equal(
+    (await resolve(fixture({ body: "/benchmark deepswe-lean pi" }))).dataset,
+    "deepswe-lean",
+  );
 });
 
 test("a comment cannot name two datasets", async () => {
@@ -248,12 +251,12 @@ test("manual dispatch defaults to the default harnesses and validates an explici
   await assert.rejects(resolve(input), /Supported benchmark harnesses/u);
 });
 
-test("manual dispatch can publish a deepswe-lean result and rejects unknown datasets", async () => {
+test("manual dispatch can publish a swe-lean result and rejects unknown datasets", async () => {
   const input = fixture({ eventName: "workflow_dispatch" });
-  input.context.payload.inputs = { harness: "", dataset: "deepswe-lean" };
+  input.context.payload.inputs = { harness: "", dataset: "swe-lean" };
   assert.deepEqual(await resolve(input), {
     ...defaults,
-    ...deepsweLean,
+    ...sweLean,
     sha: input.context.sha,
     pr: "",
   });
