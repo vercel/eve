@@ -9,8 +9,8 @@ export const BENCHMARK_HARNESSES = [
   "oracle",
 ];
 
-/** Harnesses compared on every automatic run; eve-code against opencode and pi. */
-export const DEFAULT_HARNESSES = ["eve-code", "opencode", "pi"];
+/** Harnesses compared on every automatic run; eve-code against opencode, pi, and fx. */
+export const DEFAULT_HARNESSES = ["eve-code", "opencode", "pi", "fx"];
 
 /**
  * eve-bench datasets a benchmark can run, with the settings each was calibrated for.
