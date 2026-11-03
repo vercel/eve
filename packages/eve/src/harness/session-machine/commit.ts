@@ -2,7 +2,7 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import type { ModelMessage } from "ai";
 
 import { signInInteractionId } from "#harness/interaction-facts.js";
-import { validateHarnessModelMessages } from "#harness/messages.js";
+import { changeHistory, type HistoryChange } from "./history.js";
 import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
 import { readHitlState, writeHitlState, type HitlStateChange } from "#harness/hitl/requests.js";
@@ -11,18 +11,16 @@ import type { SessionView } from "./view.js";
 
 // The save side of the machine. A transition returns the events that report what changed and
 // the execution state that follows; `applyTransition` publishes the events in order (the publish
-// sink folds each into the projection) and writes the rest. The turn state also has direct lifecycle helpers.
+// sink folds each into the projection) and writes the rest.
 // A private record lives only while the projection shows its owner open, so closing an owner is
 // one event: a transition reports it, and the save drops the record here.
 
-/** What a machine transition returns; approval storage still has direct writers. */
+/** What a machine transition returns. */
 export interface Transition extends HitlStateChange {
   readonly turn: TurnState;
   readonly events: readonly SessionEvent[];
-  /** Messages the transition commits to the end of history. */
-  readonly commit?: readonly ModelMessage[];
-  /** The transition empties history, as `clear` does. */
-  readonly clearsHistory?: true;
+  /** How the transition changes history: messages it commits, or a clear's empty history. */
+  readonly history?: HistoryChange;
 }
 
 /**
@@ -73,16 +71,21 @@ export function saveTransition<T extends { readonly state?: SessionStateMap }>(
   transition: Transition,
 ): T {
   const next = writeTurnState(writeHitlState(session, transition), transition.turn);
-  const commit = transition.commit ?? [];
-  if (transition.clearsHistory !== true && commit.length === 0) return next;
-  if (!("history" in session)) {
+  if (transition.history === undefined) return next;
+  if (!("history" in next)) {
     throw new Error("A transition that changes history needs the session's history.");
   }
-  const { history: previous } = session as T & Pick<HarnessSession, "history">;
-  const history = transition.clearsHistory
-    ? []
-    : validateHarnessModelMessages([...previous, ...commit]);
-  return { ...next, history };
+  return changeHistory(
+    next as T & Pick<HarnessSession, "compaction" | "history">,
+    transition.history,
+  );
+}
+
+/** The messages a transition commits to the end of history. */
+export function committedMessages(transition: Transition): readonly ModelMessage[] {
+  return transition.history !== undefined && "append" in transition.history
+    ? transition.history.append
+    : [];
 }
 
 /**
