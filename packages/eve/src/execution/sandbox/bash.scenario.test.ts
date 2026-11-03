@@ -124,6 +124,9 @@ describe("executeBashOnSandbox with a real shell", () => {
         throw new Error(`expected running: ${JSON.stringify(result)}`);
       expect(result.message).toContain(`still running after ${waitSeconds} seconds`);
       await runHostBash(`kill -- -${result.pid}`, home);
+      // The killed group writes its exit file after the kill returns; removing the
+      // directory before that races with the write.
+      await executeBashOnSandbox(sandbox, { command: waitCommand(result.message) });
       await rm(result.outputDirectory, { force: true, recursive: true });
     },
   );
