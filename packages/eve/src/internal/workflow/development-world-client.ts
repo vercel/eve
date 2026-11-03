@@ -154,7 +154,11 @@ type ForwardedOperation = (...args: unknown[]) => Promise<unknown>;
  * so the client's surface tracks the table instead of hand-written stubs.
  */
 function buildForwardedOperations(): {
-  readonly groups: Readonly<Record<string, Readonly<Record<string, ForwardedOperation>>>>;
+  readonly groups: Readonly<Record<string, Readonly<Record<string, ForwardedOperation>>>> & {
+    readonly events: Readonly<
+      Record<"create" | "get" | "list" | "listByCorrelationId", ForwardedOperation>
+    >;
+  };
   readonly topLevel: Readonly<Record<string, ForwardedOperation>>;
 } {
   const groups: Record<string, Record<string, ForwardedOperation>> = {};
@@ -168,7 +172,12 @@ function buildForwardedOperations(): {
       (groups[operation.slice(0, separator)] ??= {})[operation.slice(separator + 1)] = forward;
     }
   }
-  return { groups, topLevel };
+  return {
+    groups: groups as typeof groups & {
+      events: Record<"create" | "get" | "list" | "listByCorrelationId", ForwardedOperation>;
+    },
+    topLevel,
+  };
 }
 
 function createQueueHandler(
