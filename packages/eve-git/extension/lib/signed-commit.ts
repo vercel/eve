@@ -1,4 +1,4 @@
-export const GH_SIGNED_COMMIT_VERSION = "4";
+export const GH_SIGNED_COMMIT_VERSION = "5";
 
 export const GH_SIGNED_COMMIT_SOURCE = String.raw`#!/usr/bin/env node
 const { execFileSync } = require("node:child_process");
