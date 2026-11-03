@@ -43,12 +43,13 @@ export function extractErrorSignals(error: unknown): ErrorSignals {
     if (typeof candidate.name === "string" && candidate.name.length > 0) {
       link.name = candidate.name;
     }
-    const code = readErrorField(candidate, "code");
+    const bodies = readProviderErrorBodies(candidate);
+    const code = readErrorField(candidate, bodies, "code");
     if (code !== undefined) link.code = code;
     if (typeof candidate.statusCode === "number") {
       link.statusCode = candidate.statusCode;
     }
-    const type = readErrorField(candidate, "type");
+    const type = readErrorField(candidate, bodies, "type");
     if (type !== undefined) link.type = type;
     if (typeof candidate.hint === "string" && candidate.hint.length > 0) {
       link.hint = candidate.hint;
@@ -59,25 +60,32 @@ export function extractErrorSignals(error: unknown): ErrorSignals {
 }
 
 /**
- * Reads `field` from the error itself, else from the provider error body the AI SDK keeps in
- * `data` or `responseBody`: an `APICallError` carries the provider's `code` and `type` only there.
+ * The provider error bodies the AI SDK keeps on an error, in lookup order: `data`, then the
+ * parsed `responseBody`. An `APICallError` carries the provider's `code` and `type` only there.
  */
+function readProviderErrorBodies(candidate: Record<string, unknown>): readonly unknown[] {
+  if (typeof candidate.responseBody !== "string") return [candidate.data];
+  try {
+    return [candidate.data, JSON.parse(candidate.responseBody)];
+  } catch {
+    return [candidate.data];
+  }
+}
+
+/** Reads `field` from the error itself, else from its provider error bodies. */
 function readErrorField(
   candidate: Record<string, unknown>,
+  bodies: readonly unknown[],
   field: "code" | "type",
 ): string | undefined {
   const own = candidate[field];
   if (typeof own === "string" && own.length > 0) return own;
 
-  const fromData = readBodyField(candidate.data, field);
-  if (fromData !== undefined) return fromData;
-
-  if (typeof candidate.responseBody !== "string") return undefined;
-  try {
-    return readBodyField(JSON.parse(candidate.responseBody), field);
-  } catch {
-    return undefined;
+  for (const body of bodies) {
+    const value = readBodyField(body, field);
+    if (value !== undefined) return value;
   }
+  return undefined;
 }
 
 function readBodyField(value: unknown, field: "code" | "type"): string | undefined {
