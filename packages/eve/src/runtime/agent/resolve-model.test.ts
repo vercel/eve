@@ -30,7 +30,12 @@ const BUILD_METADATA = createModelMetadata({
       {
         slug: "anthropic/claude-opus-5",
         providers: [
-          { contextWindowTokens: 200_000, provider: "anthropic", providerModelId: "claude-opus-5" },
+          {
+            contextWindowTokens: 200_000,
+            maxOutputTokens: 64_000,
+            provider: "anthropic",
+            providerModelId: "claude-opus-5",
+          },
         ],
       },
     ],
@@ -212,8 +217,31 @@ describe("dynamic runtime model resolution", () => {
 
     expect(resolved).toMatchObject({
       model,
-      reference: { contextWindowTokens: 200_000, id: "anthropic/claude-opus-5" },
+      reference: {
+        contextWindowTokens: 200_000,
+        id: "anthropic/claude-opus-5",
+        maxOutputTokens: 64_000,
+      },
     });
+  });
+
+  it("carries the catalog's max output on a Gateway id, and none for a model it doesn't list", async () => {
+    const resolved = await resolveRuntimeModelSelection({
+      durability: "durable",
+      modelMetadata: metadataSource(),
+      selection: "anthropic/claude-opus-5",
+    });
+    expect(resolved.reference).toMatchObject({
+      contextWindowTokens: 200_000,
+      maxOutputTokens: 64_000,
+    });
+
+    const unlisted = await resolveRuntimeModelSelection({
+      durability: "durable",
+      modelMetadata: metadataSource(),
+      selection: "openai/gpt-5.5",
+    });
+    expect(unlisted.reference.maxOutputTokens).toBeUndefined();
   });
 
   it("rejects missing, malformed, and unknown selections", async () => {

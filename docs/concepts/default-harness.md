@@ -20,6 +20,8 @@ export default defineAgent({
 
 Before summarizing, eve tries to shorten oversized tool results in older history. If that can't free enough space, eve summarizes. eve measures the space against the provider's last reported input token count, plus an estimate for new messages.
 
+This is eve's default strategy, `fixedTail()`. To decide when and how to compact your own way, set [`compaction.compact`](../agent-config#custom-compaction-strategies). eve checks what the strategy returns.
+
 The summary prompt asks the compaction model to separate completed progress and decisions from remaining work. It also asks the model to keep the constraints, preferences, data, and references needed to continue. A later compaction passes the previous summary in full and replaces it with an updated one. Omit `compaction.model` to summarize with the active turn model.
 
 After compacting, the harness keeps the most recent messages word for word next to the summary. It keeps up to 20,000 tokens or half the threshold, whichever is smaller, and shortens their tool results to 2,000 characters. The current user message is always kept. When that message alone exceeds the budget, the harness keeps its start and end with a note at the cut. It summarizes the middle with the older turns.

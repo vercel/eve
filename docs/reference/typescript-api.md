@@ -178,6 +178,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | `eve/memory/file`                                                                 | `fileMemory`, `inMemory`, and the conditional document backend contract                                           |
 | `eve/memory/file/vercel`                                                          | `vercelBlob` and Vercel Blob backend options                                                                      |
 | `eve/context`                                                                     | `defineState`, session and state types                                                                            |
+| [`eve/compaction`](../agent-config#custom-compaction-strategies)                  | `fixedTail`, `turns`, and the `CompactionStrategy` and `CompactionContext` types                                  |
 | `eve/sandbox`                                                                     | `defineSandbox`, `defineParentSandbox`, `DefaultSandbox`, and sandbox session and network policy types            |
 | [`eve/sandbox/provider`](../sandbox/custom-providers)                             | `defineSandboxProvider`, provider errors, `SANDBOX_AGENT_ENV`, and connection and lifecycle types                 |
 | [`eve/sandbox/docker`](../sandbox/docker)                                         | `DockerSandbox` and Docker environment and session types                                                          |
