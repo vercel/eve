@@ -90,7 +90,15 @@ export async function bundleWorkflowStepRegistrations(input: {
 // loaded lazily from the application's install, and it exposes native
 // optional codecs for xz/zstd support. Step bundles must neither fail
 // resolving an absent optional install nor inline platform `.node` artifacts.
-const WORKFLOW_STEP_EXTERNAL_PACKAGES = ["@mongodb-js/zstd", "just-bash", "node-liblzma"] as const;
+// eve loads its own Rolldown lazily, and inlining it would also put an
+// `import.meta.env` read in the bundle, which makes Vitest scan the whole
+// bundle and overflow its tokenizer.
+const WORKFLOW_STEP_EXTERNAL_PACKAGES = [
+  "@mongodb-js/zstd",
+  "just-bash",
+  "node-liblzma",
+  "rolldown",
+] as const;
 
 function isWorkflowStepExternalPackage(source: string): boolean {
   return WORKFLOW_STEP_EXTERNAL_PACKAGES.some(
