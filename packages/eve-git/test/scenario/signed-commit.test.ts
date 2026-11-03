@@ -63,6 +63,13 @@ globalThis.fetch = async (url, init = {}) => {
     const tree = git(["write-tree"], { env });
     const oid = git(["commit-tree", tree, "-p", input.expectedHeadOid, "-m", input.message.headline]);
     git(["update-ref", "refs/heads/" + input.branch.branchName, oid, input.expectedHeadOid]);
+    if (process.env.FAKE_GITHUB_RACE) {
+      // Someone else pushes right after the commit, before the script fetches.
+      const blob = git(["hash-object", "-w", "--stdin"], { input: "raced\n" });
+      git(["update-index", "--add", "--cacheinfo", "100644," + blob + ",race.txt"], { env });
+      const raced = git(["commit-tree", git(["write-tree"], { env }), "-p", oid, "-m", "race"]);
+      git(["update-ref", "refs/heads/" + input.branch.branchName, raced, oid]);
+    }
     return Response.json({ data: { createCommitOnBranch: { commit: { oid } } } });
   }
   throw new Error("unexpected GitHub request: " + method + " " + pathname);
@@ -75,6 +82,8 @@ const IDENTITY = {
   GIT_COMMITTER_NAME: "eve-git test",
   GIT_COMMITTER_EMAIL: "eve-git@example.test",
 };
+
+const REPO_URL = "https://github.com/owner/repo";
 
 let dir: string;
 let remote: string;
@@ -100,6 +109,7 @@ beforeEach(async () => {
   await commitFile(upstream, "app.txt", "v1\n");
   await git(upstream, "push", "--quiet", "origin", "HEAD:main");
   await git(dir, "clone", "--quiet", remote, sandbox);
+  await git(sandbox, "config", `url.${remote}.insteadOf`, REPO_URL);
 });
 
 afterEach(async () => {
@@ -114,20 +124,38 @@ test("a new branch starts at local HEAD, so later pushes keep newer main commits
 
   await stage(sandbox, "feature.txt", "first\n");
   await signedCommit("first");
-  await stage(sandbox, "feature.txt", "second\n");
-  await signedCommit("second");
+  // Larger than execFileSync's default 1 MiB maxBuffer, like a monorepo lockfile.
+  const large = "second\n".repeat(200_000);
+  await stage(sandbox, "feature.txt", large);
+  await writeFile(join(sandbox, "untracked.txt"), "preserved\n");
+  const { stdout } = await signedCommit("second");
 
   assert.deepEqual(await changedSinceMain("feature"), ["feature.txt"]);
-  assert.equal(await show("feature:feature.txt"), "second\n");
+  assert.equal(await show("feature:feature.txt"), large);
   assert.equal(await rev(remote, "feature~2"), clonedMain);
+  assert.equal(await rev(sandbox, "HEAD"), stdout.trim());
+  assert.equal(await git(sandbox, "status", "--porcelain"), "?? untracked.txt");
+});
+
+test("syncs to the commit it made even when the branch moves right after", async () => {
+  await stage(sandbox, "feature.txt", "first\n");
+  const { stdout } = await signedCommit("first", { FAKE_GITHUB_RACE: "1" });
+
+  assert.equal(await rev(sandbox, "HEAD"), stdout.trim());
+  assert.equal(await rev(remote, "feature^"), stdout.trim());
+  assert.equal(await git(sandbox, "status", "--porcelain"), "");
+});
+
+test("refuses with nothing staged before touching GitHub", async () => {
+  await assert.rejects(signedCommit("empty"), /no staged changes/u);
+  assert.equal(await readFile(log, "utf8"), "");
 });
 
 for (const [name, moveBranch] of [
   [
     "someone else pushes to the branch",
     async () => {
-      await git(upstream, "fetch", "--quiet", "origin", "feature");
-      await git(upstream, "checkout", "--quiet", "-B", "feature", "FETCH_HEAD");
+      await checkoutRemoteFeature(upstream);
       await commitFile(upstream, "review.txt", "suggestion\n");
       await git(upstream, "push", "--quiet", "origin", "feature");
     },
@@ -137,8 +165,7 @@ for (const [name, moveBranch] of [
     async () => {
       await commitFile(upstream, "security.txt", "fixed\n");
       await git(upstream, "push", "--quiet", "origin", "HEAD:main");
-      await git(upstream, "fetch", "--quiet", "origin", "feature");
-      await git(upstream, "checkout", "--quiet", "-B", "feature", "FETCH_HEAD");
+      await checkoutRemoteFeature(upstream);
       await git(upstream, "merge", "--quiet", "--no-ff", "--no-edit", "main");
       await git(upstream, "push", "--quiet", "origin", "feature");
     },
@@ -149,45 +176,92 @@ for (const [name, moveBranch] of [
     await signedCommit("first");
     await moveBranch();
     const movedTip = await rev(remote, "feature");
-    const requests = await readFile(log, "utf8");
 
     await stage(sandbox, "feature.txt", "second\n");
-    await assert.rejects(signedCommit("second"), (error: unknown) => {
-      const { code, stderr } = error as { code: number; stderr: string };
-      assert.equal(code, 1);
-      assert.match(stderr, /local HEAD [0-9a-f]{40} is not the tip of feature/u);
-      assert.match(stderr, /git pull --ff-only origin feature through the authenticated gh tool/u);
-      assert.match(stderr, /run gh-signed-commit again/u);
-      return true;
-    });
+    await assertRefused("second", [
+      /local HEAD [0-9a-f]{40} is not the tip of feature/u,
+      new RegExp(`git pull --ff-only ${REPO_URL} feature through the authenticated gh tool`, "u"),
+    ]);
     assert.equal(await rev(remote, "feature"), movedTip);
-    const attempted = (await readFile(log, "utf8")).slice(requests.length);
-    assert.doesNotMatch(attempted, /^POST /mu);
 
-    await git(sandbox, "pull", "--quiet", "--ff-only", "origin", "feature");
+    await git(sandbox, "pull", "--quiet", "--ff-only", REPO_URL, "feature");
     await signedCommit("second");
     assert.equal(await rev(remote, "feature^"), movedTip);
-    assert.deepEqual(
-      (await git(dir, "--git-dir", remote, "diff", "--name-only", movedTip, "feature")).split("\n"),
-      ["feature.txt"],
-    );
+    assert.deepEqual(await changedSince(movedTip), ["feature.txt"]);
   });
 }
 
-test("refuses to start a branch at a local commit GitHub does not have", async () => {
-  await commitFile(sandbox, "local.txt", "unpushed\n");
-  await stage(sandbox, "feature.txt", "first\n");
-  await assert.rejects(signedCommit("first"), (error: unknown) => {
-    const { stderr } = error as { stderr: string };
-    assert.match(stderr, /local HEAD [0-9a-f]{40} does not exist on GitHub/u);
-    assert.match(stderr, /never local commits/u);
-    return true;
-  });
-  await assert.rejects(rev(remote, "feature"));
-  assert.doesNotMatch(await readFile(log, "utf8"), /^POST /mu);
+test("recovers through the rebase advice when the pull is refused", async () => {
+  const lines = Array.from({ length: 20 }, (_, index) => `line ${index}`);
+  await stage(sandbox, "feature.txt", lines.join("\n") + "\n");
+  await signedCommit("first");
+  await checkoutRemoteFeature(upstream);
+  await commitFile(upstream, "feature.txt", ["reviewed", ...lines.slice(1)].join("\n") + "\n");
+  await git(upstream, "push", "--quiet", "origin", "feature");
+  const movedTip = await rev(remote, "feature");
+
+  await stage(sandbox, "feature.txt", [...lines.slice(0, 19), "edited"].join("\n") + "\n");
+  await assertRefused("second", [/If the pull is refused, commit the staged changes locally/u]);
+  await assert.rejects(git(sandbox, "pull", "--quiet", "--ff-only", REPO_URL, "feature"));
+  await git(sandbox, "commit", "--quiet", "-m", "local");
+  await git(sandbox, "pull", "--quiet", "--rebase", REPO_URL, "feature");
+  await git(sandbox, "reset", "--soft", "FETCH_HEAD");
+  await signedCommit("second");
+
+  assert.equal(await rev(remote, "feature^"), movedTip);
+  assert.equal(
+    await show("feature:feature.txt"),
+    ["reviewed", ...lines.slice(1, 19), "edited"].join("\n") + "\n",
+  );
 });
 
-async function signedCommit(message: string) {
+test("names the remote tip to reset to when local commits sit on top of it", async () => {
+  await stage(sandbox, "feature.txt", "first\n");
+  await signedCommit("first");
+  const tip = await rev(remote, "feature");
+  await commitFile(sandbox, "local.txt", "committed locally\n");
+  await stage(sandbox, "feature.txt", "second\n");
+
+  await assertRefused("second", [
+    new RegExp(`run git reset --soft ${tip} to stage your local commits`, "u"),
+  ]);
+  await git(sandbox, "reset", "--soft", tip);
+  await signedCommit("second");
+  assert.deepEqual(await changedSince(tip), ["feature.txt", "local.txt"]);
+});
+
+test("names the pushed commit to reset to when a new branch starts at a local commit", async () => {
+  const clonedMain = await rev(sandbox, "HEAD");
+  await commitFile(sandbox, "local.txt", "committed locally\n");
+  await stage(sandbox, "feature.txt", "first\n");
+
+  await assertRefused("first", [
+    /local HEAD [0-9a-f]{40} does not exist on GitHub/u,
+    new RegExp(`run git reset --soft ${clonedMain} to stage your local commits`, "u"),
+  ]);
+  await assert.rejects(rev(remote, "feature"));
+  await git(sandbox, "reset", "--soft", clonedMain);
+  await signedCommit("first");
+  assert.deepEqual(await changedSince(clonedMain), ["feature.txt", "local.txt"]);
+});
+
+async function assertRefused(message: string, patterns: RegExp[]) {
+  const before = await readFile(log, "utf8");
+  await assert.rejects(signedCommit(message), (error: unknown) => {
+    const { code, stderr } = error as { code: number; stderr: string };
+    assert.equal(code, 1);
+    for (const pattern of patterns) assert.match(stderr, pattern);
+    return true;
+  });
+  assert.doesNotMatch((await readFile(log, "utf8")).slice(before.length), /^POST /mu);
+}
+
+async function checkoutRemoteFeature(cwd: string) {
+  await git(cwd, "fetch", "--quiet", "origin", "feature");
+  await git(cwd, "checkout", "--quiet", "-B", "feature", "FETCH_HEAD");
+}
+
+async function signedCommit(message: string, env: Record<string, string> = {}) {
   return execFileAsync(
     process.execPath,
     [script, "--repo", "owner/repo", "--branch", "feature", "-m", message],
@@ -200,6 +274,7 @@ async function signedCommit(message: string) {
         FAKE_GITHUB_REMOTE: remote,
         GH_TOKEN: "not-used",
         NODE_OPTIONS: `--require=${preload}`,
+        ...env,
       },
     },
   );
@@ -218,7 +293,9 @@ async function rev(repository: string, ref: string) {
 }
 
 async function show(object: string) {
-  return (await execFileAsync("git", ["--git-dir", remote, "show", object])).stdout;
+  return (
+    await execFileAsync("git", ["--git-dir", remote, "show", object], { maxBuffer: Infinity })
+  ).stdout;
 }
 
 async function stage(cwd: string, file: string, contents: string) {
@@ -232,6 +309,9 @@ async function commitFile(cwd: string, file: string, contents: string) {
 }
 
 async function changedSinceMain(branch: string) {
-  const base = await git(dir, "--git-dir", remote, "merge-base", "main", branch);
-  return (await git(dir, "--git-dir", remote, "diff", "--name-only", base, branch)).split("\n");
+  return changedSince(await git(dir, "--git-dir", remote, "merge-base", "main", branch));
+}
+
+async function changedSince(base: string) {
+  return (await git(dir, "--git-dir", remote, "diff", "--name-only", base, "feature")).split("\n");
 }

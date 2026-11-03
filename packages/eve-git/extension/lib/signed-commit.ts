@@ -9,8 +9,10 @@ for (let i = 0; i < args.length; i += 1) {
   const value = args[i];
   if (value === "--repo") options.repo = args[++i];
   else if (value === "--branch") options.branch = args[++i];
-  // Accepted for existing invocations; new branches start at local HEAD.
-  else if (value === "--base") i += 1;
+  else if (value === "--base") {
+    i += 1;
+    process.stderr.write("gh-signed-commit: --base is ignored; new branches start at local HEAD\n");
+  }
   else if (value === "-m") options.message = args[++i];
   else if (value === "-b") options.body = args[++i];
   else fail("unknown argument: " + value);
@@ -22,6 +24,7 @@ if (!process.env.GH_TOKEN) fail('GH_TOKEN is not set; invoke the configured auth
 
 const [owner, repo] = options.repo.split("/");
 const api = "https://api.github.com";
+const remote = "https://github.com/" + options.repo;
 const headers = {
   Accept: "application/vnd.github+json",
   Authorization: "Bearer " + process.env.GH_TOKEN,
@@ -38,29 +41,26 @@ async function main() {
     throw new Error("no staged changes; stage files with git add before running gh-signed-commit");
   }
   const localHead = git("rev-parse", "HEAD").toString().trim();
-  let head = await branchHead(options.branch);
-  // The commit is the remote tip plus the staged diff against local HEAD. If the
-  // two differ, every remote change missing locally would be committed reversed.
-  if (head !== null && head !== localHead) {
-    throw new Error(
-      "local HEAD " + localHead + " is not the tip of " + options.branch + " (" + head + "), so committing would revert the remote changes missing locally. " +
-        "Run git pull --ff-only origin " + options.branch + " through the authenticated gh tool, then run gh-signed-commit again. " +
-        "gh-signed-commit publishes only staged changes, never local commits.",
-    );
-  }
+  const head = await branchHead(options.branch);
   if (head === null) {
     // Like git push, start the branch at local HEAD, not at a newer base tip.
     if (!(await commitExists(localHead))) {
-      throw new Error(
-        "local HEAD " + localHead + " does not exist on GitHub. gh-signed-commit publishes only staged changes, never local commits: " +
-          "run git reset --soft with the pushed commit your local commits started from, keeping their changes staged, then run gh-signed-commit again.",
-      );
+      throw new Error("local HEAD " + localHead + " does not exist on GitHub. " + restage(pushedBase()));
     }
     await request("POST", "/repos/" + owner + "/" + repo + "/git/refs", {
       ref: "refs/heads/" + options.branch,
       sha: localHead,
     });
-    head = localHead;
+  } else if (head !== localHead) {
+    // The commit is the remote tip plus the staged diff against local HEAD, so
+    // every remote change missing locally would be committed reversed.
+    throw new Error(
+      "local HEAD " + localHead + " is not the tip of " + options.branch + " (" + head + "); committing would revert the remote changes missing locally. " +
+        (isAncestor(head, localHead)
+          ? restage(head)
+          : "Run git pull --ff-only " + remote + " " + options.branch + " through the authenticated gh tool, then run gh-signed-commit again. " +
+            "If the pull is refused, commit the staged changes locally, run git pull --rebase " + remote + " " + options.branch + " through the authenticated gh tool, run git reset --soft FETCH_HEAD, then run gh-signed-commit again."),
+    );
   }
 
   const query = "mutation CreateCommitOnBranch($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }";
@@ -74,7 +74,7 @@ async function main() {
       variables: {
         input: {
           branch: { repositoryNameWithOwner: options.repo, branchName: options.branch },
-          expectedHeadOid: head,
+          expectedHeadOid: head ?? localHead,
           message,
           fileChanges: changes,
         },
@@ -87,9 +87,32 @@ async function main() {
   }
   const oid = payload.data?.createCommitOnBranch?.commit?.oid;
   if (!oid) throw new Error("GitHub commit returned no oid");
-  git("fetch", "origin", options.branch);
-  git("reset", "--soft", "FETCH_HEAD");
+  // Move to the commit just made, which has the index as its tree. The branch
+  // tip may already include someone else's later push.
+  git("fetch", remote, options.branch);
+  git("reset", "--soft", oid);
   process.stdout.write(oid + "\n");
+}
+
+function restage(base) {
+  return "gh-signed-commit publishes only staged changes, never local commits: " +
+    (base ? "run git reset --soft " + base : "run git reset --soft with the newest commit of yours that exists on GitHub") +
+    " to stage your local commits, then run gh-signed-commit again.";
+}
+
+// The pushed commit the local commits start from, when there is exactly one.
+function pushedBase() {
+  const boundary = git("rev-list", "--boundary", "HEAD", "--not", "--remotes").toString().split("\n").filter((line) => line.startsWith("-"));
+  return boundary.length === 1 ? boundary[0].slice(1) : null;
+}
+
+function isAncestor(ancestor, commit) {
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", ancestor, commit], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function ensureNoUnstagedTrackedChanges() {
@@ -135,7 +158,7 @@ async function branchHead(branch) {
 
 async function commitExists(sha) {
   const response = await fetch(api + "/repos/" + owner + "/" + repo + "/git/commits/" + sha, { headers });
-  if (response.status === 404 || response.status === 422) return false;
+  if (response.status === 404) return false;
   if (!response.ok) throw new Error("GitHub commit lookup failed: " + response.status);
   return true;
 }

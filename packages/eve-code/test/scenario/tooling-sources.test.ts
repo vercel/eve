@@ -75,8 +75,7 @@ test("signed commit missing-token error names the authenticated gh invocation", 
   }
 });
 
-test("signed commit guards tracked work before remote access and never hard-resets", async () => {
-  assertSignedCommitSourceOrder();
+test("signed commit guards tracked work before remote access", async () => {
   const dir = await mkdtemp(join(tmpdir(), "eve-code-signed-commit-"));
   try {
     const script = join(dir, "gh-signed-commit.cjs");
@@ -117,98 +116,3 @@ test("signed commit guards tracked work before remote access and never hard-rese
     await rm(dir, { force: true, recursive: true });
   }
 });
-
-test("signed commit advances HEAD without rewriting the worktree", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "eve-code-signed-commit-happy-"));
-  const remote = join(dir, "remote.git");
-  const worktree = join(dir, "worktree");
-  try {
-    await execFileAsync("git", ["init", "--quiet", "--bare", remote]);
-    await execFileAsync("git", ["init", "--quiet", worktree]);
-    await execFileAsync("git", ["config", "user.name", "eve-code test"], { cwd: worktree });
-    await execFileAsync("git", ["config", "user.email", "eve-code@example.test"], {
-      cwd: worktree,
-    });
-    await writeFile(join(worktree, "tracked.txt"), "before\n");
-    await execFileAsync("git", ["add", "tracked.txt"], { cwd: worktree });
-    await execFileAsync("git", ["commit", "--quiet", "-m", "fixture"], { cwd: worktree });
-    await execFileAsync("git", ["branch", "-M", "test"], { cwd: worktree });
-    await execFileAsync("git", ["remote", "add", "origin", remote], { cwd: worktree });
-    await execFileAsync("git", ["push", "--quiet", "-u", "origin", "test"], { cwd: worktree });
-    const { stdout: oldHeadOutput } = await execFileAsync("git", ["rev-parse", "HEAD"], {
-      cwd: worktree,
-    });
-    const oldHead = oldHeadOutput.trim();
-
-    // Larger than execFileSync's default 1 MiB maxBuffer, like a monorepo lockfile.
-    const after = "after\n".repeat(400_000);
-    await writeFile(join(worktree, "tracked.txt"), after);
-    await writeFile(join(worktree, "untracked.txt"), "preserved\n");
-    await execFileAsync("git", ["add", "tracked.txt"], { cwd: worktree });
-    const { stdout: treeOutput } = await execFileAsync("git", ["write-tree"], { cwd: worktree });
-    const { stdout: newHeadOutput } = await execFileAsync(
-      "git",
-      ["commit-tree", treeOutput.trim(), "-p", oldHead, "-m", "signed fixture"],
-      { cwd: worktree },
-    );
-    const newHead = newHeadOutput.trim();
-    await execFileAsync(
-      "git",
-      ["push", "--quiet", "--force", "origin", `${newHead}:refs/heads/test`],
-      {
-        cwd: worktree,
-      },
-    );
-
-    const script = join(dir, "gh-signed-commit.cjs");
-    const preload = join(dir, "fetch.cjs");
-    const commitRequest = join(dir, "commit-request.json");
-    await writeFile(script, GH_SIGNED_COMMIT_SOURCE);
-    await writeFile(
-      preload,
-      `globalThis.fetch = async (url, init) => {\n  if (String(url).endsWith("/graphql")) {\n    require("node:fs").writeFileSync(process.env.COMMIT_REQUEST, init.body);\n    return Response.json({ data: { createCommitOnBranch: { commit: { oid: process.env.NEW_HEAD } } } });\n  }\n  return Response.json({ object: { sha: process.env.OLD_HEAD } });\n};\n`,
-    );
-    const { stdout } = await execFileAsync(
-      process.execPath,
-      [script, "--repo", "owner/repo", "--branch", "test", "-m", "signed fixture"],
-      {
-        cwd: worktree,
-        env: {
-          ...process.env,
-          COMMIT_REQUEST: commitRequest,
-          GH_TOKEN: "not-used",
-          NEW_HEAD: newHead,
-          NODE_OPTIONS: `--require=${preload}`,
-          OLD_HEAD: oldHead,
-        },
-      },
-    );
-
-    assert.equal(stdout.trim(), newHead);
-    const { variables } = JSON.parse(await readFile(commitRequest, "utf8"));
-    assert.equal(
-      Buffer.from(variables.input.fileChanges.additions[0].contents, "base64").toString(),
-      after,
-    );
-    assert.equal(
-      (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: worktree })).stdout.trim(),
-      newHead,
-    );
-    assert.equal(
-      (await execFileAsync("git", ["status", "--short"], { cwd: worktree })).stdout,
-      "?? untracked.txt\n",
-    );
-  } finally {
-    await rm(dir, { force: true, recursive: true });
-  }
-});
-
-function assertSignedCommitSourceOrder() {
-  const guard = GH_SIGNED_COMMIT_SOURCE.indexOf("ensureNoUnstagedTrackedChanges();");
-  const firstRemoteRead = GH_SIGNED_COMMIT_SOURCE.indexOf("await branchHead(options.branch)");
-  const graphql = GH_SIGNED_COMMIT_SOURCE.indexOf('fetch(api + "/graphql"');
-  const fetch = GH_SIGNED_COMMIT_SOURCE.indexOf('git("fetch", "origin", options.branch)');
-  assert.ok(guard >= 0 && guard < firstRemoteRead && firstRemoteRead < graphql && graphql < fetch);
-  assert.match(GH_SIGNED_COMMIT_SOURCE, /git\("reset", "--soft", "FETCH_HEAD"\)/u);
-  assert.doesNotMatch(GH_SIGNED_COMMIT_SOURCE, /git\("reset", "--hard"/u);
-}
