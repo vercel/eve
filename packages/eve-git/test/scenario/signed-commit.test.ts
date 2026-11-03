@@ -116,7 +116,7 @@ afterEach(async () => {
   await rm(dir, { force: true, recursive: true });
 });
 
-test("a new branch starts at local HEAD, so later pushes keep newer main commits", async () => {
+test("a branch cut from an older clone of main never reverts newer main commits", async () => {
   const clonedMain = await rev(sandbox, "HEAD");
   // main moves on after the sandbox cloned, as in a long-running thread.
   await commitFile(upstream, "security.txt", "fixed\n");
@@ -146,10 +146,15 @@ test("syncs to the commit it made even when the branch moves right after", async
   assert.equal(await git(sandbox, "status", "--porcelain"), "");
 });
 
-test("refuses with nothing staged before touching GitHub", async () => {
-  await assert.rejects(signedCommit("empty"), /no staged changes/u);
-  assert.equal(await readFile(log, "utf8"), "");
+test("refuses with nothing to commit before writing to GitHub", async () => {
+  await assert.rejects(signedCommit("empty"), /nothing to commit/u);
+  assert.doesNotMatch(await readFile(log, "utf8"), /^POST /mu);
+  await assert.rejects(rev(remote, "feature"));
 });
+
+const LINES = Array.from({ length: 20 }, (_, index) => `line ${index}`);
+const lines = (first: string, last: string) =>
+  [first, ...LINES.slice(1, 19), last].join("\n") + "\n";
 
 for (const [name, moveBranch] of [
   [
@@ -157,6 +162,14 @@ for (const [name, moveBranch] of [
     async () => {
       await checkoutRemoteFeature(upstream);
       await commitFile(upstream, "review.txt", "suggestion\n");
+      await git(upstream, "push", "--quiet", "origin", "feature");
+    },
+  ],
+  [
+    "someone else edits the same file",
+    async () => {
+      await checkoutRemoteFeature(upstream);
+      await commitFile(upstream, "feature.txt", lines("reviewed", LINES[19]!));
       await git(upstream, "push", "--quiet", "origin", "feature");
     },
   ],
@@ -171,77 +184,48 @@ for (const [name, moveBranch] of [
     },
   ],
 ] as const) {
-  test(`refuses without writing when ${name}, and succeeds after a fast-forward pull`, async () => {
-    await stage(sandbox, "feature.txt", "first\n");
+  test(`refuses without writing when ${name}, and succeeds after the advised rebase`, async () => {
+    await stage(sandbox, "feature.txt", lines(LINES[0]!, LINES[19]!));
     await signedCommit("first");
     await moveBranch();
     const movedTip = await rev(remote, "feature");
+    const movedFile = await show("feature:feature.txt");
 
-    await stage(sandbox, "feature.txt", "second\n");
+    await stage(sandbox, "feature.txt", lines(LINES[0]!, "edited"));
     await assertRefused("second", [
-      /local HEAD [0-9a-f]{40} is not the tip of feature/u,
-      new RegExp(`git pull --ff-only ${REPO_URL} feature through the authenticated gh tool`, "u"),
+      new RegExp(`feature is at ${movedTip}, which this checkout lacks`, "u"),
+      new RegExp(`git pull --rebase ${REPO_URL} feature through the authenticated gh tool`, "u"),
     ]);
     assert.equal(await rev(remote, "feature"), movedTip);
 
-    await git(sandbox, "pull", "--quiet", "--ff-only", REPO_URL, "feature");
+    await git(sandbox, "commit", "--quiet", "-m", "local");
+    await git(sandbox, "pull", "--quiet", "--rebase", REPO_URL, "feature");
     await signedCommit("second");
     assert.equal(await rev(remote, "feature^"), movedTip);
     assert.deepEqual(await changedSince(movedTip), ["feature.txt"]);
+    assert.equal(await show("feature:feature.txt"), movedFile.replace(LINES[19]!, "edited"));
   });
 }
 
-test("recovers through the rebase advice when the pull is refused", async () => {
-  const lines = Array.from({ length: 20 }, (_, index) => `line ${index}`);
-  await stage(sandbox, "feature.txt", lines.join("\n") + "\n");
-  await signedCommit("first");
-  await checkoutRemoteFeature(upstream);
-  await commitFile(upstream, "feature.txt", ["reviewed", ...lines.slice(1)].join("\n") + "\n");
-  await git(upstream, "push", "--quiet", "origin", "feature");
-  const movedTip = await rev(remote, "feature");
-
-  await stage(sandbox, "feature.txt", [...lines.slice(0, 19), "edited"].join("\n") + "\n");
-  await assertRefused("second", [/If the pull is refused, commit the staged changes locally/u]);
-  await assert.rejects(git(sandbox, "pull", "--quiet", "--ff-only", REPO_URL, "feature"));
-  await git(sandbox, "commit", "--quiet", "-m", "local");
-  await git(sandbox, "pull", "--quiet", "--rebase", REPO_URL, "feature");
-  await git(sandbox, "reset", "--soft", "FETCH_HEAD");
-  await signedCommit("second");
-
-  assert.equal(await rev(remote, "feature^"), movedTip);
-  assert.equal(
-    await show("feature:feature.txt"),
-    ["reviewed", ...lines.slice(1, 19), "edited"].join("\n") + "\n",
-  );
-});
-
-test("names the remote tip to reset to when local commits sit on top of it", async () => {
+test("publishes local commits on top of the branch tip", async () => {
   await stage(sandbox, "feature.txt", "first\n");
   await signedCommit("first");
   const tip = await rev(remote, "feature");
   await commitFile(sandbox, "local.txt", "committed locally\n");
   await stage(sandbox, "feature.txt", "second\n");
 
-  await assertRefused("second", [
-    new RegExp(`run git reset --soft ${tip} to stage your local commits`, "u"),
-  ]);
-  await git(sandbox, "reset", "--soft", tip);
   await signedCommit("second");
+  assert.equal(await rev(remote, "feature^"), tip);
   assert.deepEqual(await changedSince(tip), ["feature.txt", "local.txt"]);
 });
 
-test("names the pushed commit to reset to when a new branch starts at a local commit", async () => {
+test("starts a new branch at the newest pushed commit and publishes local commits", async () => {
   const clonedMain = await rev(sandbox, "HEAD");
   await commitFile(sandbox, "local.txt", "committed locally\n");
   await stage(sandbox, "feature.txt", "first\n");
 
-  await assertRefused("first", [
-    /local HEAD [0-9a-f]{40} does not exist on GitHub/u,
-    new RegExp(`run git reset --soft ${clonedMain} to stage your local commits`, "u"),
-  ]);
-  await assert.rejects(rev(remote, "feature"));
-  await git(sandbox, "reset", "--soft", clonedMain);
   await signedCommit("first");
+  assert.equal(await rev(remote, "feature^"), clonedMain);
   assert.deepEqual(await changedSince(clonedMain), ["feature.txt", "local.txt"]);
 });
 

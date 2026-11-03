@@ -36,31 +36,23 @@ main().catch((error) => fail(error instanceof Error ? error.message : String(err
 
 async function main() {
   ensureNoUnstagedTrackedChanges();
-  const changes = stagedChanges();
-  if (changes.additions.length === 0 && changes.deletions.length === 0) {
-    throw new Error("no staged changes; stage files with git add before running gh-signed-commit");
-  }
-  const localHead = git("rev-parse", "HEAD").toString().trim();
+  // The commit's parent: the branch tip, or for a new branch the newest commit of
+  // HEAD already on a remote. Local commits after it are published with the index.
   const head = await branchHead(options.branch);
-  if (head === null) {
-    // Like git push, start the branch at local HEAD, not at a newer base tip.
-    if (!(await commitExists(localHead))) {
-      throw new Error("local HEAD " + localHead + " does not exist on GitHub. " + restage(pushedBase()));
-    }
-    await request("POST", "/repos/" + owner + "/" + repo + "/git/refs", {
-      ref: "refs/heads/" + options.branch,
-      sha: localHead,
-    });
-  } else if (head !== localHead) {
-    // The commit is the remote tip plus the staged diff against local HEAD, so
-    // every remote change missing locally would be committed reversed.
+  const base = head ?? pushedAncestor();
+  // The commit's tree is the index, so a base the checkout lacks would be reverted.
+  if (!isAncestor(base, "HEAD")) {
     throw new Error(
-      "local HEAD " + localHead + " is not the tip of " + options.branch + " (" + head + "); committing would revert the remote changes missing locally. " +
-        (isAncestor(head, localHead)
-          ? restage(head)
-          : "Run git pull --ff-only " + remote + " " + options.branch + " through the authenticated gh tool, then run gh-signed-commit again. " +
-            "If the pull is refused, commit the staged changes locally, run git pull --rebase " + remote + " " + options.branch + " through the authenticated gh tool, run git reset --soft FETCH_HEAD, then run gh-signed-commit again."),
+      options.branch + " is at " + base + ", which this checkout lacks; committing would revert it. " +
+        "Commit your changes locally, run git pull --rebase " + remote + " " + options.branch + " through the authenticated gh tool, then run gh-signed-commit again.",
     );
+  }
+  const changes = changesSince(base);
+  if (changes.additions.length === 0 && changes.deletions.length === 0) {
+    throw new Error("nothing to commit; stage files with git add before running gh-signed-commit");
+  }
+  if (head === null) {
+    await request("POST", "/repos/" + owner + "/" + repo + "/git/refs", { ref: "refs/heads/" + options.branch, sha: base });
   }
 
   const query = "mutation CreateCommitOnBranch($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }";
@@ -74,7 +66,7 @@ async function main() {
       variables: {
         input: {
           branch: { repositoryNameWithOwner: options.repo, branchName: options.branch },
-          expectedHeadOid: head ?? localHead,
+          expectedHeadOid: base,
           message,
           fileChanges: changes,
         },
@@ -87,23 +79,16 @@ async function main() {
   }
   const oid = payload.data?.createCommitOnBranch?.commit?.oid;
   if (!oid) throw new Error("GitHub commit returned no oid");
-  // Move to the commit just made, which has the index as its tree. The branch
-  // tip may already include someone else's later push.
+  // Move to the commit just made, whose tree is the index. The branch tip may
+  // already include someone else's later push.
   git("fetch", remote, options.branch);
   git("reset", "--soft", oid);
   process.stdout.write(oid + "\n");
 }
 
-function restage(base) {
-  return "gh-signed-commit publishes only staged changes, never local commits: " +
-    (base ? "run git reset --soft " + base : "run git reset --soft with the newest commit of yours that exists on GitHub") +
-    " to stage your local commits, then run gh-signed-commit again.";
-}
-
-// The pushed commit the local commits start from, when there is exactly one.
-function pushedBase() {
-  const boundary = git("rev-list", "--boundary", "HEAD", "--not", "--remotes").toString().split("\n").filter((line) => line.startsWith("-"));
-  return boundary.length === 1 ? boundary[0].slice(1) : null;
+function pushedAncestor() {
+  const unpushed = git("rev-list", "--first-parent", "HEAD", "--not", "--remotes").toString().split("\n").filter(Boolean);
+  return git("rev-parse", unpushed.length ? unpushed.at(-1) + "^" : "HEAD").toString().trim();
 }
 
 function isAncestor(ancestor, commit) {
@@ -126,15 +111,15 @@ function ensureNoUnstagedTrackedChanges() {
   }
 }
 
-function stagedChanges() {
-  const output = git("diff", "--cached", "--no-renames", "--raw", "-z", "HEAD");
+function changesSince(base) {
+  const output = git("diff", "--cached", "--no-renames", "--raw", "-z", base);
   const tokens = output.toString().split("\0").filter(Boolean);
   const additions = [];
   const deletions = [];
   for (let index = 0; index < tokens.length; index += 2) {
     const [oldMode, newMode, , , status] = tokens[index].slice(1).split(" ");
     const path = tokens[index + 1];
-    if (!status || !path) throw new Error("unexpected staged diff output");
+    if (!status || !path) throw new Error("unexpected diff output");
     if (status === "A" || status === "M" || status === "T") {
       // FileAddition carries no mode, so it cannot express every index entry safely.
       if (newMode !== "100644" || (oldMode !== "000000" && oldMode !== "100644")) {
@@ -143,7 +128,7 @@ function stagedChanges() {
       additions.push({ path, contents: git("show", ":0:" + path).toString("base64") });
     } else if (status === "D") deletions.push({ path });
     else if (status === "U") throw new Error("unmerged path: " + path);
-    else throw new Error("unsupported staged status " + status + " for " + path);
+    else throw new Error("unsupported status " + status + " for " + path);
   }
   return { additions, deletions };
 }
@@ -154,13 +139,6 @@ async function branchHead(branch) {
   const payload = await response.json();
   if (!response.ok) throw new Error("GitHub ref lookup failed: " + response.status);
   return payload.object.sha;
-}
-
-async function commitExists(sha) {
-  const response = await fetch(api + "/repos/" + owner + "/" + repo + "/git/commits/" + sha, { headers });
-  if (response.status === 404) return false;
-  if (!response.ok) throw new Error("GitHub commit lookup failed: " + response.status);
-  return true;
 }
 
 async function request(method, path, body) {

@@ -52,7 +52,7 @@ const SIGNED_COMMIT = `Stage only the intended changes. Repositories that requir
 gh-signed-commit --repo owner/name --branch <branch> -m "<headline>" [-b "<body>"]
 \`\`\`
 
-The command commits only staged changes on top of local HEAD, creating a new branch there, and synchronizes the checkout to the signed remote commit. It refuses when local HEAD is not the existing branch tip and prints the commands that bring the checkout up to date. Then write the PR body to a file and create one draft:`;
+The command publishes your local commits and staged changes as one signed commit on the branch, then synchronizes the checkout to it. It refuses when the branch has commits the checkout lacks and prints how to rebase onto them. Then write the PR body to a file and create one draft:`;
 
 const PLAIN_COMMIT = `Stage only the intended changes, commit them, and push the branch. Then write the PR body to a file and create one draft:`;
 
