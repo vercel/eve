@@ -93,7 +93,7 @@ function respondToBashJob(message: string, request: MockModelRequest): MockModel
     .map((result) => formatOutput(result.output));
   if (outputs.length === 0) {
     const command = /by running: `([^`]+)`/u.exec(message)?.[1] ?? "";
-    return { toolCalls: [{ input: { command }, name: "bash" }] };
+    return { toolCalls: [{ input: { command, timeout: 5 }, name: "bash" }] };
   }
   // The model reads the job's process group and output directory from the running message.
   const pid = /as process group (\d+)/u.exec(outputs[0]!)?.[1];

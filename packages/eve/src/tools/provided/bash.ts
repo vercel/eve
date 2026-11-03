@@ -1,4 +1,5 @@
 import {
+  BASH_MAX_YIELD_SECONDS,
   BASH_YIELD_SECONDS,
   executeBashOnSandbox,
   type BashInput,
@@ -11,13 +12,19 @@ import { defineJsonSchema } from "#tools/schema.js";
 
 export interface BashToolInput {
   command: string;
+  /**
+   * Seconds to wait for the command before it keeps running in the
+   * background. Defaults to 30; values outside 1–120 are clamped.
+   */
+  timeout?: number;
 }
 
 /**
- * Output of the provided `bash` tool. A command that finishes within 30
- * seconds is `completed`. A longer command keeps running in the sandbox as
- * process group `pid` and returns `running` with its output so far; it keeps
- * writing `stdout`, `stderr`, and finally `exit` files in `outputDirectory`.
+ * Output of the provided `bash` tool. A command that finishes within the wait
+ * (30 seconds, or the input's `timeout`) is `completed`. A longer command keeps
+ * running in the sandbox as process group `pid` and returns `running` with its
+ * output so far; it keeps writing `stdout`, `stderr`, and finally `exit` files
+ * in `outputDirectory`.
  */
 export type BashToolOutput =
   | {
@@ -44,6 +51,10 @@ export const BASH_INPUT_SCHEMA = defineJsonSchema<BashToolInput>({
   type: "object",
   properties: {
     command: { type: "string", description: "The shell command to execute." },
+    timeout: {
+      type: "number",
+      description: `Seconds to wait for the command before it keeps running in the background. Defaults to ${BASH_YIELD_SECONDS}; values above ${BASH_MAX_YIELD_SECONDS} wait ${BASH_MAX_YIELD_SECONDS}, and values below 1 wait 1.`,
+    },
   },
   required: ["command"],
   additionalProperties: false,
@@ -94,7 +105,7 @@ export const BASH_OUTPUT_SCHEMA = defineJsonSchema<BashToolOutput>({
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool(
   defineTool({
     label: { start: (input) => toolLabel("Run", input.command) },
-    description: `Execute a shell command in the shared workspace environment. The result is the command's stdout, then any stderr after a \`[stderr]\` line. The final line is always \`[exit code: N]\` or a note that the command is still running, and only that final line reports how the command ended. A command still running after ${BASH_YIELD_SECONDS} seconds keeps running in the background, and the note says how to check on or stop it.`,
+    description: `Execute a shell command in the shared workspace environment. The call waits ${BASH_YIELD_SECONDS} seconds for the command, or \`timeout\` seconds from 1 to ${BASH_MAX_YIELD_SECONDS}. For builds, installs, and test suites whose full output you need, pass a larger \`timeout\` instead of shortening or splitting the command. The result is the command's stdout, then any stderr after a \`[stderr]\` line. The final line is always \`[exit code: N]\` or a note that the command is still running, and only that final line reports how the command ended. A command still running after the wait keeps running in the background, and the note says how to check on or stop it.`,
     async execute(input, ctx) {
       return await executeBashOnSandbox(await ctx.getSandbox(), input as BashInput, {
         abortSignal: ctx.abortSignal,
