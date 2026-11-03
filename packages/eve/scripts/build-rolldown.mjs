@@ -346,6 +346,11 @@ await buildWithNitroRolldown({
     entryFileNames: "[name].js",
     format: "esm",
     minify: {
+      // App bundlers re-bundle `eve/client` and `eve/react` from these files.
+      // webpack before 5.90 drops import bindings used after
+      // `var a = class {}, b = f()` (#5037), so keep each declaration in its
+      // own statement.
+      compress: { joinVars: false },
       mangle: {
         keepNames: { class: true, function: true },
         // Disable top-level renaming so the workflow bundler's scope-
