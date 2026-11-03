@@ -19,7 +19,7 @@ and limitations are in `docs/channels/a2a.mdx`; this note records the design dec
 | messageId | the delivery's idempotency key, hashed with the owner; the delivery ID encodes it        |
 
 An eve turn stays `running` while it waits on interactions, so one task survives any number of
-prompt round trips. Nothing is stored beyond the session: every read folds the session stream.
+prompt round trips. Nothing is stored beyond the session: reads fold the session stream. Each process keeps the folded views of its 32 most recently read sessions, so a read folds only the lines since the last read. A cold read, such as on a new function instance, still folds the whole session. A stream or subscription starts from a copy of the kept view, so that other reads folding the shared view ahead can't make it skip a status change.
 
 ```
 SendMessage{}                   -> create session (new context)            -> task = turn 1
