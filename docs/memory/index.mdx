@@ -300,7 +300,8 @@ keys, or one-time codes. Tell the user when you save or delete a memory.
 
 Provider tools are ordinary eve tools, so they follow approvals and
 `toModelOutput`. To replace a slot's tools, create `agent/tools/<slot>.ts`.
-Export `disableTool()` there to remove them.
+Export `disableTool()` there to remove them. eve's built-in tools don't replace
+them: a slot named `web_search` offers its tools beside the built-in `web_search`.
 
 ## Troubleshooting
 

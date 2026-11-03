@@ -33,7 +33,7 @@ import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
 import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
-import type { DynamicRemoteBinding } from "#reactions/remote.js";
+import type { DynamicRemoteBinding } from "#definitions/remote.js";
 import type { SandboxAccess, SandboxSessionEndReason } from "#sandbox/state.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
@@ -120,12 +120,14 @@ export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDel
 export interface HistoryState {
   /** Last announced value per keyed announcement (see `#harness/announcements.js`). */
   readonly announcements?: Readonly<Record<string, string>>;
+  /** The digest of the message each key's announcement last added, which a rewrite looks for. */
+  readonly messages?: Readonly<Record<string, string>>;
 }
 export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
 /**
  * The catalog tools a session's tool list has offered. Each stays offered for
  * the rest of the session, so the tool list never drops a catalog tool that
- * earlier calls named. Compaction keeps it, unlike {@link HistoryStateKey}.
+ * earlier calls named. eve's catalog definition keeps it.
  */
 export interface OfferedCatalogTools {
   /** `eve__tool` mentions connected services, and `eve__search` their sign-in entries. */
@@ -137,9 +139,6 @@ export interface OfferedCatalogTools {
   /** `eve__tool`. */
   readonly tools: boolean;
 }
-export const OfferedCatalogToolsKey = new ContextKey<OfferedCatalogTools>(
-  "eve.offeredCatalogTools",
-);
 export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationProjection>(
   "eve.channelInstrumentation",
 );
@@ -197,11 +196,6 @@ export const ToolChannelKey = new ContextKey<{
 // Model keys
 // ---------------------------------------------------------------------------
 
-/** Static model configured for the effective turn agent, or `null` for a dynamic-only agent. */
-export const StaticModelReferenceKey = new ContextKey<RuntimeModelReference | null>(
-  "eve.staticModelReference",
-);
-
 export interface LiveDynamicModelSelection {
   /** Live provider instance; absent for string selections, which resolve through the reference. */
   readonly model?: LanguageModel;
@@ -256,8 +250,6 @@ export interface DurableDynamicSkillMetadata {
    */
   readonly revision?: string;
 }
-
-export type DynamicSkillManifest = Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>;
 
 /**
  * Durable map from dynamic skill name to the serialized sandbox session state

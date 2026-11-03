@@ -1,3 +1,4 @@
+import { transition } from "#harness/session-machine/commit.js";
 import { expect, it, vi } from "vitest";
 
 import { sandboxProvider } from "#context/providers/sandbox.js";
@@ -30,10 +31,10 @@ it("keeps what the sandbox provider commits when a session step saves a transiti
       commitSessionStep(
         { serializedContext, sessionState: createTestSessionState(), sessionWritable },
         (view) => [
-          {
+          transition({
             events: [],
             turn: { ...view.turn, remembered: { deploy: remembered } },
-          },
+          }),
         ],
         { origin: "relayed" },
       ),

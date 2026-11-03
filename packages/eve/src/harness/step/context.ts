@@ -1,6 +1,7 @@
+import { unchangedBy } from "#harness/session-machine/commit.js";
+import type { ModelChoice } from "#definitions/model.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { ModelMessage } from "ai";
-
-import type { SessionEvent } from "#protocol/session-event.js";
 
 import type { AlsContext, ContextContainer } from "#context/container.js";
 import {
@@ -9,10 +10,10 @@ import {
   SessionCallbackKey,
   SessionPredecessorKey,
 } from "#context/keys.js";
-import { takeTurnFailure } from "#reactions/intents.js";
-import { takeUserInstructionMessages } from "#reactions/kinds/instructions.js";
-import { isDynamicModelSelectionError } from "#reactions/kinds/model.js";
-import { evaluateValues, isReactionFailedError } from "#reactions/runner.js";
+import { takeTurnFailure } from "#definitions/intents.js";
+import { isDynamicModelSelectionError } from "#definitions/model.js";
+import { DefinitionFailedError } from "#definitions/kernel.js";
+import { evaluateStepValues } from "#definitions/step.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import {
   applyTransition,
@@ -37,7 +38,8 @@ import type {
   StepFn,
   HarnessStepInput,
   StepResult,
-  ToolLoopHarnessConfig,
+  KernelConfig,
+  Commit,
 } from "#harness/types.js";
 import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
@@ -52,10 +54,12 @@ const log = createLogger("harness.step");
  */
 export interface Step {
   session: HarnessSession;
+  /** The model the step's call runs, once eve has chosen it for the call. */
+  model?: ModelChoice;
   frameworkToolNames: ReadonlySet<string>;
-  readonly config: ToolLoopHarnessConfig;
-  /** The step's context; direct harness tests may run without one. */
-  readonly ctx: AlsContext | undefined;
+  readonly config: KernelConfig;
+  /** The session's context. */
+  readonly ctx: AlsContext;
   readonly runStep: StepFn;
   readonly publish: Publish;
   /** The caller's event handler. Without one, a failure throws instead of being reported. */
@@ -68,18 +72,23 @@ export interface Step {
    * text there narrates; a person reads it as a reply.
    */
   readonly finalReplyOnly: boolean;
+  /** A tool's `endsTurn` applies: a root turn without an output schema. */
+  readonly endsTurn: boolean;
   view(): SessionView;
   position(): TurnPosition;
-  /** Publishes a transition, or facts that change nothing private, as one commit. */
-  apply(
-    change: Transition | readonly SessionEvent[],
-    messages?: readonly ModelMessage[],
-  ): Promise<void>;
+  /** Publishes a transition, or kernel facts that change nothing private, as one commit. */
+  apply(change: Transition | Commit, messages?: readonly ModelMessage[]): Promise<void>;
+}
+
+/** The model the step's call runs. Read only once eve has chosen it for the call. */
+export function stepReference(step: Pick<Step, "model">): RuntimeModelReference {
+  if (step.model === undefined) throw new Error("The step read its model before eve chose it.");
+  return step.model.reference;
 }
 
 export function createStep(input: {
-  readonly config: ToolLoopHarnessConfig;
-  readonly ctx: AlsContext | undefined;
+  readonly config: KernelConfig;
+  readonly ctx: AlsContext;
   readonly emit: HarnessEmitFn | undefined;
   readonly instrumentation: InstrumentationStepScope<HarnessSession> | undefined;
   readonly live: StepProjection;
@@ -101,10 +110,11 @@ export function createStep(input: {
     instrumentation: input.instrumentation,
     hasDelegatedCaller,
     finalReplyOnly: hasDelegatedCaller || ctx?.get(ScheduleIdKey) !== undefined,
+    endsTurn: !hasDelegatedCaller && input.session.outputSchema === undefined,
     view: () => sessionView(live.read(), step.session.state),
     position: () => turnPosition(live.read()),
     async apply(change, messages) {
-      const transition = "events" in change ? change : { events: change, turn: step.view().turn };
+      const transition = "events" in change ? change : unchangedBy(change, step.view().turn);
       // Records whose rows the commit closed retire with it; the writer closes and scopes.
       step.session = dropClosedRecords(
         await applyTransition(step.session, transition, input.publish, messages),
@@ -155,39 +165,26 @@ export async function openTurn(
 
 /**
  * Before a model call: the session's dynamic values are evaluated with the conversation the call
- * reads, and user-role instructions from new occurrences join history, ahead of the turn's input
- * on its first call. A value that fails fails the turn; returns the step's result then.
+ * reads. A value that fails fails the turn; returns the step's result then.
  */
 export async function prepareModelCall(
   step: Step,
   preview: Prompt,
 ): Promise<StepResult | undefined> {
-  // The step's context is the session's container; direct harness tests run without one.
-  const ctx = step.ctx as ContextContainer | undefined;
-  if (ctx === undefined) return undefined;
   throwIfTurnAborted(step.config.abortSignal);
+  const conversation = validateHarnessModelMessages(withClientContext(preview));
   try {
-    await evaluateValues(ctx, {
-      abortSignal: step.config.abortSignal,
-      conversation: validateHarnessModelMessages(withClientContext(preview)),
-    });
+    await evaluateStepValues(step, { abortSignal: step.config.abortSignal, conversation });
   } catch (error) {
-    if (!isReactionFailedError(error)) throw error;
+    if (!(error instanceof DefinitionFailedError)) throw error;
     return failTurn(step, error, "REACTION_FAILED");
-  }
-  const instructionMessages = takeUserInstructionMessages(ctx);
-  if (instructionMessages.length > 0) {
-    step.session = {
-      ...step.session,
-      history: validateHarnessModelMessages([...step.session.history, ...instructionMessages]),
-    };
   }
   return undefined;
 }
 
 /** A hook failed during the turn: the turn fails. Returns the step's result then. */
-export async function failTurnForReaction(step: Step): Promise<StepResult | undefined> {
-  const reason = takeTurnFailure(step.ctx as ContextContainer | undefined);
+export async function failTurnForEffect(step: Step): Promise<StepResult | undefined> {
+  const reason = takeTurnFailure(step.ctx as ContextContainer);
   if (reason === undefined) return undefined;
   return failTurn(step, new Error(reason), "HOOK_FAILED");
 }

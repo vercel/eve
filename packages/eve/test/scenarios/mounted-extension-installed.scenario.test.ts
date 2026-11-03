@@ -1,4 +1,5 @@
 import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { declared } from "#runtime/types.js";
 import { createRequire } from "node:module";
 import { dirname, join, relative } from "node:path";
 
@@ -384,7 +385,7 @@ describe("mounted extension installed under node_modules", () => {
       readFile(join(skillsResourceRoot, "crm__research", "references", "checklist.md"), "utf8"),
     ).resolves.toBe("# Checklist\n");
 
-    const dynamicTools = graph.root.agent.dynamicToolResolvers.find(
+    const dynamicTools = declared(graph.root.agent, "tool").find(
       (resolver) => resolver.slug === "crm__dynamic",
     );
     const producedTools = (await dynamicTools?.evaluate({} as never)) as {
@@ -392,7 +393,7 @@ describe("mounted extension installed under node_modules", () => {
     };
     await expect(producedTools.quote.execute({}, {})).resolves.toEqual({ apiKey: "sk-installed" });
 
-    const dynamicSkills = graph.root.agent.dynamicSkillResolvers.find(
+    const dynamicSkills = declared(graph.root.agent, "skill").find(
       (resolver) => resolver.slug === "crm__oncall",
     );
     const producedSkills = (await dynamicSkills?.evaluate({} as never)) as {
@@ -400,7 +401,7 @@ describe("mounted extension installed under node_modules", () => {
     };
     expect(producedSkills.escalation.content).toContain("Page the on-call.");
 
-    const dynamicInstructions = graph.root.agent.dynamicInstructionsResolvers.find(
+    const dynamicInstructions = declared(graph.root.agent, "instructions").find(
       (resolver) => resolver.slug === "crm__dynamic",
     );
     const producedInstructions = (await dynamicInstructions?.evaluate({} as never)) as {

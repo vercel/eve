@@ -1,3 +1,4 @@
+import { commitOf } from "#harness/session-machine/commit.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { describe, expect, it } from "vitest";
 
@@ -51,7 +52,7 @@ function session(
   return {
     ctx,
     heard,
-    commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => handle(facts)),
+    commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => handle(commitOf(facts))),
   };
 }
 

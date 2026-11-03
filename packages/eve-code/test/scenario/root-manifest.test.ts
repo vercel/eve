@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { compiledOf } from "../../../eve/dist/src/compiler/manifest.js";
 import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -61,8 +62,8 @@ test("built extension adds no grep tool or GitHub contributions to the root agen
     );
     assert.ok(manifest.tools.some((tool) => tool.name === "code__apply_patch"));
     assert.ok(!manifest.tools.some((tool) => tool.name === "code__grep"));
-    assert.ok(!manifest.dynamicSkills.some((entry) => entry.slug === "code__pr"));
-    assert.ok(!manifest.dynamicInstructions.some((entry) => entry.slug === "code__github"));
+    assert.ok(!compiledOf(manifest, "skill").some((entry) => entry.slug === "code__pr"));
+    assert.ok(!compiledOf(manifest, "instructions").some((entry) => entry.slug === "code__github"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

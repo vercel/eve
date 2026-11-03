@@ -1,13 +1,15 @@
 import { join, posix } from "node:path";
 
-import type {
-  AgentSourceManifest,
-  ConnectionSourceRef,
-  InstructionsSourceRef,
-  LocalSubagentSourceRef,
-  ResolvedExtensionMount,
-  ScheduleSourceRef,
-  SkillSourceRef,
+import {
+  type AgentSourceManifest,
+  type AgentSourceRef,
+  type ConnectionSourceRef,
+  type InstructionsSourceRef,
+  type LocalSubagentSourceRef,
+  type ResolvedExtensionMount,
+  type ScheduleSourceRef,
+  type SkillSourceRef,
+  sourceKindOf,
 } from "#discover/manifest.js";
 import { mountRefNamespace } from "#discover/extensions.js";
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
@@ -61,21 +63,6 @@ export type ProjectedResourceSource =
     };
 
 export type ProjectedSource = ProjectedModuleSource | ProjectedResourceSource;
-
-const MODULE_KIND_BY_SLOT_ROOT: Partial<
-  Record<string, Exclude<ProjectedModuleSource["kind"], "connection">>
-> = {
-  agent: "config",
-  channels: "channel",
-  extensions: "extension",
-  hooks: "hook",
-  instructions: "instructions",
-  memory: "memory",
-  sandbox: "sandbox",
-  schedules: "schedule",
-  skills: "skill",
-  tools: "tool",
-};
 
 export interface ProjectedSubagentSource {
   readonly mountId?: string;
@@ -184,15 +171,7 @@ export function projectAgentSources(input: {
 export function listApplicationModulePaths(manifest: AgentSourceManifest): string[] {
   const sources: readonly { readonly logicalPath: string; readonly sourceKind: string }[] = [
     ...(manifest.configModule === undefined ? [] : [manifest.configModule]),
-    ...(manifest.sandbox === null ? [] : [manifest.sandbox]),
-    ...manifest.channels,
-    ...manifest.connections,
-    ...manifest.hooks,
-    ...manifest.memories,
-    ...manifest.tools,
-    ...manifest.instructions,
-    ...manifest.schedules,
-    ...manifest.skills,
+    ...manifest.sources,
   ];
   return [
     ...sources.flatMap((source) =>
@@ -328,10 +307,7 @@ function projectManifest(input: {
     });
     input.candidates.push(candidate);
   };
-  const pushResource = (
-    kind: ProjectedResourceSource["kind"],
-    source: InstructionsSourceRef | ScheduleSourceRef | SkillSourceRef,
-  ) => {
+  const pushResource = (source: Exclude<AgentSourceRef, ModuleSourceRef>) => {
     const logicalPath = projection.logicalPath(source.logicalPath);
     const projected = {
       ...source,
@@ -361,7 +337,7 @@ function projectManifest(input: {
     input.candidates.push(candidate);
     input.resources.push({
       candidate,
-      kind,
+      kind: sourceKindOf(source.logicalPath),
       source: projected,
     } as ProjectedResourceSource);
   };
@@ -381,23 +357,9 @@ function projectManifest(input: {
     if (!resolvedNamespaces.has(mountRefNamespace(source.logicalPath))) continue;
     pushModule(source, undefined, input.declarationMountIds?.get(source.sourceId));
   }
-  for (const source of input.manifest.channels) pushModule(source);
-  for (const source of input.manifest.connections) pushModule(source);
-  for (const source of input.manifest.hooks) pushModule(source);
-  for (const source of input.manifest.memories) pushModule(source);
-  if (input.manifest.sandbox !== null) pushModule(input.manifest.sandbox);
-  for (const source of input.manifest.tools) pushModule(source);
-  for (const source of input.manifest.instructions) {
+  for (const source of input.manifest.sources) {
     if (source.sourceKind === "module") pushModule(source);
-    else pushResource("instructions", source);
-  }
-  for (const source of input.manifest.schedules) {
-    if (source.sourceKind === "module") pushModule(source);
-    else pushResource("schedule", source);
-  }
-  for (const source of input.manifest.skills) {
-    if (source.sourceKind === "module") pushModule(source);
-    else pushResource("skill", source);
+    else pushResource(source);
   }
   for (const source of input.manifest.subagents) {
     const name = projection.name(source.subagentId);
@@ -451,8 +413,10 @@ function projectModuleCandidate(candidate: AgentModuleCandidate): ProjectedModul
       source: { ...source, connectionName: deriveConnectionName(candidate.logicalPath) },
     };
   }
-  const kind = MODULE_KIND_BY_SLOT_ROOT[slot.split("/", 1)[0]!];
-  if (kind === undefined) {
+  const root = slot.split("/", 1)[0]!;
+  const kind =
+    root === "agent" ? "config" : root === "extensions" ? "extension" : sourceKindOf(slot);
+  if (kind === undefined || kind === "connection") {
     throw new Error(`Agent module source slot "${candidate.logicalPath}" is not compiled yet.`);
   }
   return { candidate, kind, source };

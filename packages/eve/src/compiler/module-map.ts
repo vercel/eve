@@ -106,7 +106,7 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
         usesProgrammaticLoader = true;
         return {
           bindingName,
-          initializer: `await loadProgrammaticModule(${JSON.stringify(binding.backing)}, ${renderProgrammaticDependencies(binding.backing.dependencies, bindingNames)})`,
+          initializer: `await loadProgrammaticModule(${JSON.stringify(binding.backing)})`,
           sourceId,
         };
       }),
@@ -213,34 +213,12 @@ function orderBoundModules(
       const dependency = bySourceId.get(mount);
       if (dependency !== undefined) visit(dependency);
     }
-    if (module.binding.backing.kind === "programmatic") {
-      for (const dependencySourceId of Object.values(module.binding.backing.dependencies ?? {})) {
-        const dependency = bySourceId.get(dependencySourceId);
-        if (dependency === undefined) {
-          throw new Error(
-            `Programmatic binding "${module.sourceId}" depends on missing binding "${dependencySourceId}".`,
-          );
-        }
-        visit(dependency);
-      }
-    }
     visiting.delete(module.sourceId);
     visited.add(module.sourceId);
     ordered.push(module);
   };
   for (const module of modules) visit(module);
   return ordered;
-}
-
-function renderProgrammaticDependencies(
-  dependencies: Readonly<Record<string, string>> | undefined,
-  bindingNames: ReadonlyMap<string, string>,
-): string {
-  const entries = Object.entries(dependencies ?? {});
-  if (entries.length === 0) return "Object.freeze({})";
-  return `Object.freeze({ ${entries
-    .map(([alias, sourceId]) => `${JSON.stringify(alias)}: ${bindingNames.get(sourceId)!}`)
-    .join(", ")} })`;
 }
 
 function collectBoundNodeScopes(manifest: CompiledAgentManifest): readonly BoundNodeScope[] {

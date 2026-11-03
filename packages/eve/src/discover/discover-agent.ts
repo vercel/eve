@@ -2,7 +2,11 @@ import { join, resolve } from "node:path";
 
 import { discoverConnectionSources } from "#discover/connections.js";
 import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
-import { discoverSubagents } from "#discover/discover-subagent.js";
+import {
+  DISCOVER_LOCAL_SUBAGENT_SCHEDULES_INVALID,
+  DISCOVER_REQUIRED_SUBAGENT_CONFIG_MODULE_MISSING,
+  discoverSubagents,
+} from "#discover/discover-subagent.js";
 import {
   DISCOVER_EXTENSION_AGENT_CONFIG_UNSUPPORTED,
   DISCOVER_EXTENSION_MOUNT_AMBIGUOUS,
@@ -14,7 +18,12 @@ import {
   locateExtensionMount,
   mountNamespace,
 } from "#discover/extensions.js";
-import { classifyAgentRootEntry, normalizeLogicalPath } from "#discover/filesystem.js";
+import {
+  classifyAgentRootEntry,
+  classifyLocalSubagentEntry,
+  getDirectoryEntryType,
+  normalizeLogicalPath,
+} from "#discover/filesystem.js";
 import {
   createChannelNameDiagnostic,
   createExtensionNameDiagnostic,
@@ -34,11 +43,13 @@ import { discoverLibSources } from "#discover/lib.js";
 import { discoverMemorySources } from "#discover/memory.js";
 import {
   type AgentSourceManifest,
-  type CreateAgentSourceManifestInput,
+  type AgentSourceRef,
   createAgentSourceManifest,
   createModuleSourceRef,
   type ExtensionSourceRef,
   type ResolvedExtensionMount,
+  sourceKindOf,
+  sourcesOf,
 } from "#discover/manifest.js";
 import {
   createDiskProjectSource,
@@ -88,247 +99,233 @@ interface DiscoverAgentResult {
 export async function discoverAgent(input: DiscoverAgentInput): Promise<DiscoverAgentResult> {
   const source = input.source ?? createDiskProjectSource();
   const appRoot = resolve(input.appRoot);
-  const agentRoot = resolve(input.agentRoot);
-  const role = input.role ?? "agent";
+  return discoverAgentRoot({
+    appRoot,
+    packageName: await tryReadPackageJsonName(source, appRoot),
+    role: input.role ?? "agent",
+    rootPath: resolve(input.agentRoot),
+    source,
+  });
+}
+
+/**
+ * What a root may hold that belongs to the agent consuming an extension. An extension that declares
+ * one fails discovery, and the declaration is dropped.
+ */
+const CONSUMER_OWNED = [
+  {
+    code: DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
+    kind: "memory",
+    message:
+      "An extension may not declare memory — scope and lifecycle state belong to the consuming application.",
+  },
+  {
+    code: DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED,
+    kind: "sandbox",
+    message: "An extension may not declare a sandbox — it is the consuming agent's to own.",
+  },
+] as const;
+
+/**
+ * Discovers one agent-shaped root: an agent, a local subagent package, or an extension's source
+ * tree. A subagent requires its config module and declares no channels or schedules; an
+ * extension declares nothing its consumer owns and mounts no extensions.
+ */
+export async function discoverAgentRoot(input: {
+  readonly appRoot: string;
+  readonly packageName?: string;
+  readonly role: "agent" | "extension" | "subagent";
+  readonly rootPath: string;
+  readonly source: ProjectSource;
+}): Promise<DiscoverAgentResult> {
+  const { appRoot, role, rootPath, source } = input;
   const diagnostics: DiscoverDiagnostic[] = [];
-  const packageName = await tryReadPackageJsonName(source, appRoot);
-  const rootEntries = await readSortedDirectoryEntries(source, agentRoot);
+  const found = <T extends { readonly diagnostics: readonly DiscoverDiagnostic[] }>(result: T) => {
+    diagnostics.push(...result.diagnostics);
+    return result;
+  };
+  const rootEntries = await readSortedDirectoryEntries(source, rootPath);
+  const subagent = role === "subagent";
 
   diagnostics.push(
     ...createUnsupportedRootDirectoryDiagnostics({
-      classifyEntry: classifyAgentRootEntry,
-      createUnsupportedDirectoryMessage(directoryName) {
-        return `Ignoring unsupported directory "${directoryName}/" in the agent root.`;
-      },
+      classifyEntry: subagent ? classifyLocalSubagentEntry : classifyAgentRootEntry,
+      createUnsupportedDirectoryMessage: (directoryName) =>
+        `Ignoring unsupported directory "${directoryName}/" in the ${subagent ? "local subagent" : "agent"} root.`,
       rootEntries,
-      rootPath: agentRoot,
+      rootPath,
     }),
   );
 
-  const instructionsResult = await discoverInstructionsSource({
-    rootEntries,
-    rootPath: agentRoot,
-    source,
-    required: role !== "extension",
-  });
-  diagnostics.push(...instructionsResult.diagnostics);
+  const { instructions } = found(
+    await discoverInstructionsSource({ required: role === "agent", rootEntries, rootPath, source }),
+  );
+  const config = found(
+    discoverFlatModuleSource({
+      ...(subagent && {
+        missingDiagnostic: {
+          code: DISCOVER_REQUIRED_SUBAGENT_CONFIG_MODULE_MISSING,
+          message:
+            'Expected one authored subagent config module at "agent.ts", "agent.cts", "agent.mts", "agent.js", "agent.cjs", or "agent.mjs".',
+        },
+      }),
+      rootEntries,
+      rootPath,
+      slotName: "agent",
+    }),
+  ).module;
+  const channels = subagent
+    ? []
+    : found(
+        await discoverNamedSourceDirectory({
+          directoryName: "channels",
+          invalidDirectoryCode: DISCOVER_CHANNELS_DIRECTORY_INVALID,
+          invalidDirectoryMessage: `Expected "${join(rootPath, "channels")}" to be a directory of authored channels.`,
+          recursive: true,
+          rootEntries,
+          rootPath,
+          source,
+          validateSegment: createChannelNameDiagnostic,
+        }),
+      ).sources;
+  const { lib } = found(await discoverLibSources({ agentRoot: rootPath, rootEntries, source }));
+  if (subagent) diagnostics.push(...createLocalSubagentScheduleDiagnostics(rootPath, rootEntries));
+  const schedules = subagent
+    ? []
+    : found(await discoverScheduleSources({ agentRoot: rootPath, rootEntries, source })).schedules;
+  const { connections } = found(await discoverConnectionSources({ rootEntries, rootPath, source }));
+  const { memories } = found(await discoverMemorySources({ rootEntries, rootPath, source }));
+  const sandbox = found(await discoverSandboxSource({ rootEntries, rootPath, source }));
+  const tools = found(
+    await discoverNamedSourceDirectory({
+      directoryName: "tools",
+      invalidDirectoryCode: DISCOVER_TOOLS_DIRECTORY_INVALID,
+      invalidDirectoryMessage: `Expected "${join(rootPath, "tools")}" to be a directory of authored tools.`,
+      recursive: true,
+      rootEntries,
+      rootPath,
+      source,
+      validateSegment: createToolNameDiagnostic,
+    }),
+  ).sources;
+  const hooks = found(
+    await discoverNamedSourceDirectory({
+      directoryName: "hooks",
+      invalidDirectoryCode: DISCOVER_HOOKS_DIRECTORY_INVALID,
+      invalidDirectoryMessage: `Expected "${join(rootPath, "hooks")}" to be a directory of authored hooks.`,
+      recursive: true,
+      rootEntries,
+      rootPath,
+      source,
+      validateSegment: createHookNameDiagnostic,
+    }),
+  ).sources;
+  const { skills } = found(await discoverSkills({ agentRoot: rootPath, source }));
+  const { subagents } = found(await discoverSubagents({ agentRoot: rootPath, appRoot, source }));
+  const { mounts } = found(
+    await discoverExtensionMountDeclarations({ agentRoot: rootPath, source }),
+  );
 
-  const configModuleResult = discoverFlatModuleSource({
-    rootEntries,
-    rootPath: agentRoot,
-    slotName: "agent",
-  });
-  diagnostics.push(...configModuleResult.diagnostics);
-
-  const channelsResult = await discoverNamedSourceDirectory({
-    directoryName: "channels",
-    invalidDirectoryCode: DISCOVER_CHANNELS_DIRECTORY_INVALID,
-    invalidDirectoryMessage: `Expected "${join(agentRoot, "channels")}" to be a directory of authored channels.`,
-    recursive: true,
-    rootEntries,
-    rootPath: agentRoot,
-    source,
-    validateSegment: createChannelNameDiagnostic,
-  });
-  diagnostics.push(...channelsResult.diagnostics);
-
-  const libResult = await discoverLibSources({
-    agentRoot,
-    rootEntries,
-    source,
-  });
-  diagnostics.push(...libResult.diagnostics);
-
-  const schedulesResult = await discoverScheduleSources({
-    agentRoot,
-    rootEntries,
-    source,
-  });
-  diagnostics.push(...schedulesResult.diagnostics);
-
-  const connectionsResult = await discoverConnectionSources({
-    rootEntries,
-    rootPath: agentRoot,
-    source,
-  });
-  diagnostics.push(...connectionsResult.diagnostics);
-
-  const memoryResult = await discoverMemorySources({
-    rootEntries,
-    rootPath: agentRoot,
-    source,
-  });
-  diagnostics.push(...memoryResult.diagnostics);
-
-  const sandboxResult = await discoverSandboxSource({
-    rootEntries,
-    rootPath: agentRoot,
-    source,
-  });
-  diagnostics.push(...sandboxResult.diagnostics);
-
+  let sources: AgentSourceRef[] = [
+    ...channels,
+    ...connections,
+    ...hooks,
+    ...memories,
+    ...(sandbox.sandbox === null ? [] : [sandbox.sandbox]),
+    ...tools,
+    ...instructions,
+    ...schedules,
+    ...skills,
+  ];
+  let resolvedExtensions: readonly ResolvedExtensionMount[] = [];
   if (role === "extension") {
-    if (configModuleResult.module !== undefined) {
+    if (config !== undefined) {
       diagnostics.push(
         createDiscoverErrorDiagnostic({
           code: DISCOVER_EXTENSION_AGENT_CONFIG_UNSUPPORTED,
           message:
             "An extension may not declare agent config (agent.ts) — model, limits, and sandbox are the consuming agent's to own.",
-          sourcePath: join(agentRoot, configModuleResult.module.logicalPath),
+          sourcePath: join(rootPath, config.logicalPath),
         }),
       );
     }
-    const instrumentationDirectory = rootEntries.find(
+    const instrumentation = rootEntries.find(
       (entry) => entry.name === "instrumentation" && entry.isDirectory(),
     );
-    if (instrumentationDirectory !== undefined) {
+    if (instrumentation !== undefined) {
       diagnostics.push(
         createDiscoverErrorDiagnostic({
           code: DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
           message:
             "An extension may not declare instrumentation providers — process-wide observability belongs to the consuming agent.",
-          sourcePath: join(agentRoot, instrumentationDirectory.name),
+          sourcePath: join(rootPath, instrumentation.name),
         }),
       );
     }
-    const [firstMemory] = memoryResult.memories;
-    if (firstMemory !== undefined) {
+    for (const owned of CONSUMER_OWNED) {
+      const [first] = sourcesOf({ sources }, owned.kind);
+      if (first === undefined) continue;
       diagnostics.push(
         createDiscoverErrorDiagnostic({
-          code: DISCOVER_EXTENSION_MEMORY_UNSUPPORTED,
-          message:
-            "An extension may not declare memory — scope and lifecycle state belong to the consuming application.",
-          sourcePath: join(agentRoot, firstMemory.logicalPath),
+          code: owned.code,
+          message: owned.message,
+          sourcePath: join(rootPath, first.logicalPath),
         }),
       );
     }
-    if (sandboxResult.sandbox !== null) {
-      diagnostics.push(
-        createDiscoverErrorDiagnostic({
-          code: DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED,
-          message: "An extension may not declare a sandbox — it is the consuming agent's to own.",
-          sourcePath: join(agentRoot, sandboxResult.sandbox.logicalPath),
-        }),
-      );
-    }
-  }
-
-  const toolsResult = await discoverNamedSourceDirectory({
-    directoryName: "tools",
-    invalidDirectoryCode: DISCOVER_TOOLS_DIRECTORY_INVALID,
-    invalidDirectoryMessage: `Expected "${join(agentRoot, "tools")}" to be a directory of authored tools.`,
-    recursive: true,
-    rootEntries,
-    rootPath: agentRoot,
-    source,
-    validateSegment: createToolNameDiagnostic,
-  });
-  diagnostics.push(...toolsResult.diagnostics);
-
-  const hooksResult = await discoverNamedSourceDirectory({
-    directoryName: "hooks",
-    invalidDirectoryCode: DISCOVER_HOOKS_DIRECTORY_INVALID,
-    invalidDirectoryMessage: `Expected "${join(agentRoot, "hooks")}" to be a directory of authored hooks.`,
-    recursive: true,
-    rootEntries,
-    rootPath: agentRoot,
-    source,
-    validateSegment: createHookNameDiagnostic,
-  });
-  diagnostics.push(...hooksResult.diagnostics);
-
-  const extensionsResult = await discoverNamedSourceDirectory({
-    directoryName: "extensions",
-    invalidDirectoryCode: DISCOVER_EXTENSIONS_DIRECTORY_INVALID,
-    invalidDirectoryMessage: `Expected "${join(agentRoot, "extensions")}" to be a directory of extension mounts.`,
-    recursive: false,
-    rootEntries,
-    rootPath: agentRoot,
-    source,
-    validateSegment: createExtensionNameDiagnostic,
-  });
-  diagnostics.push(...extensionsResult.diagnostics);
-
-  const skillsResult = await discoverSkills({
-    agentRoot,
-    source,
-  });
-  diagnostics.push(...skillsResult.diagnostics);
-
-  const subagentsResult = await discoverSubagents({
-    agentRoot,
-    appRoot,
-    source,
-  });
-  diagnostics.push(...subagentsResult.diagnostics);
-
-  const mountCollection = await collectExtensionMounts({
-    agentRoot,
-    fileMounts: extensionsResult.sources,
-    rootEntries,
-    source,
-  });
-  diagnostics.push(...mountCollection.diagnostics);
-
-  let resolvedExtensions: readonly ResolvedExtensionMount[] = [];
-  if (role !== "agent") {
-    // Extensions cannot mount other extensions yet. Fail loudly instead of
-    // silently dropping the nested mount, and reserve the behavior so enabling
-    // it later is additive.
-    for (const descriptor of mountCollection.mounts) {
+    sources = sources.filter((entry) =>
+      CONSUMER_OWNED.every(({ kind }) => sourceKindOf(entry.logicalPath) !== kind),
+    );
+    // Extensions cannot mount other extensions yet. Fail loudly instead of silently dropping the
+    // nested mount, and reserve the behavior so enabling it later is additive.
+    for (const descriptor of mounts) {
       diagnostics.push(
         createDiscoverErrorDiagnostic({
           code: DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED,
           message: `"${descriptor.mountRef.logicalPath}" mounts an extension from inside an extension, which is not supported yet. Extensions cannot mount other extensions; remove the "extensions/" slot.`,
-          sourcePath: join(agentRoot, descriptor.mountRef.logicalPath),
+          sourcePath: join(rootPath, descriptor.mountRef.logicalPath),
         }),
       );
     }
   } else {
-    const result = await resolveExtensionMounts({
-      agentRoot,
-      appRoot,
-      mounts: mountCollection.mounts,
-      source,
-    });
-    diagnostics.push(...result.diagnostics);
-    resolvedExtensions = result.mounts;
+    resolvedExtensions = found(
+      await resolveExtensionMounts({ agentRoot: rootPath, appRoot, mounts, source }),
+    ).mounts;
   }
 
-  const manifestInput: CreateAgentSourceManifestInput = {
-    agentRoot,
+  const manifest = createAgentSourceManifest({
+    agentRoot: rootPath,
     appRoot,
-    channels: channelsResult.sources,
-    connections: connectionsResult.connections,
-    packageName,
+    ...(role !== "extension" && config !== undefined && { configModule: config }),
     diagnostics,
-    extensions:
-      role === "extension" ? [] : mountCollection.mounts.map((descriptor) => descriptor.mountRef),
+    extensions: role === "extension" ? [] : mounts.map((descriptor) => descriptor.mountRef),
+    lib,
+    packageName: input.packageName,
     resolvedExtensions,
-    hooks: hooksResult.sources,
-    memories: role === "extension" ? [] : memoryResult.memories,
-    lib: libResult.lib,
-    instructions: instructionsResult.instructions,
-    sandbox: role === "extension" ? null : sandboxResult.sandbox,
     sandboxWorkspaces:
-      role === "extension" || sandboxResult.sandboxWorkspace === null
-        ? []
-        : [sandboxResult.sandboxWorkspace],
-    schedules: schedulesResult.schedules,
-    skills: skillsResult.skills,
-    tools: toolsResult.sources,
-    subagents: subagentsResult.subagents,
-  };
+      role === "extension" || sandbox.sandboxWorkspace === null ? [] : [sandbox.sandboxWorkspace],
+    sources,
+    subagents,
+  });
+  return { diagnostics, manifest };
+}
 
-  if (role !== "extension" && configModuleResult.module !== undefined) {
-    manifestInput.configModule = configModuleResult.module;
-  }
-  const manifest = createAgentSourceManifest(manifestInput);
-
-  return {
-    diagnostics,
-    manifest,
-  };
+function createLocalSubagentScheduleDiagnostics(
+  subagentRoot: string,
+  rootEntries: readonly ProjectSourceEntry[],
+): DiscoverDiagnostic[] {
+  return rootEntries.flatMap((entry) =>
+    classifyLocalSubagentEntry(entry.name, getDirectoryEntryType(entry)) ===
+    "invalid-schedules-directory"
+      ? [
+          createDiscoverErrorDiagnostic({
+            code: DISCOVER_LOCAL_SUBAGENT_SCHEDULES_INVALID,
+            message: `Local subagent packages cannot define schedules at "${join(subagentRoot, entry.name)}".`,
+            sourcePath: join(subagentRoot, entry.name),
+          }),
+        ]
+      : [],
+  );
 }
 
 /**

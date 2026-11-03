@@ -60,7 +60,7 @@ export function errorInfoOf(failure: {
  * not it; `failure(view, turnId)` reads the session's error. Every reader stops there.
  */
 export function sessionEndedFacts(
-  projection: SessionProjection | undefined,
+  projection: Pick<SessionProjection, "view"> | undefined,
   ending: {
     readonly outcome: "completed" | "failed";
     readonly cause?: Cause;

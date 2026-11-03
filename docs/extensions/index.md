@@ -319,7 +319,7 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
-Hooks and instruction fragments add to the agent's own, so you can't replace them. A dynamic tool wins over a static tool with the same name, so replace a dynamic tool with a dynamic definition in the same file. `disableTool()` removes either kind.
+Hooks and instruction fragments add to the agent's own, so you can't replace them. At runtime, static tools keep their names when a dynamic definition returns the same name. Configure approvals on the static definition, not on a same-named dynamic tool. `disableTool()` removes either kind.
 
 You can also override from the agent root with the prefixed name. `agent/tools/crm__search.ts` replaces the extension's `tools/search.ts`, and wins over a directory-mount override.
 

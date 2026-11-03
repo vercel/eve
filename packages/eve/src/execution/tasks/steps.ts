@@ -1,4 +1,3 @@
-import type { SessionEvent } from "#protocol/session-event.js";
 import {
   readDurableSession,
   replaceDurableSessionSnapshot,
@@ -43,7 +42,7 @@ import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-in
 import { readHitlState } from "#harness/hitl/index.js";
 import type { Transition } from "#harness/session-machine/commit.js";
 import { endTask, finishRun, settleTask } from "#harness/session-machine/transitions.js";
-import { delegatedUsageFact } from "#harness/facts.js";
+import { lateTaskSpend, taskSpend } from "#harness/session-machine/runs.js";
 import { storedProjection, type SessionView } from "#harness/session-machine/view.js";
 import { stopRuns, waitedCallRuns, type RunStopTarget } from "#execution/stop-runs.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
@@ -83,12 +82,7 @@ export async function applyTaskRunMessage(
         : counted.table;
     return await commitSessionStep(
       { ...input, sessionState: saveTable(input.sessionState, session, table) },
-      (view) => [
-        {
-          turn: view.turn,
-          events: counted.spend === undefined ? [] : [delegatedUsageFact(undefined, counted.spend)],
-        },
-      ],
+      (view) => [lateTaskSpend(view, counted.spend)],
       { origin: "own" },
     );
   }
@@ -155,25 +149,6 @@ export async function applyTaskRunMessage(
         : [...settles, spent(settles, message.from.callId, spend, taskId)],
     withdraws,
   });
-}
-
-/**
- * Delegated spend, owned by the call this commit settles. One reply may settle several calls
- * with the same result; its spend belongs once to the latest served call (the message's
- * source), never once per recipient. A serve body can keep spending after it replied or while
- * cancellation unwinds: no open call owns that, and an immutable settlement can't be amended,
- * so it is the task's own `delegated-late` usage.
- */
-function spendFact(
-  events: readonly SessionEvent[],
-  sourceCallId: string | undefined,
-  spend: TokenUsage,
-  taskId: string,
-): SessionEvent {
-  const settled = events.filter((event) => event.type === "call.settled");
-  const call = settled.find((event) => event.data.callId === sourceCallId) ?? settled[0];
-  if (call !== undefined) return delegatedUsageFact(call.data.callId, spend);
-  return { ...delegatedUsageFact(undefined, spend), scope: { taskId } };
 }
 
 /**
@@ -288,17 +263,13 @@ function spent(
   spend: TokenUsage,
   taskId: string,
 ): Decision {
-  return (view) => ({
-    events: [
-      spendFact(
-        settles.flatMap((decide) => decide(view).events),
-        sourceCallId,
-        spend,
-        taskId,
-      ),
-    ],
-    turn: view.turn,
-  });
+  return (view) =>
+    taskSpend(view, {
+      settling: settles.flatMap((decide) => decide(view).events),
+      sourceCallId,
+      spend,
+      taskId,
+    });
 }
 
 /** Settles a task's settled calls; calls only settle on a known task. */
