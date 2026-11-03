@@ -378,9 +378,10 @@ for (const mode of ["stable", "rc"]) {
   test(`version-packages releases desktop independently without eve compatibility noise (${mode})`, async (t) => {
     const { root, write, git } = await createReleaseFixture(t);
     const desktop = JSON.parse(await readFile("packages/eve-agent-desktop/package.json", "utf8"));
+    // Pin the unreleased version: release PRs bump the real manifest and would shift the expected result.
     const desktopManifest = JSON.stringify({
       name: desktop.name,
-      version: desktop.version,
+      version: "0.0.0",
       peerDependencies: desktop.peerDependencies,
       devDependencies: { eve: desktop.devDependencies.eve },
     });
