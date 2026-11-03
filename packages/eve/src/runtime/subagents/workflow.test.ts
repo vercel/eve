@@ -99,7 +99,7 @@ const input: WorkflowBodyInput = {
     sent: 0,
   },
   runId: "run",
-  session: { auth: alice, id: "session", turn: { id: "turn", sequence: 1 } },
+  session: { audience: "unknown", auth: alice, id: "session", turn: { id: "turn", sequence: 1 } },
   stepIndex: 0,
   toolName: "reviewer",
   workflowId: "workflow//eve//agentToolServeWorkflow",

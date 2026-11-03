@@ -5,6 +5,7 @@ import { readSessionSchedule } from "#context/session-schedule.js";
 import { loadContext } from "#context/container.js";
 import type { ContextReader } from "#context/key.js";
 import { SandboxKey, SessionKey } from "#context/keys.js";
+import { ConversationContextKey } from "#shared/conversation-context.js";
 
 /**
  * Builds a {@link SessionContext} from the active ALS scope.
@@ -22,6 +23,7 @@ export function buildCallbackContext(): SessionContext {
       auth: session.auth,
       turn: session.turn,
       parent: session.parent,
+      audience: ctx.get(ConversationContextKey)?.audience ?? "unknown",
       schedule: readSessionSchedule(ctx),
       predecessor: session.predecessor,
     },

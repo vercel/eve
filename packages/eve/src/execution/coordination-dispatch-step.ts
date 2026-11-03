@@ -107,6 +107,7 @@ async function dispatchCoordination(
   const starts = withPrestartedRuns(
     prepared.plan.map((task) => ({
       agentContext: captureAgentSessionContext(prepared, task.callId),
+      audience: prepared.inheritedConversation?.audience ?? "unknown",
       auth: {
         current: prepared.auth,
         initiator: prepared.initiatorAuth,

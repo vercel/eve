@@ -1217,6 +1217,7 @@ describe("buildToolSet", () => {
       });
 
       expect(capturedCtx?.session).toEqual({
+        audience: "unknown",
         auth: session.auth,
         id: "session_current",
         parent: session.parent,

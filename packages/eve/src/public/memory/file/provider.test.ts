@@ -416,6 +416,7 @@ function operationContext() {
     messages: [],
     operationId: "memop-1",
     session: {
+      audience: "unknown",
       auth: { current: null, initiator: null },
       id: "session-1",
       turn: { id: "turn-1", sequence: 1 },

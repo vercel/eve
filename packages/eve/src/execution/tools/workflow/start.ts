@@ -1,5 +1,6 @@
 import type { SessionAuth, SessionParent } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -49,6 +50,8 @@ function taskRunHookToken(sessionId: string, taskId: string): string {
 export interface StartWorkflowTaskInput {
   /** Captured for this call, as the context of the sessions opened for it. */
   readonly agentContext: AgentSessionContext;
+  /** The session's audience, which the call's run reports as its own. */
+  readonly audience: ChannelAudience;
   /** The caller's auth the session admits the call with. */
   readonly auth: SessionAuth;
   readonly batchEvent: {
@@ -94,6 +97,7 @@ export async function startWorkflowToolCallRun(
     input: task.input,
     owner: input.owner,
     session: {
+      audience: input.audience,
       auth: input.auth,
       id: session.sessionId,
       parent: input.parentSession,

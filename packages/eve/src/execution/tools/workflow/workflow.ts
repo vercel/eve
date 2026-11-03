@@ -188,7 +188,8 @@ function isAnsweredOnControlHook(message: WorkflowToolRunMessage): boolean {
 }
 
 /** Starts the body the run's entry point names. */
-function startWorkflowBody(input: WorkflowBodyInput): StartedWorkflowBody {
+function startWorkflowBody(started: WorkflowBodyInput): StartedWorkflowBody {
+  const input = withAudience(started);
   switch (input.entry.entryPoint) {
     case "execute":
     case "task":
@@ -196,6 +197,13 @@ function startWorkflowBody(input: WorkflowBodyInput): StartedWorkflowBody {
     case "serve":
       return startServeBody(input);
   }
+}
+
+/** A run started before eve recorded the session's audience reads it as `"unknown"`. */
+function withAudience(input: WorkflowBodyInput): WorkflowBodyInput {
+  const recorded = input.session as Partial<WorkflowBodyInput["session"]>;
+  if (recorded.audience !== undefined) return input;
+  return { ...input, session: { ...input.session, audience: "unknown" } };
 }
 
 async function* awaitBodyOutcome(

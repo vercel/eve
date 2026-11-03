@@ -3,6 +3,7 @@ import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-sess
 import type { SessionAuth, SessionParent, SessionPredecessor, SessionTurn } from "#context/keys.js";
 
 import type { SessionSchedule } from "#context/session-schedule.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 export type { SessionAuth, SessionParent, SessionPredecessor, SessionSchedule, SessionTurn };
 
 /**
@@ -22,6 +23,13 @@ export interface SessionContext {
     readonly auth: SessionAuth;
     readonly turn: SessionTurn;
     readonly parent?: SessionParent;
+    /**
+     * Who can see the conversation on its channel, as eve classified it when the session
+     * started: `"private"` when only its participants can, `"public"` when others can, and
+     * `"unknown"` when eve couldn't tell. A local subagent has its parent's audience. Security
+     * policies should treat `"unknown"` like `"public"`.
+     */
+    readonly audience: ChannelAudience;
     /** Present only for scheduled work; not an application-supplied auth attribute. */
     readonly schedule?: SessionSchedule;
     /**

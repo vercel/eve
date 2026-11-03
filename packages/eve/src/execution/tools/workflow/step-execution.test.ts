@@ -142,6 +142,7 @@ function context(user = "user-1", sessionId = "session-1"): WorkflowStepContext 
     channel: { kind: "unknown", metadata: {} },
     abortSignal: new AbortController().signal,
     session: {
+      audience: "unknown",
       id: "session-1",
       auth: { current: auth, initiator: auth },
       turn: { id: "turn-1", sequence: 1 },

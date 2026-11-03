@@ -46,6 +46,7 @@ Public fields include:
 - `auth.current`: the caller for the active inbound turn.
 - `auth.initiator`: the caller that started the session.
 - `parent`: the parent call, session, root session, and turn for a child subagent session.
+- `audience`: who can see the conversation on its channel. `"private"` means only its participants can, such as a Slack DM or private channel. `"public"` means others can, such as a public Slack channel. `"unknown"` means eve couldn't classify the conversation, as for GitHub, Linear, and plain HTTP sessions. eve classifies it when the session starts, and a local subagent has its parent's audience. Security policies should treat `"unknown"` like `"public"`.
 - `predecessor`: present only when this session replaced a stranded one; `sessionId` names that earlier session. See [Recover a stranded session](./deployment/self-hosted-operations#recover-a-stranded-session) to read its earlier conversation.
 
 Unprotected agents expose `auth.current` and `auth.initiator` as `null`. Sessions that a top-level schedule starts use eve's app identity (`principalId: "eve:app"`, `principalType: "runtime"`). See [Authentication](./auth-and-route-protection#what-reaches-ctxsessionauth) for how inbound identity becomes session auth.

@@ -12,6 +12,7 @@ function approvalContext(overrides: Partial<ApprovalContext> = {}): ApprovalCont
     callId: "call-1",
     getSandbox: vi.fn(),
     session: {
+      audience: "unknown",
       auth: { current: null, initiator: null },
       id: "session-1",
       turn: { id: "turn-1", sequence: 0 },

@@ -107,6 +107,7 @@ const input: WorkflowBodyInput = {
   owner: { send: (message) => mocks.deliver("inbox", message), sent: 0 },
   runId: "run",
   session: {
+    audience: "unknown",
     auth: alice("editor"),
     id: "session",
     turn: { id: "turn", sequence: 1 },
