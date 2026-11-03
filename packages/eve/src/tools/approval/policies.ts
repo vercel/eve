@@ -14,7 +14,7 @@ const DEFAULT_CAUTION_DESCRIPTION = "The action is dangerous or its important ef
 export interface AutoApprovalOptions {
   /** Decision model instance or ID. Defaults to TypeSafe Jev. */
   readonly model?: DecisionModel;
-  /** Options for the decision model call, such as AI Gateway's `zeroDataRetention`. */
+  /** Provider options for the decision call. */
   readonly modelOptions?: Pick<AgentModelOptionsDefinition, "providerOptions">;
   /** Instructions used to classify the exact tool call. */
   readonly instructions?: string;

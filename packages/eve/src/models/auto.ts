@@ -30,7 +30,7 @@ export interface AutoConfig<
 > {
   /** Decision model instance or ID. Defaults to TypeSafe Jev through AI SDK model resolution. */
   readonly model?: DecisionModel;
-  /** Options for the decision model call, such as AI Gateway's `zeroDataRetention`. */
+  /** Provider options for the decision call, not the selected model. */
   readonly modelOptions?: Pick<AgentModelOptionsDefinition, "providerOptions">;
   /** Model selection to use when decision fails. */
   readonly fallback?: AutoModelSelection;
@@ -158,10 +158,6 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
     (config.model !== undefined &&
       !isRecord(config.model) &&
       (typeof config.model !== "string" || !config.model.trim())) ||
-    (config.modelOptions !== undefined &&
-      (!isRecord(config.modelOptions) ||
-        (config.modelOptions.providerOptions !== undefined &&
-          !isRecord(config.modelOptions.providerOptions)))) ||
     (config.fallback !== undefined && !isModelSelection(config.fallback)) ||
     !isRecord(config.options) ||
     Object.values(config.options).some((option) =>
@@ -174,7 +170,7 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
     )
   ) {
     throw new Error(
-      "auto requires descriptions or { model, description, reasoning?, modelContextWindowTokens?, modelOptions? } option entries and, when provided, a valid decision model, modelOptions object, and fallback model.",
+      "auto requires descriptions or { model, description, reasoning?, modelContextWindowTokens?, modelOptions? } option entries and, when provided, a valid decision model and fallback model.",
     );
   }
 
