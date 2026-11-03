@@ -23,9 +23,9 @@ The local world is the default for `eve start` and needs no configuration. It st
 
 Each `eve start` process accepts queue messages only from its own queue. Don't point `WORKFLOW_LOCAL_BASE_URL` at a load balancer, because another replica rejects forwarded messages with HTTP 401. To serve an agent from several replicas, use the [Postgres world](#use-the-postgres-world).
 
-On startup, `eve start` queues pending and running local workflow runs again. Runs that were active when the previous process stopped continue when the eve version is unchanged. A step that was running when the previous process stopped, such as a model call, runs again right away. `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` or `false` doesn't disable this recovery.
+On startup, `eve start` queues pending and running local workflow runs again. Runs that were active when the previous process stopped continue when the eve version is unchanged. A step that was running when the previous process stopped, such as a model call, runs again right away. In a [spec 8 run](#set-the-workflow-spec-version), that interrupted attempt counts toward the step's retries, so a step that allows no retries fails instead. `WORKFLOW_LOCAL_RECOVER_ACTIVE_RUNS=0` or `false` doesn't disable this recovery.
 
-Run one `eve start` process per `.eve/.workflow-data` directory. Recovery treats steps started before it booted as abandoned, so a second live process on the same directory runs them twice.
+Run one eve process, `eve start` or `eve dev`, per `.eve/.workflow-data` directory. Both use `.eve` in the app directory. Recovery treats steps started before it booted as abandoned, so a second live process on the same directory runs them twice.
 
 ## Use the Postgres world
 

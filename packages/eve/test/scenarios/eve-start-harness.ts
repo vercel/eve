@@ -120,7 +120,8 @@ async function stopChildProcess(child: ChildProcess): Promise<void> {
 
   await new Promise<void>((resolve) => {
     const timeout = setTimeout(() => {
-      child.kill("SIGKILL");
+      // The whole group, so a server child that outlives `eve start` dies too.
+      process.kill(-child.pid!, "SIGKILL");
       resolve();
     }, 10_000);
 

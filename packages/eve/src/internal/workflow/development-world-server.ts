@@ -14,7 +14,10 @@ import {
   resolveLocalWorkflowWorldDataDirectory,
 } from "#internal/workflow/local-world-data-directory.js";
 import { applyLocalWorkflowWorldDeliveryTimeoutDefaults } from "#internal/workflow/local-world-delivery-timeouts.js";
-import { reenqueueRecoveredLocalRun } from "#internal/workflow/local-world-recovery.js";
+import {
+  localRecoveryMessage,
+  releaseOrphanedLocalSteps,
+} from "#internal/workflow/local-world-recovery.js";
 import {
   decodeDevelopmentWorldValue,
   encodeDevelopmentWorldValue,
@@ -380,14 +383,19 @@ async function reenqueueActiveDevelopmentRuns(input: {
           { cause: error },
         );
       }
+      const recoverable = [];
       for (const run of page.data) {
-        if (!(await input.canRecover(run.deploymentId))) continue;
-        await reenqueueRecoveredLocalRun({
-          enqueue: input.enqueue,
-          queueName: `${input.prefix}${run.workflowName}` as ValidQueueName,
-          run,
-          world: input.world,
-        });
+        if (await input.canRecover(run.deploymentId)) recoverable.push(run);
+      }
+      await releaseOrphanedLocalSteps(
+        input.world,
+        recoverable.map((run) => run.runId),
+      );
+      for (const run of recoverable) {
+        await input.enqueue(
+          `${input.prefix}${run.workflowName}` as ValidQueueName,
+          localRecoveryMessage(run),
+        );
       }
       cursor = page.hasMore ? (page.cursor ?? undefined) : undefined;
     } while (cursor !== undefined);

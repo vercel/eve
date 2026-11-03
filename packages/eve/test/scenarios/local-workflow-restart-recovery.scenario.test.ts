@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, expect, it, vi } from "vitest";
@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { Client } from "../../src/client/client.js";
 import { buildApplication } from "../../src/internal/nitro/host.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
+import { resolveLocalWorkflowWorldDataDirectory } from "../../src/internal/workflow/local-world-data-directory.js";
 import { startPackagedEveStart } from "./eve-start-harness.js";
 
 const scenarioApp = useScenarioApp();
@@ -15,14 +16,15 @@ afterEach(() => vi.unstubAllEnvs());
 
 /**
  * Starts a turn, SIGKILLs `eve start` once the agent writes `crashMarker` and
- * `settleMs` passes, restarts on the same data directory, and returns the
- * turn's outcome, or undefined if it does not settle within 60s.
+ * the local World stores at least `storedWaits` waits, restarts on the same
+ * data directory, and returns the turn's outcome, or undefined if it does not
+ * settle within 60s.
  */
 async function crashMidTurnAndRecover(input: {
   readonly name: string;
   readonly files: Readonly<Record<string, string>>;
   readonly crashMarker: string;
-  readonly settleMs?: number;
+  readonly storedWaits?: number;
 }): Promise<{ readonly outcome: string | undefined; readonly stderr: string }> {
   vi.stubEnv("EVE_MOCK_AUTHORED_MODELS", "");
   vi.stubEnv("NODE_ENV", "production");
@@ -48,7 +50,10 @@ export default eveChannel({ auth: httpBasic({ username: "alice", password: "fixt
     await expect
       .poll(() => existsSync(join(appRoot, input.crashMarker)), { timeout: 30_000 })
       .toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, input.settleMs ?? 0));
+    const waits = join(resolveLocalWorkflowWorldDataDirectory(appRoot), "waits");
+    const storedWaits = () =>
+      existsSync(waits) ? readdirSync(waits).filter((file) => file.endsWith(".json")).length : 0;
+    await expect.poll(storedWaits).toBeGreaterThanOrEqual(input.storedWaits ?? 0);
   } finally {
     await server.crash();
   }
@@ -109,8 +114,8 @@ it("finishes a spec 9 turn that was sleeping when `eve start` was killed", async
   const { outcome, stderr } = await crashMidTurnAndRecover({
     name: "local-workflow-restart-sleep",
     crashMarker: ".sleep-requested",
-    // Long enough for the sleep's wait to be stored before the crash.
-    settleMs: 3_000,
+    // The session's idle timeout and the sleep: the crash must lose a stored wait's timer.
+    storedWaits: 2,
     files: {
       "agent/agent.ts": `import { writeFileSync } from "node:fs";
 import { join } from "node:path";

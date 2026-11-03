@@ -144,14 +144,17 @@ describe("authenticateLocalWorkflowDeliveries", () => {
   it("still re-enqueues a run whose orphaned steps fail to release", async () => {
     vi.stubEnv("WORKFLOW_QUEUE_NAMESPACE", "evetest");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { recovery, secured } = createFakeWorld({ releaseFails: "wrun_1" });
-    await secured.start?.();
-    expect(recovery).toEqual(["enqueue wrun_1", "release wrun_2", "enqueue wrun_2"]);
-    expect(warn).toHaveBeenCalledWith(
-      "[eve] Failed to release orphaned steps of workflow run wrun_1:",
-      expect.any(Error),
-    );
-    warn.mockRestore();
+    try {
+      const { recovery, secured } = createFakeWorld({ releaseFails: "wrun_1" });
+      await secured.start?.();
+      expect(recovery).toEqual(["enqueue wrun_1", "release wrun_2", "enqueue wrun_2"]);
+      expect(warn).toHaveBeenCalledWith(
+        "[eve] Failed to release orphaned steps of workflow run wrun_1:",
+        expect.any(Error),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("rejects recovery without an installed namespace", async () => {
