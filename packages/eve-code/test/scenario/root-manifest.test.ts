@@ -15,8 +15,8 @@ import {
 
 const packageRoot = fileURLToPath(new URL("../../", import.meta.url));
 
-test("built worker keeps explicit read tools without shell or write capabilities", async () => {
-  const root = await mkdtemp(join(tmpdir(), "eve-code-worker-manifest-"));
+test("built extension adds no grep tool or GitHub contributions to the root agent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eve-code-root-manifest-"));
   try {
     const extensionRoot = join(root, "extension-package");
     await mkdir(extensionRoot);
@@ -41,13 +41,13 @@ test("built worker keeps explicit read tools without shell or write capabilities
     await symlink(extensionRoot, join(appRoot, "node_modules", "eve-code"), "dir");
     await writeFile(
       join(appRoot, "package.json"),
-      JSON.stringify({ name: "worker-manifest-consumer", type: "module" }),
+      JSON.stringify({ name: "root-manifest-consumer", type: "module" }),
     );
     await writeFile(
       join(appRoot, "agent", "extensions", "code.ts"),
       'import code from "eve-code";\nexport default code({});\n',
     );
-    await writeFile(join(appRoot, "agent", "instructions.md"), "Delegate repository research.\n");
+    await writeFile(join(appRoot, "agent", "instructions.md"), "Work in the repository.\n");
     const discovered = await discoverAgent({ appRoot, agentRoot: join(appRoot, "agent") });
     assert.deepEqual(
       discovered.diagnostics.filter((item) => item.severity === "error"),
@@ -59,20 +59,10 @@ test("built worker keeps explicit read tools without shell or write capabilities
       diagnostics.filter((item) => item.severity === "error"),
       [],
     );
+    assert.ok(manifest.tools.some((tool) => tool.name === "code__apply_patch"));
+    assert.ok(!manifest.tools.some((tool) => tool.name === "code__grep"));
     assert.ok(!manifest.dynamicSkills.some((entry) => entry.slug === "code__pr"));
     assert.ok(!manifest.dynamicInstructions.some((entry) => entry.slug === "code__github"));
-    const worker = manifest.subagents.find((item) => item.name === "code__worker");
-    assert.ok(worker);
-    assert.equal(worker.configResolver, undefined);
-    assert.ok("config" in worker.agent);
-    const toolNames = worker.agent.tools.map((tool) => tool.name).sort();
-    assert.ok(!toolNames.includes("bash"), "a read-only worker must not receive default bash");
-    assert.ok(!toolNames.includes("write_file"));
-    assert.ok(!toolNames.includes("apply_patch"));
-    assert.equal(worker.agent.config.defaultTools, false);
-    assert.deepEqual(toolNames, ["glob", "grep", "read_file"]);
-    for (const tool of worker.agent.tools) assert.equal(tool.hasExecute, true);
-    assert.deepEqual(worker.agent.connections, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
