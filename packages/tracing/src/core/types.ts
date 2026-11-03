@@ -143,6 +143,9 @@ export interface Usage {
     readonly cacheReadTokens?: number;
     readonly cacheWriteTokens?: number;
   };
+  readonly outputTokenDetails?: {
+    readonly reasoningTokens?: number;
+  };
 }
 
 /** `subagent-call` and `remote-agent-call` delegate to another agent. */

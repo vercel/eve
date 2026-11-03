@@ -55,6 +55,10 @@ export interface InstrumentationUsage {
   };
   readonly inputTokens?: number;
   readonly outputTokens?: number;
+  readonly outputTokenDetails?: {
+    /** Part of `outputTokens`. */
+    readonly reasoningTokens?: number;
+  };
 }
 
 /** Final model input for one call. Message shape stays opaque to this layer. */

@@ -59,6 +59,10 @@ export function eveActivationMetadata(input: {
         turn.initiatorPrincipal && "id" in turn.initiatorPrincipal
           ? turn.initiatorPrincipal.id
           : undefined,
+      "vercel.user_id":
+        turn.currentPrincipal && "id" in turn.currentPrincipal
+          ? turn.currentPrincipal.id
+          : undefined,
       "agent.channel.name": delivery?.channelName,
       "agent.channel.delivery.id": delivery?.deliveryId,
       "agent.channel.request.id": delivery?.requestId,

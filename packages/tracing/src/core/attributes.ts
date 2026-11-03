@@ -38,6 +38,7 @@ export function usageAttributes(usage: Usage, genAi = false): Attributes {
       "gen_ai.usage.output_tokens": usage.outputTokens,
       "gen_ai.usage.cache_read.input_tokens": usage.inputTokenDetails?.cacheReadTokens,
       "gen_ai.usage.cache_write.input_tokens": usage.inputTokenDetails?.cacheWriteTokens,
+      "gen_ai.usage.reasoning.output_tokens": usage.outputTokenDetails?.reasoningTokens,
     };
   return {
     [USAGE_FIELDS.costUsd]: usage.costUsd,

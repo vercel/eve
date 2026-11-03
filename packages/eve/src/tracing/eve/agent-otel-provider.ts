@@ -31,9 +31,11 @@ import type { ConversationEnvironment } from "#shared/conversation-context.js";
 import { createEveTracing } from "#tracing/eve/operation-input.js";
 import {
   gatewayCostAttributes,
+  gatewayModelCallCostAttributes,
   gatewayRoutingAttributes,
   readGatewayCostData,
 } from "#tracing/eve/gateway.js";
+import { endUserId } from "#tracing/eve/end-user.js";
 import type {
   AgentSpanIdGenerator,
   AgentTelemetry,
@@ -86,6 +88,8 @@ export function createAgentOtelInstrumentation(
   // Attempts run in one process; a lost serverless worker retries the whole step.
   const steps = new Map<string, AttemptOperation>();
   const modelSpans = new Map<string, Map<string, ModelOperation>>();
+  /** Each open attempt's end user, for the model calls it makes. */
+  const endUsers = new Map<string, string>();
   const sessionTracing = createEveSessionTracing({ ...input, environment, tracing, capturePolicy });
   const { prepareSessionTrace, prepareTurnTrace } = sessionTracing;
 
@@ -154,6 +158,11 @@ export function createAgentOtelInstrumentation(
           : [{ relationship: "execution.delivery", context: activeSpanContext }],
     });
     steps.set(attemptIdempotencyKey(event.scope), attempt);
+    const userId = endUserId(event.runtimeContext, turn.currentPrincipal);
+    if (userId !== undefined) {
+      attempt?.attributes({ "vercel.user_id": userId });
+      endUsers.set(attemptIdempotencyKey(event.scope), userId);
+    }
   };
 
   const onStepTerminal = async (event: InstrumentationModelTerminalEvent): Promise<void> => {
@@ -163,6 +172,7 @@ export function createAgentOtelInstrumentation(
     const attempt =
       steps.get(attemptIdempotencyKey(event.scope)) ?? (await attemptFor(event.scope));
     steps.delete(attemptIdempotencyKey(event.scope));
+    endUsers.delete(attemptIdempotencyKey(event.scope));
     if (failure !== undefined) {
       // A failed attempt also fails the tool calls it dispatched.
       await attempt?.fail(failure.error);
@@ -196,6 +206,10 @@ export function createAgentOtelInstrumentation(
       },
       event.idempotencyKey,
     );
+    const userId =
+      endUserId(event.runtimeContext, undefined) ??
+      endUsers.get(attemptIdempotencyKey(event.scope));
+    if (userId !== undefined) operation.attributes({ "vercel.user_id": userId });
     let models = modelSpans.get(attemptIdempotencyKey(event.scope));
     if (models === undefined)
       modelSpans.set(attemptIdempotencyKey(event.scope), (models = new Map()));
@@ -218,6 +232,10 @@ export function createAgentOtelInstrumentation(
     const operation = models?.get(event.idempotencyKey);
     models?.delete(event.idempotencyKey);
     if (operation === undefined) return;
+    if (event.outcome === "completed") {
+      const cost = readGatewayCostData(event.providerMetadata);
+      if (cost !== undefined) operation.attributes(gatewayModelCallCostAttributes(cost));
+    }
     if (event.outcome === "failed") await operation.fail(event.error);
     else
       await operation.complete({

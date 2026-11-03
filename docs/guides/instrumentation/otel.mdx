@@ -175,16 +175,21 @@ Each root agent turn starts a new trace. A local subagent's first turn joins the
 
 A remote child starts a separate trace with a root `invoke_agent` span. Its first turn links to the caller with `eve.link.type=agent.dispatch`, and the receiving deployment applies its own sampler. Local dispatches have no dispatch link, so query them by `parentSpanId`, or by `agent.parent_run.id` and `agent.parent_call.id`.
 
-| Attribute                | Use                                                         |
-| ------------------------ | ----------------------------------------------------------- |
-| `gen_ai.conversation.id` | Find the root session and its child sessions across traces. |
-| `agent.run.id`           | Identify one agent session, not the full conversation.      |
-| `gen_ai.tool.call.id`    | Match tool spans with their approval spans.                 |
-| `error.type`             | Classify tool failures.                                     |
-| `gen_ai.usage.*`         | Token counts on model and activation spans.                 |
-| `agent.usage.*`          | Token counts on step and tool spans.                        |
+| Attribute                | Use                                                                   |
+| ------------------------ | --------------------------------------------------------------------- |
+| `gen_ai.conversation.id` | Find the root session and its child sessions across traces.           |
+| `agent.run.id`           | Identify one agent session, not the full conversation.                |
+| `gen_ai.tool.call.id`    | Match tool spans with their approval spans.                           |
+| `error.type`             | Classify tool failures.                                               |
+| `gen_ai.usage.*`         | Token counts on model and activation spans.                           |
+| `agent.usage.*`          | Token counts on step and tool spans.                                  |
+| `vercel.user_id`         | The end user a turn serves, on its activation, step, and model spans. |
 
 The trace schema is version 4.
+
+`vercel.user_id` is the `enduser.id` your runtime context sets, so it follows your own export decision. Without one, it's the turn's principal ID, recorded only when the trace content policy records the principal. Model spans also record `gen_ai.usage.reasoning.output_tokens` when the provider reports reasoning tokens.
+
+For a model call AI Gateway priced, the `chat` span records the cost as `gen_ai.usage.cost.amount`, with `gen_ai.usage.cost.currency` set to `USD`, `gen_ai.usage.cost.source` set to `provider`, and the `gen_ai.usage.cost.input` and `gen_ai.usage.cost.output` breakdown. It also records `vercel.ai_gateway.generation.id`. The `agent.step` span keeps its existing cost and generation ID attributes.
 
 eve adds `gen_ai.conversation.id` to spans created during model, tool, and memory work, including spans from third-party instrumentation. The conversation ID grants no access to message history, agent state, or credentials, and no authorization. Remote requests carry it in W3C Baggage. `trustedForwarders` controls whether the receiver accepts parent session data and the trace-content policy. See [Remote agents](../guides/remote-agents#preserving-trace-content).
 
