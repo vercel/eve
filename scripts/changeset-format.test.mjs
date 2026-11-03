@@ -375,7 +375,7 @@ test("version-packages assembles changesets across bump types and preserves old 
 });
 
 for (const mode of ["stable", "rc"]) {
-  test(`version-packages keeps ignored desktop releases out of eve-only release notes (${mode})`, async (t) => {
+  test(`version-packages releases desktop independently without eve compatibility noise (${mode})`, async (t) => {
     const { root, write, git } = await createReleaseFixture(t);
     const desktop = JSON.parse(await readFile("packages/eve-agent-desktop/package.json", "utf8"));
     const desktopManifest = JSON.stringify({
@@ -388,30 +388,49 @@ for (const mode of ["stable", "rc"]) {
     await mkdir(join(root, "packages/desktop"));
     await write("packages/desktop/package.json", desktopManifest);
     await write(".changeset/desktop.md", pending);
-    if (mode === "rc") await write(".changeset/pre.json", '{ "mode": "pre", "tag": "rc" }\n');
-    await write(".changeset/eve-only.md", '---\n"eve": patch\n---\n\nRepair the main package.\n');
+    if (mode === "rc") {
+      await write(".changeset/pre.json", '{ "mode": "pre", "tag": "rc" }\n');
+      await write(
+        "packages/eve/package.json",
+        JSON.stringify({ name: "eve", version: "1.0.0-rc.1" }),
+      );
+      git("tag", "eve@1.0.0-rc.1");
+    }
     git("add", ".");
+    git("commit", "-qm", "feat: Add desktop tools");
+    const desktopCommit = git("rev-parse", "HEAD");
+    const release = async (numbers) =>
+      execFileSync(process.execPath, ["scripts/version-packages.mjs"], {
+        cwd: root,
+        stdio: "pipe",
+        env: await mockGitHubPulls(root, numbers),
+      });
+    await release({ [desktopCommit]: 10 });
+    const releasedManifest = await readFile(join(root, "packages/desktop/package.json"), "utf8");
+    const releasedNotes = await readFile(join(root, "packages/desktop/CHANGELOG.md"), "utf8");
+    assert.equal(JSON.parse(releasedManifest).version, mode === "stable" ? "0.1.0" : "0.1.0-rc.0");
+    assert.match(releasedNotes, /Add the experimental `@eve\/agent-desktop` extension/u);
+    git("add", ".");
+    git("commit", "-qm", "chore: Version packages");
+    git("tag", `@eve/agent-desktop@${JSON.parse(releasedManifest).version}`);
+
+    await write(".changeset/eve-only.md", '---\n"eve": patch\n---\n\nRepair the main package.\n');
+    git("add", ".changeset/eve-only.md");
     git("commit", "-qm", "fix: Repair the main package");
-    const commit = git("rev-parse", "HEAD");
-
-    execFileSync(process.execPath, ["scripts/version-packages.mjs"], {
-      cwd: root,
-      stdio: "pipe",
-      env: await mockGitHubPulls(root, { [commit]: 10 }),
-    });
-
+    const eveCommit = git("rev-parse", "HEAD");
+    await release({ [desktopCommit]: 10, [eveCommit]: 11 });
     const eve = JSON.parse(await readFile(join(root, "packages/eve/package.json"), "utf8"));
-    assert.equal(eve.version, mode === "stable" ? "1.0.1" : "1.0.1-rc.0");
+    assert.equal(eve.version, mode === "stable" ? "1.0.1" : "1.0.0-rc.2");
     assert.equal(
       await readFile(join(root, "packages/desktop/package.json"), "utf8"),
-      desktopManifest,
+      releasedManifest,
     );
-    assert.equal(await readFile(join(root, ".changeset/desktop.md"), "utf8"), pending);
-    await assert.rejects(readFile(join(root, "packages/desktop/CHANGELOG.md"), "utf8"), {
-      code: "ENOENT",
-    });
+    assert.equal(
+      await readFile(join(root, "packages/desktop/CHANGELOG.md"), "utf8"),
+      releasedNotes,
+    );
     const notes = await readFile(join(root, "packages/eve/CHANGELOG.md"), "utf8");
-    assert.match(notes, /### Bug Fixes\n\n- Repair the main package\. \(\[#10\]/u);
+    assert.match(notes, /### Bug Fixes\n\n- Repair the main package\. \(\[#11\]/u);
     assert.doesNotMatch(notes, /### Dependencies|@eve\/agent-desktop|^\s*[-*]\s*$/mu);
   });
 }

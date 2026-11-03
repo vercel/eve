@@ -12,5 +12,5 @@
     "version": false,
     "tag": false
   },
-  "ignore": ["@eve/agent-desktop"]
+  "ignore": []
 }
