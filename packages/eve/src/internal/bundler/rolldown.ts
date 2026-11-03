@@ -1,25 +1,21 @@
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 
-import type { BuildOptions, OutputAsset, OutputChunk, RolldownOutput } from "rolldown";
+import type {
+  BuildOptions,
+  LogLevel,
+  LogOrStringHandler,
+  OutputAsset,
+  OutputChunk,
+  RolldownLog,
+  RolldownOutput,
+} from "rolldown";
 
 import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
-import {
-  type BundlerDefaultLogHandler,
-  onVendoredDependencyLog,
-} from "#internal/bundler/vendored-dependency-log.js";
+import { onVendoredDependencyLog } from "#internal/bundler/vendored-dependency-log.js";
 
 export type RolldownOutputChunk = OutputChunk;
 export type RolldownOutputAsset = OutputAsset;
-
-/**
- * Build options as eve's callers assemble them. Plugins stay loosely typed:
- * eve's plugin factories return plain hook objects, which Rolldown validates.
- */
-export type RolldownBuildInput = Record<string, unknown> & {
-  readonly experimental?: Record<string, unknown>;
-  readonly plugins?: readonly unknown[];
-};
 
 type RolldownParserLanguage = "js" | "jsx" | "ts" | "tsx";
 
@@ -74,7 +70,7 @@ export async function parseWithRolldownAst(filename: string, sourceText: string)
  * unresolved imports. Pseudo-packages such as `server-only` load as empty
  * modules ahead of every caller plugin.
  */
-export async function buildWithRolldown(options: RolldownBuildInput): Promise<RolldownOutput> {
+export async function buildWithRolldown(options: BuildOptions): Promise<RolldownOutput> {
   assertCustomRolldownConditionNames(options);
   const { build } = await loadRolldown();
   return await build({
@@ -82,21 +78,21 @@ export async function buildWithRolldown(options: RolldownBuildInput): Promise<Ro
     checks: { bundlerTimings: false },
     onLog: onRolldownBuildLog,
     ...options,
-    plugins: [createPseudoPackagePlugin(), ...(options.plugins ?? [])],
+    plugins: [createPseudoPackagePlugin(), options.plugins],
     // Debug module IDs contain temporary workspace paths and destabilize runtime fingerprints.
     experimental: { ...options.experimental, attachDebugInfo: "none" },
-  } as BuildOptions);
+  });
 }
 
 // Unlike the Nitro host build, whose dependency graph deliberately leaves
 // optional imports such as `just-bash` unresolved, these bundles inline their
 // dependencies, so an unresolved import there only fails once the bundle loads.
 function onRolldownBuildLog(
-  level: string,
-  log: unknown,
-  defaultHandler: BundlerDefaultLogHandler,
+  level: LogLevel,
+  log: RolldownLog,
+  defaultHandler: LogOrStringHandler,
 ): void {
-  if (level === "warn" && (log as { code?: unknown } | null)?.code === "UNRESOLVED_IMPORT") {
+  if (level === "warn" && log.code === "UNRESOLVED_IMPORT") {
     defaultHandler(level, log);
     return;
   }
@@ -111,14 +107,9 @@ export const ROLLDOWN_STANDARD_CONDITION_NAMES: ReadonlySet<string> = new Set([
   "require",
 ]);
 
-function assertCustomRolldownConditionNames(options: RolldownBuildInput): void {
-  const resolve = options.resolve;
-  if (resolve === null || typeof resolve !== "object") return;
-  const conditionNames = Reflect.get(resolve, "conditionNames");
-  if (!Array.isArray(conditionNames)) return;
-
-  for (const conditionName of conditionNames) {
-    if (typeof conditionName === "string" && ROLLDOWN_STANDARD_CONDITION_NAMES.has(conditionName)) {
+function assertCustomRolldownConditionNames(options: BuildOptions): void {
+  for (const conditionName of options.resolve?.conditionNames ?? []) {
+    if (ROLLDOWN_STANDARD_CONDITION_NAMES.has(conditionName)) {
       throw new Error(
         `Rolldown resolves the standard condition ${JSON.stringify(conditionName)} per import edge; conditionNames may contain only eve-specific additions.`,
       );
@@ -138,7 +129,7 @@ function assertCustomRolldownConditionNames(options: RolldownBuildInput): void {
  */
 export async function buildSingleRolldownChunk(
   description: string,
-  options: RolldownBuildInput & { readonly output?: Record<string, unknown> },
+  options: BuildOptions,
 ): Promise<RolldownOutputChunk> {
   const result = await buildWithRolldown({
     ...options,

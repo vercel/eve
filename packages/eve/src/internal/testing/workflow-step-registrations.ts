@@ -72,7 +72,7 @@ export async function bundleWorkflowStepRegistrations(input: {
     ],
     resolve: {
       conditionNames: ["eve-source"],
-      extensions: WORKFLOW_SOURCE_EXTENSIONS,
+      extensions: [...WORKFLOW_SOURCE_EXTENSIONS],
       mainFields: ["module", "main"],
     },
     tsconfig: input.tsconfigPath ?? false,

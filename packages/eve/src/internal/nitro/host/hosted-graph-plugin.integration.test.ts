@@ -175,7 +175,10 @@ function hostedGraph(externals: Partial<ExternalsPolicy>) {
 }
 
 /** The bundled code of a module that re-exports `specifier` through the plugin. */
-async function bundleImport(plugin: object, specifier: string): Promise<string> {
+async function bundleImport(
+  plugin: ReturnType<typeof hostedGraph>,
+  specifier: string,
+): Promise<string> {
   return await bundleThroughPlugins({ plugins: [plugin], reexports: [specifier] });
 }
 

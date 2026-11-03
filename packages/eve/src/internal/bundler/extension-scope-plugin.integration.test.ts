@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { RolldownPluginOption } from "rolldown";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { buildSingleRolldownChunk } from "#internal/bundler/rolldown.js";
@@ -32,7 +33,7 @@ function scratchModule(source: string): { modulePath: string; sourceRoot: string
   return { modulePath, sourceRoot };
 }
 
-async function bundle(input: string, plugins: unknown[]): Promise<string> {
+async function bundle(input: string, plugins: RolldownPluginOption[]): Promise<string> {
   const chunk = await buildSingleRolldownChunk("test module", {
     input,
     platform: "node",

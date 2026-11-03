@@ -3,8 +3,8 @@ import { join } from "node:path";
 import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
 import type { CompiledAgentManifest, CompiledExtensionMount } from "#compiler/manifest.js";
 import type { GeneratedCompiledArtifactsFiles } from "#internal/application/compiled-artifacts.js";
-import { resolveAuthoredTsConfigPath } from "#internal/authored-module-build-options.js";
 import { findAuthoredPackageRoot } from "#internal/authored-package-boundary.js";
+import { resolveAuthoredTsConfigPath } from "#internal/bundler/authored-plugins.js";
 import {
   createExternalsPolicy,
   type ExternalsPolicy,
@@ -72,7 +72,7 @@ export interface HostSpec {
 interface HostAuthoredSources {
   /** Package root authored asset imports may not escape. */
   readonly packageRoot: string;
-  /** The app's tsconfig or jsconfig, which resolves authored import aliases. */
+  /** The authored package's tsconfig or jsconfig, which resolves authored import aliases. */
   readonly tsconfig: string | false;
 }
 
@@ -92,6 +92,8 @@ export function createHostSpec(
 ): HostSpec {
   const { appRoot, compiledArtifacts } = preparedHost;
   const { manifest, paths } = preparedHost.compileResult;
+  // A workspace member without its own package.json shares the enclosing package.
+  const packageRoot = findAuthoredPackageRoot(appRoot) ?? appRoot;
   const development = mode.kind === "development";
   const preset = mode.kind === "production" ? mode.preset : undefined;
   const instrumented = compiledArtifacts.instrumentationPluginPath !== undefined;
@@ -115,11 +117,7 @@ export function createHostSpec(
 
   return {
     agentName: manifest.config.name,
-    authored: {
-      // A workspace member without its own package.json shares the enclosing package.
-      packageRoot: findAuthoredPackageRoot(appRoot) ?? appRoot,
-      tsconfig: resolveAuthoredTsConfigPath(appRoot),
-    },
+    authored: { packageRoot, tsconfig: resolveAuthoredTsConfigPath(packageRoot) },
     development,
     extensionMounts: nodes.flatMap((node) => node.extensionMounts),
     extensionOverridePaths: extensionOverridePaths(manifest),
