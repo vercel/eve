@@ -353,10 +353,12 @@ test("pushes to main publish the default harnesses on the default model at the p
   assert.deepEqual(input.calls, []);
 });
 
-test("the weekly schedule publishes deepswe-lean for the default harnesses on every model", async () => {
+test("the weekly schedule publishes deepswe-lean for the default harnesses and fx on every model", async () => {
   const input = fixture({ eventName: "schedule" });
   assert.deepEqual(await resolve(input), {
     ...defaults,
+    harness: "eve-code,opencode,pi,fx",
+    slug: "eve-code+opencode+pi+fx",
     ...deepsweLean,
     models: [anthropic, openai],
     sha: input.context.sha,

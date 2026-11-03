@@ -79,7 +79,7 @@ eve-code is benchmarked with [eve-bench](https://github.com/vercel-labs/eve-benc
 
 ### In CI
 
-The `eve-code` workflow benchmarks eve-code, opencode, and pi together, with one `Benchmark harness (<family>)` job per model family:
+The `eve-code` workflow benchmarks eve-code, opencode, and pi together. The weekly DeepSWE-lean run also benchmarks [fx](https://fx.sh), so the docs keep a fresh fx result. Each model family runs as its own `Benchmark harness (<family>)` job:
 
 | Family      | Model                                                                             |
 | ----------- | --------------------------------------------------------------------------------- |

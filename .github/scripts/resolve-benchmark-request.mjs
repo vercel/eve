@@ -13,6 +13,12 @@ export const BENCHMARK_HARNESSES = [
 export const DEFAULT_HARNESSES = ["eve-code", "opencode", "pi"];
 
 /**
+ * Harnesses of the weekly run on main. Its report is the docs' comparison, so every harness the
+ * docs show is measured fresh there instead of depending on an older stored reference.
+ */
+export const SCHEDULED_HARNESSES = [...DEFAULT_HARNESSES, "fx"];
+
+/**
  * eve-bench datasets a benchmark can run, with the settings each was calibrated for.
  * swe-lean needs five attempts to separate a 10-15% token change from trial noise.
  * deepswe-lean resolves almost nothing at low reasoning; its stored baselines use
@@ -156,6 +162,7 @@ export async function resolveBenchmarkRequest({ github, context, models }) {
     };
   } else if (eventName === "schedule") {
     selection.dataset = SCHEDULED_DATASET;
+    selection.harnesses = SCHEDULED_HARNESSES;
   } else {
     return null;
   }
