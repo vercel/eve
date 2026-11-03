@@ -21,6 +21,10 @@ import { type HostNitroRoutes, renderHostRoutes } from "#internal/nitro/host/hos
 import type { HostRuntimePlugin, HostSpec } from "#internal/nitro/host/host-spec.js";
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
 import {
+  createRuntimePluginSource,
+  EVE_RUNTIME_PLUGIN_ID,
+} from "#internal/nitro/host/runtime-plugin.js";
+import {
   SKILL_FILES_PLUGIN_ID,
   writeSkillFilesPlugin,
 } from "#internal/nitro/host/skill-files-plugin.js";
@@ -135,6 +139,7 @@ function toNitroConfig(
       extensionOverridePaths: spec.extensionOverridePaths,
       instrumentationEntryPlugin: instrumentationEntry?.plugin,
       instrumentationSourcePaths: compiledArtifacts.instrumentationSourcePaths,
+      runtimeModules: [compiledArtifacts.bootstrapPath, compiledArtifacts.workflowWorldPluginPath],
       workflowArtifacts: built.workflowArtifacts,
     }),
     compatibilityDate: EVE_NITRO_COMPATIBILITY_DATE,
@@ -152,9 +157,10 @@ function toNitroConfig(
     modules: instrumentationEntry ? [instrumentationEntry.module] : [],
     noExternals: createHostNoExternals(built.workflowArtifacts.stepTargets),
     output: { dir: locations.outputDir },
-    plugins: spec.runtimePlugins.map((plugin) =>
-      resolveRuntimePluginPath(plugin, compiledArtifacts),
-    ),
+    plugins: [
+      EVE_RUNTIME_PLUGIN_ID,
+      ...spec.runtimePlugins.map((plugin) => resolveRuntimePluginPath(plugin, compiledArtifacts)),
+    ],
     preset: spec.preset,
     publicAssets: [],
     // Nitro would otherwise serve an app-root `index.html` and `server.*` as
@@ -181,6 +187,7 @@ function toNitroConfig(
     vercel: spec.vercel,
     virtual: {
       ...built.routes.virtual,
+      [EVE_RUNTIME_PLUGIN_ID]: createRuntimePluginSource(spec.runtime, compiledArtifacts),
       ...(built.skillFilesPlugin !== undefined && {
         [SKILL_FILES_PLUGIN_ID]: built.skillFilesPlugin,
       }),
@@ -190,9 +197,7 @@ function toNitroConfig(
 
 const EVE_RUNTIME_PLUGIN_PATHS = {
   "local-schedules": "src/internal/nitro/host/local-schedules-runtime-plugin.ts",
-  "local-tracing": "src/internal/nitro/host/local-tracing-runtime-plugin.ts",
   "sandbox-shutdown": "src/internal/nitro/host/sandbox-shutdown-plugin.ts",
-  "workflow-sandbox": "src/internal/nitro/host/workflow-sandbox-runtime-plugin.ts",
 } as const;
 
 function resolveRuntimePluginPath(
@@ -200,8 +205,6 @@ function resolveRuntimePluginPath(
   compiledArtifacts: HostSpec["locations"]["compiledArtifacts"],
 ): string {
   switch (plugin) {
-    case "compiled-artifacts":
-      return compiledArtifacts.bootstrapPath;
     case "instrumentation":
       if (compiledArtifacts.instrumentationPluginPath === undefined) {
         throw new Error("Instrumented host has no instrumentation plugin.");
@@ -209,8 +212,6 @@ function resolveRuntimePluginPath(
       return compiledArtifacts.instrumentationPluginPath;
     case "skill-files":
       return SKILL_FILES_PLUGIN_ID;
-    case "workflow-world":
-      return compiledArtifacts.workflowWorldPluginPath;
     default:
       return resolvePackageSourceFilePath(EVE_RUNTIME_PLUGIN_PATHS[plugin]);
   }

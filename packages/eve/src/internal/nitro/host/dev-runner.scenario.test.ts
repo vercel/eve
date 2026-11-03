@@ -1,17 +1,15 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { DEV_SERVER_CLOSE_BUDGET_MS } from "#cli/dev/local-server-process.js";
-import { createNodeDevelopmentRunner } from "#internal/nitro/host/dev-runner.js";
-import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
+import { EveDevRunner } from "#internal/nitro/host/dev-runner.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 
 const createScratchDirectory = useTemporaryDirectories();
 
-describe("Node development runner", () => {
-  it("runs the worker IPC close hook during graceful shutdown", async () => {
+describe("eve development runner", () => {
+  it("shuts down gracefully on close without a cause, running the worker IPC close hook", async () => {
     const root = await createScratchDirectory("eve-dev-runner-shutdown-");
     const entryPath = join(root, "worker.mjs");
     const markerPath = join(root, "closed.txt");
@@ -33,7 +31,7 @@ describe("Node development runner", () => {
       "utf8",
     );
 
-    const runner = createNodeDevelopmentRunner({
+    const runner = new EveDevRunner({
       entry: entryPath,
       name: "eve-dev-runner-shutdown-test",
       workerData: {},
@@ -52,41 +50,6 @@ describe("Node development runner", () => {
 
     expect(closeDurationMs).toBeLessThan(5_000);
     await expect(readFile(markerPath, "utf8")).resolves.toBe("gracefully-closed\n");
-    const lateCloseListener = vi.fn();
-    runner.onceClosed(lateCloseListener);
-    expect(lateCloseListener).toHaveBeenCalledWith(undefined);
-  });
-
-  it("closes the dev server within the CLI's budget while a response is still streaming", async () => {
-    const root = await createScratchDirectory("eve-dev-runner-open-stream-");
-    const entryPath = join(root, "worker.mjs");
-    await writeFile(
-      entryPath,
-      [
-        "export default {",
-        "  fetch: () =>",
-        "    new Response(",
-        "      new ReadableStream({",
-        '        start(controller) { controller.enqueue(new TextEncoder().encode("first")); },',
-        "      }),",
-        "    ),",
-        "};",
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-    const server = new DrainedNitroDevServer({ error: () => undefined });
-    const listener = server.listen({ hostname: "127.0.0.1", port: 0 });
-    await listener.ready();
-    await server.replaceWorker({ entry: entryPath, workerData: {} });
-
-    const response = await fetch(new URL("/stream", listener.url));
-    const reader = response.body!.getReader();
-    await reader.read();
-
-    const closeStartedAt = performance.now();
-    await server.close();
-    expect(performance.now() - closeStartedAt).toBeLessThan(DEV_SERVER_CLOSE_BUDGET_MS);
-    await reader.cancel().catch(() => undefined);
+    await runner.terminated;
   });
 });

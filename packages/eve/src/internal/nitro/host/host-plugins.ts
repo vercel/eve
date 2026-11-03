@@ -1,12 +1,12 @@
 import { posix, relative, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
 import {
   resolvePackageRoot,
   resolveWorkflowModulePath,
   WORKFLOW_MODULE_SPECIFIERS,
 } from "#internal/application/package.js";
+import { createAuthoredPlugins } from "#internal/bundler/authored-plugins.js";
 import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
@@ -29,6 +29,8 @@ export interface HostPluginsInput {
   readonly extensionOverridePaths: ReadonlyMap<string, string>;
   readonly instrumentationEntryPlugin?: NitroBuildPlugin;
   readonly instrumentationSourcePaths?: readonly string[];
+  /** Generated modules eve's runtime plugin imports only for their side effects. */
+  readonly runtimeModules: readonly string[];
   readonly workflowArtifacts: WorkflowArtifacts;
 }
 
@@ -47,6 +49,7 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
       workflowsPath,
       workflowHandlerPath(input.workflowArtifacts),
       ...(input.instrumentationSourcePaths ?? []),
+      ...input.runtimeModules,
     ]),
     input.instrumentationEntryPlugin ?? null,
     createNodeEsmCompatBannerPlugin(),
@@ -62,10 +65,7 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
       })),
     ),
     // Workflow step modules reach Nitro as authored source, not prebundled.
-    createAuthoredAssetImportPlugin({
-      authoredSourceOnly: true,
-      packageRoot: input.authoredPackageRoot,
-    }),
+    ...createAuthoredPlugins({ authoredSourceOnly: true, packageRoot: input.authoredPackageRoot }),
   ];
   return plugins
     .filter((plugin) => plugin !== null)

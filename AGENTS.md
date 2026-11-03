@@ -134,8 +134,8 @@ CI.
    public APIs. Wrap them in eve-owned surfaces so internals can change freely.
    Add runtime `dependencies` only as a last resort: prefer vendoring code or
    generated artifacts into the repository and listing the source package under
-   `devDependencies`. The `eve` package should aim to keep `nitro` and
-   `rolldown` as its only runtime dependencies. This keeps eve installs as
+   `devDependencies`. The `eve` package should aim to keep `nitro`, `rolldown`,
+   and `undici` as its only runtime dependencies. This keeps eve installs as
    small as possible and avoids exposure to hijacked nested dependencies that
    are not pinned directly in the main lockfile. eve hands its own `rolldown`
    to Nitro through `deps.paths` and never lets Nitro resolve or install a
