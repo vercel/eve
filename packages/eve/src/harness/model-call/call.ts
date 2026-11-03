@@ -52,7 +52,9 @@ import {
 } from "#harness/step-hooks.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import { requireSessionModelReference, type StepResult } from "#harness/types.js";
+import type { StepResult } from "#harness/types.js";
+import { stepReference } from "#harness/step/context.js";
+import { agentSettings } from "#execution/effective-agent-config.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import { compactedTurnInput, historyBeforeCall } from "#harness/compaction/step.js";
@@ -150,10 +152,7 @@ export class ModelCaller {
     this.prompt = prompt;
     this.input = input;
 
-    this.profile = resolveModelProfile(
-      input.model,
-      requireSessionModelReference(step.session).promptCache,
-    );
+    this.profile = resolveModelProfile(input.model, stepReference(step).promptCache);
     this.attributionHeaders = buildGatewayAttributionHeaders(
       this.profile,
       step.config.runtimeIdentity,
@@ -162,7 +161,7 @@ export class ModelCaller {
     this.turnMessages = input.turnMessages;
     this.request = {
       history: prompt.messages,
-      historyState: step.ctx?.get(HistoryStateKey) ?? {},
+      historyState: step.ctx.get(HistoryStateKey) ?? {},
       nonSystemMessages: input.projectedMessages,
     };
   }
@@ -240,7 +239,7 @@ export class ModelCaller {
     this.input.generation.end();
     // The cut response never reaches history, so the calls it announced never run, even once its
     // response ended and only their approvals were being decided.
-    step.ctx?.set(HistoryStateKey, this.request.historyState);
+    step.ctx.set(HistoryStateKey, this.request.historyState);
     const runId = step.position().runId;
     if (runId !== undefined) {
       await step.apply(
@@ -269,7 +268,7 @@ export class ModelCaller {
     const call = {
       catalog: this.input.catalog,
       currentInput: new Set(this.turnMessages),
-      historyState: step.ctx?.get(HistoryStateKey) ?? {},
+      historyState: step.ctx.get(HistoryStateKey) ?? {},
       record: prompt.messages,
     };
     const draft = await stepDraft(step, call);
@@ -393,7 +392,8 @@ export class ModelCaller {
     });
 
     const hooks = buildStepHooks({
-      auth: step.ctx?.get(AuthKey) ?? null,
+      auth: step.ctx.get(AuthKey) ?? null,
+      model: stepReference(step),
       profile: this.profile,
       session: step.session,
     });
@@ -429,7 +429,7 @@ export class ModelCaller {
       onStepEnd: hooks.onStepEnd,
       onStepStart: hooks.onStepStart,
       prepareStep: hooks.prepareStep,
-      reasoning: step.session.agent.modelReference?.reasoning ?? step.session.agent.reasoning,
+      reasoning: stepReference(step).reasoning ?? agentSettings(step).reasoning,
       runtimeContext,
       stopWhen: isStepCount(1),
       telemetry: attempt?.telemetry,

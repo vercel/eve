@@ -5,7 +5,7 @@ import { createUserMessage } from "#harness/messages.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 
 const session = {
-  compaction: { recentWindowSize: 10, threshold: 10_000 },
+  compaction: {},
   history: [createUserMessage("user", "Alice asks for the weather.")],
 };
 const call: ModelMessage = {

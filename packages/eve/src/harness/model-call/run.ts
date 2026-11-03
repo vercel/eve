@@ -29,7 +29,8 @@ import {
 } from "#harness/step/prompt.js";
 import type { HarnessStepResult } from "#harness/step-hooks.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
-import { requireSessionModelReference, type StepResult } from "#harness/types.js";
+import type { StepResult } from "#harness/types.js";
+import { stepReference } from "#harness/step/context.js";
 import { ModelCaller } from "./call.js";
 import { type EndsTurnTools, endsTurnTools, frameworkToolNames } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
@@ -132,7 +133,7 @@ export async function runModelStep(
     throw error;
   }
   // The returned session now owns these messages; persist their baseline with it.
-  step.ctx?.set(HistoryStateKey, caller.request.historyState);
+  step.ctx.set(HistoryStateKey, caller.request.historyState);
   return stepResult;
 }
 
@@ -144,7 +145,6 @@ async function requestRun(
   step: Step,
   prompt: Prompt,
 ): Promise<{ readonly model: LanguageModel } | { readonly failed: StepResult }> {
-  const { config, ctx } = step;
   try {
     await step.apply(
       requestRunFact({ turnId: activeTurnId(step.position()) }, nextRunId(step.view().projection)),
@@ -154,8 +154,8 @@ async function requestRun(
     return { failed: await failBoundaryEvent(step, error) };
   }
   try {
-    const resolved = await resolveEffectiveRuntimeModel({ config, ctx, session: step.session });
-    step.session = resolved.session;
+    const resolved = await resolveEffectiveRuntimeModel(step);
+    step.model = resolved.choice;
     return { model: resolved.model };
   } catch (error) {
     return { failed: await failModelSelection(step, error) };
@@ -166,6 +166,6 @@ async function requestRun(
 async function startRun(step: Step, attempt: number): Promise<void> {
   const runId = step.position().runId;
   if (runId === undefined) return;
-  const modelId = requireSessionModelReference(step.session).id;
+  const modelId = stepReference(step).id;
   await step.apply(startRunFact({ attempt, modelId, runId }));
 }

@@ -37,10 +37,7 @@ it("binds dynamic remote credentials to the dispatch checkpoint's parent view", 
     { sequence: 0, turnId: "turn_0" },
   );
   const scope = { runId: "model_0", turnId: "turn_0" };
-  const session = hydrateDurableSession({
-    durable: readDurableSession(checkpoint),
-    turnAgent: ctx.require(BundleKey).turnAgent,
-  });
+  const session = hydrateDurableSession(readDurableSession(checkpoint));
   const requested = withPublished({ ...session, history: [] }, [
     { type: "model.requested", data: { runId: "model_0", owner: { turnId: "turn_0" } }, scope },
   ]);

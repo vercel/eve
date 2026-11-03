@@ -37,7 +37,6 @@ import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
-import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 import { resolveWorkflowAgentMetadata } from "#execution/agent-sessions/metadata.js";
 import { readDynamicSubagentSelections } from "#definitions/subagents.js";
@@ -147,14 +146,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   const ctx = input.ctx;
   enterSessionProjection(ctx, durableSession.state);
   const bundle = ctx.require(BundleKey);
-  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const session = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
-    durable: durableSession,
-    turnAgent: effectiveAgent.turnAgent,
-  });
+  const session = hydrateDurableSession(durableSession);
   const adapter = ctx.require(ChannelKey);
 
   const plan = input.plan({

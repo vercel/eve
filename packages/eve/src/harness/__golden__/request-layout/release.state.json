@@ -77,6 +77,12 @@
     "eve.conversationId": "wrun_<ulid0>",
     "eve.historyState": {},
     "eve.initiatorAuth": null,
+    "eve.model": {
+      "reference": {
+        "contextWindowTokens": 200000,
+        "id": "eve-test/layout"
+      }
+    },
     "eve.offeredCatalogTools": {
       "connections": false,
       "searchableSkills": false,

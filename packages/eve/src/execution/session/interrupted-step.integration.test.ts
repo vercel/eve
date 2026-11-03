@@ -2,7 +2,6 @@ import { commitOf } from "#harness/session-machine/commit.js";
 import { expect, it, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
-import { createCompactionConfig } from "#execution/session.js";
 import {
   readInterruptedAttempt,
   recoverInterruptedStep,
@@ -19,8 +18,7 @@ it.each([
   "adopts a recorded $outcome session ending without restoring providers",
   async ({ outcome, isError }) => {
     const session: HarnessSession = {
-      agent: { tools: [], dynamicModel: true },
-      compaction: createCompactionConfig(),
+      compaction: {},
       continuationToken: "test",
       history: [],
       sessionId: "ended-session",
@@ -51,8 +49,7 @@ it.each([
 
 function openTurnSession(sessionId: string) {
   const session: HarnessSession = {
-    agent: { tools: [], dynamicModel: true },
-    compaction: createCompactionConfig(),
+    compaction: {},
     continuationToken: "test",
     history: [],
     sessionId,

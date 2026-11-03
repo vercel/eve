@@ -62,6 +62,8 @@ export function definitionSession(
     }[];
     readonly connections?: readonly DynamicSource[];
     readonly instructions?: readonly DynamicSource[];
+    /** The agent's static model. */
+    readonly model?: { readonly id: string };
     readonly skills?: readonly DynamicSource[];
     readonly staticConnections?: readonly ResolvedConnectionDefinition[];
     readonly subagents?: readonly DynamicSubagentSource[];
@@ -118,7 +120,7 @@ export function definitionSession(
       subagentsByName: new Map(),
     },
     toolRegistry: { toolsByName },
-    turnAgent: { id: "agent" },
+    turnAgent: { id: "agent", model: input.model },
   } as never);
   const registry = new ConnectionRegistryImpl(input.staticConnections ?? []);
   ctx.set(ConnectionRegistryKey, registry);

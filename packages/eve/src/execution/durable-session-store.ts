@@ -38,11 +38,7 @@ export interface DurableSessionState {
  * Durable projection of {@link HarnessSession} embedded in state
  * snapshots.
  *
- * Omits `agent.modelReference`, `agent.tools`,
- * `agent.compactionModelReference`, and the `compaction` thresholds —
- * those are rebuilt every turn from `bundle.turnAgent` by
- * {@link import("#execution/session.js").hydrateDurableSession}.
- * Omits `history` too: the session workflow carries it as its own value, so
+ * Omits `history`: the session workflow carries it as its own value, so
  * only the steps that read or change it receive it as input.
  * The system prompt isn't stored: each model step renders it from the
  * current deployment's bundle.

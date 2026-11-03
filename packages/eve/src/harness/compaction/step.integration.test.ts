@@ -7,7 +7,7 @@ import * as compaction from "#harness/compaction/engine.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
-import { createKernel } from "#harness/kernel.js";
+import { createTestKernel } from "#internal/testing/kernel.js";
 import { eventsOf } from "#harness/publication.js";
 import { sessionUsage, takeSessionUsageDelta } from "#harness/session-usage.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
@@ -97,8 +97,7 @@ async function compactWith(
   handleEvent: (events: readonly SessionEvent[]) => Promise<void> = async () => {},
 ) {
   const session: HarnessSession = {
-    agent: { modelReference: { id: "summary-model" }, tools: [] },
-    compaction: { recentWindowSize: 1, threshold: 100_000 },
+    compaction: {},
     continuationToken: "http:compaction-session",
     history: [
       { content: "Please prepare the quarterly report.", kind: "user", role: "user" },
@@ -107,7 +106,8 @@ async function compactWith(
     ],
     sessionId: "compaction-session",
   };
-  return createKernel({
+  return createTestKernel({
+    agent: { model: { id: "summary-model" } },
     compactOnly: true,
     handleEvent: (publication) => handleEvent(eventsOf(publication)),
     resolveModel: async () => model,
@@ -120,7 +120,12 @@ describe("compaction summary call", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const turnModel = new MockLanguageModelV3({ doStream: async () => summaryStream() });
     const events: SessionEvent[] = [];
-    const result = await createKernel({
+    const result = await createTestKernel({
+      agent: {
+        compactionModel: { id: "compaction-model" },
+        model: { contextWindowTokens: 2_000, id: "turn-model" },
+        thresholdPercent: 1,
+      },
       handleEvent: async (publication) => void events.push(...eventsOf(publication)),
       resolveModel: async (reference) => {
         if (reference.id === "compaction-model") throw new Error("Unknown model: compaction-model");
@@ -129,13 +134,8 @@ describe("compaction summary call", () => {
       tools: new Map(),
     })(
       {
-        agent: {
-          compactionModelReference: { id: "compaction-model" },
-          modelReference: { id: "turn-model" },
-          tools: [],
-        },
         // Small enough that the brief compacts before the turn's first model call.
-        compaction: { recentWindowSize: 1, threshold: 2_000 },
+        compaction: {},
         continuationToken: "http:unresolved-compaction-model",
         history: [
           { content: "Alice's brief. ".repeat(2_000), kind: "user", role: "user" },
@@ -183,14 +183,14 @@ describe("compaction summary call", () => {
       );
       const doStream = vi.fn(async () => summaryStream());
       const events: SessionEvent[] = [];
-      const run = createKernel({
+      const run = createTestKernel({
+        agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 1 },
         handleEvent: async (publication) => void events.push(...eventsOf(publication)),
         resolveModel: async () => new MockLanguageModelV3({ doStream }),
         tools: new Map(),
       })(
         {
-          agent: { modelReference: { id: "summary-model" }, tools: [] },
-          compaction: { recentWindowSize: 1, threshold: 2_000 },
+          compaction: {},
           continuationToken: "http:late-compaction-failure",
           history: [{ content: "Earlier notes. ".repeat(2_000), kind: "user", role: "user" }],
           sessionId: "late-compaction-failure",
@@ -250,15 +250,15 @@ describe("compaction summary call", () => {
     const events: SessionEvent[] = [];
 
     const result = await contextStorage.run(new ContextContainer(), async () => {
-      let stepped = await createKernel({
+      let stepped = await createTestKernel({
+        agent: { model: { contextWindowTokens: 2_000, id: "step-model" }, thresholdPercent: 1 },
         handleEvent: foldingHandler(async (event) => void events.push(event)),
         resolveModel: async () => model,
         tools: new Map(),
       })(
         {
-          agent: { modelReference: { id: "step-model" }, tools: [] },
           // Small enough that the long brief compacts before the turn's first model call.
-          compaction: { recentWindowSize: 1, threshold: 2_000 },
+          compaction: {},
           continuationToken: "http:rate-limited-compaction",
           history,
           sessionId: "rate-limited-compaction",
@@ -282,7 +282,8 @@ describe("compaction summary call", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const doStream = vi.fn(async () => summaryStream());
     const events: SessionEvent[] = [];
-    const result = await createKernel({
+    const result = await createTestKernel({
+      agent: { model: { contextWindowTokens: 2_000, id: "summary-model" }, thresholdPercent: 1 },
       handleEvent: async (publication) => void events.push(...eventsOf(publication)),
       resolveModel: async () => new MockLanguageModelV3({ doStream }),
       // A tool description no compaction can shrink, over the limit by itself.
@@ -299,11 +300,7 @@ describe("compaction summary call", () => {
       ]),
     })(
       {
-        agent: {
-          modelReference: { id: "summary-model" },
-          tools: [],
-        },
-        compaction: { recentWindowSize: 1, threshold: 2_000 },
+        compaction: {},
         continuationToken: "http:fixed-part-over-limit",
         history: [],
         sessionId: "fixed-part-over-limit",
@@ -451,8 +448,7 @@ describe("compaction summary call", () => {
     let position = 0;
     // Over the threshold, but capping the old search output fits it without a summary.
     const session: HarnessSession = {
-      agent: { modelReference: { id: "turn-model" }, tools: [] },
-      compaction: { recentWindowSize: 1, threshold: 20_000 },
+      compaction: {},
       continuationToken: "http:compaction-capped",
       history: [
         { content: "Please search the backlog.", kind: "user", role: "user" },
@@ -474,7 +470,8 @@ describe("compaction summary call", () => {
       ],
       sessionId: "compaction-capped",
     };
-    await createKernel({
+    await createTestKernel({
+      agent: { model: { contextWindowTokens: 20_000, id: "turn-model" }, thresholdPercent: 1 },
       handleEvent: async (publication) => {
         const facts = eventsOf(publication);
         events.push(...facts);
@@ -521,8 +518,7 @@ describe("announcements after a compaction during a turn", () => {
       },
     });
     const session: HarnessSession = {
-      agent: { modelReference: { id: "step-model" }, tools: [] },
-      compaction: { recentWindowSize: 1, threshold: 2_000 },
+      compaction: {},
       continuationToken: "http:announcement-compaction-session",
       history: [],
       sessionId: "announcement-compaction-session",
@@ -534,7 +530,8 @@ describe("announcements after a compaction during a turn", () => {
     ]);
 
     await contextStorage.run(new ContextContainer(), async () => {
-      let stepped = await createKernel({
+      let stepped = await createTestKernel({
+        agent: { model: { contextWindowTokens: 2_000, id: "step-model" }, thresholdPercent: 1 },
         handleEvent: foldingHandler(),
         resolveModel: async () => model,
         tools,

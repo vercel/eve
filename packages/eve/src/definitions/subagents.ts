@@ -60,7 +60,7 @@ export function subagentDefinition(resolver: ResolvedDynamicSubagentResolver): D
  * carries the binding a child opened now keeps, from which they're built again.
  */
 export function readDynamicSubagentSelections(
-  ctx: ContextReader | undefined,
+  ctx: ContextReader,
 ): Readonly<Record<string, Selection>> {
   const selections: Record<string, Selection> = {};
   for (const { id, slot } of slotsOf(ctx, "subagent")) {
@@ -69,7 +69,7 @@ export function readDynamicSubagentSelections(
     const nodeId = id.slice("subagent:".length);
     selections[nodeId] =
       selection.kind === "remote" && selection.remoteAgent.credentials === true
-        ? { ...selection, binding: bindingOf(ctx!, nodeId) }
+        ? { ...selection, binding: bindingOf(ctx, nodeId) }
         : selection;
   }
   return selections;

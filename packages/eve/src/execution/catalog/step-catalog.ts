@@ -127,7 +127,7 @@ export interface StepCatalog extends HarnessToolLookup {
 export function buildStepCatalog(input: {
   /** What the step's definitions offer: tools by name, connections, and skills. */
   readonly table: ToolTable;
-  readonly ctx: ContextReader | undefined;
+  readonly ctx: ContextReader;
   /** Whether `endsTurn` applies: a root turn without an output schema. */
   readonly endsTurn: boolean;
   readonly session: Pick<HarnessSession, "rootSessionId">;
@@ -150,7 +150,7 @@ export function buildStepCatalog(input: {
   }
   // Read once here: validation runs while the SDK parses the stream, where the
   // context store may not be active.
-  const registry = input.ctx?.get(ConnectionRegistryKey);
+  const registry = input.ctx.get(ConnectionRegistryKey);
   const { connections, skills } = table;
   const connectionVersions = dynamicConnectionVersions(input.ctx);
   // Entries hold only what this session sees, so a delegated session of the
@@ -229,12 +229,12 @@ export function buildStepCatalog(input: {
  * resolves subagents at runtime. Both are fixed by the deployment.
  */
 export function sessionOffersTasks(input: {
-  readonly ctx: ContextReader | undefined;
+  readonly ctx: ContextReader;
   readonly session: Pick<HarnessSession, "rootSessionId">;
   readonly tools: readonly HarnessToolDefinition[];
 }): boolean {
   return (
-    (input.ctx?.get(BundleKey)?.subagentRegistry.dynamicResolvers.length ?? 0) > 0 ||
+    (input.ctx.get(BundleKey)?.subagentRegistry.dynamicResolvers.length ?? 0) > 0 ||
     input.tools.some(
       (definition) => isVisible(definition, input.session) && startsTasks(definition),
     )

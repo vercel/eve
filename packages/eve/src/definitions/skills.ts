@@ -119,9 +119,7 @@ export function skillDefinition(resolver: ResolvedDynamicDefinition<"skill">): D
  * The dynamic skills the session keeps, by definition. A dynamic skill overrides a same-named
  * authored one; when two definitions name the same skill, the first keeps it.
  */
-export function dynamicSkillManifest(
-  ctx: Pick<ContextReader, "get"> | undefined,
-): DynamicSkillManifest {
+export function dynamicSkillManifest(ctx: Pick<ContextReader, "get">): DynamicSkillManifest {
   const manifest: Record<string, readonly DurableDynamicSkillMetadata[]> = {};
   for (const { id, skills } of ownedSkills(ctx, (name, id, owner) =>
     log.error(`Dynamic skill "${name}" from "${id}" collides with "${owner}".`),
@@ -137,7 +135,7 @@ export function dynamicSkillManifest(
  * whose files the sandbox holds.
  */
 function ownedSkills(
-  ctx: Pick<ContextReader, "get"> | undefined,
+  ctx: Pick<ContextReader, "get">,
   onCollision?: (name: string, id: string, owner: string) => void,
 ): {
   readonly id: string;

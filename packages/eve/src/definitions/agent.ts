@@ -8,15 +8,15 @@ import { connectionDefinition, connections } from "./connections.js";
 import type { Definition } from "./definition.js";
 import { hookDefinition } from "./hooks.js";
 import { instructionsDefinition, instructions, workspace } from "./instructions.js";
-import { loadModelDefinition } from "./model.js";
+import { agentModel, loadModelDefinition, parentModel } from "./model.js";
 import { skillDefinition, skills } from "./skills.js";
 import { subagentDefinition } from "./subagents.js";
 import { staticTools, toolDefinition, toolsDefinition } from "./tools.js";
 import { scheduleCollectionToolPrefix } from "#shared/schedule-collection-tools.js";
 import type { ResolvedScheduleCollection } from "#runtime/types.js";
 
-// eve's own harness: a definition for each file the agent declares, then eve's builtins, which see
-// everything the agent declares.
+// eve's own harness: a definition for each file the agent declares, then eve's builtins, which
+// see everything the agent declares, and the model the session's parent gave it.
 
 const built = new WeakMap<CompiledBundle, Promise<readonly Definition[]>>();
 
@@ -31,25 +31,24 @@ export function agentDefinitions(bundle: CompiledBundle): Promise<readonly Defin
   return definitions;
 }
 
-/** For a step without a bundle: eve's builtins over the step's own tools. */
-const WITHOUT_BUNDLE: readonly Definition[] = [staticTools, approvals, builtins];
-
 /** The session's definitions. */
 export async function sessionDefinitions(
-  ctx: Pick<ContextReader, "get">,
+  ctx: Pick<ContextReader, "require">,
 ): Promise<readonly Definition[]> {
-  const bundle = ctx.get(BundleKey);
-  return bundle === undefined ? WITHOUT_BUNDLE : await agentDefinitions(bundle);
+  return await agentDefinitions(ctx.require(BundleKey));
 }
 
 async function buildAgentDefinitions(bundle: CompiledBundle): Promise<readonly Definition[]> {
   const agent = bundle.resolvedAgent;
   const model = await loadModelDefinition(bundle);
+  const staticModel = agentModel(bundle);
   // The order is the contract. Definitions contribute in it, and each arrangement wraps what the
   // ones before it left: the first to offer a tool name keeps it, so static tools come before
   // dynamic ones, and connections keep theirs before tools and subagents check names against them.
+  // The last model choice wins.
   return [
     ...declared(agent, "hook").map(hookDefinition),
+    ...(staticModel === undefined ? [] : [staticModel]),
     ...(model === undefined ? [] : [model]),
     instructions,
     ...declared(agent, "instructions").map(instructionsDefinition),
@@ -70,6 +69,8 @@ async function buildAgentDefinitions(bundle: CompiledBundle): Promise<readonly D
     ...declared(agent, "skill").map(skillDefinition),
     approvals,
     builtins,
+    // Last, so a parent's choice is the one the session runs: nothing of the session's evaluates for it.
+    parentModel,
   ];
 }
 

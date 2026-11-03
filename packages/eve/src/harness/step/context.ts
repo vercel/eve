@@ -1,4 +1,6 @@
 import { unchangedBy } from "#harness/session-machine/commit.js";
+import type { ModelChoice } from "#definitions/model.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import type { ModelMessage } from "ai";
 
@@ -54,10 +56,12 @@ const log = createLogger("harness.step");
  */
 export interface Step {
   session: HarnessSession;
+  /** The model the step's call runs, once eve has chosen it for the call. */
+  model?: ModelChoice;
   frameworkToolNames: ReadonlySet<string>;
   readonly config: KernelConfig;
-  /** The step's context; direct harness tests may run without one. */
-  readonly ctx: AlsContext | undefined;
+  /** The session's context. */
+  readonly ctx: AlsContext;
   readonly runStep: StepFn;
   readonly publish: Publish;
   /** The caller's event handler. Without one, a failure throws instead of being reported. */
@@ -76,9 +80,15 @@ export interface Step {
   apply(change: Transition | Commit, messages?: readonly ModelMessage[]): Promise<void>;
 }
 
+/** The model the step's call runs. Read only once eve has chosen it for the call. */
+export function stepReference(step: Pick<Step, "model">): RuntimeModelReference {
+  if (step.model === undefined) throw new Error("The step read its model before eve chose it.");
+  return step.model.reference;
+}
+
 export function createStep(input: {
   readonly config: KernelConfig;
-  readonly ctx: AlsContext | undefined;
+  readonly ctx: AlsContext;
   readonly emit: HarnessEmitFn | undefined;
   readonly instrumentation: InstrumentationStepScope<HarnessSession> | undefined;
   readonly live: StepProjection;
@@ -161,9 +171,6 @@ export async function prepareModelCall(
   step: Step,
   preview: Prompt,
 ): Promise<StepResult | undefined> {
-  // The step's context is the session's container; direct harness tests run without one.
-  const ctx = step.ctx as ContextContainer | undefined;
-  if (ctx === undefined) return undefined;
   throwIfTurnAborted(step.config.abortSignal);
   const conversation = validateHarnessModelMessages(withClientContext(preview));
   try {
@@ -172,13 +179,15 @@ export async function prepareModelCall(
     if (!(error instanceof DefinitionFailedError)) throw error;
     return failTurn(step, error, "REACTION_FAILED");
   }
-  step.session = changeHistory(step.session, { append: takeUserInstructionMessages(ctx) });
+  step.session = changeHistory(step.session, {
+    append: takeUserInstructionMessages(step.ctx as ContextContainer),
+  });
   return undefined;
 }
 
 /** A hook failed during the turn: the turn fails. Returns the step's result then. */
 export async function failTurnForEffect(step: Step): Promise<StepResult | undefined> {
-  const reason = takeTurnFailure(step.ctx as ContextContainer | undefined);
+  const reason = takeTurnFailure(step.ctx as ContextContainer);
   if (reason === undefined) return undefined;
   return failTurn(step, new Error(reason), "HOOK_FAILED");
 }

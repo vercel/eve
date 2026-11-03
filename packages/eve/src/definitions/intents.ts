@@ -116,8 +116,7 @@ export function reportEffectFailure(
 }
 
 /** Takes the failure a hook reported for the running turn, if any. */
-export function takeTurnFailure(ctx: ContextContainer | undefined): string | undefined {
-  if (ctx === undefined) return undefined;
+export function takeTurnFailure(ctx: ContextContainer): string | undefined {
   const turnId = activeTurnIdOf(currentProjection(ctx));
   if (turnId === undefined) return undefined;
   const [failure] = takeIntents(

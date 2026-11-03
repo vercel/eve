@@ -7,8 +7,7 @@ import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
 const session: HarnessSession = {
-  agent: { modelReference: { id: "test-model" }, tools: [] },
-  compaction: { recentWindowSize: 10, threshold: 100_000 },
+  compaction: {},
   continuationToken: "http:test-session",
   history: [],
   sessionId: "test-session",

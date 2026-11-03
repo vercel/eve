@@ -197,11 +197,6 @@ export const ToolChannelKey = new ContextKey<{
 // Model keys
 // ---------------------------------------------------------------------------
 
-/** Static model configured for the effective turn agent, or `null` for a dynamic-only agent. */
-export const StaticModelReferenceKey = new ContextKey<RuntimeModelReference | null>(
-  "eve.staticModelReference",
-);
-
 export interface LiveDynamicModelSelection {
   /** Live provider instance; absent for string selections, which resolve through the reference. */
   readonly model?: LanguageModel;

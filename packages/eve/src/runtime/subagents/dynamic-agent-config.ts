@@ -2,7 +2,7 @@ import { normalizeAgentDefinition } from "#internal/authored-definition/core.js"
 import { isDefinedAgent } from "#public/definitions/agent.js";
 import type { ContextAccessor } from "#context/key.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import { getEffectiveModelSelection } from "#definitions/model.js";
+import { currentModel } from "#definitions/model.js";
 import { resolveRuntimeModelSelection } from "#runtime/agent/resolve-model.js";
 import type { ModelMetadata } from "#internal/model-catalog.js";
 import {
@@ -139,6 +139,6 @@ async function normalizeDurableModelSelection(input: {
  */
 function parentContextWindow(state: ContextAccessor, model: unknown): number | undefined {
   if (typeof model !== "string") return undefined;
-  const parent = getEffectiveModelSelection(state)?.reference;
+  const parent = currentModel(state);
   return parent?.id === model ? parent.contextWindowTokens : undefined;
 }

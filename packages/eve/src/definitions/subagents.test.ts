@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { StaticModelReferenceKey } from "#context/keys.js";
 import {
   beforeModelCall,
   dynamicTools,
@@ -59,6 +58,7 @@ describe("dynamic subagents", () => {
   it("reads the model the session chose", async () => {
     const seen: string[] = [];
     const { ctx } = definitionSession({
+      model: { id: "openai/gpt-5.4" },
       subagents: [
         {
           evaluate: (ctx) => {
@@ -69,7 +69,6 @@ describe("dynamic subagents", () => {
         },
       ],
     });
-    ctx.set(StaticModelReferenceKey, { id: "openai/gpt-5.4" } as never);
     await beforeModelCall(ctx);
 
     expect(seen).toEqual(["openai/gpt-5.4"]);

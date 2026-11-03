@@ -7,8 +7,7 @@ import type { HarnessSession } from "#harness/types.js";
 
 function makeSession(continuationToken: string): HarnessSession {
   return {
-    agent: { modelReference: { id: "openai/gpt-5.4" }, tools: [] },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken,
     history: [],
     sessionId: "session_test",
@@ -50,7 +49,6 @@ describe("reconcileSessionContinuationToken", () => {
     expect(next.continuationToken).toBe("slack:C123:1800000000.123456");
     // Every other field is preserved.
     expect(next.sessionId).toBe(session.sessionId);
-    expect(next.agent).toBe(session.agent);
     expect(next.compaction).toBe(session.compaction);
     expect(next.history).toBe(session.history);
   });

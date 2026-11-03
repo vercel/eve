@@ -56,21 +56,7 @@ function buildSession(input: {
   withRefreshableAgent?: boolean;
 }): HarnessSession {
   return {
-    agent: {
-      compactionModelReference: input.withRefreshableAgent
-        ? { id: "compaction-model", contextWindowTokens: 200_000 }
-        : undefined,
-      modelReference: { id: "test-model", contextWindowTokens: 200_000 },
-      tools: input.withRefreshableAgent
-        ? [{ description: "", inputSchema: { type: "object" }, name: "test" }]
-        : [],
-    },
-    compaction: {
-      lastKnownInputTokens: 100,
-      lastKnownPromptMessageCount: 3,
-      recentWindowSize: 10,
-      threshold: 180_000,
-    },
+    compaction: { lastKnownInputTokens: 100, lastKnownPromptMessageCount: 3 },
     continuationToken: input.continuationToken,
     history: [{ content: "hi", kind: "user", role: "user" }],
     sessionId: input.sessionId,

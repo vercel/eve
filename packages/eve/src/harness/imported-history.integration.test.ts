@@ -1,7 +1,7 @@
 import { MockLanguageModelV3 } from "ai/test";
 import { expect, it } from "vitest";
 
-import { createKernel } from "#harness/kernel.js";
+import { createTestKernel } from "#internal/testing/kernel.js";
 import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
 import { eachEvent, withPublished } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -69,7 +69,8 @@ const prompted = (call: MockLanguageModelV3["doStreamCalls"][number] | undefined
 it("reads imported history before each turn's context and message, and records it consumed", async () => {
   const llm = model();
   const events: SessionEvent[] = [];
-  const harness = createKernel({
+  const harness = createTestKernel({
+    agent: { model: { id: "m" } },
     handleEvent: eachEvent(async (event) => {
       events.push(event);
     }),
@@ -77,8 +78,7 @@ it("reads imported history before each turn's context and message, and records i
     tools: new Map(),
   });
   const session: HarnessSession = {
-    agent: { modelReference: { id: "m" }, tools: [] },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: "http:history",
     history: [],
     sessionId: "history",
