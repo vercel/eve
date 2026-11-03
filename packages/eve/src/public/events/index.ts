@@ -44,12 +44,9 @@ export {
 
 export { isTerminal, isCompleted } from "#protocol/session-events/guards.js";
 
-export {
-  createStreamChecker,
-  type StreamChecker,
-  type Violation,
-  type ViolationRule,
-} from "#protocol/session-events/checker.js";
+export { createStreamChecker } from "./stream-checker.js";
+
+export type { StreamChecker, Violation, ViolationRule } from "#protocol/session-events/checker.js";
 
 export {
   type Fact,

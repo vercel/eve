@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { createEventReader } from "#protocol/session-lines.js";
 import {
   createStreamChecker,
   emptySessionView,
   foldEvents,
   turns,
-  type ReceivedEvent,
   type StoredLine,
 } from "#public/events/index.js";
 
@@ -19,16 +19,6 @@ function turnLines(turnId: string, follows: string | null, outcome: string): Sto
   ];
 }
 
-function received(lines: readonly StoredLine[]): ReceivedEvent[] {
-  return lines.flatMap((line, position) => {
-    if (!("facts" in line)) return [];
-    return line.facts.map((fact, index) => ({
-      ...(fact as { readonly type: string }),
-      meta: { at, endOfLine: index === line.facts.length - 1, position: { index, line: position } },
-    }));
-  });
-}
-
 describe("eve/events", () => {
   const stream: StoredLine[] = [
     { at, facts: [{ data: {}, type: "session.started" }] },
@@ -39,14 +29,14 @@ describe("eve/events", () => {
   it("checks a stream and folds the same stream into its turns", () => {
     const checker = createStreamChecker();
     expect(stream.flatMap((line, position) => checker.check(line, position))).toEqual([]);
+    const reader = createEventReader();
+    const events = stream.flatMap((line, position) => reader.read(line, position));
     expect(
-      turns(foldEvents(emptySessionView(), received(stream))).map(
-        ({ turnId, status, outcome }) => ({
-          outcome,
-          status,
-          turnId,
-        }),
-      ),
+      turns(foldEvents(emptySessionView(), events)).map(({ turnId, status, outcome }) => ({
+        outcome,
+        status,
+        turnId,
+      })),
     ).toEqual([
       { outcome: "completed", status: "settled", turnId: "turn_0" },
       { outcome: "failed", status: "settled", turnId: "turn_1" },
