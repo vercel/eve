@@ -1,3 +1,4 @@
+import { mintClearance } from "#harness/clearance.js";
 import { describe, expect, it } from "vitest";
 
 import { SessionKey, ToolStubsKey } from "#context/keys.js";
@@ -101,7 +102,14 @@ describe("tool stubs through eve__tool", () => {
               throw new Error(`eve__tool ${JSON.stringify(input)} reached no runnable entry.`);
             }
             const options = { messages: [], toolCallId };
-            return await settle(invokeTool(resolved.definition, resolved.call.input, options));
+            return await settle(
+              invokeTool(
+                resolved.definition,
+                resolved.call.input,
+                options,
+                mintClearance(toolCallId),
+              ),
+            );
           });
 
         expect(

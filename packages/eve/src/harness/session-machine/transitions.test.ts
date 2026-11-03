@@ -77,6 +77,7 @@ describe("the budget prompt", () => {
     ]);
     // The answer stands, admitted, as any answer to the prompt does.
     const answered = withPublished(asked, [
+      { data: { deliveryId: "d_1" }, type: "delivery.admitted" },
       {
         data: { deliveryId: "d_1", interactionId, responseId: "r_1", value: { optionId: "maybe" } },
         type: "response.submitted",

@@ -1,3 +1,4 @@
+import { commitOf } from "#harness/session-machine/commit.js";
 import { viewOfEvents } from "#protocol/session-projection/fold.js";
 import type { SessionView as PublicSessionView } from "#protocol/session-projection/tables.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -45,7 +46,7 @@ export function withPublished(
   events: readonly SessionEvent[],
 ): HarnessSession {
   const projection = stepProjection(undefined, session.state);
-  projection.record(events);
+  projection.record(commitOf(events));
   return saveProjection(session, projection.read());
 }
 

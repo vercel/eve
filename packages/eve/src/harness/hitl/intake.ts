@@ -1,3 +1,5 @@
+import { approvedClearance } from "#harness/clearance.js";
+import { transition } from "#harness/session-machine/commit.js";
 import { callRun, runTurn } from "#protocol/session-projection/selectors.js";
 import { buildStepCatalog } from "#execution/catalog/step-catalog.js";
 import { SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
@@ -44,7 +46,7 @@ import {
 } from "./delivery.js";
 import { decideApproval } from "#harness/tools.js";
 import { changedSinceOffered, changedToolMessage, failedCall } from "#harness/approval-outcome.js";
-import { callSettledFrom } from "#harness/call-facts.js";
+import { settleCall } from "#harness/session-machine/calls.js";
 
 /**
  * What a delivery leaves for its step once its answers are admitted. `stop` ends the step: a
@@ -104,7 +106,7 @@ export async function admitHumanInput(
   const typedAnswers = config.typedAnswers !== false;
   const delivered = deliver(step.view(), input, { ...options, typedAnswers });
   if (delivered.takeQueued && step.view().turn.queued !== undefined) {
-    await step.apply({ events: [], turn: { ...step.view().turn, queued: undefined } });
+    await step.apply(transition({ events: [], turn: { ...step.view().turn, queued: undefined } }));
   }
   // A typed approval answers like a press, so the approval's response policy decides it.
   const typed = typedAnswers ? resolveTypedApproval(step.view(), delivered.input) : delivered.input;
@@ -225,7 +227,7 @@ async function runApproved(
       if (changedSinceOffered(approval.call, tool)) {
         const { callId, toolName } = approval.call;
         const failed = failedCall({ callId, message: changedToolMessage(toolName), toolName });
-        await step.publish(callSettledFrom(failed.result));
+        await step.publish(settleCall(failed.result));
         denied.push({ part: failed.part });
         continue;
       }
@@ -246,13 +248,10 @@ async function runApproved(
           ).settled,
         );
       } else {
-        workflows.set(approval.call.callId, {
-          approval,
-          clearedBy:
-            approval.interactionId === undefined
-              ? recheck.clearedBy
-              : { interactionId: approval.interactionId },
-        });
+        // A person's acceptance clears the call; the recheck only confirms it still may run.
+        const clearance =
+          approvedClearance(step.view().projection.view, approval.call.callId) ?? recheck.clearance;
+        workflows.set(approval.call.callId, { approval, clearedBy: clearance?.clearedBy });
       }
     }
     local.push({

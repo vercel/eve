@@ -2,7 +2,7 @@ import type { ModelMessage } from "ai";
 
 import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import { callSettledFrom } from "#harness/call-facts.js";
+import { callSettledFrom, callStarted } from "#harness/call-facts.js";
 import {
   contextStarted,
   controlAdmitted,
@@ -52,7 +52,7 @@ import type { SessionView as PublicView } from "#protocol/session-projection/tab
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { Answer } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import type { Transition } from "./commit.js";
+import { transition, type Transition } from "./commit.js";
 import type { HistoryChange } from "./history.js";
 import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import type { Relay, WorkflowAskRoute } from "#harness/hitl/relays.js";
@@ -81,10 +81,8 @@ import {
 // pure: what they need from effects (model responses, tool results, the requests a session
 // relays) arrives in their input.
 
-const unchanged = (view: SessionView, events: readonly SessionEvent[]) => ({
-  events,
-  turn: view.turn,
-});
+const unchanged = (view: SessionView, events: readonly SessionEvent[]) =>
+  transition({ events, turn: view.turn });
 
 /** A delivery a turn consumes, with what the person sent: nothing for an answer or context. */
 export interface ConsumedDelivery {
@@ -183,6 +181,24 @@ export function join(
   );
 }
 
+/** The turn completes: it settles with the reply its parts made. */
+export function complete(view: SessionView): Transition {
+  return unchanged(view, turnSettled(view.projection, { outcome: "completed" }));
+}
+
+/**
+ * An interrupted attempt that finished clearing the session: its history empties now, and nothing
+ * it suspended or a sign-in held stays. What it remembered of approvals does.
+ */
+export function clearedByAttempt(view: SessionView): Transition {
+  return transition({
+    events: [],
+    history: { rewrite: [] },
+    signIns: [],
+    turn: { remembered: view.turn.remembered, suspended: [] },
+  });
+}
+
 /**
  * The step failed. A recoverable failure leaves the session for the user to retry; a terminal
  * one ends it.
@@ -212,7 +228,7 @@ export function fail(
           outcome: "failed",
         })),
   ];
-  return { ...commitSteps(view.turn, stopped, cancelledTranscript), events };
+  return transition({ ...commitSteps(view.turn, stopped, cancelledTranscript), events });
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +275,7 @@ export function settle(view: SessionView, input: { readonly results: readonly Se
     }
   }
   const complete = steps.filter(isComplete);
-  return { ...commitSteps({ ...view.turn, suspended: steps }, complete), events };
+  return transition({ ...commitSteps({ ...view.turn, suspended: steps }, complete), events });
 }
 
 /**
@@ -302,7 +318,7 @@ export function suspendStep(
   view: SessionView,
   step: Pick<SuspendedStep, "event" | "messages" | "tasks">,
 ): Transition {
-  return { events: [], turn: suspend(view.turn, { ...step, requests: [] }) };
+  return transition({ events: [], turn: suspend(view.turn, { ...step, requests: [] }) });
 }
 
 /** The step without the approved calls in `callIds`, which have run or joined the runtime. */
@@ -337,6 +353,36 @@ export interface TaskCallStart {
   readonly turnId: string;
   readonly kind: "agent" | "tool";
   readonly name: string;
+}
+
+/** The calls a dispatch started or refused, recorded on the session but not yet published. */
+export interface PendingDispatch {
+  /** Calls the turn waits on, each running from now in a run of its own. */
+  readonly executing: readonly {
+    readonly callId: string;
+    readonly clearedBy?: import("#protocol/session-events/families/call.js").ClearedBy;
+  }[];
+  /** Tasks the dispatch started or sent a call to. */
+  readonly started: readonly TaskCallStart[];
+  /** Calls a dispatch admission refused before any run started, and the policy that refused. */
+  readonly refused: readonly { readonly result: RuntimeActionResult; readonly policy: string }[];
+}
+
+/**
+ * What a dispatch recorded, published as one commit: the calls the turn waits on started, the
+ * tasks it started or reached, and the calls it refused.
+ */
+export function startDispatchedCalls(view: SessionView, pending: PendingDispatch): Transition {
+  // One introduction per task in this commit, from the public table, not the private runtime
+  // address the dispatch already recorded.
+  const introducedTasks = new Set(Object.keys(view.projection.view.tasks));
+  return unchanged(view, [
+    ...pending.executing.map(({ callId, clearedBy }) => callStarted(callId, { clearedBy })),
+    ...pending.started.flatMap((task) => startTask(view, task, introducedTasks).events),
+    ...pending.refused.map(({ policy, result }) =>
+      callSettledFrom(result, { cause: { policy }, rejected: true }),
+    ),
+  ]);
 }
 
 /** A task starts once; every call it serves starts against that task. */
@@ -883,11 +929,11 @@ export function cancel(view: SessionView, input: { readonly cause?: Cause } = {}
     ...unreadSettled(view),
   );
   const { queued: _queued, ...turn } = view.turn;
-  return {
+  return transition({
     ...commitSteps(turn, stopped, cancelledTranscript),
     events,
     signIns: [],
-  };
+  });
 }
 
 function unreadSettled(view: SessionView): SessionEvent[] {
@@ -920,12 +966,12 @@ export function stopInterruptedSteps(
       step.requests.some((request) => input.settledInteractions.has(request.interactionId)) ||
       [...stepCallIds(step)].some((callId) => input.calls.get(callId)?.started === true),
   );
-  return {
+  return transition({
     ...commitSteps(view.turn, stopped, (step) =>
       stoppedTranscript(step, (callId) => interruptedCallResult(input.calls.get(callId))),
     ),
     events: [],
-  };
+  });
 }
 
 function commitSteps(
@@ -972,7 +1018,7 @@ function stoppedTranscript(
 export function clear(view: SessionView, input: { readonly cause?: Cause } = {}): Transition {
   const { projection } = view;
   const changeId = nextChangeId(projection);
-  return {
+  return transition({
     history: { rewrite: [] },
     signIns: [],
     events: [
@@ -987,7 +1033,7 @@ export function clear(view: SessionView, input: { readonly cause?: Cause } = {})
       fact("context.settled", { changeId, kind: "clear", outcome: "completed", selects: null }),
     ],
     turn: { remembered: view.turn.remembered, suspended: [] } satisfies TurnState,
-  };
+  });
 }
 
 /**

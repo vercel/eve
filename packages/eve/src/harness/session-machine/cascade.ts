@@ -1,3 +1,5 @@
+import type { Commit } from "#harness/types.js";
+import { commitOf } from "./commit.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { FACT_CATALOG, isFactType, isTerminalType } from "#protocol/session-events/catalog.js";
 import { copyView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
@@ -123,11 +125,7 @@ export function closeUnder(view: SessionView, owner: Ref, reason: string): Sessi
  * The facts that close the open entities `which` selects, leaves first, as a retry superseded
  * them. The writer closes what each leaves open under it.
  */
-export function supersede(
-  view: SessionView,
-  which: (ref: Ref) => boolean,
-  reason: string,
-): SessionEvent[] {
+export function supersede(view: SessionView, which: (ref: Ref) => boolean, reason: string): Commit {
   const scratch = copyView(view);
   const facts: SessionEvent[] = [];
   for (const ref of openUnder(scratch, "session")) {
@@ -136,7 +134,7 @@ export function supersede(
     foldReceivedEvent(scratch, { ...fact, meta: { endOfLine: false } });
     facts.push(fact);
   }
-  return facts;
+  return commitOf(facts);
 }
 
 /** Why what an owner held closed, as its readers already see it. */

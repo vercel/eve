@@ -1,7 +1,6 @@
+import { unchangedBy } from "#harness/session-machine/commit.js";
 import { changeHistory } from "#harness/session-machine/history.js";
 import type { ModelMessage } from "ai";
-
-import type { SessionEvent } from "#protocol/session-event.js";
 
 import type { AlsContext, ContextContainer } from "#context/container.js";
 import {
@@ -39,6 +38,7 @@ import type {
   HarnessStepInput,
   StepResult,
   KernelConfig,
+  Commit,
 } from "#harness/types.js";
 import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
@@ -71,11 +71,8 @@ export interface Step {
   readonly finalReplyOnly: boolean;
   view(): SessionView;
   position(): TurnPosition;
-  /** Publishes a transition, or facts that change nothing private, as one commit. */
-  apply(
-    change: Transition | readonly SessionEvent[],
-    messages?: readonly ModelMessage[],
-  ): Promise<void>;
+  /** Publishes a transition, or kernel facts that change nothing private, as one commit. */
+  apply(change: Transition | Commit, messages?: readonly ModelMessage[]): Promise<void>;
 }
 
 export function createStep(input: {
@@ -105,7 +102,7 @@ export function createStep(input: {
     view: () => sessionView(live.read(), step.session.state),
     position: () => turnPosition(live.read()),
     async apply(change, messages) {
-      const transition = "events" in change ? change : { events: change, turn: step.view().turn };
+      const transition = "events" in change ? change : unchangedBy(change, step.view().turn);
       // Records whose rows the commit closed retire with it; the writer closes and scopes.
       step.session = dropClosedRecords(
         await applyTransition(step.session, transition, input.publish, messages),

@@ -10,10 +10,11 @@ import type {
 } from "ai";
 import { usageOf } from "#harness/facts.js";
 import { createRuntimeToolResultFromMessagePart } from "#harness/action-result-helpers.js";
-import { callSettledFrom, toJsonValue } from "#harness/call-facts.js";
+import { toJsonValue } from "#harness/call-facts.js";
+import { settleCall } from "#harness/session-machine/calls.js";
+import { settleRun } from "#harness/session-machine/runs.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
-import type { SessionEvent } from "#protocol/session-event.js";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import type { ToolSignIn } from "#harness/call-executor.js";
 import type { TurnPosition } from "#harness/session-machine/view.js";
@@ -54,9 +55,8 @@ export type HarnessStepResult = Pick<
   readonly invalidInputToolCallIds?: ReadonlySet<string>;
   /** The calls eve ran that wait on a person's approval. */
   readonly approvalRequests?: readonly ApprovalAsk[];
-  readonly policyApprovals?: Readonly<
-    Record<string, import("#protocol/session-events/families/call.js").ClearedBy>
-  >;
+  /** The calls eve cleared that the runtime runs, and what cleared each. */
+  readonly policyApprovals?: Readonly<Record<string, import("#harness/clearance.js").Clearance>>;
   /** The calls eve ran that stopped for a sign-in. */
   readonly signIns?: readonly ToolSignIn[];
 };
@@ -213,41 +213,33 @@ export async function emitStepActions(
 ): Promise<void> {
   const { runId } = state;
   for (const part of notRun) {
-    await emitFn(callSettledFrom(createRuntimeToolResultFromMessagePart(part, part.toolName)));
+    await emitFn(settleCall(createRuntimeToolResultFromMessagePart(part, part.toolName)));
   }
   if (runId === undefined) return;
-  const commit: SessionEvent[] = [];
   const result = finalOutputOf(step);
-  if (result !== undefined) {
-    commit.push({
-      data: { kind: "result", partId: `${runId}.result`, phase: "reply", runId, value: result },
-      type: "content.completed",
-    });
-  }
-  const settled: {
-    runId: string;
-    outcome: "completed";
-    finishReason: string;
-    generationId?: string;
-  } = {
-    finishReason: normalizeAssistantStepFinishReason(step.finishReason),
-    outcome: "completed",
-    runId,
-  };
-  const generationId = readGatewayGenerationId(step.providerMetadata);
-  if (generationId !== undefined) settled.generationId = generationId;
-  commit.push({ data: settled, type: "model.settled" });
-  const usage = runUsageOf({
-    costUsd: extractGatewayCostUsd(step.providerMetadata),
-    usage: step.usage,
-  });
-  if (usage !== undefined) {
-    commit.push({
-      data: { kind: "model", owner: { runId }, usage },
-      type: "usage.recorded",
-    });
-  }
-  await emitFn(commit);
+  await emitFn(
+    settleRun(
+      {
+        finishReason: normalizeAssistantStepFinishReason(step.finishReason),
+        generationId: readGatewayGenerationId(step.providerMetadata),
+        outcome: "completed",
+        runId,
+        usage: runUsageOf({
+          costUsd: extractGatewayCostUsd(step.providerMetadata),
+          usage: step.usage,
+        }),
+      },
+      result === undefined
+        ? undefined
+        : {
+            kind: "result",
+            partId: `${runId}.result`,
+            phase: "reply",
+            runId,
+            value: result,
+          },
+    ),
+  );
 }
 
 /** The run's structured result: the input of its valid `eve__reply` call. */

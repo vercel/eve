@@ -10,7 +10,10 @@ import {
 import type { GenerationSteering } from "#harness/generation-steering.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import { enforceBudget, humanInputContext } from "#harness/hitl/index.js";
-import { runRequested, runStarted } from "#harness/facts.js";
+import {
+  requestRun as requestRunFact,
+  startRun as startRunFact,
+} from "#harness/session-machine/runs.js";
 import { activeTurnId } from "#harness/session-machine/view.js";
 import { nextRunId } from "#protocol/session-projection.js";
 import {
@@ -153,7 +156,7 @@ async function requestRun(
   const { config, ctx } = step;
   try {
     await step.apply(
-      [runRequested({ turnId: activeTurnId(step.position()) }, nextRunId(step.view().projection))],
+      requestRunFact({ turnId: activeTurnId(step.position()) }, nextRunId(step.view().projection)),
       validateHarnessModelMessages(withClientContext(prompt)),
     );
   } catch (error) {
@@ -173,5 +176,5 @@ async function startRun(step: Step, attempt: number): Promise<void> {
   const runId = step.position().runId;
   if (runId === undefined) return;
   const modelId = requireSessionModelReference(step.session).id;
-  await step.apply([runStarted({ attempt, modelId, runId })]);
+  await step.apply(startRunFact({ attempt, modelId, runId }));
 }

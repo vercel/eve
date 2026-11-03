@@ -31,10 +31,8 @@ import {
 } from "#harness/compaction/engine.js";
 import { takeCompactionCaptureFailure } from "#reactions/kinds/memory.js";
 import { isDeepStrictEqual } from "node:util";
-import type { SessionEvent } from "#protocol/session-event.js";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
-import { toErrorMessage } from "#shared/errors.js";
 import { normalizeModelStreamError } from "#harness/model-call/errors.js";
 import { runModelCallWithRetries } from "#harness/model-call/retry.js";
 import {
@@ -47,18 +45,14 @@ import { resolveModelProfile } from "#harness/model-profile.js";
 import { markUsageReported, NO_USAGE } from "#harness/session-usage.js";
 import { addTokenUsage } from "#shared/token-usage-math.js";
 import { controlDeliveryFor } from "#harness/session-machine/transitions.js";
+import { usageOf } from "#harness/facts.js";
 import {
-  contextStarted,
-  controlAdmitted,
-  deliveryApplied,
-  fact,
-  runRequested,
-  runSettledFacts,
-  runStarted,
-  usageOf,
-} from "#harness/facts.js";
-import { openWork } from "#protocol/session-projection/selectors.js";
-import type { SessionView } from "#protocol/session-projection/tables.js";
+  completeCompaction,
+  failChange,
+  startChange,
+  startSummaryRun,
+} from "#harness/session-machine/context-changes.js";
+import { admitControl, settleDelivery } from "#harness/session-machine/deliveries.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
 
 const log = createLogger("harness.tool-loop");
@@ -88,11 +82,11 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   const delivery = controlDeliveryFor(step.view(), config.controlDelivery);
   const { deliveryId } = delivery;
   if (step.session.history.length === 0) {
-    await step.apply([controlAdmitted(delivery, "compact"), deliveryApplied(deliveryId)]);
+    await step.apply(admitControl(delivery, "compact", { applied: true }));
     return { next: null, session: step.session };
   }
   const messages = validateHarnessModelMessages(step.session.history);
-  await step.apply([controlAdmitted(delivery, "compact")], messages);
+  await step.apply(admitControl(delivery, "compact"), messages);
   const { projection } = step.view();
   const change = lazyChange(step, {
     changeId: nextChangeId(projection),
@@ -125,7 +119,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
   }
   // Applied, not only published: the step's applied session is the compacted one.
   const reason = outcome === "failed" ? "compaction-failed" : undefined;
-  await step.apply([fact("delivery.settled", { deliveryId, outcome, reason })]);
+  await step.apply(settleDelivery(deliveryId, outcome, reason));
   return { next: null, session: step.session };
 }
 
@@ -190,7 +184,7 @@ function lazyChange(
   input: {
     readonly changeId: string;
     readonly runId: string;
-    readonly started: Omit<Parameters<typeof contextStarted>[0], "changeId">;
+    readonly started: Omit<Parameters<typeof startChange>[0], "changeId">;
     readonly prompt: readonly HarnessModelMessage[];
   },
 ): LazyChange {
@@ -204,10 +198,7 @@ function lazyChange(
     async open() {
       if (opened) return;
       opened = true;
-      await step.publish(
-        contextStarted({ changeId: input.changeId, ...input.started }),
-        input.prompt,
-      );
+      await step.publish(startChange({ changeId: input.changeId, ...input.started }), input.prompt);
       // A memory capture before compaction ran in the commit that started it. When it failed, the
       // compaction fails before it rewrites the history the capture couldn't keep.
       const captureFailure = takeCompactionCaptureFailure(step.ctx);
@@ -245,10 +236,13 @@ async function summarizeHistory(
     executor ??= await summaryExecutor(step, input);
     if (!runOpen) {
       runOpen = true;
-      await step.publish([
-        runRequested({ changeId: change.changeId }, change.runId),
-        runStarted({ attempt: 0, modelId: executor.modelId, runId: change.runId }),
-      ]);
+      await step.publish(
+        startSummaryRun({
+          changeId: change.changeId,
+          modelId: executor.modelId,
+          runId: change.runId,
+        }),
+      );
     }
     const summary = await executor.summarize(prompt);
     summaryUsage.push(summary.usage);
@@ -280,7 +274,7 @@ async function summarizeHistory(
     countSummaryUsage(step, input.betweenTurns, usage);
     if (change.opened) {
       await step.publish(
-        summaryFailed(step.view().projection.view, {
+        failChange(step.view().projection.view, {
           changeId: change.changeId,
           error,
           ...(usage !== undefined && { spent: { runId: change.runId, usage } }),
@@ -313,23 +307,14 @@ async function settleChange(
   const usage = summaryUsageOf(input.summaryUsage);
   countSummaryUsage(step, input.betweenTurns, usage);
   await step.publish(
-    [
+    completeCompaction({
+      changeId: change.changeId,
+      runId: change.runId,
+      runOpen: input.runOpen,
       // Every summary call that returned left an entry, even without usage.
-      ...(input.summaryUsage.length > 0
-        ? runSettledFacts({
-            finishReason: "stop",
-            outcome: "completed",
-            runId: change.runId,
-            usage,
-          })
-        : input.runOpen
-          ? runSettledFacts({ outcome: "abandoned", runId: change.runId })
-          : []),
-      {
-        data: { changeId: change.changeId, kind: "compaction", outcome: "completed" },
-        type: "context.settled",
-      },
-    ],
+      summarized: input.summaryUsage.length > 0,
+      usage,
+    }),
     messages,
   );
 }
@@ -446,41 +431,6 @@ function summaryUsageOf(deltas: readonly (TokenUsageDelta | undefined)[]): Usage
   const spent = deltas.filter((delta) => delta !== undefined);
   if (spent.length === 0) return undefined;
   return spent.reduce<Usage>((total, delta) => addTokenUsage(total, usageOf(delta)), NO_USAGE);
-}
-
-/** The summary run and its change failed; the run records what it spent. */
-function summaryFailed(
-  view: SessionView,
-  input: {
-    readonly changeId: string;
-    readonly error: unknown;
-    readonly spent?: { readonly runId: string; readonly usage: Usage };
-  },
-): SessionEvent[] {
-  if (view.changes[input.changeId]?.status !== "running") return [];
-  const error = { code: "COMPACTION_FAILED", message: toErrorMessage(input.error) };
-  // The summary run failed, and its change with it; the writer closes what else they held.
-  const runs = openWork(view, { changeId: input.changeId }).runs;
-  const { spent } = input;
-  return [
-    ...runs.flatMap(({ runId }) =>
-      runSettledFacts({
-        error,
-        outcome: "failed",
-        runId,
-        ...(spent?.runId === runId && { usage: spent.usage }),
-      }),
-    ),
-    {
-      data: {
-        changeId: input.changeId,
-        error,
-        kind: view.changes[input.changeId]?.kind ?? "compaction",
-        outcome: "failed",
-      },
-      type: "context.settled",
-    },
-  ];
 }
 
 /**

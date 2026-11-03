@@ -75,7 +75,7 @@ function setup(
   };
   const step = (current: HarnessSession, input?: Parameters<ReturnType<typeof createKernel>>[1]) =>
     contextStorage.run(recorder.enter(createApprovalContext()), () =>
-      createKernel(config)(current, input),
+      createKernel(config)(current, recorder.admit(input)),
     );
   return { events, session, step };
 }

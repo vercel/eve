@@ -1,6 +1,7 @@
 import { createLogger } from "#internal/logging.js";
 import { contextScopeValue, withContextScopeValue } from "#context/container.js";
-import { fact, usageOf } from "#harness/facts.js";
+import { usageOf } from "#harness/facts.js";
+import { recordUsage as recordUsageFact } from "#harness/session-machine/runs.js";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import type { Publish } from "#harness/session-machine/commit.js";
 
@@ -61,11 +62,7 @@ export async function recordUsage(
   if (sink === undefined) return;
   const counted = usageOf(usage);
   const published = sink.publish(
-    fact("usage.recorded", {
-      kind: options.kind ?? "auxiliary",
-      ...(sink.callId !== undefined && { owner: { callId: sink.callId } }),
-      usage: counted,
-    }),
+    recordUsageFact({ callId: sink.callId, kind: options.kind ?? "auxiliary", usage: counted }),
   );
   if (sink.inReaction !== true) return await published;
   sink.pending.push(

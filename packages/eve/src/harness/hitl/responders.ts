@@ -1,3 +1,4 @@
+import { transition } from "#harness/session-machine/commit.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { contextStorage } from "#context/container.js";
@@ -213,13 +214,13 @@ export async function weighResponders(
       }
     }
   }
-  return {
+  return transition({
     challenges,
     events,
     responders: upsert,
     turn: view.turn,
     unavailable,
-  };
+  });
 }
 
 /**

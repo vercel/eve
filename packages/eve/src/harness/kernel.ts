@@ -112,7 +112,7 @@ export function createKernel(config: KernelConfig): StepFn {
       // The publish sink folds what it publishes; without a sink, the step does, so lifecycle
       // never depends on whether a caller listens.
       if (emit !== undefined) await emit(publication, messages);
-      if (emit === undefined || ctx === undefined) live.record(events);
+      if (emit === undefined || ctx === undefined) live.record(publication);
     };
     const step = createStep({
       config,

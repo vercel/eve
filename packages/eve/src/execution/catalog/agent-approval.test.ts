@@ -32,7 +32,8 @@ function session(input: Parameters<typeof catalogContext>[0]) {
 }
 
 const ASKS = { awaitsPerson: true, denied: false };
-const RUNS = { denied: false };
+// A call the gate lets run carries its clearance.
+const RUNS = { clearance: { callId: "call-get_weather" }, denied: false };
 
 describe("agent approval in the step catalog", () => {
   it("covers authored, workflow, subagent, and connection entries from one policy", async () => {
