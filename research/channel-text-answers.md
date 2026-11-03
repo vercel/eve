@@ -1,5 +1,5 @@
 ---
-issue: TBD
+issue: "https://github.com/vercel/eve/pull/5861"
 status: implemented
 last_updated: "2026-11-03"
 ---
