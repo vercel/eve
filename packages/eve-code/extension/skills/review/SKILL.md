@@ -5,7 +5,7 @@ description: Comprehensive security and correctness audit. Use for review, deep 
 
 # Deep review
 
-Give the worker subagent a self-contained audit instruction naming the repository and target ref or worktree. The worker inspects the shared checkout directly. The root agent evaluates findings and owns the final verdict.
+The worker subagent cannot run commands, so hand it the diff as a file. Write the change under review to a fresh file in the shared sandbox (`patch=$(mktemp)`, then `git -C <repo> diff --cached`, `diff HEAD`, or `diff <base>...<head>` into `"$patch"`); untracked files appear only after `git add -N`. Give the worker a self-contained audit instruction naming the repository and that patch path. The root agent evaluates findings and owns the final verdict.
 
 Audit changed code and its necessary surrounding context for bugs, broken functionality, security vulnerabilities, developer-experience regressions, and feature-gate leaks. Cite repository evidence for every finding. Report only issues introduced or exposed by code added or modified in the reviewed change.
 
