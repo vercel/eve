@@ -79,11 +79,16 @@ globalThis.fetch = async (url, init = {}) => {
 };
 `;
 
-const IDENTITY = {
+const GIT_ENV = {
   GIT_AUTHOR_NAME: "eve-git test",
   GIT_AUTHOR_EMAIL: "eve-git@example.test",
   GIT_COMMITTER_NAME: "eve-git test",
   GIT_COMMITTER_EMAIL: "eve-git@example.test",
+  GIT_CONFIG_COUNT: "2",
+  GIT_CONFIG_KEY_0: "commit.gpgsign",
+  GIT_CONFIG_VALUE_0: "false",
+  GIT_CONFIG_KEY_1: "core.hooksPath",
+  GIT_CONFIG_VALUE_1: "/dev/null",
 };
 
 const REPO_URL = "https://github.com/owner/repo";
@@ -283,7 +288,7 @@ async function signedCommit(
       cwd,
       env: {
         ...process.env,
-        ...IDENTITY,
+        ...GIT_ENV,
         FAKE_GITHUB_LOG: log,
         FAKE_GITHUB_REMOTE: remote,
         GH_TOKEN: "not-used",
@@ -297,7 +302,7 @@ async function signedCommit(
 async function git(cwd: string, ...args: string[]) {
   const { stdout } = await execFileAsync("git", args, {
     cwd,
-    env: { ...process.env, ...IDENTITY },
+    env: { ...process.env, ...GIT_ENV },
   });
   return stdout.trim();
 }
