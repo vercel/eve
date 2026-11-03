@@ -129,7 +129,9 @@ export async function resolveToolDefinition(
  * result without clobbering required fields with `undefined`.
  */
 type OptionalResolvedFields = {
-  -readonly [K in "label" | "approval" | "endsTurn" | "toModelOutput"]?: ResolvedToolDefinition[K];
+  -readonly [
+    K in "label" | "approval" | "endsTurn" | "errorCode" | "toModelOutput"
+  ]?: ResolvedToolDefinition[K];
 };
 
 /**
@@ -185,6 +187,13 @@ function extractOptionalHooks(
             record.endsTurn,
             describe(definition, "to provide endsTurn as a boolean or a function"),
           ) as ResolvedToolDefinition["endsTurn"]);
+  }
+
+  if (record.errorCode !== undefined) {
+    optional.errorCode = expectFunction(
+      record.errorCode,
+      describe(definition, "to provide an errorCode function"),
+    ) as ResolvedToolDefinition["errorCode"];
   }
 
   if (record.toModelOutput !== undefined) {

@@ -261,15 +261,17 @@ export async function executeToolCall(
     };
     settled.push(completed);
     await input.beforeResult?.(failed ? thrown : undefined);
+    const errorCode = failed ? undefined : definition.errorCode?.(output);
     await input.publish(
       callSettledFrom(
         createRuntimeToolResultFromValue({
           callId,
-          isError: failed,
+          isError: failed || errorCode !== undefined,
           output: thrown ?? output,
           toolName,
         }),
         {
+          errorCode,
           label: failed ? undefined : projectToolLabel(definition, "complete", args, output),
         },
       ),

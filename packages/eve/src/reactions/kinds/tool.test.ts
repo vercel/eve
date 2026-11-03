@@ -87,6 +87,27 @@ describe("dynamic tools", () => {
     expect(await evaluationError(ctx)).toContain(message);
   });
 
+  it("keeps a tool's errorCode", async () => {
+    const errorCode = (output: unknown) => (output === null ? "empty" : undefined);
+    const { ctx } = reactionSession({
+      tools: [
+        {
+          evaluate: () =>
+            defineTool({
+              description: "Search.",
+              errorCode,
+              execute: async () => null,
+              inputSchema: {},
+            }),
+          slug: "search",
+        },
+      ],
+    });
+    await beforeModelCall(ctx);
+
+    expect(dynamicTools(ctx)[0]?.errorCode).toBe(errorCode);
+  });
+
   it("keeps the first definition's tool when two return the same name, and logs the other", async () => {
     const logs = captureLogRecords();
     const { ctx } = reactionSession({

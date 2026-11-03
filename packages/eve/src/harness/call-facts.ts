@@ -75,12 +75,18 @@ export function callStarted(
 export function callSettledFrom(
   result: RuntimeActionResult,
   options: {
+    /** A returned result the tool reported as failed, with its code; see `ToolDefinition.errorCode`. */
+    readonly errorCode?: string;
     readonly label?: string;
     readonly rejected?: boolean;
     readonly cause?: Cause;
   } = {},
 ): FactOf<"call.settled"> {
-  const { error, outcome } = callOutcomeOf(result);
+  const { outcome, ...settled } = callOutcomeOf(result);
+  const error =
+    options.errorCode === undefined
+      ? settled.error
+      : { code: options.errorCode, message: `The tool reported ${options.errorCode}.` };
   // Rejection is an explicit adjudication, never inferred from an output's error code.
   const rejected = options.rejected === true;
   return fact("call.settled", {

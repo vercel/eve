@@ -149,7 +149,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "approval",
       "outputSchema",
       "toModelOutput",
-      ...(workflow === undefined ? [] : [workflow.entryPoint]),
+      ...(workflow === undefined ? ["errorCode"] : [workflow.entryPoint]),
     ],
     message,
   );
@@ -224,6 +224,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
 
   if (record.toModelOutput !== undefined) {
     expectFunction(record.toModelOutput, message);
+  }
+
+  if (record.errorCode !== undefined) {
+    expectFunction(record.errorCode, message);
   }
 
   if (record.auth !== undefined) {

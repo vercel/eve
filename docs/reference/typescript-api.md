@@ -143,7 +143,7 @@ Tool definitions accept these options:
 - `availableInSubagents: false` restricts the tool to top-level root sessions.
 - `deferred: true` keeps the tool out of the model's tool list. The model finds it with `eve__search` and calls it with `eve__tool`; see [Tools](../tools#keep-a-tool-out-of-the-tool-list).
 
-`defineTool` definitions accept `endsTurn: true`, or a function that receives the `execute` output, to end the turn without a reply after a successful call; see [Tools](../tools#end-the-turn-after-a-tool-call).
+`defineTool` definitions accept `endsTurn: true`, or a function that receives the `execute` output, to end the turn without a reply after a successful call; see [Tools](../tools#end-the-turn-after-a-tool-call). They also accept `errorCode`, a function that reports a returned result as failed with a code; see [Tools](../tools#report-a-returned-failure).
 
 Authored workflow bodies also receive `ctx.agents`, a map that describes the agents the workflow can call. It stays the same across workflow replays. `ctx.agent(name)` returns an `AgentSession` whose `send(message, options?)` resolves to a response with `result()`. The `agent` entry is a copy of the root agent, and its description is empty when the root omits `description`. See [Workflows as tools](../tools/workflows#delegate-work-ctxagent) for the workflow-only context.
 

@@ -163,6 +163,7 @@ function liveTool(name: string, authored: DynamicToolEntry): HarnessToolDefiniti
     deferred: entry.deferred,
     description: entry.description,
     endsTurn: entry.endsTurn,
+    errorCode: entry.errorCode as HarnessToolDefinition["errorCode"],
     execute: createToolExecuteWithAuth({
       execute: (input, context) => entry.execute(input as never, context),
       scope: name,

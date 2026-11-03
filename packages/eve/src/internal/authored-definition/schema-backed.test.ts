@@ -65,6 +65,20 @@ describe("normalizeToolDefinition", () => {
     );
   });
 
+  it("accepts an errorCode function and rejects other errorCode values", () => {
+    const tool = defineTool({
+      description: "Reports failures from its result.",
+      errorCode: (output) => (output === null ? "empty" : undefined),
+      inputSchema: z.object({}),
+      execute: () => null,
+    });
+
+    expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
+    expect(() => normalizeToolDefinition({ ...tool, errorCode: "empty" }, FAILURE_MESSAGE)).toThrow(
+      FAILURE_MESSAGE,
+    );
+  });
+
   it("normalizes a tool with a Zod 3 input schema", () => {
     const tool = defineTool({
       description: "Gets weather for a city.",
