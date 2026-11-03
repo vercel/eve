@@ -1,5 +1,5 @@
 /** Web search providers that AI Gateway runs for any Gateway model. */
-export const WEB_SEARCH_FALLBACK_PROVIDERS = ["exa", "parallel", "browserbase"] as const;
+export const WEB_SEARCH_FALLBACK_PROVIDERS = ["exa", "parallel", "browserbase", "tako"] as const;
 
 /**
  * Web search providers available through Vercel AI Gateway. `native` is the model vendor's own
