@@ -384,6 +384,22 @@ test("mints a repository-scoped token only during execution and redacts output",
   assert.equal(output.stdout, "pushed [redacted]");
 });
 
+test("leases the token to uploads.github.com the same way as api.github.com", async () => {
+  const policies: NetworkPolicy[] = [];
+  await executeGitHubShell(READ, CONFIG, {
+    sessionId: "session-1",
+    async getConnectToken() {
+      return "secret-token";
+    },
+    async getSandbox() {
+      return fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" }, policies);
+    },
+  });
+  const lease = policies[0] as { allow: Record<string, unknown> };
+  assert.match(JSON.stringify(lease.allow["api.github.com"]), /Bearer secret-token/u);
+  assert.deepEqual(lease.allow["uploads.github.com"], lease.allow["api.github.com"]);
+});
+
 test("rewrites SSH GitHub remotes to HTTPS so they carry the credential", async () => {
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
   await executeGitHubShell(WRITE, CONFIG, {
