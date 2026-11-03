@@ -1466,19 +1466,73 @@ describe("models that fail", () => {
         await session.next("unpaid");
         await session.send("Alice pastes the incident report.");
         await session.next("filtered");
+        await session.send("Alice pastes the incident report again.");
+        await session.next("filtered again");
         await session.send("Alice asks about pricing.");
         await session.next("answered");
       },
     );
 
-    expect(turnOutcomes(events)).toEqual(["turn_0:failed", "turn_1:failed", "turn_2:completed"]);
+    expect(turnOutcomes(events)).toEqual([
+      "turn_0:failed",
+      "turn_1:failed",
+      "turn_2:failed",
+      "turn_3:completed",
+    ]);
     // A failed call keeps the person's message, but a refused one would be refused again.
     expect(nextPrompt).toContain("Alice asks about the release.");
     expect(nextPrompt).toContain("Alice asks about pricing.");
     expect(nextPrompt).not.toContain("incident report");
     expect(nextPrompt).not.toContain("The report says");
-    // In their place, the model reads that a turn was refused.
-    expect(nextPrompt).toContain("The model provider refused the previous turn");
+    // In their place, the model reads that a turn was refused, once for both.
+    expect(nextPrompt.split("The model provider refused a response in this turn")).toHaveLength(2);
+  });
+
+  it("keeps the record of a call a refused turn already ran", async () => {
+    let sends = 0;
+    let nextPrompt = "";
+    const { events } = await withSession(
+      "edge-refused-after-tool",
+      {
+        message: "Alice asks to send the March invoice to Bob.",
+        model: scriptedModel(({ said, results }, raw) => {
+          if (said("did it go out")) {
+            nextPrompt = JSON.stringify(raw);
+            return "Checking.";
+          }
+          if (results.length === 0) return [{ toolName: "send_invoice", toolCallId: "call_send" }];
+          return {
+            stream: simulateReadableStream({
+              chunks: [
+                { type: "stream-start", warnings: [] },
+                {
+                  finishReason: { raw: undefined, unified: "content-filter" },
+                  type: "finish",
+                  usage,
+                },
+              ],
+            }) as StreamResult["stream"],
+          };
+        }),
+        tools: [{ name: "send_invoice", execute: () => ({ sent: ++sends }) }],
+      },
+      async (session) => {
+        await session.next("filtered");
+        await session.send("Alice asks: did it go out?");
+        await session.next("answered");
+      },
+    );
+
+    expect(turnOutcomes(events)).toEqual(["turn_0:failed", "turn_1:completed"]);
+    expect(sends).toBe(1);
+    // The invoice went out, so the model must still read that it did, though not the request.
+    expect(nextPrompt).toContain("call_send");
+    expect(nextPrompt).toContain('"sent":1');
+    expect(nextPrompt).not.toContain("March invoice");
+    // The note takes the input's place, so the call still follows a user message.
+    expect(nextPrompt.indexOf("The model provider refused")).toBeLessThan(
+      nextPrompt.indexOf("call_send"),
+    );
   });
 
   it("fails the turn when the account can't pay, and the session takes the next message", async () => {

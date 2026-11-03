@@ -17,7 +17,6 @@ import { changeHistory } from "#harness/session-machine/history.js";
 import {
   createFrameworkUserMessage,
   type HarnessModelMessage,
-  TOOL_RESULT_BOUNDARY,
   turnAnchorOf,
 } from "#harness/messages.js";
 
@@ -108,10 +107,8 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
       session: step.session,
     };
   if (summary?.tags.includes("refused") === true && turnId !== undefined) {
-    const before = historyBeforeTurn(step.session.history, turnId);
-    if (before.length < step.session.history.length) {
-      step.session = changeHistory(step.session, { rewrite: [...before, REFUSED_TURN_NOTE] });
-    }
+    const rewrite = withoutTurnInput(step.session.history, turnId);
+    if (rewrite !== undefined) step.session = changeHistory(step.session, { rewrite });
   }
   step.session = { ...step.session, outputSchema: undefined };
   return { next: null, session: step.session, settledTurn: { isError: true, output } };
@@ -120,23 +117,28 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
 // The model learns a turn was refused, so it doesn't repeat it unaware, without reading what it said.
 const REFUSED_TURN_NOTE = createFrameworkUserMessage(
   "context.instruction",
-  "The model provider refused the previous turn, so its messages were removed from this conversation, and the turn ended with an error.",
+  "The model provider refused a response in this turn, so the turn ended with an error and the request that started it was removed from this conversation. Any tool calls that follow ran before the refusal.",
 );
 
 /**
- * History as it stood before the turn's input joined it. A refused turn's input stays in the
- * stream, but the model doesn't read it again: sent with the next turn, it would be refused too.
+ * History with the turn's input replaced by a note, or `undefined` when history holds none of it.
+ * The input stays in the stream, but the model doesn't read it again: sent with the next turn, it
+ * would be refused too. The tool calls the turn already ran stay, since they happened, and the
+ * note keeps them behind a user message, as providers require.
  */
-function historyBeforeTurn(
+function withoutTurnInput(
   history: readonly HarnessModelMessage[],
   turnId: string,
-): HarnessModelMessage[] {
-  const input = history.findIndex((message) => turnAnchorOf(message) === turnId);
-  if (input === -1) return [...history];
-  const boundary = history[input - 1];
-  const start =
-    boundary?.role === "assistant" && boundary.content === TOOL_RESULT_BOUNDARY ? input - 1 : input;
-  return history.slice(0, start);
+): HarnessModelMessage[] | undefined {
+  let noted = false;
+  const rewrite = history.flatMap((message, index) => {
+    if (turnAnchorOf(message) !== turnId) return [message];
+    if (noted) return [];
+    noted = true;
+    // Consecutive refused turns share one note.
+    return history[index - 1]?.content === REFUSED_TURN_NOTE.content ? [] : [REFUSED_TURN_NOTE];
+  });
+  return noted ? rewrite : undefined;
 }
 
 /**

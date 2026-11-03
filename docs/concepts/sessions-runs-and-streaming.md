@@ -216,7 +216,7 @@ A cancelled turn isn't a failure. It ends with `outcome: "cancelled"` and a `cau
 
 When a model call fails transiently before publishing anything, the run records `model.retried` and tries again. Once it has published output, the run ends `abandoned` with its unfinished calls, and a new run tries again.
 
-A provider `content-filter` response fails the run and turn with `MODEL_CALL_FAILED` and a `hint` to review the request against the provider's content policy. eve doesn't retry it; deltas already streamed stay visible, and the session can receive another message. The turn's input and partial response leave the conversation history, so the next turn doesn't send them to the model again. In their place, a note tells the model that the provider refused a turn. Other failed model calls keep the turn's input in history.
+A provider `content-filter` response fails the run and turn with `MODEL_CALL_FAILED` and a `hint` to review the request against the provider's content policy. eve doesn't retry it; deltas already streamed stay visible, and the session can receive another message. A refusal note replaces the turn's input in conversation history, and the refused response's partial output stays out of history. Completed tool calls and their results stay, so the model knows which actions already ran. Removing the input doesn't guarantee recovery: retained history or tool results can still trigger the provider's filter. Other failed model calls keep the turn's input in history.
 
 ## Query session state
 

@@ -1,5 +1,5 @@
 ---
-"eve": minor
+"eve": major
 ---
 
 A dynamic tool no longer replaces a static tool of the same name: the static tool keeps the name and eve logs an error, as it already did for two dynamic tools with the same name.
