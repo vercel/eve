@@ -13,7 +13,7 @@ export default defineExtension({
     clearCaCert: z.boolean().default(false),
     /** Use the OS trust store for the CLI's own HTTPS requests, such as `read`. */
     useSystemCa: z.boolean().optional(),
-    /** Wrap page output in boundary markers so the model can tell tool output from page content. */
+    /** Retain the CLI's boundary metadata and wrap model output in markers identifying untrusted page content. */
     contentBoundaries: z.boolean().default(false),
     /** Download Chromium during auto-install. */
     installBrowser: z.boolean().default(true),

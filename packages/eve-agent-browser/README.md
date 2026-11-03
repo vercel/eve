@@ -75,6 +75,8 @@ export default browser({
 });
 ```
 
+With `contentBoundaries: true`, tool results retain the CLI's `_boundary` metadata. Model output is wrapped in page-content markers after screenshot filtering. Primitive or array results use a `{ data, _boundary }` envelope. Calls reject missing or invalid boundary metadata instead of returning unmarked content.
+
 `caCert` and `clearCaCert: true` cannot be combined. The domain allowlist applies to navigation and subresources. Use the sandbox's network policy as an additional boundary, and treat browser state, downloads, and screenshots as sensitive data.
 
 By default, each sandbox uses the `eve-default` browser session. Set `session` when multiple mounts need independent browser sessions inside one sandbox. `sessionPrefix` changes the prefix of the default session name.

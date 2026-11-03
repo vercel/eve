@@ -3,7 +3,7 @@ import catalog from "./mcp-tools.json" with { type: "json" };
 import { defineTool } from "eve/tools";
 
 import extension from "../extension";
-import { runMcpTool, type BrowserToolContext } from "./browser";
+import { runMcpTool, type BrowserToolContext, type ContentBoundary } from "./browser";
 
 const PREFIX = "agent_browser_";
 
@@ -97,7 +97,15 @@ export function catalogTool<TOutput = unknown>(
       return (options.output ? await options.output(data, ctx) : data) as TOutput;
     },
     deferred: options.deferred,
-    toModelOutput: options.toModelOutput,
+    toModelOutput(output: TOutput) {
+      const rendered = options.toModelOutput?.(output) ?? { type: "json" as const, value: output };
+      const boundary = (output as { readonly _boundary?: ContentBoundary } | null)?._boundary;
+      if (!extension.config.contentBoundaries || boundary === undefined) return rendered;
+      return {
+        type: "text" as const,
+        value: `--- AGENT_BROWSER_PAGE_CONTENT nonce=${boundary.nonce} origin=${JSON.stringify(boundary.origin)} ---\n${JSON.stringify(rendered.value)}\n--- END_AGENT_BROWSER_PAGE_CONTENT nonce=${boundary.nonce} ---`,
+      };
+    },
   });
 }
 

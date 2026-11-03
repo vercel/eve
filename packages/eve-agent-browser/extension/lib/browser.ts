@@ -40,26 +40,36 @@ async function withDeadline<T>(work: PromiseLike<T>, label: string): Promise<T> 
   }
 }
 
+export interface ContentBoundary {
+  readonly nonce: string;
+  readonly origin: string;
+}
+
 interface McpCallResult {
   readonly _meta?: { readonly agentBrowserVersion?: string };
   readonly content?: readonly { readonly text?: string; readonly type: string }[];
   readonly error?: { readonly message: string };
   readonly isError?: boolean;
-  readonly structuredContent?: { readonly response?: { readonly data?: unknown } | null };
+  readonly structuredContent?: {
+    readonly response?: {
+      readonly data?: unknown;
+      readonly _boundary?: ContentBoundary;
+    } | null;
+  };
 }
 
 /**
  * Run one agent-browser MCP tool in the eve sandbox with `agent-browser mcp
- * call` and return the `data` payload of its CLI response. Each call is its
+ * call` and return its `data`, retaining `_boundary` when boundaries are enabled. Each call is its
  * own process, so nothing outlives the tool call; browser state lives in the
  * session daemon. Throws when the sandbox is unavailable, the installed CLI
  * does not match this package, or the tool reports an error.
  */
-export async function runMcpTool<TData = unknown>(
+export async function runMcpTool(
   ctx: BrowserToolContext,
   tool: string,
   args: Record<string, unknown>,
-): Promise<TData> {
+): Promise<unknown> {
   const sandbox = await requireSandbox(ctx);
   await ensureInstalled(sandbox, ctx.abortSignal);
 
@@ -95,7 +105,23 @@ export async function runMcpTool<TData = unknown>(
     const text = result.content?.find((part) => part.type === "text")?.text ?? "unknown error";
     throw new Error(`agent-browser ${tool} failed: ${text}`);
   }
-  return (result.structuredContent?.response?.data ?? null) as TData;
+  const response = result.structuredContent?.response;
+  const data = response?.data ?? null;
+  if (!config.contentBoundaries) return data;
+
+  const boundary = response?._boundary;
+  if (
+    typeof boundary?.nonce !== "string" ||
+    !/^[a-f0-9]{32}$/.test(boundary.nonce) ||
+    typeof boundary.origin !== "string"
+  ) {
+    throw new Error(
+      "agent-browser did not return valid content boundary metadata. Check the sandbox CLI version before retrying.",
+    );
+  }
+  const output =
+    data !== null && typeof data === "object" && !Array.isArray(data) ? data : { data };
+  return { ...output, _boundary: boundary };
 }
 
 /** The catalog this package ships describes one agent-browser minor; another minor may take different arguments. */

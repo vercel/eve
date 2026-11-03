@@ -137,9 +137,76 @@ test("runs one mcp call per tool call with the default session", async () => {
   });
   const result = await tools.open.execute({ url: "https://example.com" }, fakeCtx(sandbox));
   assert.deepEqual(result, { title: "Example", url: "https://example.com/" });
+  assert.deepEqual(await tools.open.toModelOutput(result), { type: "json", value: result });
   const command = sandbox.commands.at(-1);
   assert.ok(command.startsWith("agent-browser mcp call agent_browser_open "), command);
   assert.deepEqual(parseCall(command).args, { url: "https://example.com", session: "eve-default" });
+});
+
+for (const { name, data, expected } of [
+  {
+    name: "read",
+    data: { content: "Page text", url: "https://example.com" },
+    expected: { content: "Page text", url: "https://example.com" },
+  },
+  { name: "eval", data: "Page value", expected: { data: "Page value" } },
+]) {
+  test(`${name} preserves CLI boundaries in structured and model output`, async () => {
+    resetConfig({ contentBoundaries: true });
+    const boundary = { nonce: "0123456789abcdef0123456789abcdef", origin: "https://example.com" };
+    const sandbox = fakeSandbox({
+      respond: () => {
+        const response = JSON.parse(OK(data));
+        response.structuredContent.response._boundary = boundary;
+        return { stdout: JSON.stringify(response) };
+      },
+    });
+    const output = await tools[name].execute({}, fakeCtx(sandbox));
+    assert.deepEqual(output, { ...expected, _boundary: boundary });
+    const model = await tools[name].toModelOutput(output);
+    assert.equal(model.type, "text");
+    assert.equal(
+      model.value,
+      `--- AGENT_BROWSER_PAGE_CONTENT nonce=0123456789abcdef0123456789abcdef origin="https://example.com" ---\n${JSON.stringify({ ...expected, _boundary: boundary })}\n--- END_AGENT_BROWSER_PAGE_CONTENT nonce=0123456789abcdef0123456789abcdef ---`,
+    );
+    resetConfig();
+  });
+}
+
+test("boundary rendering keeps screenshot pixels and paths out of model output", async () => {
+  resetConfig({ contentBoundaries: true });
+  const boundary = { nonce: "0123456789abcdef0123456789abcdef", origin: "https://example.com" };
+  const response = JSON.parse(OK({ path: "/workspace/shot.png" }));
+  response.structuredContent.response._boundary = boundary;
+  const sandbox = fakeSandbox({ respond: () => ({ stdout: JSON.stringify(response) }) });
+  sandbox.readBinaryFile = async () => new Uint8Array([137, 80, 78, 71]);
+  const output = await tools.screenshot.execute({}, fakeCtx(sandbox));
+  assert.ok(output.imageDataUrl.startsWith("data:image/png;base64,"));
+  assert.deepEqual(output._boundary, boundary);
+  const model = await tools.screenshot.toModelOutput(output);
+  assert.equal(model.type, "text");
+  assert.match(
+    model.value,
+    /^--- AGENT_BROWSER_PAGE_CONTENT nonce=0123456789abcdef0123456789abcdef /,
+  );
+  assert.match(model.value, /Captured and already displayed to the user/);
+  assert.ok(!model.value.includes("data:image"));
+  assert.ok(!model.value.includes("/workspace/shot.png"));
+  resetConfig();
+});
+
+test("boundary-enabled calls reject responses without valid CLI boundary metadata", async () => {
+  resetConfig({ contentBoundaries: true });
+  for (const boundary of [undefined, { nonce: "invalid", origin: "https://example.com" }]) {
+    const response = JSON.parse(OK({ content: "Page text" }));
+    response.structuredContent.response._boundary = boundary;
+    const sandbox = fakeSandbox({ respond: () => ({ stdout: JSON.stringify(response) }) });
+    await assert.rejects(
+      () => tools.read.execute({}, fakeCtx(sandbox)),
+      /valid content boundary metadata/,
+    );
+  }
+  resetConfig();
 });
 
 test("auto-installs when the binary is missing", async () => {
@@ -214,7 +281,12 @@ test("passes access config as arguments and server settings as environment", asy
     proxy: "http://proxy.example.com:8080",
     useSystemCa: true,
   });
-  const sandbox = fakeSandbox();
+  const response = JSON.parse(OK({}));
+  response.structuredContent.response._boundary = {
+    nonce: "0123456789abcdef0123456789abcdef",
+    origin: "unknown",
+  };
+  const sandbox = fakeSandbox({ respond: () => ({ stdout: JSON.stringify(response) }) });
   await tools.close.execute({}, fakeCtx(sandbox));
   const command = sandbox.commands.at(-1);
   assert.ok(command.startsWith("AGENT_BROWSER_PROXY=http://proxy.example.com:8080 "), command);

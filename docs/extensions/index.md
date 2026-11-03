@@ -354,7 +354,7 @@ export default browser({
 
 Configure an [agent sandbox](/docs/sandbox) with real process execution, such as Vercel Sandbox or Docker. On first use, the extension installs agent-browser, Chromium, and its system libraries. System dependency installation requires apt or dnf and sudo. For prepared templates, call `installAgentBrowser` from `@eve/agent-browser/sandbox` in the environment's `prepare` callback.
 
-The filename supplies the namespace: this mount adds `browser__open`, `browser__snapshot`, `browser__click`, and the other browser tools. Core tools are listed every turn; additional inspection and interaction tools are deferred and discoverable through `eve__search`. Cookie, storage, and saved-auth-state commands aren't exposed to the model.
+The filename supplies the namespace: this mount adds `browser__open`, `browser__snapshot`, `browser__click`, and the other browser tools. Core tools are listed every turn; additional inspection and interaction tools are deferred and discoverable through `eve__search`. With `contentBoundaries: true`, results retain the CLI's boundary metadata and model output includes page-content markers. Cookie, storage, and saved-auth-state commands aren't exposed to the model.
 
 See [sandbox environment preparation](/docs/sandbox#prepare-a-reusable-environment) for template setup and the [package README](https://github.com/vercel/eve/tree/main/packages/eve-agent-browser) for configuration, screenshots, version matching, and tool overrides.
 
