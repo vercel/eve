@@ -14,7 +14,7 @@ test("npm and pnpm pack only the current release without changing the repository
   const manifest = {
     name: "eve",
     version: "1.2.3",
-    packageManager: "pnpm@12.16.1",
+    packageManager: "pnpm@12.17.0",
     repository: {
       type: "git",
       url: "git+https://github.com/vercel/eve.git",
