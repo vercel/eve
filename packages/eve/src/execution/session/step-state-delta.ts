@@ -56,14 +56,19 @@ export async function withSessionStateDelta(
       sessionWritable,
     });
   }
-  // Values rebuilt from state references are frozen, even after the setting is
-  // turned off, so step code always edits copies; `base` stays untouched.
+  // With state references, `produce` needs the given values untouched, so step
+  // code edits copies. Without them, step code edits the given values as it
+  // always has, except values rebuilt from earlier references, which are frozen.
+  const byReference = workflowStateRefsEnabled();
+  const editable = <T>(value: T): T =>
+    byReference || (value !== null && typeof value === "object" && Object.isFrozen(value))
+      ? snapshotValue(value)
+      : value;
   const given = {
     ...input,
-    serializedContext: snapshotValue(input.serializedContext),
-    sessionState: snapshotValue(input.sessionState),
+    serializedContext: editable(input.serializedContext),
+    sessionState: editable(input.sessionState),
   };
-  const byReference = workflowStateRefsEnabled();
   const { serializedContext, sessionState, history, ...result } = await work(given);
   const candidateState = sessionState ?? base.sessionState;
   const next = {
