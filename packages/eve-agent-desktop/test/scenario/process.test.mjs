@@ -4,9 +4,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bindCallAbort, createProcessSandbox } from "./support/process-sandbox.mjs";
+import { bindCallAbort, createProcessSandbox } from "../support/process-sandbox.mjs";
 
-const { runCommand } = await import("../dist/sandbox/process.js");
+const { runCommand } = await import("../../dist/sandbox/process.js");
 const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const gone = (child) => child.exitCode !== null || child.signalCode !== null;
 const streamOf = (text) =>

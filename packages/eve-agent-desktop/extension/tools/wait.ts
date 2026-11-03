@@ -4,16 +4,23 @@ import { desktopTool, flag } from "../lib/tool";
 
 const TARGET_FLAG = { window: "window", text: "text", element: "element" } as const;
 
-export default desktopTool({
-  description:
-    "Wait for a window, text, or element to appear, for a menu to open or close, or for a fixed time. Prefer a condition over a fixed time.",
-  inputSchema: z.object({
-    condition: z.enum(["window", "text", "element", "menu", "menu_closed", "time"]),
+/**
+ * The input stays one object rather than a union on `condition`: model
+ * providers require a top-level object schema. The refinement still rejects a
+ * mode's missing or stray fields before the call reaches the sandbox.
+ */
+const inputSchema = z
+  .object({
+    condition: z
+      .enum(["window", "text", "element", "menu", "menu_closed", "time"])
+      .describe(
+        "time needs ms; window, text, and element need target; menu and menu_closed take neither.",
+      ),
     target: z
       .string()
       .optional()
       .describe(
-        "Required for window (a title or part of one), text (the text), and element (a ref).",
+        "Required for window (a title or part of one), text (the text), and element (a ref). Not allowed otherwise.",
       ),
     ms: z
       .number()
@@ -21,7 +28,7 @@ export default desktopTool({
       .positive()
       .max(60_000)
       .optional()
-      .describe("Required for time: milliseconds to pause."),
+      .describe("Required for time, and only for time: milliseconds to pause."),
     predicate: z
       .enum(["exists", "enabled", "visible", "actionable", "value"])
       .optional()
@@ -35,8 +42,44 @@ export default desktopTool({
       .max(120_000)
       .optional()
       .describe("Timeout for condition waits (default 30000)."),
-  }),
+  })
+  .superRefine((input, ctx) => {
+    const needsTarget = input.condition in TARGET_FLAG;
+    const needsMs = input.condition === "time";
+    if (needsTarget !== (input.target !== undefined)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["target"],
+        message: needsTarget
+          ? `condition ${input.condition} needs target.`
+          : `condition ${input.condition} takes no target.`,
+      });
+    }
+    if (needsMs !== (input.ms !== undefined)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ms"],
+        message: needsMs ? "condition time needs ms." : `condition ${input.condition} takes no ms.`,
+      });
+    }
+    if (
+      (input.predicate !== undefined || input.value !== undefined) &&
+      input.condition !== "element"
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: [input.predicate !== undefined ? "predicate" : "value"],
+        message: "predicate and value apply only to condition element.",
+      });
+    }
+  });
+
+export default desktopTool({
+  description:
+    "Wait for a window, text, or element to appear, for a menu to open or close, or for a fixed time. Prefer a condition over a fixed time.",
+  inputSchema,
   argv: (input) => {
+    // The schema already enforces these; the checks narrow the types and guard direct execute calls.
     let mode: string[];
     if (input.condition === "time") {
       if (input.ms === undefined) throw new Error("wait with condition time needs ms.");

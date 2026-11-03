@@ -1,10 +1,11 @@
 // End-to-end check against a real desktop in this machine, the same code path a
 // tool takes inside an eve sandbox. Opt in with AGENT_DESKTOP_LIVE=1 on an
-// Ubuntu 24.04+ host with passwordless sudo; it installs packages.
+// Ubuntu 24.04+ host with passwordless sudo; it installs packages, as a
+// sandbox environment's prepare would.
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createProcessSandbox } from "./support/process-sandbox.mjs";
+import { createProcessSandbox } from "../support/process-sandbox.mjs";
 
 globalThis[Symbol.for("eve.ext-config-scope")] = "@eve/agent-desktop.live";
 
@@ -16,7 +17,7 @@ test(
   async () => {
     const { default: extension } = await import("@eve/agent-desktop");
     const tools = await import("@eve/agent-desktop/tools");
-    extension({ extraPackages: ["gnome-calculator"] });
+    extension({});
 
     const sandbox = createProcessSandbox();
     const { installAgentDesktop } = await import("@eve/agent-desktop/sandbox");

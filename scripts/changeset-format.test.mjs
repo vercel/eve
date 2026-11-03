@@ -384,7 +384,9 @@ for (const mode of ["stable", "rc"]) {
       peerDependencies: desktop.peerDependencies,
       devDependencies: { eve: desktop.devDependencies.eve },
     });
-    const pending = await readFile(".changeset/desktop-accessibility-tools.md", "utf8");
+    // Inline, not read from .changeset/: a release consumes and deletes the pending file.
+    const pending =
+      '---\n"@eve/agent-desktop": minor\n---\n\nAdd the experimental `@eve/agent-desktop` extension.\n';
     await mkdir(join(root, "packages/desktop"));
     await write("packages/desktop/package.json", desktopManifest);
     await write(".changeset/desktop.md", pending);

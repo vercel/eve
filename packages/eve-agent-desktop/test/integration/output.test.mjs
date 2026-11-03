@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { runCommand } = await import("../dist/sandbox/process.js");
+const { runCommand } = await import("../../dist/sandbox/process.js");
 const BLOCK_BYTES = 512 * 1024;
 
 function finiteStream(block, count, { hangOnCancel = false } = {}) {

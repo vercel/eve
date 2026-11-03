@@ -11,12 +11,13 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import test from "node:test";
 
-import { createProcessSandbox } from "./support/process-sandbox.mjs";
+import { createProcessSandbox } from "../support/process-sandbox.mjs";
 
 globalThis[Symbol.for("eve.ext-config-scope")] = "@eve/agent-desktop.conformance";
 
 const { default: extension } = await import("@eve/agent-desktop");
 const tools = await import("@eve/agent-desktop/tools");
+const { AGENT_DESKTOP_VERSION } = await import("@eve/agent-desktop/sandbox");
 
 const binary = process.env.AGENT_DESKTOP_BIN || "agent-desktop";
 const available = (() => {
@@ -52,7 +53,7 @@ const INPUTS = {
   minimize: { app: "gnome-calculator" },
   mouse_click: { xy: "-10,40", button: "middle", count: 2 },
   mouse_move: { xy: "-10,40" },
-  mouse_wheel: { x: -10, y: 40, dy: -3, dx: -2 },
+  mouse_wheel: { xy: "-10,40", dy: -3, dx: -2 },
   move_window: { app: "gnome-calculator", x: -100, y: 20 },
   press: { combo: "ctrl+s", app: "gnome-calculator" },
   resize_window: { app: "gnome-calculator", width: 800, height: 600 },
@@ -94,8 +95,11 @@ async function argvFor(name, input) {
   const sandbox = {
     async spawn({ command: spawned }) {
       command = spawned;
+      const stdout = spawned.endsWith(" --version 2>/dev/null")
+        ? `agent-desktop ${AGENT_DESKTOP_VERSION}\n`
+        : envelope({});
       return {
-        stdout: streamOf(envelope({})),
+        stdout: streamOf(stdout),
         stderr: streamOf(""),
         wait: async () => ({ exitCode: 0 }),
         kill: async () => {},
@@ -137,7 +141,7 @@ test("the check itself fails when a flag is wrong", { skip: !available }, () => 
 
 for (const [name, input] of Object.entries(INPUTS)) {
   test(`${name} builds argv the CLI accepts`, { skip: !available }, async () => {
-    extension({ headed: true, autoInstall: false, manageDesktop: false });
+    extension({ headed: true, manageDesktop: false });
     let argv;
     try {
       argv = await argvFor(name, input);
@@ -155,7 +159,7 @@ for (const [name, input] of Object.entries(INPUTS)) {
 }
 
 test("a tool runs the real CLI through a real sandbox command", { skip: !available }, async () => {
-  extension({ binary, autoInstall: false, manageDesktop: false });
+  extension({ binary, manageDesktop: false });
   const sandbox = createProcessSandbox();
   try {
     const data = await tools.status.execute(

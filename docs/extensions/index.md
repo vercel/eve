@@ -345,21 +345,36 @@ Install the package alongside `eve`:
 pnpm add @eve/agent-desktop
 ```
 
-Mount it in your agent:
+Install agent-desktop in your [sandbox environment's](/docs/sandbox) `prepare` callback. The extension requires Ubuntu 24.04 or later, apt, and root or passwordless sudo. Include `AGENT_DESKTOP_REVALIDATION_KEY` in the environment options so the prepared template rebuilds when the package's agent-desktop version or desktop packages change:
+
+```ts title="agent/sandbox.ts"
+import { AGENT_DESKTOP_REVALIDATION_KEY, installAgentDesktop } from "@eve/agent-desktop/sandbox";
+import { defineSandbox } from "eve/sandbox";
+import { VercelSandbox } from "eve/sandbox/vercel";
+
+export const environment = VercelSandbox.environment({
+  env: { AGENT_DESKTOP_REVALIDATION_KEY },
+  prepare: async (sandbox) => {
+    await installAgentDesktop(sandbox, { extraPackages: ["gnome-calculator"] });
+  },
+});
+
+export default defineSandbox(() => environment.open());
+```
+
+Then mount it in your agent:
 
 ```ts title="agent/extensions/desktop.ts"
 import desktop from "@eve/agent-desktop";
 
-export default desktop({
-  extraPackages: ["gnome-calculator"],
-});
+export default desktop({});
 ```
 
-Configure an [agent sandbox](/docs/sandbox). The extension requires Ubuntu 24.04 or later, apt, and root or passwordless sudo. On first use, it installs agent-desktop and starts a headless desktop. The agent gets `desktop__launch`, `desktop__snapshot`, `desktop__click`, and other namespaced tools, with instructions for the observe, act, and verify loop.
+The tools don't install anything at tool time; when agent-desktop is missing or on a different minor version, they fail with setup guidance. They start a headless desktop on display `:100` when a session needs one, so the extension can be mounted beside `eve/extensions/computer-use`, which uses `:99`. The agent gets `desktop__launch`, `desktop__snapshot`, `desktop__click`, and other namespaced tools, with instructions for the observe, act, and verify loop.
 
 Headless actions use accessibility APIs by default. Set `headed: true` only when the agent may use physical pointer and keyboard input. The tools preserve agent-desktop's retry guidance when an action fails.
 
-For prepared sandbox templates, `@eve/agent-desktop/sandbox` exports `installAgentDesktop` and `startDesktop`. See the [package README](https://github.com/vercel/eve/tree/main/packages/eve-agent-desktop#mount) for setup, configuration, and tool overrides.
+`@eve/agent-desktop/sandbox` also exports `startDesktop` to start the desktop eagerly after opening a session sandbox. See the [package README](https://github.com/vercel/eve/tree/main/packages/eve-agent-desktop#prepare) for setup, configuration, and tool overrides.
 
 ### Use an extension tool result in a hook
 

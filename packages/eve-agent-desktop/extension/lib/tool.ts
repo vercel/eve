@@ -1,6 +1,7 @@
 import { defineTool, type ToolModelOutput } from "eve/tools";
 import { z } from "zod";
 
+import extension from "../extension";
 import { withDesktopCall, type DesktopCall } from "./desktop";
 
 export interface DesktopToolSpec<TSchema extends z.ZodObject, TOutput> {
@@ -10,6 +11,8 @@ export interface DesktopToolSpec<TSchema extends z.ZodObject, TOutput> {
   readonly argv: (input: z.infer<TSchema>) => readonly string[];
   /** Keep the tool out of the model's tool list; the model finds it with `eve__search`. */
   readonly deferred?: boolean;
+  /** The tool sends physical input, which agent-desktop refuses unless the extension runs headed. */
+  readonly headed?: boolean;
   /**
    * Shapes the envelope's `data` into the tool output. Runs inside the call's
    * deadline, so anything it does in the sandbox shares the call's signal.
@@ -31,8 +34,15 @@ export function desktopTool<TSchema extends z.ZodObject, TOutput = unknown>(
     description: spec.description,
     inputSchema: spec.inputSchema as never,
     async execute(input, ctx) {
+      // Reject what cannot run before paying for the sandbox probe and desktop start.
+      if (spec.headed && !extension.config.headed) {
+        throw new Error(
+          "This tool sends physical input and needs the extension mounted with headed: true. In headless mode, use the ref tools such as click and scroll_to.",
+        );
+      }
+      const argv = spec.argv(input);
       return await withDesktopCall(ctx, async (call) => {
-        const data = await call.run(spec.argv(input));
+        const data = await call.run(argv);
         return (spec.output ? await spec.output(data, call, input) : data) as TOutput;
       });
     },
@@ -59,8 +69,19 @@ export const ref = z
     'Qualified element ref from the latest snapshot or find, like "@s8f3k2p9:e12". Refs expire when the UI changes.',
   );
 
+const XY = /^-?\d+,-?\d+$/;
+
+/** Screen coordinates, the one shape every coordinate input takes. */
+export const xy = z
+  .string()
+  .regex(XY, 'Screen coordinates as "x,y", such as "640,400".')
+  .describe('Screen coordinates as "x,y", such as "640,400".');
+
 export const point = z
   .string()
+  .refine((value) => value.startsWith("@") || XY.test(value), {
+    message: 'Expected an element ref like "@s8f3k2p9:e12" or screen coordinates as "x,y".',
+  })
   .describe('An element ref like "@s8f3k2p9:e12", or screen coordinates as "x,y".');
 
 /** A ref goes to `refFlag` (or stays positional without one); coordinates go to `xyFlag`. */
@@ -99,13 +120,14 @@ export const surface = z
 export function refAction(
   command: string,
   description: string,
-  options: { deferred?: boolean } = {},
+  options: { deferred?: boolean; headed?: boolean } = {},
 ) {
   return desktopTool({
     description,
     inputSchema: z.object({ ref, timeoutMs }),
     argv: (input) => [command, input.ref, ...flag("timeout-ms", input.timeoutMs)],
     deferred: options.deferred,
+    headed: options.headed,
   });
 }
 

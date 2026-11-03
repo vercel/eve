@@ -46,11 +46,11 @@
   },
   "scripts": {
     "build": "eve extension build && tsc -p tsconfig.sandbox.json && node ../../scripts/copy-package-license.mjs .",
-    "test": "pnpm run build && node --test test/extension.test.mjs test/setup.test.mjs test/output.test.mjs test/process.test.mjs",
-    "test:integration": "node --test test/extension.test.mjs test/setup.test.mjs test/output.test.mjs",
-    "test:scenario": "node --test test/process.test.mjs",
-    "test:conformance": "node --test test/conformance.test.mjs",
-    "test:live": "node --test test/live.test.mjs",
+    "test": "pnpm run build && pnpm run test:integration && pnpm run test:scenario",
+    "test:integration": "node --test \"test/integration/*.test.mjs\"",
+    "test:scenario": "node --test \"test/scenario/*.test.mjs\"",
+    "test:conformance": "node --test test/scenario/conformance.test.mjs",
+    "test:live": "node --test test/scenario/live.test.mjs",
     "typecheck": "tsc"
   },
   "dependencies": {

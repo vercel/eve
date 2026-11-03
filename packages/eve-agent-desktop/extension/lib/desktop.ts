@@ -1,9 +1,7 @@
 import {
   AGENT_DESKTOP_VERSION,
-  DEFAULT_AGENT_DESKTOP_INSTALL_SPEC,
   desktopEnvPrefix,
   desktopReadyCommand,
-  installAgentDesktop,
   quoteShellArg,
   startDesktop,
   type DesktopSandbox,
@@ -30,8 +28,9 @@ interface Envelope {
 
 /**
  * Everything one tool call may use. The signal carries the call's whole budget
- * and its cancellation, and `run` is the only way to reach the CLI, so install,
- * desktop start and post-processing all sit inside the same deadline.
+ * and its cancellation, and `run` is the only way to reach the CLI, so the
+ * version probe, desktop start and post-processing all sit inside the same
+ * deadline.
  */
 export interface DesktopCall {
   readonly sandbox: Pick<SandboxSession, "spawn" | "readBinaryFile" | "removePath">;
@@ -39,21 +38,14 @@ export interface DesktopCall {
   run<TData = unknown>(args: readonly string[]): Promise<TData>;
 }
 
-/**
- * Install specs that recently failed, keyed by the sandbox that failed. In a
- * process serving many sessions, one sandbox's failure must not stop another
- * from installing the same spec. Retrying on every call would repeat a slow
- * apt and npm run, so a failure is reported again until it is a few minutes
- * old.
- */
-const failedInstalls = new Map<string, { readonly error: Error; readonly at: number }>();
-const INSTALL_RETRY_AFTER_MS = 300_000;
 const pendingSetups = new Map<string, Promise<void>>();
 
+const PREPARE_DOCS = "https://github.com/vercel/eve/tree/main/packages/eve-agent-desktop#prepare";
+
 /**
- * Prepare the sandbox for one tool call and hand the caller its scope: the
- * desktop is installed and running, the deadline signal has started, and every
- * command goes through it.
+ * Check the sandbox for one tool call and hand the caller its scope: the
+ * targeted agent-desktop is installed, the desktop is running, the deadline
+ * signal has started, and every command goes through it.
  */
 export async function withDesktopCall<T>(
   ctx: DesktopToolContext,
@@ -127,7 +119,7 @@ async function prepareSandbox(
     .catch(() => undefined)
     .then(async () => {
       signal.throwIfAborted();
-      if (config.autoInstall) await ensureInstalled(sandbox, signal, sessionId);
+      await ensureInstalled(sandbox, signal);
       if (config.manageDesktop) await ensureDesktop(sandbox, signal);
     });
   pendingSetups.set(sessionId, pending);
@@ -138,52 +130,14 @@ async function prepareSandbox(
   await untilSettled(pending, signal);
 }
 
-async function ensureInstalled(
-  sandbox: DesktopSandbox,
-  signal: AbortSignal,
-  sessionId: string,
-): Promise<void> {
-  const config = extension.config;
+/**
+ * Installation belongs in the sandbox environment's `prepare`, so sessions
+ * start from a template that already has it. The tools only check for it.
+ */
+async function ensureInstalled(sandbox: DesktopSandbox, signal: AbortSignal): Promise<void> {
   const installed = await probeVersion(sandbox, signal);
   if (installed !== undefined && matchesPackageMinor(installed)) return;
-
-  // A custom binary is the app's to install; never replace it with the default package.
-  if (config.binary !== "agent-desktop") {
-    throw installed === undefined
-      ? new Error(`agent-desktop binary ${config.binary} was not found in the sandbox.`)
-      : versionMismatchError(installed);
-  }
-  // Reinstalling a custom spec would install the same mismatched version again.
-  if (installed !== undefined && config.installSpec !== undefined)
-    throw versionMismatchError(installed);
-
-  const spec = config.installSpec ?? DEFAULT_AGENT_DESKTOP_INSTALL_SPEC;
-  const key = `${sessionId}\u0000${spec}`;
-  const failed = failedInstalls.get(key);
-  if (failed !== undefined && Date.now() - failed.at < INSTALL_RETRY_AFTER_MS) throw failed.error;
-  try {
-    await installAgentDesktop(sandbox, {
-      signal,
-      installSpec: config.installSpec,
-      installDesktop: config.installDesktop,
-      extraPackages: config.extraPackages,
-    });
-    const reinstalled = await probeVersion(sandbox, signal);
-    if (reinstalled === undefined || !matchesPackageMinor(reinstalled))
-      throw versionMismatchError(reinstalled ?? "missing");
-    failedInstalls.delete(key);
-  } catch (error) {
-    if (!signal.aborted) rememberFailedInstall(key, error as Error);
-    throw error;
-  }
-}
-
-function rememberFailedInstall(key: string, error: Error): void {
-  const now = Date.now();
-  for (const [remembered, failure] of failedInstalls) {
-    if (now - failure.at >= INSTALL_RETRY_AFTER_MS) failedInstalls.delete(remembered);
-  }
-  failedInstalls.set(key, { error, at: now });
+  throw notInstalledError(installed);
 }
 
 async function ensureDesktop(sandbox: DesktopSandbox, signal: AbortSignal): Promise<void> {
@@ -214,8 +168,17 @@ function matchesPackageMinor(version: string): boolean {
   return minor(version) === minor(AGENT_DESKTOP_VERSION);
 }
 
-function versionMismatchError(installed: string): Error {
+function notInstalledError(installed: string | undefined): Error {
+  const binary = extension.config.binary;
+  const found =
+    installed === undefined
+      ? `agent-desktop (${binary}) was not found in the sandbox.`
+      : `agent-desktop ${installed} in the sandbox does not match @eve/agent-desktop (agent-desktop ${AGENT_DESKTOP_VERSION}).`;
   return new Error(
-    `agent-desktop ${installed} in the sandbox does not match @eve/agent-desktop (agent-desktop ${AGENT_DESKTOP_VERSION}). Install agent-desktop@${AGENT_DESKTOP_VERSION} or set installSpec to it.`,
+    [
+      found,
+      "The tools do not install it. Call installAgentDesktop(sandbox) from @eve/agent-desktop/sandbox in the sandbox environment's prepare callback, and include AGENT_DESKTOP_REVALIDATION_KEY in the environment options so the template rebuilds when this package changes.",
+      `See ${PREPARE_DOCS}`,
+    ].join("\n"),
   );
 }

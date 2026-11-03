@@ -8,7 +8,7 @@ You have desktop tools backed by agent-desktop, operating apps on a Linux deskto
 - Refs belong to one snapshot. After the UI changes, take a new snapshot. `STALE_REF`, `AMBIGUOUS_TARGET`, or `SNAPSHOT_NOT_FOUND` all mean: snapshot again and use the new ref.
 - Retry an action only when its error says `retry: safe`. Any other delivery may already have landed: read the live state with `get`, `is`, or a new snapshot before acting again, so you never click, type, or submit twice.
 - After an action that starts async work or opens a window, use `wait` (for a window, text, or element), not a fixed sleep.
-- Actions are headless by default: they use semantic accessibility calls and do not move the pointer or take focus. Pointer tools (`double_click`, `hover`, `drag`, `mouse_*`) only work when the extension is configured as headed; do not use them to recover from a headless failure.
+- Actions are headless by default: they use semantic accessibility calls and do not move the pointer or take focus. Pointer tools (`scroll`, `double_click`, `hover`, `drag`, `mouse_*`) only work when the extension is configured as headed; do not use them to recover from a headless failure.
 - Use `screenshot` of one app window when the tree is empty or you need to see layout. Prefer the tree for reading text.
 - `type` inserts text into a field; `press` sends key combos like `ctrl+s` or `return`.
 - Window, clipboard, pointer, and surface tools are not listed up front; find them with `eve__search`.

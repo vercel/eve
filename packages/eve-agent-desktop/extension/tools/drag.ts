@@ -11,4 +11,5 @@ export default desktopTool({
     ...pointArgs(input.to, "to", "to-xy"),
   ],
   deferred: true,
+  headed: true,
 });

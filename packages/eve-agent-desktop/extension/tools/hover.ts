@@ -8,4 +8,5 @@ export default desktopTool({
   inputSchema: z.object({ target: point }),
   argv: (input) => ["hover", ...pointArgs(input.target, undefined, "xy")],
   deferred: true,
+  headed: true,
 });

@@ -8,7 +8,8 @@ globalThis[Symbol.for("eve.ext-config-scope")] = "@eve/agent-desktop.test";
 
 const { default: extension } = await import("@eve/agent-desktop");
 const tools = await import("@eve/agent-desktop/tools");
-const { AGENT_DESKTOP_VERSION } = await import("@eve/agent-desktop/sandbox");
+const { AGENT_DESKTOP_REVALIDATION_KEY, AGENT_DESKTOP_VERSION, DESKTOP_APT_PACKAGES } =
+  await import("@eve/agent-desktop/sandbox");
 
 const OK = (data, command = "x") => JSON.stringify({ version: "2.5", ok: true, command, data });
 
@@ -82,7 +83,7 @@ function resetConfig(overrides = {}) {
 }
 
 test("ships the expected tools and defers the advanced ones", () => {
-  const files = readdirSync(new URL("../extension/tools", import.meta.url)).map((f) =>
+  const files = readdirSync(new URL("../../extension/tools", import.meta.url)).map((f) =>
     f.replace(/\.ts$/, ""),
   );
   assert.deepEqual(Object.keys(tools).sort(), files.sort());
@@ -100,13 +101,21 @@ test("ships the expected tools and defers the advanced ones", () => {
     assert.ok(name in tools, `missing ${name}`);
     assert.notEqual(tools[name].deferred, true, `${name} should be listed up front`);
   }
-  for (const name of ["drag", "hover", "mouse_click", "clipboard_get", "resize_window", "status"]) {
+  for (const name of [
+    "drag",
+    "hover",
+    "mouse_click",
+    "scroll",
+    "clipboard_get",
+    "resize_window",
+    "status",
+  ]) {
     assert.equal(tools[name].deferred, true, `${name} should be deferred`);
   }
 });
 
 test("instructions name only tools the extension ships", () => {
-  const text = readFileSync(new URL("../extension/instructions.md", import.meta.url), "utf8");
+  const text = readFileSync(new URL("../../extension/instructions.md", import.meta.url), "utf8");
   for (const [, name] of text.matchAll(/`([a-z_]+)`/g)) {
     if (
       ["eve__search", "root", "skeleton", "return", "mouse_"].includes(name) ||
@@ -123,7 +132,7 @@ test("click runs one agent-desktop command inside the desktop session and return
   const result = await tools.click.execute({ ref: "@s1:e2" }, ctx(sandbox));
   assert.deepEqual(result, { action: "click" });
   const command = sandbox.commands.at(-1);
-  assert.match(command, /^export DISPLAY=':99'; /);
+  assert.match(command, /^export DISPLAY=':100'; /);
   assert.match(
     command,
     /DBUS_SESSION_BUS_ADDRESS="\$\(cat \/tmp\/agent-desktop-eve\/dbus-session-address/,
@@ -203,6 +212,41 @@ test("wait takes exactly one condition", async () => {
   );
 });
 
+test("the wait schema rejects a mode's missing or stray fields", async () => {
+  const valid = async (input) =>
+    (await tools.wait.inputSchema["~standard"].validate(input)).issues === undefined;
+  assert.equal(await valid({ condition: "time", ms: 300 }), true);
+  assert.equal(await valid({ condition: "window", target: "Calculator" }), true);
+  assert.equal(await valid({ condition: "element", target: "@s1:e2", predicate: "enabled" }), true);
+  assert.equal(await valid({ condition: "menu" }), true);
+  assert.equal(await valid({ condition: "time" }), false);
+  assert.equal(await valid({ condition: "text" }), false);
+  assert.equal(await valid({ condition: "menu", target: "File" }), false);
+  assert.equal(await valid({ condition: "window", target: "Calculator", ms: 300 }), false);
+  assert.equal(await valid({ condition: "text", target: "Done", predicate: "value" }), false);
+});
+
+test("a wait with invalid input fails before any sandbox work", async () => {
+  resetConfig();
+  const sandbox = fakeSandbox();
+  await assert.rejects(() => tools.wait.execute({ condition: "time" }, ctx(sandbox)), /needs ms/);
+  assert.deepEqual(sandbox.commands, []);
+});
+
+test("physical-input tools refuse before any sandbox work when headless", async () => {
+  resetConfig();
+  const sandbox = fakeSandbox();
+  for (const [name, input] of [
+    ["scroll", { ref: "@s1:e2" }],
+    ["hover", { target: "@s1:e2" }],
+    ["mouse_wheel", { xy: "10,20" }],
+    ["double_click", { ref: "@s1:e2" }],
+  ]) {
+    await assert.rejects(() => tools[name].execute(input, ctx(sandbox)), /headed: true/, name);
+  }
+  assert.deepEqual(sandbox.commands, []);
+});
+
 test("pointer targets take a ref or x,y", async () => {
   resetConfig({ headed: true });
   const sandbox = fakeSandbox();
@@ -216,7 +260,26 @@ test("pointer targets take a ref or x,y", async () => {
     "--from=@s1:e2",
     "--to-xy=-10,40",
   ]);
+  await tools.mouse_wheel.execute({ xy: "-10,40", dy: -3 }, ctx(sandbox));
+  assert.deepEqual(lastArgv(sandbox), [
+    "agent-desktop",
+    "--headed",
+    "mouse-wheel",
+    "--x=-10",
+    "--y=40",
+    "--dy=-3",
+  ]);
   resetConfig();
+});
+
+test("coordinate inputs take one x,y shape", async () => {
+  const valid = async (tool, input) =>
+    (await tools[tool].inputSchema["~standard"].validate(input)).issues === undefined;
+  assert.equal(await valid("mouse_wheel", { xy: "-10,40" }), true);
+  assert.equal(await valid("mouse_wheel", { x: -10, y: 40 }), false);
+  assert.equal(await valid("mouse_click", { xy: "10, 40" }), false);
+  assert.equal(await valid("hover", { target: "@s1:e2" }), true);
+  assert.equal(await valid("hover", { target: "middle" }), false);
 });
 
 test("structured errors keep the code, suggestion and retry disposition", async () => {
@@ -347,7 +410,7 @@ test("starts the desktop when it is not running", async () => {
   await tools.list_apps.execute({}, ctx(sandbox));
   assert.ok(
     sandbox.commands.some((command) =>
-      command.includes("setsid -f Xvfb ':99' -screen 0 1280x800x24"),
+      command.includes("setsid -f Xvfb ':100' -screen 0 1280x800x24"),
     ),
   );
 });
@@ -385,82 +448,41 @@ function versionSandbox(versions, options) {
   return sandbox;
 }
 
-test("auto-installs the CLI and desktop packages when the binary is missing", async () => {
-  resetConfig({ extraPackages: ["gnome-calculator"] });
-  const sandbox = versionSandbox([undefined, AGENT_DESKTOP_VERSION]);
-  await tools.list_apps.execute({}, ctx(sandbox));
-  assert.ok(
-    sandbox.commands.some(
-      (command) => command.includes("'xvfb'") && command.includes("'gnome-calculator'"),
-    ),
+const installed = (sandbox) =>
+  sandbox.commands.some(
+    (command) => command.includes("npm install") || command.includes("apt-get"),
   );
-  assert.ok(
-    sandbox.commands.some((command) =>
-      command.includes(`npm install -g 'agent-desktop@${AGENT_DESKTOP_VERSION}'`),
-    ),
-  );
-  resetConfig();
-});
 
-test("a failed install is reported again without reinstalling", async () => {
-  resetConfig({ installSpec: "agent-desktop@1.0.99" });
-  const sandbox = versionSandbox([undefined, undefined], {
-    respond: (command) =>
-      command.includes("npm install -g") ? { exitCode: 1, stdout: "", stderr: "E404" } : undefined,
-  });
-  await assert.rejects(
-    () => tools.list_apps.execute({}, ctx(sandbox)),
-    /Installing agent-desktop failed .*E404/,
-  );
-  const installs = () =>
-    sandbox.commands.filter((command) => command.includes("npm install -g")).length;
-  assert.equal(installs(), 1);
-  await assert.rejects(() => tools.list_apps.execute({}, ctx(sandbox)), /E404/);
-  assert.equal(installs(), 1);
+test("a missing CLI points at prepare and never installs at tool time", async () => {
   resetConfig();
-});
-
-test("never installs over a custom binary", async () => {
-  resetConfig({ binary: "/opt/agent-desktop/bin/agent-desktop" });
   const sandbox = versionSandbox([undefined]);
   await assert.rejects(
     () => tools.list_apps.execute({}, ctx(sandbox)),
-    /was not found in the sandbox/,
+    (error) => {
+      assert.match(error.message, /agent-desktop \(agent-desktop\) was not found in the sandbox/);
+      assert.match(error.message, /installAgentDesktop\(sandbox\).*prepare/);
+      assert.match(error.message, /AGENT_DESKTOP_REVALIDATION_KEY/);
+      return true;
+    },
   );
-  assert.ok(
-    !sandbox.commands.some(
-      (command) => command.includes("npm install -g") || command.includes("apt-get"),
-    ),
-  );
-  resetConfig();
+  assert.equal(installed(sandbox), false);
+  assert.equal(sandbox.commands.length, 1, "nothing runs after the failed probe");
 });
 
-test("does not reinstall a custom installSpec on a version mismatch", async () => {
-  resetConfig({ installSpec: "agent-desktop@0.9.0" });
+test("a different agent-desktop minor is reported with the rebuild hint", async () => {
+  resetConfig({ binary: "/opt/agent-desktop/bin/agent-desktop" });
   const sandbox = fakeSandbox({ version: "0.9.0" });
   await assert.rejects(
     () => tools.list_apps.execute({}, ctx(sandbox)),
-    /agent-desktop 0\.9\.0 in the sandbox does not match/,
+    /agent-desktop 0\.9\.0 in the sandbox does not match[\s\S]*AGENT_DESKTOP_REVALIDATION_KEY/,
   );
-  assert.ok(!sandbox.commands.some((command) => command.includes("npm install -g")));
+  assert.equal(installed(sandbox), false);
   resetConfig();
 });
 
-test("a failed install in one session does not block the install in another", async () => {
-  resetConfig({ installSpec: "agent-desktop@1.0.99" });
-  const failing = versionSandbox([undefined, undefined], {
-    respond: (command) =>
-      command.includes("npm install -g") ? { exitCode: 1, stdout: "", stderr: "E404" } : undefined,
-  });
-  const other = versionSandbox([undefined, AGENT_DESKTOP_VERSION]);
-  const session = (id, sandbox) => ({ session: { id }, getSandbox: async () => sandbox });
-  await assert.rejects(() => tools.list_apps.execute({}, session("session-a", failing)), /E404/);
-  await tools.list_apps.execute({}, session("session-b", other));
-  const installs = (sandbox) =>
-    sandbox.commands.filter((command) => command.includes("npm install -g")).length;
-  assert.equal(installs(other), 1, "the second session must try its own install");
-  assert.equal(installs(failing), 1);
-  resetConfig();
+test("the revalidation key changes with the CLI version and the desktop packages", () => {
+  assert.ok(AGENT_DESKTOP_REVALIDATION_KEY.includes(AGENT_DESKTOP_VERSION));
+  for (const name of DESKTOP_APT_PACKAGES) assert.ok(AGENT_DESKTOP_REVALIDATION_KEY.includes(name));
 });
 
 function screenshotSandbox() {

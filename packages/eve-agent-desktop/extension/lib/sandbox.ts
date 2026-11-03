@@ -17,7 +17,8 @@ export const DEFAULT_AGENT_DESKTOP_INSTALL_SPEC = `agent-desktop@${AGENT_DESKTOP
 /** Where the managed desktop keeps its logs, session-bus address and runtime directory. */
 export const DESKTOP_ROOT = "/tmp/agent-desktop-eve";
 
-export const DEFAULT_DISPLAY = ":99";
+/** `eve/extensions/computer-use` runs its own display on `:99`; this one stays clear of it so both can be mounted. */
+export const DEFAULT_DISPLAY = ":100";
 
 /**
  * apt packages for a headless X11 desktop that agent-desktop can read: Xvfb,
@@ -37,6 +38,14 @@ export const DESKTOP_APT_PACKAGES = [
   "xdotool",
   "xvfb",
 ] as const;
+
+/**
+ * Include this in the sandbox environment options (for example as an `env`
+ * value) so prepared templates rebuild when the installed agent-desktop or
+ * desktop packages change. eve rebuilds a template only when the sandbox file
+ * or its environment options change, not when an imported helper does.
+ */
+export const AGENT_DESKTOP_REVALIDATION_KEY = `agent-desktop:1:${AGENT_DESKTOP_VERSION}:${DESKTOP_APT_PACKAGES.join(",")}`;
 
 const SESSION_BUS_FILE = `${DESKTOP_ROOT}/dbus-session-address`;
 const A11Y_ENV =

@@ -18,4 +18,6 @@ export default desktopTool({
     ...flag("amount", input.amount),
     ...flag("timeout-ms", input.timeoutMs),
   ],
+  deferred: true,
+  headed: true,
 });
