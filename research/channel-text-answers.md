@@ -39,10 +39,10 @@ channel that shows this request alone shows the one a reply answers.
 
 ## Private channel helpers
 
-`eve/internal/channels` re-exports what eve's channels share for showing a session as text:
-replies and failure notices, one-at-a-time prompts, private sign-ins, the step's context, the
-logger, and callback URL resolution. It is not documented or covered by `public-api/`, and it
-changes with eve. A package that imports it, such as `@eve/recall`, releases with eve.
+`eve/internal/channels` re-exports what `@eve/recall` needs from eve's own channels: posting
+replies, prompts, and failures as text, private sign-ins, the step's context, the logger, and
+callback URL resolution. It holds only what a first-party package imports, is not documented
+or covered by `public-api/`, and changes with eve. A package that imports it releases with eve.
 
 ## Boundaries
 
