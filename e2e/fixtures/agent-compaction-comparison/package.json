@@ -9,7 +9,7 @@
     "start": "eve start",
     "typecheck": "eve build --skip-sandbox-prewarm && tsc",
     "test:unit": "vitest run strategies",
-    "test:e2e": "eve eval --strict"
+    "test:e2e": "node ./replay.mjs --strict"
   },
   "dependencies": {
     "@eve-e2e/config": "workspace:*",
