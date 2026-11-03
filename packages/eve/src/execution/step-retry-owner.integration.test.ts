@@ -67,6 +67,11 @@ async function withInterruptedSession(
     readonly loseTurnStep?: (completion: number) => boolean;
     /** How many turn-step attempts, from the first, fail their first session write. */
     readonly failTurnStepWrites?: number;
+    /**
+     * The process dies the first time this tool runs: what its stream has not sent to storage
+     * yet is lost, with the step's completion.
+     */
+    readonly crashIn?: string;
   },
   body: (session: Session) => Promise<void>,
 ) {
@@ -85,6 +90,8 @@ async function withInterruptedSession(
   );
   let seen = 0;
   let armed = false;
+  let dead = false;
+  let crashed = false;
   let interrupted = 0;
   const runtime = await createTestRuntime({
     agent: {
@@ -124,6 +131,11 @@ async function withInterruptedSession(
                 description: `Run ${tool.name} for Alice.`,
                 execute: () => {
                   ran.push(tool.name);
+                  if (tool.name === options.crashIn && !crashed) {
+                    crashed = true;
+                    dead = true;
+                    armed = true;
+                  }
                   return { done: tool.name };
                 },
                 inputSchema: z.object({}).passthrough(),
@@ -139,6 +151,18 @@ async function withInterruptedSession(
     const world = await getWorld();
     const createBatch = world.events.createBatch;
     world.events.createBatch = undefined;
+    const streams = world.streams;
+    const { write: streamWrite, writeMulti: streamWriteMulti } = streams;
+    if (options.crashIn !== undefined) {
+      streams.write = async (...args) => {
+        if (!dead) await streamWrite.apply(streams, args);
+      };
+      if (streamWriteMulti !== undefined) {
+        streams.writeMulti = async (...args) => {
+          if (!dead) await streamWriteMulti.apply(streams, args);
+        };
+      }
+    }
     const create = world.events.create.bind(world.events);
     let sessionId: string | undefined;
     let turnSteps = 0;
@@ -176,6 +200,7 @@ async function withInterruptedSession(
       }
       if ((lose || armed) && runId === sessionId && event.eventType === "step_completed") {
         armed = false;
+        dead = false;
         interrupted += 1;
         forgetSessionLive(runId);
         throw new Error("Process exited after publication, before checkpoint");
@@ -241,6 +266,8 @@ async function withInterruptedSession(
       spy.mockRestore();
       writerSpy.mockRestore();
       world.events.createBatch = createBatch;
+      streams.write = streamWrite;
+      streams.writeMulti = streamWriteMulti;
       await run.cancel().catch(() => {});
     }
   });
@@ -365,6 +392,32 @@ it("does not run an approved call again when the step that ran it is interrupted
   // The model reads that deploy ran, and doesn't read the applied approval again as new input.
   expect(prompts[2]).toContain("result was lost");
   expect(prompts[2]).not.toContain("earlier interactive prompt");
+});
+
+// #5841: `call.started` is still buffered when the tool runs, so a crash right after loses it.
+it.fails("does not run an approved call again when the process dies as it starts", async () => {
+  const { prompts, ran } = await withInterruptedSession(
+    "retry-approved-crash",
+    {
+      crashIn: "deploy",
+      respond: (_prompt, call) =>
+        call === 1
+          ? toolCallStreamResult({ input: "{}", toolCallId: "deploy", toolName: "deploy" })
+          : textStreamResult("Checked the deploy."),
+      tools: [{ approval: true, name: "deploy" }],
+    },
+    async (session) => {
+      await session.next("deploy approval");
+      const [deploy] = ofType(session.events(), "interaction.opened");
+      await session.answer(deploy!.data.interactionId, "approve");
+      await vi.waitFor(() => expect(session.interrupted()).toBe(1));
+      await session.next("reply after retry");
+    },
+  );
+  expect(ran).toEqual(["deploy"]);
+  // The deploy ran before the process died, so the retry's model reads that it may have.
+  expect(prompts.at(-1)).toContain("The call may or may not have taken effect.");
+  expect(prompts.at(-1)).not.toContain("This call did not run.");
 });
 
 it("hands a workflow's result to the step again when the step that read it is interrupted", async () => {
