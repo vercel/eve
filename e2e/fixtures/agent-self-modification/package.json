@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@eve-e2e/config": "workspace:*",
+    "@eve/agent-browser": "workspace:*",
     "@vercel/connect": "2.2.0",
     "@workflow/world-postgres": "catalog:",
     "eve": "workspace:*",
