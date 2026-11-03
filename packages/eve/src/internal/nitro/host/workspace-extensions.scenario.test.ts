@@ -42,7 +42,7 @@ describe("buildWorkspaceExtensions", () => {
   });
 
   // https://github.com/vercel/eve/issues/5837
-  it.fails("builds an extension after the workspace extension its subagent mounts", async () => {
+  it("builds an extension after the workspace extension its subagent mounts", async () => {
     const { appRoot, plannerRoot } = await createMountingWorkspaceAgent();
 
     await buildWorkspaceExtensions(appRoot);
@@ -55,7 +55,7 @@ describe("buildWorkspaceExtensions", () => {
 
 describe("prepareDevelopmentWorkspaceExtensions", () => {
   // https://github.com/vercel/eve/issues/5837
-  it.fails("builds an extension after the workspace extension its subagent mounts", async () => {
+  it("builds an extension after the workspace extension its subagent mounts", async () => {
     const { appRoot, plannerRoot } = await createMountingWorkspaceAgent();
 
     await prepareDevelopmentWorkspaceExtensions({ appRoot });

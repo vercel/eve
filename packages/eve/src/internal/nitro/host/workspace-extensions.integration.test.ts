@@ -267,6 +267,28 @@ describe("buildWorkspaceExtensions", () => {
       `Failed to build workspace extension "@acme/alpha" at ${join(appRoot, "packages", "alpha")}. Fix the error below, then rebuild the agent, or run \`eve extension build\` in that package directory to build it on its own.\ntools/search.ts is invalid`,
     );
   });
+
+  it("builds extensions that declare each other as dependencies", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha", "beta"]);
+    for (const [name, dependency] of [
+      ["alpha", "beta"],
+      ["beta", "alpha"],
+    ] as const) {
+      await writeText(
+        join(appRoot, "packages", name, "package.json"),
+        `${JSON.stringify({
+          name: `@acme/${name}`,
+          type: "module",
+          eve: { extension: { source: "extension", dist: "dist/extension" } },
+          dependencies: { [`@acme/${dependency}`]: "workspace:*" },
+        })}\n`,
+      );
+    }
+
+    await buildWorkspaceExtensions(appRoot);
+
+    expect(mocks.buildExtensionPackage).toHaveBeenCalledTimes(2);
+  });
 });
 
 const PAST = new Date("2000-01-01T00:00:00Z");
