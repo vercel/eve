@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import { compiledOf, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { bundleAuthoredModuleMapForGeneration } from "#internal/authored-module-loader.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
@@ -258,7 +258,9 @@ describe("mounted extension via authored-source loader", () => {
     try {
       // Each mounted authentication hook requests a token for its own connector.
       const authenticate = (map: typeof moduleMap, mount: string) => {
-        const hook = manifest.hooks.find((entry) => entry.slug === `${mount}__authenticate`)!;
+        const hook = compiledOf(manifest, "hook").find(
+          (entry) => entry.slug === `${mount}__authenticate`,
+        )!;
         const definition = map.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[hook.sourceId]!
           .default as {
           events: Record<string, (event: unknown, ctx: object) => Promise<void>>;
