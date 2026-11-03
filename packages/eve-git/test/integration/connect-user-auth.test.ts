@@ -93,11 +93,7 @@ test("maps Connect errors to eve authorization errors", async () => {
     "github/acme-bot",
     client({
       async startAuthorization() {
-        return {
-          request: "r",
-          verifier: "v",
-          connector: { id: "c", uid: "github/acme-bot", type: "github" },
-        } as unknown as Awaited<ReturnType<ConnectUserClient["startAuthorization"]>>;
+        return { request: "r", verifier: "v", url: "" };
       },
     }).value,
   );
