@@ -151,7 +151,7 @@ jobs:
         run: gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n "$ARTIFACT" -D "$RUNNER_TEMP/bench"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 26
       # Merge onto the newest main so a concurrent refresh of the other dataset
       # is never overwritten. createCommitOnBranch commits are signed by GitHub,
       # which satisfies the signed-commit requirement without a bot signing key.
