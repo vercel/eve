@@ -199,6 +199,14 @@ export function interactionMatches(
   return true;
 }
 
+/** Renders an interaction filter for failure messages, keeping RegExp and predicate matchers visible. */
+export function formatInteractionFilter(filter: EveEvalInteractionMatchOptions): string {
+  return JSON.stringify(filter, (_key, value: unknown) => {
+    if (value instanceof RegExp) return String(value);
+    return typeof value === "function" ? "<predicate>" : value;
+  });
+}
+
 /** Returns true when one stream event satisfies a typed event matcher. */
 export function eventMatches(event: SessionStreamEvent, matcher: EveEvalEventMatch): boolean {
   return (

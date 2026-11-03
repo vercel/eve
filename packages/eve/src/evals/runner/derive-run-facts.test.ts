@@ -348,3 +348,29 @@ it("reads a partial answer's segment as parked on the request it left open", () 
     toolCalls: [{ callId: "call_api", output: "deployed", status: "completed" }],
   });
 });
+
+it("reads only the requests the last pause waits on, not every open request", () => {
+  const opened = (interactionId: string, kind: "approval" | "question"): SessionEvent =>
+    ({
+      data: { interactionId, request: { kind, prompt: `${kind}?` }, subject: turn0 },
+      scope: turn0,
+      type: "interaction.opened",
+    }) as SessionEvent;
+  const events = stream([
+    {
+      data: { cause: { deliveryId: "d_0" }, follows: null, turnId: "turn_0" },
+      scope: turn0,
+      type: "turn.started",
+    },
+    opened("i_approval", "approval"),
+    opened("i_question", "question"),
+    // The question is answered but stays open until the rest of its batch is decided.
+    {
+      data: { awaiting: [{ interactionId: "i_approval" }], turnId: "turn_0" },
+      scope: turn0,
+      type: "turn.paused",
+    },
+  ]);
+
+  expect(deriveRunFacts(events).openInteractions).toMatchObject([{ interactionId: "i_approval" }]);
+});

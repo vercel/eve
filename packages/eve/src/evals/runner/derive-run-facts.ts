@@ -1,6 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
-import { callOutputSource, openInteractions } from "#protocol/session-projection/selectors.js";
+import { callOutputSource } from "#protocol/session-projection/selectors.js";
 import type { CallRow } from "#protocol/session-projection/tables.js";
 import { ownerOf } from "#protocol/session-projection/tree.js";
 import { interaction, type Interaction } from "#protocol/session-projection/reader.js";
@@ -138,7 +138,7 @@ export function deriveRunFacts(
     ];
   });
   const spent = Object.keys(view.usage.byKind).length > 0 ? view.usage.total : undefined;
-  const parked = endedParkedOnInput(events);
+  const awaited = awaitedInteractionIds(events);
   return {
     toolCalls,
     toolCallCount: toolCalls.length,
@@ -146,10 +146,8 @@ export function deriveRunFacts(
     subagentCalls,
     subagentCallCount: subagentCalls.length,
     interactions,
-    parked,
-    openInteractions: parked
-      ? openInteractions(view).flatMap((row) => interaction(view, row.interactionId) ?? [])
-      : [],
+    parked: awaited.length > 0,
+    openInteractions: awaited.flatMap((interactionId) => interaction(view, interactionId) ?? []),
     messageCount,
     reasoningBlockCount,
     models: [...models],
@@ -174,14 +172,17 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
   };
 }
 
-/** The explicit pause says whether the turn is waiting on a person rather than background work. */
-function endedParkedOnInput(events: readonly SessionStreamEvent[]): boolean {
+/**
+ * The requests the last pause waits on. The explicit pause says whether the turn is waiting on a
+ * person rather than background work, and leaves out answered requests still open in their batch.
+ */
+function awaitedInteractionIds(events: readonly SessionStreamEvent[]): readonly string[] {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event?.type === "turn.paused") {
-      return event.data.awaiting.some((awaiting) => "interactionId" in awaiting);
+      return event.data.awaiting.map(({ interactionId }) => interactionId);
     }
-    if (event?.type === "turn.settled" || event?.type === "session.ended") return false;
+    if (event?.type === "turn.settled" || event?.type === "session.ended") return [];
   }
-  return false;
+  return [];
 }

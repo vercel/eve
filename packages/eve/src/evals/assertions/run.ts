@@ -7,6 +7,7 @@ import type { Interaction } from "#protocol/session-projection/reader.js";
 import {
   deepEquals,
   eventMatches,
+  formatInteractionFilter,
   interactionMatches,
   subagentCallMatches,
   testRegExp,
@@ -73,7 +74,7 @@ export function awaitingInput(filter: EveEvalInteractionMatchOptions = {}): RunA
       );
       if (unmatched.length === 0) return PASS;
       return fail(
-        `expected every pending request to match ${JSON.stringify(filter)}; unmatched: ${unmatched.map(formatPendingRequest).join("; ")}`,
+        `expected every pending request to match ${formatInteractionFilter(filter)}; unmatched: ${unmatched.map(formatPendingRequest).join("; ")}`,
       );
     },
   };

@@ -124,6 +124,14 @@ it("awaitingInput lists each pending request the filter rejects", async () => {
   });
 });
 
+it("awaitingInput shows RegExp matchers in its failure message", async () => {
+  const outcome = await awaitingInput({ prompt: /publish/u }).evaluate(
+    parkedOn([deployApproval("a_0")]),
+  );
+
+  expect(outcome.message).toContain('{"prompt":"/publish/u"}');
+});
+
 it("awaitingInput with a filter fails a run that did not park", async () => {
   const events = stampTestEvents(testTurnFacts(0, "Done.", ["d_0"]));
   const subject = {

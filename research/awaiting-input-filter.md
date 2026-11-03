@@ -59,14 +59,17 @@ t.awaitingInput({ kind: "approval", toolName: "deploy" });
 
 ## Open requests
 
-An open request is one whose status is `open` at the end of the scope:
+A run waits on the requests its last `turn.paused` event lists. eve builds
+that list itself, so it leaves out requests already answered but still open
+until the rest of their batch is decided:
 
-- **Turn scope:** the session's open requests, as `openInteractions(view)`
-  reports them. A request left open by an earlier turn counts.
-- **Session and eval scope:** the open requests of every session in the scope.
-  A session that completed contributes none, so at eval scope a completed
-  session A and a session B parked on an approval pass
-  `awaitingInput({ kind: "approval" })`.
+- **Turn scope:** the requests the turn's last pause lists, read from
+  everything the eval read of the session. A request an earlier turn opened
+  counts.
+- **Session scope:** the same, at the end of the session so far.
+- **Eval scope:** the requests of every session in the eval. A session that
+  completed contributes none, so at eval scope a completed session A and a
+  session B parked on an approval pass `awaitingInput({ kind: "approval" })`.
 
 Assertions don't see the session view, so `EveEvalDerivedFacts` gains a field
 next to `parked`:

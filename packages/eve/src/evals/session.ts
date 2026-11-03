@@ -34,7 +34,12 @@ import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createOutputAssertions, createScopedAssertions } from "#evals/assertions/scoped.js";
 import { outputOf } from "#evals/output.js";
 import { EvalRequirementFailed } from "#evals/control-flow.js";
-import { interactionMatches, matchesValue, toolCallMatches } from "#evals/match.js";
+import {
+  formatInteractionFilter,
+  interactionMatches,
+  matchesValue,
+  toolCallMatches,
+} from "#evals/match.js";
 import type {
   EveEvalAgentSession,
   EveEvalAssertions,
@@ -141,7 +146,7 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   get view(): SessionView {
-    return foldEvents(emptySessionView(), [...this.#history, ...this.#events]);
+    return foldEvents(emptySessionView(), this.#readEvents());
   }
 
   get transcript(): string {
@@ -403,7 +408,7 @@ export class EvalSessionDriver implements EveEvalSession {
 
     const derived = deriveRunFacts(input.events, {
       sessionId: input.sessionId,
-      usageEvents: this.#history.length === 0 ? this.#events : [...this.#history, ...this.#events],
+      usageEvents: this.#readEvents(),
     });
     const turn = new EvalTurn({
       collector: this.#collector,
@@ -446,9 +451,14 @@ export class EvalSessionDriver implements EveEvalSession {
     });
   }
 
+  /** Everything this eval read of the session: the history before this driver attached, then its own events. */
+  #readEvents(): readonly SessionStreamEvent[] {
+    return this.#history.length === 0 ? this.#events : [...this.#history, ...this.#events];
+  }
+
   #assertionSubject() {
     const sessionId = this.id;
-    const derived = deriveRunFacts(this.#events, { sessionId });
+    const derived = deriveRunFacts(this.#events, { sessionId, usageEvents: this.#readEvents() });
     return {
       derived,
       events: [...this.#events],
@@ -763,10 +773,6 @@ class EvalTurn implements EveEvalTurn {
 function attachSignal(input: SendTurnPayload, signal: AbortSignal | undefined): SendTurnPayload {
   if (signal === undefined) return input;
   return input.signal === undefined ? { ...input, signal } : input;
-}
-
-function formatInteractionFilter(filter: EveEvalInteractionMatchOptions): string {
-  return JSON.stringify(filter);
 }
 
 function inputRequirementFailed(
