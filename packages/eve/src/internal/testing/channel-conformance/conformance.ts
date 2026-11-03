@@ -72,7 +72,7 @@ function unnamedAnsweredPrompts(
   );
 }
 
-interface ConformanceChannel {
+export interface ConformanceChannel {
   readonly driver: () => ChannelDriver | ClientDriver;
   /**
    * A DM column beside the channel's shared-thread column. It runs only rules
@@ -403,7 +403,11 @@ function cellOf(entry: ConformanceChannel, rule: (typeof channelContract)[number
  * separate files let vitest run channels in parallel workers.
  */
 export function describeChannelConformance(channel: keyof typeof channelConformance): void {
-  const entries: readonly ConformanceChannel[] = channelConformance[channel];
+  describeConformance(channelConformance[channel]);
+}
+
+/** Holds each driver to the contract, for a channel outside eve's own table such as a workspace package's. */
+export function describeConformance(entries: readonly ConformanceChannel[]): void {
   describe.each(entries.map((entry) => ({ entry, name: entry.driver().name })))(
     "$name channel contract",
     ({ entry }) => {
