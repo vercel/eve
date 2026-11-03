@@ -30,6 +30,7 @@ import {
   shouldCompact,
 } from "#harness/compaction/engine.js";
 import { takeCompactionCaptureFailure } from "#reactions/kinds/memory.js";
+import { isDeepStrictEqual } from "node:util";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import { nextChangeId, nextRunId } from "#protocol/session-projection.js";
@@ -79,44 +80,38 @@ export function assertFixedPartFits(input: {
 }
 
 /**
- * `session.compact()`: summarizes the history now, then the session waits. The control is a
- * delivery: it's admitted with the change, and applied once the change completes.
+ * `session.compact()`: summarizes the history, then the session waits. The control is a delivery:
+ * it's admitted first, and applied once the history is decided.
  */
 export async function compactHistory(step: Step): Promise<StepResult> {
   const { config } = step;
-  const { projection } = step.view();
   const delivery = controlDeliveryFor(step.view(), config.controlDelivery);
   const { deliveryId } = delivery;
-  const changeId = nextChangeId(projection);
   if (step.session.history.length === 0) {
     await step.apply([controlAdmitted(delivery, "compact"), deliveryApplied(deliveryId)]);
     return { next: null, session: step.session };
   }
   const messages = validateHarnessModelMessages(step.session.history);
-  await step.apply(
-    [
-      controlAdmitted(delivery, "compact"),
-      contextStarted({ cause: { deliveryId }, changeId, kind: "compaction" }),
-    ],
-    messages,
-  );
-  const runId = nextRunId(step.view().projection);
+  await step.apply([controlAdmitted(delivery, "compact")], messages);
+  const { projection } = step.view();
+  const change = lazyChange(step, {
+    changeId: nextChangeId(projection),
+    prompt: messages,
+    runId: nextRunId(projection),
+    started: { cause: { deliveryId }, kind: "compaction" },
+  });
   let outcome: "applied" | "failed" = "applied";
   try {
-    await step.apply([runRequested({ changeId }, runId)], messages);
     const resolvedModel = await resolveEffectiveRuntimeModel({
       config,
       ctx: step.ctx,
       session: step.session,
     });
     step.session = resolvedModel.session;
-    const summaryModel =
-      step.session.agent.compactionModelReference ?? requireSessionModelReference(step.session);
-    await step.publish(runStarted({ attempt: 0, modelId: summaryModel.id, runId }));
-    await rewriteHistory(step, {
+    await summarizeHistory(step, {
       betweenTurns: true,
-      change: { changeId, runId, runOpen: true },
-      force: true,
+      change,
+      compact: true,
       messages,
       model: resolvedModel.model,
       promptMessages: messages,
@@ -124,9 +119,6 @@ export async function compactHistory(step: Step): Promise<StepResult> {
     });
   } catch (error) {
     outcome = "failed";
-    // A rewrite that failed closed its run and change; this closes them when setup failed.
-    const facts = summaryFailed(step.view().projection.view, { changeId, error });
-    if (facts.length > 0) await step.publish(facts);
     logError(log, "manual session compaction failed", error, {
       sessionId: step.session.sessionId,
     });
@@ -138,19 +130,18 @@ export async function compactHistory(step: Step): Promise<StepResult> {
 }
 
 /**
- * Compacts a turn's prompt before its model call when the prompt is over the threshold, and
- * returns the compacted durable messages: `undefined` when the prompt fits. A failure settles
- * the change failed and is rethrown; `step.session` counts the summary calls that finished.
- *
- * Kept in the tool loop (rather than the AI SDK's `prepareStep` hook) so the compacted messages
- * flow through the same `messages` the harness uses to rebuild `session.history` after the step.
+ * The history the next model call reads, committed: summarized when the call would pass the
+ * threshold, a share of the model's window (`agent.ts`'s `compaction.threshold`), counting the
+ * summary prompt's own overhead. Returns the messages the call reads, or `undefined` when the
+ * history stays. A failure is rethrown, after settling any change it opened; `step.session`
+ * counts the summary calls that finished.
  */
-export async function compactIfDue(
+export async function historyBeforeCall(
   step: Step,
   input: {
-    /** The durable messages a compaction rewrites. */
+    /** The durable messages the history becomes. */
     readonly messages: readonly HarnessModelMessage[];
-    /** The prompt as the model reads it, which decides whether the history needs compaction. */
+    /** The prompt as the model reads it, which the call's size measures. */
     readonly promptMessages: readonly HarnessModelMessage[];
     readonly model: LanguageModel;
     readonly requestEnvelopeTokens: number;
@@ -158,83 +149,84 @@ export async function compactIfDue(
 ): Promise<HarnessModelMessage[] | undefined> {
   const prompt = validateHarnessModelMessages(input.promptMessages);
   const { compaction } = step.session;
-  const previousEnvelopeTokens = compaction.requestEnvelopeTokens;
-  if (!shouldCompact(prompt, compaction, input.requestEnvelopeTokens, previousEnvelopeTokens)) {
+  const previousEnvelope = compaction.requestEnvelopeTokens;
+  if (!shouldCompact(prompt, compaction, input.requestEnvelopeTokens, previousEnvelope)) {
     return undefined;
   }
+  const tokens = getInputTokenCount(
+    prompt,
+    compaction,
+    input.requestEnvelopeTokens,
+    previousEnvelope,
+  );
   const { projection } = step.view();
-  const change = { changeId: nextChangeId(projection), runId: nextRunId(projection) };
-  try {
-    const inputTokens = getInputTokenCount(
-      prompt,
-      compaction,
-      input.requestEnvelopeTokens,
-      previousEnvelopeTokens,
-    );
-    await step.publish(
-      contextStarted({
-        changeId: change.changeId,
-        kind: "compaction",
-        trigger: { inputTokens },
-        turnId: step.position().turnId,
-      }),
-      prompt,
-    );
-    return await rewriteHistory(step, {
-      change: { ...change, runOpen: false },
-      force: false,
-      messages: input.messages,
-      model: input.model,
-      promptMessages: prompt,
-      requestEnvelopeTokens: input.requestEnvelopeTokens,
-      telemetryTurnId: activeTurnId(step.position()),
-    });
-  } catch (error) {
-    // Setup can fail before the rewrite closes what it opened: close only what's still open.
-    const facts = summaryFailed(step.view().projection.view, { changeId: change.changeId, error });
-    if (facts.length > 0) await step.publish(facts);
-    throw error;
-  }
+  const turnId = step.position().turnId;
+  const change = lazyChange(step, {
+    changeId: nextChangeId(projection),
+    prompt,
+    runId: nextRunId(projection),
+    started: { kind: "compaction", trigger: { inputTokens: tokens }, turnId },
+  });
+  return await summarizeHistory(step, {
+    change,
+    messages: input.messages,
+    model: input.model,
+    promptMessages: prompt,
+    requestEnvelopeTokens: input.requestEnvelopeTokens,
+    telemetryTurnId: activeTurnId(step.position()),
+  });
 }
 
-/** What a history rewrite reads and calls while its change is open. */
-export interface HistoryRewriteContext {
-  /** Always summarize: `session.compact()` asked, rather than a threshold. */
-  readonly force: boolean;
-  /** The threshold and measurement for the history alone, without what surrounds it. */
-  readonly config: CompactionConfig;
-  /** The history's tokens as the provider last measured them, when known. */
-  readonly historyTokens?: number;
-  /** Writes a summary with the compaction model, under the change's summary run. */
-  readonly summarize: CompactionSummarizer;
+/** A compaction change that opens the first time something needs it: a summary or a rewrite. */
+interface LazyChange {
+  readonly changeId: string;
+  readonly runId: string;
+  readonly opened: boolean;
+  open(): Promise<void>;
 }
 
-/** Rewrites the history under an open change: eve's default summarizes older turns. */
-export type HistoryRewrite = (
-  messages: HarnessModelMessage[],
-  ctx: HistoryRewriteContext,
-) => Promise<readonly ModelMessage[]>;
-
-const defaultRewrite: HistoryRewrite = (messages, ctx) =>
-  compactMessages(messages, ctx.config, ctx.summarize, ctx.force, ctx.historyTokens);
-
-/**
- * Rewrites `messages` under an announced change, then settles it and its summary run and replaces
- * the session's history. The run opens with its first summary call unless it's already open: the
- * history may compact without one. A failure settles both failed, keeps the history, and is
- * rethrown; either way `step.session` counts the summary calls that finished.
- */
-async function rewriteHistory(
+function lazyChange(
   step: Step,
   input: {
-    /** A manual compaction runs between turns, so no turn's usage reports its summary calls. */
+    readonly changeId: string;
+    readonly runId: string;
+    readonly started: Omit<Parameters<typeof contextStarted>[0], "changeId">;
+    readonly prompt: readonly HarnessModelMessage[];
+  },
+): LazyChange {
+  let opened = false;
+  return {
+    changeId: input.changeId,
+    runId: input.runId,
+    get opened() {
+      return opened;
+    },
+    async open() {
+      if (opened) return;
+      opened = true;
+      await step.publish(
+        contextStarted({ changeId: input.changeId, ...input.started }),
+        input.prompt,
+      );
+      // A memory capture before compaction ran in the commit that started it. When it failed, the
+      // compaction fails before it rewrites the history the capture couldn't keep.
+      const captureFailure = takeCompactionCaptureFailure(step.ctx);
+      if (captureFailure !== undefined) throw captureFailure;
+    },
+  };
+}
+
+/**
+ * Compacts the history and commits it. The change opens with the first summary call or rewrite,
+ * so a history with nothing to compact records none.
+ */
+async function summarizeHistory(
+  step: Step,
+  input: {
+    /** Between turns, no turn's usage reports the summary calls. */
     readonly betweenTurns?: true;
-    readonly change: {
-      readonly changeId: string;
-      readonly runId: string;
-      readonly runOpen: boolean;
-    };
-    readonly force: boolean;
+    readonly change: LazyChange;
+    readonly compact?: true;
     readonly messages: readonly HarnessModelMessage[];
     /** The turn's model, which writes summaries unless the agent names a compaction model. */
     readonly model: LanguageModel;
@@ -242,12 +234,15 @@ async function rewriteHistory(
     readonly requestEnvelopeTokens: number | undefined;
     readonly telemetryTurnId?: string;
   },
-): Promise<HarnessModelMessage[]> {
+): Promise<HarnessModelMessage[] | undefined> {
   const { change } = input;
+  const before = validateHarnessModelMessages(input.messages);
   const summaryUsage: (TokenUsageDelta | undefined)[] = [];
-  const executor = await summaryExecutor(step, input);
-  let runOpen = change.runOpen;
+  let executor: Awaited<ReturnType<typeof summaryExecutor>> | undefined;
+  let runOpen = false;
   const summarize: CompactionSummarizer = async (prompt) => {
+    await change.open();
+    executor ??= await summaryExecutor(step, input);
     if (!runOpen) {
       runOpen = true;
       await step.publish([
@@ -265,43 +260,69 @@ async function rewriteHistory(
     return summary.text;
   };
 
-  let rewritten: readonly ModelMessage[];
+  let messages: HarnessModelMessage[];
   try {
-    // A memory capture before compaction ran in the commit that started it. When it failed, the
-    // compaction fails before it rewrites the history the capture couldn't keep.
-    const captureFailure = takeCompactionCaptureFailure(step.ctx);
-    if (captureFailure !== undefined) throw captureFailure;
-    rewritten = await defaultRewrite(
-      validateHarnessModelMessages(input.messages),
-      historyContext(step.session, { ...input, summarize }),
-    );
+    const rewrite = historyContext(step.session, {
+      ...input,
+      threshold: step.session.compaction.threshold,
+    });
+    messages = (await compactMessages(
+      before,
+      rewrite.config,
+      summarize,
+      input.compact === true,
+      rewrite.historyTokens,
+    )) as HarnessModelMessage[];
+    // Capping old tool output alone rewrites the history without a summary call.
+    if (!isDeepStrictEqual(messages, before)) await change.open();
   } catch (error) {
     const usage = summaryUsageOf(summaryUsage);
     countSummaryUsage(step, input.betweenTurns, usage);
-    await step.publish(
-      summaryFailed(step.view().projection.view, {
-        changeId: change.changeId,
-        error,
-        ...(usage !== undefined && { spent: { runId: change.runId, usage } }),
-      }),
-    );
+    if (change.opened) {
+      await step.publish(
+        summaryFailed(step.view().projection.view, {
+          changeId: change.changeId,
+          error,
+          ...(usage !== undefined && { spent: { runId: change.runId, usage } }),
+        }),
+      );
+    }
     throw error;
   }
-  // What the summary calls spent belongs to the summary run, in the commit that settles it.
-  const usage = summaryUsageOf(summaryUsage);
+  const unchanged = isDeepStrictEqual(messages, before);
+  if (change.opened) {
+    await settleChange(step, { ...input, runOpen, summaryUsage }, unchanged ? before : messages);
+  }
+  if (unchanged) return undefined;
+  step.session = changeHistory(step.session, { rewrite: messages });
+  return messages;
+}
+
+/** Settles an open change and its summary run; what the summary calls spent belongs to the run. */
+async function settleChange(
+  step: Step,
+  input: {
+    readonly betweenTurns?: true;
+    readonly change: LazyChange;
+    readonly runOpen: boolean;
+    readonly summaryUsage: readonly (TokenUsageDelta | undefined)[];
+  },
+  messages: readonly HarnessModelMessage[],
+): Promise<void> {
+  const { change } = input;
+  const usage = summaryUsageOf(input.summaryUsage);
   countSummaryUsage(step, input.betweenTurns, usage);
-  const messages = validateHarnessModelMessages(rewritten);
   await step.publish(
     [
       // Every summary call that returned left an entry, even without usage.
-      ...(summaryUsage.length > 0
+      ...(input.summaryUsage.length > 0
         ? runSettledFacts({
             finishReason: "stop",
             outcome: "completed",
             runId: change.runId,
             usage,
           })
-        : runOpen
+        : input.runOpen
           ? runSettledFacts({ outcome: "abandoned", runId: change.runId })
           : []),
       {
@@ -311,8 +332,6 @@ async function rewriteHistory(
     ],
     messages,
   );
-  step.session = changeHistory(step.session, { rewrite: messages });
-  return messages;
 }
 
 /**
@@ -323,23 +342,23 @@ async function rewriteHistory(
 function historyContext(
   session: HarnessSession,
   input: {
-    readonly force: boolean;
     readonly messages: readonly HarnessModelMessage[];
     readonly promptMessages: readonly HarnessModelMessage[];
     readonly requestEnvelopeTokens: number | undefined;
-    readonly summarize: CompactionSummarizer;
+    /** The call's input tokens to aim under. */
+    readonly threshold: number;
   },
-): HistoryRewriteContext {
+): { readonly config: CompactionConfig; readonly historyTokens?: number } {
   const { compaction } = session;
   const requestEnvelopeTokens = input.requestEnvelopeTokens ?? 0;
   const protectedTokens = Math.max(
     0,
     estimateTokens(input.promptMessages) - estimateTokens(input.messages),
   );
-  assertFixedPartFits({ protectedTokens, requestEnvelopeTokens, threshold: compaction.threshold });
+  assertFixedPartFits({ protectedTokens, requestEnvelopeTokens, threshold: input.threshold });
   const config: CompactionConfig = {
     ...compaction,
-    threshold: Math.max(1, compaction.threshold - requestEnvelopeTokens - protectedTokens),
+    threshold: Math.max(1, input.threshold - requestEnvelopeTokens - protectedTokens),
     lastKnownInputTokens:
       compaction.lastKnownInputTokens === undefined
         ? undefined
@@ -360,11 +379,9 @@ function historyContext(
         );
   return {
     config,
-    force: input.force,
     ...(promptTokens !== undefined && {
       historyTokens: Math.max(0, promptTokens - requestEnvelopeTokens - protectedTokens),
     }),
-    summarize: input.summarize,
   };
 }
 
