@@ -167,7 +167,7 @@ The JSON-RPC endpoint validates each request before authentication, as the MCP c
 - `Host` must match the request URL.
 - Browser requests must have an exact same-origin `Origin`.
 
-Request bodies are limited to 32 MB. File parts accept only `https` and `http` URLs or inline `raw` bytes, held to `uploadPolicy`; a disallowed media type is refused with `ContentTypeNotSupportedError`.
+Request bodies are limited to 32 MB. File parts accept only `https` and `http` URLs or inline `raw` bytes, held to `uploadPolicy`; a disallowed media type is refused with `ContentTypeNotSupportedError`. A file URL's size and actual type are known only once it downloads, so those are checked when the file is staged for the agent. A file that fails then reaches the agent as a note that it wasn't accepted, rather than as an error to the caller.
 
 The Agent Card is CORS-readable and cacheable: responses carry `Cache-Control`, an `ETag`, and `Last-Modified`, and a matching conditional request gets `304 Not Modified`. The JSON-RPC endpoint is not; put a same-origin backend in front of it when a browser application needs to call the agent.
 
