@@ -15,10 +15,10 @@ const HEALTH_POLL_INTERVAL_MS = 250;
 const HEALTH_TIMEOUT_MS = 60_000;
 // srvx prints this line only after its own listener is bound.
 const LISTENING_URL_PATTERN = /Listening on:?\s+(https?:\/\/\S+)/;
-// Must exceed the server's bounded sandbox shutdown (15s in
-// sandbox-shutdown-plugin.ts) so stopping sandboxes on SIGTERM is not
-// cut short by SIGKILL.
-const TERMINATE_GRACE_MS = 20_000;
+// On SIGTERM, srvx closes the server for up to 5s before Nitro's close hooks
+// run the bounded sandbox shutdown (15s in sandbox-shutdown-plugin.ts). The
+// grace covers both, so SIGKILL does not cut stopping sandboxes short.
+const TERMINATE_GRACE_MS = 25_000;
 const WILDCARD_LISTEN_HOSTNAMES: ReadonlySet<string> = new Set(["[::]", "::", "0.0.0.0"]);
 
 function resolveOutputServerEntry(appRoot: string): string {

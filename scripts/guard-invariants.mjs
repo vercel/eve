@@ -165,7 +165,7 @@
  *   rule 56 — Retired: dangling references to stripped declarations are caught
  *             by `packages/eve/test/scenarios/packed-public-types.scenario.test.ts`.
  *   rule 57 — No `rollup:before` hooks under `packages/eve/src`. eve's build
- *             plugins are one ordered list passed as `rolldownConfig.plugins`;
+ *             plugins are one ordered list passed as `buildPlugins`;
  *             hooks that splice plugins into Nitro's bundler config reorder
  *             them behind the host's back.
  *   rule 58 — No writes to `nitro.options` (assignment, `.push(`, `.unshift(`)
@@ -176,6 +176,10 @@
  *             eve-owned Nitro id uses `#eve/`, and nothing pins Nitro's
  *             private virtual ids. Files that predate the rule are baselined
  *             and may only leave the baseline.
+ *   rule 60 — eve never resolves a package from Nitro's directory: no
+ *             `nitro/package.json` lookups in `packages/eve/src` outside test
+ *             helpers. eve declares what it builds with, such as `rolldown`,
+ *             and hands it to Nitro through `deps.paths`.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -301,6 +305,7 @@ function isTsLike(relPath) {
  *   rule53: Violation[];
  *   rule57: Violation[];
  *   rule58: Violation[];
+ *   rule60: Violation[];
  *   rule59: { allowlist: Set<string>; violations: Violation[] };
  *   symlinks: string[];
  * }} state
@@ -386,6 +391,7 @@ async function scanRepo(state) {
     checkRule53(posix, lines, state.rule53);
     checkRule57(posix, lines, state.rule57);
     checkRule58(posix, lines, state.rule58);
+    checkRule60(posix, lines, state.rule60);
     checkRule59(posix, lines, state.rule59);
   }
 }
@@ -834,7 +840,7 @@ function checkRule57(posix, lines, violations) {
       file: posix,
       line: idx + 1,
       message:
-        "`rollup:before` hook detected. Add eve build plugins to the ordered list in internal/nitro/host/host-plugins.ts, which the host passes as `rolldownConfig.plugins`, instead of splicing them into Nitro's bundler config.",
+        "`rollup:before` hook detected. Add eve build plugins to the ordered list in internal/nitro/host/host-plugins.ts, which the host passes as `buildPlugins`, instead of splicing them into Nitro's bundler config.",
     });
   });
 }
@@ -854,6 +860,28 @@ function checkRule58(posix, lines, violations) {
       line: idx + 1,
       message:
         "`nitro.options` write detected. eve's host is configured entirely by the config passed to `createNitro`: derive the value in internal/nitro/host/host-spec.ts and render it in create-host-nitro.ts's `toNitroConfig`.",
+    });
+  });
+}
+
+const EVE_TESTING_DIR = "packages/eve/src/internal/testing/";
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule60(posix, lines, violations) {
+  if (!posix.startsWith(EVE_SRC_DIR) || posix.startsWith(EVE_TESTING_DIR)) return;
+  if (/\.test\.[cm]?ts$/.test(posix)) return;
+  lines.forEach((line, idx) => {
+    if (!line.includes("nitro/package.json")) return;
+    violations.push({
+      rule: 60,
+      file: posix,
+      line: idx + 1,
+      message:
+        "Package resolved through Nitro's directory. Nitro installs its builder and storage packages on demand, so a consumer install may not have them: declare the package in eve's own dependencies, resolve it from eve, and hand it to Nitro through `deps.paths`.",
     });
   });
 }
@@ -1938,6 +1966,7 @@ async function main() {
     rule53: /** @type {Violation[]} */ ([]),
     rule57: /** @type {Violation[]} */ ([]),
     rule58: /** @type {Violation[]} */ ([]),
+    rule60: /** @type {Violation[]} */ ([]),
     rule59: {
       allowlist: new Set(baseline.rule59_nitroVirtualIdAllowlist),
       violations: /** @type {Violation[]} */ ([]),
@@ -2054,6 +2083,7 @@ async function main() {
   violations.push(...state.rule53);
   violations.push(...state.rule57);
   violations.push(...state.rule58);
+  violations.push(...state.rule60);
   violations.push(...state.rule59.violations);
 
   for (const issue of await checkPublicExports()) {

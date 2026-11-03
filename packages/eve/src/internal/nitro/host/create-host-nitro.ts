@@ -13,12 +13,13 @@ import {
   createDevelopmentNitroArtifactsConfig,
   createProductionNitroArtifactsConfig,
 } from "#internal/nitro/host/artifacts-config.js";
+import { resolveRolldownPackageDir } from "#internal/bundler/rolldown.js";
+import { onVendoredDependencyLog } from "#internal/bundler/vendored-dependency-log.js";
 import { createHostNoExternals } from "#internal/nitro/host/externals-policy.js";
 import { createHostPlugins } from "#internal/nitro/host/host-plugins.js";
 import { type HostNitroRoutes, renderHostRoutes } from "#internal/nitro/host/host-routes.js";
 import type { HostRuntimePlugin, HostSpec } from "#internal/nitro/host/host-spec.js";
 import { createInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
-import { onNitroBundlerLog } from "#internal/nitro/host/nitro-bundler-config.js";
 import {
   SKILL_FILES_PLUGIN_ID,
   writeSkillFilesPlugin,
@@ -40,7 +41,7 @@ const EVE_NITRO_BUILDER = "rolldown";
 
 // Nitro gates preset behavior on this date. Pinning it keeps the build date
 // and COMPATIBILITY_DATE env out of eve's host; move it with the Nitro version.
-const EVE_NITRO_COMPATIBILITY_DATE = "2026-09-03";
+const EVE_NITRO_COMPATIBILITY_DATE = "2026-11-03";
 
 /**
  * eve owns its host config and env loading, so Nitro must not merge the app
@@ -126,7 +127,20 @@ function toNitroConfig(
     },
     buildDir: locations.buildDir,
     builder: EVE_NITRO_BUILDER,
+    buildPlugins: createHostPlugins({
+      appRoot: locations.appRoot,
+      authoredPackageRoot: spec.authored.packageRoot,
+      externals: spec.externals,
+      extensionMounts: spec.extensionMounts,
+      extensionOverridePaths: spec.extensionOverridePaths,
+      instrumentationEntryPlugin: instrumentationEntry?.plugin,
+      instrumentationSourcePaths: compiledArtifacts.instrumentationSourcePaths,
+      workflowArtifacts: built.workflowArtifacts,
+    }),
     compatibilityDate: EVE_NITRO_COMPATIBILITY_DATE,
+    // eve builds with its own Rolldown and never lets Nitro install a package
+    // into the app; a missing one fails the build with the install command.
+    deps: { install: false, paths: { rolldown: resolveRolldownPackageDir() } },
     dev: spec.development,
     features: { websocket: spec.websocket },
     ...(instrumentationEntry && {
@@ -147,19 +161,11 @@ function toNitroConfig(
     // catch-alls in front of eve's routes.
     renderer: false,
     rolldownConfig: {
-      onLog: onNitroBundlerLog,
+      // eve's own plugins dominate the timings, which the app cannot act on.
+      checks: { bundlerTimings: false },
+      onLog: onVendoredDependencyLog,
       // Keep dependency filtering out of Rolldown's JS callback bridge.
       output: { sourcemapIgnoreList: /node_modules/ },
-      plugins: createHostPlugins({
-        appRoot: locations.appRoot,
-        authoredPackageRoot: spec.authored.packageRoot,
-        externals: spec.externals,
-        extensionMounts: spec.extensionMounts,
-        extensionOverridePaths: spec.extensionOverridePaths,
-        instrumentationEntryPlugin: instrumentationEntry?.plugin,
-        instrumentationSourcePaths: compiledArtifacts.instrumentationSourcePaths,
-        workflowArtifacts: built.workflowArtifacts,
-      }),
       tsconfig: spec.authored.tsconfig,
       // Region comments contain invocation-random scratch paths, not runtime inputs.
       ...(!spec.development && { experimental: { attachDebugInfo: "none" as const } }),
@@ -170,6 +176,8 @@ function toNitroConfig(
     serverDir: false,
     serverEntry: false,
     traceDeps: [...spec.externals.traceDeps],
+    // Rolldown's `tsconfig` option above resolves authored aliases.
+    typescript: { tsconfigPaths: false },
     vercel: spec.vercel,
     virtual: {
       ...built.routes.virtual,

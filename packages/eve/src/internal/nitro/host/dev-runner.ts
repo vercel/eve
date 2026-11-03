@@ -1,13 +1,16 @@
-import { existsSync } from "node:fs";
-import { Worker } from "node:worker_threads";
-
-import { BaseEnvRunner } from "#compiled/env-runner/index.js";
+import { NodeWorkerEnvRunner } from "#compiled/env-runner/index.js";
 import { resolvePackageCompiledFilePath } from "#internal/application/package.js";
+import { toErrorMessage } from "#shared/errors.js";
 
+/** In-flight requests get half of this, then Nitro's close hooks run. */
 const DEVELOPMENT_WORKER_SHUTDOWN_TIMEOUT_MS = 15_000;
 
 export interface DevelopmentRunner {
   readonly closed: boolean;
+  /**
+   * Retires the runner. Without a cause it shuts down gracefully, so admitted
+   * requests settle and Nitro's close hooks run; with one it stops at once.
+   */
   close(cause?: unknown): Promise<void>;
   fetch(request: Request, init?: RequestInit): Promise<Response>;
   onceClosed(listener: (cause?: unknown) => void): void;
@@ -29,165 +32,49 @@ export interface DevelopmentRunnerInput {
 
 export type DevelopmentRunnerFactory = (input: DevelopmentRunnerInput) => DevelopmentRunner;
 
-class NodeDevelopmentRunner extends BaseEnvRunner implements DevelopmentRunner {
-  #closeCause: unknown;
-  readonly #closedListeners = new Set<(cause?: unknown) => void>();
-  #worker: Worker | undefined;
-  #workerExit: Promise<void> | undefined;
-  #workerHasExited = false;
-
-  constructor(input: DevelopmentRunnerInput) {
-    const workerEntry = resolvePackageCompiledFilePath("src/compiled/env-runner/node-worker.js");
-    super({
-      data: {
-        entry: input.entry,
-        ...input.workerData,
+/** Runs a Nitro development entry in a worker thread through env-runner. */
+export const createNodeDevelopmentRunner: DevelopmentRunnerFactory = (input) => {
+  const closedListeners = new Set<(cause?: unknown) => void>();
+  let closeCause: unknown;
+  const runner = new NodeWorkerEnvRunner({
+    data: { entry: input.entry, ...input.workerData },
+    hooks: {
+      onClose: (_runner, cause) => {
+        closeCause = cause;
+        const listeners = [...closedListeners];
+        closedListeners.clear();
+        for (const listener of listeners) listener(cause);
       },
-      hooks: {
-        onClose: (_runner, cause) => {
-          const listeners = [...this.#closedListeners];
-          this.#closedListeners.clear();
-          for (const listener of listeners) {
-            listener(cause);
-          }
-        },
-      },
-      name: input.name,
-      workerEntry,
-    });
-    this._initWithVirtualData(() => this.#startWorker());
-  }
+    },
+    name: input.name,
+    workerEntry: resolvePackageCompiledFilePath("src/compiled/env-runner/node-worker.js"),
+  });
 
-  onceClosed(listener: (cause?: unknown) => void): void {
-    if (this.closed) {
-      listener(this.#closeCause);
-      return;
-    }
-    this.#closedListeners.add(listener);
-  }
-
-  override sendMessage(message: unknown): void {
-    if (this.#worker === undefined) {
-      throw new Error("Development worker is not initialized.");
-    }
-    this.#worker.postMessage(message);
-  }
-
-  override async waitForReady(timeout: number): Promise<void> {
-    try {
-      await super.waitForReady(timeout);
-    } catch (error) {
-      if (this.#closeCause === undefined) {
-        throw error;
+  return {
+    get closed() {
+      return runner.closed;
+    },
+    close: async (cause) =>
+      cause === undefined
+        ? await runner.shutdown(DEVELOPMENT_WORKER_SHUTDOWN_TIMEOUT_MS)
+        : await runner.close(cause),
+    fetch: async (request, init) => await runner.fetch(request, init),
+    onceClosed(listener) {
+      if (runner.closed) {
+        listener(closeCause);
+        return;
       }
-      throw new Error(
-        `Development worker failed before readiness: ${this.#closeCause instanceof Error ? this.#closeCause.message : String(this.#closeCause)}`,
-        { cause: this.#closeCause },
-      );
-    }
-  }
-
-  protected override _hasRuntime(): boolean {
-    return this.#worker !== undefined;
-  }
-
-  protected override _runtimeType(): string {
-    return "worker";
-  }
-
-  protected override async _closeRuntime(): Promise<void> {
-    const worker = this.#worker;
-    if (worker === undefined) {
-      return;
-    }
-
-    const workerExit = this.#workerExit;
-    this.#worker = undefined;
-    this.#workerExit = undefined;
-
-    try {
-      if (!this.#workerHasExited) {
-        worker.postMessage({ event: "shutdown" });
+      closedListeners.add(listener);
+    },
+    upgrade: async (context) => await runner.upgrade(context),
+    async waitForReady(timeout) {
+      try {
+        await runner.waitForReady(timeout);
+      } catch (error) {
+        throw new Error(`Development worker failed before readiness: ${toErrorMessage(error)}`, {
+          cause: error,
+        });
       }
-      if (
-        !this.#workerHasExited &&
-        workerExit !== undefined &&
-        !(await waitForWorkerExit(workerExit))
-      ) {
-        await worker.terminate();
-      }
-    } finally {
-      worker.removeAllListeners();
-    }
-  }
-
-  protected override _handleMessage(message: unknown): void {
-    if (isWorkerInitializationError(message)) {
-      this.#closeCause = new Error(message.error);
-    }
-    super._handleMessage(message);
-  }
-
-  #startWorker(): void {
-    if (!existsSync(this._workerEntry)) {
-      void this.close(`Development worker entry not found at "${this._workerEntry}".`);
-      return;
-    }
-
-    const worker = new Worker(this._workerEntry, {
-      env: process.env,
-      workerData: {
-        name: this._name,
-        ...this._data,
-      },
-    });
-    this.#worker = worker;
-    this.#workerHasExited = false;
-    let resolveWorkerExit!: () => void;
-    this.#workerExit = new Promise((resolve) => {
-      resolveWorkerExit = resolve;
-    });
-    worker.once("error", (error) => {
-      this.#closeCause = error;
-      void this.close(error);
-    });
-    worker.once("exit", (code) => {
-      this.#workerHasExited = true;
-      resolveWorkerExit();
-      if (!this.closed) {
-        const error = new Error(`Development worker exited with code ${String(code)}.`);
-        this.#closeCause ??= error;
-        void this.close(error);
-      }
-    });
-    worker.on("message", (message: unknown) => this._handleMessage(message));
-  }
-}
-
-export const createNodeDevelopmentRunner: DevelopmentRunnerFactory = (input) =>
-  new NodeDevelopmentRunner(input);
-
-async function waitForWorkerExit(workerExit: Promise<void>): Promise<boolean> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      workerExit.then(() => true),
-      new Promise<false>((resolve) => {
-        timer = setTimeout(() => resolve(false), DEVELOPMENT_WORKER_SHUTDOWN_TIMEOUT_MS);
-        timer.unref();
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function isWorkerInitializationError(
-  value: unknown,
-): value is { readonly error: string; readonly event: "init-error" } {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  return record.event === "init-error" && typeof record.error === "string";
-}
+    },
+  };
+};

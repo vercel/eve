@@ -383,6 +383,11 @@ export class DrainedNitroDevServer {
 
     const listeners = [...this.#listeners];
     const listenerClosePromises = listeners.map((listener) => listener.beginClose());
+    // Dropping client sockets aborts their proxied requests, so the workers'
+    // graceful shutdown does not wait out open streams.
+    for (const listener of listeners) {
+      listener.destroySockets();
+    }
 
     const slots = [this.#active, this.#spare?.slot, ...this.#draining].filter(
       (slot): slot is RunnerSlot => slot !== undefined,
@@ -397,9 +402,6 @@ export class DrainedNitroDevServer {
       await this.#disposeHost(currentHost);
     }
 
-    for (const listener of listeners) {
-      listener.destroySockets();
-    }
     await Promise.all(listenerClosePromises);
   }
 

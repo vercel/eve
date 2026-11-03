@@ -1,5 +1,7 @@
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { dirname } from "node:path";
+
+import type { BuildOptions, OutputAsset, OutputChunk, RolldownOutput } from "rolldown";
 
 import { createPseudoPackagePlugin } from "#internal/bundler/pseudo-packages.js";
 import {
@@ -7,72 +9,39 @@ import {
   onVendoredDependencyLog,
 } from "#internal/bundler/vendored-dependency-log.js";
 
-export type RolldownOutputChunk = {
-  readonly type: "chunk";
-  readonly code: string;
-  readonly fileName: string;
-  readonly imports: readonly string[];
-  readonly dynamicImports: readonly string[];
-  readonly isEntry: boolean;
-  readonly name: string;
-};
-
-export type RolldownOutputAsset = {
-  readonly type: "asset";
-  readonly fileName: string;
-  readonly source: string | Uint8Array;
-};
-
-type RolldownOutput = {
-  readonly output: readonly [RolldownOutputChunk, ...(RolldownOutputChunk | RolldownOutputAsset)[]];
-};
-
-type RolldownBuild = (options: Record<string, unknown>) => Promise<RolldownOutput>;
-type RolldownParseAst = (
-  sourceText: string,
-  options?: Record<string, unknown> | null,
-  filename?: string,
-) => unknown;
-type RolldownParserLanguage = "js" | "jsx" | "ts" | "tsx";
-
-type RolldownModule = {
-  readonly build: RolldownBuild;
-};
-
-type RolldownParseAstModule = {
-  readonly parseAst: RolldownParseAst;
-};
-
-let rolldownPromise: Promise<RolldownModule> | undefined;
-let rolldownParseAstPromise: Promise<RolldownParseAstModule> | undefined;
+export type RolldownOutputChunk = OutputChunk;
+export type RolldownOutputAsset = OutputAsset;
 
 /**
- * Loads Rolldown from Nitro's dependency tree so eve does not carry a second
- * native bundler package in its own install footprint.
+ * Build options as eve's callers assemble them. Plugins stay loosely typed:
+ * eve's plugin factories return plain hook objects, which Rolldown validates.
  */
-function loadNitroRolldown(): Promise<RolldownModule> {
-  rolldownPromise ??= (async () => {
-    const require = createRequire(import.meta.url);
-    const nitroRequire = createRequire(require.resolve("nitro/package.json"));
-    const rolldownPath = nitroRequire.resolve("rolldown");
-    return (await import(pathToFileURL(rolldownPath).href)) as RolldownModule;
-  })();
+export type RolldownBuildInput = Record<string, unknown> & {
+  readonly experimental?: Record<string, unknown>;
+  readonly plugins?: readonly unknown[];
+};
 
+type RolldownParserLanguage = "js" | "jsx" | "ts" | "tsx";
+
+let rolldownPromise: Promise<typeof import("rolldown")> | undefined;
+let rolldownParseAstPromise: Promise<typeof import("rolldown/parseAst")> | undefined;
+
+/**
+ * Loads eve's own Rolldown, the copy Nitro also builds with through
+ * `deps.paths`. Lazy, so commands that never bundle skip the native binding.
+ */
+function loadRolldown(): Promise<typeof import("rolldown")> {
+  rolldownPromise ??= import("rolldown");
   return rolldownPromise;
 }
 
-/**
- * Loads Rolldown's parser from Nitro's dependency tree so workflow directive
- * transforms can use the same bundler dependency without exposing it publicly.
- */
-function loadNitroRolldownParseAst(): Promise<RolldownParseAstModule> {
-  rolldownParseAstPromise ??= (async () => {
-    const require = createRequire(import.meta.url);
-    const nitroRequire = createRequire(require.resolve("nitro/package.json"));
-    const parseAstPath = nitroRequire.resolve("rolldown/parseAst");
-    return (await import(pathToFileURL(parseAstPath).href)) as RolldownParseAstModule;
-  })();
+/** eve's Rolldown package directory, which Nitro builds with through `deps.paths`. */
+export function resolveRolldownPackageDir(): string {
+  return dirname(createRequire(import.meta.url).resolve("rolldown/package.json"));
+}
 
+function loadRolldownParseAst(): Promise<typeof import("rolldown/parseAst")> {
+  rolldownParseAstPromise ??= import("rolldown/parseAst");
   return rolldownParseAstPromise;
 }
 
@@ -83,11 +52,8 @@ function inferRolldownParserLanguage(filename: string): RolldownParserLanguage {
   return "js";
 }
 
-export async function parseWithNitroRolldownAst(
-  filename: string,
-  sourceText: string,
-): Promise<unknown> {
-  const { parseAst } = await loadNitroRolldownParseAst();
+export async function parseWithRolldownAst(filename: string, sourceText: string): Promise<unknown> {
+  const { parseAst } = await loadRolldownParseAst();
   return parseAst(
     sourceText,
     {
@@ -108,21 +74,18 @@ export async function parseWithNitroRolldownAst(
  * unresolved imports. Pseudo-packages such as `server-only` load as empty
  * modules ahead of every caller plugin.
  */
-export async function buildWithNitroRolldown(
-  options: Record<string, unknown> & {
-    readonly experimental?: Record<string, unknown>;
-    readonly plugins?: readonly unknown[];
-  },
-): Promise<RolldownOutput> {
+export async function buildWithRolldown(options: RolldownBuildInput): Promise<RolldownOutput> {
   assertCustomRolldownConditionNames(options);
-  const { build } = await loadNitroRolldown();
+  const { build } = await loadRolldown();
   return await build({
+    // eve's own plugins dominate the timings, which the app cannot act on.
+    checks: { bundlerTimings: false },
     onLog: onRolldownBuildLog,
     ...options,
     plugins: [createPseudoPackagePlugin(), ...(options.plugins ?? [])],
     // Debug module IDs contain temporary workspace paths and destabilize runtime fingerprints.
     experimental: { ...options.experimental, attachDebugInfo: "none" },
-  });
+  } as BuildOptions);
 }
 
 // Unlike the Nitro host build, whose dependency graph deliberately leaves
@@ -148,7 +111,7 @@ export const ROLLDOWN_STANDARD_CONDITION_NAMES: ReadonlySet<string> = new Set([
   "require",
 ]);
 
-function assertCustomRolldownConditionNames(options: Record<string, unknown>): void {
+function assertCustomRolldownConditionNames(options: RolldownBuildInput): void {
   const resolve = options.resolve;
   if (resolve === null || typeof resolve !== "object") return;
   const conditionNames = Reflect.get(resolve, "conditionNames");
@@ -175,9 +138,9 @@ function assertCustomRolldownConditionNames(options: Record<string, unknown>): v
  */
 export async function buildSingleRolldownChunk(
   description: string,
-  options: Record<string, unknown> & { readonly output?: Record<string, unknown> },
+  options: RolldownBuildInput & { readonly output?: Record<string, unknown> },
 ): Promise<RolldownOutputChunk> {
-  const result = await buildWithNitroRolldown({
+  const result = await buildWithRolldown({
     ...options,
     write: false,
     output: { ...options.output, codeSplitting: false },
