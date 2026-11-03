@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -525,12 +525,6 @@
       "types": "./dist/src/internal/scaffold.d.ts",
       "import": "./dist/src/internal/scaffold.js",
       "default": "./dist/src/internal/scaffold.js"
-    },
-    "./internal/code/prwatch": {
-      "eve-source": "./dist/src/extensions/code/extension/lib/prwatch.js",
-      "types": "./dist/src/extensions/code/extension/lib/prwatch.d.ts",
-      "import": "./dist/src/extensions/code/extension/lib/prwatch.js",
-      "default": "./dist/src/extensions/code/extension/lib/prwatch.js"
     },
     "./internal/grep": {
       "eve-source": "./dist/src/internal/grep.js",

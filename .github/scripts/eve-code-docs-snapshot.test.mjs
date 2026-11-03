@@ -87,3 +87,16 @@ test("replaces only the measured dataset", () => {
   assert.deepEqual(Object.keys(merged.datasets).sort(), ["deepswe-lean", "swe-lean"]);
   assert.equal(merged.datasets["swe-lean"].generatedAt, "2026-10-01T00:00:00.000Z");
 });
+
+test("rerunning an unchanged report keeps the snapshot byte-identical", () => {
+  const { section } = snapshotFromReport(report());
+  const written = (snapshot) => `${JSON.stringify(snapshot, null, 2)}\n`;
+  const first = written(mergeSnapshot({}, section, "2026-10-01T00:00:00.000Z"));
+  const again = mergeSnapshot(JSON.parse(first), section, "2026-10-08T00:00:00.000Z");
+  assert.equal(written(again), first);
+
+  const changed = snapshotFromReport(report()).section;
+  changed.harnesses[0].resolved = 9;
+  const updated = mergeSnapshot(JSON.parse(first), changed, "2026-10-08T00:00:00.000Z");
+  assert.equal(updated.datasets["swe-lean"].generatedAt, "2026-10-08T00:00:00.000Z");
+});

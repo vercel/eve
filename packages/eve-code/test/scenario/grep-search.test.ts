@@ -372,12 +372,10 @@ test("ripgrep and fallback content modes emit an unambiguous filename protocol",
   assert.match(buildPosixGrepCommand(input), /-n -H -Z/u);
 });
 
-test("code and worker remount the canonical grep with truthful fallback documentation", async () => {
+test("code remounts the canonical grep with truthful fallback documentation", async () => {
   const { default: tool } = await import("../../extension/tools/grep.ts");
-  const { default: worker } = await import("../../extension/subagents/worker/tools/grep.ts");
   const { grep } = await import("eve/tools/grep");
   assert.equal(tool, grep);
-  assert.equal(worker, grep);
   assert.match(tool.description, /POSIX fallback does not read \.gitignore/u);
 });
 

@@ -247,7 +247,7 @@ async function claimRunningJob(
   return {
     ...formatStreams({ stderr: raw.stderr, stdout }, omitted),
     message:
-      `The command is still running after ${waitSeconds} seconds as process group ${pid}; stdout and stderr show its output so far. ` +
+      `The command is still running after ${waitSeconds} seconds as process group ${pid}; this result includes its output so far. ` +
       `It keeps writing to ${directory}/stdout and ${directory}/stderr, and writes its exit code to ${directory}/exit when it finishes. ` +
       `Check on it with later commands such as \`tail ${directory}/stdout\` or \`cat ${directory}/exit\`, and stop it with \`kill -- -${pid}\`. ` +
       `To wait for it in one call instead of polling, run \`while [ ! -e ${directory}/exit ] && kill -0 -- -${pid} 2>/dev/null; do sleep 1; done; cat ${directory}/exit 2>/dev/null || echo "process group ${pid} exited without an exit code"\` with a \`timeout\` of up to ${BASH_MAX_YIELD_SECONDS} seconds.`,
