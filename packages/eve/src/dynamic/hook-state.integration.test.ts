@@ -15,6 +15,7 @@ import { markMockModel } from "#internal/mock-model-identity.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { textStreamResult, toolCallStreamResult } from "#internal/testing/approval-resume.js";
 import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
+import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
 import { resumeHook, start } from "#internal/workflow/runtime.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineHook } from "#public/definitions/hook.js";
@@ -61,16 +62,6 @@ function scriptedModel(name: Choice, served: Choice[]) {
       provider: "eve-test",
     }),
   );
-}
-
-async function until(served: readonly Choice[], count: number): Promise<void> {
-  const deadline = Date.now() + 20_000;
-  while (served.length < count) {
-    if (Date.now() > deadline) {
-      throw new Error(`Timed out waiting for ${count} model calls. Served: ${served.join(", ")}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
 }
 
 /**
@@ -134,14 +125,15 @@ async function runTwoTurns(): Promise<readonly Choice[]> {
       },
     ]);
     try {
-      await until(served, 2);
+      // The second message must start its own turn, not steer the first one.
+      await waitForParkedTurnStep(run.runId);
       await resumeHook(sessionInboxHookToken(continuationToken), {
         auth: caller("team"),
         delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
         kind: "send",
         payload: { message: "Use the second model." },
       });
-      await until(served, 4);
+      await waitForParkedTurnStep(run.runId, 2);
     } finally {
       await run.cancel().catch(() => {});
     }
