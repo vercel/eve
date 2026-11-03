@@ -388,11 +388,13 @@ test("screenshot readback shares the call signal and its cleanup is inside the d
   const sandbox = screenshotSandbox();
   let readSignal;
   const reading = Promise.withResolvers();
-  sandbox.readBinaryFile = ({ signal }) => {
+  sandbox.readFile = async ({ signal }) => {
     readSignal = signal;
     reading.resolve();
-    return new Promise((_resolve, reject) => {
-      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    // A stream that never produces data and ignores cancellation.
+    return new ReadableStream({
+      pull: () => new Promise(() => {}),
+      cancel: () => new Promise(() => {}),
     });
   };
   const controller = new AbortController();
@@ -494,7 +496,7 @@ function screenshotSandbox() {
   });
   sandbox.removed = [];
   sandbox.removePath = async (options) => sandbox.removed.push(options);
-  sandbox.readBinaryFile = async () => Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+  sandbox.readFile = async () => new Response(Buffer.from([0x89, 0x50, 0x4e, 0x47])).body;
   return sandbox;
 }
 
@@ -530,7 +532,7 @@ test("inlineScreenshots false keeps the file and sends no pixels anywhere", asyn
 test("an unreadable capture keeps its path and says why the model has no pixels", async () => {
   resetConfig();
   const sandbox = screenshotSandbox();
-  sandbox.readBinaryFile = async () => {
+  sandbox.readFile = async () => {
     throw new Error("read failed");
   };
   const output = await tools.screenshot.execute({ app: "gnome-calculator" }, ctx(sandbox));
@@ -549,10 +551,47 @@ test("an unreadable capture keeps its path and says why the model has no pixels"
 test("a capture too large to inline keeps its path instead of being dropped", async () => {
   resetConfig();
   const sandbox = screenshotSandbox();
-  sandbox.readBinaryFile = async () => Buffer.alloc(4 * 1024 * 1024);
+  sandbox.readFile = async () => new Response(Buffer.alloc(4 * 1024 * 1024)).body;
   const output = await tools.screenshot.execute({ app: "gnome-calculator" }, ctx(sandbox));
   assert.equal(output.imageDataUrl, undefined);
   assert.equal(output.imageOmitted, "too_large");
   assert.match(output.path, /\.png$/);
+  assert.equal(sandbox.removed.length, 0);
+  resetConfig();
+});
+
+test("an endless capture stops reading at the inline limit and is cancelled", async () => {
+  resetConfig();
+  const sandbox = screenshotSandbox();
+  const state = { pulled: 0, cancelled: 0 };
+  const chunk = new Uint8Array(256 * 1024);
+  sandbox.readFile = async () =>
+    new ReadableStream(
+      {
+        pull(controller) {
+          state.pulled += chunk.byteLength;
+          controller.enqueue(chunk);
+        },
+        cancel() {
+          state.cancelled++;
+          return new Promise(() => {}); // a sandbox that never acknowledges the cancel
+        },
+      },
+      { highWaterMark: 0 },
+    );
+  const output = await tools.screenshot.execute({ app: "gnome-calculator" }, ctx(sandbox));
+  assert.equal(output.imageOmitted, "too_large");
+  assert.equal(state.cancelled, 1);
+  assert.ok(state.pulled <= 3 * 1024 * 1024 + chunk.byteLength, `read ${state.pulled} bytes`);
+  resetConfig();
+});
+
+test("a capture of exactly the inline limit is inlined", async () => {
+  resetConfig();
+  const sandbox = screenshotSandbox();
+  sandbox.readFile = async () => new Response(Buffer.alloc(3 * 1024 * 1024, 1)).body;
+  const output = await tools.screenshot.execute({ app: "gnome-calculator" }, ctx(sandbox));
+  assert.equal(output.imageOmitted, undefined);
+  assert.ok(output.imageDataUrl.startsWith("data:image/png;base64,"));
   resetConfig();
 });

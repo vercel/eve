@@ -37,18 +37,16 @@ export async function inlineScreenshot(
   if (!extension.config.inlineScreenshots || output.path === undefined) return output;
   const { path, ...rest } = output;
   const sandbox = call.sandbox;
-  let bytes: Uint8Array | null;
+  let bytes: Uint8Array | null | typeof TOO_LARGE;
   try {
-    bytes = await sandbox.readBinaryFile({ path, signal: call.signal });
+    bytes = await readCapped(sandbox, path, call.signal);
   } catch {
     call.signal.throwIfAborted();
     return { ...output, imageOmitted: "unreadable" };
   }
   call.signal.throwIfAborted();
-  if (bytes === null || bytes === undefined || bytes.length === 0)
-    return { ...output, imageOmitted: "unreadable" };
-  if (bytes.length > MAX_INLINE_SCREENSHOT_BYTES)
-    return { ...rest, path, imageOmitted: "too_large" };
+  if (bytes === TOO_LARGE) return { ...rest, path, imageOmitted: "too_large" };
+  if (bytes === null || bytes.length === 0) return { ...output, imageOmitted: "unreadable" };
   try {
     await sandbox.removePath({ path, force: true, signal: call.signal });
   } catch {
@@ -59,6 +57,44 @@ export async function inlineScreenshot(
     ...rest,
     imageDataUrl: `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`,
   };
+}
+
+const TOO_LARGE = Symbol("too_large");
+
+/**
+ * Read the capture as a stream and stop as soon as it passes the inline
+ * limit. The sandbox controls the file, so a post-read size check or a
+ * separate stat would let it make the host buffer an arbitrarily large file.
+ * Cancelling never waits on a sandbox-controlled acknowledgement.
+ */
+async function readCapped(
+  sandbox: DesktopCall["sandbox"],
+  path: string,
+  signal: AbortSignal,
+): Promise<Uint8Array | null | typeof TOO_LARGE> {
+  const stream = await sandbox.readFile({ path, signal });
+  if (stream === null) return null;
+  const reader = stream.getReader();
+  const stop = () => void reader.cancel(signal.reason).catch(() => undefined);
+  signal.addEventListener("abort", stop, { once: true });
+  const bytes = new Uint8Array(MAX_INLINE_SCREENSHOT_BYTES);
+  let used = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      signal.throwIfAborted();
+      if (done) return bytes.slice(0, used);
+      if (value.byteLength > MAX_INLINE_SCREENSHOT_BYTES - used) {
+        stop();
+        return TOO_LARGE;
+      }
+      bytes.set(value, used);
+      used += value.byteLength;
+    }
+  } finally {
+    signal.removeEventListener("abort", stop);
+    reader.releaseLock();
+  }
 }
 
 /** The model gets the pixels when they were captured inline, and never the sandbox path or the base64 as text. */

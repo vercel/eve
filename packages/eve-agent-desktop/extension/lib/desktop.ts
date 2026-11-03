@@ -33,7 +33,7 @@ interface Envelope {
  * deadline.
  */
 export interface DesktopCall {
-  readonly sandbox: Pick<SandboxSession, "spawn" | "readBinaryFile" | "removePath">;
+  readonly sandbox: Pick<SandboxSession, "spawn" | "readFile" | "removePath">;
   readonly signal: AbortSignal;
   run<TData = unknown>(args: readonly string[]): Promise<TData>;
 }

@@ -70,10 +70,10 @@ export function createProcessSandbox() {
       await rm(path, { force, recursive });
       signal?.throwIfAborted();
     },
-    async readBinaryFile({ path, signal }) {
+    async readFile({ path, signal }) {
       signal?.throwIfAborted();
       try {
-        return readFileSync(path);
+        return new Response(readFileSync(path)).body;
       } catch {
         return null;
       }
