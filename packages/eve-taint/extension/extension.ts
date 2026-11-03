@@ -5,8 +5,12 @@ export { taintPolicy, taintRuntimeContext } from "./lib/policy.ts";
 export {
   EXPORT_TAG,
   EXTERNAL_TAG,
+  PERSONAL_TAG,
+  SENSITIVE_EFFECT_TAG,
+  SENSITIVE_TAG,
   UNTRUSTED_TAG,
   type Exposure,
+  type ReadLeg,
   type TaintPolicyOptions,
 } from "./lib/taint.ts";
 

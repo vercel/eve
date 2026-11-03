@@ -1,6 +1,6 @@
 # @eve/taint Extension Package
 
-This private package is the source of the `eve/extensions/taint` extension: a hook that records in `defineState` when a session reads untrusted content, and `taintPolicy()`, an agent-wide approval policy that acts on it.
+This private package is the source of the `eve/extensions/taint` extension: a hook that records in `defineState` when a session reads untrusted content or sensitive data, and `taintPolicy()`, an agent-wide approval policy that applies the Rule of Two to them.
 
 Before writing code, read the installed eve package docs for extensions, hooks, state, and approvals.
 
