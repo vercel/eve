@@ -7,13 +7,14 @@ import { listDevelopmentGenerationIds } from "#internal/nitro/dev-runtime-genera
 import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
 import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
 import type { ValidQueueName, World } from "#compiled/@workflow/world/index.js";
-import { createWorld } from "#compiled/@workflow/world-local/index.js";
+import { createWorld, type LocalWorld } from "#compiled/@workflow/world-local/index.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
   displayLocalWorkflowWorldDataDirectory,
   resolveLocalWorkflowWorldDataDirectory,
 } from "#internal/workflow/local-world-data-directory.js";
 import { applyLocalWorkflowWorldDeliveryTimeoutDefaults } from "#internal/workflow/local-world-delivery-timeouts.js";
+import { releaseOrphanedLocalSteps } from "#internal/workflow/release-orphaned-steps.js";
 import {
   decodeDevelopmentWorldValue,
   encodeDevelopmentWorldValue,
@@ -68,7 +69,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   readonly #appRoot: string;
   readonly #resolveActiveGenerationId: () => string;
   readonly #transportSecret: string;
-  readonly #world: World;
+  readonly #world: LocalWorld;
   readonly #resume: boolean;
   // Owned by the host, not a worker: rebuilds preserve the startup admission decision.
   readonly #unrecoveredGenerations = new Map<
@@ -130,6 +131,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
         appRoot: this.#appRoot,
         enqueue: this.#queue.bind(this),
         prefix: deriveEveWorkflowQueuePrefix(this.#agentName),
+        release: async (runId) => await releaseOrphanedLocalSteps(this.#world, runId),
         world: this.#world,
         canRecover: async (generationId) => {
           const availability = await this.#generationAvailability(generationId);
@@ -360,6 +362,8 @@ async function reenqueueActiveDevelopmentRuns(input: {
   readonly enqueue: World["queue"];
   readonly canRecover: (generationId: string) => Promise<boolean>;
   readonly prefix: string;
+  /** Releases a run's orphaned inline steps before it is re-enqueued. */
+  readonly release: (runId: string) => Promise<void>;
   readonly world: World;
 }): Promise<void> {
   for (const status of ["pending", "running"] as const) {
@@ -381,6 +385,7 @@ async function reenqueueActiveDevelopmentRuns(input: {
       }
       for (const run of page.data) {
         if (!(await input.canRecover(run.deploymentId))) continue;
+        await input.release(run.runId);
         await input.enqueue(`${input.prefix}${run.workflowName}` as ValidQueueName, {
           runId: run.runId,
         });

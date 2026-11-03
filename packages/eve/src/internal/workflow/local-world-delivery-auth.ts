@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import type { ValidQueueName } from "#compiled/@workflow/world/index.js";
 import type { LocalWorld } from "#compiled/@workflow/world-local/index.js";
 import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
+import { releaseOrphanedLocalSteps } from "#internal/workflow/release-orphaned-steps.js";
 import {
   workflowQueuePrefix,
   WORKFLOW_QUEUE_NAMESPACE_ENV,
@@ -55,7 +56,10 @@ export function authenticateLocalWorkflowDeliveries(
   return world;
 }
 
-/** Mirrors world-local's startup recovery, but through the stamped `world.queue`. */
+/**
+ * Mirrors world-local's startup recovery, but through the stamped `world.queue`:
+ * each run's orphaned inline steps are released before it is re-enqueued.
+ */
 async function reenqueueActiveRuns(world: LocalWorld): Promise<void> {
   const namespace = process.env[WORKFLOW_QUEUE_NAMESPACE_ENV];
   if (!namespace) {
@@ -72,6 +76,7 @@ async function reenqueueActiveRuns(world: LocalWorld): Promise<void> {
       status: ["pending", "running"],
     });
     for (const run of page.data) {
+      await releaseOrphanedLocalSteps(world, run.runId);
       try {
         await world.queue(`${prefix}${run.workflowName}` as ValidQueueName, { runId: run.runId });
       } catch (error) {
