@@ -426,9 +426,6 @@ importers:
         specifier: 'catalog:'
         version: 4.5.4
     devDependencies:
-      '@agent-browser/eve':
-        specifier: ^0.33.0
-        version: 0.33.2(@vercel/sandbox@3.9.0)(eve@packages+eve)
       '@agentphone/chat-sdk-adapter':
         specifier: 0.1.0
         version: 0.1.0(ai@7.0.137(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
@@ -462,6 +459,9 @@ importers:
       '@chat-adapter/x':
         specifier: 4.42.0
         version: 4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4)
+      '@eve/agent-browwser':
+        specifier: workspace:*
+        version: link:../../packages/eve-agent-browser
       '@getdial/chat-sdk-adapter':
         specifier: 0.2.0
         version: 0.2.0(ai@7.0.137(zod@4.5.4))(chat@4.42.0(ai@7.0.137(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react-native@0.87.1(@babel/core@7.29.7(supports-color@10.2.2))(@types/react@19.2.15)(bufferutil@4.1.0)(react@19.2.6)(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
@@ -2010,6 +2010,22 @@ importers:
     linkDirectory: false
     publishDirectory: .package
 
+  packages/eve-agent-browser:
+    dependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.5.4
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.5
+      eve:
+        specifier: workspace:*
+        version: link:../eve
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   packages/eve-catalog:
     devDependencies:
       vitest:
@@ -2115,20 +2131,6 @@ importers:
     publishDirectory: .package
 
 packages:
-
-  '@agent-browser/eve@0.33.2':
-    resolution: {integrity: sha512-9i+YbKEvIYFubkM/iE52IakEis8wCZB5/9mvewzhzFJRJhX2NuvycpiZiGIeoV8kMqU4yD2o556b6fYQZlbS9g==}
-    engines: {node: '>=24.0.0'}
-    peerDependencies:
-      eve: '>=0.25.1'
-
-  '@agent-browser/sandbox@0.33.2':
-    resolution: {integrity: sha512-xszrdrHh3OLWMe4TF56d9/ZrETd9FueHiQKoYsNMit78Mo5q72xJF+vytdJKXmW5cduEpR8I/p3BJL6m0gEvwg==}
-    peerDependencies:
-      '@vercel/sandbox': '>=1.0.0'
-    peerDependenciesMeta:
-      '@vercel/sandbox':
-        optional: true
 
   '@agentclientprotocol/sdk@1.3.0':
     resolution: {integrity: sha512-i3h/efaeuMUFAO1HSfo97QZQnnvMd7wWBYtBsdL6UMZg3a78sk3Ffya5Xu7C7tYsXomXoDXJBAzQF2PcFKAhIQ==}
@@ -15386,18 +15388,6 @@ ignoredOptionalDependencies:
   - node-liblzma
 
 snapshots:
-
-  '@agent-browser/eve@0.33.2(@vercel/sandbox@3.9.0)(eve@packages+eve)':
-    dependencies:
-      '@agent-browser/sandbox': 0.33.2(@vercel/sandbox@3.9.0)
-      eve: link:packages/eve
-      zod: 4.4.3
-    transitivePeerDependencies:
-      - '@vercel/sandbox'
-
-  '@agent-browser/sandbox@0.33.2(@vercel/sandbox@3.9.0)':
-    optionalDependencies:
-      '@vercel/sandbox': 3.9.0
 
   '@agentclientprotocol/sdk@1.3.0(zod@4.5.4)':
     dependencies:

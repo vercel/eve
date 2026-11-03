@@ -1965,8 +1965,7 @@ const extensionPresentations: Record<string, ExtensionPresentation> = {
   ...baseExtensionPresentations,
   "agent-browser": {
     logo: "agent-browser",
-    docsHref:
-      "https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve",
+    docsHref: "https://github.com/vercel/eve/tree/main/packages/eve-agent-browser",
     keywords: [
       "browser",
       "browser automation",
@@ -1989,16 +1988,16 @@ The extension installs agent-browser automatically on first use and runs it insi
     quickStart: `Mount the extension under \`agent/extensions/\`:
 
 \`\`\`ts title="agent/extensions/browser.ts"
-import browser from "@agent-browser/eve";
+import browser from "@eve/agent-browwser";
 
 export default browser({});
 \`\`\`
 
-The filename supplies the \`browser\` namespace. The extension adds tools such as \`browser__navigate\`, \`browser__snapshot\`, \`browser__click\`, \`browser__fill\`, \`browser__find\`, and \`browser__screenshot\`. agent-browser keeps the underlying browser process and session state in the eve sandbox.`,
+The filename supplies the \`browser\` namespace. The extension adds tools such as \`browser__open\`, \`browser__snapshot\`, \`browser__click\`, \`browser__fill\`, \`browser__find\`, and \`browser__screenshot\`. agent-browser keeps the underlying browser process and session state in the eve sandbox.`,
     configure: `Restrict browser access to the sites the agent needs with the extension's domain allow-list:
 
 \`\`\`ts title="agent/extensions/browser.ts"
-import browser from "@agent-browser/eve";
+import browser from "@eve/agent-browwser";
 
 export default browser({
   allowedDomains: ["example.com", "*.example.com"],
@@ -2009,7 +2008,7 @@ export default browser({
 
 Also configure the [sandbox network policy](/docs/sandbox#network-policy) for defense in depth. Treat saved browser state, cookies, screenshots, downloads, and recordings as sensitive data. Do not place passwords or session tokens in prompts. Use the extension's per-tool overrides to gate or disable actions your agent should not take unattended.
 
-The extension also supports inline screenshots, session naming, proxies, and production pre-installation. See the [agent-browser eve extension documentation](https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve) for the complete options and example app.`,
+The extension also supports inline screenshots, session naming, proxies, and production pre-installation. See the [agent-browser eve extension documentation](https://github.com/vercel/eve/tree/main/packages/eve-agent-browser) for configuration, sandbox preparation, and tool overrides.`,
     relatedResources: [
       {
         title: "Give your eve agent a browser",
