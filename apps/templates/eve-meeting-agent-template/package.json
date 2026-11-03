@@ -9,9 +9,10 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@eve/recall": "^0.1.0-rc.0",
     "@vercel/connect": "^2.5.0",
     "ai": "7.0.139",
-    "eve": "^0.81.1",
+    "eve": "^1.0.0-rc.3",
     "zod": "4.4.3"
   },
   "devDependencies": {

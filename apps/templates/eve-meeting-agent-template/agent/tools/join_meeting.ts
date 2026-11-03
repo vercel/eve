@@ -1,4 +1,4 @@
-import { createRecallBot, recallBotConfig, resolveRecallWebhookUrl } from "eve/channels/recall";
+import { createRecallBot, recallBotConfig, resolveRecallWebhookUrl } from "@eve/recall";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
