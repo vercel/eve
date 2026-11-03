@@ -2,6 +2,7 @@ import type { CompiledConnectionDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
+import { normalizeConnectionTags } from "#internal/authored-definition/tags.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import {
   normalizeMcpClientConnectionDefinition,
@@ -81,6 +82,7 @@ export async function resolveConnectionDefinition(
       sourceId: string;
       sourceKind: "module";
       spec?: ResolvedConnectionDefinition["spec"];
+      tags?: ResolvedConnectionDefinition["tags"];
       toolCall?: Readonly<ConnectionToolCallDefinition>;
       tools?: Readonly<ToolFilterDefinition>;
       url: string;
@@ -181,6 +183,13 @@ export async function resolveConnectionDefinition(
       );
     }
 
+    if (resolvedRecord.tags !== undefined) {
+      result.tags = normalizeConnectionTags(
+        resolvedRecord.tags,
+        `Connection "${definition.connectionName}":`,
+      );
+    }
+
     return result;
   } catch (error) {
     if (error instanceof ResolveAgentError) {
@@ -237,6 +246,7 @@ export function resolveDynamicConnectionValue(
       sourceId: source.sourceId,
       sourceKind: "module" as const,
       spec: normalized.spec,
+      tags: normalized.tags,
       toolCall: normalized.toolCall,
       tools: normalized.operations,
       url: normalized.baseUrl ?? "",
@@ -268,6 +278,7 @@ export function resolveDynamicConnectionValue(
     protocol,
     sourceId: source.sourceId,
     sourceKind: "module" as const,
+    tags: normalized.tags,
     toolCall: normalized.toolCall,
     protocolVersionDiscovery: normalized.protocolVersionDiscovery,
     forwardPrincipal: normalized.forwardPrincipal,

@@ -93,7 +93,7 @@ Filters match an operation's `operationId` and its generated tool name, so `bloc
 
 ## Approval gates
 
-Operations can change data, like authored tools. Use the shared `approval` option to ask a person first, and `operations.allow` to expose only the operations you need. See [Per-connection approval](../connections#per-connection-approval) for the helpers and [Human-in-the-loop](../human-in-the-loop#approvals) for policy behavior.
+Operations can change data, like authored tools. Use the shared `approval` option to ask a person first, and `operations.allow` to expose only the operations you need. See [Per-connection approval](../connections#per-connection-approval) for the helpers and [Human-in-the-loop](../human-in-the-loop#approvals) for policy behavior. To gate operations by what they do rather than by name, [tag them](../human-in-the-loop#tag-entries-for-policies) with `tags`, keyed by `operationId`.
 
 A custom policy sees the full tool name, `<connection>__<operationId>`, while `providedArguments` callbacks get the bare `operationId`. Its `toolInput` holds the parameters as top-level properties and the request body under `body`. To ask a person only for large orders:
 

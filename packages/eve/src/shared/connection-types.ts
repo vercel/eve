@@ -92,6 +92,18 @@ export type ToolFilterDefinition =
   | { readonly block: readonly string[] };
 
 /**
+ * Tags for a connection's tools: one list for every tool, or a `default`
+ * list with per-tool lists keyed by the server's tool name. A tool's own
+ * list replaces the default, so `[]` clears it for that tool.
+ */
+export type ConnectionTags =
+  | readonly string[]
+  | {
+      readonly default?: readonly string[];
+      readonly tools?: Readonly<Record<string, readonly string[]>>;
+    };
+
+/**
  * Framework-resolved identity on whose behalf a connection is
  * authenticating. The runtime derives this from
  * {@link AuthorizationDefinition.principalType} plus the active

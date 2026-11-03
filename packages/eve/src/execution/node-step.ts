@@ -244,6 +244,7 @@ function createRegisteredHarnessToolDefinition(input: {
     approval: def.approval,
     outputSchema: def.outputSchema,
     rootOnly: input.rootOnly,
+    tags: def.tags,
     toModelOutput: def.toModelOutput,
   };
   return definition;

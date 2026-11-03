@@ -1,6 +1,7 @@
 import type { ConnectionEvents } from "#public/definitions/connections/events.js";
 import type {
   ConnectionAuthDefinition,
+  ConnectionTags,
   HeadersDefinition,
   ToolFilterDefinition,
 } from "#shared/connection-types.js";
@@ -112,6 +113,18 @@ export interface McpClientConnectionDefinition {
    * input schema and adds their resolved values immediately before execution.
    */
   toolCall?: ConnectionToolCallDefinition;
+  /**
+   * Opaque tags for this connection's tools, which eve doesn't interpret.
+   * Approval policies read the called tool's tags as `toolTags`, and eve
+   * records them on the call's `call.requested` event. Pass one list for
+   * every tool, or `{ default, tools }` to give tools their own lists, keyed
+   * by the server's tool name. A tool's own list replaces `default`.
+   *
+   * ```ts
+   * tags: { default: ["reads:untrusted", "effect:external"], tools: { list_labels: [] } },
+   * ```
+   */
+  readonly tags?: ConnectionTags;
   /**
    * Client-side tool filter. When set, `eve__search` returns and `eve__tool`
    * calls only tools whose names pass the filter.

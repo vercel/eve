@@ -139,7 +139,12 @@ export function createAgentToolInstrumentation(input: {
         arguments: input.recordInputs ? event.input : undefined,
         startTimeMs: event.startedAtMs,
       });
-      tool.attributes({ "agent.tool.is_framework": event.frameworkTool === true });
+      tool.attributes({
+        "agent.tool.is_framework": event.frameworkTool === true,
+        ...(event.capability.tags !== undefined && {
+          "agent.tool.tags": [...event.capability.tags],
+        }),
+      });
       state = {
         attemptId: attemptIdempotencyKey(event.scope),
         attemptIndex: event.scope.attempt,

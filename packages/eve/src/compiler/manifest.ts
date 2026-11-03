@@ -632,6 +632,7 @@ const compiledAgentConfigBaseFields = {
     .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
     .optional(),
   source: moduleSourceRefSchema,
+  tags: z.array(z.string()).optional(),
   tool: z.union([z.boolean(), z.literal("deferred")]).optional(),
   limits: compiledAgentLimitsDefinitionSchema.optional(),
 };
@@ -1240,6 +1241,7 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
             sessionUsage: config.limits.sessionUsage,
           },
     source: { ...config.source },
+    tags: config.tags === undefined ? undefined : [...config.tags],
     tool: config.tool,
   };
 

@@ -20,6 +20,7 @@ import {
 import { withAgentApproval } from "#approval/agent.js";
 import { isConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { connectionToolName } from "#connections/ownership.js";
+import { connectionToolTags } from "#internal/authored-definition/tags.js";
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { isApprovalRecheck, inheritApprovalContext } from "#approval/evaluation.js";
@@ -85,6 +86,7 @@ export function connectionEntry(
   const label = `${displayProperName(connection.connectionName)}: ${displayTitle(toolName)}`;
   // Wrapped inside the pin, so a call the agent's policy holds is pinned to this instance too.
   const approval = withAgentApproval(agentApproval, connection.approval);
+  const tags = connectionToolTags(connection.tags, toolName);
   return {
     approval: connectionApproval(registry, connection, toolName, approval),
     deferred: true,
@@ -95,6 +97,7 @@ export function connectionEntry(
     inputSchema: refineJsonSchema({}, (input) => checkInput(registry, connection, toolName, input)),
     label: { start: () => label },
     name: connectionToolName(connection.connectionName, toolName),
+    ...(tags !== undefined && { tags }),
     toModelOutput: connectionToolModelOutput,
   };
 }

@@ -1,5 +1,6 @@
 import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
 import { normalizeAgentApproval } from "#internal/authored-definition/approval.js";
+import { normalizeTags } from "#internal/authored-definition/tags.js";
 import type {
   AgentDefinition,
   AgentBuildDefinition,
@@ -66,6 +67,7 @@ export function normalizeAgentDefinition(
       "modelContextWindowTokens",
       "modelOptions",
       "reasoning",
+      "tags",
       "tool",
     ],
     message,
@@ -119,6 +121,10 @@ export function normalizeAgentDefinition(
 
   if (record.reasoning !== undefined) {
     definition.reasoning = normalizeAgentReasoningDefinition(record.reasoning, message);
+  }
+
+  if (record.tags !== undefined) {
+    definition.tags = normalizeTags(record.tags, message);
   }
 
   if (record.tool !== undefined) {

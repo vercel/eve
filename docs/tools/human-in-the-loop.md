@@ -97,7 +97,7 @@ Channels show this prompt in their approval UI. Slack also shows the complete to
 
 ### Write your own policy
 
-When the decision depends on the input, pass a function. It receives `session`, the same as `ctx.session` in `execute`, plus `{ toolName, toolInput, callId, abortSignal }`. Connection tools also get `toolAnnotations`.
+When the decision depends on the input, pass a function. It receives `session`, the same as `ctx.session` in `execute`, plus `{ toolName, toolInput, callId, abortSignal }`. It also gets `toolTags` when the called entry [declares tags](#tag-entries-for-policies), and connection tools get `toolAnnotations`.
 
 This policy denies cross-tenant calls, then requires approval only above an amount:
 
@@ -177,6 +177,54 @@ approval: (ctx) => (ctx.toolAnnotations?.destructiveHint === true ? askOnce(ctx)
 - Not gated: `eve__search`, `eve__skill`, task controls, the built-in `ask_question`, `no_reply`, and `sleep` tools, connection sign-in, and provider-executed tools such as a provider's native web search. Neither is `ctx.agent()` in workflow code, though a local child's own calls are.
 - A channel calling `invokeTool` directly gets the same policy: a call it would ask about is rejected with `approval-required`.
 - With a policy set, eve evaluates it on every call, so keep it fast and pass `abortSignal` to asynchronous work.
+
+### Tag entries for policies
+
+Give tools, connections, subagents, and remote agents `tags`, then write one policy that gates on them instead of on tool names. Tags are strings you choose; eve doesn't interpret them. A policy reads the called entry's tags as `toolTags`:
+
+```ts title="agent/tools/post_comment.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Comment on a GitHub issue.",
+  inputSchema: z.object({ repo: z.string(), number: z.number(), body: z.string() }),
+  tags: ["effect:external"],
+  async execute(input) {
+    return postComment(input);
+  },
+});
+```
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+  approval: ({ toolTags }) => (toolTags?.includes("effect:external") ? "user-approval" : undefined),
+});
+```
+
+A connection tags its tools with one list, or with a `default` list and per-tool lists keyed by the server's tool name. A tool's own list replaces the default, so `[]` clears it:
+
+```ts title="agent/connections/issues.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://issues.example.com/mcp",
+  description: "Public issue tracker.",
+  tags: {
+    default: ["reads:untrusted", "effect:external"],
+    tools: { list_labels: [] },
+  },
+});
+```
+
+- `toolTags` is `undefined` when the entry declares no tags, so a policy can treat an untagged entry differently from one tagged `[]`. Built-in tools have no tags.
+- A subagent's tags go in its `agent.ts`, and a remote agent's in its `defineRemoteAgent`. They tag the parent's call to that agent, not the calls the agent makes. Tags on the root agent's `agent.ts` and on subagents a `defineDynamic()` resolver selects have no effect.
+- A call through `eve__tool` gets the resolved entry's tags.
+- eve records the tags on the call's `call.requested` event as `capability.tags`, and on its tool span as `agent.tool.tags`, so you can find tagged calls in traces before any policy acts on them.
+- Each entry can have up to 32 tags of 1 to 128 characters. eve drops duplicates and rejects anything else when it loads the definition.
 
 ### Remember approval for a tool
 

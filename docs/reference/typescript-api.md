@@ -142,6 +142,7 @@ Tool definitions accept these options:
 
 - `availableInSubagents: false` restricts the tool to top-level root sessions.
 - `deferred: true` keeps the tool out of the model's tool list. The model finds it with `eve__search` and calls it with `eve__tool`; see [Tools](../tools#keep-a-tool-out-of-the-tool-list).
+- `tags` gives the tool opaque strings that approval policies read as `toolTags`; see [Tag entries for policies](../human-in-the-loop#tag-entries-for-policies).
 
 `defineTool` definitions accept `endsTurn: true`, or a function that receives the `execute` output, to end the turn without a reply after a successful call; see [Tools](../tools#end-the-turn-after-a-tool-call).
 

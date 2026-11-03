@@ -8,6 +8,7 @@ import {
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
+import { normalizeTags } from "#internal/authored-definition/tags.js";
 import { registerDefinitionSource } from "#internal/authored-definition/source-identity.js";
 import { isToolSchema, toInputSchema, toOutputSchema } from "#tools/schema.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -129,7 +130,9 @@ export async function resolveToolDefinition(
  * result without clobbering required fields with `undefined`.
  */
 type OptionalResolvedFields = {
-  -readonly [K in "label" | "approval" | "endsTurn" | "toModelOutput"]?: ResolvedToolDefinition[K];
+  -readonly [
+    K in "label" | "approval" | "endsTurn" | "tags" | "toModelOutput"
+  ]?: ResolvedToolDefinition[K];
 };
 
 /**
@@ -185,6 +188,10 @@ function extractOptionalHooks(
             record.endsTurn,
             describe(definition, "to provide endsTurn as a boolean or a function"),
           ) as ResolvedToolDefinition["endsTurn"]);
+  }
+
+  if (record.tags !== undefined) {
+    optional.tags = normalizeTags(record.tags, describe(definition, "to provide valid tags"));
   }
 
   if (record.toModelOutput !== undefined) {

@@ -37,8 +37,8 @@ export function createProviderStreamActionBatch(input: {
     pendingActions.clear();
     // The provider runs these as it streams: each is requested and started in one commit.
     const runId = input.state.runId ?? `${input.state.turnId}.run`;
-    const commit: SessionEvent[] = actions.flatMap(({ action, presentationLabel }) => [
-      callRequested({ action, owner: { runId }, label: presentationLabel }),
+    const commit: SessionEvent[] = actions.flatMap(({ action, presentationLabel, tags }) => [
+      callRequested({ action, label: presentationLabel, owner: { runId }, tags }),
       callStarted(action.callId, { clearedBy: { policy: "provider" } }),
     ]);
     await input.emitFn(commit);

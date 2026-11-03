@@ -188,6 +188,7 @@ export async function decideApproval(
       callId: call.callId,
       toolInput: isObject(call.input) ? call.input : undefined,
       toolName: definition.name,
+      ...(definition.tags !== undefined && { toolTags: definition.tags }),
     },
     { memory: call.approvalMemory, recheck: call.recheck },
   );

@@ -12,6 +12,7 @@ import type { InstrumentationChannel } from "#shared/instrumentation-channel.js"
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#context/session-context.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
+import { normalizeTags } from "#internal/authored-definition/tags.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenResult } from "#shared/connection-types.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
@@ -48,6 +49,13 @@ interface ToolDefinitionBase {
    */
   readonly deferred?: boolean;
   readonly description: string;
+  /**
+   * Opaque tags that describe this tool, such as `"reads:untrusted"` or
+   * `"effect:external"`. eve doesn't interpret them: approval policies read
+   * them as `toolTags`, and eve records them on each call's `call.requested`
+   * event. Up to 32 non-empty strings of at most 128 characters each.
+   */
+  readonly tags?: readonly string[];
 }
 
 export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
@@ -438,6 +446,7 @@ export function stampToolDefinition<
     readonly execute?: (...args: never[]) => unknown;
     readonly label?: ToolLabelDefinition;
     readonly approval?: Approval<never>;
+    readonly tags?: readonly string[];
     readonly toModelOutput?: (...args: never[]) => unknown;
   },
 >(definition: T, definer: "defineTool" | "defineWorkflowTool"): T {
@@ -451,6 +460,9 @@ export function stampToolDefinition<
     throw new Error(
       `${definer}: approvalKey is no longer supported. Use an approval policy for input-dependent decisions.`,
     );
+  }
+  if (definition.tags !== undefined) {
+    Object.assign(definition, { tags: normalizeTags(definition.tags, `${definer}:`) });
   }
   Object.assign(definition, { [TOOL_BRAND]: true });
   stampDefinitionKey(definition, `tool:${definition.description}`);

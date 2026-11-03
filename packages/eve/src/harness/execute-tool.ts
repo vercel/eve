@@ -42,6 +42,8 @@ export interface HarnessToolDefinition {
    * cannot delegate recursively. Absent means visible everywhere.
    */
   readonly rootOnly?: boolean;
+  /** The entry's opaque tags, which approval policies read as `toolTags`. */
+  readonly tags?: readonly string[];
   readonly toModelOutput?: (output: unknown) => unknown;
   /**
    * The version of a dynamically sourced entry the model was offered. A call made from one

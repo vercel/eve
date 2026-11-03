@@ -35,6 +35,8 @@ export interface Capability {
   readonly label?: string;
   /** An `agent` another deployment serves: a remote agent, not a subagent of this one. */
   readonly remote?: true;
+  /** The entry's opaque tags when the call was requested, as its definition declared them. */
+  readonly tags?: readonly string[];
 }
 
 /** A preview of a call's input as the model writes it. The first record announces the call. */
@@ -119,6 +121,7 @@ export const callSchemas = {
           name: z.string(),
           remote: z.literal(true).optional(),
           label: z.string().optional(),
+          tags: z.array(z.string()).optional(),
         }),
         input: jsonValue.optional(),
         inputError: errorInfo.optional(),

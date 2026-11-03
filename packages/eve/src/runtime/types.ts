@@ -17,6 +17,7 @@ import type {
   AuthorizationDefinition,
   ConnectionAuthResolver,
   ConnectionProtocol,
+  ConnectionTags,
   HeadersDefinition,
   ToolFilterDefinition,
 } from "#shared/connection-types.js";
@@ -140,6 +141,8 @@ export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
    * parses it on first use.
    */
   readonly spec?: OpenAPISpecSource;
+  /** Tags for the connection's tools; a tool's own list replaces the default. */
+  readonly tags?: ConnectionTags;
   readonly tools?: Readonly<ToolFilterDefinition>;
   readonly url: string;
 }
@@ -291,6 +294,7 @@ export type ResolvedRuntimeSubagentNode = Readonly<
     Node & {
       kind: "subagent";
       name: string;
+      tags?: readonly string[];
       tool?: AgentToolExposure;
     } & (
       | {
@@ -318,6 +322,7 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
       kind: "remote";
       name: string;
       path: string;
+      tags?: readonly string[];
       tool?: AgentToolExposure;
       url: string;
     }

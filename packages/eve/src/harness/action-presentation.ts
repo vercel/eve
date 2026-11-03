@@ -10,6 +10,7 @@ import { parseJsonObject } from "#shared/json.js";
 export interface RuntimeActionRequestProjection {
   readonly action: RuntimeActionRequest;
   readonly presentationLabel?: string;
+  readonly tags?: readonly string[];
 }
 
 export function createPresentedRuntimeActionRequestFromToolCall(input: {
@@ -17,12 +18,13 @@ export function createPresentedRuntimeActionRequestFromToolCall(input: {
   readonly tools: HarnessToolLookup;
 }): RuntimeActionRequestProjection {
   const action = createRuntimeActionRequestFromToolCall(input);
-  const presentationLabel = projectToolLabel(
-    input.tools.get(input.toolCall.toolName),
-    "start",
-    action.input,
-  );
-  return presentationLabel === undefined ? { action } : { action, presentationLabel };
+  const definition = input.tools.get(input.toolCall.toolName);
+  const presentationLabel = projectToolLabel(definition, "start", action.input);
+  return {
+    action,
+    ...(presentationLabel !== undefined && { presentationLabel }),
+    ...(definition?.tags !== undefined && { tags: definition.tags }),
+  };
 }
 
 /** Label callbacks share normalization, detached input, and failure isolation. */

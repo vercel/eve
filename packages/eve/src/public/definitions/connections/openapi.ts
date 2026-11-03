@@ -1,5 +1,6 @@
 import type {
   ConnectionAuthDefinition,
+  ConnectionTags,
   HeadersDefinition,
   ToolFilterDefinition,
 } from "#shared/connection-types.js";
@@ -111,6 +112,18 @@ export interface OpenAPIConnectionDefinition {
    * resolved values immediately before building the HTTP request.
    */
   toolCall?: ConnectionToolCallDefinition;
+  /**
+   * Opaque tags for this connection's tools, which eve doesn't interpret.
+   * Approval policies read the called tool's tags as `toolTags`, and eve
+   * records them on the call's `call.requested` event. Pass one list for
+   * every tool, or `{ default, tools }` to give tools their own lists, keyed
+   * by `operationId`. A tool's own list replaces `default`.
+   *
+   * ```ts
+   * tags: { default: ["reads:untrusted", "effect:external"], tools: { listIssues: [] } },
+   * ```
+   */
+  readonly tags?: ConnectionTags;
   /**
    * Operation filter keyed on `operationId`. When set, the model can find
    * and call only operations whose id passes the filter.

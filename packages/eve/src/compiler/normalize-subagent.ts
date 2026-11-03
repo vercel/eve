@@ -5,6 +5,7 @@ import {
   expectOnlyKnownKeys,
   expectString,
 } from "#internal/authored-module.js";
+import { normalizeTags } from "#internal/authored-definition/tags.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 import type { LocalSubagentSourceRef } from "#discover/manifest.js";
@@ -43,7 +44,7 @@ export function normalizeSubagentConfig(value: unknown, message: string): Normal
     const record = expectObjectRecord(value, message);
     expectOnlyKnownKeys(
       record,
-      ["auth", "description", "forwardPrincipal", "headers", "kind", "path", "tool", "url"],
+      ["auth", "description", "forwardPrincipal", "headers", "kind", "path", "tags", "tool", "url"],
       message,
     );
     if (record.forwardPrincipal !== undefined) {
@@ -52,6 +53,7 @@ export function normalizeSubagentConfig(value: unknown, message: string): Normal
         `${message} Expected "forwardPrincipal" to be a boolean.`,
       );
     }
+    if (record.tags !== undefined) normalizeTags(record.tags, message);
     return {
       description: expectString(record.description, message),
       kind: "remote",

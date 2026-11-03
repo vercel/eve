@@ -26,6 +26,7 @@ export default defineRemoteAgent({
 | `forwardPrincipal` | `boolean`                                     | No       | `false`           | Send the calling turn's user identity to the remote deployment. See [Forwarding the caller identity](#forwarding-the-caller-identity).                                              |
 | `headers`          | `HeadersValue`                                | No       | none              | Request headers, static or resolved for each request.                                                                                                                               |
 | `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` to create the remote session.                                                                                                                               |
+| `tags`             | `string[]`                                    | No       | none              | Tags the call to this remote agent for [approval policies](/docs/human-in-the-loop#tag-entries-for-policies).                                                                       |
 | `tool`             | `boolean \| "deferred"`                       | No       | `true`            | `false` lets only authored workflow tools call it, through `ctx.agent()`. `"deferred"` keeps it out of the tool list but findable with `eve__search` and callable with `eve__tool`. |
 
 ## Calling a remote agent

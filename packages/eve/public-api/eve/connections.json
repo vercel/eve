@@ -10,6 +10,7 @@
   "ConnectionAuthorizationRequiredErrorOptions",
   "ConnectionCallbackContext",
   "ConnectionPrincipal",
+  "ConnectionTags",
   "ConnectionToolCallDefinition",
   "DynamicConnectionDefinition",
   "DynamicConnectionResult",

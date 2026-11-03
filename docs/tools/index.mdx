@@ -57,18 +57,19 @@ export default defineTool({
 
 ## Options
 
-| Field                  | Default            | What it does                                                                  |
-| ---------------------- | ------------------ | ----------------------------------------------------------------------------- |
-| `description`          | required           | Tells the model what the tool does.                                           |
-| `inputSchema`          | required           | Validates and types the model's input.                                        |
-| `execute`              | required           | Runs the tool.                                                                |
-| `outputSchema`         | none               | Describes and types the return value.                                         |
-| `approval`             | `never()`          | [Asks a person to approve calls](#gate-a-tool-on-human-approval).             |
-| `toModelOutput`        | full return        | [Changes what the model sees](#shape-what-the-model-sees-with-tomodeloutput). |
-| `label`                | readable tool name | [Sets activity text](#label-tool-activity).                                   |
-| `endsTurn`             | `false`            | [Ends the turn after success](#end-the-turn-after-a-tool-call).               |
-| `deferred`             | `false`            | [Leaves the tool out of the tool list](#keep-a-tool-out-of-the-tool-list).    |
-| `availableInSubagents` | `true`             | [Offers the tool in delegated sessions](#hide-a-tool-from-delegated-agents).  |
+| Field                  | Default            | What it does                                                                             |
+| ---------------------- | ------------------ | ---------------------------------------------------------------------------------------- |
+| `description`          | required           | Tells the model what the tool does.                                                      |
+| `inputSchema`          | required           | Validates and types the model's input.                                                   |
+| `execute`              | required           | Runs the tool.                                                                           |
+| `outputSchema`         | none               | Describes and types the return value.                                                    |
+| `approval`             | `never()`          | [Asks a person to approve calls](#gate-a-tool-on-human-approval).                        |
+| `toModelOutput`        | full return        | [Changes what the model sees](#shape-what-the-model-sees-with-tomodeloutput).            |
+| `label`                | readable tool name | [Sets activity text](#label-tool-activity).                                              |
+| `endsTurn`             | `false`            | [Ends the turn after success](#end-the-turn-after-a-tool-call).                          |
+| `deferred`             | `false`            | [Leaves the tool out of the tool list](#keep-a-tool-out-of-the-tool-list).               |
+| `availableInSubagents` | `true`             | [Offers the tool in delegated sessions](#hide-a-tool-from-delegated-agents).             |
+| `tags`                 | none               | [Tags the tool for approval policies](/docs/human-in-the-loop#tag-entries-for-policies). |
 
 ## When a tool throws
 

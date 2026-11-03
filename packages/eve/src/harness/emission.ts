@@ -200,7 +200,14 @@ async function consumeStreamContent(
 
     emittedActionCallIds.add(action.callId);
     actionInputs.set(action.callId, action.input);
-    await emitFn(callRequested({ action, owner: { runId }, label: projection.presentationLabel }));
+    await emitFn(
+      callRequested({
+        action,
+        label: projection.presentationLabel,
+        owner: { runId },
+        tags: projection.tags,
+      }),
+    );
   };
 
   const collectProviderToolCall = async (toolCall: {
@@ -267,6 +274,7 @@ async function consumeStreamContent(
         action,
         inputError: { code: "INVALID_TOOL_INPUT", message },
         owner: { runId },
+        tags: action.kind === "tool-call" ? options?.tools.get(action.toolName)?.tags : undefined,
       }),
     );
     await emitActionResult(result);

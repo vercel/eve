@@ -35,6 +35,7 @@ import {
   type ToolSchemaSource,
   UNSPECIFIED_INPUT_SCHEMA,
 } from "#tools/schema.js";
+import { normalizeTags } from "#internal/authored-definition/tags.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import { assertDynamicSentinelKeys, isDynamicSentinel } from "#dynamic/definition.js";
 
@@ -148,6 +149,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "inputSchema",
       "approval",
       "outputSchema",
+      "tags",
       "toModelOutput",
       ...(workflow === undefined ? [] : [workflow.entryPoint]),
     ],
@@ -224,6 +226,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
 
   if (record.toModelOutput !== undefined) {
     expectFunction(record.toModelOutput, message);
+  }
+
+  if (record.tags !== undefined) {
+    normalizeTags(record.tags, message);
   }
 
   if (record.auth !== undefined) {

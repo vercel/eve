@@ -85,7 +85,7 @@ The shared `approval` option applies to every tool on an MCP connection. The [co
 
 ### Gate specific tools by name or input
 
-With `always()`, a server that mixes read tools with destructive ones prompts on every harmless call. Pass a custom policy instead, the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use, to ask only for the calls that matter. The policy receives `{ session, toolName, toolInput, toolAnnotations, callId, abortSignal }` and returns an approval status, directly or as a promise.
+With `always()`, a server that mixes read tools with destructive ones prompts on every harmless call. Pass a custom policy instead, the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use, to ask only for the calls that matter. The policy receives `{ session, toolName, toolInput, toolAnnotations, toolTags, callId, abortSignal }` and returns an approval status, directly or as a promise. `toolTags` comes from the connection's [`tags`](/docs/human-in-the-loop#tag-entries-for-policies), which can differ per tool.
 
 This connection always asks before a delete, asks before a publish only when the call schedules a post, and lets everything else run:
 

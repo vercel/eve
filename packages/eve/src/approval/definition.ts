@@ -39,6 +39,12 @@ export interface ApprovalContext<TInput = Record<string, unknown>> extends Sessi
   readonly toolAnnotations?: ConnectionToolAnnotations;
   readonly toolInput?: ApprovalToolInput<TInput>;
   readonly toolName: string;
+  /**
+   * The called entry's `tags`, as its definition declares them. Absent when the
+   * entry declares none, so a policy can tell an untagged entry from one tagged
+   * `[]`. For a connection tool, its own list or the connection's default.
+   */
+  readonly toolTags?: readonly string[];
 }
 
 /**

@@ -175,6 +175,7 @@ function liveTool(name: string, authored: DynamicToolEntry): HarnessToolDefiniti
       entry.outputSchema === undefined
         ? undefined
         : toOutputSchema(entry.outputSchema as ToolSchemaSource),
+    tags: entry.tags,
     toModelOutput: entry.toModelOutput as HarnessToolDefinition["toModelOutput"],
   };
 }

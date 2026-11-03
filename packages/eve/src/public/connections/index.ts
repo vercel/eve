@@ -9,6 +9,7 @@ export type {
   ConnectionCallbackContext,
   ConnectionAuthResolver,
   ConnectionPrincipal,
+  ConnectionTags,
   HeadersDefinition,
   InteractiveAuthorizationDefinition,
   NonInteractiveAuthorizationDefinition,

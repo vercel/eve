@@ -28,6 +28,34 @@ function authProvider(auth: ConnectionAuthDefinition | undefined): Authorization
 }
 
 describe("normalizeMcpClientConnectionDefinition", () => {
+  it("keeps tags, deduplicated, as one list or a default with per-tool lists", () => {
+    const list = normalizeMcpClientConnectionDefinition(
+      validInput({ tags: ["reads:untrusted", "reads:untrusted"] }),
+      MSG,
+    );
+    const split = normalizeMcpClientConnectionDefinition(
+      validInput({ tags: { default: ["effect:external"], tools: { list_labels: [] } } }),
+      MSG,
+    );
+    expect([list.tags, split.tags]).toEqual([
+      ["reads:untrusted"],
+      { default: ["effect:external"], tools: { list_labels: [] } },
+    ]);
+  });
+
+  it.each([
+    "reads:untrusted",
+    [""],
+    [1],
+    ["x".repeat(129)],
+    Array.from({ length: 33 }, (_, index) => `tag-${index}`),
+    { default: "reads:untrusted" },
+    { tools: { get_issue: "reads:untrusted" } },
+    { everything: [] },
+  ])("rejects malformed tags: %j", (tags) => {
+    expect(() => normalizeMcpClientConnectionDefinition(validInput({ tags }), MSG)).toThrow(MSG);
+  });
+
   it.each([undefined, true, false])("preserves protocolVersionDiscovery %s", (value) => {
     const result = normalizeMcpClientConnectionDefinition(
       validInput({ protocolVersionDiscovery: value }),

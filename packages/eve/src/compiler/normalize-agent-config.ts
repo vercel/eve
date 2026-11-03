@@ -100,6 +100,7 @@ export async function compileAgentConfig(
     name: string;
     reasoning?: CompiledAgentDefinition["reasoning"];
     source: ModuleSourceRef;
+    tags?: readonly string[];
     tool?: AgentToolExposure;
     limits?: CompiledAgentDefinition["limits"];
   } = {
@@ -147,6 +148,10 @@ export async function compileAgentConfig(
 
   if (definition.reasoning !== undefined) {
     compiledConfig.reasoning = definition.reasoning;
+  }
+
+  if (definition.tags !== undefined) {
+    compiledConfig.tags = [...definition.tags];
   }
 
   if (definition.tool !== undefined) {

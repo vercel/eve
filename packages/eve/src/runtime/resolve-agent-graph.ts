@@ -1,4 +1,5 @@
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
+import { normalizeTags } from "#internal/authored-definition/tags.js";
 import type {
   CompiledAgentManifest,
   CompiledAgentNodeManifest,
@@ -239,14 +240,24 @@ async function resolveRuntimeSubagent(input: {
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }): Promise<ResolvedRuntimeSubagentNode> {
   const variant:
-    | { readonly description: string; readonly dynamic?: never; readonly tool?: AgentToolExposure }
+    | {
+        readonly description: string;
+        readonly dynamic?: never;
+        readonly tags?: readonly string[];
+        readonly tool?: AgentToolExposure;
+      }
     | {
         readonly description?: never;
         readonly dynamic: ResolvedDynamicSubagentDefinition;
+        readonly tags?: never;
         readonly tool?: never;
       } =
     input.sourceRef.configResolver === undefined
-      ? { description: input.sourceRef.description, tool: input.sourceRef.agent.config.tool }
+      ? {
+          description: input.sourceRef.description,
+          tags: input.sourceRef.agent.config.tags,
+          tool: input.sourceRef.agent.config.tool,
+        }
       : {
           dynamic: await resolveDynamicDefinition(input.sourceRef.configResolver, {
             kindLabel: "dynamic subagent",
@@ -305,6 +316,7 @@ async function resolveRuntimeRemoteAgent(input: {
     path: string;
     sourceId: string;
     sourceKind: "module";
+    tags?: readonly string[];
     tool?: AgentToolExposure;
     url: string;
   } = {
@@ -330,6 +342,13 @@ async function resolveRuntimeRemoteAgent(input: {
 
   if (resolvedRecord.forwardPrincipal === true) {
     resolvedRemoteAgent.forwardPrincipal = true;
+  }
+
+  if (resolvedRecord.tags !== undefined) {
+    resolvedRemoteAgent.tags = normalizeTags(
+      resolvedRecord.tags,
+      `Remote agent "${input.sourceRef.logicalPath}":`,
+    );
   }
 
   const headers = resolveRemoteAgentHeaders(resolvedRecord.headers);

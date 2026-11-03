@@ -357,6 +357,7 @@ export type InternalAgentDefinition = {
   model: InternalAgentModelDefinition;
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
+  tags?: readonly string[];
   tool?: AgentToolExposure;
   limits?: CompiledAgentLimitsDefinition;
 };
@@ -426,6 +427,14 @@ type PublicAgentDefinitionBase = {
    * Framework-owned runtime limits for this agent's runs.
    */
   readonly limits?: AgentLimitsDefinition;
+  /**
+   * Opaque tags for the call to this subagent from its parent, such as
+   * `"reads:untrusted"`. eve doesn't interpret them: the parent's approval
+   * policies read them as `toolTags`, and eve records them on the call's
+   * `call.requested` event. They have no effect on the root agent or on
+   * subagents a `defineDynamic()` resolver selects.
+   */
+  readonly tags?: readonly string[];
   /**
    * How eve exposes this agent to its parent model. `true` lists it as a
    * tool, `"deferred"` makes it a catalog entry the model finds with `eve__search`

@@ -49,6 +49,14 @@ export interface RemoteAgentDefinition {
    */
   readonly path: string;
   /**
+   * Opaque tags for the call to this remote agent, such as
+   * `"reads:untrusted"`. eve doesn't interpret them: approval policies read
+   * them as `toolTags`, and eve records them on the call's `call.requested`
+   * event. They describe this deployment's call, not the calls the remote
+   * agent makes.
+   */
+  readonly tags?: readonly string[];
+  /**
    * How eve exposes this remote agent to the parent model: `true` lists it as
    * a tool, `"deferred"` makes it a catalog entry the model finds with
    * `eve__search` and calls with `eve__tool`, and `false` keeps it callable only from

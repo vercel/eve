@@ -170,6 +170,7 @@ export function createPreparedRuntimeSubagentTool(
     name: definition.name,
     nodeId: definition.nodeId,
     sourceId: definition.sourceId,
+    tags: definition.tags,
   };
 }
 

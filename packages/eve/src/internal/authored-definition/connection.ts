@@ -1,4 +1,5 @@
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
+import { normalizeConnectionTags } from "#internal/authored-definition/tags.js";
 import type { McpClientConnectionDefinition } from "#public/definitions/connections/mcp.js";
 import type { OpenAPIConnectionDefinition } from "#public/definitions/connections/openapi.js";
 import type {
@@ -23,6 +24,7 @@ const KNOWN_TOP_LEVEL_KEYS = [
   "headers",
   "instanceKey",
   "protocolVersionDiscovery",
+  "tags",
   "toolCall",
   "tools",
   "url",
@@ -36,6 +38,7 @@ const KNOWN_OPENAPI_TOP_LEVEL_KEYS = [
   "instanceKey",
   "operations",
   "spec",
+  "tags",
   "toolCall",
 ] as const;
 const KNOWN_AUTHORIZATION_KEYS = [
@@ -172,6 +175,10 @@ export function normalizeMcpClientConnectionDefinition(
     result.approval = normalizeApproval(record.approval, message);
   }
 
+  if (record.tags !== undefined) {
+    result.tags = normalizeConnectionTags(record.tags, message);
+  }
+
   return result;
 }
 
@@ -284,6 +291,10 @@ export function normalizeOpenApiConnectionDefinition(
 
   if (record.approval !== undefined) {
     result.approval = normalizeApproval(record.approval, message);
+  }
+
+  if (record.tags !== undefined) {
+    result.tags = normalizeConnectionTags(record.tags, message);
   }
 
   return result;

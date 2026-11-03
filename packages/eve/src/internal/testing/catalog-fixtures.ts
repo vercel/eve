@@ -174,6 +174,7 @@ export function fakeConnection(input: {
   readonly name: string;
   readonly rejectsToken?: boolean;
   readonly signIn?: boolean;
+  readonly tags?: ResolvedConnectionDefinition["tags"];
   readonly toolCall?: ResolvedConnectionDefinition["toolCall"];
   readonly tools: readonly ConnectionToolMetadata[];
 }): FakeConnection {
@@ -187,6 +188,7 @@ export function fakeConnection(input: {
     protocol: "mcp",
     sourceId: `connections/${input.name}.ts`,
     sourceKind: "module",
+    tags: input.tags,
     toolCall: input.toolCall,
     url: `https://${input.name}.example.com/mcp`,
   };

@@ -70,6 +70,33 @@ describe("agent approval in the step catalog", () => {
     ]);
   });
 
+  it("gives the policy each entry's tags, with a connection tool's own list replacing the default", async () => {
+    const seen: Record<string, readonly string[] | undefined> = {};
+    const github = fakeConnection({
+      name: "github",
+      tags: { default: ["reads:untrusted", "effect:external"], tools: { list_labels: [] } },
+      tools: [connectionTool("get_issue"), connectionTool("list_labels")],
+    });
+    const { decide } = session({
+      approval: (ctx) => {
+        seen[ctx.toolName] = ctx.toolTags;
+        return undefined;
+      },
+      connections: [github],
+      tools: [inlineTool("post_comment", { tags: ["effect:external"] }), inlineTool("bash")],
+    });
+
+    for (const name of ["post_comment", "bash", "github__get_issue", "github__list_labels"]) {
+      await decide(name);
+    }
+    expect(seen).toEqual({
+      bash: undefined,
+      github__get_issue: ["reads:untrusted", "effect:external"],
+      github__list_labels: [],
+      post_comment: ["effect:external"],
+    });
+  });
+
   it("denies a connection call the connection itself approves", async () => {
     const crm = fakeConnection({
       approval: () => "approved",

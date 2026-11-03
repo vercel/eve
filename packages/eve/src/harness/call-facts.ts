@@ -17,8 +17,15 @@ import { defined, fact } from "#harness/facts.js";
 // The facts for one call, built where the call streams and runs: what the model asked for, that
 // it started, and how it settled. Calls never reach the wire any other way.
 
-/** What a call invokes: a tool, an agent, the skill it loads, or a task control, with its label. */
-export function capabilityOf(action: RuntimeActionRequest, label?: string): Capability {
+/**
+ * What a call invokes: a tool, an agent, the skill it loads, or a task control, with its label
+ * and the entry's tags.
+ */
+export function capabilityOf(
+  action: RuntimeActionRequest,
+  label?: string,
+  tags?: readonly string[],
+): Capability {
   const capability: Capability =
     action.kind === "load-skill"
       ? { kind: "skill", name: action.name }
@@ -27,7 +34,11 @@ export function capabilityOf(action: RuntimeActionRequest, label?: string): Capa
         : action.kind === "remote-agent-call"
           ? { kind: "agent", name: action.name, remote: true }
           : { kind: toolKind(action.toolName), name: action.toolName };
-  return label === undefined ? capability : { ...capability, label };
+  return {
+    ...capability,
+    ...(label !== undefined && { label }),
+    ...(tags !== undefined && { tags }),
+  };
 }
 
 /** What a call to an entry invokes, as its input starts streaming. */
@@ -51,12 +62,13 @@ export function callRequested(input: {
   readonly action: RuntimeActionRequest;
   readonly owner: CallOwner;
   readonly label?: string;
+  readonly tags?: readonly string[];
   readonly inputError?: ErrorInfo;
 }): FactOf<"call.requested"> {
   const { action, inputError } = input;
   return fact("call.requested", {
     callId: action.callId,
-    capability: capabilityOf(action, input.label),
+    capability: capabilityOf(action, input.label, input.tags),
     input: inputError === undefined ? toJsonValue(action.input) : undefined,
     inputError,
     owner: input.owner,
