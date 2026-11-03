@@ -30,10 +30,11 @@ const RESOLVE_FILTER = /^(?:\.|\/|[A-Za-z]:[\\/])/;
 export function createAuthoredAssetImportPlugin(input: {
   readonly packageRoot: string;
   /**
-   * Handles only importers and assets outside `node_modules`: authored source
-   * and workspace packages bundled from source. Set it for bundles that also
-   * bundle dependencies, such as the Nitro server and the workflow driver, so
-   * installed dependency imports stay with the host bundler.
+   * Handles only imports from importers outside `node_modules`: authored
+   * source and workspace packages bundled from source. Their assets may still
+   * sit in `node_modules`. Set it for bundles that also bundle dependencies,
+   * such as the Nitro server and the workflow driver, so installed dependency
+   * imports stay with the host bundler.
    */
   readonly authoredSourceOnly?: boolean;
 }) {
@@ -47,6 +48,8 @@ export function createAuthoredAssetImportPlugin(input: {
   ];
   const handles = (path: string): boolean =>
     input.authoredSourceOnly !== true || (isAbsolute(path) && !isNodeModulesPath(path));
+  // Ids resolved here for an authored importer, so `load` accepts them even inside `node_modules`.
+  const resolvedAssetIds = new Set<string>();
   return {
     name: "eve-authored-asset-import",
     resolveId: {
@@ -74,7 +77,9 @@ export function createAuthoredAssetImportPlugin(input: {
           );
         }
 
-        return `${canonicalPath}${suffix}`;
+        const id = `${canonicalPath}${suffix}`;
+        resolvedAssetIds.add(id);
+        return id;
       },
     },
     load: {
@@ -82,7 +87,7 @@ export function createAuthoredAssetImportPlugin(input: {
       async handler(id: string) {
         const { path, suffix } = splitImportSuffix(id);
 
-        if (!isPotentialAuthoredAssetImport(id) || !handles(path)) {
+        if (!isPotentialAuthoredAssetImport(id) || !(resolvedAssetIds.has(id) || handles(path))) {
           return undefined;
         }
 

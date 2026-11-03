@@ -192,9 +192,9 @@ export async function deliver() {
     );
   });
 
-  // #5847: the Nitro host and workflow bundles skip node_modules assets, so a
-  // relative ?raw import into an installed package fails to load.
-  it.fails("embeds ?raw assets from node_modules imported by workflow and step modules", async () => {
+  // The host and workflow bundles leave dependency imports to the host bundler,
+  // but an authored import of an installed package's file is still authored.
+  it("embeds ?raw assets from node_modules imported by workflow and step modules", async () => {
     const app = await scenarioApp({
       name: "workflow-dependency-raw-assets",
       installDependencies: true,
