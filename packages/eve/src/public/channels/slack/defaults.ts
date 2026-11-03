@@ -21,7 +21,7 @@ import {
   buildAuthEphemeralText,
   buildAuthRequiredPublicText,
 } from "#public/channels/slack/connections.js";
-import type { SlackMessage, SlackMessageEdit } from "#public/channels/slack/inbound.js";
+import type { SlackMessage } from "#public/channels/slack/inbound.js";
 import {
   notifyRefusedResponder,
   postRequestCards,
@@ -36,6 +36,7 @@ import { deliverCompletedSlackReply } from "#public/channels/slack/reply-deliver
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import type {
   SlackApprovalChannelResolver,
+  SlackChannelConfig,
   SlackChannelInternalEvents,
   SlackChannelState,
   SlackContext,
@@ -187,20 +188,34 @@ export function defaultOnMessage(ctx: SlackContext, message: SlackMessage): Slac
   return { auth: defaultSlackAuth(message, ctx) };
 }
 
+type SlackMessageHook = NonNullable<SlackChannelConfig["onMessage"]>;
+
 /**
- * Default `onMessageEdited`: sends an edit to a message addressed to the agent
- * (a direct message, a code channel message, or one that mentions the bot
- * before or after the edit) with auth derived from its author, matching which
- * new messages the defaults answer. It runs only when no message hook is
- * authored.
+ * Default `onMessageEdited`: runs the hook a new message of the same kind would reach on the
+ * edited message, so the app's own checks decide edits too. Without authored hooks, that sends
+ * edits to DMs, code channel messages, and messages that mention the bot before or after the
+ * edit, and drops the rest.
  */
 export function defaultOnMessageEdited(
+  hooks: Pick<SlackChannelConfig, "onAppMention" | "onDirectMessage" | "onMessage">,
+): NonNullable<SlackChannelConfig["onMessageEdited"]> {
+  return (ctx, edit) => {
+    const hook = editedMessageHook(hooks, ctx, edit.message);
+    return hook === undefined ? null : hook(ctx, edit.message);
+  };
+}
+
+function editedMessageHook(
+  hooks: Pick<SlackChannelConfig, "onAppMention" | "onDirectMessage" | "onMessage">,
   ctx: SlackInboundMessageContext,
-  edit: SlackMessageEdit,
-): SlackMentionResult {
-  const addressed =
-    edit.message.raw.channel_type === "im" || ctx.isBotMentioned() || ctx.slack.codeChannel;
-  return addressed ? defaultOnMessage(ctx, edit.message) : null;
+  message: SlackMessage,
+): SlackMessageHook | undefined {
+  if (message.raw.channel_type === "im") {
+    return hooks.onDirectMessage ?? hooks.onMessage ?? defaultOnMessage;
+  }
+  if (ctx.isBotMentioned()) return hooks.onAppMention ?? hooks.onMessage ?? defaultOnMessage;
+  if (ctx.slack.codeChannel) return hooks.onMessage ?? hooks.onAppMention ?? defaultOnMessage;
+  return hooks.onMessage;
 }
 
 /** eve's default `received`: the `Thinking...` status, set the moment a message arrives. */
