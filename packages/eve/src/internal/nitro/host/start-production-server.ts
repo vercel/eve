@@ -209,9 +209,12 @@ export async function startProductionServer(
   // srvx hides its listening line when TEST is set, and that line is the only
   // proof that this child, not another process, owns the port. With CI or
   // TEST set, srvx also skips graceful shutdown, so SIGTERM would never run
-  // Nitro's close hooks. A socket path would replace the port eve waits on.
+  // Nitro's close hooks, and SERVER_SHUTDOWN_TIMEOUT would stretch srvx's
+  // close past TERMINATE_GRACE_MS. A socket path would replace the port eve
+  // waits on.
   delete env.TEST;
   delete env.CI;
+  delete env.SERVER_SHUTDOWN_TIMEOUT;
   delete env.NITRO_UNIX_SOCKET;
   if (options.schedules === false) {
     env[EVE_SCHEDULES_DISABLED_ENV] = "1";
