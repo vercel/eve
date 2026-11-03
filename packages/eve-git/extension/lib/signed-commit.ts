@@ -25,6 +25,7 @@ if (!process.env.GH_TOKEN) fail('GH_TOKEN is not set; invoke the configured auth
 const [owner, repo] = options.repo.split("/");
 const api = "https://api.github.com";
 const remote = "https://github.com/" + options.repo;
+const ANCESTOR_LIMIT = 100;
 const headers = {
   Accept: "application/vnd.github+json",
   Authorization: "Bearer " + process.env.GH_TOKEN,
@@ -37,9 +38,9 @@ main().catch((error) => fail(error instanceof Error ? error.message : String(err
 async function main() {
   ensureNoUnstagedTrackedChanges();
   // The commit's parent: the branch tip, or for a new branch the newest commit of
-  // HEAD already on a remote. Local commits after it are published with the index.
+  // HEAD that the repository has. Local commits after it are published with the index.
   const head = await branchHead(options.branch);
-  const base = head ?? pushedAncestor();
+  const base = head ?? (await publishedAncestor());
   // The commit's tree is the index, so a base the checkout lacks would be reverted.
   if (!isAncestor(base, "HEAD")) {
     throw new Error(
@@ -55,29 +56,20 @@ async function main() {
     await request("POST", "/repos/" + owner + "/" + repo + "/git/refs", { ref: "refs/heads/" + options.branch, sha: base });
   }
 
-  const query = "mutation CreateCommitOnBranch($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }";
   const message = { headline: options.message };
   if (options.body) message.body = options.body;
-  const response = await fetch(api + "/graphql", {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      query,
-      variables: {
-        input: {
-          branch: { repositoryNameWithOwner: options.repo, branchName: options.branch },
-          expectedHeadOid: base,
-          message,
-          fileChanges: changes,
-        },
+  const data = await graphql(
+    "mutation CreateCommitOnBranch($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
+    {
+      input: {
+        branch: { repositoryNameWithOwner: options.repo, branchName: options.branch },
+        expectedHeadOid: base,
+        message,
+        fileChanges: changes,
       },
-    }),
-  });
-  const payload = await response.json();
-  if (!response.ok || payload.errors?.length) {
-    throw new Error("GitHub commit failed: " + (payload.errors?.map((item) => item.message).join("; ") || response.status));
-  }
-  const oid = payload.data?.createCommitOnBranch?.commit?.oid;
+    },
+  );
+  const oid = data?.createCommitOnBranch?.commit?.oid;
   if (!oid) throw new Error("GitHub commit returned no oid");
   // Move to the commit just made, whose tree is the index. The branch tip may
   // already include someone else's later push.
@@ -86,9 +78,23 @@ async function main() {
   process.stdout.write(oid + "\n");
 }
 
-function pushedAncestor() {
-  const unpushed = git("rev-list", "--first-parent", "HEAD", "--not", "--remotes").toString().split("\n").filter(Boolean);
-  return git("rev-parse", unpushed.length ? unpushed.at(-1) + "^" : "HEAD").toString().trim();
+// Asks GitHub, not remote-tracking refs, which can be missing or stale.
+async function publishedAncestor() {
+  const candidates = git("rev-list", "--first-parent", "--max-count=" + ANCESTOR_LIMIT, "HEAD").toString().split("\n").filter(Boolean);
+  const fields = candidates.map((oid, index) => "c" + index + ': object(oid: "' + oid + '") { oid }').join(" ");
+  const data = await graphql("query { repository(owner: " + JSON.stringify(owner) + ", name: " + JSON.stringify(repo) + ") { " + fields + " } }");
+  const base = candidates.find((_, index) => data.repository["c" + index]);
+  if (!base) throw new Error("none of the last " + ANCESTOR_LIMIT + " commits of HEAD exist in " + options.repo + "; check out a commit from it before running gh-signed-commit");
+  return base;
+}
+
+async function graphql(query, variables) {
+  const response = await fetch(api + "/graphql", { method: "POST", headers, body: JSON.stringify({ query, variables }) });
+  const payload = await response.json();
+  if (!response.ok || payload.errors?.length) {
+    throw new Error("GitHub GraphQL request failed: " + (payload.errors?.map((item) => item.message).join("; ") || response.status));
+  }
+  return payload.data;
 }
 
 function isAncestor(ancestor, commit) {

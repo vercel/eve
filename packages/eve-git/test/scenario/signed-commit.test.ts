@@ -15,7 +15,6 @@ const execFileAsync = promisify(execFile);
 const FAKE_GITHUB = String.raw`
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
-const os = require("node:os");
 const path = require("node:path");
 const remote = process.env.FAKE_GITHUB_REMOTE;
 const git = (args, options = {}) =>
@@ -30,27 +29,31 @@ const exists = (args) => {
 globalThis.fetch = async (url, init = {}) => {
   const method = init.method ?? "GET";
   const { pathname } = new URL(String(url));
-  fs.appendFileSync(process.env.FAKE_GITHUB_LOG, method + " " + pathname + "\n");
+  const write = method === "POST" && !(pathname === "/graphql" && init.body.startsWith('{"query":"query'));
+  // Reads are logged as GET so tests can assert that a refusal wrote nothing.
+  fs.appendFileSync(process.env.FAKE_GITHUB_LOG, (write ? "POST " : "GET ") + pathname + "\n");
   let match;
   if (method === "GET" && (match = pathname.match(/\/git\/ref\/heads%2F(.+)$/))) {
     const sha = exists(["rev-parse", "--verify", "refs/heads/" + decodeURIComponent(match[1])]);
     return sha ? Response.json({ object: { sha } }) : Response.json({}, { status: 404 });
-  }
-  if (method === "GET" && (match = pathname.match(/\/git\/commits\/([0-9a-f]+)$/))) {
-    return exists(["cat-file", "-e", match[1] + "^{commit}"]) === null
-      ? Response.json({}, { status: 404 })
-      : Response.json({ sha: match[1] });
   }
   if (method === "POST" && pathname.endsWith("/git/refs")) {
     const { ref, sha } = JSON.parse(init.body);
     git(["update-ref", ref, sha, ""]);
     return Response.json({ ref, object: { sha } }, { status: 201 });
   }
+  if (method === "POST" && pathname === "/graphql" && !write) {
+    const repository = {};
+    for (const [, alias, oid] of JSON.parse(init.body).query.matchAll(/(c\d+): object\(oid: "([0-9a-f]+)"\)/g)) {
+      repository[alias] = exists(["cat-file", "-e", oid + "^{commit}"]) === null ? null : { oid };
+    }
+    return Response.json({ data: { repository } });
+  }
   if (method === "POST" && pathname === "/graphql") {
     const { input } = JSON.parse(init.body).variables;
     const env = {
       ...process.env,
-      GIT_INDEX_FILE: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "fake-github-")), "index"),
+      GIT_INDEX_FILE: path.join(fs.mkdtempSync(path.join(path.dirname(remote), "index-")), "index"),
     };
     git(["read-tree", input.expectedHeadOid], { env });
     for (const { path: file, contents } of input.fileChanges.additions) {
@@ -229,6 +232,29 @@ test("starts a new branch at the newest pushed commit and publishes local commit
   assert.deepEqual(await changedSince(clonedMain), ["feature.txt", "local.txt"]);
 });
 
+test("stacks a new branch on a branch it just published", async () => {
+  await stage(sandbox, "feature.txt", "first\n");
+  const { stdout } = await signedCommit("first");
+  await stage(sandbox, "next.txt", "next\n");
+
+  await signedCommit("next", {}, { branch: "next-feature" });
+  assert.equal(await rev(remote, "next-feature^"), stdout.trim());
+});
+
+test("starts a new branch from a shallow checkout of a commit", async () => {
+  const shallow = join(dir, "shallow");
+  const main = await rev(remote, "main");
+  await git(dir, "init", "--quiet", shallow);
+  await git(shallow, "fetch", "--quiet", "--depth=1", remote, main);
+  await git(shallow, "checkout", "--quiet", "FETCH_HEAD");
+  await git(shallow, "config", `url.${remote}.insteadOf`, REPO_URL);
+  await stage(shallow, "feature.txt", "first\n");
+
+  await signedCommit("first", {}, { cwd: shallow });
+  assert.equal(await rev(remote, "feature^"), main);
+  assert.deepEqual(await changedSince(main), ["feature.txt"]);
+});
+
 async function assertRefused(message: string, patterns: RegExp[]) {
   const before = await readFile(log, "utf8");
   await assert.rejects(signedCommit(message), (error: unknown) => {
@@ -245,12 +271,16 @@ async function checkoutRemoteFeature(cwd: string) {
   await git(cwd, "checkout", "--quiet", "-B", "feature", "FETCH_HEAD");
 }
 
-async function signedCommit(message: string, env: Record<string, string> = {}) {
+async function signedCommit(
+  message: string,
+  env: Record<string, string> = {},
+  { branch = "feature", cwd = sandbox } = {},
+) {
   return execFileAsync(
     process.execPath,
-    [script, "--repo", "owner/repo", "--branch", "feature", "-m", message],
+    [script, "--repo", "owner/repo", "--branch", branch, "-m", message],
     {
-      cwd: sandbox,
+      cwd,
       env: {
         ...process.env,
         ...IDENTITY,
