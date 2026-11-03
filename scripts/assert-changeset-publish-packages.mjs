@@ -1,7 +1,7 @@
 import { access, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-const allowedPublicPackages = new Set(["eve", "@vercel/agent-runs"]);
+const allowedPublicPackages = new Set(["eve", "@vercel/agent-runs", "@eve/agent-browser"]);
 const workspaceRoots = ["apps", "packages"];
 
 async function readJson(path) {

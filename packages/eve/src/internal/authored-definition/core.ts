@@ -1,4 +1,5 @@
 import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
+import { normalizeAgentApproval } from "#internal/authored-definition/approval.js";
 import type {
   AgentDefinition,
   AgentBuildDefinition,
@@ -54,6 +55,7 @@ export function normalizeAgentDefinition(
   expectOnlyKnownKeys(
     record,
     [
+      "approval",
       "build",
       "compaction",
       "defaultTools",
@@ -125,6 +127,10 @@ export function normalizeAgentDefinition(
 
   if (record.limits !== undefined) {
     definition.limits = normalizeAgentLimitsDefinition(record.limits, message);
+  }
+
+  if (record.approval !== undefined) {
+    definition.approval = normalizeAgentApproval(record.approval, message);
   }
 
   return definition as Readonly<NormalizedAgentDefinition>;

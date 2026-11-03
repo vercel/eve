@@ -1,5 +1,6 @@
 import type { ModelMessage } from "ai";
 
+import { sandboxOf } from "#context/build-callback-context.js";
 import type { ContextContainer } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
@@ -344,6 +345,7 @@ function internalContext(
     readonly abortSignal: AbortSignal;
     readonly conversation?: readonly ModelMessage[];
     readonly memo: InternalContext["memo"];
+    readonly mode?: "evaluate" | "restore";
   },
 ): InternalContext {
   const frame = sessionFrameOf(ctx);
@@ -353,6 +355,22 @@ function internalContext(
       ...frame,
       abortSignal: run.abortSignal,
       ctx,
+      getSandbox:
+        reaction.kind === "model"
+          ? () => {
+              throw new Error(
+                `"${reaction.label}" called ctx.getSandbox() while choosing the model. Choose the model from the session, and read the sandbox in the definitions that use it.`,
+              );
+            }
+          : run.mode === "restore"
+            ? () => {
+                // Restoring runs before the step opens its sandbox. A memo that reads it under a
+                // new key would change the value anyway, so the next model call's evaluation does.
+                throw new Error(
+                  `"${reaction.label}" called ctx.getSandbox() while eve rebuilt it in a fresh process, before the step opened its sandbox. eve evaluates it again, with the sandbox, before the next model call.`,
+                );
+              }
+            : sandboxOf(ctx),
       history,
       memo: run.memo,
       messages: async () => requireHistory({ history }, reaction.label),

@@ -295,20 +295,23 @@ async function withGitHubCredentialLease<T>(
   leaseQueues.set(sessionId, current);
   await previous;
   try {
-    await broker(sandbox, {
-      "api.github.com": [
-        {
-          match: {
-            headers: [
-              {
-                key: { exact: "authorization" },
-                value: { regex: `^(?:token|Bearer) ${credential.placeholder}$` },
-              },
-            ],
-          },
-          transform: [{ headers: { authorization: `Bearer ${credential.token}` } }],
+    const api: GitHubLeaseRule[] = [
+      {
+        match: {
+          headers: [
+            {
+              key: { exact: "authorization" },
+              value: { regex: `^(?:token|Bearer) ${credential.placeholder}$` },
+            },
+          ],
         },
-      ],
+        transform: [{ headers: { authorization: `Bearer ${credential.token}` } }],
+      },
+    ];
+    await broker(sandbox, {
+      "api.github.com": api,
+      // `gh release upload` and `gh release create` with assets send files here.
+      "uploads.github.com": api,
       "github.com": [
         {
           match: {

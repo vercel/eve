@@ -62,6 +62,13 @@ export function connectUserAuthorization(
           callbackUrl,
           deviceCode: true,
         });
+        if (!response.url && !response.deviceCode) {
+          throw new ConnectionAuthorizationFailedError("connect", {
+            message: `Vercel Connect started an authorization for ${connector} without a sign-in URL or device code.`,
+            reason: "missing_challenge",
+            retryable: false,
+          });
+        }
         // Name the destination service, as Connect's eve helper does.
         const displayName = response.connector?.serviceName ?? response.connector?.name;
         return {

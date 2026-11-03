@@ -288,6 +288,35 @@ export const next = () => ++count;
     expect(declaration).not.toContain("protocol/message");
   });
 
+  it("emits portable declarations for a subagent with an inline approval policy", async () => {
+    const root = await createExtensionPackage();
+    const subagentRoot = join(root, "extension", "subagents", "reviewer");
+    await mkdir(subagentRoot, { recursive: true });
+    await writeFile(
+      join(subagentRoot, "agent.ts"),
+      [
+        'import { defineAgent } from "eve";',
+        "",
+        "export default defineAgent({",
+        '  description: "Review changes.",',
+        '  model: "openai/gpt-5.4",',
+        '  approval: (ctx) => (ctx.toolName === "bash" ? "user-approval" : undefined),',
+        "});",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const config = await tryReadExtensionBuildConfig(root);
+    const outDir = await buildExtensionPackage(root, config!);
+
+    const declaration = await readFile(
+      join(outDir, "extension", "subagents", "reviewer", "agent.d.ts"),
+      "utf8",
+    );
+    expect(declaration).toMatch(/import\(["']eve["']\)\.ApprovalContext/);
+    expect(declaration).not.toContain("approval/definition");
+  });
+
   it("copies data files and stamps only the extension capabilities in use", async () => {
     const root = await createExtensionPackage();
     await writeFile(

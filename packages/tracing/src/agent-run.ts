@@ -107,8 +107,19 @@ interface LiveTurn {
   readonly root: LiveOperation;
   /** Token of the last checkpoint this process wrote. */
   revision: string | undefined;
+  /**
+   * Every checkpoint token this tree wrote. A checkpoint store scoped to an
+   * execution context (eve keeps it in the serialized workflow context) can
+   * hand a concurrent hook an older checkpoint of this same tree; that is not
+   * another process's write and must not fork the tree.
+   */
+  readonly revisions: Set<string>;
+  /** Replaced by another process's checkpoint: the tree still records spans but no longer persists. */
+  retired: boolean;
   writes: number;
 }
+
+const REVISIONS_PER_TURN = 10000;
 
 export function createAgentRun(input: AgentRunOptions): AgentRun {
   const telemetry = input.telemetry ?? otelTelemetry();
@@ -142,7 +153,7 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     let queue = Promise.resolve();
     return () => {
       const turn = entry();
-      if (checkpointer === undefined || turn === undefined) return queue;
+      if (checkpointer === undefined || turn === undefined || turn.retired) return queue;
       turn.writes++;
       queue = queue.then(async () => {
         try {
@@ -153,6 +164,7 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
             const revision = randomUUID();
             await checkpointer.set(key, traceSnapshot({ ...turn.root.record(), revision }));
             turn.revision = revision;
+            if (turn.revisions.size < REVISIONS_PER_TURN) turn.revisions.add(revision);
           }
         } catch (error) {
           report(error, { phase: "checkpoint", operation: "activation" });
@@ -183,22 +195,35 @@ export function createAgentRun(input: AgentRunOptions): AgentRun {
     const ceiling = currentAgentHandoff()?.capture;
     capture = capture === undefined ? ceiling : intersectCapture(capture, ceiling);
     const saved = checkpointer === undefined ? undefined : await loadCheckpoint(key);
+    const savedRevision = (saved as ScopeRecord | undefined)?.revision;
     if (
       cached !== undefined &&
-      (cached.writes > 0 || (saved as ScopeRecord | undefined)?.revision === cached.revision)
+      (cached.writes > 0 ||
+        savedRevision === cached.revision ||
+        (savedRevision !== undefined && cached.revisions.has(savedRevision)))
     ) {
       if (context !== undefined) cached.root.useContext(context);
       // A re-entry may decline content the cached turn was allowed to record.
       if (capture !== undefined) cached.root.narrow(capture);
       return cached;
     }
+    // Another process wrote this checkpoint, so it replaces the cached tree.
+    // Callers may still hold the cached tree's operations; keep them from
+    // persisting their older view over the newer checkpoint.
+    if (cached !== undefined) cached.retired = true;
     let entry: LiveTurn | undefined;
     const onChange = persistence(key, () => entry);
     const restored =
       saved === undefined ? undefined : await scopes.restore(saved, { capture, context, onChange });
     const root = restored ?? (await open?.(onChange));
     if (root === undefined) return undefined;
-    entry = { root, revision: (saved as ScopeRecord | undefined)?.revision, writes: 0 };
+    entry = {
+      root,
+      revision: savedRevision,
+      revisions: new Set(savedRevision === undefined ? [] : [savedRevision]),
+      retired: false,
+      writes: 0,
+    };
     if (restored === undefined) await onChange();
     return entry;
   }

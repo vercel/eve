@@ -1,4 +1,4 @@
-import { deliveries } from "#protocol/session-projection/public-view.js";
+import { calls, deliveries } from "#protocol/session-projection/public-view.js";
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -714,6 +714,116 @@ describe("reactions", () => {
       fetchSpy.mockRestore();
     }
   }, 90_000);
+
+  it("reads the session's sandbox from a dynamic value once per memo key, across turns", async () => {
+    const log: string[] = [];
+    const prompts: LanguageModelV4Prompt[] = [];
+    const model = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async ({ prompt }) => {
+          prompts.push(prompt);
+          return prompt.some((message) => message.role === "tool")
+            ? textStreamResult("Checked out.")
+            : toolCallStreamResult({
+                input: "{}",
+                toolCallId: "call-checkout",
+                toolName: "checkout",
+              });
+        },
+        modelId: "scripted-model",
+        provider: "eve-test",
+      }),
+    );
+    const runtime = await createTestRuntime({
+      agent: {
+        definition: defineAgent({
+          model: defineDynamicModel(() => ({ model, modelContextWindowTokens: 200_000 })),
+        }),
+        name: "repo-guidelines",
+      },
+      modules: [
+        {
+          // Stands in for `git clone`: the repository's guidelines land in the sandbox.
+          loadNamespace: async () => ({
+            default: defineTool({
+              description: "Check out the repository.",
+              execute: async (_input, ctx) => {
+                const sandbox = await ctx.getSandbox();
+                await sandbox.writeTextFile({ content: "Run pnpm test.", path: "AGENTS.md" });
+                return { checkedOut: true };
+              },
+              inputSchema: {},
+            }),
+          }),
+          logicalPath: "tools/checkout.ts",
+        },
+        {
+          loadNamespace: async () => ({
+            default: defineDynamic(async (ctx) => {
+              const checkout = calls(ctx.view, { name: "checkout" })
+                .filter((call) => call.state === "completed")
+                .at(-1);
+              if (checkout === undefined) return null;
+              const text = await ctx.memo(["agents-md", checkout.callId], async () => {
+                log.push("read:AGENTS.md");
+                return (await ctx.getSandbox()).readTextFile({ path: "AGENTS.md" });
+              });
+              return text === null ? null : defineInstructions({ content: text, role: "user" });
+            }),
+          }),
+          logicalPath: "instructions/guidelines.ts",
+        },
+        {
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "turn.settled": () => {
+                  log.push("turn:settled");
+                },
+              },
+            }),
+          }),
+          logicalPath: "hooks/observe.ts",
+        },
+      ],
+    });
+
+    const continuationToken = "http:repo-guidelines";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Check out the repository." },
+          serializedContext: buildSerializedContext({
+            auth: ALICE,
+            channelKind: "http",
+            continuationToken,
+          }),
+        },
+      ]);
+      try {
+        await until(log, "turn:settled", 1);
+        await resumeHook(sessionInboxHookToken(continuationToken), {
+          auth: ALICE,
+          delivery: createChannelDeliveryMetadata({ channelKind: "http", channelName: "test" }),
+          kind: "send",
+          payload: { message: "What do the guidelines say?" },
+        });
+        await until(log, "turn:settled", 2);
+      } finally {
+        await run.cancel().catch(() => {});
+      }
+    });
+
+    // The second turn's model call reads the same checkout, so it reuses the memo's result.
+    expect(prompts).toHaveLength(3);
+    expect(JSON.stringify(prompts[0])).not.toContain("Run pnpm test.");
+    expect(JSON.stringify(prompts[1])).toContain("Run pnpm test.");
+    expect(JSON.stringify(prompts[2])).toContain("Run pnpm test.");
+    expect(log.filter((entry) => entry === "read:AGENTS.md")).toEqual(["read:AGENTS.md"]);
+  }, 60_000);
 
   describe("across deployments", () => {
     afterEach(() => {
