@@ -81,7 +81,10 @@ export async function ensureComputerUse(
   sandbox: Pick<SandboxSession, "resolvePath" | "run">,
   abortSignal?: AbortSignal,
 ): Promise<void> {
-  const ready = await sandbox.run({ command: computerUseReadyCommand(sandbox), abortSignal });
+  const ready = await sandbox.run({
+    command: computerUseReadyCommand(sandbox),
+    signal: abortSignal,
+  });
   if (ready.exitCode === 0) return;
   await startComputerUse(sandbox);
 }

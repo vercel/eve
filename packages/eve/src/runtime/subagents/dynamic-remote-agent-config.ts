@@ -7,23 +7,36 @@ import {
   expectString,
   getOptionalStringRecordProperty,
 } from "#internal/authored-module.js";
+import type { HeadersValue } from "#client/types.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { AgentToolExposure } from "#shared/agent-definition.js";
 
+/** A dynamic remote agent as the session records it: JSON, without its credentials. */
 export interface DynamicRemoteAgentConfig {
-  readonly credentialsStepId?: string;
   readonly description: string;
   readonly forwardPrincipal?: boolean;
   readonly path: string;
   readonly tool?: AgentToolExposure;
   readonly url: string;
+  /** It carries `auth` or `headers`, which are code: they're rendered from its record. */
+  readonly credentials?: true;
 }
 
-export async function normalizeDynamicRemoteAgentConfig(input: {
+/** A dynamic remote agent's `auth` and `headers`, which its `render` creates. */
+export interface RemoteAgentCredentials {
+  readonly auth?: OutboundAuthFn;
+  readonly headers?: HeadersValue;
+}
+
+/** Normalizes what a dynamic subagent returned for a remote agent: its config, and credentials. */
+export async function normalizeDynamicRemoteAgent(input: {
   readonly name: string;
   readonly value: unknown;
-}): Promise<DynamicRemoteAgentConfig> {
+}): Promise<{
+  readonly config: DynamicRemoteAgentConfig;
+  readonly credentials?: RemoteAgentCredentials;
+}> {
   const message = `Dynamic subagent "${input.name}" must return defineAgent(...), defineRemoteAgent(...), or null.`;
   const record = expectObjectRecord(input.value, message);
   expectOnlyKnownKeys(
@@ -37,40 +50,46 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
   }
 
   const url = await resolveUrl(record.url, message);
-  const credentialsStepId = readCredentialsStepId(record);
-  validateCredentials(record, message);
-  if (
-    (record.auth !== undefined || record.headers !== undefined) &&
-    credentialsStepId === undefined
-  ) {
-    throw new Error(
-      `${message} Dynamic remote auth and headers must be compiled by eve so credentials stay out of durable workflow state.`,
+  const credentials: { auth?: OutboundAuthFn; headers?: HeadersValue } = {};
+  if (record.auth !== undefined) {
+    credentials.auth = expectFunction<OutboundAuthFn>(
+      record.auth,
+      `${message} "auth" must be a function.`,
     );
   }
+  if (record.headers !== undefined) {
+    credentials.headers =
+      typeof record.headers === "function"
+        ? (record.headers as HeadersValue)
+        : getOptionalStringRecordProperty(
+            record,
+            "headers",
+            `${message} "headers" must be an object of string values or a function.`,
+          );
+  }
+  const hasCredentials = credentials.auth !== undefined || credentials.headers !== undefined;
   const config: {
-    credentialsStepId?: string;
     description: string;
     forwardPrincipal?: boolean;
     path: string;
     tool?: AgentToolExposure;
     url: string;
+    credentials?: true;
   } = {
     description: expectString(record.description, message),
     path: record.path === undefined ? EVE_SESSION_ROUTE_PATH : expectString(record.path, message),
     url,
   };
 
-  if (credentialsStepId !== undefined) {
-    config.credentialsStepId = credentialsStepId;
-  }
   if (record.forwardPrincipal !== undefined) {
     config.forwardPrincipal = expectBoolean(record.forwardPrincipal, message);
   }
   if (record.tool !== undefined) {
     config.tool = expectAgentToolExposure(record.tool, message);
   }
+  if (hasCredentials) config.credentials = true;
 
-  return config;
+  return hasCredentials ? { config, credentials } : { config };
 }
 
 async function resolveUrl(value: unknown, message: string): Promise<string> {
@@ -82,22 +101,4 @@ async function resolveUrl(value: unknown, message: string): Promise<string> {
     throw new Error(`${message} The "url" field must resolve to a non-empty string.`);
   }
   return url;
-}
-
-function validateCredentials(record: Record<string, unknown>, message: string): void {
-  if (record.auth !== undefined) {
-    expectFunction<OutboundAuthFn>(record.auth, message);
-  }
-  if (record.headers !== undefined && typeof record.headers !== "function") {
-    getOptionalStringRecordProperty(record, "headers", message);
-  }
-}
-
-function readCredentialsStepId(record: Record<string, unknown>): string | undefined {
-  const resolver = record.__eveResolveRemoteAgentCredentials;
-  if (typeof resolver !== "function") {
-    return undefined;
-  }
-  const stepId = (resolver as { readonly stepId?: unknown }).stepId;
-  return typeof stepId === "string" ? stepId : undefined;
 }

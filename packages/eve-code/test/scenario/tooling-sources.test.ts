@@ -63,12 +63,9 @@ test("signed commit missing-token error names the authenticated gh invocation", 
           stderr,
           /command "gh-signed-commit --repo owner\/name --branch branch -m headline"/u,
         );
-        assert.match(
-          stderr,
-          /permissions \[\{"provider":"github","repositories":\["owner\/name"\],"access":"write"\}\]/u,
-        );
+        assert.match(stderr, /repository "owner\/name"/u);
         assert.match(stderr, /description.*workingDirectory/u);
-        assert.match(stderr, /scoped credential lease/u);
+        assert.match(stderr, /supplies the credential lease/u);
         assert.doesNotMatch(stderr, /login tool|gh auth login/u);
         return true;
       },

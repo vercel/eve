@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CALL_TOOL_NAME, SEARCH_TOOL_NAME } from "#protocol/catalog-tools.js";
 
+import {
+  type ApprovalContext,
+  type ApprovalPolicy,
+  resolveApprovalPolicy,
+} from "#approval/definition.js";
+import { evaluateApproval } from "#approval/evaluation.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
@@ -15,9 +21,8 @@ import type { ConnectionRegistry } from "#runtime/connections/registry-types.js"
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { type ConnectionClient, defineInteractiveAuthorization } from "#shared/connection-types.js";
 
-import { catalogBundle } from "#internal/testing/catalog-fixtures.js";
+import { catalogBundle, nativeCatalog } from "#internal/testing/catalog-fixtures.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { buildStepCatalog } from "./step-catalog.js";
 
 const URL = "https://kennel.example.com/mcp";
 const TOKEN = "signed-in-token";
@@ -38,9 +43,10 @@ interface SeenRequest {
 
 /**
  * Alice's session with one MCP connection, `kennel`, served by a stubbed
- * `fetch` and reached through the real MCP client, `search`, and `execute`.
+ * `fetch` and reached through the real MCP client, `search`, and `execute`,
+ * with the connection's `approval` policy when one is given.
  */
-function setup(mode: ServerMode) {
+async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
   const seen: SeenRequest[] = [];
   vi.stubGlobal("fetch", async (input: string | globalThis.URL | Request, init?: RequestInit) => {
     const request = new Request(input, init);
@@ -93,10 +99,12 @@ function setup(mode: ServerMode) {
   });
 
   let token: string | undefined;
+  let instanceId: string | undefined;
   const startAuthorization = vi.fn(async ({ callbackUrl }: { callbackUrl: string }) => ({
     challenge: { url: `https://idp.example.com/authorize?redirect=${callbackUrl}` },
   }));
   const connection = {
+    ...(approval !== undefined && { approval }),
     authorization: defineInteractiveAuthorization({
       getToken: async () => {
         if (token === undefined) throw new ConnectionAuthorizationRequiredError("kennel");
@@ -110,6 +118,9 @@ function setup(mode: ServerMode) {
     }),
     connectionName: "kennel",
     description: "Pet boarding.",
+    get instanceId() {
+      return instanceId;
+    },
     protocol: "mcp",
     protocolVersionDiscovery: false,
     url: URL,
@@ -145,20 +156,46 @@ function setup(mode: ServerMode) {
   ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
   ctx.set(ConnectionRegistryKey, registry);
   ctx.set(BundleKey, catalogBundle({ connections: [connection] }));
-  const catalog = buildStepCatalog({ agentTools: new Map(), ctx, endsTurn: true, session: {} });
+  const catalog = await nativeCatalog({ agentTools: new Map(), ctx, endsTurn: true, session: {} });
   const options = { messages: [], toolCallId: "call-1" };
+  const resolve = (tool: string, input: object) => {
+    const resolved = catalog.resolve({ input: { input, name: tool }, toolName: CALL_TOOL_NAME });
+    if (resolved === undefined) throw new Error(`execute could not resolve "${tool}".`);
+    return resolved;
+  };
 
   return {
     seen,
     startAuthorization,
+    /** Resolves `kennel` to another instance from here on, as a changed connection does. */
+    switchInstance: (id: string) => {
+      instanceId = id;
+    },
     search: (query: string) =>
       contextStorage.run(ctx, () =>
         catalog.advertised.get(SEARCH_TOOL_NAME)!.execute!({ query }, options),
       ),
+    /**
+     * Decides the call's approval the way the harness does: once when the model
+     * makes it, and as a recheck before a call that stopped runs again.
+     */
+    approve: (tool: string, { recheck = false } = {}) => {
+      const { definition } = resolve(tool, {});
+      const context: ApprovalContext = {
+        abortSignal: new AbortController().signal,
+        callId: options.toolCallId,
+        getSandbox: () => Promise.reject(new Error("Approval never opens a sandbox.")),
+        session: {} as ApprovalContext["session"],
+        toolInput: {},
+        toolName: definition.name,
+      };
+      return contextStorage.run(ctx, () =>
+        evaluateApproval(resolveApprovalPolicy(definition.approval!), context, { recheck }),
+      );
+    },
     /** Runs `eve__tool({ name, input })` the way the harness runs a resolved call. */
     execute: (tool: string, input: object = {}) => {
-      const resolved = catalog.resolve({ input: { input, name: tool }, toolName: CALL_TOOL_NAME });
-      if (resolved === undefined) throw new Error(`execute could not resolve "${tool}".`);
+      const resolved = resolve(tool, input);
       return contextStorage.run(ctx, () =>
         resolved.definition.execute!(resolved.call.input, options),
       );
@@ -184,7 +221,7 @@ afterEach(async () => {
 
 describe("MCP connections sign in only when the server asks", () => {
   it("searches a server that lists its tools anonymously, with no prompt and no sign-in result", async () => {
-    const kennel = setup("public-list-401");
+    const kennel = await setup("public-list-401");
 
     const output = await kennel.search("kennel");
 
@@ -203,7 +240,7 @@ describe("MCP connections sign in only when the server asks", () => {
   it.each(["public-list-401", "public-list-meta"] as const)(
     "%s: runs a public tool anonymously, then signs in for a protected tool and calls it with the token",
     async (mode) => {
-      const kennel = setup(mode);
+      const kennel = await setup(mode);
 
       expect(await kennel.execute("kennel__find_pet")).toBe("find_pet ok");
       expect(kennel.startAuthorization).not.toHaveBeenCalled();
@@ -224,7 +261,7 @@ describe("MCP connections sign in only when the server asks", () => {
   );
 
   it("reconnects with the token after sign-in, even when a public call reopened an anonymous connection", async () => {
-    const kennel = setup("public-list-401");
+    const kennel = await setup("public-list-401");
     await kennel.execute("kennel__pet_invoice");
     // While the sign-in is pending, a public call connects anonymously again.
     expect(await kennel.execute("kennel__find_pet")).toBe("find_pet ok");
@@ -240,7 +277,7 @@ describe("MCP connections sign in only when the server asks", () => {
   });
 
   it("finds a server that rejects anonymous listing as its sign-in result, which signs in", async () => {
-    const kennel = setup("token-everywhere");
+    const kennel = await setup("token-everywhere");
 
     // Until sign-in, the search counts the sign-in entry, not the tools behind it.
     expect(await kennel.search("kennel__")).toEqual({
@@ -265,5 +302,51 @@ describe("MCP connections sign in only when the server asks", () => {
       results: [{ tool: "kennel__find_pet" }, { tool: "kennel__pet_invoice" }],
       searched: 2,
     });
+  });
+});
+
+// #5564: the harness rechecks a call's approval before it runs again after the sign-in it stopped for.
+describe("a connection call with an approval policy runs after the sign-in it stopped for", () => {
+  it("when the policy approved it without asking a person", async () => {
+    const kennel = await setup("public-list-401", () => "approved");
+
+    expect(await kennel.approve("kennel__pet_invoice")).toMatchObject({ denied: false });
+    expect(isAuthorizationSignal(await kennel.execute("kennel__pet_invoice"))).toBe(true);
+
+    kennel.finishSignIn();
+    expect(await kennel.approve("kennel__pet_invoice", { recheck: true })).toMatchObject({
+      denied: false,
+    });
+    expect(await kennel.execute("kennel__pet_invoice")).toBe("pet_invoice ok");
+  });
+
+  it("when a person approved it", async () => {
+    const kennel = await setup("public-list-401", () => "user-approval");
+
+    expect(await kennel.approve("kennel__pet_invoice")).toMatchObject({ awaitsPerson: true });
+    expect(await kennel.approve("kennel__pet_invoice", { recheck: true })).toMatchObject({
+      denied: false,
+    });
+    expect(isAuthorizationSignal(await kennel.execute("kennel__pet_invoice"))).toBe(true);
+
+    kennel.finishSignIn();
+    expect(await kennel.approve("kennel__pet_invoice", { recheck: true })).toMatchObject({
+      denied: false,
+    });
+    expect(await kennel.execute("kennel__pet_invoice")).toBe("pet_invoice ok");
+  });
+
+  it("unless its connection resolves to another instance by then", async () => {
+    const kennel = await setup("public-list-401", () => "approved");
+
+    await kennel.approve("kennel__pet_invoice");
+    expect(isAuthorizationSignal(await kennel.execute("kennel__pet_invoice"))).toBe(true);
+
+    kennel.finishSignIn();
+    kennel.switchInstance("kennel-bob");
+    await kennel.approve("kennel__pet_invoice", { recheck: true });
+    await expect(kennel.execute("kennel__pet_invoice")).rejects.toThrow(
+      "The connection for this tool call changed or is unavailable.",
+    );
   });
 });

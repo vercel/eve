@@ -1,4 +1,5 @@
-import type { MessageStreamEvent } from "eve/client";
+import { emptySessionView, foldEvents, calls } from "eve/events";
+import type { SessionStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const BASH_TOOL = "bash";
@@ -13,14 +14,14 @@ interface BashOutput {
 export default defineEval({
   description:
     "Sandbox Bash: a slow command returns running, keeps writing its output file, and stops with kill.",
-  // The first bash call waits the full 30-second yield before it reports the command.
+  // A model that omits `timeout` waits the default 30 seconds before the command is reported.
   timeoutMs: 150_000,
   async test(t) {
     const turn = await t.send(
       [
         "EVE_SANDBOX_BASH_JOB",
         "Alice is rebuilding a search index that prints one progress line per second for two minutes.",
-        `Start it with the \`${BASH_TOOL}\` tool by running: \`${INDEX_COMMAND}\``,
+        `Start it with the \`${BASH_TOOL}\` tool and a \`timeout\` of 5 seconds by running: \`${INDEX_COMMAND}\``,
         "The tool will report that the command is still running, with its process group and output directory.",
         "Check its latest progress line once with `tail`, then stop it with `kill` and read its exit code.",
         "After it stops, reply with exactly: index job stopped",
@@ -29,7 +30,7 @@ export default defineEval({
     turn.expectOk();
 
     t.log(JSON.stringify(bashOutputs(turn.events)));
-    turn.noFailedActions();
+    turn.noFailedCalls();
     turn.eventsSatisfy("the slow command yields, keeps running, then stops with kill", (events) =>
       jobWasObservedAndStopped(bashOutputs(events)),
     );
@@ -54,11 +55,12 @@ function jobWasObservedAndStopped(outputs: readonly BashOutput[]): boolean {
   );
 }
 
-function bashOutputs(events: readonly MessageStreamEvent[]): readonly BashOutput[] {
-  return events.flatMap((event) => {
-    if (event.type !== "action.result" || event.data.result.kind !== "tool-result") return [];
-    if (event.data.result.toolName !== BASH_TOOL) return [];
-    const output = event.data.result.output;
+function bashOutputs(events: readonly SessionStreamEvent[]): readonly BashOutput[] {
+  const view = foldEvents(emptySessionView(), events);
+
+  return calls(view).flatMap((call) => {
+    if (call.name !== BASH_TOOL || call.outcome !== "completed") return [];
+    const output = call.output;
     if (typeof output !== "object" || output === null || Array.isArray(output)) return [];
     return [output as BashOutput];
   });

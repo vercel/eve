@@ -73,8 +73,9 @@ Each retained fixture package also exposes the same command as:
 pnpm --filter agent-basic-runtime test:e2e
 ```
 
-The root convenience command runs every fixture package with a `test:e2e`
-script:
+The root convenience command uses Turbo to build each fixture's workspace
+dependencies and then run every `test:e2e` script. A fixture that needs
+`e2e:prepare` invokes it from its own test script:
 
 ```sh
 pnpm test:e2e
@@ -194,7 +195,9 @@ The matrix models and worlds are registered in [`e2e/matrix.json`](./matrix.json
 discovers every fixture with an `evals/` directory and emits the suite
 matrices from the registry:
 
-- `model_matrix` — fixture × model legs for `e2e-local.yml`. The first
+- `model_matrix` — fixture × model legs for `e2e-local.yml`. Each leg includes
+  the fixture's workspace package name so Turbo can select its dependency
+  graph. The first
   registry model is the default that every fixture runs on; the rest run only
   on fixtures with `"e2e": { "modelMatrix": "full" }` in package.json.
   A fixture can set `e2e.localOnly: true` when it requires local-runner hardware
@@ -208,7 +211,8 @@ matrices from the registry:
   selected model into one job per shard. This partitions only the local model
   suite; world matrices remain one leg per fixture.
 - `world_matrix_<world>` — one leg per fixture for that world's suite
-  workflow. A fixture can set `e2e.worlds` to a subset of registered world
+  workflow, including its workspace package name for Turbo filtering. A
+  fixture can set `e2e.worlds` to a subset of registered world
   names, or to `[]` when its evals require local dev behavior; omitting it
   selects every world. A registered world's `package` reaches the job as
   `EVE_E2E_WORKFLOW_WORLD` (worlds without one, like `vercel`, use the
@@ -223,11 +227,13 @@ newly added fixtures and models become required automatically. Add a new
 aggregate to the ruleset only after its workflow lands on `main`: a required
 check nothing reports blocks every PR as permanently "expected".
 
-`.github/workflows/e2e-local.yml` (the model suite) builds the eve package
-once per leg, then runs one fixture directory with the leg's real model:
+`.github/workflows/e2e-local.yml` (the model suite) asks Turbo to prepare the
+selected fixture's workspace dependencies, then runs one fixture directory
+with the leg's real model. The `dist-extensions` task also builds and re-packs
+its file-protocol extension dependencies:
 
 ```sh
-pnpm --filter eve run build
+pnpm prepare:e2e --filter="$FIXTURE_PACKAGE"
 cd "$FIXTURE_DIR"
 pnpm run --if-present e2e:prepare
 EVE_E2E_MODEL="$MODEL" pnpm exec eve eval --strict --junit "$JUNIT_PATH"

@@ -1,5 +1,5 @@
-import type { EveDynamicToolPart, EveMessagePart } from "#client/message-reducer-types.js";
+import type { EveMessagePart, EveToolPart } from "#client/message-types.js";
 
-export function isTerminalToolCallPart(part: EveMessagePart): part is EveDynamicToolPart {
-  return part.type === "dynamic-tool" && part.toolMetadata?.eve?.kind === "tool-call";
+export function isTerminalToolCallPart(part: EveMessagePart): part is EveToolPart {
+  return part.type === "tool" && part.kind === "tool";
 }

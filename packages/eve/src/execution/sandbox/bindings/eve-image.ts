@@ -1,23 +1,10 @@
-import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { stripVersionBuildMetadata } from "#shared/package-version.js";
+// Content tag of packages/eve/Dockerfile, kept in sync by
+// `pnpm sandbox-image:tag --write` and checked in CI. Releases that do not
+// change the Dockerfile keep the same image, so sandbox templates survive
+// eve upgrades.
+const EVE_SANDBOX_IMAGE_TAG = "dockerfile-fc0279bf1664";
 
-const GHCR_EVE_SANDBOX_IMAGE_REPOSITORY = "ghcr.io/vercel/eve";
-const VERCEL_EVE_SANDBOX_IMAGE_REPOSITORY = "vcr.vercel.com/vercel/eve/base";
+const tag = process.env.EVE_SANDBOX_IMAGE_TAG?.trim() || EVE_SANDBOX_IMAGE_TAG;
 
-export function resolveEveSandboxImage(): string {
-  return `${GHCR_EVE_SANDBOX_IMAGE_REPOSITORY}:${resolveEveSandboxImageTag()}`;
-}
-
-export function resolveVercelEveSandboxImage(): string {
-  return `${VERCEL_EVE_SANDBOX_IMAGE_REPOSITORY}:${resolveEveSandboxImageTag()}`;
-}
-
-function resolveEveSandboxImageTag(): string {
-  const override = process.env.EVE_SANDBOX_IMAGE_TAG?.trim();
-  return override !== undefined && override.length > 0
-    ? override
-    : stripVersionBuildMetadata(resolveInstalledPackageInfo().version);
-}
-
-export const DEFAULT_EVE_SANDBOX_IMAGE = resolveEveSandboxImage();
-export const VERCEL_EVE_SANDBOX_IMAGE = resolveVercelEveSandboxImage();
+export const DEFAULT_EVE_SANDBOX_IMAGE = `ghcr.io/vercel/eve:${tag}`;
+export const VERCEL_EVE_SANDBOX_IMAGE = `vcr.vercel.com/vercel/eve/base:${tag}`;

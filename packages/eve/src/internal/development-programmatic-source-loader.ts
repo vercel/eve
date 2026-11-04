@@ -10,15 +10,14 @@ import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
 /** Loads framework and development-extension programmatic modules for local dev maps. */
 export async function loadFrameworkProgrammaticModule(
   backing: Extract<AgentModuleBacking, { readonly kind: "programmatic" }>,
-  dependencyNamespaces?: Readonly<Record<string, ProgrammaticModuleNamespace>>,
 ): Promise<ProgrammaticModuleNamespace> {
   return memoizeModuleNamespaceFactories(
     await loadProgrammaticModuleNamespace({
       backing,
-      dependencyNamespaces,
       registries: [frameworkAgentSourceRegistry, getDevelopmentExtensionSourceRegistry()],
     }),
   );
 }
 
 export { memoizeModuleNamespaceFactories } from "#compiler/source-graph.js";
+export { interopAuthoredModuleNamespace } from "#internal/authored-module.js";

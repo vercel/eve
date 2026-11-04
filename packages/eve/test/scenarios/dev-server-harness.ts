@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcessByStdio } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess, type ChildProcessByStdio } from "node:child_process";
 import { request as requestHttp, type Agent } from "node:http";
 import { existsSync, watch as watchFileSystem } from "node:fs";
 import { dirname, join } from "node:path";
@@ -107,7 +107,7 @@ export async function startEveDev(
     });
     await waitForPath(join(appRoot, ".eve", "dev-server-state.v1.json"));
   } catch (error) {
-    await stopEveDevChild(child);
+    await stopChildProcess(child);
     throw error;
   }
 
@@ -145,15 +145,13 @@ export async function startEveDev(
       });
     },
     async stop() {
-      await stopEveDevChild(child);
+      await stopChildProcess(child);
     },
     url,
   };
 }
 
-async function stopEveDevChild(
-  child: ChildProcessByStdio<null, Readable, Readable>,
-): Promise<void> {
+export async function stopChildProcess(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) {
     return;
   }

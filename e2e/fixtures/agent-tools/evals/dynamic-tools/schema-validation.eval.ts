@@ -15,7 +15,7 @@ export default defineEval({
       'Alice is checking a blank form submission. Call `schema_validate` with value " " (one space). If the tool reports a validation error, include "Blank value rejected" in your explanation. Do not retry.',
     );
     invalid.expectOk();
-    invalid.event("step.completed", { data: { finishReason: "tool-calls" } });
+    invalid.event("model.settled", { data: { finishReason: "tool-calls" } });
     invalid.notCalledTool("schema_validate");
     invalid.messageIncludes("Blank value rejected");
   },

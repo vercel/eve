@@ -1,6 +1,5 @@
 import type { ToolSet, TypedToolCall } from "ai";
 
-import type { ActionPresentationByCallId } from "#protocol/message.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/coordination.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessToolLookup } from "#harness/types.js";
@@ -18,35 +17,27 @@ export function createPresentedRuntimeActionRequestFromToolCall(input: {
   readonly tools: HarnessToolLookup;
 }): RuntimeActionRequestProjection {
   const action = createRuntimeActionRequestFromToolCall(input);
-  const presentationLabel = projectToolStartLabel(
+  const presentationLabel = projectToolLabel(
     input.tools.get(input.toolCall.toolName),
+    "start",
     action.input,
   );
   return presentationLabel === undefined ? { action } : { action, presentationLabel };
 }
 
-/** Calls a tool's label callback with a detached, JSON-safe input copy. */
-export function projectToolStartLabel(
+/** Label callbacks share normalization, detached input, and failure isolation. */
+export function projectToolLabel(
   definition: { readonly label?: HarnessToolDefinition["label"] } | undefined,
+  phase: "start" | "delta" | "complete",
   input: unknown,
+  output?: unknown,
 ): string | undefined {
-  const start = definition?.label?.start;
-  if (start === undefined) return undefined;
+  const project = definition?.label?.[phase];
+  if (project === undefined || input === undefined) return undefined;
   try {
-    const label = normalizePresentationText(start(parseJsonObject(input)));
+    const label = normalizePresentationText(project(parseJsonObject(input), output));
     return label === "" ? undefined : label;
   } catch {
     return undefined;
   }
-}
-
-export function collectActionPresentation(
-  actions: readonly RuntimeActionRequestProjection[],
-): ActionPresentationByCallId | undefined {
-  const presentation = Object.fromEntries(
-    actions.flatMap(({ action, presentationLabel }) =>
-      presentationLabel === undefined ? [] : [[action.callId, { label: presentationLabel }]],
-    ),
-  );
-  return Object.keys(presentation).length === 0 ? undefined : presentation;
 }

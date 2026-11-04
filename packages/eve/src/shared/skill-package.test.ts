@@ -14,7 +14,7 @@ describe("normalizeSkillPackage", () => {
     const packageDefinition = normalizeSkillPackage({
       name: "research",
       description: "Research unfamiliar topics.",
-      markdown: "Use primary sources.\n",
+      content: "Use primary sources.\n",
       files: {
         "references/checklist.md": "# Checklist\n",
         "assets/query.json": new Uint8Array([1, 2, 3]),
@@ -48,7 +48,7 @@ describe("normalizeSkillPackage", () => {
         normalizeSkillPackage({
           name,
           description: "Broken.",
-          markdown: "Broken.",
+          content: "Broken.",
         }),
       ).toThrow("Expected skill name");
     }
@@ -58,7 +58,7 @@ describe("normalizeSkillPackage", () => {
         normalizeSkillPackage({
           name: "safe",
           description: "Broken.",
-          markdown: "Broken.",
+          content: "Broken.",
           files: {
             [path]: "nope",
           },
@@ -78,7 +78,7 @@ describe("writeSkillPackageToSandbox", () => {
     const skill = normalizeSkillPackage({
       name: "tenant",
       description: "Tenant-specific procedures.",
-      markdown: "Follow tenant policy.",
+      content: "Follow tenant policy.",
       files: {
         "references/policy.md": "Policy body",
       },
@@ -94,36 +94,12 @@ describe("writeSkillPackageToSandbox", () => {
     );
   });
 
-  it("writes several files at once, but not all of them", async () => {
-    let inFlight = 0;
-    let maxInFlight = 0;
-    const session = {
-      ...mockSandbox().session,
-      async writeBinaryFile() {
-        maxInFlight = Math.max(maxInFlight, ++inFlight);
-        await Promise.resolve();
-        inFlight -= 1;
-      },
-    };
-    const skill = normalizeSkillPackage({
-      name: "tenant",
-      description: "Tenant-specific procedures.",
-      markdown: "Follow tenant policy.",
-      files: Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`references/${i}.md`, ""])),
-    });
-
-    await writeSkillPackageToSandbox({ sandbox: session, skill });
-
-    expect(maxInFlight).toBeGreaterThan(1);
-    expect(maxInFlight).toBeLessThan(skill.files.length);
-  });
-
   it("falls back to the legacy workspace skill directory when HOME is unavailable", async () => {
     const sandbox = mockSandbox();
     const skill = normalizeSkillPackage({
       name: "tenant",
       description: "Tenant-specific procedures.",
-      markdown: "Follow tenant policy.",
+      content: "Follow tenant policy.",
     });
 
     await writeSkillPackageToSandbox({ sandbox: sandbox.session, skill });

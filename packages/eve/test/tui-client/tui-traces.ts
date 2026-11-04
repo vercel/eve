@@ -41,7 +41,7 @@ const SYSTEM_PROMPT = `${"smoke system prompt guidance. ".repeat(24)}${SYSTEM_PR
 
 void (async () => {
   const appRoot = await mkdtemp(join(tmpdir(), "eve-tui-traces-"));
-  const client = new Client({ host: UNREACHABLE_HOST });
+  const client = new Client({ baseUrl: UNREACHABLE_HOST });
   const screen = new MockScreen({ columns: 110, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
@@ -351,7 +351,7 @@ void (async () => {
 });
 
 function bootRunner(appRoot: string) {
-  const client = new Client({ host: UNREACHABLE_HOST });
+  const client = new Client({ baseUrl: UNREACHABLE_HOST });
   const screen = new MockScreen({ columns: 110, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({

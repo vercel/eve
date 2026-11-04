@@ -55,10 +55,16 @@ describe("session inbox resume", () => {
     const hook = sessionHook("owner-2", token, { sessionId: "session-1" });
     resumeHookMock.mockResolvedValue(hook);
 
-    const receipt = await resumeSessionInbox(token, { kind: "clear" });
+    const receipt = await resumeSessionInbox(token, {
+      deliveryId: "clear-delivery",
+      kind: "clear",
+    });
     expect(receipt.ownerRunId).toBe("owner-2");
     await expect(receipt.sessionId).resolves.toBe("session-1");
-    expect(resumeHookMock).toHaveBeenCalledWith(sessionInboxHookToken(token), { kind: "clear" });
+    expect(resumeHookMock).toHaveBeenCalledWith(sessionInboxHookToken(token), {
+      deliveryId: "clear-delivery",
+      kind: "clear",
+    });
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
@@ -69,14 +75,19 @@ describe("session inbox resume", () => {
     getHookByTokenMock.mockResolvedValue(hook);
     resumeHookMock.mockResolvedValue(hook);
 
-    await resumeSessionInbox("channel:runnable", { kind: "clear" });
-    await resumeSessionInbox("channel:runnable", { kind: "compact" });
+    await resumeSessionInbox("channel:runnable", { deliveryId: "clear-delivery", kind: "clear" });
+    await resumeSessionInbox("channel:runnable", {
+      deliveryId: "compact-delivery",
+      kind: "compact",
+    });
 
     expect(world.runs.get).toHaveBeenCalledOnce();
     expect(resumeHookMock).toHaveBeenNthCalledWith(1, sessionInboxHookToken("channel:runnable"), {
+      deliveryId: "clear-delivery",
       kind: "clear",
     });
     expect(resumeHookMock).toHaveBeenNthCalledWith(2, sessionInboxHookToken("channel:runnable"), {
+      deliveryId: "compact-delivery",
       kind: "compact",
     });
   });
@@ -86,8 +97,14 @@ describe("session inbox resume", () => {
     const hook = sessionHook("owner-2", token, { sessionId: "session-1" });
     resumeHookMock.mockResolvedValue(hook);
 
-    await resumeSessionInbox({ sessionId: "session-1" }, { kind: "compact" });
-    expect(resumeHookMock).toHaveBeenCalledWith(sessionInboxHookToken(token), { kind: "compact" });
+    await resumeSessionInbox(
+      { sessionId: "session-1" },
+      { deliveryId: "compact-delivery", kind: "compact" },
+    );
+    expect(resumeHookMock).toHaveBeenCalledWith(sessionInboxHookToken(token), {
+      deliveryId: "compact-delivery",
+      kind: "compact",
+    });
   });
   it("does not hydrate metadata until an accepted alias caller asks for identity", async () => {
     const metadata = vi.fn(() => Promise.resolve({ sessionId: "anchor" }));
@@ -96,7 +113,10 @@ describe("session inbox resume", () => {
       readonly metadata: Promise<unknown>;
     }>();
     resumeHookMock.mockReturnValue(acceptance.promise);
-    const delivery = resumeSessionInbox("channel:alias", { kind: "clear" });
+    const delivery = resumeSessionInbox("channel:alias", {
+      deliveryId: "clear-delivery",
+      kind: "clear",
+    });
     expect(metadata).not.toHaveBeenCalled();
     acceptance.resolve({
       runId: "successor",
@@ -119,13 +139,19 @@ describe("session inbox resume", () => {
         throw new Error("Metadata must not be read");
       },
     });
-    const receipt = await resumeSessionInbox({ sessionId: "anchor" }, { kind: "clear" });
+    const receipt = await resumeSessionInbox(
+      { sessionId: "anchor" },
+      { deliveryId: "clear-delivery", kind: "clear" },
+    );
     await expect(receipt.sessionId).resolves.toBe("anchor");
   });
 
   it("does not substitute the executor for missing session identity", async () => {
     resumeHookMock.mockResolvedValue({ runId: "successor", metadata: Promise.resolve(undefined) });
-    const receipt = await resumeSessionInbox("alias", { kind: "clear" });
+    const receipt = await resumeSessionInbox("alias", {
+      deliveryId: "clear-delivery",
+      kind: "clear",
+    });
     await expect(receipt.sessionId).rejects.toThrow("command accepted");
     expect(resumeHookMock).toHaveBeenCalledOnce();
   });

@@ -1,6 +1,7 @@
 import { defineAuthoringCase, emptyProject } from "../../lib/authoring-case.js";
 
 export default defineAuthoringCase({
+  category: "projects",
   startingPoint: emptyProject,
   projectDirectory: "wayfinder",
   async interact({ send }) {

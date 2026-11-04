@@ -27,7 +27,11 @@ describe("normalizeScheduleCollectionDefinition", () => {
       { approval: { rename: () => "user-approval" } },
       "rename",
     ],
-    ["unsupported deferral", { tool: "deferred" }, "deferred tools are not supported"],
+    [
+      "an invalid tool exposure",
+      { tool: "hidden" },
+      'Expected "tool" to be true, false, or "deferred".',
+    ],
     ["the removed capture hook", { resolvePayload: () => ({}) }, "resolvePayload"],
     ["the removed deliveries", { deliveries: {} }, "deliveries"],
   ])("rejects a subscription with %s", (_label, override, message) => {

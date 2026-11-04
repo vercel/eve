@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DevelopmentServerState } from "#internal/nitro/host/dev-server-state.js";
 
@@ -16,6 +16,7 @@ async function createState(): Promise<DevelopmentServerState> {
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(
     temporaryRoots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
   );
@@ -54,5 +55,22 @@ describe("DevelopmentServerState", () => {
     await state.remove();
 
     await expect(state.read()).resolves.toBeUndefined();
+  });
+
+  it("ignores the app's record when a separate state directory is configured", async () => {
+    const state = await createState();
+    await state.write("http://127.0.0.1:2000/");
+    const stateDirectory = join(state.appRoot, ".eve", "eval-servers", "run-1");
+    vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv("EVE_DEV_STATE_DIR", stateDirectory);
+    const isolated = new DevelopmentServerState({ appRoot: state.appRoot });
+
+    await expect(isolated.read()).resolves.toBeUndefined();
+    await isolated.write("http://127.0.0.1:2001/");
+
+    await expect(readFile(join(stateDirectory, STATE_FILE_NAME), "utf8")).resolves.toBe(
+      '{"url":"http://127.0.0.1:2001/"}\n',
+    );
+    await expect(state.read()).resolves.toBe("http://127.0.0.1:2000/");
   });
 });

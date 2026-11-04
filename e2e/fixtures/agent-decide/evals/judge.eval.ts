@@ -37,7 +37,7 @@ export default defineEval({
       criteria: ["Missing", "Partly identified", "Fully identified"],
     }).gate(0.75);
     const judgments = t.judge({
-      state: { response: turn.message ?? "" },
+      state: { response: turn.reply ?? "" },
       questions: {
         identifiesModel: {
           type: "boolean",

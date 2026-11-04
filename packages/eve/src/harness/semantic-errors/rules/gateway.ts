@@ -39,6 +39,16 @@ export const GATEWAY_RULES: readonly SemanticErrorRule[] = [
     hint: "Add a valid credit card or credits in the Vercel dashboard, then retry.",
   },
   {
+    // AI Gateway answers a throttled balance check with the same 402 `insufficient_funds` as
+    // an empty balance; only the message tells them apart, so this must precede the next rule.
+    id: "gateway-credit-check-throttled",
+    name: "AI Gateway credit check throttled",
+    tags: ["gateway", "transient"],
+    when: messageMatches(/credit balance verification is temporarily throttled/i),
+    message: "AI Gateway temporarily throttled its credit balance check.",
+    hint: "Retries are automatic; if it persists, wait a moment and retry.",
+  },
+  {
     id: "gateway-credit-exhausted",
     name: "AI Gateway credit balance exhausted",
     tags: ["gateway", "config", "recoverable"],

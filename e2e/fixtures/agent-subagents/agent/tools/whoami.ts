@@ -1,6 +1,8 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
+import { tenantSessions } from "../lib/tenant-sessions.js";
+
 /**
  * Reports the session principals as one deterministic marker string, so an
  * eval can grep a parent reply for exactly which identities a child session
@@ -14,6 +16,7 @@ export default defineTool({
   inputSchema: z.object({}),
   async execute(_input, ctx) {
     const { current, initiator } = ctx.session.auth;
+    if (current?.principalId.startsWith("tenant-") === true) tenantSessions.add(ctx.session.id);
     const forwardedBy = current?.attributes["eve:forwarded-by"] ?? "none";
     return {
       marker: `WHOAMI current=${formatPrincipal(current)} initiator=${formatPrincipal(initiator)} forwarded-by=${String(forwardedBy)}`,

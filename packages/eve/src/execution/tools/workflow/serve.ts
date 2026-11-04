@@ -35,7 +35,6 @@ import type { JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { ToolContext } from "#tools/definition.js";
 import type {
-  AgentSession,
   WorkflowServeCall,
   WorkflowServeContext,
   WorkflowServeReceive,
@@ -156,7 +155,7 @@ class WorkflowServeCalls implements WorkflowBodyControl {
 
   /**
    * The call the body serves now: the latest call it received. Steps,
-   * questions, sign-ins, and `agent.started` belong to this call, so they
+   * questions, sign-ins, and `child.opened` belong to this call, so they
    * carry its `callId` and turn; `ctx.session` is its view of the session,
    * `ctx.agents` lists the agents it may open, a session opened now is its
    * child, and a message sent now carries its auth.
@@ -405,7 +404,7 @@ async function executeServeBody(
 function createServeContext(
   input: WorkflowBodyInput,
   calls: WorkflowServeCalls,
-  agent: (name: string) => AgentSession,
+  agent: WorkflowSharedContext["agent"],
 ): ServeContext {
   const ctx: ServeContext = {
     ...createSharedContext(input, agent, (request, options) => {

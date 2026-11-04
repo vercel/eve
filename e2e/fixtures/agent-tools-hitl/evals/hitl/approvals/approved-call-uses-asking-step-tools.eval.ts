@@ -29,6 +29,8 @@ export default defineEval({
       output: { change: "retiring" },
       count: 1,
     });
-    approved.event("message.completed", { data: { message: /^Retiring change: done / } });
+    approved.event("content.completed", {
+      data: { phase: "reply", value: /^Retiring change: done / },
+    });
   },
 });

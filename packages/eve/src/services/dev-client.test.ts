@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/index.js";
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
 import { createDevelopmentRuntimeArtifactRefresher } from "#services/dev-client.js";
+import { encodeTestLine, testTurnFacts } from "#internal/testing/events.js";
 
 const encoder = new TextEncoder();
 
@@ -18,7 +19,7 @@ describe("runtime-artifact refresher session continuity", () => {
       revisions: ["snapshot-a", "snapshot-b"],
     });
     vi.stubGlobal("fetch", fetchMock);
-    const client = new Client({ host: "http://127.0.0.1:3000" });
+    const client = new Client({ baseUrl: "http://127.0.0.1:3000" });
     const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://127.0.0.1:3000",
     });
@@ -52,7 +53,7 @@ describe("runtime-artifact refresher session continuity", () => {
       revisions: ["snapshot-a", "snapshot-a"],
     });
     vi.stubGlobal("fetch", fetchMock);
-    const client = new Client({ host: "http://127.0.0.1:3000" });
+    const client = new Client({ baseUrl: "http://127.0.0.1:3000" });
     const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://127.0.0.1:3000",
     });
@@ -82,11 +83,11 @@ describe("runtime-artifact refresher session continuity", () => {
       revisions: ["snapshot-a", "snapshot-b"],
     });
     vi.stubGlobal("fetch", fetchMock);
-    const client = new Client({ host: "http://localhost:3000" });
+    const client = new Client({ baseUrl: "http://localhost:3000" });
     const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://localhost:3000",
     });
-    const inputResponses = [{ optionId: "approve", requestId: "request-1" }];
+    const answers = [{ optionId: "approve", interactionId: "request-1" }];
     const session = client.sessions.attach("session_test");
 
     await refresher.refresh({
@@ -95,9 +96,9 @@ describe("runtime-artifact refresher session continuity", () => {
     await (await session.send("approve a tool")).result();
     const sessionId = session.state.sessionId;
     await refresher.refresh({
-      inputResponses,
+      answers,
     });
-    await (await session.respond(inputResponses)).result();
+    await (await session.respond(answers)).result();
 
     expect(session.state.sessionId).toBe(sessionId);
 
@@ -123,7 +124,7 @@ describe("createDevelopmentRuntimeArtifactRefresher", () => {
       revisions: ["snapshot-a", "snapshot-b"],
     });
     vi.stubGlobal("fetch", fetchMock);
-    const client = new Client({ host: "http://localhost:3000" });
+    const client = new Client({ baseUrl: "http://localhost:3000" });
     const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://localhost:3000",
     });
@@ -154,7 +155,7 @@ describe("createDevelopmentRuntimeArtifactRefresher", () => {
       revisions: ["snapshot-b"],
     });
     vi.stubGlobal("fetch", fetchMock);
-    const client = new Client({ host: "http://localhost:3000" });
+    const client = new Client({ baseUrl: "http://localhost:3000" });
     const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://localhost:3000",
     });
@@ -296,17 +297,12 @@ function createDevFetchMock(input: {
     return new Response(
       new ReadableStream<Uint8Array>({
         start(controller) {
+          // Each read answers the latest accepted delivery with one completed turn.
           controller.enqueue(
             encoder.encode(
-              `${JSON.stringify({
-                data: { continuationToken: "session-id", wait: "next-user-message" },
-                type: "session.waiting",
-                meta: {
-                  at: new Date().toISOString(),
-                  id: `event-${nextDeliveryIndex}`,
-                  deliveryIds: [`delivery-${nextDeliveryIndex}`],
-                },
-              })}\n`,
+              testTurnFacts(0, "Done.", [`delivery-${nextDeliveryIndex}`])
+                .map(encodeTestLine)
+                .join(""),
             ),
           );
           controller.close();

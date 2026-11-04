@@ -1,7 +1,19 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import type { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { settleDuplicateDeliveryStep } from "#execution/session/settle-duplicate-delivery-step.js";
 
-import type { RuntimeActionResultHookPayload } from "#channel/types.js";
-import type { DeliveryAdmission, SessionInputQueue } from "#execution/session/input-queue.js";
+import type {
+  RuntimeActionResultHookPayload,
+  SessionAuthContext,
+  SessionControlIdentity,
+} from "#channel/types.js";
+import { controlDeliveryOf } from "#execution/session/control-delivery.js";
+import type { ControlSettlement } from "#harness/facts.js";
+import type {
+  ControlOrigin,
+  DeliveryAdmission,
+  SessionInputQueue,
+} from "#execution/session/input-queue.js";
 import { isWorkflowMessage, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import {
   decodeSessionInboxPayload,
@@ -13,8 +25,10 @@ import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.
 /** One canonical admission result, after wire decoding but before turn policy. */
 type SessionAdmission =
   | { readonly admission: DeliveryAdmission; readonly kind: "delivery" }
-  | { readonly kind: "cancel" }
+  | { readonly kind: "cancel"; readonly origin?: ControlOrigin }
   | { readonly kind: "consumed" }
+  /** A control this owner cannot run: settle it failed, so its sender doesn't wait forever. */
+  | { readonly kind: "unsupported"; readonly settlement: ControlSettlement }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
 
@@ -27,6 +41,7 @@ export async function admitSessionInboxPayload(
   value: SessionInboxPayload,
   input: {
     readonly queue: SessionInputQueue;
+    readonly cursor: SessionStateCursor;
   },
 ): Promise<SessionAdmission> {
   if (value.kind === "session-failure") throw new Error(value.error);
@@ -38,7 +53,7 @@ export async function admitSessionInboxPayload(
     return { kind: "consumed" };
   }
   // A child's questions reach the session only through the run that opened it.
-  if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
+  if (value.kind === "subagent-interaction") {
     return { kind: "consumed" };
   }
 
@@ -48,15 +63,32 @@ export async function admitSessionInboxPayload(
   } catch (error) {
     if (!(error instanceof SessionInboxPayloadError)) throw error;
     await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
-    return { kind: "consumed" };
+    const settlement = unsupportedControl(value, error.message);
+    return settlement === undefined ? { kind: "consumed" } : { kind: "unsupported", settlement };
   }
 
   switch (command.kind) {
-    case "deliver":
-      return { admission: input.queue.enqueueDelivery(command), kind: "delivery" };
+    case "session-prewarm":
+      if (command.expectedOwnerRunId === getWorkflowMetadata().workflowRunId)
+        input.queue.prepareOnDeployment(command.targetDeploymentId);
+      return { kind: "consumed" };
+    case "deliver": {
+      const admission = input.queue.enqueueDelivery(command);
+      if (admission === undefined) {
+        await input.cursor.advance((state) =>
+          settleDuplicateDeliveryStep({ ...state, delivery: command }),
+        );
+        return { kind: "consumed" };
+      }
+      return { admission, kind: "delivery" };
+    }
     case "clear":
+      // A clear starts over: it stops the running turn and its tasks, as a reset does, then runs.
+      // It carries no origin: the queued control, not the cancel, settles its delivery.
+      input.queue.enqueueControl("clear", controlOrigin(command));
+      return { kind: "cancel" };
     case "compact":
-      input.queue.enqueueControl(command.kind);
+      input.queue.enqueueControl("compact", controlOrigin(command));
       return { kind: "consumed" };
     case "session-timeout":
       // A previous owner's timer may fire after handoff; only this owner's deadline counts.
@@ -65,9 +97,41 @@ export async function admitSessionInboxPayload(
       }
       return { kind: "consumed" };
     case "reset":
-      input.queue.enqueueControl("reset");
+      input.queue.enqueueControl("reset", controlOrigin(command));
       return { kind: "cancel" };
-    case "cancel":
-      return { kind: "cancel" };
+    case "cancel": {
+      const origin = controlOrigin(command);
+      return origin === undefined ? { kind: "cancel" } : { kind: "cancel", origin };
+    }
   }
+}
+
+/** The delivery a control arrived as. */
+export function controlOrigin(command: SessionControlIdentity): ControlOrigin {
+  return command.auth === undefined
+    ? { deliveryId: command.deliveryId }
+    : { auth: command.auth, deliveryId: command.deliveryId };
+}
+
+/**
+ * The failed settlement of an undecodable payload that names its delivery: a control from a newer eve, or
+ * a malformed one. Its sender awaits that delivery's settlement. Without a delivery id, nobody
+ * waits on it, and the payload is only dropped.
+ */
+function unsupportedControl(
+  value: SessionInboxPayload,
+  reason: string,
+): ControlSettlement | undefined {
+  const { auth, deliveryId, kind } = value as Record<string, unknown>;
+  if (typeof deliveryId !== "string" || deliveryId.length === 0) return undefined;
+  const origin =
+    typeof auth === "object" && auth !== null
+      ? { auth: auth as SessionAuthContext, deliveryId }
+      : { deliveryId };
+  return {
+    control: controlDeliveryOf(origin),
+    outcome: "failed",
+    reason,
+    source: typeof kind === "string" && kind.length > 0 ? kind : "unknown",
+  };
 }

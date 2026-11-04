@@ -20,7 +20,8 @@ describe("just-bash automatic installation", () => {
       files: {
         "pnpm-workspace.yaml":
           "minimumReleaseAge: 0\nstrictDepBuilds: true\nallowBuilds:\n  esbuild: true\n",
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4-mini" };\n',
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4-mini" });\n',
         "agent/instructions.md": "Help with everyday tasks.\n",
         "agent/tools/check_shell.ts": [
           'import { defineTool } from "eve/tools";',
@@ -48,7 +49,6 @@ describe("just-bash automatic installation", () => {
     try {
       expect((await fetch(new URL("/eve/v1/health", server.url))).status).toBe(200);
       expect(existsSync(join(app.appRoot, "node_modules", "just-bash"))).toBe(false);
-      expect(existsSync(join(app.appRoot, "node_modules", "microsandbox"))).toBe(false);
       expect(await readFile(join(app.appRoot, "pnpm-workspace.yaml"), "utf8")).not.toContain(
         "ignoredOptionalDependencies:",
       );

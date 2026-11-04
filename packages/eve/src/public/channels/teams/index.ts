@@ -1,5 +1,3 @@
-export type { ModelMessage } from "ai";
-
 /**
  * Instrumentation metadata for Teams sessions, read from the channel state: the
  * Teams team/channel id (`channelId`), the conversation type (`personal`,
@@ -16,6 +14,7 @@ export {
   teamsChannel,
   type TeamsChannel,
   type TeamsChannelConfig,
+  type TeamsChannelContext,
   type TeamsChannelCredentials,
   type TeamsChannelEvents,
   type TeamsChannelState,
@@ -24,29 +23,15 @@ export {
   type TeamsHandle,
   type TeamsInboundMessageContext,
   type TeamsInboundResult,
-  type TeamsInboundResultOrPromise,
-  type TeamsInputResponseResult,
+  type TeamsAnswerResult,
   type TeamsInvokeResult,
-  type TeamsInvokeResultOrPromise,
   type TeamsReceiveTarget,
   type TeamsRequestOptions,
   type TeamsThread,
 } from "#public/channels/teams/teamsChannel.js";
 
 export {
-  callTeamsConnectorApi,
-  normalizeTeamsPostInput,
-  replyToTeamsActivity,
-  resolveTeamsAccessToken,
-  resolveTeamsAppId,
-  resolveTeamsAppPassword,
-  resolveTeamsTenantId,
-  sendTeamsActivity,
-  splitTeamsMessageText,
   teamsContinuationToken,
-  triggerTeamsTypingIndicator,
-  updateTeamsActivity,
-  TEAMS_MESSAGE_TEXT_MAX_LENGTH,
   type TeamsAccessTokenResult,
   type TeamsApiOptions,
   type TeamsApiResponse,
@@ -54,7 +39,6 @@ export {
   type TeamsAppPassword,
   type TeamsAttachment,
   type TeamsChannelAccount,
-  type TeamsCredentials,
   type TeamsFetch,
   type TeamsMention,
   type TeamsMessageBody,
@@ -65,10 +49,6 @@ export {
 } from "#public/channels/teams/api.js";
 
 export {
-  formatTeamsContextBlock,
-  isTeamsPersonalMessage,
-  parseTeamsActivity,
-  teamsThreadRootActivityId,
   type TeamsActivity,
   type TeamsActivityBase,
   type TeamsConversationAccount,
@@ -80,42 +60,10 @@ export {
 } from "#public/channels/teams/inbound.js";
 
 export {
-  deriveTeamsInputResponses,
-  isTeamsInputResponseActivity,
-  isTeamsToolApprovalResponseActivity,
-  readTeamsToolApprovalPrompt,
-  renderAnsweredInputRequestMessage,
-  renderInputRequestAttachment,
-  renderInputRequestMessage,
-  teamsInvokeResponse,
-  TEAMS_ADAPTIVE_CARD_CONTENT_TYPE,
-  TEAMS_HITL_CHOICE_INPUT_ID,
-  TEAMS_HITL_DATA_KEY,
-  TEAMS_HITL_FREEFORM_INPUT_ID,
-  TEAMS_HITL_REQUEST_KIND_KEY,
-  TEAMS_HITL_PROMPT_KEY,
-} from "#public/channels/teams/hitl.js";
-
-export {
-  collectTeamsFileParts,
-  buildTeamsTurnMessage,
-  createTeamsFetchFile,
-  normalizeTeamsFilesPolicy,
   type TeamsFilesConfig,
   type TeamsFilesPolicy,
 } from "#public/channels/teams/attachments.js";
 
-export {
-  buildAuthCompletedText,
-  defaultTeamsAuth,
-  formatConnectionDisplayName,
-  teamsMentionUser,
-} from "#public/channels/teams/defaults.js";
+export { defaultTeamsAuth } from "#public/channels/teams/defaults.js";
 
-export {
-  verifyTeamsJwt,
-  verifyTeamsRequest,
-  type TeamsJwtVerifyOptions,
-  type TeamsVerifyOptions,
-  type TeamsWebhookVerifier,
-} from "#public/channels/teams/verify.js";
+export { type TeamsWebhookVerifier } from "#public/channels/teams/verify.js";

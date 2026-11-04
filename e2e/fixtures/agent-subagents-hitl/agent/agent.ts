@@ -1,5 +1,5 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineAgent, type DefinedAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 const COLLISION_MARKER = "MIXED-PARK-COMPLETE-7K2M";
@@ -109,9 +109,11 @@ function waitForTasks(): MockModelResponse {
   return { toolCalls: [{ input: {}, name: "eve__task_wait" }] };
 }
 
-export default defineAgent({
+const agent: DefinedAgent = defineAgent({
   ...e2eAgentConfig(),
   // Parking coverage requires both actions in one step; children still use the matrix model.
   model: mockModel(respond),
   modelContextWindowTokens: 1_000_000,
 });
+
+export default agent;

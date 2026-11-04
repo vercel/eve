@@ -62,8 +62,9 @@ interface DiscoverNamedSourceDirectoryBaseInput {
    * When set, emit this diagnostic for any leaf file that is neither a
    * supported authored module nor (when allowed) a markdown file. When
    * unset, unrecognized leaf files are silently ignored — used by
-   * `tools/`, `channels/`, and `hooks/` so authors can drop incidental
-   * files into those directories without build errors.
+   * `tools/`, `channels/`, `hooks/`, and `lib/` so authors can drop
+   * incidental files (or JSON data imported by a module) into those
+   * directories without build errors.
    */
   unsupportedFileCode?: string;
   unsupportedFileMessage?: (sourcePath: string, directoryName: string) => string;

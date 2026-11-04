@@ -32,6 +32,7 @@ interface QuestionPanelState {
   /** The freeform row's inline editor; focused while the cursor rests on it. */
   readonly editor: LineState;
   readonly caretVisible: boolean;
+  readonly maxRows?: number;
 }
 
 export function renderQuestionPanel(
@@ -39,27 +40,50 @@ export function renderQuestionPanel(
   theme: Theme,
   width: number,
 ): string[] {
-  const c = theme.colors;
-  // The rule hugs the question — no blank row between them.
-  const rows: string[] = [];
-
-  // The prompt is model-authored and can span paragraphs. Embedded newlines
-  // MUST split before width-wrapping: a row that secretly holds newlines
-  // occupies more terminal rows than the live region accounts for, leaking a
-  // duplicate frame into scrollback on every repaint.
-  for (const logical of state.prompt.split(/\r?\n/u)) {
-    for (const line of wrapVisibleLine(logical, Math.max(8, width - 2))) {
-      rows.push(`  ${c.bold(line)}`);
-    }
-  }
+  const rows = renderQuestionPrompt(state.prompt, theme, width);
   rows.push("");
-
-  rows.push(...renderQuestionChoices(state.options, state.cursor, theme));
+  let focusedRow = rows.length;
+  let focusedEndRow = focusedRow;
+  for (const [index, option] of state.options.entries()) {
+    if (index === state.cursor) focusedRow = rows.length;
+    rows.push(
+      ...renderQuestionChoice(option, index === state.cursor, theme).flatMap((row) =>
+        row.split(/\r?\n/u),
+      ),
+    );
+    if (index === state.cursor) focusedEndRow = rows.length - 1;
+  }
   if (state.allowFreeform) {
+    if (state.cursor === state.options.length) focusedRow = focusedEndRow = rows.length;
     rows.push(renderFreeformRow(state, theme, width));
   }
 
-  return rows.map((row) => clipVisible(row, width));
+  return fitQuestionPanel(
+    rows.map((row) => clipVisible(row, width)),
+    state.maxRows ?? rows.length,
+    focusedRow,
+    focusedEndRow,
+  );
+}
+
+export function renderQuestionPrompt(prompt: string, theme: Theme, width: number): string[] {
+  return stripTerminalControls(prompt)
+    .split(/\r?\n/u)
+    .flatMap((line) => wrapVisibleLine(line, Math.max(1, width - 2)))
+    .map((line) => `  ${theme.colors.bold(line)}`);
+}
+
+/** Window the body, keeping the focused choice or editor reachable on short terminals. */
+export function fitQuestionPanel(
+  rows: readonly string[],
+  maxRows: number,
+  focusedRow = rows.length - 1,
+  focusedEndRow = focusedRow,
+): string[] {
+  // Keep the label when one choice's description is taller than the viewport.
+  const end = Math.min(focusedEndRow, focusedRow + maxRows - 1);
+  const start = Math.max(0, Math.min(end - maxRows + 1, rows.length - maxRows));
+  return rows.slice(start, start + maxRows);
 }
 
 /** Who asked for a prompt and where it sits among the open requests, for the drawer's corner. */
@@ -75,36 +99,32 @@ export function inputContextLabel(
   return parts.length === 0 ? undefined : parts.join(` ${theme.glyph.dot} `);
 }
 
-export function renderQuestionChoices(
-  options: readonly AgentTUIInputOption[],
-  cursor: number,
+function renderQuestionChoice(
+  option: AgentTUIInputOption,
+  isCursor: boolean,
   theme: Theme,
-  forceCursor = false,
 ): string[] {
-  return options.flatMap((option, index) => {
-    const isCursor = forceCursor || cursor === index;
-    const row = renderOptionRow({
-      colors: theme.colors,
-      glyphs: {
-        pointer: theme.glyph.pointer,
-        selectedPointer: theme.glyph.selectedPointer,
-        success: theme.glyph.success,
-        placeholder: theme.glyph.option,
-        dot: theme.glyph.dot,
-        warning: theme.glyph.warning,
-      },
-      label: option.label,
-      isCursor,
-      state: { kind: "available", checked: false },
-      placeholder: false,
-      presentation: "minimal",
-    });
-    const rows = [`  ${row}`];
-    if (option.description !== undefined && option.description.length > 0) {
-      rows.push(`     ${theme.colors.dim(option.description)}`);
-    }
-    return rows;
+  const row = renderOptionRow({
+    colors: theme.colors,
+    glyphs: {
+      pointer: theme.glyph.pointer,
+      selectedPointer: theme.glyph.selectedPointer,
+      success: theme.glyph.success,
+      placeholder: theme.glyph.option,
+      dot: theme.glyph.dot,
+      warning: theme.glyph.warning,
+    },
+    label: option.label,
+    isCursor,
+    state: { kind: "available", checked: false },
+    placeholder: false,
+    presentation: "minimal",
   });
+  const rows = [`  ${row}`];
+  if (option.description !== undefined && option.description.length > 0) {
+    rows.push(`     ${theme.colors.dim(option.description)}`);
+  }
+  return rows;
 }
 
 function renderFreeformRow(state: QuestionPanelState, theme: Theme, width: number): string {

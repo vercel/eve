@@ -1,0 +1,61 @@
+:root {
+  color-scheme: light;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  --border: #e4e4e7;
+  --muted: #71717a;
+}
+
+body {
+  margin: 0;
+  color: #18181b;
+  background: #fafafa;
+}
+
+a {
+  color: inherit;
+}
+
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: white;
+}
+
+.topbar .spacer {
+  flex: 1;
+}
+
+.content {
+  padding: 2rem 1.5rem;
+  max-width: 64rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+}
+
+th,
+td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.status {
+  text-transform: capitalize;
+}
+
+.muted {
+  color: var(--muted);
+}

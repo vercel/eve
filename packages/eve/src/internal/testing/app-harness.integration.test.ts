@@ -2,23 +2,10 @@ import { startSessionOwner } from "#internal/testing/workflow-test-helpers.js";
 import { describe, expect, it } from "vitest";
 
 import { workflowEntry } from "#execution/session/entry.js";
-import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getActiveRuntimeSession } from "#runtime/sessions/runtime-session.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
 import { readFirstTurnReply } from "#internal/testing/events.js";
-
-function buildSerializedContext(overrides: {
-  channelKind: string;
-  continuationToken: string;
-}): Record<string, unknown> {
-  return {
-    "eve.auth": null,
-    "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
-    "eve.stateLayout": 1,
-    "eve.channel": { kind: overrides.channelKind, state: {} },
-    "eve.continuationToken": overrides.continuationToken,
-  };
-}
 
 describe("AppHarness", () => {
   it("keeps compiled artifacts scoped to the test runtime session", async () => {

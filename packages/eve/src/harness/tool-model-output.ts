@@ -9,13 +9,25 @@ import { withToolOutputSerializationError } from "#harness/tool-output-serializa
 
 /**
  * A validated {@link ToolModelOutput} in the AI SDK's expected shape:
- * `json` values are proven JSON-serializable and `content` arrays are
- * mutable so the value is assignable to the SDK's `ToolResultOutput`.
+ * `json` values are proven JSON-serializable, `content` arrays are
+ * mutable, and file URLs are parsed `URL`s so the value is assignable to
+ * the SDK's `ToolResultOutput`.
  */
 export type ToolModelOutputValue =
   | { readonly type: "json"; readonly value: JSONValue }
   | { readonly type: "text"; readonly value: string }
-  | { readonly type: "content"; readonly value: ToolModelOutputPart[] };
+  | { readonly type: "content"; readonly value: ToolModelOutputValuePart[] };
+
+type ToolModelOutputValuePart =
+  | Extract<ToolModelOutputPart, { readonly type: "text" }>
+  | {
+      readonly type: "file";
+      readonly data:
+        | { readonly type: "data"; readonly data: string }
+        | { readonly type: "url"; readonly url: URL };
+      readonly mediaType: string;
+      readonly filename?: string;
+    };
 
 const log = createLogger("harness.tool-model-output");
 
@@ -28,13 +40,16 @@ const log = createLogger("harness.tool-model-output");
 const CONTENT_FILE_WARN_BYTES = 3 * 1024 * 1024;
 
 /** File-data tags the AI SDK accepts but eve does not support yet. */
-const UNSUPPORTED_FILE_DATA_TAGS = new Set(["url", "reference", "text"]);
+const UNSUPPORTED_FILE_DATA_TAGS = new Set(["reference", "text"]);
 
 const toolModelOutputPartSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
   z.object({
     type: z.literal("file"),
-    data: z.object({ type: z.literal("data"), data: z.string() }),
+    data: z.discriminatedUnion("type", [
+      z.object({ type: z.literal("data"), data: z.string() }),
+      z.object({ type: z.literal("url"), url: z.string() }),
+    ]),
     mediaType: z.string().min(1),
     filename: z.string().optional(),
   }),
@@ -103,15 +118,42 @@ export function normalizeToolModelOutput(input: {
         };
       }
       if (output.type === "content") {
-        for (const part of output.value) {
-          if (part.type === "file") {
-            warnOversizedFilePayload(part, input.toolName);
-          }
-        }
+        return {
+          type: "content",
+          value: output.value.map((part) => normalizeContentPart(part, input.toolName)),
+        };
       }
       return output;
     },
   );
+}
+
+function normalizeContentPart(
+  part: z.infer<typeof toolModelOutputPartSchema>,
+  toolName: string,
+): ToolModelOutputValuePart {
+  if (part.type === "text") return part;
+  if (part.data.type === "data") {
+    warnOversizedFilePayload(part.data.data, part.mediaType, toolName);
+    return { ...part, data: part.data };
+  }
+  return { ...part, data: { type: "url", url: parseFileUrl(part.data.url) } };
+}
+
+/**
+ * Only `https:` URLs are accepted: the provider fetches them, and eve's
+ * own attachment refs use internal schemes that must never be authored.
+ * The error names only the scheme, since presigned URLs carry credentials.
+ */
+function parseFileUrl(value: string): URL {
+  const url = URL.canParse(value) ? new URL(value) : undefined;
+  if (url?.protocol !== "https:") {
+    const received = url === undefined ? "a value that is not a URL" : `a ${url.protocol} URL`;
+    throw new TypeError(
+      `Expected file content part url to be an https: URL, received ${received}.`,
+    );
+  }
+  return url;
 }
 
 /**
@@ -152,24 +194,21 @@ function assertSupportedFilePartData(output: unknown): void {
     if (typeof tag === "string" && UNSUPPORTED_FILE_DATA_TAGS.has(tag)) {
       throw new TypeError(
         `File content part data tag "${tag}" is not supported yet; ` +
-          'only { type: "data" } with a base64 string is accepted.',
+          'use { type: "data" } with a base64 string or { type: "url" } with an https: URL.',
       );
     }
   }
 }
 
-function warnOversizedFilePayload(
-  part: { readonly data: { readonly data: string }; readonly mediaType: string },
-  toolName: string,
-): void {
-  const estimatedBytes = Math.floor((part.data.data.length * 3) / 4);
+function warnOversizedFilePayload(base64: string, mediaType: string, toolName: string): void {
+  const estimatedBytes = Math.floor((base64.length * 3) / 4);
   if (estimatedBytes <= CONTENT_FILE_WARN_BYTES) return;
   log.warn(
     "content-part file payload exceeds the inline size guideline — it is persisted in " +
       "history and re-sent on every subsequent model call",
     {
       estimatedBytes,
-      mediaType: part.mediaType,
+      mediaType,
       toolName,
       warnBytes: CONTENT_FILE_WARN_BYTES,
     },

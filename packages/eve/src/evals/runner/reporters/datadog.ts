@@ -1,3 +1,4 @@
+import { outputOf } from "#evals/output.js";
 import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
 import { resolveRuntimeTraceLinks } from "#evals/runner/reporters/datadog-runtime-trace-links.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
@@ -81,7 +82,7 @@ type DatadogRecordingOptions = Required<
  * package and `DD_API_KEY`/`DD_APP_KEY` credentials unless `config.client` is
  * provided.
  */
-export function Datadog(config: DatadogReporterConfig = {}): EvalReporter {
+export function datadogReporter(config: DatadogReporterConfig = {}): EvalReporter {
   return new DatadogReporter(config);
 }
 
@@ -216,9 +217,14 @@ class DatadogReporter implements EvalReporter {
     }
 
     const newRecords: DatadogDatasetRecordInput[] = [];
+    const syncedRecordKeys = new Set<string>();
     for (const result of results) {
+      // Repeated attempts share one dataset record per eval.
+      const recordKey = this.#getRecordKey(result.id);
+      if (syncedRecordKeys.has(recordKey)) continue;
+      syncedRecordKeys.add(recordKey);
       const nextRecord = this.#composeDatasetRecord(result);
-      const index = recordIndexes.get(this.#getRecordKey(result.id));
+      const index = recordIndexes.get(recordKey);
       if (index === undefined) {
         newRecords.push({
           inputData: nextRecord.input,
@@ -315,7 +321,7 @@ class DatadogReporter implements EvalReporter {
       spanInput.input = toOptionalDatadogJsonValue(resolveInput(result, evaluation));
     }
     if (this.#recording.recordOutputs) {
-      spanInput.output = toOptionalDatadogJsonValue(result.result.output);
+      spanInput.output = toOptionalDatadogJsonValue(outputOf(result.result));
     }
     if (this.#recording.recordExpectedOutputs) {
       spanInput.expectedOutput = toOptionalDatadogJsonValue(resolveExpectedOutput(evaluation));
@@ -325,6 +331,9 @@ class DatadogReporter implements EvalReporter {
     }
     if (datasetRecordId !== undefined) {
       spanInput.datasetRecordId = datasetRecordId;
+    }
+    if (result.attempt !== undefined) {
+      spanInput.runIteration = result.attempt;
     }
 
     const span = await this.#experiment.submitSpan(spanInput);
@@ -441,8 +450,8 @@ function resolveResultTags(
 
 function resolveInput(result: EveEvalResult, evaluation: EveEval | undefined): unknown {
   for (const event of result.result.events) {
-    if (event.type !== "message.received") continue;
-    return event.data.message;
+    if (event.type !== "delivery.consumed") continue;
+    return event.data.parts;
   }
 
   return evaluation?.description ?? "";
@@ -476,7 +485,8 @@ function resolveResultMetadata(
     eveToolCalls: result.result.derived.toolCalls.map((call) => call.name),
     eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
     eveSkillLoads: result.result.derived.skillLoads.map((load) => load.skill),
-    eveParked: result.result.derived.parked,
+    eveAwaitingInput: result.result.status === "awaiting-input",
+    eveSessionEnded: result.result.sessionEnded,
   });
   const runtimeTraceLinks = resolveRuntimeTraceLinks(result.result.traceContexts);
   if (runtimeTraceLinks.length > 0) {

@@ -11,7 +11,7 @@ export default defineEval({
     );
 
     t.succeeded();
-    t.loadedSkill("toolkit__toolkit-guide");
+    t.calledSkill("toolkit__toolkit-guide");
     t.messageIncludes(TOOLKIT_SKILL_SCRIPT_TOKEN);
   },
 });

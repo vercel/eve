@@ -100,6 +100,7 @@ export async function installPackageIntoProject(input: {
     cwd: input.appRoot,
     shell: shouldSpawnPackageManagerWithShell(),
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
   });
 
   const outputChunks: Buffer[] = [];

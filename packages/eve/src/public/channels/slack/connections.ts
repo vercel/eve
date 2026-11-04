@@ -12,19 +12,20 @@
  * When no user can be targeted (no Slack user for the principal, no link or
  * instructions to show, or the ephemeral delivery fails), the public status still leaves
  * the shared thread with safe progress feedback. The matching
- * `authorization.completed` handler edits that status post in place to
+ * sign-in `interaction.settled` handler edits that status post in place to
  * surface the outcome (`authorized` / `declined` / `failed` /
  * `timed-out`).
  */
-import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
+import { signInEnding } from "#protocol/session-projection/reader.js";
+import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
 import { truncatePlainText } from "#public/channels/slack/limits.js";
 import {
   SIGN_IN_CANCEL_ACTION_ID,
   type SignInCancelTarget,
 } from "#public/channels/slack/sign-in-cancel.js";
-import { displayProperName } from "#shared/display-name.js";
+import { displayProperName } from "#protocol/session-projection/display-name.js";
 
-export type { ConnectionAuthorizationOutcome };
+export type { InteractionOutcome };
 
 /** A connection name for display (`linear` → `Linear`, `my_crm` → `My crm`). */
 export function formatConnectionDisplayName(connectionName: string): string {
@@ -50,22 +51,22 @@ export function buildAuthRequiredPublicText(input: {
 
 /**
  * Final-state markdown for the public status message. Edited in place by
- * `authorization.completed` so the thread sees resolution without
+ * sign-in `interaction.settled` so the thread sees resolution without
  * scrolling.
  */
 export function buildAuthCompletedText(input: {
   readonly displayName: string;
-  readonly outcome: ConnectionAuthorizationOutcome;
+  readonly outcome: InteractionOutcome;
   readonly reason?: string;
 }): string {
-  if (input.outcome === "authorized") {
+  if (input.outcome === "accepted") {
     return `:white_check_mark: ${input.displayName} connected`;
   }
   if (input.outcome === "declined") {
     return `${input.displayName} sign-in cancelled`;
   }
   const tail = input.reason !== undefined ? ` (${input.reason})` : "";
-  return `:x: ${input.displayName} authorization ${input.outcome}${tail}`;
+  return `:x: ${input.displayName} authorization ${signInEnding(input.outcome)}${tail}`;
 }
 
 /** The private sign-in prompt: a link to open, instructions to follow, or both. */

@@ -5,7 +5,7 @@ description: "Learn what eve CLI telemetry collects and how to control it."
 
 # CLI telemetry
 
-eve collects usage data from its CLI to help improve its commands and development experience. You can turn telemetry off at any time.
+eve collects CLI usage data to improve its commands and development experience. You can turn telemetry off at any time.
 
 ## What eve collects
 

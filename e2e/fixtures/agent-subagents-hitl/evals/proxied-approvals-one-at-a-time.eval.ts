@@ -19,38 +19,42 @@ export default defineEval({
     );
     const blocked = await waitForInputs(t, started.session, ["deploy_release", "publish_notes"]);
 
-    const deployRequestId = blocked.pendingInputRequests[0]?.requestId;
-    // The reply answers only the first approval. The subagent decides it, and the parent relays
-    // its settlement before showing the next prompt; Alice replies once she sees that one.
-    const approved = await blocked.send("approve");
-    approved.noFailedActions();
-    const settledInTurn = approved.events.some(
-      (event) => event.type === "approval.settled" && event.data.requestId === deployRequestId,
-    );
-    if (!settledInTurn) {
-      await watchNextTurn(t, approved.session, "deploy approval settlement").waitForEvent(
-        "approval.settled",
-        { data: { outcome: "approved", requestId: deployRequestId } },
+    const deployRequestId = blocked.pendingInteractions[0]?.interactionId;
+    // The reply answers only the first approval. The subagent admits it: the answer stands while
+    // the rest of its batch waits, and the parent relays that admission before Alice replies
+    // to the next prompt, so her next reply can't revise it.
+    const liveApproval = await blocked.start("approve");
+    let approved;
+    try {
+      approved = await liveApproval.result();
+    } finally {
+      t.log(JSON.stringify(liveApproval.events.slice(-16)));
+    }
+    approved.noFailedCalls();
+    const admittedInTurn = approved.events.some((event) => event.type === "response.admitted");
+    if (!admittedInTurn) {
+      await watchNextTurn(t, approved.session, "deploy approval admission").waitForEvent(
+        "response.admitted",
       );
     }
     const resolved = approved.events.flatMap((event) =>
-      event.type === "input.resolved" ? event.data.resolutions : [],
+      event.type === "interaction.settled" ? [event.data.interactionId] : [],
     );
-    if (resolved.some((resolution) => resolution.requestId !== deployRequestId)) {
+    if (resolved.some((interactionId) => interactionId !== deployRequestId)) {
       throw new Error(`The first reply resolved ${JSON.stringify(resolved)}.`);
     }
 
-    const cancelled = await approved.session.send("cancel");
-    cancelled.noFailedActions();
-    const completed = cancelled.message?.includes(MARKER)
+    const cancelled = await approved.session.send("deny");
+    cancelled.noFailedCalls();
+    const completed = cancelled.reply?.includes(MARKER)
       ? cancelled
       : await waitForMessage(t, approved.session, MARKER);
     completed.messageIncludes('deploy_release={"deployed":true}');
-    if (completed.message?.includes('"published":true') === true) {
+    if (completed.reply?.includes('"published":true') === true) {
       throw new Error("The typed cancel ran publish_notes instead of denying it.");
     }
 
-    t.calledSubagent("release-pair", { status: "completed", count: 1 });
+    t.calledAgent("release-pair", { status: "completed", count: 1 });
   },
 });
 
@@ -61,12 +65,12 @@ async function waitForInputs(
   toolNames: readonly string[],
 ): Promise<EveEvalSession> {
   let session = initialSession;
-  const pending = () => session.pendingInputRequests.map((request) => request.action.toolName);
+  const pending = () => session.pendingInteractions.map((request) => request.call?.name);
   for (let attempt = 0; attempt < 5; attempt += 1) {
     if (JSON.stringify(pending()) === JSON.stringify(toolNames)) return session;
     const live = watchNextTurn(t, session, "subagent input wait");
     const turn = await live.result();
-    turn.noFailedActions();
+    turn.noFailedCalls();
     session = live.session;
   }
   throw new Error(
@@ -83,16 +87,16 @@ async function waitForMessage(
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const live = watchNextTurn(t, session, "subagent completion wait");
     const turn = await live.result();
-    turn.noFailedActions();
-    if (turn.message?.includes(marker) === true) return turn;
+    turn.noFailedCalls();
+    if (turn.reply?.includes(marker) === true) return turn;
     session = live.session;
   }
   throw new Error("Subagent result did not reach the parent after five turns.");
 }
 
 function watchNextTurn(t: EveEvalContext, session: EveEvalSession, operation: string) {
-  if (session.sessionId === undefined || session.state === undefined) {
+  if (session.id === undefined || session.state === undefined) {
     throw new Error(`${operation} has no parent session cursor.`);
   }
-  return t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
+  return t.target.attach(session.id, { startIndex: session.state.streamIndex }).watch();
 }

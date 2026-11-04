@@ -1,4 +1,5 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { readInboxHandle } from "#execution/session-inbox/handle.js";
 import { EVE_VERSION_ATTRIBUTE } from "#execution/eve-workflow-attributes.js";
 import { isSessionInboxHookToken } from "#execution/session-inbox/address.js";
 import {
@@ -38,14 +39,36 @@ export class StrandedSessionOwnerError extends Error {
 
 /**
  * The single ingress path into a hook: refuses a session inbox whose owner
- * cannot execute before anything is committed, then resumes by token. Any
- * other hook resumes unchecked. Resuming by token rather than by the looked-up
- * hook keeps Workflow's delivery dedup, which a caller-supplied hook disables.
+ * cannot execute before anything is committed. Vercel can reuse a validated
+ * inbox handle: Workflow requires its guarded, deduplicated write endpoint.
+ * Only a definite refusal falls back to resolving the current token owner.
  */
 export async function resumeRunnableHook(
   token: string,
   payload: unknown,
+  inbox?: string,
 ): Promise<Awaited<ReturnType<typeof resumeHook>>> {
+  const world = inbox !== undefined ? await getWorld() : undefined;
+  if (
+    inbox !== undefined &&
+    inbox.length <= 8_192 &&
+    world !== undefined &&
+    routesToOwnerDeployment(world) &&
+    world.capabilities !== undefined &&
+    "resolvedHookResume" in world.capabilities &&
+    world.capabilities.resolvedHookResume === true
+  ) {
+    const parsed = readInboxHandle(inbox);
+    const cached = parsed?.token === token ? parsed : undefined;
+    if (cached !== undefined) {
+      try {
+        return await resumeHook(cached, payload);
+      } catch (error) {
+        // Only a definite refusal may be retried against a freshly resolved owner.
+        if (!HookNotFoundError.is(error)) throw error;
+      }
+    }
+  }
   if (isSessionInboxHookToken(token)) await assertRunnableSessionInbox(token);
   return await resumeHook(token, payload);
 }
@@ -63,11 +86,14 @@ export async function assertRunnableSessionInbox(token: string): Promise<void> {
   if (holder !== undefined) await assertRunnableOwner(world, holder.runId, holder.hook);
 }
 
-/** {@link assertRunnableSessionInbox} for a hook the caller already looked up. */
-export async function assertRunnableSessionOwner(hook: Hook): Promise<void> {
+/** {@link assertRunnableSessionInbox} for a holder the caller already looked up. */
+export async function assertRunnableSessionOwner(holder: {
+  readonly runId: string;
+  readonly hook?: Hook;
+}): Promise<void> {
   const world = await getWorld();
   if (routesToOwnerDeployment(world)) return;
-  await assertRunnableOwner(world, hook.runId, hook);
+  await assertRunnableOwner(world, holder.runId, holder.hook);
 }
 
 /**

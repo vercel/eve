@@ -29,7 +29,7 @@ vi.mock("#tracing/eve/agent-otel-provider.js", () => ({
   createAgentOtelInstrumentation: () => ({
     hook: {
       events: {
-        "turn.completed": (_event: unknown, ctx: { state: { get(): unknown } }) => {
+        "turn.settled": (_event: unknown, ctx: { state: { get(): unknown } }) => {
           internalTerminalState(ctx.state.get());
         },
         "turn.started": (_event: unknown, ctx: { state: { set(value: string): void } }) => {
@@ -100,13 +100,13 @@ describe("installInstrumentationRuntime", () => {
   });
 
   it.each([
-    ["session.completed", "conversation-1", true],
-    ["session.failed", "conversation-1", true],
-    ["session.completed", "child-1", false],
-    ["session.failed", "child-1", false],
+    ["completed", "conversation-1", true],
+    ["failed", "conversation-1", true],
+    ["completed", "child-1", false],
+    ["failed", "child-1", false],
   ] as const)(
-    "releases conversation traces after %s for %s",
-    async (type, sessionId, expectedRelease) => {
+    "releases conversation traces after a %s session.ended for %s",
+    async (outcome, sessionId, expectedRelease) => {
       const releaseConversation = vi.fn(async () => true);
       const processor = {
         forceFlush: vi.fn(async () => undefined),
@@ -124,9 +124,10 @@ describe("installInstrumentationRuntime", () => {
       const hooks = runtime.hooks.forTrace!(traceContext("unknown"));
       const event = {
         idempotencyKey: sessionIdempotencyKey(sessionId),
+        outcome,
         sessionId,
-        type,
-        ...(type === "session.failed" ? { error: new Error("failed") } : undefined),
+        type: "session.ended" as const,
+        ...(outcome === "failed" ? { error: new Error("failed") } : undefined),
       };
 
       const context = new ContextContainer();
@@ -145,7 +146,7 @@ describe("installInstrumentationRuntime", () => {
       providers: [
         {
           events: {
-            "turn.completed": (_event, ctx) => authoredTerminalState(ctx.state.get()),
+            "turn.settled": (_event, ctx) => authoredTerminalState(ctx.state.get()),
             "turn.started": (_event, ctx) => ctx.state.set("authored"),
           },
           name: "eve.otel",
@@ -170,7 +171,8 @@ describe("installInstrumentationRuntime", () => {
         idempotencyKey,
         sessionId: "session-1",
         turnId: "turn-1",
-        type: "turn.completed",
+        outcome: "completed",
+        type: "turn.settled",
       });
     });
 

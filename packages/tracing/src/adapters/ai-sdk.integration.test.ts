@@ -12,8 +12,8 @@ import { generateText, isStepCount, tool } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { z } from "zod";
 import { describe, expect, it, vi } from "vitest";
-import { createAgentTracing, otelTelemetry } from "@eve/tracing";
-import { aiSdkTelemetry } from "@eve/tracing/ai-sdk";
+import { createAgentRun, otelTelemetry } from "@vercel/agent-runs";
+import { aiSdkTelemetry } from "@vercel/agent-runs/ai-sdk";
 
 const usage = {
   inputTokens: { total: 3, noCache: 3, cacheRead: 0, cacheWrite: 0 },
@@ -115,7 +115,7 @@ describe("AI SDK HarnessAgent consumer", () => {
         spanProcessors: [new SimpleSpanProcessor(exporter)],
       });
       context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
-      const tracing = createAgentTracing({ telemetry: otelTelemetry({ provider }) });
+      const tracing = createAgentRun({ telemetry: otelTelemetry({ provider }) });
       const agent = new HarnessAgent({
         harness: scriptedHarness(method === "stream"),
         telemetry: {
@@ -199,7 +199,7 @@ describe("AI SDK generateText consumer", () => {
       spanProcessors: [new SimpleSpanProcessor(exporter)],
     });
     context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
-    const tracing = createAgentTracing({ telemetry: otelTelemetry({ provider }) });
+    const tracing = createAgentRun({ telemetry: otelTelemetry({ provider }) });
     const activeInModel: (string | undefined)[] = [];
     let activeInTool: string | undefined;
     const responses = [

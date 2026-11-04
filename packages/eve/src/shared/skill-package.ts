@@ -3,17 +3,9 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { mapWithConcurrency } from "#shared/map-with-concurrency.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import { resolveSandboxSkillRoot, resolveSandboxSkillWritePath } from "#shared/skill-paths.js";
-
-/**
- * Each sandbox write is a remote round trip (Vercel Sandbox also resolves the
- * path with a command first), so writing a package's files one at a time makes
- * a dynamic skill's first sync cost seconds.
- */
-const SANDBOX_WRITE_CONCURRENCY = 16;
 
 export interface NormalizedSkillPackageFile {
   readonly content: Buffer;
@@ -25,13 +17,13 @@ export interface MaterializableSkillPackage {
   readonly description: string;
   readonly files: readonly NormalizedSkillPackageFile[];
   readonly license?: string;
-  readonly markdown: string;
+  readonly content: string;
   readonly metadata?: Readonly<Record<string, string>>;
   readonly name: string;
 }
 
-export function stripSkillFrontmatter(markdown: string): string {
-  return markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+export function stripSkillFrontmatter(content: string): string {
+  return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
 }
 
 /** Content hash over every package file, including `SKILL.md`. */
@@ -52,7 +44,7 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
 
   const files: NormalizedSkillPackageFile[] = [
     {
-      content: Buffer.from(input.markdown, "utf8"),
+      content: Buffer.from(input.content, "utf8"),
       relativePath: "SKILL.md",
     },
   ];
@@ -72,7 +64,7 @@ export function normalizeSkillPackage(input: NamedSkillDefinition): Materializab
     description: input.description,
     files,
     license: input.license,
-    markdown: input.markdown,
+    content: input.content,
     metadata: input.metadata === undefined ? undefined : { ...input.metadata },
     name: input.name,
   };
@@ -103,16 +95,17 @@ export async function writeSkillPackageToSandbox(input: {
   readonly sandbox: SandboxSession;
   readonly skill: MaterializableSkillPackage;
 }): Promise<void> {
-  await mapWithConcurrency(input.skill.files, SANDBOX_WRITE_CONCURRENCY, async (file) => {
-    await input.sandbox.writeBinaryFile({
+  const files = await Promise.all(
+    input.skill.files.map(async (file) => ({
       content: file.content,
       path: await resolveSandboxSkillWritePath({
         name: input.skill.name,
         relativePath: file.relativePath,
         sandbox: input.sandbox,
       }),
-    });
-  });
+    })),
+  );
+  await input.sandbox.writeFiles({ files });
 }
 
 /**

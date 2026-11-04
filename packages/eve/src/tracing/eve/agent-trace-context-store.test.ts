@@ -40,7 +40,6 @@ describe("ContextAgentTraceStateStore", () => {
         sequence: 0,
         startTimeMs: 1_700_000_000_000,
         subagentName: "researcher",
-        terminal: { outcome: "failed", errorName: "Error", errorMessage: "failed" },
       });
     });
 
@@ -66,7 +65,6 @@ describe("ContextAgentTraceStateStore", () => {
         },
         currentPrincipal: { id: "user-123", type: "user" },
         initiatorPrincipal: { type: "none" },
-        terminal: { outcome: "failed", errorName: "Error", errorMessage: "failed" },
         caller: { ...spanContext("4", "2"), isRemote: true },
         startTimeMs: 1_700_000_000_000,
         subagentName: "researcher",
@@ -121,7 +119,7 @@ describe("ContextAgentTraceStateStore", () => {
 
       store.update("turn", JSON.stringify(["session-1", "turn-1"]), (turn) => ({
         ...turn,
-        terminal: { outcome: "completed" },
+        subagentName: "researcher",
       }));
       store.update("turn", JSON.stringify(["session-1", "turn-1"]), (turn) => ({
         ...turn,
@@ -129,13 +127,13 @@ describe("ContextAgentTraceStateStore", () => {
       }));
 
       expect(store.get("turn", JSON.stringify(["session-1", "turn-1"]))).toMatchObject({
-        terminal: { outcome: "completed" },
+        subagentName: "researcher",
         channelDelivery: { deliveryId: "delivery" },
       });
       store.delete("turn", JSON.stringify(["session-1", "turn-1"]));
       store.update("turn", JSON.stringify(["session-1", "turn-1"]), (turn) => ({
         ...turn,
-        terminal: { outcome: "cancelled" },
+        subagentName: "reviewer",
       }));
       expect(store.get("turn", JSON.stringify(["session-1", "turn-1"]))).toBeUndefined();
     });

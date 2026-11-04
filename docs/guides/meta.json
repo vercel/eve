@@ -6,7 +6,6 @@
     "instrumentation",
     "hooks",
     "session-context",
-    "dynamic-capabilities",
     "remote-agents",
     "dev-tui",
     "frontend",

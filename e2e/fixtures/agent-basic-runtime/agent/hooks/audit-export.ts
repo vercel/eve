@@ -5,15 +5,22 @@ async function exportOrQueue(event: HookEvent, ctx: HookContext): Promise<void> 
   try {
     await exportAuditEvent(ctx.session.auth.current, event);
   } catch (error) {
-    auditOutbox.update((queued) => [...queued, { eventId: event.meta.id, type: event.type }]);
-    // Rethrow so eve logs the failed export. The turn keeps running.
-    throw error;
+    auditOutbox.update((queued) => [
+      ...queued,
+      { position: `${ctx.position.line}:${ctx.position.index}`, type: event.type },
+    ]);
+    // An observer that mustn't fail the turn catches its own errors: a hook that throws during a
+    // turn fails it.
+    console.warn("audit export failed; queued for later", {
+      error: error instanceof Error ? error.message : String(error),
+      type: event.type,
+    });
   }
 }
 
 export default defineHook({
   events: {
     "turn.started": exportOrQueue,
-    "step.started": exportOrQueue,
+    "model.started": exportOrQueue,
   },
 });

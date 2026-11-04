@@ -1,4 +1,5 @@
 import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ChannelFrom } from "#channel/channel-operations.js";
 
 import { createLogger, logError } from "#internal/logging.js";
@@ -38,7 +39,6 @@ import type {
   GitHubChannelConfig,
   GitHubInboundContext,
   GitHubInboundResult,
-  GitHubInboundResultOrPromise,
 } from "#public/channels/github/githubChannel.js";
 
 const log = createLogger("github.dispatch");
@@ -193,7 +193,9 @@ async function dispatchCiEvent(input: {
   readonly ci: GitHubCiPayload;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubCiWebhookEvent;
-  readonly handlerResult: (ctx: GitHubInboundContext) => GitHubInboundResultOrPromise;
+  readonly handlerResult: (
+    ctx: GitHubInboundContext,
+  ) => GitHubInboundResult | Promise<GitHubInboundResult>;
   readonly label: string;
   readonly from: ChannelFrom<GitHubChannelState>;
 }): Promise<void> {
@@ -228,7 +230,7 @@ async function dispatchWebhookEventTurn(input: {
   readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubCiWebhookEvent | GitHubIssueWebhookEvent | GitHubPullRequestWebhookEvent;
-  readonly handlerResult: () => GitHubInboundResultOrPromise;
+  readonly handlerResult: () => GitHubInboundResult | Promise<GitHubInboundResult>;
   readonly message: string;
   readonly from: ChannelFrom<GitHubChannelState>;
   readonly state: GitHubChannelState;
@@ -250,6 +252,7 @@ async function dispatchWebhookEventTurn(input: {
       hook: result.context,
     }),
     from: input.from,
+    history: result.history,
     state: input.state,
     title: result.title,
   });
@@ -261,7 +264,7 @@ async function dispatchCommentTurn(input: {
   readonly commentUrl: string | undefined;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubIssueCommentEvent | GitHubPullRequestReviewCommentEvent;
-  readonly handlerResult: () => GitHubInboundResultOrPromise;
+  readonly handlerResult: () => GitHubInboundResult | Promise<GitHubInboundResult>;
   readonly from: ChannelFrom<GitHubChannelState>;
   readonly state: GitHubChannelState;
 }): Promise<void> {
@@ -289,6 +292,7 @@ async function dispatchCommentTurn(input: {
       hook: result.context,
     }),
     from: input.from,
+    history: result.history,
     state: input.state,
     title: result.title,
   });
@@ -296,7 +300,7 @@ async function dispatchCommentTurn(input: {
 
 async function runInboundHandler(input: {
   readonly event: GitHubTurnEvent;
-  readonly handlerResult: () => GitHubInboundResultOrPromise;
+  readonly handlerResult: () => GitHubInboundResult | Promise<GitHubInboundResult>;
 }): Promise<GitHubInboundResult | undefined> {
   try {
     return await input.handlerResult();
@@ -318,6 +322,7 @@ async function sendGitHubTurn(input: {
   readonly message: string;
   readonly context: readonly string[] | undefined;
   readonly from: ChannelFrom<GitHubChannelState>;
+  readonly history?: readonly SessionHistoryMessage[];
   readonly state: GitHubChannelState;
   readonly title: string | undefined;
 }): Promise<void> {
@@ -337,6 +342,7 @@ async function sendGitHubTurn(input: {
     await input.from(continuationTokenFromState(input.state)).send(input.message, {
       auth: input.auth,
       context: [contextBlock, ...(input.context ?? [])],
+      history: input.history,
       state: input.state,
       title: input.title,
     });

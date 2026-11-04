@@ -1,4 +1,4 @@
-import { resumeHook, start } from "workflow/api";
+import { resumeHook, start } from "eve/workflow/api";
 
 import { describePlan, hashPlan } from "./plan.ts";
 

@@ -24,7 +24,8 @@ describe("initAgentInstructions", () => {
     expect(instructions).toContain("What should the agent do?");
     expect(instructions).toContain("ask the user to confirm it");
     expect(instructions).toContain("Web Chat");
-    expect(instructions).toContain("--channel-web-nextjs");
+    expect(instructions).toContain("eve add channel/web");
+    expect(instructions).not.toContain("--channel-web-nextjs");
     expect(instructions).toContain("--model provider/model-id");
     expect(instructions).toContain("--reasoning effort");
     // `npx` runs without a prior install and is package-manager agnostic, so the

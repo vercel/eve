@@ -9,7 +9,7 @@
 import { findPendingAuthorization } from "#channel/pending-authorization.js";
 import type { Session } from "#channel/session.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import type { AuthorizationRequiredStreamEvent } from "#protocol/message.js";
+import type { SignIn } from "#channel/sign-in.js";
 import type { TeamsChannelAccount, TeamsMessageBody } from "#public/channels/teams/api.js";
 import {
   TEAMS_ADAPTIVE_CARD_CONTENT_TYPE,
@@ -17,13 +17,11 @@ import {
 } from "#public/channels/teams/hitl.js";
 import type { TeamsInvokeActivity } from "#public/channels/teams/inbound.js";
 import { createLogger } from "#internal/logging.js";
-import { displayProperName } from "#shared/display-name.js";
+
 import { isObject } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 const log = createLogger("teams.authorization");
-
-type AuthorizationRequired = AuthorizationRequiredStreamEvent["data"];
 
 const NOT_YOURS = "Only the person who needs to sign in can open this sign-in.";
 
@@ -32,28 +30,28 @@ const TEAMS_AUTHORIZATION_DATA_KEY = "eve_authorization";
 
 /** Identifies one sign-in attempt from the shared card's button press. */
 export interface TeamsAuthorizationReveal {
-  readonly attemptId?: string;
+  readonly interactionId: string;
   readonly name: string;
   readonly replyToActivityId?: string;
 }
 
 /** A connection's display name for its sign-in cards (`linear` → `Linear`). */
 export function teamsAuthorizationDisplayName(event: {
-  readonly authorization?: { readonly displayName?: string };
+  readonly displayName: string;
   readonly name: string;
 }): string {
-  return event.authorization?.displayName ?? displayProperName(event.name);
+  return event.displayName;
 }
 
 /** The full sign-in card, link and code included, for the person signing in alone. */
 export function renderTeamsAuthorizationPrompt(
-  event: AuthorizationRequired,
+  event: SignIn,
   options: { readonly adaptiveCardVersion: string; readonly requester: string | undefined },
 ): TeamsMessageBody {
   const displayName = teamsAuthorizationDisplayName(event);
-  const url = event.authorization?.url;
-  const instructions = event.authorization?.instructions;
-  const userCode = event.authorization?.userCode;
+  const url = event.url;
+  const instructions = event.instructions;
+  const userCode = event.userCode;
   const codeHint = userCode
     ? `If ${displayName} asks for a confirmation code, enter ${userCode}.`
     : undefined;
@@ -89,7 +87,7 @@ export function renderTeamsAuthorizationPrompt(
 
 /** The shared sign-in card: who must sign in, and a button that shows them the challenge. */
 export function renderTeamsAuthorizationStatus(
-  event: AuthorizationRequired,
+  event: SignIn,
   options: {
     readonly adaptiveCardVersion: string;
     readonly replyToActivityId: string | undefined;
@@ -101,7 +99,7 @@ export function renderTeamsAuthorizationStatus(
     ? `${options.requester} must sign in to continue. Only they can open the sign-in.`
     : "Only the person who needs to sign in can open it.";
   const reveal: TeamsAuthorizationReveal = {
-    attemptId: event.attemptId,
+    interactionId: event.interactionId,
     name: event.name,
     replyToActivityId: options.replyToActivityId,
   };
@@ -131,9 +129,14 @@ export function readTeamsAuthorizationReveal(
   const action = isObject(activity.value?.action) ? activity.value.action : null;
   const data = action && isObject(action.data) ? action.data : null;
   const reveal = data?.[TEAMS_AUTHORIZATION_DATA_KEY];
-  if (!isObject(reveal) || typeof reveal.name !== "string") return null;
+  if (
+    !isObject(reveal) ||
+    typeof reveal.name !== "string" ||
+    typeof reveal.interactionId !== "string"
+  )
+    return null;
   return {
-    attemptId: typeof reveal.attemptId === "string" ? reveal.attemptId : undefined,
+    interactionId: reveal.interactionId,
     name: reveal.name,
     replyToActivityId:
       typeof reveal.replyToActivityId === "string" ? reveal.replyToActivityId : undefined,
@@ -154,15 +157,15 @@ export async function answerTeamsAuthorizationReveal(input: {
 }): Promise<JsonObject> {
   // A press nobody can be identified for needs no lookup.
   if (input.auth === null) return teamsInvokeResponse({ message: NOT_YOURS });
-  const { name, attemptId } = input.reveal;
-  let event: AuthorizationRequired | undefined;
+  const { name, interactionId } = input.reveal;
+  let event: SignIn | undefined;
   try {
     const session = await input.resolveSession();
     event =
       session &&
       (await findPendingAuthorization(
         session,
-        (candidate) => candidate.name === name && candidate.attemptId === attemptId,
+        (candidate) => candidate.name === name && candidate.interactionId === interactionId,
       ));
   } catch (error) {
     log.error("Teams sign-in lookup failed", { error });

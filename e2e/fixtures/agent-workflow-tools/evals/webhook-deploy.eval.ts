@@ -7,6 +7,6 @@ export default defineEval({
     turn.expectOk();
     turn.calledTool("webhook_deploy", { output: /"callback":\{"service":"api"\}/u });
     turn.messageIncludes("WORKFLOW-WEBHOOK-RESULT");
-    t.noFailedActions();
+    t.noFailedCalls();
   },
 });

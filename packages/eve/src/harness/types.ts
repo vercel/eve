@@ -1,74 +1,42 @@
+import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
+import type { Fact, Progress } from "#protocol/session-events/facts.js";
+import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
-import type { LanguageModel, ModelMessage, UserContent } from "ai";
+import type { LanguageModel } from "ai";
+import type { MessageContent } from "#shared/message-content.js";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
-import type { AlsContext } from "#context/container.js";
-import type {
-  RuntimeIdentity,
-  StepStartedStreamEvent,
-  UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import type { RuntimeIdentity } from "#protocol/session-events/families/session.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import type { InputResponse } from "#shared/input.js";
+import type { Answer } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { InternalToolDefinition } from "#tools/definition.js";
-import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
+import type { Principal } from "#protocol/session-events/envelope.js";
+import type { SessionUsageLimit } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
-import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
-
-/**
- * Serializable tool definition stored on the session.
- *
- * Carries schema but no execute function so the session stays serializable
- * across workflow step boundaries.
- */
-export type SessionToolDefinition = Readonly<InternalToolDefinition>;
+import type { SessionHistoryMessage } from "#shared/session-history.js";
 
 /** Authored-key → opaque-value map stored on `session.state`. */
 export type SessionStateMap = Readonly<Record<string, unknown>>;
 
-/**
- * Compaction configuration stored on the session.
- */
-export interface CompactionConfig {
+/** Prompt observations that survive rebuilding the agent's settings on each turn. */
+export interface CompactionState {
   readonly lastKnownInputTokens?: number;
   readonly lastKnownPromptMessageCount?: number;
+  /** The previous request's non-history estimate, also used before the next request is built. */
+  readonly requestEnvelopeTokens?: number;
+}
+
+/** How one model call's history compacts: the session's observations, and the model's limit. */
+export interface CompactionConfig extends CompactionState {
   readonly recentWindowSize: number;
   readonly threshold: number;
   readonly thresholdPercent?: number;
 }
-
-/**
- * Serializable agent configuration stored on the session.
- */
-interface SessionAgentBase {
-  /**
-   * Optional model used only for compaction summaries.
-   *
-   * When omitted, the harness uses the active turn model for compaction.
-   */
-  readonly compactionModelReference?: RuntimeModelReference;
-  readonly reasoning?: AgentReasoningDefinition;
-  readonly system: string;
-  readonly tools: readonly SessionToolDefinition[];
-}
-
-export type SessionAgent = SessionAgentBase &
-  (
-    | {
-        readonly dynamicModel?: never;
-        readonly modelReference: RuntimeModelReference;
-      }
-    | {
-        readonly dynamicModel: true;
-        readonly modelReference?: RuntimeModelReference;
-      }
-  );
 
 /**
  * A {@link HarnessSession} without its conversation history. Session steps
@@ -76,10 +44,8 @@ export type SessionAgent = SessionAgentBase &
  * never becomes part of their Workflow step input.
  */
 export interface HarnessSessionBase {
-  readonly agent: SessionAgent;
-  readonly compaction: CompactionConfig;
+  readonly compaction: CompactionState;
   readonly continuationToken: string;
-  readonly limits?: SessionLimits;
   readonly outputSchema?: JsonObject;
   /**
    * Stable identifier of the top user-facing session in the dispatch
@@ -105,60 +71,20 @@ export interface HarnessSession extends HarnessSessionBase {
   readonly history: HarnessModelMessage[];
 }
 
-export function requireSessionModelReference(session: HarnessSession): RuntimeModelReference {
-  const reference = session.agent.modelReference;
-  if (reference === undefined) {
-    throw new Error("Expected a concrete model selection for the active model call.");
-  }
-  return reference;
+/** The delivery a control arrived as: its id, and who sent it, as the wire names them. */
+export interface ControlDelivery {
+  readonly deliveryId: string;
+  readonly principal?: Principal;
 }
 
 /**
- * Token limits stored on one durable session.
+ * What a channel's `deliver` hook makes of one payload: the input a turn receives. The message is
+ * {@link MessageContent}: plain text, or text and file parts.
  */
-export interface SessionLimits {
-  /**
-   * Maximum provider-reported input tokens this durable session may spend
-   * before eve refuses to start another model call. Absent when the session
-   * is uncapped. Root sessions default to 40M unless authored otherwise;
-   * delegated subagent sessions receive the parent's remaining quota at
-   * dispatch time.
-   */
-  readonly maxInputTokensPerSession?: number;
-  /**
-   * Maximum provider-reported output tokens this durable session may spend before
-   * eve refuses to start another model call.
-   */
-  readonly maxOutputTokensPerSession?: number;
-  /**
-   * Maximum provider-reported model token cost this durable session may spend,
-   * in US dollars, before eve refuses to start another model call.
-   */
-  readonly maxTokenCostUsdPerSession?: number;
-}
-
-/**
- * Input payload for a harness turn.
- *
- * Carries an optional message and/or structured input responses from the
- * channel emitter's `onDeliver`. The message may be a plain text string or
- * a structured AI SDK {@link UserContent} array (mixing `text`, `image`,
- * and `file` parts) to support multimodal attachments delivered by
- * channels. The harness resolves any pending input batch at the start of
- * `runStep` before the model call.
- */
-export interface AttributedInputResponse {
-  readonly auth: SessionAuthContext | null;
-  readonly response: InputResponse;
-}
-
 export interface StepInput {
-  /** Internal responder-bound input produced at the delivery boundary. */
-  readonly attributedInputResponses?: readonly AttributedInputResponse[];
-  readonly inputResponses?: readonly InputResponse[];
-  readonly message?: string | UserContent;
-  /** Internal actor attribution for `message`. */
-  readonly messageAuth?: SessionAuthContext | null;
+  /** Answers to the session's open interactions. */
+  readonly answers?: readonly Answer[];
+  readonly message?: MessageContent;
   /**
    * Context strings from the channel delivery. Each entry is appended as a
    * synthetic user-role message to `session.history` before the
@@ -166,17 +92,47 @@ export interface StepInput {
    */
   readonly context?: readonly string[];
   /**
+   * Prior conversation from the channel delivery, added as user and assistant
+   * turns before this turn's context and message. Populated by channels via
+   * `SendPayload.history`.
+   */
+  readonly history?: readonly SessionHistoryMessage[];
+  /**
    * Run-scoped schema that replaces the session's current output schema when
    * present. Omitted continuations keep the existing schema.
    */
   readonly outputSchema?: JsonObject;
+}
+
+/**
+ * An answer as the session received it: the response it submits, the delivery it arrived in,
+ * and who gave it when that isn't the turn's caller.
+ */
+export interface SubmittedAnswer extends Answer {
+  readonly responseId: string;
+  readonly deliveryId: string;
   /**
-   * Runtime-owned action results being resumed into the current turn.
-   *
-   * This field is internal to the execution/harness boundary and is never
-   * produced by channels.
+   * Who answered an approval when a delivery only answered requests: the turn keeps its caller.
+   * `null` answers as no one; absent, the answer is the caller's.
    */
+  readonly responder?: SessionAuthContext | null;
+}
+
+/**
+ * A turn step's input inside the session: what `deliver` made, with each answer bound to the
+ * response it submits, and what the runtime resumes. Never produced by channels.
+ */
+export interface HarnessStepInput extends Omit<StepInput, "answers"> {
+  readonly answers?: readonly SubmittedAnswer[];
+  /** Runtime-owned action results being resumed into the current turn. */
   readonly runtimeActionResults?: readonly RuntimeActionResult[];
+  /**
+   * What the agents behind some of {@link runtimeActionResults} spent, by call id. Each call's
+   * settlement records it, so the session counts a child's usage once.
+   */
+  readonly delegatedUsage?: Readonly<Record<string, TokenUsage>>;
+  /** The deliveries this input carries, each with what its person sent, which the turn consumes. */
+  readonly deliveries?: readonly ConsumedDelivery[];
 }
 
 /**
@@ -242,7 +198,7 @@ export type TurnHold =
  * A single step of AI work. Takes the current session and optional user input,
  * returns the updated session and an instruction for the runtime.
  */
-export type StepFn = (session: HarnessSession, input?: StepInput) => Promise<StepResult>;
+export type StepFn = (session: HarnessSession, input?: HarnessStepInput) => Promise<StepResult>;
 
 /**
  * Map from tool name to its harness-owned definition.
@@ -270,35 +226,42 @@ export interface ResolvedCall<T extends ToolCallLike> {
 /** Resolves a model tool call to the entry it runs, if it reaches one. */
 export type CallResolver = <T extends ToolCallLike>(toolCall: T) => ResolvedCall<T> | undefined;
 
-/**
- * Callback that writes one event to the event stream.
- *
- * Composed by the runtime from the underlying writable and the channel's
- * event handler, then injected into the harness so it can emit lifecycle
- * events without knowing about writables or handlers.
- */
-export type HarnessEmitFn = (
-  event: UnstampedMessageStreamEvent,
-  messages?: readonly import("ai").ModelMessage[],
-) => Promise<void>;
+declare const committedBrand: unique symbol;
 
 /**
- * Unified event handler: emits the event to the stream, then
- * dispatches to hook subscribers and dynamic tool resolvers.
- *
- * Same signature as {@link HarnessEmitFn} but semantically broader —
- * every event goes through channel adapter, stream write, hooks,
- * and dynamic tool dispatch in one call.
+ * The facts of one kernel transition, which the writer commits as one line so readers never see
+ * half of it. Only the kernel (`harness/session-machine/`, `harness/hitl/`) builds one: the sink
+ * takes no other facts.
+ */
+export type Commit = readonly Fact[] & { readonly [committedBrand]: true };
+
+/** What one publish writes: one transition's facts, or one transient progress record. */
+export type SessionPublication = Commit | Progress;
+
+/** The sink the harness emits to: see {@link HandleEventFn}. */
+export type HarnessEmitFn = HandleEventFn;
+
+/** Where a model call stands: its turn and its step within the turn. */
+export interface StepCoordinates {
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}
+
+/**
+ * Publishes one event or one commit to the session: the stream write, then the channel and the
+ * session's reactions. Composed by the runtime and injected into the harness, so the harness emits
+ * lifecycle without knowing about writables or handlers.
  */
 export type HandleEventFn = (
-  event: UnstampedMessageStreamEvent,
+  publication: SessionPublication,
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
 /**
- * Dependencies injected into the tool-loop harness at construction time.
+ * Dependencies injected into the kernel at construction time.
  */
-export interface ToolLoopHarnessConfig {
+export interface KernelConfig {
   readonly steeringSignal?: AbortSignal;
   /** Cancellation signal for the active turn. */
   readonly abortSignal?: AbortSignal;
@@ -308,43 +271,35 @@ export interface ToolLoopHarnessConfig {
    * continuation prompt may park the session.
    */
   readonly capabilities?: SessionCapabilities;
+  readonly sessionUsageLimit?: SessionUsageLimit;
   /** Clears model-message history without running a model turn. */
   readonly clearOnly?: boolean;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
+  /** The delivery a clear or compact control arrived as; its facts name it. */
+  readonly controlDelivery?: ControlDelivery;
   readonly handleEvent?: HandleEventFn;
-  /** Projects raw durable history before it crosses a message-bearing boundary. */
-  readonly historyProjector?: HistoryViewProjector;
-  /** Execution-prepared view of the history supplied to the first harness step. */
-  readonly historyView?: PreparedHistoryView;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.
    */
   readonly instrumentation?: SessionInstrumentation;
-  /** Attribute work that must finish before cumulative model usage is persisted. */
-  readonly titleAttributeWrite?: Promise<void>;
+  /**
+   * Tags the turn's run with what its model steps spent. The workflow wrapper provides it, inside
+   * a workflow step; absent, nothing is tagged.
+   */
+  readonly setAttributes?: (attributes: Record<string, EveAttributeValue>) => Promise<void>;
   /**
    * Sign-in callbacks the step's delivery carried. Each completes before anything else runs, and
    * a connection's sign-in resumes the turn that asked for it.
    */
   readonly signInCompletions?: readonly AuthorizationChallenge[];
-  /** Restores runtime resources for the originating turn before approval work. */
-  readonly prepareApprovalTurn?: (event: {
-    readonly sequence: number;
-    readonly turnId: string;
-  }) => Promise<void>;
-  /** Resolves persisted step-scoped tools before an approval policy reads them. */
-  readonly resolveStepDynamicTools?: (input: {
-    readonly ctx: AlsContext;
-    readonly event: StepStartedStreamEvent;
-    readonly messages: readonly ModelMessage[];
-  }) => Promise<void>;
-  readonly dispatchDynamicModelEvent?: (input: {
-    readonly ctx: AlsContext;
-    readonly event: UnstampedMessageStreamEvent;
-    readonly messages: readonly ModelMessage[];
-  }) => Promise<void>;
+  /**
+   * False when the session's messages come from the agent that delegated it, not a person: none
+   * of them answers a pending request by text. A person answers through the root session, which
+   * routes structured answers down.
+   */
+  readonly typedAnswers?: boolean;
   readonly resolveModel: (reference: RuntimeModelReference) => Promise<LanguageModel>;
   /**
    * Runtime identity metadata attached to the `session.started` event.

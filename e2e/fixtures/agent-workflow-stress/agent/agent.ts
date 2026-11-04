@@ -1,10 +1,10 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineAgent, type DefinedAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 import { FANOUT_LABELS, FANOUT_REPLY, FANOUT_TOOL_NAME } from "./lib/fanout";
 
-export default defineAgent({
+const agent: DefinedAgent = defineAgent({
   // Harness config wires the workflow world; the model is always this
   // fixture's scripted mock.
   ...e2eAgentConfig(),
@@ -15,6 +15,8 @@ export default defineAgent({
   ),
   modelContextWindowTokens: 1_000_000,
 });
+
+export default agent;
 
 function respondToFanout(request: MockModelRequest): MockModelResponse {
   const roles = request.messages.map((message) => message.role);

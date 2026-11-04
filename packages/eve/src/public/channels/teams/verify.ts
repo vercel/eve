@@ -18,6 +18,8 @@ const log = createLogger("teams.verify");
 const DEFAULT_BOT_CONNECTOR_OPENID_METADATA_URL =
   "https://login.botframework.com/v1/.well-known/openidconfiguration";
 const BOT_CONNECTOR_ISSUER = "https://api.botframework.com";
+// Bot Connector signs every token with RS256; the token header must not choose another algorithm.
+const BOT_CONNECTOR_ALGORITHM = "RS256";
 
 /**
  * Caller-supplied inbound webhook verifier. Replaces Bot Connector JWT
@@ -51,19 +53,24 @@ export interface TeamsJwtVerifyOptions {
   readonly openIdMetadataUrl?: string;
 }
 
+export interface VerifiedTeamsRequest {
+  readonly body: string;
+  /** Native Connector claim; a trusted custom verifier owns its own binding. */
+  readonly serviceUrl?: string;
+}
+
 /**
- * Verifies an inbound Teams request and returns the raw body.
+ * Verifies an inbound Teams request and returns its body and native service URL binding.
  *
  * Uses `webhookVerifier` when provided, otherwise validates the bearer JWT
  * against Bot Connector keys and the resolved app id. Throws when the
- * verifier rejects the request, the bearer token is missing, no app id can be
- * resolved (`appId` option or `MICROSOFT_APP_ID`/`TEAMS_APP_ID`), metadata or
- * keys cannot be loaded, or JWT verification fails.
+ * verifier rejects the request, the bearer token or native service URL claim
+ * is missing, no app id can be resolved, keys cannot be loaded, or JWT verification fails.
  */
 export async function verifyTeamsRequest(
   request: Request,
   options: TeamsVerifyOptions,
-): Promise<string> {
+): Promise<VerifiedTeamsRequest> {
   const body = await request.text();
 
   if (options.webhookVerifier !== undefined) {
@@ -71,7 +78,7 @@ export async function verifyTeamsRequest(
     if (!result) {
       throw new Error("teamsChannel: inbound webhook verifier rejected the request.");
     }
-    return typeof result === "string" ? result : body;
+    return { body: typeof result === "string" ? result : body };
   }
 
   const authorization = request.headers.get("authorization") ?? "";
@@ -80,8 +87,11 @@ export async function verifyTeamsRequest(
     throw new Error("teamsChannel: inbound request missing bearer token.");
   }
 
-  await verifyTeamsJwt(token, options);
-  return body;
+  const claims = await verifyTeamsJwt(token, options);
+  if (typeof claims.serviceurl !== "string") {
+    throw new Error("teamsChannel: verified token is missing its service URL claim.");
+  }
+  return { body, serviceUrl: claims.serviceurl };
 }
 
 /** Verifies one Bot Connector JWT and returns its payload. */
@@ -94,12 +104,10 @@ export async function verifyTeamsJwt(
 
   const result = await jwtVerify(
     token,
-    async (protectedHeader: Record<string, unknown>) => {
-      const key = selectJwk(jwks, protectedHeader);
-      const alg = typeof protectedHeader.alg === "string" ? protectedHeader.alg : undefined;
-      return importJWK(key, alg);
-    },
+    async (protectedHeader: Record<string, unknown>) =>
+      importJWK(selectJwk(jwks, protectedHeader), BOT_CONNECTOR_ALGORITHM),
     {
+      algorithms: [BOT_CONNECTOR_ALGORITHM],
       audience: appId,
       clockTolerance: options.maxSkewSeconds ?? 60 * 5,
       issuer: BOT_CONNECTOR_ISSUER,

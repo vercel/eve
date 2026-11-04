@@ -8,6 +8,8 @@ export type HttpMethod = (typeof HTTP_METHODS)[number];
 /** Internal descriptor for one resolved OpenAPI operation. */
 export interface OpenApiOperation {
   readonly toolName: string;
+  /** The document's `operationId`, when the operation declares one. */
+  readonly operationId: string | undefined;
   readonly method: HttpMethod;
   readonly pathTemplate: string;
   readonly description: string;
@@ -31,8 +33,9 @@ export function operationName(
   method: HttpMethod,
   pathTemplate: string,
 ): string {
-  if (typeof operation.operationId === "string" && operation.operationId.length > 0) {
-    const sanitized = sanitizeToolName(operation.operationId);
+  const operationId = declaredOperationId(operation);
+  if (operationId !== undefined) {
+    const sanitized = sanitizeToolName(operationId);
     if (sanitized.length > 0) {
       return sanitized;
     }
@@ -42,6 +45,13 @@ export function operationName(
     .replace(/[^a-zA-Z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
   return sanitizeToolName(`${method}_${sanitizedPath}`);
+}
+
+/** The operation's `operationId`, when it declares a non-empty one. */
+export function declaredOperationId(operation: Record<string, unknown>): string | undefined {
+  return typeof operation.operationId === "string" && operation.operationId.length > 0
+    ? operation.operationId
+    : undefined;
 }
 
 const MAX_TOOL_NAME_LENGTH = 64;

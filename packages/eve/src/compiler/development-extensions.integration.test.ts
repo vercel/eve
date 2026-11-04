@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { compiledOf } from "#compiler/manifest.js";
 
 import {
   defaultDevelopmentExtensions,
@@ -47,9 +48,9 @@ describe("development extensions", () => {
     expect(subagent.agent.tools.map((tool) => tool.name)).toEqual(
       expect.arrayContaining(["edit_file", "search_models", "search_registry"]),
     );
-    expect(subagent.agent.dynamicTools.map((tool) => tool.slug)).toContain("registry_add");
-    expect(subagent.agent.dynamicTools.map((tool) => tool.slug)).not.toContain("publish");
-    expect(subagent.agent.dynamicInstructions).toHaveLength(1);
+    expect(compiledOf(subagent.agent, "tool").map((tool) => tool.slug)).toContain("registry_add");
+    expect(compiledOf(subagent.agent, "tool").map((tool) => tool.slug)).not.toContain("publish");
+    expect(compiledOf(subagent.agent, "instructions")).toHaveLength(1);
 
     const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
       frameworkAgentSourceRegistry,
@@ -61,7 +62,7 @@ describe("development extensions", () => {
       moduleMapPath: "/virtual/source-test/.eve/compile/module-map.mjs",
     });
     expect(generated).toContain(
-      "eve/self-modification/local?eve-mount=extensions%2Fself-modification",
+      "eve/extensions/self-modification/local?eve-mount=extensions%2Fself-modification",
     );
   });
 

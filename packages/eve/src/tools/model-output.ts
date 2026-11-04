@@ -15,17 +15,24 @@ export type ToolModelOutput =
 /**
  * One part of a `content` {@link ToolModelOutput}. Mirrors the AI SDK's
  * `ToolResultOutput` content parts narrowed to the JSON-safe subset:
- * file data is the SDK's tagged `FileData` union restricted to
- * `{ type: "data" }` with a base64 string, so persisted tool results
- * survive the durable JSON boundary. Use the `toolOutputPart` builders
- * from `eve/tools` to construct parts without hand-writing the nesting.
+ * file data is the SDK's tagged `FileData` union restricted to a base64
+ * `{ type: "data" }` payload or an `https:` `{ type: "url" }` string, so
+ * persisted tool results survive the durable JSON boundary. Use the
+ * `toolOutputPart` builders from `eve/tools` to construct parts without
+ * hand-writing the nesting.
  */
 export type ToolModelOutputPart =
   | { readonly type: "text"; readonly text: string }
   | {
       readonly type: "file";
-      /** Tagged file data; only JSON-safe base64 payloads are accepted. */
-      readonly data: { readonly type: "data"; readonly data: string };
+      /**
+       * Tagged file data: a base64 payload, or an `https:` URL the
+       * provider fetches itself. A URL must stay readable for the whole
+       * session because every later model call sends it again.
+       */
+      readonly data:
+        | { readonly type: "data"; readonly data: string }
+        | { readonly type: "url"; readonly url: string };
       /** IANA media type, e.g. `image/png`. */
       readonly mediaType: string;
       readonly filename?: string;
@@ -91,19 +98,27 @@ export const toolOutputPart = {
     base64: string,
     options: { readonly mediaType: string; readonly filename?: string },
   ): ToolModelOutputPart {
-    const part: {
-      type: "file";
-      data: { type: "data"; data: string };
-      mediaType: string;
-      filename?: string;
-    } = {
-      type: "file",
-      data: { type: "data", data: base64 },
-      mediaType: options.mediaType,
-    };
-    if (options.filename !== undefined) {
-      part.filename = options.filename;
-    }
-    return part;
+    return filePart({ type: "data", data: base64 }, options);
+  },
+  /**
+   * Builds a file part from an `https:` URL, e.g. a presigned object
+   * storage link. The provider fetches the file, so eve neither downloads
+   * it nor stores its bytes in session history. Every later model call
+   * sends the URL again, so it must not expire before the session ends.
+   */
+  fileUrl(
+    url: string,
+    options: { readonly mediaType: string; readonly filename?: string },
+  ): ToolModelOutputPart {
+    return filePart({ type: "url", url }, options);
   },
 };
+
+function filePart(
+  data: Extract<ToolModelOutputPart, { readonly type: "file" }>["data"],
+  options: { readonly mediaType: string; readonly filename?: string },
+): ToolModelOutputPart {
+  return options.filename === undefined
+    ? { type: "file", data, mediaType: options.mediaType }
+    : { type: "file", data, mediaType: options.mediaType, filename: options.filename };
+}

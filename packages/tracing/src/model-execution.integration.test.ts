@@ -4,7 +4,7 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import { createAgentTracing, otelTelemetry } from "./index.js";
+import { createAgentRun, otelTelemetry } from "@vercel/agent-runs";
 
 describe("wrapped model streams", () => {
   it.each(["completed", "failed", "cancelled"])(
@@ -14,7 +14,7 @@ describe("wrapped model streams", () => {
       const provider = new BasicTracerProvider({
         spanProcessors: [new SimpleSpanProcessor(exporter)],
       });
-      const tracing = createAgentTracing({
+      const tracing = createAgentRun({
         telemetry: otelTelemetry({ provider }),
       });
       try {

@@ -11,7 +11,7 @@ export const TASK_WAIT_TIMEOUT_DESCRIPTION =
   "Optional. Seconds to wait before returning without a result. Omit it to wait for a result or a new message, which is almost always right. Don't use short timeouts to check on tasks: results reach you without checking.";
 
 export const TASK_CANCEL_DESCRIPTION =
-  "Stop a task's current work. That work never reports back; if it already had a result, that result is still delivered. An agent, or any task that accepts more input, stays available: call its tool with its taskId to give it new work.";
+  "Stop a task's current work. That work never reports back; if it already had a result, that result is still delivered. Cancelling an agent or one-shot task ends it; start a new task to delegate again. Other tasks that accept more input stay available: call their tool with the taskId to give them new work.";
 
 const TASK_ID_SOURCE = 'copied from its "Started task" receipt or the [Tasks] note';
 
@@ -37,7 +37,10 @@ export const TASK_SYSTEM_BLOCK = [
   ...TASK_SYSTEM_BLOCK_CLOSING,
 ].join("\n");
 
-/** The task block for a child or schedule session, whose caller reads only the final reply. */
+/**
+ * The task block for a child or schedule session, whose caller reads only the final reply: a held
+ * turn's text there is narration.
+ */
 export const FINAL_REPLY_TASK_SYSTEM_BLOCK = [
   ...TASK_SYSTEM_BLOCK_OPENING,
   `- Only your final reply reaches your caller. While tasks work, call ${TASK_WAIT_TOOL_NAME} instead of replying. Start every independent task first, then wait.`,

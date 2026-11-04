@@ -3,7 +3,7 @@ import type {
   AgentTurnTraceState,
 } from "#tracing/eve/agent-trace-state.js";
 import { normalizeInstrumentationChannelKind } from "#internal/instrumentation.js";
-import type { TurnInput } from "#compiled/@eve/tracing/index.js";
+import type { TurnInput } from "#compiled/@vercel/agent-runs/index.js";
 import { checkpointContent } from "#tracing/eve/operation-input.js";
 
 export function eveActivationMetadata(input: {

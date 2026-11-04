@@ -12,7 +12,7 @@ export default defineTool({
     request: always(),
     response: ({ request, response }) => {
       // The person who asked for the change may withdraw it; only the fixture approver approves it.
-      if (response.decision === "cancel") {
+      if (response.decision === "deny") {
         return response.principal.principalId === request.principal?.principalId
           ? { status: "allowed" }
           : { status: "rejected", reason: "Only the requester can cancel this change." };

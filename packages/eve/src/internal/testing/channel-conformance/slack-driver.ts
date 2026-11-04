@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 
-import { slackChannel } from "#public/channels/slack/index.js";
-import { HITL_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
+import { type SlackChannelConfig, slackChannel } from "#public/channels/slack/index.js";
+import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import {
   type ChannelDriver,
   type Person,
@@ -61,13 +61,20 @@ interface SlackMessageBody {
 
 /**
  * Drives the Slack channel through its Events API and interactivity webhooks,
- * in a public channel thread by default or in a DM.
+ * in a public channel thread by default, in a DM, or in a code channel, where
+ * people write top-level without mentioning the bot. `config` adds authored
+ * channel hooks on top of the fake platform.
  */
-export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): ChannelDriver {
-  const dm = surface === "private";
+export function slackDriver(
+  conversation: Exclude<Surface, "public"> | "code-channel" = "shared",
+  config: Pick<SlackChannelConfig, "onAnswers" | "renderers"> = {},
+): ChannelDriver {
+  const dm = conversation === "private";
+  const codeChannel = conversation === "code-channel";
+  const surface: Surface = dm ? "private" : "shared";
   // A fresh channel per driver keeps each test's session apart in the shared workflow world.
   nextChannel += 1;
-  const CHANNEL = `${dm ? "D" : "C"}${String(nextChannel).padStart(3, "0")}`;
+  const CHANNEL = `${dm ? "D" : codeChannel ? "C_CODE" : "C"}${String(nextChannel).padStart(3, "0")}`;
   let sequence = 0;
   // Every message is a reply in the thread the first one starts.
   const threadTs = "1700000000.000001";
@@ -119,6 +126,28 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
     const method = url.pathname.split("/").at(-1)!;
     const body = decodeSlackApiBody(await request.text(), request.headers.get("content-type"));
     const ts = nextTs();
+    if (codeChannel && method === "conversations.info") {
+      return {
+        body,
+        method,
+        response: {
+          channel: {
+            id: CHANNEL,
+            is_private: false,
+            properties: { record_channel: { record_type: "agent_channel" } },
+          },
+          ok: true,
+        },
+      };
+    }
+    // Everything the bot shows in a code channel posts top-level; Slack has no thread to find.
+    if (
+      codeChannel &&
+      method.startsWith("chat.") &&
+      (body as { thread_ts?: unknown }).thread_ts !== undefined
+    ) {
+      return { body, method, response: { error: "thread_not_found", ok: false } };
+    }
     return {
       body,
       method,
@@ -136,7 +165,7 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
   }
 
   return {
-    name: dm ? "slack-dm" : "slack",
+    name: dm ? "slack-dm" : codeChannel ? "slack-code-channel" : "slack",
     personId: PERSON,
     capabilities: dm
       ? ["attachments", "buttons", "text-replies"]
@@ -144,18 +173,23 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
     surface,
     createChannel: (record) =>
       slackChannel({
+        ...config,
         api: { fetch: recordingFetch(record, decode) },
         credentials: { botToken: "xoxb-conformance", signingSecret: SIGNING_SECRET },
+        ...(codeChannel && { codeChannels: true }),
       }),
     message: (text, person, files = []) => {
       const ts = threadStarted ? nextTs() : threadTs;
-      const thread = threadStarted ? { thread_ts: threadTs } : {};
+      const thread = threadStarted && !codeChannel ? { thread_ts: threadTs } : {};
       threadStarted = true;
       // In a channel the default policy hears only mentions, so a person mentions the bot each
       // time. On its own line, so the test model's line-based directives still read the message.
+      // A code channel hears every message.
       const event = dm
         ? { channel_type: "im", text, type: "message" }
-        : { channel_type: "channel", text: `${text}\n<@${BOT}>`, type: "app_mention" };
+        : codeChannel
+          ? { channel_type: "channel", text, type: "message" }
+          : { channel_type: "channel", text: `${text}\n<@${BOT}>`, type: "app_mention" };
       // A message with uploads is a `file_share` in a DM; a mention carries its files as is.
       const shared: Record<string, unknown> = {};
       if (files.length > 0) {
@@ -217,7 +251,7 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
       const payload = {
         actions: [action],
         channel: { id: CHANNEL },
-        message: { blocks, thread_ts: threadTs, ts: messageTs },
+        message: { blocks, ...(!codeChannel && { thread_ts: threadTs }), ts: messageTs },
         team: { id: TEAM },
         type: "block_actions",
         user: { id, name, team_id: TEAM, username: name },
@@ -263,16 +297,18 @@ function hitlOptions(
   messageTs: string,
   messageBlocks: readonly unknown[] = blocks,
 ): RenderedOption[] {
-  return blocks.flatMap((block) =>
-    // Questions use `actions` blocks (`elements`); approval cards keep buttons in `actions`.
-    (
-      (block as { readonly elements?: readonly SlackElement[] }).elements ??
-      (block as { readonly actions?: readonly SlackElement[] }).actions ??
-      []
-    )
-      .filter((element) => element.action_id?.startsWith(HITL_ACTION_PREFIX) === true)
-      .flatMap((element) => renderedOptions(element, messageBlocks, messageTs)),
+  return hitlElements(blocks).flatMap((element) =>
+    renderedOptions(element, messageBlocks, messageTs),
   );
+}
+
+/** HITL widgets wherever a block nests them, as a renderer can. */
+function hitlElements(value: unknown): SlackElement[] {
+  if (Array.isArray(value)) return value.flatMap(hitlElements);
+  if (typeof value !== "object" || value === null) return [];
+  const element = value as SlackElement;
+  if (element.action_id?.startsWith(ANSWER_ACTION_PREFIX) === true) return [element];
+  return Object.values(value).flatMap(hitlElements);
 }
 
 /** Every `text` string in Block Kit, wherever a block nests it. */

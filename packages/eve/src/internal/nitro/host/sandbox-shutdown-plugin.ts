@@ -1,23 +1,12 @@
-import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
+import { shutdownActiveSandboxConnections } from "#execution/sandbox/active-connections.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
-
-const SHUTDOWN_SIGNALS = ["SIGINT", "SIGTERM"] as const;
-type ShutdownSignal = (typeof SHUTDOWN_SIGNALS)[number];
 
 /**
  * Bounds sandbox shutdown so a wedged provider cannot keep the server
- * process alive past the supervisor's kill grace (`eve start` waits
- * 20s before SIGKILL).
+ * process alive past the supervisor's kill grace (`eve start` waits 25s
+ * before SIGKILL, which includes srvx's graceful close).
  */
 const SANDBOX_SHUTDOWN_TIMEOUT_MS = 15_000;
-
-let installed = false;
-
-interface SandboxShutdownProcess {
-  readonly env: Record<string, string | undefined>;
-  exit(code?: number): void;
-  once(event: ShutdownSignal, listener: () => void): unknown;
-}
 
 interface NitroAppLike {
   readonly hooks?: {
@@ -62,52 +51,34 @@ export async function runSandboxShutdown(log: (message: string) => void): Promis
   });
 
   try {
-    await Promise.race([shutdownActiveSandboxHandles({ log }), deadline]);
+    await Promise.race([shutdownActiveSandboxConnections({ log }), deadline]);
   } finally {
     clearTimeout(timer);
   }
 }
 
-function exitCodeForSignal(signal: ShutdownSignal): number {
-  return signal === "SIGINT" ? 130 : 143;
-}
-
 /**
- * Wires sandbox shutdown into the server lifecycle: the nitro `close`
- * hook plus SIGINT/SIGTERM, since the node-server preset installs no
- * signal handling of its own. Exposed for tests; the plugin default
- * export applies it to the real `process`.
+ * Stops tracked sandboxes when the server closes. On SIGINT or SIGTERM,
+ * srvx's graceful shutdown closes the server and Nitro runs its `close`
+ * hooks; the process then exits on its own.
  */
-export function installSandboxShutdownHandlers(input: {
+export function installSandboxShutdown(input: {
+  readonly env: Record<string, string | undefined>;
   readonly log: (message: string) => void;
   readonly nitroApp?: NitroAppLike;
-  readonly process: SandboxShutdownProcess;
 }): void {
-  if (!shouldInstallSandboxShutdown(input.process.env)) {
+  if (!shouldInstallSandboxShutdown(input.env)) {
     return;
   }
-
   input.nitroApp?.hooks?.hook("close", async () => {
     await runSandboxShutdown(input.log);
   });
-
-  for (const signal of SHUTDOWN_SIGNALS) {
-    input.process.once(signal, () => {
-      void runSandboxShutdown(input.log).finally(() => {
-        input.process.exit(exitCodeForSignal(signal));
-      });
-    });
-  }
 }
 
 export default function sandboxShutdownPlugin(nitroApp?: NitroAppLike): void {
-  if (installed) {
-    return;
-  }
-  installed = true;
-  installSandboxShutdownHandlers({
+  installSandboxShutdown({
+    env: process.env,
     log: (message) => console.error(message),
     nitroApp,
-    process,
   });
 }

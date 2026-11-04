@@ -1,5 +1,5 @@
 import { observeToolOutput } from "#tool-stubs/execute.js";
-import type { ModelMessage } from "ai";
+import type { JSONValue, ModelMessage } from "ai";
 
 import type {
   RuntimeActionRequest,
@@ -244,7 +244,7 @@ export function resolveToolCallInputObject(
   }
 
   try {
-    return parseJsonObject(typeof value === "string" ? parseJsonStringInput(value) : value);
+    return parseJsonObject(typeof value === "string" ? JSON.parse(value) : value);
   } catch (error) {
     // This module is bundled into the workflow driver body, which cannot
     // import the logger, so enrich the error (and keep the original as
@@ -255,10 +255,6 @@ export function resolveToolCallInputObject(
       { cause: error },
     );
   }
-}
-
-function parseJsonStringInput(value: string): unknown {
-  return JSON.parse(value);
 }
 
 /** Errors bypass `toModelOutput`, as they do for local execution. */
@@ -284,60 +280,11 @@ async function projectToolResultOutput(
 }
 
 function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output"] {
-  if (typeof result.output === "string") {
-    if (result.isError === true) {
-      return {
-        type: "error-text",
-        value: result.output,
-      };
-    }
-
-    return {
-      type: "text",
-      value: result.output,
-    };
-  }
-
-  if (result.isError === true) {
-    return {
-      type: "error-json",
-      value: toMutableJsonValue(result.output),
-    };
-  }
-
+  if (typeof result.output === "string")
+    return { type: result.isError === true ? "error-text" : "text", value: result.output };
   return {
-    type: "json",
-    value: toMutableJsonValue(result.output),
+    type: result.isError === true ? "error-json" : "json",
+    // Runtime results are already JSON; detach them for the SDK's mutable message types.
+    value: structuredClone(result.output) as JSONValue,
   };
 }
-
-function toMutableJsonValue(value: RuntimeActionResult["output"]): MutableJsonValue {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => toMutableJsonValue(item));
-  }
-
-  const next: Record<string, MutableJsonValue> = {};
-
-  for (const [key, item] of Object.entries(value)) {
-    next[key] = toMutableJsonValue(item);
-  }
-
-  return next;
-}
-
-type MutableJsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | MutableJsonValue[]
-  | { [key: string]: MutableJsonValue };

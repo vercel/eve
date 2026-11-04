@@ -1,3 +1,4 @@
+import { outputOf } from "#evals/output.js";
 import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
 import {
   composeAssertionScoreMetadata,
@@ -5,6 +6,7 @@ import {
   groupAssertionScores,
 } from "#evals/runner/reporters/assertion-scores.js";
 import { resolveLocalGitMetadata } from "#evals/runner/resolve-git-metadata.js";
+import { formatAttemptLabel } from "#evals/runner/attempt-label.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 
 /**
@@ -85,7 +87,7 @@ interface BraintrustExperimentSummary {
  * missing. `config` is optional and defaults to an empty object (the project
  * name then falls back to the first observed eval id).
  */
-export function Braintrust(config: BraintrustReporterConfig = {}): EvalReporter {
+export function braintrustReporter(config: BraintrustReporterConfig = {}): EvalReporter {
   return new BraintrustReporter(config);
 }
 
@@ -146,6 +148,7 @@ class BraintrustReporter implements EvalReporter {
 
     const metadata: Record<string, unknown> = {
       ...evaluation?.metadata,
+      eveAttempt: result.attempt,
       eveSessionId: result.result.sessionId,
       eveStatus: result.result.status,
       eveVerdict: result.verdict,
@@ -153,7 +156,8 @@ class BraintrustReporter implements EvalReporter {
       eveToolCalls: result.result.derived.toolCalls.map((call) => call.name),
       eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
       eveSkillLoads: result.result.derived.skillLoads.map((load) => load.skill),
-      eveParked: result.result.derived.parked,
+      eveAwaitingInput: result.result.status === "awaiting-input",
+      eveSessionEnded: result.result.sessionEnded,
       eveAssertionScores: composeAssertionScoreMetadata(result.assertions),
     };
 
@@ -180,9 +184,10 @@ class BraintrustReporter implements EvalReporter {
     };
 
     this.#experiment.log({
-      id: result.id,
+      // Braintrust upserts rows by id, so each attempt needs its own row id.
+      id: formatAttemptLabel(result.id, result.attempt),
       input: evaluation?.description ?? "",
-      output: result.result.output ?? "",
+      output: outputOf(result.result) ?? "",
       error: result.error ?? undefined,
       scores,
       metadata,

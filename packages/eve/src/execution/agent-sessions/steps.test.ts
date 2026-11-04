@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { FatalError } from "#compiled/@workflow/core/index.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import {
@@ -7,6 +8,7 @@ import {
   endAgentSessionsStep,
   openAgentSessionStep,
   sendAgentSessionMessageStep,
+  stopLateAgentSessionStep,
 } from "#execution/agent-sessions/steps.js";
 
 const mocks = vi.hoisted(() => ({
@@ -14,20 +16,38 @@ const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   dispatch: vi.fn(),
   resolveSessionInbox: vi.fn(),
+  resumeHook: vi.fn(),
+  startWorkflow: vi.fn(),
+  logError: vi.fn(),
+  runtimeConfig: undefined as unknown,
+  targetKind: "local" as "local" | "remote",
   waitForCommandHookOwner: vi.fn(),
   waitForSessionInbox: vi.fn(),
 }));
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
-  getStepMetadata: () => ({ attempt: mocks.attempt }),
+  getStepMetadata: () => ({ attempt: mocks.attempt, stepId: "step_0" }),
+  getWorkflowMetadata: () => ({ workflowRunId: "run_0" }),
 }));
 vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/workflow-runtime.js")>()),
-  createWorkflowRuntime: () => ({ createSession: mocks.createSession }),
+  createWorkflowRuntime: (config: unknown) => {
+    mocks.runtimeConfig = config;
+    return { createSession: mocks.createSession };
+  },
   dispatchWorkflowSessionCommand: mocks.dispatch,
+  startWorkflowOnCurrentDeployment: mocks.startWorkflow,
   waitForCommandHookOwner: mocks.waitForCommandHookOwner,
   waitForSessionInbox: mocks.waitForSessionInbox,
+}));
+vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#internal/workflow/runtime.js")>()),
+  resumeHook: mocks.resumeHook,
+}));
+vi.mock("#internal/logging.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#internal/logging.js")>()),
+  logError: mocks.logError,
 }));
 vi.mock("#execution/session-inbox/resume.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/session-inbox/resume.js")>()),
@@ -43,7 +63,10 @@ vi.mock("#execution/agent-sessions/target.js", () => {
   const action = { callId: "call-1", name: "reviewer", nodeId: "reviewer" };
   return {
     resolveAgentAction: () => action,
-    resolveAgentStartTarget: () => ({ action, kind: "local", source: { type: "declared" } }),
+    resolveAgentStartTarget: () =>
+      mocks.targetKind === "remote"
+        ? { action, kind: "remote" }
+        : { action, kind: "local", source: { type: "declared" } },
   };
 });
 vi.mock("#subagents/tool.js", () => ({
@@ -83,6 +106,8 @@ const message = {
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.attempt = 1;
+  mocks.runtimeConfig = undefined;
+  mocks.targetKind = "local";
 });
 
 describe("openAgentSessionStep", () => {
@@ -92,11 +117,14 @@ describe("openAgentSessionStep", () => {
     mocks.createSession.mockResolvedValue({ sessionId: "child-1" });
 
     await expect(open()).resolves.toEqual({
-      continuationToken: "subagent:run-1:0",
-      kind: "local",
-      name: "reviewer",
-      nodeId: "reviewer",
-      sessionId: "child-1",
+      address: {
+        continuationToken: "subagent:run-1:0",
+        kind: "local",
+        name: "reviewer",
+        nodeId: "reviewer",
+        sessionId: "child-1",
+      },
+      deliveryId: "agent-session:run-1:0:initial",
     });
     expect(mocks.waitForCommandHookOwner).not.toHaveBeenCalled();
   });
@@ -106,10 +134,58 @@ describe("openAgentSessionStep", () => {
     mocks.createSession.mockResolvedValue({ sessionId: "child-2" });
     mocks.waitForCommandHookOwner.mockResolvedValue({ runId: "child-1" });
 
-    await expect(open()).resolves.toMatchObject({ sessionId: "child-1" });
+    await expect(open()).resolves.toMatchObject({ address: { sessionId: "child-1" } });
     expect(mocks.waitForCommandHookOwner).toHaveBeenCalledWith(
       expect.stringContaining("subagent:run-1:0"),
     );
+  });
+
+  it("binds a model override to the local child runtime", async () => {
+    mocks.createSession.mockResolvedValue({ sessionId: "child-1" });
+
+    await openAgentSessionStep({
+      ...message,
+      model: {
+        model: "anthropic/claude-opus-5.5",
+        modelContextWindowTokens: 200_000,
+        reasoning: "high",
+      },
+      name: "reviewer",
+    });
+
+    expect(mocks.runtimeConfig).toMatchObject({
+      agentSessionRuntimeOverrides: {
+        model: {
+          contextWindowTokens: 200_000,
+          id: "anthropic/claude-opus-5.5",
+          reasoning: "high",
+        },
+      },
+    });
+  });
+
+  it("rejects a model override for a remote target without retrying", async () => {
+    mocks.targetKind = "remote";
+
+    await expect(
+      openAgentSessionStep({
+        ...message,
+        model: "anthropic/claude-opus-5.5",
+        name: "reviewer",
+      }),
+    ).rejects.toBeInstanceOf(FatalError);
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid model selection without retrying", async () => {
+    await expect(
+      openAgentSessionStep({
+        ...message,
+        model: "",
+        name: "reviewer",
+      }),
+    ).rejects.toBeInstanceOf(FatalError);
+    expect(mocks.createSession).not.toHaveBeenCalled();
   });
 });
 
@@ -160,6 +236,25 @@ describe("commands to a session that opened without waiting", () => {
     expect(mocks.resolveSessionInbox).toHaveBeenCalledWith("child-continuation");
     expect(mocks.dispatch).toHaveBeenLastCalledWith(
       expect.objectContaining({ sessionId: "child-2" }),
+    );
+  });
+
+  it("logs an unavailable late child without scheduling another workflow", async () => {
+    const unavailable = new HookNotFoundError("child-inbox");
+    mocks.resumeHook.mockRejectedValue(unavailable);
+
+    await expect(stopLateAgentSessionStep(session)).resolves.toBeUndefined();
+
+    expect(mocks.resumeHook).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ kind: "reset" }),
+    );
+    expect(mocks.startWorkflow).not.toHaveBeenCalled();
+    expect(mocks.logError).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining("late child"),
+      unavailable,
+      { sessionId: "child-1" },
     );
   });
 

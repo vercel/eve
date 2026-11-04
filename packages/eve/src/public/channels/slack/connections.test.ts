@@ -41,7 +41,7 @@ describe("buildAuthRequiredPublicText", () => {
 
 describe("buildAuthCompletedText", () => {
   it("renders the success outcome with a check glyph", () => {
-    expect(buildAuthCompletedText({ displayName: "Linear", outcome: "authorized" })).toBe(
+    expect(buildAuthCompletedText({ displayName: "Linear", outcome: "accepted" })).toBe(
       ":white_check_mark: Linear connected",
     );
   });
@@ -56,10 +56,10 @@ describe("buildAuthCompletedText", () => {
     expect(
       buildAuthCompletedText({
         displayName: "Linear",
-        outcome: "timed-out",
+        outcome: "expired",
         reason: "the code expired",
       }),
-    ).toBe(":x: Linear authorization timed-out (the code expired)");
+    ).toBe(":x: Linear authorization timed out (the code expired)");
   });
 
   it("reports a cancelled sign-in plainly", () => {
@@ -117,6 +117,13 @@ describe("buildAuthEphemeralBlocks", () => {
       action_id: SIGN_IN_CANCEL_ACTION_ID,
       text: { text: "Cancel", type: "plain_text" },
     });
+    expect(parseSignInCancelTarget(cancel?.value)).toEqual(target);
+  });
+
+  it("round-trips a code channel's Cancel target", () => {
+    const target = { channelId: "C01", codeChannel: true, turnId: "turn_0" } as const;
+    const blocks = buildAuthEphemeralBlocks({ cancel: target, displayName: "Linear" });
+    const cancel = (blocks[1] as { elements: Array<Record<string, unknown>> }).elements[0];
     expect(parseSignInCancelTarget(cancel?.value)).toEqual(target);
   });
 

@@ -27,16 +27,12 @@ export function buildWorkflowToolSerializedContext(input: {
     "eve.stateLayout": 1,
     "eve.capabilities": { requestInput: input.requestInput ?? false },
     "eve.channel": { kind: "http", state: {} },
-    ...(input.acceptedDeploymentId === undefined
-      ? {}
-      : {
-          "eve.channelDelivery": {
-            acceptedDeploymentId: input.acceptedDeploymentId,
-            channelKind: "http",
-            channelName: "test",
-            deliveryId: "delivery-initial",
-          },
-        }),
+    "eve.channelDelivery": {
+      acceptedDeploymentId: input.acceptedDeploymentId,
+      channelKind: "http",
+      channelName: "test",
+      deliveryId: "delivery-initial",
+    },
     "eve.continuationToken": input.continuationToken,
   };
 }

@@ -83,6 +83,51 @@ describe("normalizeToolModelOutput", () => {
     });
   });
 
+  it("parses https file URLs into the AI SDK's URL shape", () => {
+    const url = "https://bucket.example.com/report.pdf?X-Amz-Signature=abc";
+
+    expect(
+      normalize(
+        toolOutput.content([
+          toolOutputPart.fileUrl(url, { mediaType: "application/pdf", filename: "report.pdf" }),
+        ]),
+      ),
+    ).toEqual({
+      type: "content",
+      value: [
+        {
+          type: "file",
+          data: { type: "url", url: new URL(url) },
+          mediaType: "application/pdf",
+          filename: "report.pdf",
+        },
+      ],
+    });
+  });
+
+  it.each([
+    ["http URL", "http://minio.internal/a.pdf?X-Amz-Signature=secret", /received a http: URL/u],
+    [
+      "sandbox ref",
+      "eve-sandbox:/workspace/.eve/attachments/a.pdf",
+      /received a eve-sandbox: URL/u,
+    ],
+    ["data URL", "data:application/pdf;base64,aGVsbG8=", /received a data: URL/u],
+    ["relative path", "/workspace/a.pdf", /received a value that is not a URL/u],
+  ])("rejects a file url that is a %s without echoing it", (_label, url, expected) => {
+    let error: unknown;
+    try {
+      normalize({
+        type: "content",
+        value: [{ type: "file", data: { type: "url", url }, mediaType: "application/pdf" }],
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(String(error)).toMatch(expected);
+    expect(String(error)).not.toContain(url);
+  });
+
   it.each([
     [
       "raw Uint8Array payload",
@@ -90,11 +135,6 @@ describe("normalizeToolModelOutput", () => {
       /base64 string, received raw bytes/u,
     ],
     ["raw untagged bytes", new Uint8Array([1, 2, 3]), /base64 string, received raw bytes/u],
-    [
-      "url file-data tag",
-      { type: "url", url: "https://example.com/a.png" },
-      /"url" is not supported yet/u,
-    ],
     [
       "reference file-data tag",
       { type: "reference", reference: "file_abc" },

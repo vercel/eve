@@ -1,4 +1,4 @@
-import { chatSdkChannel, messageToUserContent } from "#public/channels/chat-sdk/index.js";
+import { chatSdkChannel, messageContentOf } from "#public/channels/chat-sdk/index.js";
 import {
   type Adapter,
   type AdapterPostableMessage,
@@ -219,25 +219,25 @@ function chatSdkDriverWith(input: {
       });
       if (dm) {
         bridge.bot.onDirectMessage(async (thread, message) => {
-          await bridge.send(messageToUserContent(message), {
+          await bridge.send(messageContentOf(message), {
             auth: userAuth(message.author.userId),
             context: [],
             thread,
           });
         });
       } else {
-        // The wiring docs/channels/chat-sdk.mdx shows: a mention starts the session, and
+        // The wiring docs/channels/chat-sdk/index.mdx shows: a mention starts the session, and
         // subscribing lets the rest of the thread continue it without one.
         bridge.bot.onNewMention(async (thread, message) => {
           await thread.subscribe();
-          await bridge.send(messageToUserContent(message), {
+          await bridge.send(messageContentOf(message), {
             auth: userAuth(message.author.userId),
             context: [],
             thread,
           });
         });
         bridge.bot.onSubscribedMessage(async (thread, message) => {
-          await bridge.send(messageToUserContent(message), {
+          await bridge.send(messageContentOf(message), {
             auth: userAuth(message.author.userId),
             context: [],
             thread,

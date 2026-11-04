@@ -31,35 +31,6 @@ function stripAnsi(text: string): string {
     .join("");
 }
 
-function removeRolldownPluginTimingWarningBlock(stderr: string): string {
-  const lines = stripAnsi(stderr).split(/\r?\n/);
-  const retainedLines: string[] = [];
-  let inWarningBlock = false;
-
-  for (const line of lines) {
-    // The diagnostic is timing-dependent (it fires when plugins consume
-    // a large share of build time, e.g. on slow CI runners) and its
-    // first line varies between rolldown versions ("[PLUGIN_TIMINGS]
-    // Warning: ..." vs "[PLUGIN_TIMINGS] Your build spent ..."), so the
-    // trigger matches only the stable code prefix.
-    if (!inWarningBlock && line.includes("[PLUGIN_TIMINGS]")) {
-      inWarningBlock = true;
-      continue;
-    }
-
-    if (inWarningBlock) {
-      if (line.includes("https://rolldown.rs/options/checks#plugintimings")) {
-        inWarningBlock = false;
-      }
-      continue;
-    }
-
-    retainedLines.push(line);
-  }
-
-  return retainedLines.join("\n").trim();
-}
-
 async function createTemporaryAppRoot(input: {
   /**
    * When `true`, omit the authored `instructions.md` so discovery fails with
@@ -89,7 +60,7 @@ async function createTemporaryAppRoot(input: {
   );
   await writeFile(
     join(appRoot, "agent", "agent.mjs"),
-    'export default { model: "openai/gpt-5.4" };\n',
+    'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
   );
 
   if (!input.omitInstructionsSource) {
@@ -241,7 +212,7 @@ describe("eve build process output", () => {
 
     expect(result.code).toBe(0);
     expect(result.signal).toBeNull();
-    expect(removeRolldownPluginTimingWarningBlock(result.stderr)).toBe("");
+    expect(stripAnsi(result.stderr).trim()).toBe("");
     expect(result.stdout).toContain("[BUILD] built output at");
     expect(result.stdout).toContain(".output");
   }, 120_000);
@@ -249,7 +220,8 @@ describe("eve build process output", () => {
   it("bundles authored workflow tools into the server and driver output", async () => {
     const { appRoot } = await scenarioApp({
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "You are a precise assistant.",
       },
       installDependencies: true,
@@ -273,7 +245,7 @@ describe("eve build process output", () => {
       join(appRoot, "agent", "tools", "deploy_service.mjs"),
       [
         'import { defineWorkflowTool } from "eve/tools";',
-        'import { sleep } from "workflow";',
+        'import { sleep } from "eve/workflow";',
         'import { hashPlan } from "../lib/plan.mjs";',
         "",
         "export default defineWorkflowTool({",

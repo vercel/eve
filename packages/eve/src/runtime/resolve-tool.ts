@@ -1,8 +1,13 @@
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
-import { isFrameworkTool, frameworkTool } from "#tools/provided/framework-tool.js";
+import {
+  isFrameworkTool,
+  frameworkTool,
+  isInteractionOnly,
+  markInteractionOnly,
+} from "#tools/provided/framework-tool.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
-import { normalizeToolApproval } from "#internal/authored-definition/approval.js";
+import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import { registerDefinitionSource } from "#internal/authored-definition/source-identity.js";
 import { isToolSchema, toInputSchema, toOutputSchema } from "#tools/schema.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -99,7 +104,10 @@ export async function resolveToolDefinition(
       sourceKind: "module",
       ...extractOptionalHooks(resolvedRecord, definition),
     };
-    return isFrameworkTool(resolvedRecord) ? frameworkTool(resolved) : resolved;
+    const marked = isFrameworkTool(resolvedRecord) ? frameworkTool(resolved) : resolved;
+    // Checked on the authored executor, so only a definition that runs a built-in interaction
+    // executor is marked, never one that merely shares its name.
+    return isInteractionOnly(resolvedRecord.execute) ? markInteractionOnly(marked) : marked;
   } catch (error) {
     if (error instanceof ResolveAgentError) {
       throw error;
@@ -121,9 +129,7 @@ export async function resolveToolDefinition(
  * result without clobbering required fields with `undefined`.
  */
 type OptionalResolvedFields = {
-  -readonly [
-    K in "label" | "approval" | "approvalKey" | "endsTurn" | "toModelOutput"
-  ]?: ResolvedToolDefinition[K];
+  -readonly [K in "label" | "approval" | "endsTurn" | "toModelOutput"]?: ResolvedToolDefinition[K];
 };
 
 /**
@@ -165,17 +171,10 @@ function extractOptionalHooks(
   }
 
   if (record.approval !== undefined) {
-    optional.approval = normalizeToolApproval(
+    optional.approval = normalizeApproval(
       record.approval,
       describe(definition, "to provide a valid approval definition"),
     );
-  }
-
-  if (record.approvalKey !== undefined) {
-    optional.approvalKey = expectFunction(
-      record.approvalKey,
-      describe(definition, "to provide an approvalKey function"),
-    ) as ResolvedToolDefinition["approvalKey"];
   }
 
   if (record.endsTurn !== undefined) {

@@ -9,7 +9,6 @@ export {
   type PackageManagerInstallResult,
   type RunInstallOptions,
   type RunPackageManagerOptions,
-  type RunPnpmOptions,
 } from "./pm/run.js";
 export {
   resultSucceeded,

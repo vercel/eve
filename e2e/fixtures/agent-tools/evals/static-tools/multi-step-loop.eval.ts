@@ -28,7 +28,7 @@ export default defineEval({
       input: { stepKey: "K-9F2X" },
       count: 1,
     });
-    t.noFailedActions();
+    t.noFailedCalls();
     t.messageIncludes(MULTI_STEP_FINAL_VALUE);
   },
 });

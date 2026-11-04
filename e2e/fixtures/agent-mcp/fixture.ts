@@ -22,7 +22,7 @@ export const MCP_PATH = "/eve/v1/mcp";
 export const DESTRUCTIVE_DENIAL = "The front desk does not run tools the server marks destructive.";
 
 /** Where the note tools keep the front-desk note in the sandbox. */
-export const NOTE_PATH = "/workspace/front-desk-note.txt";
+export const NOTE_PATH = "front-desk-note.txt";
 
 /** This deployment's MCP channel, the way `kennelUrl()` reaches its own kennel. */
 export function selfMcpUrl(): string {

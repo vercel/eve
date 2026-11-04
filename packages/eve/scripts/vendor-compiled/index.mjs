@@ -5,7 +5,6 @@
  */
 import acpSdk from "./@agentclientprotocol/sdk.mjs";
 import anthropic from "./@ai-sdk/anthropic.mjs";
-import codeMode from "./@ai-sdk/code-mode.mjs";
 import google from "./@ai-sdk/google.mjs";
 import mcp from "./@ai-sdk/mcp.mjs";
 import openai from "./@ai-sdk/openai.mjs";
@@ -18,7 +17,6 @@ import chatAdapterSlack from "./@chat-adapter/slack.mjs";
 import chatAdapterStateMemory from "./@chat-adapter/state-memory.mjs";
 import chatAdapterTwilio from "./@chat-adapter/twilio.mjs";
 import eveCatalog from "./@eve/catalog.mjs";
-import eveTracing from "./@eve/tracing.mjs";
 import photonChatAdapterIMessage from "./@photon-ai/chat-adapter-imessage.mjs";
 import linqChatSdkAdapter from "./@linqapp/chat-sdk-adapter.mjs";
 
@@ -26,6 +24,7 @@ import modelContextProtocolServer from "./@modelcontextprotocol/server.mjs";
 import opentelemetryApi from "./@opentelemetry/api.mjs";
 import opentelemetryOtlpTransformer from "./@opentelemetry/otlp-transformer.mjs";
 import standardSchemaSpec from "./@standard-schema/spec.mjs";
+import vercelAgentRuns from "./@vercel/agent-runs.mjs";
 import vercelBlob from "./@vercel/blob.mjs";
 import vercelConnect from "./@vercel/connect.mjs";
 import vercelDetectAgent from "./@vercel/detect-agent.mjs";
@@ -55,6 +54,7 @@ import jsonSchema from "./json-schema.mjs";
 import justSecrets from "./just-secrets.mjs";
 import marked from "./marked.mjs";
 import picocolors from "./picocolors.mjs";
+import run from "./run.mjs";
 import semver from "./semver.mjs";
 import shadcnRegistry from "./shadcn-registry.mjs";
 import turndown from "./turndown.mjs";
@@ -65,7 +65,6 @@ export const MODULES = [
   acpSdk,
   anthropic,
   cfworkerJsonSchema,
-  codeMode,
   chat,
   chatAdapterSlack,
   chatAdapterStateMemory,
@@ -76,7 +75,6 @@ export const MODULES = [
   eventsourceParserStream,
   envRunner,
   eveCatalog,
-  eveTracing,
   google,
   jose,
   jsYaml,
@@ -95,10 +93,12 @@ export const MODULES = [
   picocolors,
   provider,
   providerUtils,
+  run,
   semver,
   shadcnRegistry,
   standardSchemaSpec,
   turndown,
+  vercelAgentRuns,
   vercelBlob,
   vercelConnect,
   vercelDetectAgent,

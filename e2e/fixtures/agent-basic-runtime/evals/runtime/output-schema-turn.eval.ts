@@ -26,7 +26,7 @@ export default defineEval({
 
     const plain = await session.send("Reply normally without structured output.");
     plain.expectOk();
-    plain.notEvent("result.completed");
+    plain.notEvent("content.completed", { data: { kind: "result" } });
 
     t.succeeded();
     // Real models choose their own field values; assert schema conformance

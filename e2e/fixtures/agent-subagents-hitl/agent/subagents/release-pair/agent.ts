@@ -1,9 +1,9 @@
-import { defineAgent } from "eve";
+import { defineAgent, type DefinedAgent } from "eve";
 import { mockModel } from "eve/evals";
 
 export const RELEASE_PAIR_MARKER = "RELEASE-PAIR-DONE-4T8Q";
 
-export default defineAgent({
+const agent: DefinedAgent = defineAgent({
   description: "Deploy a release and publish its notes, asking for approval of each.",
   // Both gated calls in one step, so the parent relays two approvals at once.
   model: mockModel(({ toolResults }) => {
@@ -20,3 +20,5 @@ export default defineAgent({
   }),
   modelContextWindowTokens: 1_000_000,
 });
+
+export default agent;

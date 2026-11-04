@@ -1,4 +1,5 @@
 import { relative } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
 
 import {
   buildOpaqueTypesStub,
@@ -7,16 +8,22 @@ import {
   createDeclarationCopier,
 } from "../_shared.mjs";
 
+const WORKFLOW_VM_DECLARATION = "_workflow-vm.d.ts";
+
 async function discoverDeclarationFiles({ distDir }) {
   const files = await collectFilesRecursively(distDir, [".d.ts"]);
   return (
     files
       .map((file) => relative(distDir, file).replaceAll("\\", "/"))
-      // eve flattens dist/workflow/index.js to workflow.js, so workflow.d.ts
-      // is owned by the shim entry below instead of upstream's VM-runner file.
-      .filter((file) => file !== "workflow.d.ts")
       .sort()
-      .map((file) => ({ source: file, output: file }))
+      // eve flattens dist/workflow/index.js to workflow.js, so workflow.d.ts
+      // is owned by the shim entry below. Upstream's VM-runner declarations
+      // move aside; queueing them here keeps relative-import discovery from
+      // copying them back over the shim.
+      .map((file) => ({
+        source: file,
+        output: file === "workflow.d.ts" ? WORKFLOW_VM_DECLARATION : file,
+      }))
   );
 }
 
@@ -153,7 +160,9 @@ function stubCoreQuickJSEntrypoint() {
   return {
     name: "eve:stub-core-quickjs-entrypoint",
     resolveId(source, importer) {
-      if (source !== "./runtime/quickjs-entrypoint.js") return null;
+      // Each orchestrator (`runtime/spec8/`, `runtime/spec9/`) lazily imports
+      // its own sibling entrypoint.
+      if (!/^\.\/(?:runtime\/)?quickjs-entrypoint\.js$/u.test(source)) return null;
       if (typeof importer !== "string") return null;
       if (!importer.replaceAll("\\", "/").includes("/@workflow/core/")) return null;
       return CORE_QUICKJS_ENTRYPOINT_STUB_ID;
@@ -185,7 +194,9 @@ export default {
     {
       entry: "dist/workflow/index.js",
       outputPath: "workflow",
-      declaration: `export * from "./workflow/index.js";\n`,
+      // Upstream's orchestrator declarations import `PendingQueueDrain` from
+      // the root `workflow.js`, which this shim now owns.
+      declaration: `export * from "./workflow/index.js";\nexport type { PendingQueueDrain } from "./_workflow-vm.js";\n`,
     },
     {
       input: "@workflow/core/runtime",
@@ -196,5 +207,14 @@ export default {
       outputPath: "private",
     },
   ],
-  copyDeclarations,
+  async copyDeclarations(context) {
+    await copyDeclarations(context);
+    // Workflow runs in Node, where Request.duplex is always "half". DOM's
+    // Request type deliberately lacks that Node-only property; do not augment it.
+    for (const path of await collectFilesRecursively(context.destinationRoot, [".d.ts"])) {
+      const source = await readFile(path, "utf8");
+      const portable = source.replace(/Request\[(?:"duplex"|'duplex')\]/g, '"half"');
+      if (source !== portable) await writeFile(path, portable);
+    }
+  },
 };

@@ -4,7 +4,7 @@ import type { ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 import type { SessionContext } from "#context/session-context.js";
 import type { TokenResult } from "#shared/connection-types.js";
 
-type ApprovalToolInput<TInput> = TInput extends object ? Readonly<TInput> : TInput;
+export type ApprovalToolInput<TInput> = TInput extends object ? Readonly<TInput> : TInput;
 
 /** Context passed to an approval prompt callback. */
 export interface ApprovalPromptContext<TInput = Record<string, unknown>> {
@@ -30,7 +30,6 @@ export type ApprovalPrompt<TInput = Record<string, unknown>> = (
 export interface ApprovalContext<TInput = Record<string, unknown>> extends SessionContext {
   /** Cancels policy work when the active model generation is cancelled. */
   readonly abortSignal: AbortSignal;
-  readonly approvedTools: ReadonlySet<string>;
   readonly callId: string;
   /**
    * Behavior hints the connection's server declared for this tool, such as
@@ -82,7 +81,7 @@ export type ApprovalPolicy<TInput = Record<string, unknown>> = (
 /** Stable tool request passed to a response authorizer. */
 export interface ApprovalRequest<TInput = Record<string, unknown>> {
   readonly callId: string;
-  readonly requestId: string;
+  readonly interactionId: string;
   /**
    * Who requested the tool call: the auth of the caller whose turn made it,
    * captured when the approval was requested. It stays the same while the
@@ -110,7 +109,7 @@ export interface ApprovalResponseAuth {
 
 /** Submitted response passed to an approval response policy. */
 export interface ApprovalResponse {
-  readonly decision: "approve" | "cancel";
+  readonly decision: "approve" | "deny";
   /**
    * Who submitted the response: the authenticated principal, including its
    * `principalId`, `principalType`, `authenticator`, and `attributes`.
@@ -141,6 +140,8 @@ export type ApprovalResponsePolicy<TInput = Record<string, unknown>> = (
 
 /** Approval definition with request- and response-time policy. */
 export interface ApprovalConfiguration<TInput = Record<string, unknown>> {
+  /** Optional human-readable prompt shown when this call requires approval. */
+  readonly prompt?: ApprovalPrompt<TInput>;
   readonly request: ApprovalPolicy<TInput>;
   readonly response?: ApprovalResponsePolicy<TInput>;
 }
@@ -149,19 +150,6 @@ export interface ApprovalConfiguration<TInput = Record<string, unknown>> {
 export type Approval<TInput = Record<string, unknown>> =
   | ApprovalPolicy<TInput>
   | ApprovalConfiguration<TInput>;
-
-/** Approval configuration for a tool, including its optional presentation prompt. */
-export interface ToolApprovalConfiguration<
-  TInput = Record<string, unknown>,
-> extends ApprovalConfiguration<TInput> {
-  /** Optional human-readable prompt shown when this tool requires approval. */
-  readonly prompt?: ApprovalPrompt<TInput>;
-}
-
-/** Approval definition used by authored tools. */
-export type ToolApproval<TInput = Record<string, unknown>> =
-  | ApprovalPolicy<TInput>
-  | ToolApprovalConfiguration<TInput>;
 
 /** Returns the request-time policy from either approval authoring shape. */
 export function resolveApprovalPolicy<TInput>(approval: Approval<TInput>): ApprovalPolicy<TInput> {

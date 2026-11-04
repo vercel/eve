@@ -1,25 +1,30 @@
-import type { ModelMessage, ToolExecutionOptions } from "ai";
+import type { Principal } from "#protocol/session-events/envelope.js";
+import type { ToolExecutionOptions } from "ai";
+import type { HistoryMessage as ModelMessage } from "#shared/history-message.js";
 import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
 } from "#compiled/@standard-schema/spec/index.js";
 
-import type { ToolApproval } from "#approval/definition.js";
+import type { Approval } from "#approval/definition.js";
+import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
+import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionContext } from "#context/session-context.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenResult } from "#shared/connection-types.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
-import type { InputOption } from "#shared/input.js";
-import {
-  collectDurableDynamicToolCallbacks,
-  stampDurableDynamicToolCallbacks,
-} from "#tools/durable-callbacks.js";
+import type { InteractionRequest } from "#protocol/session-events/families/interaction.js";
 import { TOOL_BRAND } from "#tools/dynamic.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 
-type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unknown> : TInput;
+// `any` passes through so `ToolDefinition<any, any>` stays the type every defined tool fits.
+type ApprovalContextInput<TInput> = 0 extends 1 & TInput
+  ? TInput
+  : unknown extends TInput
+    ? Record<string, unknown>
+    : TInput;
 
 export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
@@ -99,8 +104,6 @@ export interface PublicToolDefinition<
    * The AI SDK can use this for tool result typing.
    */
   outputSchema?: PublicToolOutputSchema<TOutput>;
-  /** Derives the input-scoped key recorded when this tool is approved. */
-  approvalKey?: (input: Readonly<ApprovalContextInput<TInput>>) => string;
 }
 
 export interface InternalToolDefinitionWithExecuteFn<
@@ -115,28 +118,13 @@ export interface InternalToolDefinitionWithExecuteFn<
  * with `ctx.ask` from a `defineWorkflowTool` executor. Channels render it the
  * way they render tool approvals.
  */
-export interface ToolInputRequest {
-  /**
-   * Whether the user may answer with free text instead of one of the
-   * {@link options}.
-   */
-  readonly allowFreeform?: boolean;
-  /** Rendering hint: confirmation buttons, a selection list, or a text field. */
-  readonly display?: "confirmation" | "select" | "text";
-  /** Selectable answers. */
-  readonly options?: readonly InputOption[];
-  readonly prompt: string;
-}
-
-/** Public identity fields for the authenticated person who answered a question. */
-export interface ToolInputResponseResponder {
-  readonly authenticator: string;
-  readonly principalId: string;
-  readonly principalType: string;
-}
+export type ToolQuestion = Pick<
+  InteractionRequest,
+  "prompt" | "title" | "options" | "allowFreeform" | "display"
+>;
 
 /**
- * The outcome of a {@link ToolInputRequest}.
+ * The outcome of a {@link ToolQuestion}.
  *
  * - `answered`: the user picked an option or typed an answer. An answer the
  *   session accepted before a withdrawal wins, even after a signal aborted.
@@ -145,13 +133,13 @@ export interface ToolInputResponseResponder {
  * - `unavailable`: the session cannot reach a human, such as a scheduled run,
  *   so the request resolved immediately without being shown.
  */
-export type ToolInputResponse =
+export type ToolAnswer =
   | {
       readonly status: "answered";
       /** The selected option's `id`, when the user picked one. */
       readonly optionId?: string;
       /** Authenticated identity of the responder, without channel attributes. */
-      readonly responder?: ToolInputResponseResponder;
+      readonly responder?: Principal;
       /** Free text, when the user typed an answer. */
       readonly text?: string;
     }
@@ -159,7 +147,7 @@ export type ToolInputResponse =
   | { readonly status: "unavailable" };
 
 /** Options for `ctx.ask` in a `defineWorkflowTool` executor. */
-export interface ToolInputRequestOptions {
+export interface ToolAskOptions {
   /**
    * Withdraws the request when it aborts: the channel stops offering the
    * question and the ask resolves as `cancelled`, unless the session accepted
@@ -220,6 +208,25 @@ export type ToolContext = SessionContext & {
    * token returned by {@link getToken}.
    */
   requireAuth(provider: ToolAuthProvider, options?: ToolAuthOptions): never;
+  /**
+   * Starts or continues a session on one of the agent's channels, as a route
+   * handler's `ctx.to()` does: `ctx.to(slack, target).send(message, options)`
+   * runs the channel's `receive()` hook and returns the delivery. The session
+   * belongs to the channel, not this one, and keeps running after the tool
+   * returns. The tool runs again when its step retries, so pass
+   * `` idempotencyKey: `${ctx.session.id}:${ctx.callId}` `` to deliver once.
+   * `callId` alone is unique only within this session, and every sender to the
+   * destination shares its keys. Throws in a delegated
+   * session: a subagent, a root copy, or a remote agent call.
+   */
+  readonly to: CrossChannelToFn;
+  /**
+   * The channel serving the calling session, as hooks and dynamic resolvers
+   * read it: the channel's `kind`, the session's `continuationToken` there, and
+   * what the channel's `metadata(state)` hook projects, such as a Slack
+   * thread's `channelId` and `threadTs`.
+   */
+  readonly channel: InstrumentationChannel;
   /**
    * The person who approved this call. Present only when the call runs after a
    * person approved it; absent for calls that needed no approval.
@@ -295,7 +302,7 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    * - {@link never}: never require approval
    * - {@link once}: require approval only the first time per session
    */
-  approval?: ToolApproval<ApprovalContextInput<TInput>>;
+  approval?: Approval<ApprovalContextInput<TInput>>;
   /**
    * Optional projection controlling what the model sees as the tool result.
    * Receives the full `TOutput` from {@link execute} and returns the
@@ -303,7 +310,7 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    *
    * When omitted, the model sees the full `execute` return value
    * (default AI SDK serialization). Channel event handlers
-   * (`action.result`) always receive the full output regardless.
+   * (`call.settled`) always receive the full output regardless.
    */
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
@@ -345,7 +352,6 @@ export function defineTool<
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approval"];
-  approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TInputSchema>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -369,7 +375,6 @@ export function defineTool<
     ToolOutputFromExecuteReturn<TReturn>
   >["label"];
   approval?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
-  approvalKey?: ToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
   StandardSchemaV1.InferOutput<TSchema>,
@@ -393,7 +398,6 @@ export function defineTool<
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
   >["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
-  approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<
     unknown,
     StandardJSONSchemaV1.InferOutput<TOutputSchema>
@@ -411,7 +415,6 @@ export function defineTool<TReturn>(definition: {
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
   label?: ToolDefinition<Record<string, unknown>, ToolOutputFromExecuteReturn<TReturn>>["label"];
   approval?: ToolDefinition<Record<string, unknown>, unknown>["approval"];
-  approvalKey?: ToolDefinition<Record<string, unknown>, unknown>["approvalKey"];
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<
   Record<string, unknown>,
@@ -434,8 +437,7 @@ export function stampToolDefinition<
     readonly outputSchema?: unknown;
     readonly execute?: (...args: never[]) => unknown;
     readonly label?: ToolLabelDefinition;
-    readonly approval?: ToolApproval<never>;
-    readonly approvalKey?: (...args: never[]) => unknown;
+    readonly approval?: Approval<never>;
     readonly toModelOutput?: (...args: never[]) => unknown;
   },
 >(definition: T, definer: "defineTool" | "defineWorkflowTool"): T {
@@ -445,36 +447,31 @@ export function stampToolDefinition<
         `Pass auth providers inline to ctx.getToken(provider) or ctx.requireAuth(provider).`,
     );
   }
+  if ("approvalKey" in definition) {
+    throw new Error(
+      `${definer}: approvalKey is no longer supported. Use an approval policy for input-dependent decisions.`,
+    );
+  }
   Object.assign(definition, { [TOOL_BRAND]: true });
-  stampDurableDynamicToolCallbacks(
-    definition,
-    collectDurableDynamicToolCallbacks({
-      inputSchema: definition.inputSchema,
-      outputSchema: definition.outputSchema,
-      label: definition.label,
-      approval: definition.approval,
-      approvalKey: definition.approvalKey,
-      execute: definition.execute,
-      toModelOutput: definition.toModelOutput,
-    }),
-  );
   stampDefinitionKey(definition, `tool:${definition.description}`);
   return definition;
 }
 
 /**
- * Marker discriminator written into every {@link DisabledToolSentinel}.
+ * Cross-instance brand on a {@link DisabledToolSentinel}. `Symbol.for` lets the compiler's module
+ * copy and the author's import share the key; keeping it unexported makes the sentinel opaque, so
+ * only {@link disableTool} produces one.
  */
-const DISABLED_TOOL_SENTINEL_KIND = "eve:disabled-tool";
+const DISABLED_TOOL: unique symbol = Symbol.for("eve.disabled-tool");
 
 /**
- * Marker value returned from {@link disableTool}. Export this as the default
+ * Opaque value returned from {@link disableTool}. Export this as the default
  * export of a file in `agent/tools/` to remove the model tool whose name
  * matches the file's slug, including framework defaults and derived subagent
  * tools.
  */
 export interface DisabledToolSentinel {
-  readonly kind: typeof DISABLED_TOOL_SENTINEL_KIND;
+  readonly [DISABLED_TOOL]: true;
 }
 
 /**
@@ -482,9 +479,7 @@ export interface DisabledToolSentinel {
  * containing file's slug.
  */
 export function disableTool(): DisabledToolSentinel {
-  return {
-    kind: DISABLED_TOOL_SENTINEL_KIND,
-  };
+  return { [DISABLED_TOOL]: true };
 }
 
 /**
@@ -492,9 +487,5 @@ export function disableTool(): DisabledToolSentinel {
  * produced by {@link disableTool}.
  */
 export function isDisabledToolSentinel(value: unknown): value is DisabledToolSentinel {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === DISABLED_TOOL_SENTINEL_KIND
-  );
+  return typeof value === "object" && value !== null && Reflect.get(value, DISABLED_TOOL) === true;
 }

@@ -11,12 +11,20 @@ export default defineChannel({
       ? "private"
       : "unknown";
   },
-  routes: [POST("/target", async () => new Response("ok"))],
-  async receive(input, { from }) {
-    const sessionRef =
-      typeof input.target.sessionRef === "string" ? input.target.sessionRef : "default";
-    return from(`target:${sessionRef}`).send(input.message, {
-      auth: input.auth,
-    });
+  routes: [
+    POST("/target", async () => new Response("ok")),
+    POST("/deliveries/:conversationId", async (request, { from, params }) => {
+      const body = (await request.json()) as { message: string; idempotencyKey?: string };
+      const session = await from(params.conversationId).send(body.message, {
+        auth: null,
+        idempotencyKey: body.idempotencyKey,
+        turnPolicy: "queue",
+      });
+      return Response.json({ sessionId: session.sessionId });
+    }),
+  ],
+  async receive({ message, target, ...send }, { from }) {
+    const sessionRef = typeof target.sessionRef === "string" ? target.sessionRef : "default";
+    return from(`target:${sessionRef}`).send(message, send);
   },
 });

@@ -39,7 +39,7 @@ export async function dispatchTelegramAuthorizationCallback(input: {
     }
     const authorization = await findPendingAuthorization(
       session,
-      (event) => event.candidateId === undefined,
+      (signIn) => signIn.responseId === undefined,
     );
     if (authorization === undefined) {
       await inactiveAuthorization(input.telegram.telegram, input.query.id);

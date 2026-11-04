@@ -1,20 +1,15 @@
-import type {
-  SubagentAuthorizationEventHookPayload,
-  SubagentInputRequestHookPayload,
-} from "#channel/types.js";
+import type { SubagentInteractionHookPayload } from "#channel/types.js";
 import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunInbox } from "#execution/tools/workflow/owner.js";
 import type { RemoteAgentBinding } from "#eve-channel/support.js";
 
-/** A child's question or sign-in, which only a person at the root can answer. */
-export type AgentSessionRequest =
-  | SubagentAuthorizationEventHookPayload
-  | SubagentInputRequestHookPayload;
+/** A child's interaction fact, which the session that owns the run mirrors up to the root. */
+export type AgentSessionRequest = SubagentInteractionHookPayload;
 
 /**
- * Sends a child's question or sign-in to the session that owns the run, which
- * proxies it up the owner chain to the root. Answers route back down to the
- * child by request id.
+ * Sends a child's interaction fact to the session that owns the run, which proxies it up the
+ * owner chain to the root. Answers route back down to the child by interaction id; a remote
+ * child's answers go to its remote session.
  */
 export async function forwardAgentSessionRequest(input: {
   readonly from: WorkflowToolRunRef;
@@ -23,31 +18,22 @@ export async function forwardAgentSessionRequest(input: {
   readonly request: AgentSessionRequest;
   readonly remote?: RemoteAgentBinding & { readonly sessionId: string };
 }): Promise<void> {
-  const { from, request } = input;
-  if (request.kind === "subagent-authorization-event") {
-    await input.owner.send({
-      from,
-      kind: "request",
-      replyTo: input.replyTo,
-      request: { event: request, kind: "authorization-request" },
-    });
-    return;
-  }
+  const { from, remote, request } = input;
+  const route =
+    request.route === undefined
+      ? undefined
+      : {
+          ...request.route,
+          // Only the child's own inbox reaches it.
+          ...(request.route.childSessionInbox?.sessionId !== request.childSessionId && {
+            childSessionInbox: undefined,
+          }),
+          ...(remote !== undefined && { remote }),
+        };
   await input.owner.send({
     from,
-    inputSource: request.inputSource,
-    remote: input.remote,
     kind: "request",
-    replyTo: request.childContinuationToken,
-    childSessionInbox:
-      request.childSessionInbox?.sessionId === request.childSessionId
-        ? request.childSessionInbox
-        : undefined,
-    request: { kind: "input-batch", requests: request.event.requests },
-    requestCoordinates: {
-      sequence: request.event.sequence,
-      stepIndex: request.event.stepIndex,
-      turnId: request.event.turnId,
-    },
+    replyTo: input.replyTo,
+    request: { event: route === undefined ? request : { ...request, route }, kind: "relay" },
   });
 }

@@ -60,6 +60,22 @@ describe("renderToolSignature", () => {
       expected: "f(input: { node: { name: string; next?: unknown } }): Promise<unknown>",
     },
     {
+      name: "comments a referenced property from its target, preferring its own keywords",
+      inputSchema: {
+        type: "object",
+        properties: {
+          url: { $ref: "#/$defs/Url" },
+          home: { $ref: "#/$defs/HomeUrl", description: "Home page." },
+        },
+        $defs: {
+          HomeUrl: { $ref: "#/$defs/Url" },
+          Url: { type: "string", format: "uri", description: "A web address." },
+        },
+      },
+      expected:
+        'f(input: { url?: string /* A web address; format: "uri" */; home?: string /* Home page; format: "uri" */ }): Promise<unknown>',
+    },
+    {
       name: "renders the output type",
       inputSchema: { type: "object", properties: {} },
       outputSchema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },

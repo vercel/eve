@@ -14,13 +14,18 @@ export default defineEval({
   timeoutMs: 60_000,
   async test(t) {
     const { request, session } = await budgetQuestion(t);
-    (await session.respond(answers("continue", request), asAlice)).expectOk();
+    (await session.respond(answers("approve", request), asAlice)).expectOk();
 
-    await session.startRespond(answers("continue", request), asAlice);
+    await session.startRespond(answers("approve", request), asAlice);
     const next = (await session.send(SAY.bobStatus, asAlice)).expectOk();
-    next.event("message.completed", { data: { message: REPLY.bobStatus } });
-    session.notEvent("message.received", { data: { message: "continue" } });
-    session.notEvent("message.completed", { data: { message: REPLY.staleAnswer } });
-    session.event("input.resolved", { count: 1 });
+    next.event("content.completed", { data: { phase: "reply", value: REPLY.bobStatus } });
+    session.notEvent("delivery.consumed", {
+      data: { parts: [{ kind: "text", text: "approve" }] },
+    });
+    session.notEvent("content.completed", { data: { phase: "reply", value: REPLY.staleAnswer } });
+    session.event("interaction.settled", {
+      count: 1,
+      data: { interactionId: request.interactionId },
+    });
   },
 });

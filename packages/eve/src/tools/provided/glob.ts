@@ -31,8 +31,8 @@ export const GLOB_INPUT_SCHEMA = defineJsonSchema<GlobToolInput>({
     path: {
       type: "string",
       description:
-        "The directory to search in. Defaults to /workspace. " +
-        "Must be an absolute path or begin with $HOME/. Omit to use the default.",
+        "The directory to search in: absolute, relative to the workspace root, or beginning with $HOME/. " +
+        "Omit to search the workspace root.",
     },
     pattern: {
       type: "string",

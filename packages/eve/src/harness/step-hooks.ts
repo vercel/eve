@@ -1,5 +1,4 @@
 import type {
-  ContentPart,
   GenerateTextOnStepStartCallback,
   LanguageModelUsage,
   ModelMessage,
@@ -8,43 +7,26 @@ import type {
   StepResult,
   ToolSet,
   ToolResultPart,
-  TypedToolCall,
-  TypedToolResult,
 } from "ai";
-import {
-  createActionResultEvent,
-  createActionsRequestedEvent,
-  createStepCompletedEvent,
-  type StepCompletedProviderMetadata,
-} from "#protocol/message.js";
-import {
-  createRuntimeToolResultFromToolError,
-  createRuntimeToolResultFromMessagePart,
-  createRuntimeToolResultFromStepResult,
-  toActionResult,
-} from "#harness/action-result-helpers.js";
+import { usageOf } from "#harness/facts.js";
+import { createRuntimeToolResultFromMessagePart } from "#harness/action-result-helpers.js";
+import { toJsonValue } from "#harness/call-facts.js";
+import { settleCall } from "#harness/session-machine/calls.js";
+import { settleRun } from "#harness/session-machine/runs.js";
+import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
+import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
+import type { Usage } from "#protocol/session-events/envelope.js";
+import type { ToolSignIn } from "#harness/call-executor.js";
 import type { TurnPosition } from "#harness/session-machine/view.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
-import { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { applyConversationCacheControl, mergeGatewayAutoCaching } from "#harness/prompt-cache.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
-import {
-  collectActionPresentation,
-  createPresentedRuntimeActionRequestFromToolCall,
-} from "#harness/action-presentation.js";
-import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
-import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
-import {
-  type HarnessEmitFn,
-  type HarnessSession,
-  type HarnessToolLookup,
-  requireSessionModelReference,
-} from "#harness/types.js";
+import { type HarnessEmitFn, type HarnessSession } from "#harness/types.js";
 import { contextStorage } from "#context/container.js";
-import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
-import { readToolInterrupt } from "#harness/tool-interrupts.js";
 import { AuthKey } from "#context/keys.js";
+import type { ApprovalAsk } from "#harness/session-machine/view.js";
 
 // ---------------------------------------------------------------------------
 // Step result type
@@ -65,7 +47,15 @@ export type HarnessStepResult = Pick<
   | "toolResults"
   | "usage"
 > & {
+  /** The AI SDK's ID for the model call, which the telemetry of the calls it made shares. */
+  readonly callId?: string;
   readonly invalidInputToolCallIds?: ReadonlySet<string>;
+  /** The calls eve ran that wait on a person's approval. */
+  readonly approvalRequests?: readonly ApprovalAsk[];
+  /** The calls eve cleared that the runtime runs, and what cleared each. */
+  readonly policyApprovals?: Readonly<Record<string, import("#harness/clearance.js").Clearance>>;
+  /** The calls eve ran that stopped for a sign-in. */
+  readonly signIns?: readonly ToolSignIn[];
 };
 
 // ---------------------------------------------------------------------------
@@ -77,6 +67,8 @@ export type HarnessStepResult = Pick<
  */
 interface StepHooksInput {
   readonly auth?: import("#channel/types.js").SessionAuthContext | null;
+  /** The model the call runs. */
+  readonly model: RuntimeModelReference;
   readonly profile: ModelProfile;
   /**
    * Starts the model step the SDK is about to run. Omitted when the step already started, as
@@ -100,8 +92,8 @@ interface StepHooks {
   /**
    * `ToolLoopAgent` `onStepEnd` callback.
    *
-   * Emits `actions.requested`, `action.result`, and `step.completed` events
-   * from the captured step result.
+   * Publishes call and content facts from the captured response, then settles its model run
+   * with the usage it reported.
    */
   readonly onStepEnd: (step: StepResult<ToolSet>) => Promise<void>;
 
@@ -169,11 +161,10 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
         : messages,
     };
 
-    const modelReference = requireSessionModelReference(session);
     const providerOptions = resolveCallProviderOptions({
       auth: input.auth ?? contextStorage.getStore()?.get(AuthKey) ?? null,
       profile,
-      providerOptions: modelReference.providerOptions,
+      providerOptions: input.model.providerOptions,
       session,
     });
     if (profile.gateway) {
@@ -204,277 +195,78 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
 }
 
 // ---------------------------------------------------------------------------
-// Step action emission
+// Step end
 // ---------------------------------------------------------------------------
 
 /**
- * Emits `actions.requested`, `action.result`, and `step.completed` events
- * from a captured step result.
- *
- * Tool calls and results that match `excludedActionToolNames`, belong to
- * tool-approval requests, or are marked `invalid` by the AI SDK (e.g. the
- * model emitted unparsable JSON) are filtered out of the emitted events.
- * The AI SDK feeds the invalid-call error back to the model on the next
- * step via `step.response.messages` so it can retry with well-formed
- * arguments — the runtime event stream only sees successfully parsed
- * tool calls.
- *
- * `handledInlineToolResultCallIds` contains results emitted by
- * `emitStreamContent` or sent to authorization. Skip them here.
+ * Ends a step's run: the calls that didn't run settle with why, then one commit holds the run's
+ * structured result, if it has one, its settlement, and its usage. The stream published the calls,
+ * and eve published the results of the calls it ran as they settled.
  */
 export async function emitStepActions(
   emitFn: HarnessEmitFn,
   state: TurnPosition,
   step: HarnessStepResult,
-  options: {
-    readonly emittedActionCallIds?: ReadonlySet<string>;
-    readonly excludedActionCallIds?: ReadonlySet<string>;
-    readonly excludedActionToolNames: ReadonlySet<string>;
-    readonly handledInlineToolResultCallIds?: ReadonlySet<string>;
-    readonly tools: HarnessToolLookup;
-  },
+  notRun: readonly ToolResultPart[],
 ): Promise<void> {
-  const providerExecutedCallIds = new Set(
-    (step.toolCalls as TypedToolCall<ToolSet>[])
-      .filter(isProviderExecutedToolCall)
-      .map((toolCall) => toolCall.toolCallId),
-  );
-  const excludedCallIds = new Set<string>([
-    ...(options.excludedActionCallIds ?? []),
-    ...providerExecutedCallIds,
-    ...extractToolApprovalInputRequests({
-      content: (step.content ?? []) as ContentPart<ToolSet>[],
-      excludedCallIds: options.excludedActionCallIds,
-      tools: options.tools,
-    }).map((request) => request.action.callId),
-    ...(step.toolCalls as TypedToolCall<ToolSet>[])
-      .filter(isInvalidToolCall)
-      .map((toolCall) => toolCall.toolCallId),
-  ]);
-
-  const isExcluded = (toolCallId: string, toolName: string): boolean =>
-    excludedCallIds.has(toolCallId) || options.excludedActionToolNames.has(toolName);
-
-  // Streamed calls already emitted their request. The loop below emits their
-  // result.
-  const actions = (step.toolCalls as TypedToolCall<ToolSet>[])
-    .filter(
-      (toolCall) =>
-        !isExcluded(toolCall.toolCallId, toolCall.toolName) &&
-        !options.emittedActionCallIds?.has(toolCall.toolCallId),
-    )
-    .map((toolCall) =>
-      createPresentedRuntimeActionRequestFromToolCall({
-        toolCall,
-        tools: options.tools,
-      }),
-    );
-
-  if (actions.length > 0) {
-    await emitFn(
-      createActionsRequestedEvent({
-        actions: actions.map(({ action }) => action),
-        presentation: collectActionPresentation(actions),
-        sequence: state.sequence,
-        stepIndex: state.stepIndex,
-        turnId: state.turnId,
-      }),
-    );
+  const { runId } = state;
+  for (const part of notRun) {
+    await emitFn(settleCall(createRuntimeToolResultFromMessagePart(part, part.toolName)));
   }
-
-  const inlineCallIds = options.handledInlineToolResultCallIds;
-  const rawOutputByCallId = new Map<string, unknown>(
-    (step.toolResults as TypedToolResult<ToolSet>[]).map((toolResult) => [
-      toolResult.toolCallId,
-      toolResult.output,
-    ]),
-  );
-  const inputByCallId = new Map<string, unknown>(
-    (step.toolCalls as TypedToolCall<ToolSet>[]).map((toolCall) => [
-      toolCall.toolCallId,
-      toolCall.input,
-    ]),
-  );
-
-  for (const result of reconcileToolResults(step)) {
-    if (isExcluded(result.callId, result.toolName)) {
-      continue;
-    }
-
-    if (inlineCallIds?.has(result.callId)) {
-      continue;
-    }
-
-    const rawOutput = rawOutputByCallId.get(result.callId);
-    if (shouldSkipAuthorizationActionResult(result.callId, rawOutput)) {
-      continue;
-    }
-
-    await emitFn(
-      createActionResultEvent({
-        result: toActionResult(result, inputByCallId.get(result.callId)),
-        sequence: state.sequence,
-        stepIndex: state.stepIndex,
-        turnId: state.turnId,
-      }),
-    );
-  }
-
-  // step.completed
+  if (runId === undefined) return;
+  const result = finalOutputOf(step);
   await emitFn(
-    createStepCompletedEvent({
-      finishReason: normalizeAssistantStepFinishReason(step.finishReason),
-      providerMetadata: extractStepProviderMetadata(step.providerMetadata),
-      sequence: state.sequence,
-      stepIndex: state.stepIndex,
-      turnId: state.turnId,
-      usage: extractStepUsage({
-        costUsd: extractGatewayCostUsd(step.providerMetadata),
-        usage: step.usage,
-      }),
-    }),
+    settleRun(
+      {
+        finishReason: normalizeAssistantStepFinishReason(step.finishReason),
+        generationId: readGatewayGenerationId(step.providerMetadata),
+        outcome: "completed",
+        runId,
+        usage: runUsageOf({
+          costUsd: extractGatewayCostUsd(step.providerMetadata),
+          usage: step.usage,
+        }),
+      },
+      result === undefined
+        ? undefined
+        : {
+            kind: "result",
+            partId: `${runId}.result`,
+            phase: "reply",
+            runId,
+            value: result,
+          },
+    ),
   );
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function isProviderExecutedToolCall(toolCall: TypedToolCall<ToolSet>): boolean {
-  return toolCall.providerExecuted === true;
-}
-
-function reconcileToolResults(step: HarnessStepResult): readonly RuntimeToolResultActionResult[] {
-  const resultsByCallId = new Map<string, RuntimeToolResultActionResult>();
-
-  for (const toolResult of step.toolResults as TypedToolResult<ToolSet>[]) {
-    if (toolResult.providerExecuted === true) {
-      continue;
-    }
-
-    resultsByCallId.set(toolResult.toolCallId, createRuntimeToolResultFromStepResult(toolResult));
-  }
-
-  for (const part of step.content ?? []) {
-    if (part.type !== "tool-error" || part.providerExecuted === true) {
-      continue;
-    }
-
-    if (resultsByCallId.has(part.toolCallId)) {
-      continue;
-    }
-
-    resultsByCallId.set(part.toolCallId, createRuntimeToolResultFromToolError(part));
-  }
-
-  const entryNames = new Map(
-    (step.toolCalls as TypedToolCall<ToolSet>[]).map((toolCall) => [
-      toolCall.toolCallId,
-      toolCall.toolName,
-    ]),
+/** The run's structured result: the input of its valid `eve__reply` call. */
+function finalOutputOf(step: HarnessStepResult) {
+  const call = (step.toolCalls ?? []).find(
+    (candidate) => candidate.toolName === REPLY_TOOL_NAME && !isInvalidToolCall(candidate),
   );
-  for (const part of extractToolResultParts(step.response.messages)) {
-    if ((part as { readonly providerExecuted?: boolean }).providerExecuted === true) {
-      continue;
-    }
-
-    if (resultsByCallId.has(part.toolCallId)) {
-      continue;
-    }
-
-    resultsByCallId.set(
-      part.toolCallId,
-      createRuntimeToolResultFromMessagePart(
-        part,
-        entryNames.get(part.toolCallId) ?? part.toolName,
-      ),
-    );
-  }
-
-  return [...resultsByCallId.values()];
+  return call === undefined ? undefined : toJsonValue(call.input);
 }
 
-function shouldSkipAuthorizationActionResult(callId: string, rawOutput: unknown): boolean {
-  if (rawOutput !== undefined && isPendingAuthorizationToolOutput(rawOutput)) {
-    return true;
-  }
-  const ctx = contextStorage.getStore();
-  if (ctx === undefined) {
-    return false;
-  }
-  const stashed = readToolInterrupt(ctx, callId);
-  return stashed !== undefined && isAuthorizationSignal(stashed);
-}
-
-function extractToolResultParts(messages: readonly ModelMessage[]): ToolResultPart[] {
-  const parts: ToolResultPart[] = [];
-
-  for (const message of messages) {
-    if (message.role !== "tool" || !Array.isArray(message.content)) {
-      continue;
-    }
-
-    for (const part of message.content) {
-      if (part.type === "tool-result") {
-        parts.push(part);
-      }
-    }
-  }
-
-  return parts;
-}
-
-/**
- * Projects the AI SDK's `LanguageModelUsage` into the flat `step.completed`
- * event usage shape. Returns `undefined` when the SDK reports no usage.
- */
-function extractStepUsage(input: {
+/** A run's usage as `usage.recorded` carries it, or `undefined` when the SDK reported none. */
+export function runUsageOf(input: {
   readonly costUsd: number | undefined;
   readonly usage: LanguageModelUsage | undefined;
-}):
-  | {
-      costUsd?: number;
-      inputTokens?: number;
-      outputTokens?: number;
-      cacheReadTokens?: number;
-      cacheWriteTokens?: number;
-    }
-  | undefined {
-  const result: {
-    costUsd?: number;
-    inputTokens?: number;
-    outputTokens?: number;
-    cacheReadTokens?: number;
-    cacheWriteTokens?: number;
-  } = {};
-
-  if (input.costUsd !== undefined) result.costUsd = input.costUsd;
-
-  const usage = input.usage;
-  if (usage === undefined) {
-    return Object.keys(result).length > 0 ? result : undefined;
-  }
-
-  if (usage.inputTokens !== undefined) result.inputTokens = usage.inputTokens;
-  if (usage.outputTokens !== undefined) result.outputTokens = usage.outputTokens;
-  if (usage.inputTokenDetails?.cacheReadTokens !== undefined) {
-    result.cacheReadTokens = usage.inputTokenDetails.cacheReadTokens;
-  }
-  if (usage.inputTokenDetails?.cacheWriteTokens !== undefined) {
-    result.cacheWriteTokens = usage.inputTokenDetails.cacheWriteTokens;
-  }
-
-  return Object.keys(result).length > 0 ? result : undefined;
+}): Usage | undefined {
+  const { usage } = input;
+  if (usage === undefined && input.costUsd === undefined) return undefined;
+  return usageOf({
+    cacheReadTokens: usage?.inputTokenDetails?.cacheReadTokens,
+    cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens,
+    costUsd: input.costUsd,
+    inputTokens: usage?.inputTokens,
+    outputTokens: usage?.outputTokens,
+  });
 }
 
-function extractStepProviderMetadata(
+export function extractGatewayCostUsd(
   providerMetadata: ProviderMetadata | undefined,
-): StepCompletedProviderMetadata | undefined {
-  const generationId = readGatewayGenerationId(providerMetadata);
-  return generationId === undefined ? undefined : { gateway: { generationId } };
-}
-
-function extractGatewayCostUsd(providerMetadata: ProviderMetadata | undefined): number | undefined {
+): number | undefined {
   const gateway = readGatewayMetadata(providerMetadata);
   const cost = gateway?.cost;
   if (typeof cost === "number" && Number.isFinite(cost)) {

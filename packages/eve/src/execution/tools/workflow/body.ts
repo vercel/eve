@@ -7,11 +7,9 @@ import type { SessionContext } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { createAgentSessions } from "#execution/agent-sessions/session.js";
 import { createRunUsageTally, type RunUsageTally } from "#execution/agent-sessions/usage.js";
-import type {
-  AgentSession,
-  WorkflowSharedContext,
-  WorkflowToolContext,
-} from "#tools/workflow-definition.js";
+import type { InstrumentationChannel } from "#shared/instrumentation-channel.js";
+import { normalizeInstrumentationChannelKind } from "#shared/instrumentation-channel-kind.js";
+import type { WorkflowSharedContext, WorkflowToolContext } from "#tools/workflow-definition.js";
 import {
   ask,
   attachWorkflowToolRunContext,
@@ -273,7 +271,7 @@ export function resolveWorkflowEntryPoint<TEntryPoint>(input: WorkflowBodyInput)
  */
 export function createSharedContext(
   input: WorkflowBodyInput,
-  agent: (name: string) => AgentSession,
+  agent: WorkflowSharedContext["agent"],
   askPerson: WorkflowSharedContext["ask"],
 ): Omit<
   ToolContext & WorkflowSharedContext,
@@ -287,7 +285,11 @@ export function createSharedContext(
   return {
     agent,
     ask: askPerson,
-    getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
+    getSandbox: () =>
+      unavailable(
+        "getSandbox()",
+        'pass ctx directly to a "use step" helper to open the session\'s sandbox',
+      ),
     getToken: () =>
       unavailable("getToken()", 'pass ctx directly to a "use step" helper to resolve credentials'),
     requireAuth: () =>
@@ -295,7 +297,19 @@ export function createSharedContext(
         "requireAuth()",
         'pass ctx directly to a "use step" helper to request authorization',
       ),
+    to: () => unavailable("to()", 'pass ctx directly to a "use step" helper to send to a channel'),
+    channel: workflowToolChannel(input.agentContext),
     toolName: input.toolName,
+  };
+}
+
+/** `ctx.channel` for a call: the channel that serves the calling session. */
+export function workflowToolChannel(context: AgentSessionContext): InstrumentationChannel {
+  const projection = context.channelMetadata;
+  return {
+    continuationToken: context.continuationToken,
+    kind: normalizeInstrumentationChannelKind(projection?.kind),
+    metadata: projection?.metadata ?? {},
   };
 }
 
@@ -318,7 +332,7 @@ export function createAgentsView(context: AgentSessionContext): WorkflowSharedCo
 function createCallContext(
   input: WorkflowBodyInput,
   signals: WorkflowCallSignals,
-  agent: (name: string) => AgentSession,
+  agent: WorkflowSharedContext["agent"],
 ): WorkflowCallContext {
   const ctx: WorkflowCallContext = {
     ...createSharedContext(input, agent, (request, options) => ask(ctx, request, options)),

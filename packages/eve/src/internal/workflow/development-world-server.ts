@@ -10,7 +10,7 @@ import type { ValidQueueName, World } from "#compiled/@workflow/world/index.js";
 import { createWorld } from "#compiled/@workflow/world-local/index.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
-  LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH,
+  displayLocalWorkflowWorldDataDirectory,
   resolveLocalWorkflowWorldDataDirectory,
 } from "#internal/workflow/local-world-data-directory.js";
 import { applyLocalWorkflowWorldDeliveryTimeoutDefaults } from "#internal/workflow/local-world-delivery-timeouts.js";
@@ -127,6 +127,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       if (!this.#resume) return;
       const skippedGenerations = new Set<string>();
       await reenqueueActiveDevelopmentRuns({
+        appRoot: this.#appRoot,
         enqueue: this.#queue.bind(this),
         prefix: deriveEveWorkflowQueuePrefix(this.#agentName),
         world: this.#world,
@@ -203,7 +204,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
         } catch (error) {
           throw new Error(
             `Failed to read the app's active local Workflow runs. ` +
-              `Remove "${LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH}" to discard them.`,
+              `Remove "${displayLocalWorkflowWorldDataDirectory(this.#appRoot)}" to discard them.`,
             { cause: error },
           );
         }
@@ -355,6 +356,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 async function reenqueueActiveDevelopmentRuns(input: {
+  readonly appRoot: string;
   readonly enqueue: World["queue"];
   readonly canRecover: (generationId: string) => Promise<boolean>;
   readonly prefix: string;
@@ -373,7 +375,7 @@ async function reenqueueActiveDevelopmentRuns(input: {
       } catch (error) {
         throw new Error(
           `Failed to read the app's active local Workflow runs. ` +
-            `Remove "${LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH}" to discard them.`,
+            `Remove "${displayLocalWorkflowWorldDataDirectory(input.appRoot)}" to discard them.`,
           { cause: error },
         );
       }

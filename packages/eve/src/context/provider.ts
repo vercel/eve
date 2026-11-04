@@ -31,4 +31,10 @@ export interface FrameworkContextProvider<T> {
 
   /** Rolls back provider-owned effects when the callback or a later commit fails. */
   rollback?(value: T, cause: unknown): void | Promise<void>;
+
+  /**
+   * Releases resources the step-local value holds (e.g. open connections)
+   * when the scope ends, on success and failure alike. Must not throw.
+   */
+  dispose?(value: T): void | Promise<void>;
 }

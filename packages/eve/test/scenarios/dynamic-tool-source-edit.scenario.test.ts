@@ -52,14 +52,10 @@ export function createEditableMarkerTool(key: string, version: string) {
 const EDITABLE_TOOLS_SOURCE = `import { defineDynamic } from "eve/tools";
 import { createEditableMarkerTool } from "../lib/editable-factory.ts";
 
-export default defineDynamic({
-  events: {
-    "session.started": () => ({
-      alpha_marker: createEditableMarkerTool("alpha", "v1"),
-      beta_marker: createEditableMarkerTool("beta", "v1"),
-    }),
-  },
-});
+export default defineDynamic(() => ({
+  alpha_marker: createEditableMarkerTool("alpha", "v1"),
+  beta_marker: createEditableMarkerTool("beta", "v1"),
+}));
 `;
 
 const EDITABLE_DYNAMIC_DESCRIPTOR: ScenarioAppDescriptor = {
@@ -100,18 +96,18 @@ describe("dynamic tool source edits across a restart", () => {
       let server = await startEveDev(app.appRoot, { env: pinnedEnv });
 
       try {
-        const client = new Client({ host: server.url });
+        const client = new Client({ baseUrl: server.url });
         const created = await client.sessions.create({ message: "Hello." });
-        await expect(created.response.result()).resolves.toMatchObject({
-          inputRequests: [],
-          status: "waiting",
+        await expect(created.delivery.result()).resolves.toMatchObject({
+          interactions: [],
+          status: "completed",
         });
 
         const waiting = await (
           await created.session.send("Call tools in parallel: alpha_marker, beta_marker")
         ).result();
-        expect(waiting.status).toBe("waiting");
-        expect(waiting.inputRequests).toHaveLength(2);
+        expect(waiting.status).toBe("awaiting-input");
+        expect(waiting.interactions).toHaveLength(2);
 
         // Edit the callback module while approvals are parked: pad the top of
         // the file (shifting every byte offset below — the old identity scheme
@@ -135,19 +131,19 @@ describe("dynamic tool source edits across a restart", () => {
         }, "The crashed development server did not release its state record.");
         server = await startEveDev(app.appRoot, { env: pinnedEnv, resume: true });
 
-        const resumedSession = new Client({ host: server.url }).sessions.attach(
+        const resumedSession = new Client({ baseUrl: server.url }).sessions.attach(
           sessionState.sessionId,
           { streamIndex: sessionState.streamIndex },
         );
         const resumed = await (
           await resumedSession.respond(
-            waiting.inputRequests.map((request) => ({
+            waiting.interactions.map((request) => ({
               optionId: "approve",
-              requestId: request.requestId,
+              interactionId: request.interactionId,
             })),
           )
         ).result();
-        expect(resumed.status).toBe("waiting");
+        expect(resumed.status).toBe("completed");
 
         // Pending approvals make the session ineligible for deployment
         // handoff. Each parked call must run its own tool — never the other

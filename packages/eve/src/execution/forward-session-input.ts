@@ -1,62 +1,49 @@
+import type { SessionEvent } from "#protocol/session-event.js";
 import type { ContextContainer } from "#context/container.js";
 import {
   ContinuationTokenKey,
-  LegacyRemoteAgentCallerKey,
+  EarlierRemoteCallerKey,
   SessionCallbackKey,
   SessionIdKey,
   SessionInboxKey,
 } from "#context/keys.js";
-import { forwardLegacySessionInput } from "#execution/legacy-remote-agent/protocol.js";
-import { resolvedForParent } from "#harness/hitl/relays.js";
+import { relayedInteractionEvents } from "#harness/interaction-relay.js";
+import type { SubagentInteractionHookPayload } from "#channel/types.js";
+import { currentView } from "#harness/session-machine/current.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /** A remote session sends input to its caller instead of presenting it on its own channel. */
 export async function forwardSessionInput(
   ctx: ContextContainer,
-  event: UnstampedMessageStreamEvent,
+  event: SessionEvent,
   inputSource?: string,
 ): Promise<boolean> {
   const callback = ctx.get(SessionCallbackKey);
-  if (callback === undefined) return false;
-  const legacyCaller = ctx.get(LegacyRemoteAgentCallerKey);
-  if (legacyCaller !== undefined) return await forwardLegacySessionInput(ctx, legacyCaller, event);
-  if (event.type === "input.resolved") {
-    const relayed = resolvedForParent(event.data);
-    if (relayed === undefined) return false;
-    event = { data: relayed, type: "input.resolved" };
-  }
-  if (
-    event.type !== "input.requested" &&
-    event.type !== "authorization.required" &&
-    event.type !== "authorization.completed" &&
-    event.type !== "approval.candidate" &&
-    event.type !== "approval.settled" &&
-    event.type !== "input.resolved"
-  )
-    return false;
-
-  const body =
-    event.type === "input.requested"
-      ? {
-          callId: callback.callId,
-          childContinuationToken:
-            ctx.get(ContinuationTokenKey) ?? sessionCommandHookToken(ctx.require(SessionIdKey)),
-          childSessionId: ctx.require(SessionIdKey),
-          childSessionInbox: ctx.get(SessionInboxKey),
-          event: event.data,
-          inputSource: inputSource ?? "session",
-          kind: "subagent-input-request",
-          subagentName: callback.subagentName,
-        }
-      : {
-          callId: callback.callId,
-          childSessionId: ctx.require(SessionIdKey),
-          event,
-          kind: "subagent-authorization-event",
-          subagentName: callback.subagentName,
-        };
+  // A caller on an earlier protocol can't read this session's requests; the turn fails instead.
+  if (callback === undefined || ctx.get(EarlierRemoteCallerKey) !== undefined) return false;
+  const childSessionId = ctx.require(SessionIdKey);
+  const relayed = relayedInteractionEvents(currentView(ctx), event, childSessionId);
+  // Every other request of a commit rides with its first; the session keeps it off its channel.
+  if (relayed.length === 0) return event.type === "interaction.opened";
+  const inbox = ctx.get(SessionInboxKey);
+  const body: SubagentInteractionHookPayload = {
+    callId: callback.callId,
+    childSessionId,
+    events: relayed,
+    kind: "subagent-interaction",
+    subagentName: callback.subagentName,
+    ...(relayed.some(
+      (fact) => fact.type === "interaction.opened" && fact.data.request.kind !== "sign-in",
+    ) && {
+      route: {
+        childContinuationToken:
+          ctx.get(ContinuationTokenKey) ?? sessionCommandHookToken(childSessionId),
+        inputSource: inputSource ?? "session",
+        ...(inbox !== undefined && { childSessionInbox: inbox }),
+      },
+    }),
+  };
   const response = await postSessionCallbackRequest({ body, url: callback.url });
   if (!response.ok) throw new Error(`Remote input callback failed with HTTP ${response.status}.`);
   return true;

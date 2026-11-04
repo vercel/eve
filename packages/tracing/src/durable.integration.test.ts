@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { context } from "@opentelemetry/api";
-import { createAgentDelegationTransport } from "@eve/tracing/delegation";
+import { createAgentDelegationTransport } from "@vercel/agent-runs/delegation";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import {
   BasicTracerProvider,
@@ -9,10 +9,10 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import {
   AgentSpanIdGenerator,
-  createAgentTracing,
+  createAgentRun,
   otelTelemetry,
   type TraceCheckpointer,
-} from "@eve/tracing";
+} from "@vercel/agent-runs";
 
 const identity = { conversationId: "conversation", runId: "run", turnId: "turn" };
 
@@ -35,7 +35,7 @@ function worker(checkpointer: TraceCheckpointer, exporter: InMemorySpanExporter)
     idGenerator,
     spanProcessors: [new SimpleSpanProcessor(exporter)],
   });
-  return createAgentTracing({
+  return createAgentRun({
     telemetry: otelTelemetry({ provider, idGenerator }),
     checkpointer,
   });
@@ -129,6 +129,71 @@ describe("durable agent tracing", () => {
     expect(entries.size).toBe(0);
   });
 
+  it("keeps one tree when a resume reads a checkpoint this process wrote earlier", async () => {
+    // Eve stores checkpoints in the current context, so a parallel tool call's
+    // context can still hold an older checkpoint this same process wrote.
+    const { checkpointer, entries } = memoryCheckpointer();
+    let stale: string | undefined;
+    let staleReads = 0;
+    const viewing: TraceCheckpointer = {
+      ...checkpointer,
+      get: (key) => {
+        if (staleReads > 0 && stale !== undefined) {
+          staleReads--;
+          return JSON.parse(stale);
+        }
+        return checkpointer.get(key);
+      },
+    };
+    const exporter = new InMemorySpanExporter();
+    const tracing = worker(viewing, exporter);
+    const turn = await tracing.turn({ agentName: "support", identity, sequence: 0 });
+    const attempt = await turn.attempt({ stepIndex: 0, attempt: 0 });
+    await attempt.tool({ callId: "weather", name: "weather" });
+    stale = entries.values().next().value;
+    await attempt.tool({ callId: "note", name: "note" });
+
+    staleReads = 1;
+    const resumed = (await tracing.resume({ identity }))!;
+    await resumed.findTool("weather")!.complete({ outcome: "completed" });
+    await resumed.findTool("note")!.complete({ outcome: "completed" });
+    await attempt.complete();
+    await turn.complete();
+    await tracing.forceFlush();
+
+    expect(entries.size).toBe(0);
+    const names = exporter.getFinishedSpans().map((span) => span.name);
+    expect(names.filter((name) => name.startsWith("execute_tool")).sort()).toEqual([
+      "execute_tool note",
+      "execute_tool weather",
+    ]);
+    expect(names.filter((name) => name === "agent.step")).toHaveLength(1);
+    expect(names.filter((name) => name === "invoke_agent support")).toHaveLength(1);
+  });
+
+  it("stops a replaced tree from writing after another process's checkpoint wins", async () => {
+    const { checkpointer, entries } = memoryCheckpointer();
+    const exporter = new InMemorySpanExporter();
+    const first = worker(checkpointer, exporter);
+    const turn = await first.turn({ agentName: "support", identity, sequence: 0 });
+    const attempt = await first
+      .resume({ identity })
+      .then(() => turn.attempt({ stepIndex: 0, attempt: 0 }));
+    await attempt.tool({ callId: "lookup", name: "lookup" });
+    // Another process writes the checkpoint: its revision is unknown here.
+    const other = worker(checkpointer, exporter);
+    const elsewhere = (await other.resume({ identity }))!;
+    await elsewhere.findTool("lookup")!.complete({ outcome: "completed" });
+    const written = entries.values().next().value;
+
+    const replaced = (await first.resume({ identity }))!;
+    expect(replaced.findTool("lookup")).toBeUndefined();
+    // The replaced tree's later changes are not persisted over the newer checkpoint.
+    attempt.attributes({ "test.stale": true });
+    await first.forceFlush();
+    expect(entries.values().next().value).toBe(written);
+  });
+
   it("merges a tool call reported twice into one span", async () => {
     const { checkpointer } = memoryCheckpointer();
     const exporter = new InMemorySpanExporter();
@@ -174,7 +239,7 @@ describe("durable agent tracing", () => {
     const { checkpointer } = memoryCheckpointer();
     const exporter = new InMemorySpanExporter();
     const idGenerator = new AgentSpanIdGenerator();
-    const tracing = createAgentTracing({
+    const tracing = createAgentRun({
       telemetry: otelTelemetry({
         provider: new BasicTracerProvider({
           idGenerator,
@@ -202,7 +267,7 @@ describe("durable agent tracing", () => {
     const exporter = new InMemorySpanExporter();
     const errors: string[] = [];
     const idGenerator = new AgentSpanIdGenerator();
-    const tracing = createAgentTracing({
+    const tracing = createAgentRun({
       telemetry: otelTelemetry({
         provider: new BasicTracerProvider({
           idGenerator,
@@ -225,7 +290,7 @@ describe("durable agent tracing", () => {
 
   it("requires stable span IDs", () => {
     expect(() =>
-      createAgentTracing({
+      createAgentRun({
         telemetry: otelTelemetry({ provider: new BasicTracerProvider() }),
         checkpointer: memoryCheckpointer().checkpointer,
       }),

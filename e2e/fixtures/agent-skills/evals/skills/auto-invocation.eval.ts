@@ -15,8 +15,8 @@ export default defineEval({
     await t.send("Please use the echo marker skill and follow its instructions exactly.");
 
     t.succeeded();
-    t.loadedSkill("echo-marker");
-    t.noFailedActions();
+    t.calledSkill("echo-marker");
+    t.noFailedCalls();
     t.messageIncludes(ECHO_MARKER_TOKEN);
   },
 });

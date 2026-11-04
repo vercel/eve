@@ -1,9 +1,31 @@
 import { generateText, jsonSchema, stepCountIs, streamText, tool } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionIdKey } from "#context/keys.js";
 import { mockModel, type MockModelRequest } from "#evals/mock-model.js";
+import { renderPendingApprovalsInstruction } from "#harness/hitl/approval-prompt.js";
 
 describe("mockModel", () => {
+  it("keeps a session's call ids unique, and each session's scripted ids its own", async () => {
+    const model = mockModel({
+      respond: () => ({ toolCalls: [{ id: "stage", name: "stage_deploy" }] }),
+    });
+    const callIdIn = (sessionId: string) => {
+      const ctx = new ContextContainer();
+      ctx.set(SessionIdKey, sessionId);
+      return contextStorage.run(ctx, async () => {
+        const result = await generateText({ model, prompt: "Stage the deploy." });
+        return result.toolCalls[0]?.toolCallId;
+      });
+    };
+
+    expect(await callIdIn("session-a")).toBe("stage");
+    expect(await callIdIn("session-b")).toBe("stage");
+    // The same session calls again, as after a sign-in dropped its first call.
+    expect(await callIdIn("session-a")).toBe("stage#2");
+  });
+
   it("returns a deterministic default response", async () => {
     const result = await generateText({
       model: mockModel(),
@@ -69,11 +91,13 @@ describe("mockModel", () => {
   it("keeps framework scaffolding out of authored user messages", async () => {
     const requests: MockModelRequest[] = [];
     const tasks = "[Tasks]\n<tasks>\n</tasks>";
-    const notice = [
-      "[Pending approvals]",
-      "The following tool calls are awaiting approval and have not executed:",
-      '{"requestId":"approval-1","toolName":"gate"}',
-    ].join("\n");
+    const notice = renderPendingApprovalsInstruction([
+      {
+        call: { callId: "call-1", input: {}, toolName: "gate" },
+        interactionId: "approval-1",
+        request: { kind: "approval", prompt: "Approve gate?" },
+      },
+    ])!;
     const result = await generateText({
       messages: [
         { content: "Run the mixed approval flow.", role: "user" },

@@ -1,15 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { ModelMessage } from "ai";
-import { derivePendingState } from "#execution/session/pending-turn-state.js";
+import { pausedOnCalls } from "#execution/session/pending-turn-state.js";
 import { withParkedStep } from "#internal/testing/session-machine.js";
-import { storedProjection } from "#harness/session-machine/view.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
 const session: HarnessSession = {
-  agent: { modelReference: { id: "test-model" }, system: "", tools: [] },
-  compaction: { recentWindowSize: 10, threshold: 100_000 },
+  compaction: {},
   continuationToken: "http:test-session",
   history: [],
   sessionId: "test-session",
@@ -39,20 +37,20 @@ function parked(tasks: readonly RuntimeWorkflowTaskRequest[]): HarnessSession {
   });
 }
 
-describe("derivePendingState", () => {
+describe("pausedOnCalls", () => {
   it("waits on a task tool call without dispatching anything", () => {
-    expect(derivePendingState(parked([]), storedProjection(parked([]).state))).toMatchObject({
-      hasRunsToDispatch: false,
-      pendingCoordinationCallIds: ["wait-call"],
+    expect(pausedOnCalls(parked([]))).toMatchObject({
+      callIds: ["wait-call"],
+      dispatch: false,
+      on: "calls",
     });
   });
 
   it("dispatches the workflow tool runs a batch holds beside its task tool calls", () => {
-    expect(
-      derivePendingState(parked([deployRun]), storedProjection(parked([deployRun]).state)),
-    ).toMatchObject({
-      hasRunsToDispatch: true,
-      pendingCoordinationCallIds: ["deploy-call", "wait-call"],
+    expect(pausedOnCalls(parked([deployRun]))).toMatchObject({
+      callIds: ["deploy-call", "wait-call"],
+      dispatch: true,
+      on: "calls",
     });
   });
 });

@@ -11,7 +11,7 @@ import {
 } from "#shared/instrumentation-content.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { resolveTracePolicyDecision } from "#shared/trace-policy.js";
-import { boundedPrincipalId } from "#compiled/@eve/tracing/otel.js";
+import { boundedPrincipalId } from "#compiled/@vercel/agent-runs/otel.js";
 
 export function summarizeInstrumentationPrincipal(
   principal: SessionAuthContext | null | undefined,
@@ -19,13 +19,22 @@ export function summarizeInstrumentationPrincipal(
 ): InstrumentationPrincipalSummary | undefined {
   if (principal === undefined) return undefined;
   if (principal === null) return { type: "none" };
+  return instrumentationPrincipal(
+    principal.principalType,
+    shouldCaptureInstrumentationContent(content) ? principal.principalId : undefined,
+  );
+}
+
+/** A principal as instrumentation records it: a known type, plus its id when given and bounded. */
+export function instrumentationPrincipal(
+  principalType: string,
+  principalId: string | undefined,
+): InstrumentationPrincipalSummary {
   const type =
-    isInstrumentationPrincipalType(principal.principalType) && principal.principalType !== "none"
-      ? principal.principalType
+    isInstrumentationPrincipalType(principalType) && principalType !== "none"
+      ? principalType
       : "other";
-  const id = shouldCaptureInstrumentationContent(content)
-    ? boundedPrincipalId(principal.principalId)
-    : undefined;
+  const id = boundedPrincipalId(principalId);
   return id === undefined ? { type } : { id, type };
 }
 

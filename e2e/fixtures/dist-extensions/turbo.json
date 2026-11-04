@@ -1,0 +1,8 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "e2e:dependencies": {
+      "dependsOn": ["$TURBO_EXTENDS$", "gadget-extension#build", "gizmo-extension#build"]
+    }
+  }
+}

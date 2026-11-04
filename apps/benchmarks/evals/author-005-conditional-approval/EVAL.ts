@@ -24,7 +24,6 @@ test("requires approval only at or above the threshold", async () => {
 
   const decision = async (amount: number) =>
     policy({
-      approvedTools: new Set(),
       callId: "refund-call",
       session: {},
       toolInput: refundInput(definition, amount),

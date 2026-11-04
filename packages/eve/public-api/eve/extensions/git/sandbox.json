@@ -1,0 +1,9 @@
+[
+  "GitHubCoAuthor",
+  "GitHubConfig",
+  "GitHubLeaseRule",
+  "GitHubShellInput",
+  "GitHubShellOutput",
+  "executeGitHubShell",
+  "githubShellApproval"
+]

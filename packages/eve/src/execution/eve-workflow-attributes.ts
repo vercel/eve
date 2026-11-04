@@ -56,7 +56,10 @@ import {
 import { isSampledTrace } from "#shared/trace-policy.js";
 import { resolveForwardedTraceSeed } from "#shared/forwarded-trace-policy.js";
 
-/** eve version recorded on every run eve starts; handoff successors and legacy importers re-record it at boot. */
+/** Explicit support for idle preparation hints on a session owner. */
+export const EVE_PREWARM_ATTRIBUTE = "$eve.prewarm";
+
+/** eve version recorded on every run eve starts; successors re-record it at boot. */
 export const EVE_VERSION_ATTRIBUTE = "$eve.version";
 
 /** Run kind; only runs started as a session or subagent session carry it. */

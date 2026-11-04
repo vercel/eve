@@ -1,8 +1,5 @@
 import { z } from "#compiled/zod/index.js";
 
-/** Outcome of retiring one exact durable session. */
-export type ResetStatus = "no_active_session" | "reset";
-
 /** Successful response returned by the standard session-reset route. */
 export type ResetResponse =
   | {

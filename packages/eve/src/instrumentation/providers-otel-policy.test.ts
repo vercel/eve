@@ -1,3 +1,4 @@
+import { instrumentationScope } from "#instrumentation/scope.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -65,14 +66,16 @@ describe("otel and authored provider composition", () => {
             messages: [{ content: "private user message", role: "user" }],
           },
           model: { modelId: "test-model", provider: "test-provider" },
-          scope: {
-            attemptId: "session-1:turn-1:0:0",
-            attemptIndex: 0,
-            channelAudience: "private",
-            sessionId: "session-1",
-            stepIndex: 0,
-            turnId: "turn-1",
-          },
+          scope: instrumentationScope(
+            {
+              runId: "session-1:turn-1:0:0",
+              attempt: 0,
+              channelAudience: "private",
+              sessionId: "session-1",
+              turnId: "turn-1",
+            },
+            0,
+          ),
           type: "model.call.started",
         }),
       );

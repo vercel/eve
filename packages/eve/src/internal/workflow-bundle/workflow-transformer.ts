@@ -4,7 +4,7 @@ import {
   mayContainWorkflowDirective,
   type WorkflowDirective,
 } from "#internal/workflow-bundle/workflow-directive-ast.js";
-import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
+import { parseWithRolldownAst } from "#internal/bundler/rolldown.js";
 
 import type { WorkflowManifest } from "./workflow-builders.js";
 
@@ -199,7 +199,7 @@ export async function transformWorkflowDirectives(input: {
         end: fn.directiveEnd,
         start: fn.directiveStart,
         text: `throw new Error(${JSON.stringify(
-          `You attempted to execute workflow ${fn.name} function directly. To start a workflow, use start(${fn.name}) from workflow/api`,
+          `You attempted to execute workflow ${fn.name} function directly. To start a workflow, use start(${fn.name}) from eve/workflow/api`,
         )});`,
       });
       suffixes.push(`${fn.name}.workflowId = ${JSON.stringify(workflowId)};`);
@@ -242,7 +242,7 @@ export async function transformWorkflowDirectives(input: {
 }
 
 async function parseWorkflowSource(filename: string, source: string): Promise<AstProgram> {
-  return (await parseWithNitroRolldownAst(filename, source)) as AstProgram;
+  return (await parseWithRolldownAst(filename, source)) as AstProgram;
 }
 
 function createWorkflowStepProxySource(

@@ -1,6 +1,6 @@
 import type { FlexibleSchema } from "ai";
 
-import type { ToolApproval } from "#approval/definition.js";
+import type { Approval } from "#approval/definition.js";
 import type {
   InternalToolDefinition,
   InternalToolLabelDefinition,
@@ -15,7 +15,6 @@ import type { PreparedToolBehavior } from "#tools/behavior.js";
 export interface HarnessToolDefinition {
   readonly availableInSubagents?: boolean;
   readonly label?: InternalToolLabelDefinition;
-  readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
   readonly behavior?: PreparedToolBehavior;
   /** Kept out of the model's tool list; the model reaches it through `eve__search` and `eve__tool`. */
   readonly deferred?: boolean;
@@ -27,9 +26,15 @@ export interface HarnessToolDefinition {
   readonly executeInput?: (input: unknown) => JsonValue;
   readonly frameworkTool?: boolean;
   readonly frameworkAction?: "task-cancel" | "task-wait";
+  /**
+   * Runs a built-in executor that acts only on the conversation (`ask_question`, `no_reply`,
+   * `sleep`), so the agent-wide approval policy doesn't gate it. Set from the executor's identity,
+   * never from the tool's name.
+   */
+  readonly interactionOnly?: boolean;
   readonly inputSchema: FlexibleSchema;
   readonly name: string;
-  readonly approval?: ToolApproval;
+  readonly approval?: Approval;
   readonly outputSchema?: FlexibleSchema;
   /**
    * Advertise this tool only to the root session, hiding it from subagent
@@ -38,6 +43,11 @@ export interface HarnessToolDefinition {
    */
   readonly rootOnly?: boolean;
   readonly toModelOutput?: (output: unknown) => unknown;
+  /**
+   * The version of a dynamically sourced entry the model was offered. A call made from one
+   * version runs only while the entry still has it.
+   */
+  readonly version?: string;
   /** Present when this tool starts an associated durable workflow. */
   readonly workflowId?: string;
 }

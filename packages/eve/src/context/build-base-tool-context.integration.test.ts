@@ -10,7 +10,7 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
     let observed: AbortSignal | undefined;
     const sandbox = mockSandbox({
       run: (options) => {
-        observed = options.abortSignal;
+        observed = options.signal;
         return { exitCode: 0, stderr: "", stdout: "" };
       },
     });
@@ -53,7 +53,7 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
     let observed: AbortSignal | undefined;
     const sandbox = mockSandbox({
       run: (options) => {
-        observed = options.abortSignal;
+        observed = options.signal;
         return { exitCode: 0, stderr: "", stdout: "" };
       },
     });

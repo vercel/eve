@@ -9,36 +9,30 @@ export default defineEval({
   async test(t) {
     const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
     const session = parked.session;
-    const approval = session.requireInputRequest({ display: "confirmation", toolName: TOOL_NAME });
+    const approval = session.requireInteraction({ display: "confirmation", toolName: TOOL_NAME });
     parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
 
     const approved = await session.respond([
       {
         optionId: "approve",
-        requestId: approval.requestId,
+        interactionId: approval.interactionId,
       },
     ]);
 
     approved.expectOk();
-    approved.event("approval.candidate", {
-      data: { outcome: "pending", requestId: approval.requestId },
+    approved.event("response.submitted", {
+      data: { interactionId: approval.interactionId },
       count: 1,
     });
-    approved.event("approval.settled", {
-      data: { outcome: "approved", requestId: approval.requestId },
+    approved.event("interaction.settled", {
+      data: { interactionId: approval.interactionId, outcome: "accepted" },
       count: 1,
     });
-    approved.event("action.result", {
-      data: {
-        result: {
-          kind: "tool-result",
-          output: new RegExp(MARKER),
-          toolName: TOOL_NAME,
-        },
-        status: "completed",
-      },
-      count: 1,
-    });
+    approved.eventOrder([
+      { type: "interaction.settled", data: { interactionId: approval.interactionId } },
+      { type: "call.started", data: { clearedBy: { interactionId: approval.interactionId } } },
+    ]);
+    approved.calledTool(TOOL_NAME, { output: new RegExp(MARKER), status: "completed", count: 1 });
     t.succeeded();
   },
 });

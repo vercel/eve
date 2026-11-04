@@ -1,5 +1,5 @@
 import { defineWorkflowTool } from "eve/tools";
-import { sleep } from "workflow";
+import { sleep } from "eve/workflow";
 import { z } from "zod";
 
 /** A task that watches a canary far longer than any eval runs, so only a cancel ends it. */

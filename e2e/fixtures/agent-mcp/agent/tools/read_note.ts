@@ -8,6 +8,10 @@ export default defineTool({
   inputSchema: z.object({}),
   async execute(_input, ctx) {
     const sandbox = await ctx.getSandbox();
-    return { text: await sandbox.readTextFile({ path: NOTE_PATH }) };
+    // `write_note` writes through the file API; reading through the shell
+    // proves both resolve the relative path from the same workspace root.
+    const result = await sandbox.run({ command: `cat ${NOTE_PATH}` });
+    if (result.exitCode !== 0) throw new Error(`Reading the note failed: ${result.stderr}`);
+    return { text: result.stdout };
   },
 });

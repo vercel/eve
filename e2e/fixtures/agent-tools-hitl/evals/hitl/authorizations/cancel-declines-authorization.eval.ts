@@ -14,12 +14,13 @@ export default defineEval({
 
     await session.cancel();
     const cancelled = await follow(t, session, startIndex);
-    cancelled.event("authorization.completed", {
+    cancelled.event("interaction.settled", {
       count: 1,
-      data: { attemptId: authorization.attemptId, outcome: "declined", reason: "Cancelled." },
+      // The cancel interrupts the sign-in; nobody declined it.
+      data: { interactionId: authorization.attemptId, outcome: "interrupted" },
     });
-    cancelled.event("turn.cancelled", { count: 1 });
-    cancelled.notEvent("step.started");
-    cancelled.notEvent("action.result", { data: { status: "completed" } });
+    cancelled.event("turn.settled", { count: 1, data: { outcome: "cancelled" } });
+    cancelled.notEvent("model.started");
+    cancelled.notEvent("call.settled", { data: { outcome: "completed" } });
   },
 });

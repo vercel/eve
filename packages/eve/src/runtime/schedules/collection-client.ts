@@ -1,9 +1,7 @@
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { readSessionSchedule } from "#context/session-schedule.js";
-import { loadContext, contextStorage } from "#context/container.js";
-import type { SessionSchedule } from "#context/session-schedule.js";
+import { loadContext } from "#context/container.js";
 import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type {
@@ -94,7 +92,6 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     operation: NonNullable<ScheduleScopeContext["operation"]>,
     name?: string,
   ): Promise<{ scope: ScheduleScopeValue; provider: ScheduleProviderContext }> => {
-    assertScheduleManagementAllowed(callContext.session.schedule);
     const context = contextFor(operation, name);
     const scope =
       definition.scope === undefined
@@ -281,15 +278,6 @@ function snapshotPreparedWrite<T extends PreparedScheduleWrite>(prepared: T): T 
       "Prepared schedule write exceeds the 64 KB limit, including timing and payload.",
     );
   return JSON.parse(json) as T;
-}
-
-export function assertScheduleManagementAllowed(schedule?: SessionSchedule): void {
-  const context = contextStorage.getStore();
-  if (
-    schedule !== undefined ||
-    (context !== undefined && readSessionSchedule(context) !== undefined)
-  )
-    throw new Error("Schedule management is unavailable during scheduled execution.");
 }
 
 function principalReference(

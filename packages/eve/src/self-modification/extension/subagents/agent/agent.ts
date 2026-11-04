@@ -1,11 +1,8 @@
-import type { DynamicResolveContext } from "#dynamic/definition.js";
 import {
   defineAgent,
   defineDynamic,
   type AgentReasoningDefinition,
   type AgentStaticModelDefinition,
-  type DynamicSentinel,
-  type DynamicSubagentDefinition,
 } from "eve";
 
 import { DEFAULT_AGENT_MODEL_ID, DEFAULT_AGENT_REASONING } from "#shared/default-agent-model.js";
@@ -13,7 +10,7 @@ import { getLocalDevCapability } from "eve/local-dev";
 
 import selfModification from "../../extension.js";
 import { resolveSelfModificationConfig, type SelfModificationConfig } from "../../../config.js";
-import { isLocalSelfModificationEnabled } from "../../../mode.js";
+import { isLocalDeveloper, isLocalSelfModificationEnabled } from "../../../mode.js";
 import {
   followUpDelegation,
   namedInstallationDelegation,
@@ -47,17 +44,22 @@ const localTraceDelegation =
 const localEffectiveEdits =
   "Source edits do not affect the caller’s current turn. After this subagent reports changes, do not invoke edited tools or attempt runtime verification until a new user turn.";
 
-/** Defines the local development self-modification dynamic subagent. */
-export function defineSelfModificationAgent(
-  options: SelfModificationAgentOptions = {},
-): DynamicSentinel<DynamicSubagentDefinition | null> {
-  const resolve = async (_event: unknown, ctx: DynamicResolveContext) => {
+/**
+ * Defines the local development self-modification dynamic subagent, offered
+ * only to the developer running `eve dev` (see {@link isLocalDeveloper}).
+ */
+export function defineSelfModificationAgent(options: SelfModificationAgentOptions = {}) {
+  return defineDynamic((ctx) => {
     const bound = selfModification.config;
     const config = resolveSelfModificationConfig(options.config ?? bound);
-    if (!isLocalSelfModificationEnabled(config) || getLocalDevCapability() === undefined) {
+    if (
+      !isLocalSelfModificationEnabled(config) ||
+      getLocalDevCapability() === undefined ||
+      !isLocalDeveloper(ctx.session.auth.current)
+    ) {
       return null;
     }
-    const configuredModel = options.model ?? bound.model ?? ctx.model?.id;
+    const configuredModel = options.model ?? bound.model ?? ctx.model.id ?? undefined;
     const reasoning =
       options.reasoning ??
       bound.reasoning ??
@@ -75,13 +77,6 @@ export function defineSelfModificationAgent(
       localEffectiveEdits,
     ]);
     return defineAgent({ description, model, reasoning });
-  };
-
-  return defineDynamic({
-    events: {
-      "session.started": resolve,
-      "turn.started": resolve,
-    },
   });
 }
 

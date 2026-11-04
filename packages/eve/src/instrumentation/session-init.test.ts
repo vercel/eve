@@ -10,7 +10,7 @@ import {
 import { initializeSessionInstrumentation } from "#instrumentation/session-init.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
-import { AgentSpanIdGenerator } from "#compiled/@eve/tracing/index.js";
+import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import type { TraceCapturePolicy } from "#tracing/eve/otel-declaration.js";
 
 afterEach(() => {

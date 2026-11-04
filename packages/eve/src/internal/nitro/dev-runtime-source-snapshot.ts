@@ -6,9 +6,9 @@ import {
   readTextFileIfExists,
   resolveTsConfigDependencyPaths,
 } from "#internal/application/tsconfig-dependencies.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 import {
   isAuthoredSourcePath,
-  isPathInsideOrEqual,
   resolveLocalTsConfigPathTargetRoots,
   resolveNearestPackageRoot,
 } from "#internal/nitro/dev-runtime-source-snapshot-local-roots.js";

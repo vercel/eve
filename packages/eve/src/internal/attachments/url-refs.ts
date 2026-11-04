@@ -10,6 +10,7 @@
  */
 
 import { SANDBOX_URL_SCHEME } from "#internal/attachments/sandbox-refs.js";
+import { CHAT_SDK_FILE_PROTOCOL } from "#public/channels/chat-sdk/attachment-refs.js";
 
 const EVE_URL_SCHEME = "eve-url:";
 
@@ -26,18 +27,19 @@ export function deserializeUrlFilePart(data: string): URL {
 }
 
 /**
- * Framework-internal `FilePart.data` ref schemes (`eve-url:`, `eve-sandbox:`).
+ * Framework-internal `FilePart.data` ref schemes, including adapter download refs.
  * eve produces these during its own serialization and staging; an inbound
- * channel payload must never carry one. The staging pipeline trusts the
- * scheme prefix and reconstitutes such a string into a privileged sandbox
- * read, so a caller-supplied ref is an arbitrary-read / path-traversal vector
- * and must be rejected at the channel boundary.
+ * channel payload must never carry one. These refs identify pre-authorized
+ * sandbox files or adapter downloads; inbound values must not invoke those
+ * capabilities.
  */
-const INTERNAL_REF_SCHEMES = [EVE_URL_SCHEME, SANDBOX_URL_SCHEME];
+const INTERNAL_REF_SCHEMES = [EVE_URL_SCHEME, SANDBOX_URL_SCHEME, CHAT_SDK_FILE_PROTOCOL];
 
 /**
  * Whether a `FilePart.data` string carries a framework-internal ref scheme.
  */
 export function hasInternalRefScheme(data: string): boolean {
-  return INTERNAL_REF_SCHEMES.some((scheme) => data.startsWith(scheme));
+  // Consumers recognize prefixes even when the rest of the URL is malformed.
+  const protocol = /^\s*([a-z][a-z\d+.-]*:)/i.exec(data)?.[1]?.toLowerCase();
+  return protocol !== undefined && INTERNAL_REF_SCHEMES.includes(protocol);
 }

@@ -21,6 +21,7 @@ export function isValidGitRef(value: string): boolean {
     value
       .split("/")
       .some((part) => part.length === 0 || part.startsWith(".") || part.endsWith(".lock")) ||
+    // eslint-disable-next-line no-control-regex -- Git refs must reject ASCII control characters.
     /[\x00-\x20\x7f~^:?*[]/u.test(value)
   );
 }

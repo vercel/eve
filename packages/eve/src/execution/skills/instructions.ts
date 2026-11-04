@@ -1,7 +1,7 @@
-import type { DynamicSkillManifest } from "#context/keys.js";
+import type { CatalogSkill } from "#execution/catalog/skills.js";
 import type { Announcement } from "#harness/announcements.js";
 import { SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
-import { FALLBACK_SKILL_ROOT, MODEL_SKILL_ROOT } from "#shared/skill-paths.js";
+import { MODEL_SKILL_ROOT } from "#shared/skill-paths.js";
 
 export interface AvailableSkillDescription {
   readonly description: string;
@@ -11,6 +11,7 @@ export interface AvailableSkillDescription {
 }
 
 const ANNOUNCEMENT_KEY = "skills";
+const NO_SKILLS = "Available skills: none";
 
 /**
  * Formats the "Available skills" section: every skill that isn't deferred,
@@ -22,9 +23,8 @@ const ANNOUNCEMENT_KEY = "skills";
  * canonical symbolic skill root so supporting files remain discoverable
  * without provisioning a sandbox.
  *
- * Authored skills call this at graph resolution time so the section is part of
- * the turn agent's static instructions. Dynamic skills reuse it for their
- * announcement.
+ * eve's default prompt renders it for the agent's static skills on every model
+ * call (`definitions/skills.ts`). Dynamic skills reuse it for their announcement.
  */
 export function formatAvailableSkillsSection(
   skills: readonly AvailableSkillDescription[],
@@ -40,7 +40,7 @@ export function formatAvailableSkillsSection(
     `If the user names a skill or the request clearly matches one of the descriptions below, load it with ${SKILL_TOOL_NAME}({ name }) before proceeding.`,
     "If multiple skills match, activate the minimal set that covers the task. After activation, follow the returned instructions instead of improvising around them.",
     "If activation fails, say so briefly and continue with the best available alternative.",
-    `Skill files live under \`${MODEL_SKILL_ROOT}/<skill>/\`, with \`${FALLBACK_SKILL_ROOT}/<skill>/\` as the fallback when \`$HOME\` is unavailable.`,
+    `Skill files live under \`${MODEL_SKILL_ROOT}/<skill>/\`, with \`skills/<skill>/\` under the workspace root as the fallback when \`$HOME\` is unavailable.`,
     "When a loaded SKILL.md mentions sibling files such as `references/foo.md`, resolve them relative to the directory containing that specific SKILL.md.",
     ...skills.map(formatAvailableSkillLine),
   ];
@@ -50,26 +50,22 @@ export function formatAvailableSkillsSection(
 
 /**
  * Announces the dynamic skills that aren't deferred, in full whenever they
- * change. Nothing is announced until the first one resolves. `announced` holds
- * the values announced so far.
+ * change. Nothing is announced until the first one resolves.
  */
 export function dynamicSkillAnnouncements(
-  manifest: DynamicSkillManifest | undefined,
-  announced: Readonly<Record<string, string>> | undefined,
+  dynamic: readonly CatalogSkill[],
 ): Readonly<Record<string, Announcement>> {
-  const skills = Object.values(manifest ?? {})
-    .flat()
-    .filter((skill) => skill.deferred !== true);
-  if (skills.length === 0 && announced?.[ANNOUNCEMENT_KEY] === undefined) return {};
   const text =
     formatAvailableSkillsSection(
-      skills.map(({ description, name, revision }) => ({
-        description,
-        hasFiles: revision !== undefined,
-        name,
-      })),
-    ) ?? "Available skills: none";
-  return { [ANNOUNCEMENT_KEY]: { value: text, render: () => text } };
+      dynamic
+        .filter((skill) => !skill.deferred)
+        .map(({ description, name, path }) => ({
+          description,
+          hasFiles: path !== undefined,
+          name,
+        })),
+    ) ?? NO_SKILLS;
+  return { [ANNOUNCEMENT_KEY]: { initial: NO_SKILLS, value: text, render: () => text } };
 }
 
 function formatAvailableSkillLine(skill: AvailableSkillDescription): string {

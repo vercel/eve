@@ -1,4 +1,8 @@
-import type { Attributes, MappingContext, OutputMapping } from "#compiled/@eve/tracing/index.js";
+import type {
+  Attributes,
+  MappingContext,
+  OutputMapping,
+} from "#compiled/@vercel/agent-runs/index.js";
 import { currentTraceSessionId } from "#tracing/eve/agent-trace-context-store.js";
 
 export function eveOutputMapping(options?: {

@@ -35,7 +35,7 @@ export default defineTool({
     const result = await decide({
       state: { incident: "Alice needs an export summary." },
       questions: { category: { type: "choice", instructions: "Choose a category.", criteria: { routine: "Routine work", investigation: "Investigation" } } },
-      abortSignal: ctx.abortSignal,
+      signal: ctx.abortSignal,
     });
     return result.answers.category.choice;
   },

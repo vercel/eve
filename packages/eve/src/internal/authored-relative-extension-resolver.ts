@@ -1,7 +1,13 @@
 import { realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
-import { isNodeModulesPath, isPathImport } from "#internal/authored-package-boundary.js";
+import type { Plugin } from "rolldown";
+
+import {
+  isAuthoredSourcePath,
+  isNodeModulesPath,
+  isPathImport,
+} from "#internal/authored-package-boundary.js";
 
 const PATH_IMPORT_FILTER = /^(?:\.|\/|[A-Za-z]:[\\/])/;
 
@@ -9,8 +15,10 @@ const PATH_IMPORT_FILTER = /^(?:\.|\/|[A-Za-z]:[\\/])/;
  * Resolves extensionless path imports before Rolldown's default resolver.
  */
 export function createAuthoredRelativeExtensionResolverPlugin(input: {
+  /** Leaves imports from installed dependencies to the bundler. */
+  readonly authoredSourceOnly?: boolean;
   readonly extensions: readonly string[];
-}): Record<string, unknown> {
+}): Plugin {
   const isFile = createCachedFileProbe();
 
   return {
@@ -20,7 +28,12 @@ export function createAuthoredRelativeExtensionResolverPlugin(input: {
         id: PATH_IMPORT_FILTER,
       },
       handler(source: string, importer: string | undefined) {
-        if (importer === undefined || importer.startsWith("\0") || !isPathImport(source)) {
+        if (
+          importer === undefined ||
+          importer.startsWith("\0") ||
+          !isPathImport(source) ||
+          (input.authoredSourceOnly === true && !isAuthoredSourcePath(importer))
+        ) {
           return undefined;
         }
 
@@ -38,12 +51,30 @@ export function createAuthoredRelativeExtensionResolverPlugin(input: {
         // reaches store-installed extension source through the consumer's
         // node_modules symlink) must get the same treatment, and it keeps one
         // canonical module identity per real file.
-        return {
-          id: isNodeModulesPath(resolvedPath) ? toRealModulePath(resolvedPath) : resolvedPath,
-        };
+        const id = isNodeModulesPath(resolvedPath) ? toRealModulePath(resolvedPath) : resolvedPath;
+        // Rolldown applies package metadata such as `sideEffects: false` only
+        // to ids tied to their package.json. Without it, a module reached both
+        // here and through a package specifier would be tree-shaken or kept
+        // depending on which import resolved first.
+        const packageJsonPath = findPackageJsonPath(id, isFile);
+        return packageJsonPath === undefined ? { id } : { id, packageJsonPath };
       },
     },
   };
+}
+
+function findPackageJsonPath(path: string, isFile: (path: string) => boolean): string | undefined {
+  for (let directory = dirname(path); ; directory = dirname(directory)) {
+    const candidate = join(directory, "package.json");
+
+    if (isFile(candidate)) {
+      return candidate;
+    }
+
+    if (dirname(directory) === directory) {
+      return undefined;
+    }
+  }
 }
 
 function createCachedFileProbe(): (path: string) => boolean {

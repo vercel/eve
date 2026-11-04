@@ -31,7 +31,10 @@ describe("application host preparation", () => {
       },
       packageName: "production-host-workspace",
     });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     const workspace = await createApplicationBuildWorkspace(appRoot);
 
     try {
@@ -62,7 +65,10 @@ describe("application host preparation", () => {
       },
       packageName: "vercel-production-world",
     });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     const workspace = await createApplicationBuildWorkspace(appRoot);
 
     try {
@@ -82,7 +88,8 @@ describe("application host preparation", () => {
   it("stages the bundled development extension subagent outside the eve workspace", async () => {
     const { appRoot } = await createAppRoot("eve-bundled-dev-extension-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
         "agent/instructions.md": "Help Alice maintain her agent.",
       },
       packageName: "bundled-dev-extension",
@@ -115,7 +122,10 @@ describe("application host preparation", () => {
     });
     const agentModulePath = join(agentRoot, "agent.mjs");
     const instrumentationModulePath = join(agentRoot, "instrumentation", "audit.mjs");
-    await writeFile(agentModulePath, 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      agentModulePath,
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await mkdir(join(agentRoot, "instrumentation"), { recursive: true });
     await writeFile(instrumentationModulePath, "export default {};\n");
 
@@ -151,7 +161,7 @@ describe("application host preparation", () => {
 
     await writeFile(
       agentModulePath,
-      'export default { model: "openai/gpt-5.4" };\n// revision two\n',
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n// revision two\n',
     );
     const nextHost = await prepareDevelopmentApplicationHost(appRoot);
 

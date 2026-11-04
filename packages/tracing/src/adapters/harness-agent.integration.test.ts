@@ -6,7 +6,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { context } from "@opentelemetry/api";
-import { createAgentTracing, otelTelemetry } from "@eve/tracing";
+import { createAgentRun, otelTelemetry } from "@vercel/agent-runs";
 
 describe("outside-eve agent", () => {
   it("runs wrapped operations and handle-based tools using only the facade", async () => {
@@ -16,7 +16,7 @@ describe("outside-eve agent", () => {
     });
     const manager = new AsyncLocalStorageContextManager().enable();
     context.setGlobalContextManager(manager);
-    const tracing = createAgentTracing({
+    const tracing = createAgentRun({
       telemetry: otelTelemetry({ provider }),
     });
     try {
@@ -77,7 +77,7 @@ describe("outside-eve agent", () => {
     const provider = new BasicTracerProvider({
       spanProcessors: [new SimpleSpanProcessor(exporter)],
     });
-    const tracing = createAgentTracing({
+    const tracing = createAgentRun({
       telemetry: otelTelemetry({ provider }),
     });
     const error = new TypeError("private failure");
@@ -138,7 +138,7 @@ describe("outside-eve agent", () => {
       sampler: { shouldSample: () => ({ decision: 0 }), toString: () => "drop" },
       spanProcessors: [new SimpleSpanProcessor(exporter)],
     });
-    const tracing = createAgentTracing({
+    const tracing = createAgentRun({
       telemetry: otelTelemetry({ provider }),
     });
     try {

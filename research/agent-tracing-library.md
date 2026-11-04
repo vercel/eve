@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: in-progress
-last_updated: "2026-10-13"
+last_updated: "2026-10-15"
 ---
 
 # Agent tracing library
@@ -10,8 +10,8 @@ last_updated: "2026-10-13"
 
 Agents outside eve need the same trace topology, capture rules, and durable
 recovery that eve has, without adopting eve's runtime. This plan extracts a
-framework-neutral library, `@eve/tracing`, with one constructor:
-`createAgentTracing`. The host passes an `AgentTelemetry` object that writes
+framework-neutral library, `@vercel/agent-runs`, with one constructor:
+`createAgentRun`. The host passes an `AgentTelemetry` object that writes
 spans and, for durable turns, a `TraceCheckpointer`. The library owns span
 topology, capture, completion, checkpoint keys, and hydration. A durable turn
 resumes when the host calls the same operations again, in any process.
@@ -24,21 +24,22 @@ eve migration (#4164).
 
 ## Entrypoints
 
-| Entrypoint                | Contents                                                                                                                                       |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@eve/tracing`            | `createAgentTracing`, `otelTelemetry`, `AgentSpanIdGenerator`, operation and telemetry types, `currentCapture`                                 |
-| `@eve/tracing/delegation` | Local handoff context and the remote delegation transport                                                                                      |
-| `@eve/tracing/ai-sdk`     | `aiSdkTelemetry` and the AI SDK payload helpers `modelUsage` and `modelContent`                                                                |
-| `@eve/tracing/otel`       | Plumbing for hosts that run their own spans beside agent tracing: active-operation lookup, capture context, content bounds, and MCP enrichment |
+| Entrypoint                      | Contents                                                                                                                                       |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@vercel/agent-runs`            | `createAgentRun`, `otelTelemetry`, `AgentSpanIdGenerator`, operation and telemetry types, `currentCapture`                                     |
+| `@vercel/agent-runs/delegation` | Local handoff context and the remote delegation transport                                                                                      |
+| `@vercel/agent-runs/ai-sdk`     | `aiSdkTelemetry` and the AI SDK payload helpers `modelUsage` and `modelContent`                                                                |
+| `@vercel/agent-runs/otel`       | Plumbing for hosts that run their own spans beside agent tracing: active-operation lookup, capture context, content bounds, and MCP enrichment |
 
 The root depends only on `@opentelemetry/api`. Only `./ai-sdk` uses `ai`, as an
 optional peer dependency. Hosts cannot import private modules; the invariant
 guard (rule 52) enforces this.
 
-The library is a private workspace package, `packages/tracing`, named
-`@eve/tracing` for now. It is not published. eve vendors it the way it vendors
-`@eve/catalog`: `build:compiled` bundles the four entrypoints into
-`#compiled/@eve/tracing/`, in the same chunk group as eve's vendored
+The library lives in `packages/tracing` and is published as
+`@vercel/agent-runs`. Its constructor and types use the singular `AgentRun` name.
+eve vendors it the way it vendors `@eve/catalog`: `build:compiled` bundles the
+four entrypoints into
+`#compiled/@vercel/agent-runs/`, in the same chunk group as eve's vendored
 `@opentelemetry/api`, so the published eve package carries one OpenTelemetry
 copy and no new runtime dependency. eve imports only those vendored
 entrypoints.
@@ -46,7 +47,7 @@ entrypoints.
 ## Construction
 
 ```ts
-const tracing = createAgentTracing({
+const run = createAgentRun({
   telemetry: otelTelemetry({ provider, idGenerator, samplesTrace, mapping }),
   checkpointer, // optional: makes turns durable
   serializer, // optional: defaults to the AI SDK content serializer
@@ -87,7 +88,7 @@ either way. An optional `describe(value)` maps the value to a completion, such
 as an outcome or captured output:
 
 ```ts
-await tracing.turn({ agentName: "support", identity, sequence: 0 }, (turn) =>
+await run.turn({ agentName: "support", identity, sequence: 0 }, (turn) =>
   turn.attempt({ stepIndex: 0, attempt: 0 }, (attempt) =>
     attempt.tool({ callId: "lookup", name: "lookup" }, lookup),
   ),
@@ -99,7 +100,7 @@ start and end arrive in different hooks, or different processes, hold the
 handle and complete it themselves:
 
 ```ts
-const turn = await tracing.turn({ agentName: "support", identity, sequence: 0 });
+const turn = await run.turn({ agentName: "support", identity, sequence: 0 });
 const attempt = await turn.attempt({ stepIndex: 0, attempt: 0 });
 const tool = await attempt.tool({ callId: "lookup", name: "lookup" });
 try {
@@ -197,7 +198,7 @@ interface TraceCheckpointer {
   the entry when the turn and all of its open work have completed. Each node is
   capped at 64 KiB, and finished children leave the tree.
 - **Resume.** Calling `turn()` with the same identity continues the saved turn.
-  `tracing.resume({ identity })` returns a saved turn without starting one.
+  `run.resume({ identity })` returns a saved turn without starting one.
   `turn.findAttempt()`, `turn.findTool(callId)`, and `tool.findApproval()`
   return open operations, or `undefined`.
 - **Deferred spans.** Durable turns, tool calls, and approvals reserve their IDs
@@ -224,7 +225,7 @@ original call.
 
 ## AI SDK integration
 
-`aiSdkTelemetry(tracing, { turn })` returns an AI SDK `Telemetry` integration
+`aiSdkTelemetry(run, { turn })` returns an AI SDK `Telemetry` integration
 for `generateText`, `streamText`, and agents such as `HarnessAgent`. It keeps
 open operations keyed by the SDK `callId` and `toolCallId`, so hosts do not
 store handles between hooks. It runs model calls and tools inside their spans
@@ -251,7 +252,7 @@ an `agent.dispatch` link to the call.
 
 ## eve as consumer
 
-eve uses one `AgentTracing` instance over `otelTelemetry`. Its checkpointer
+eve uses one `AgentRun` instance over `otelTelemetry`. Its checkpointer
 stores trees in the existing workflow-context trace state, so checkpoints commit
 with each workflow step. eve keeps these concerns:
 

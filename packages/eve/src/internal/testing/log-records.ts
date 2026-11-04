@@ -22,14 +22,21 @@ export const workflowSdkNotice = {
   fatalStep: "[workflow-sdk] Encountered FatalError while executing step",
   ignoredLatestDeployment: "[workflow-sdk] deploymentId: 'latest' has no effect in this world",
   maxRetries: "[workflow-sdk] Max retries reached, bubbling error to parent workflow",
+  // The SDK rethrows transient conflicts for redelivery under load, but this
+  // line is also the only trace of a handler crash, so tests opt in narrowly.
+  queueRedelivery: "[world-local] Queue message failed (attempt ",
   unpinnedDelivery:
     "[workflow-sdk] Queue message was delivered to a deployment it was not pinned to",
 } as const;
 
-// The workflow SDK reports a duplicate in-process delivery of the same step
-// whenever redelivery races a slow step, so its presence depends on load.
-const WORKFLOW_STEP_SINGLE_FLIGHT_NOTICE =
-  "[workflow-sdk] Step execution already in flight in this process";
+// Notices of self-healing races whose presence depends on load: the workflow
+// SDK reports a duplicate in-process delivery when redelivery races a slow
+// step, and world-local restores a run_created event whose write is still in
+// flight.
+const LOAD_DEPENDENT_NOTICES = [
+  "[workflow-sdk] Step execution already in flight in this process",
+  "[world-local] restored missing run_created for ",
+] as const;
 
 /**
  * Captures `console.error` and `console.warn` for the rest of the current
@@ -39,7 +46,7 @@ const WORKFLOW_STEP_SINGLE_FLIGHT_NOTICE =
  * running inside the bundled workflow runtime has its own copy of the eve
  * logger, and the vendored workflow SDK writes to the console directly.
  * `unexpected()` returns the lines that start with none of the given
- * prefixes, ignoring the SDK's load-dependent single-flight notice.
+ * prefixes, ignoring the workflow runtime's load-dependent recovery notices.
  */
 export function captureConsoleOutput(): {
   readonly lines: string[];
@@ -60,8 +67,7 @@ export function captureConsoleOutput(): {
     unexpected: (...expected) =>
       lines.filter(
         (line) =>
-          !line.startsWith(WORKFLOW_STEP_SINGLE_FLIGHT_NOTICE) &&
-          !expected.some((prefix) => line.startsWith(prefix)),
+          ![...LOAD_DEPENDENT_NOTICES, ...expected].some((prefix) => line.startsWith(prefix)),
       ),
   };
 }

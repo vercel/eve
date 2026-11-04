@@ -5,25 +5,30 @@ import {
   TELEGRAM_REPLY_RESPONSE_PREFIX,
   isTelegramSyntheticResponse,
   registerTelegramFreeformPrompt,
-  renderTelegramInputRequest,
-  resolveTelegramInputResponses,
-  telegramReplyInputResponse,
+  renderTelegramInteraction,
+  resolveTelegramAnswers,
+  telegramReplyAnswer,
   type TelegramHitlState,
 } from "#public/channels/telegram/hitl.js";
 
-describe("renderTelegramInputRequest", () => {
+describe("renderTelegramInteraction", () => {
   it("renders option requests as compact inline-keyboard callbacks", () => {
     const state: TelegramHitlState = {};
-    const rendered = renderTelegramInputRequest(
+    const rendered = renderTelegramInteraction(
       {
-        action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
-        kind: "question",
-        options: [
-          { id: "approve", label: "Approve" },
-          { id: "cancel", label: "Cancel" },
-        ],
-        prompt: "Approve?",
-        requestId: "very-long-request-id-that-would-not-fit-comfortably-in-callback-data",
+        call: { callId: "call_1", input: {}, name: "ask_question" },
+        request: {
+          kind: "question",
+          options: [
+            { id: "approve", label: "Approve" },
+            { id: "cancel", label: "Cancel" },
+          ],
+          prompt: "Approve?",
+        },
+        status: "open",
+        turnId: "turn_0",
+        stepIndex: 0,
+        interactionId: "very-long-request-id-that-would-not-fit-comfortably-in-callback-data",
       },
       state,
     );
@@ -41,13 +46,14 @@ describe("renderTelegramInputRequest", () => {
   });
 
   it("renders freeform requests as ForceReply prompts", () => {
-    const rendered = renderTelegramInputRequest(
+    const rendered = renderTelegramInteraction(
       {
-        action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
-        allowFreeform: true,
-        kind: "question",
-        prompt: "Explain",
-        requestId: "call_1",
+        call: { callId: "call_1", input: {}, name: "ask_question" },
+        request: { allowFreeform: true, kind: "question", prompt: "Explain" },
+        status: "open",
+        turnId: "turn_0",
+        stepIndex: 0,
+        interactionId: "call_1",
       },
       {},
     );
@@ -60,33 +66,29 @@ describe("renderTelegramInputRequest", () => {
   });
 });
 
-describe("resolveTelegramInputResponses", () => {
+describe("resolveTelegramAnswers", () => {
   it("maps replies to ForceReply prompts back to freeform answers", () => {
     const state: TelegramHitlState = {};
     registerTelegramFreeformPrompt(state, { messageId: "99", requestId: "call_1" });
 
     expect(
-      resolveTelegramInputResponses(state, [
-        telegramReplyInputResponse({ messageId: "99", text: "approved" }),
-      ]),
-    ).toEqual([{ requestId: "call_1", text: "approved" }]);
+      resolveTelegramAnswers(state, [telegramReplyAnswer({ messageId: "99", text: "approved" })]),
+    ).toEqual([{ interactionId: "call_1", text: "approved" }]);
     expect(state.pendingFreeformReplies).toEqual({});
   });
 
   it("skips stale synthetic responses and preserves normal responses", () => {
     const staleCallback = {
       optionId: "selected",
-      requestId: `${TELEGRAM_CALLBACK_RESPONSE_PREFIX}eve:old`,
+      interactionId: `${TELEGRAM_CALLBACK_RESPONSE_PREFIX}eve:old`,
     };
     const staleReply = {
-      requestId: `${TELEGRAM_REPLY_RESPONSE_PREFIX}99`,
+      interactionId: `${TELEGRAM_REPLY_RESPONSE_PREFIX}99`,
       text: "ignored",
     };
-    const normal = { requestId: "direct", optionId: "ok" };
+    const normal = { interactionId: "direct", optionId: "ok" };
 
-    expect(resolveTelegramInputResponses({}, [staleCallback, staleReply, normal])).toEqual([
-      normal,
-    ]);
+    expect(resolveTelegramAnswers({}, [staleCallback, staleReply, normal])).toEqual([normal]);
     expect(isTelegramSyntheticResponse(staleCallback)).toBe(true);
     expect(isTelegramSyntheticResponse(normal)).toBe(false);
   });

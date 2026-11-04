@@ -175,11 +175,8 @@ export function productionRegistryAddTool(deployed: ResolvedDeployedSelfModifica
   });
 }
 
-export default defineDynamic({
-  events: {
-    "session.started": () =>
-      isDeployedRuntime()
-        ? productionRegistryAddTool(resolveDeployedSelfModificationConfig(selfModification.config))
-        : null,
-  },
-});
+export default defineDynamic(() =>
+  isDeployedRuntime()
+    ? productionRegistryAddTool(resolveDeployedSelfModificationConfig(selfModification.config))
+    : null,
+);

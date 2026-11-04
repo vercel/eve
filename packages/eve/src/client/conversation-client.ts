@@ -1,173 +1,141 @@
-import type { ConversationState } from "#client/conversation-state.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
+import { isFactType, isProgressType } from "#protocol/session-events/catalog.js";
+import type { ConversationState, FollowAgents } from "#client/conversation-state.js";
 import { AgentStreamFollower } from "#client/agent-stream-follower.js";
-import {
-  canonicalConversationReducer,
-  conversationReducer,
-  type ClientAgentEvent,
-  type ConversationEvent,
-} from "#client/conversation-reducer.js";
-import { EveAgentProjection, type EveAgentEventLog } from "#client/eve-agent-projection.js";
-import { assertAnswerable } from "#client/eve-agent-store-helpers.js";
+import { Conversation, type LocalSubmission } from "#client/conversation.js";
+import { assertAnswerable } from "#client/session-store-helpers.js";
 import type { SendTurnPayload } from "#client/types.js";
-import type { EveAgentReducerEvent } from "#client/reducer.js";
-import { createEventDeduper } from "#protocol/event-dedupe.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
-import type { InputResponse } from "#shared/input.js";
+import type { SessionView } from "#protocol/session-projection/tables.js";
+import type { Answer } from "#shared/input.js";
 import {
   SessionEventStream,
   type SessionEventStreamOptions,
 } from "#client/session-event-stream.js";
 import type { ClientSession } from "#client/session.js";
 
-/** Owns the canonical conversation and its root and agent-session transports for one client session. */
-export class ConversationClient<TData = ConversationState> {
-  readonly projection: EveAgentProjection<TData>;
-  readonly #conversation: EveAgentProjection<ConversationState, ConversationEvent>;
-  readonly #cursors = new Map<string, number>();
-  #seenEvents = createEventDeduper();
+/** Owns one client session's conversation and its root and agent-session transports. */
+export class ConversationClient {
+  #conversation = new Conversation();
   #follower?: AgentStreamFollower;
   #stream?: SessionEventStream;
-  readonly #onChange: (data: TData, previous: TData) => void;
-  readonly #onConversationChange?: (state: ConversationState, previous: ConversationState) => void;
+  readonly #onChange: () => void;
 
-  constructor(
-    projection: EveAgentProjection<TData>,
-    onChange: (data: TData, previous: TData) => void,
-    onConversationChange?: (state: ConversationState, previous: ConversationState) => void,
-  ) {
-    this.projection = projection;
-    // The default reducer is the canonical one, so `data` and `conversation` share one projection.
-    this.#conversation =
-      projection.reducer === conversationReducer
-        ? (projection as EveAgentProjection<ConversationState, ConversationEvent>)
-        : new EveAgentProjection(canonicalConversationReducer, []);
+  constructor(onChange: () => void) {
     this.#onChange = onChange;
-    this.#onConversationChange = onConversationChange;
-  }
-
-  get data(): TData {
-    return this.projection.data;
   }
 
   get conversation(): ConversationState {
-    return this.#conversation.data;
+    return this.#conversation.state;
   }
 
-  get projections(): readonly EveAgentEventLog[] {
-    return this.#conversation === this.projection
-      ? [this.projection]
-      : [this.#conversation, this.projection];
+  get view(): SessionView {
+    return this.#conversation.view;
   }
 
-  get following(): boolean {
-    return this.#follower !== undefined;
+  confirmSubmission(id: string, deliveryId: string): void {
+    this.#conversation.confirmSubmission(id, deliveryId);
   }
 
-  append(event: EveAgentReducerEvent): void {
-    const previous = this.data;
-    const previousConversation = this.conversation;
-    this.#appendRoot(event);
-    if (previous !== this.data) this.#onChange(this.data, previous);
-    else if (previousConversation !== this.conversation)
-      this.#onConversationChange?.(this.conversation, previousConversation);
+  holdUnconfirmedMessages(hold: boolean): void {
+    this.#conversation.holdUnconfirmedMessages(hold);
   }
 
-  /** Projects submitted answers; the returned callback withdraws them if the server never accepts. */
-  projectResponses(responses: readonly InputResponse[] | undefined): (() => void) | undefined {
-    if (!responses?.length) return undefined;
-    const event: EveAgentReducerEvent = {
-      data: { createdAt: Date.now(), responses },
-      type: "client.input.responded",
+  get streaming(): boolean {
+    return this.#stream !== undefined && !this.#stream.ended;
+  }
+
+  /** Shows the messages this client sent that eve hasn't consumed. */
+  showSubmissions(submissions: readonly LocalSubmission[]): void {
+    this.#conversation.setSubmissions(submissions);
+  }
+
+  /** Projects answers during the POST round trip, then hands ownership to the view. */
+  projectAnswers(answers: readonly Answer[] | undefined) {
+    if (!answers?.length) return undefined;
+    const conversation = this.#conversation;
+    const pending = conversation.answer(answers);
+    this.#onChange();
+    const withdraw = () => {
+      if (conversation !== this.#conversation) return;
+      pending();
+      this.#onChange();
     };
-    this.append(event);
-    return () => this.#retract(event);
+    withdraw.accept = (deliveryId: string) => {
+      if (conversation !== this.#conversation) return;
+      pending.accept(deliveryId);
+      this.#onChange();
+    };
+    return withdraw;
   }
 
-  /** Swaps projected answers for a prepared payload's, which must still be answerable. */
-  replaceResponses(
-    retract: (() => void) | undefined,
+  /** Swaps shown answers for a prepared payload's, which must still be answerable. */
+  replaceAnswers(
+    retract: ReturnType<ConversationClient["projectAnswers"]>,
     input: SendTurnPayload,
-  ): (() => void) | undefined {
+  ) {
     retract?.();
     assertAnswerable(input, this.conversation);
-    return this.projectResponses(input.inputResponses);
+    return this.projectAnswers(input.answers);
   }
 
-  #retract(event: EveAgentReducerEvent): void {
-    const previous = this.data;
-    const previousConversation = this.conversation;
-    for (const projection of this.projections) projection.remove((entry) => entry === event);
-    if (previous !== this.data) this.#onChange(this.data, previous);
-    else if (previousConversation !== this.conversation)
-      this.#onConversationChange?.(this.conversation, previousConversation);
-  }
-
-  /** Admit and project a root event before the agent sessions it announces are followed. */
+  /** Admits and folds a root event before the agent sessions it announces are followed. */
   observe(
-    event: MessageStreamEvent,
+    event: SessionStreamEvent,
     options: {
-      /** The store reconciles optimistic messages instead of directly appending the event. */
-      project?: (event: MessageStreamEvent) => void;
-      /** Record the accepted event before projection or child notifications. */
-      onAccepted?: (event: MessageStreamEvent) => void;
+      /** Reconciles the messages this client sent with the event. */
+      reconcile?: (event: SessionStreamEvent) => void;
+      /** Records the accepted event before it folds or children hear of it. */
+      onAccepted?: (event: SessionStreamEvent) => void;
       /** The store publishes after updating its event log and status. */
       notify?: boolean;
     } = {},
   ): boolean {
-    if (!this.#seenEvents.admit(event)) return false;
+    if (!this.#conversation.observe(event)) return false;
     options.onAccepted?.(event);
-    const previous = this.data;
-    const previousConversation = this.conversation;
-    if (options.project) options.project(event);
-    else this.#appendRoot(event);
+    options.reconcile?.(event);
     if (options.notify !== false) {
-      if (previous !== this.data) this.#onChange(this.data, previous);
-      else if (previousConversation !== this.conversation)
-        this.#onConversationChange?.(this.conversation, previousConversation);
+      this.#onChange();
+      if (event.meta.endOfLine !== false) this.reconcileFollowing();
     }
-    this.#follower?.acceptParentEvent(event);
+    return true;
+  }
+
+  /** Called after the store has published the root's matching event prefix and lifecycle. */
+  reconcileFollowing(): void {
     this.#follower?.reconcile();
+  }
+
+  /** Admits and folds a saved root event without notifying subscribers. */
+  hydrate(event: SessionStreamEvent): boolean {
+    assertCurrentSavedEvent(event);
+    const covered = this.#conversation.view.position;
+    if (!this.#conversation.observe(event)) return false;
+    const { next, position, endOfLine } = event.meta;
+    if (position.line < covered)
+      throw new TypeError(
+        "Saved events overlap source lines already covered by the conversation. " +
+          "Save the ordered events as eve read them, or read the session again from position 0.",
+      );
+    if (next !== undefined) {
+      if (endOfLine !== true || !Number.isSafeInteger(next) || next < position.line + 1)
+        throw new TypeError(
+          "Saved `meta.next` must cover a complete source line with a safe integer cursor. " +
+            "Save the events as eve read them, or read the session again from position 0.",
+        );
+      this.#conversation.advancePosition(next);
+    }
     return true;
   }
 
-  /** Admit and project a hydrated root event without notifying subscribers. */
-  hydrate(event: MessageStreamEvent): boolean {
-    if (!this.#seenEvents.admit(event)) return false;
-    this.#appendRoot(event);
-    return true;
-  }
-
-  /** Start following the agent sessions the root stream has announced so far. */
-  follow(session: ClientSession, events: readonly MessageStreamEvent[] = []): void {
-    this.#follower?.abortAll();
-    const follower = new AgentStreamFollower({
+  /** Starts following the agent sessions the root stream has announced so far. */
+  follow(session: ClientSession, policy: FollowAgents): void {
+    this.#follower ??= new AgentStreamFollower({
       session,
-      cursors: this.#cursors,
-      getState: () => this.conversation,
-      onFollowing: (sessionId) =>
-        this.#appendChild({ type: "client.agent.following", data: { sessionId } }),
-      onEvent: (sessionId, event) =>
-        this.#appendChild({ type: "client.agent.observed", data: { sessionId, event } }),
-      onIdle: (sessionId) => this.#appendChild({ type: "client.agent.idle", data: { sessionId } }),
-      onUnavailable: (sessionId) =>
-        this.#appendChild({ type: "client.agent.unavailable", data: { sessionId } }),
+      policy,
+      conversation: this.#conversation,
+      onChange: this.#onChange,
     });
-    this.#follower = follower;
-    for (const event of events) follower.acceptParentEvent(event);
-    follower.reconcile();
-  }
-
-  #appendRoot(event: EveAgentReducerEvent): void {
-    for (const projection of this.projections) projection.append(event);
-  }
-
-  #appendChild(event: ClientAgentEvent): void {
-    const previous = this.data;
-    const previousConversation = this.conversation;
-    this.#conversation.append(event);
-    if (previous !== this.data) this.#onChange(this.data, previous);
-    else if (previousConversation !== this.conversation)
-      this.#onConversationChange?.(this.conversation, previousConversation);
+    this.#follower.start();
   }
 
   /** Follows the root session continuously; operation readers subscribe to this one stream. */
@@ -176,26 +144,45 @@ export class ConversationClient<TData = ConversationState> {
       this.#stream.setOptions(options);
       return this.#stream;
     }
-    this.#stream = new SessionEventStream(session, options);
+    this.#stream = new SessionEventStream(session, {
+      ...options,
+      startIndex: options.startIndex ?? this.#conversation.view.position,
+    });
     return this.#stream;
   }
 
-  /** Closes the root stream; the next `stream()` call reopens it from the session cursor. */
+  /** Closes the root stream; the next read replays any partial line from the folded cursor. */
   closeStream(): void {
     this.#stream?.close();
     this.#stream = undefined;
+    this.#conversation.discardUncommitted();
   }
 
   stop(): void {
     this.#follower?.abortAll();
-    this.#follower = undefined;
     this.closeStream();
   }
 
   reset(): void {
     this.stop();
-    this.#cursors.clear();
-    this.#seenEvents = createEventDeduper();
-    for (const projection of this.projections) projection.reset();
+    this.#follower = undefined;
+    this.#conversation = new Conversation();
   }
+}
+
+/**
+ * Saved events without a stream position, or of a type this version doesn't know, were saved by
+ * eve < 27; folding them would show an empty conversation and advance the cursor past it.
+ */
+function assertCurrentSavedEvent(event: SessionStreamEvent): void {
+  const { meta, type } = event as {
+    readonly meta?: { readonly position?: unknown };
+    type?: unknown;
+  };
+  if (meta?.position !== undefined && (isFactType(type) || isProgressType(type))) return;
+  throw new TypeError(
+    `Saved session event ${JSON.stringify(type)} has no stream position this eve version can ` +
+      "read; it was likely saved by eve < 27. Discard saved `initialEvents` and the saved " +
+      "session state from before the upgrade, then start a new session.",
+  );
 }

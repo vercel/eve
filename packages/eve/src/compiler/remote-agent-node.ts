@@ -6,12 +6,7 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { AgentSourceOwner, CompiledModuleBinding } from "#compiler/source-graph.js";
 import type { AgentToolExposure } from "#shared/agent-definition.js";
 
-export interface CompiledDynamicSubagentDefinition extends Readonly<ModuleSourceRef> {
-  readonly build?: {
-    readonly externalDependencies?: readonly string[];
-  };
-  readonly eventNames: readonly string[];
-}
+export type CompiledDynamicSubagentDefinition = Readonly<ModuleSourceRef>;
 
 /**
  * Remote subagent entry owned by one compiled agent node manifest. Like

@@ -11,11 +11,12 @@ import {
   getQueryLengthBucket,
   normalizeSearchQuery,
 } from "@/lib/analytics/events";
-import type { Integration, IntegrationType } from "@/lib/integrations/data";
+import type { Integration } from "@/lib/integrations/data";
+import { filterIntegrations, type GalleryFilter } from "@/lib/integrations/gallery";
 import { cn } from "@/lib/utils";
 import { IntegrationCard } from "./integration-card";
 
-export type GalleryFilter = "all" | IntegrationType | "memory";
+export type { GalleryFilter };
 
 const FILTERS: { value: GalleryFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -46,24 +47,10 @@ export const Gallery = ({ filter, integrations }: GalleryProps) => {
   const [query, setQuery] = useState("");
   const lastTrackedSearch = useRef("");
 
-  const results = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    return integrations.filter((integration) => {
-      if (filter === "memory" && !integration.keywords?.includes("memory")) {
-        return false;
-      }
-      if (filter !== "all" && filter !== "memory" && integration.type !== filter) {
-        return false;
-      }
-      if (!normalized) {
-        return true;
-      }
-      const haystack = [integration.name, integration.tagline, ...(integration.keywords ?? [])]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(normalized);
-    });
-  }, [integrations, filter, query]);
+  const results = useMemo(
+    () => filterIntegrations(integrations, filter, query),
+    [integrations, filter, query],
+  );
 
   useEffect(() => {
     const normalizedQuery = normalizeSearchQuery(query);

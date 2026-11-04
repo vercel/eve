@@ -1,0 +1,5 @@
+{
+  "title": "CLI",
+  "defaultOpen": false,
+  "pages": ["../../guides/dev-tui", "../telemetry"]
+}

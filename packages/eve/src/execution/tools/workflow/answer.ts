@@ -1,24 +1,13 @@
-import type { SessionAuthContext } from "#channel/types.js";
 import type {
   WorkflowToolRunAnswer,
   WorkflowToolRunControlMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { InputResponse } from "#shared/input.js";
-import type { ToolInputResponseResponder } from "#tools/definition.js";
+import type { Answer } from "#shared/input.js";
+import type { Principal } from "#protocol/session-events/envelope.js";
 
-export function toToolInputResponseResponder(
-  auth: SessionAuthContext | null | undefined,
-): ToolInputResponseResponder | undefined {
-  return auth === null || auth === undefined
-    ? undefined
-    : {
-        authenticator: auth.authenticator,
-        principalId: auth.principalId,
-        principalType: auth.principalType,
-      };
-}
+export { principalOf } from "#execution/session/delivery-facts.js";
 
 /**
  * Sends the answers the session accepted to the asking run's control hook,
@@ -27,8 +16,8 @@ export function toToolInputResponseResponder(
  */
 export async function sendWorkflowAskAnswers(
   route: WorkflowAskRoute,
-  responses: readonly InputResponse[] | undefined,
-  responder?: ToolInputResponseResponder,
+  responses: readonly Answer[] | undefined,
+  responder?: Principal,
 ): Promise<void> {
   for (const response of responses ?? []) {
     const { optionId, text } = response;
@@ -38,7 +27,7 @@ export async function sendWorkflowAskAnswers(
         : { optionId, responder, status: "answered", text };
     const answer: WorkflowToolRunControlMessage = {
       kind: "answer",
-      requestId: response.requestId,
+      requestId: response.interactionId,
       response: answered,
     };
     await resumeHook(route.control, answer);

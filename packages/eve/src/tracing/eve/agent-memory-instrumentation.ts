@@ -14,11 +14,11 @@ import type { ConversationEnvironment } from "#shared/conversation-context.js";
 import type { AgentTraceStateStore } from "#tracing/eve/agent-trace-state.js";
 import { withChannelAudience } from "#tracing/eve/channel-audience-context.js";
 import { eveTurnIdentity } from "#tracing/eve/operation-input.js";
-import { type AgentTracing } from "#compiled/@eve/tracing/index.js";
-import { activeTraceOperation } from "#compiled/@eve/tracing/otel.js";
+import { type AgentRun } from "#compiled/@vercel/agent-runs/index.js";
+import { activeTraceOperation } from "#compiled/@vercel/agent-runs/otel.js";
 
 export function createAgentMemoryInstrumentation(input: {
-  tracing: AgentTracing;
+  tracing: AgentRun;
   environment: ConversationEnvironment;
   recordOutputs?: boolean;
   stateStore: AgentTraceStateStore;
