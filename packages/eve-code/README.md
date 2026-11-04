@@ -6,7 +6,6 @@ It ships inside the `eve` package. This private `@eve/code` workspace package is
 
 - `eve/extensions/code`: the extension
 - `eve/extensions/code/sandbox`: sandbox bootstrap and credential helpers
-- `eve/extensions/code/tools`: `grep`, which the extension does not mount
 
 ## Mount
 

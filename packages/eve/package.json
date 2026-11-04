@@ -351,12 +351,6 @@
       "import": "./dist/src/extensions/code/extension/extension.js",
       "default": "./dist/src/extensions/code/extension/extension.js"
     },
-    "./extensions/code/tools": {
-      "eve-source": "./dist/src/extensions/code/tools.js",
-      "types": "./dist/src/extensions/code/tools.d.ts",
-      "import": "./dist/src/extensions/code/tools.js",
-      "default": "./dist/src/extensions/code/tools.js"
-    },
     "./extensions/code/sandbox": {
       "eve-source": "./dist/src/extensions/code/sandbox.js",
       "types": "./dist/src/extensions/code/sandbox.d.ts",
@@ -530,12 +524,6 @@
       "types": "./dist/src/internal/scaffold.d.ts",
       "import": "./dist/src/internal/scaffold.js",
       "default": "./dist/src/internal/scaffold.js"
-    },
-    "./internal/grep": {
-      "eve-source": "./dist/src/internal/grep.js",
-      "types": "./dist/src/internal/grep.d.ts",
-      "import": "./dist/src/internal/grep.js",
-      "default": "./dist/src/internal/grep.js"
     },
     "./internal/git": {
       "eve-source": "./dist/src/internal/git.js",

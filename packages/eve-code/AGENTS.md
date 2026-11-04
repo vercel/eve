@@ -12,7 +12,7 @@ Before writing code, read the installed eve package docs for extensions, hooks, 
 - Broker credentials without placing them in model-authored URLs or arguments.
 - Use real `git`, `gh`, and `vc` CLIs rather than bespoke repository lifecycle tools.
 - Mount eve's built-in `edit_file` from `eve/tools/edit_file` as the only file editing tool. Do not add another.
-- Do not mount `grep`. Keep exporting it from `eve/extensions/code/tools` for consumers that mount it themselves.
+- Do not mount `grep` or other search tools. The instructions point the model at `rg` and `find` in `bash`, as pi does.
 - Delegation uses eve's built-in `agent` tool. The removed `worker` config is rejected with a migration hint; do not add an extension-owned worker subagent back.
 - Keep shared implementation under `extension/lib/`; filesystem paths define contribution names.
 - Computer use lives in `@eve/computer-use` (`eve/extensions/computer-use`). Import its public helpers directly; do not add computer-use code or re-exports here.

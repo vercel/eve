@@ -172,14 +172,6 @@ export default defineTool({ ...editFile, approval: always() });
 
 `agent/extensions/code/tools/edit_file.ts` works only when the mount is a directory, `agent/extensions/code/extension.ts`.
 
-To give the model a structured content-search tool, add the built-in [`grep`](/docs/concepts/built-in-tools#grep) tool:
-
-```sh
-eve add tool/grep
-```
-
-The command writes `agent/tools/grep.ts`, which re-exports `eve/tools/grep`. The `grep` export from `eve/extensions/code/tools` is the same definition.
-
 For a custom GitHub command tool, `eve/extensions/git/sandbox` exports `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`. `executeGitHubShell` parses the command, calls `authorize`, and installs the credential rules. `dependencies` supply the session ID and sandbox access. Use `githubShellApproval` as the tool's approval policy so invalid commands are still rejected.
 
 ## Prepare the sandbox
