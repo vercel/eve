@@ -1,5 +1,4 @@
 import type { Commit } from "#harness/types.js";
-import { commitOf } from "./commit.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { FACT_CATALOG, isFactType, isTerminalType } from "#protocol/session-events/catalog.js";
 import { copyView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
@@ -134,7 +133,10 @@ export function supersede(view: SessionView, which: (ref: Ref) => boolean, reaso
     foldReceivedEvent(scratch, { ...fact, meta: { endOfLine: false } });
     facts.push(fact);
   }
-  return commitOf(facts);
+  // A cast, not `commitOf`: `commit.ts` loads the harness, and `eve/internal/legacy-events`
+  // reaches this module from browser bundles (guard rule 65).
+  const closures: readonly SessionEvent[] = facts;
+  return closures as Commit;
 }
 
 /** Why what an owner held closed, as its readers already see it. */
