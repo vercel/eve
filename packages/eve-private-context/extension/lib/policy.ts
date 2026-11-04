@@ -4,23 +4,38 @@ import { personal } from "./personal.ts";
 import {
   decideAudience,
   decidePrivateContext,
+  exceeded,
   strictestOf,
   type AudiencePolicyOptions,
   type PrivateContextPolicyOptions,
 } from "./private-context.ts";
 
-/**
- * Asks a person before calls tagged `effect:external` or `effect:export` once the session has
- * read someone's personal data (a call tagged `reads:personal`). Until then it returns
- * `undefined`.
- */
-export function privateContextPolicy(options: PrivateContextPolicyOptions = {}): ApprovalPolicy {
-  return (ctx) => decidePrivateContext(personal.get(), ctx, options);
+/** Who a `sink:user` shows data to: the caller of the turn that made the call. */
+function callerOf(ctx: ApprovalContext): string | undefined {
+  return ctx.session.auth.current?.principalId ?? personal.get().caller;
 }
 
 /**
- * Denies calls tagged `reads:personal` in a conversation visible outside its participants:
- * `ctx.session.audience` is `"public"`, or `"unknown"` unless `treatUnknownAs` is `"private"`.
+ * Asks a person before a call that would send confidential data past what its destination may
+ * see: personal data anywhere but back to its owner (`sink:user`), and sensitive data to a public
+ * sink. An external call with no `sink:*` tag is capped at public.
+ */
+export function privateContextPolicy(options: PrivateContextPolicyOptions = {}): ApprovalPolicy {
+  return (ctx) => decidePrivateContext(personal.get(), ctx, callerOf(ctx), options);
+}
+
+/**
+ * Whether a call would send confidential data past its sink's cap. Pass it to
+ * `untrustedContentPolicy({ when: exceedsCap })` for the Rule of Two.
+ */
+export function exceedsCap(ctx: ApprovalContext): boolean {
+  return exceeded(personal.get(), ctx, callerOf(ctx)) !== undefined;
+}
+
+/**
+ * Denies a read the conversation's readers shouldn't see: `reads:personal` unless
+ * `ctx.session.audience` is `"private"`, and `reads:sensitive` when it's visible outside the
+ * organization. eve's `"public"` counts as the workspace; `"unknown"` follows `treatUnknownAs`.
  */
 export function audiencePolicy(options: AudiencePolicyOptions = {}): ApprovalPolicy {
   return (ctx) => decideAudience(ctx.session.audience, ctx, options);
@@ -38,7 +53,7 @@ export function privateContext(
  * approval, then approved, then `undefined`. Among equals the first wins, so its reason is kept.
  *
  * ```ts
- * approval: strictest(taintPolicy(), privateContext()),
+ * approval: strictest(untrustedContentPolicy({ when: exceedsCap }), privateContext()),
  * ```
  */
 export function strictest(...policies: readonly ApprovalPolicy[]): ApprovalPolicy {

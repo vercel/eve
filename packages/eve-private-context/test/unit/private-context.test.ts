@@ -3,55 +3,63 @@ import test from "node:test";
 
 import {
   admitted,
-  AUDIENCE_DENIED_REASON,
   decideAudience,
   decidePrivateContext,
+  exceeded,
   initialPersonalContext,
   MAX_SOURCES,
-  readsPersonal,
+  PERSONAL_AUDIENCE_REASON,
+  readLevelOf,
   requested,
+  SENSITIVE_AUDIENCE_REASON,
   settled,
+  sinkCapOf,
   strictestOf,
   type PersonalContext,
+  type ReadLevel,
 } from "../../extension/lib/private-context.ts";
 
-function read(state: PersonalContext, callId: string, name: string, outcome = "completed") {
-  return settled(requested(state, callId, name), callId, outcome);
+function read(
+  state: PersonalContext,
+  callId: string,
+  name: string,
+  level: ReadLevel = "personal",
+  outcome = "completed",
+) {
+  return settled(requested(state, callId, name, level), callId, outcome);
 }
 
-const holding = read(admitted(initialPersonalContext(), "alice"), "call-1", "notion_search");
+const alice = admitted(initialPersonalContext(), "alice");
+const personal = read(alice, "call-1", "notion_search");
+const sensitive = read(alice, "call-1", "wiki_search", "sensitive");
+
+const sink = (...toolTags: string[]) => ({ toolName: "send", toolTags });
 
 test("records the caller as the owner of a completed personal read", () => {
-  assert.deepEqual(holding, {
-    caller: "alice",
+  assert.deepEqual(personal, {
+    ...alice,
     owners: ["alice"],
-    pending: {},
     sources: ["notion_search"],
   });
-  const bob = read(admitted(holding, "bob"), "call-2", "slack_search_dms");
+  const bob = read(admitted(personal, "bob"), "call-2", "slack_search_dms");
   assert.deepEqual(bob.owners, ["alice", "bob"]);
   assert.deepEqual(bob.sources, ["notion_search", "slack_search_dms"]);
   // A delivery with no principal, such as a sign-in callback, keeps the caller.
   assert.equal(admitted(bob, undefined).caller, "bob");
 });
 
-test("reads personal data from tagged entries and the untagged built-in agent tool", () => {
-  assert.equal(readsPersonal({ name: "notion_search", tags: ["reads:personal"] }), true);
-  assert.equal(readsPersonal({ name: "agent" }), true);
-  assert.equal(readsPersonal({ name: "agent", tags: [] }), false);
-  assert.equal(readsPersonal({ name: "web_fetch" }), false);
+test("records a sensitive read without an owner", () => {
+  assert.deepEqual(sensitive, { ...alice, sensitive: true, sensitiveSources: ["wiki_search"] });
 });
 
-test("records nothing for a personal read that didn't complete", () => {
+test("records nothing for a read that didn't complete", () => {
   for (const outcome of ["failed", "rejected", "interrupted"]) {
-    assert.deepEqual(read(initialPersonalContext(), "call-1", "notion_search", outcome), {
-      ...initialPersonalContext(),
-    });
+    assert.deepEqual(read(alice, "call-1", "notion_search", "personal", outcome), alice);
   }
 });
 
 test("owns a read with no known caller as unknown, and caps deduplicated sources", () => {
-  assert.deepEqual(read(initialPersonalContext(), "call-1", "notion_search").owners, ["unknown"]);
+  assert.deepEqual(read(initialPersonalContext(), "call-1", "x").owners, ["unknown"]);
   let state = initialPersonalContext();
   for (let index = 0; index < MAX_SOURCES + 3; index++) {
     state = read(state, `call-${index}`, `tool_${index}`);
@@ -62,41 +70,77 @@ test("owns a read with no known caller as unknown, and caps deduplicated sources
   assert.equal(state.sources.filter((source) => source === "tool_5").length, 1);
 });
 
-test("asks before writes only once the session holds personal data", () => {
-  for (const toolTags of [["effect:external"], ["effect:export"]]) {
-    assert.equal(
-      decidePrivateContext(initialPersonalContext(), { toolName: "x", toolTags }),
-      undefined,
-    );
-    assert.equal(decidePrivateContext(holding, { toolName: "x", toolTags }), "user-approval");
-  }
-  assert.equal(decidePrivateContext(holding, { toolName: "x", toolTags: [] }), undefined);
-  assert.equal(decidePrivateContext(holding, { toolName: "local_tool" }), undefined);
+test("orders read levels from tags, and counts the untagged agent tool as personal", () => {
+  assert.equal(readLevelOf({ name: "x", tags: ["reads:sensitive"] }), "sensitive");
+  assert.equal(readLevelOf({ name: "x", tags: ["reads:sensitive", "reads:personal"] }), "personal");
+  assert.equal(readLevelOf({ name: "agent" }), "personal");
+  assert.equal(readLevelOf({ name: "agent", tags: [] }), undefined);
+  assert.equal(readLevelOf({ name: "web_fetch" }), undefined);
 });
 
-test("treats untagged connection tools as writes by default, unless read-only", () => {
-  const write = { toolName: "linear__create_issue" };
-  assert.equal(decidePrivateContext(holding, write), "user-approval");
-  assert.equal(decidePrivateContext(holding, write, { untaggedConnections: "ignore" }), undefined);
+test("caps sinks by their sink tag, and any other external call at public", () => {
+  assert.equal(sinkCapOf(sink("sink:internal")), "internal");
+  assert.equal(sinkCapOf(sink("effect:external", "sink:user")), "user");
+  assert.equal(sinkCapOf(sink("effect:external")), "public");
+  assert.equal(sinkCapOf(sink("effect:irreversible")), "public");
+  assert.equal(sinkCapOf(sink()), undefined);
+  assert.equal(sinkCapOf({ toolName: "linear__create_issue" }), "public");
   assert.equal(
-    decidePrivateContext(holding, { toolAnnotations: { readOnlyHint: true }, toolName: "list" }),
+    sinkCapOf({ toolName: "linear__create_issue" }, { untaggedConnections: "ignore" }),
     undefined,
   );
-  assert.equal(decidePrivateContext(holding, { toolName: "eve__search" }), undefined);
+  assert.equal(sinkCapOf({ toolAnnotations: { readOnlyHint: true }, toolName: "list" }), undefined);
+  assert.equal(sinkCapOf({ toolName: "eve__search" }), undefined);
+  assert.equal(sinkCapOf({ toolName: "local_tool" }), undefined);
 });
 
-test("denies personal reads unless the conversation is private", () => {
-  const call = { toolName: "notion_search", toolTags: ["reads:personal"] };
-  const denied = { reason: AUDIENCE_DENIED_REASON, type: "denied" };
-  assert.deepEqual(decideAudience("public", call), denied);
-  assert.deepEqual(decideAudience("unknown", call), denied);
-  assert.equal(decideAudience("private", call), undefined);
-  assert.equal(decideAudience("unknown", call, { treatUnknownAs: "private" }), undefined);
-  assert.deepEqual(decideAudience("public", call, { treatUnknownAs: "private" }), denied);
+test("lets personal data go only back to its owner", () => {
+  assert.equal(exceeded(personal, sink("sink:user"), "alice"), undefined);
+  assert.equal(exceeded(personal, sink("sink:user"), "bob"), "personal");
+  assert.equal(exceeded(personal, sink("sink:internal"), "alice"), "personal");
+  assert.equal(exceeded(personal, sink("effect:external"), "alice"), "personal");
+  const shared = read(admitted(personal, "bob"), "call-2", "slack_search_dms");
+  assert.equal(exceeded(shared, sink("sink:user"), "bob"), "personal");
+});
+
+test("lets sensitive data go to internal and user sinks, not public ones", () => {
+  assert.equal(exceeded(sensitive, sink("sink:internal"), "alice"), undefined);
+  assert.equal(exceeded(sensitive, sink("sink:user"), "alice"), undefined);
+  assert.equal(exceeded(sensitive, sink("sink:public"), "alice"), "sensitive");
+  assert.equal(exceeded(sensitive, sink("effect:external"), "alice"), "sensitive");
+  assert.equal(exceeded(alice, sink("sink:public"), "alice"), undefined);
+});
+
+test("asks for personal flows always, and sensitive flows unless allowed", () => {
+  assert.equal(decidePrivateContext(personal, sink("sink:internal"), "alice"), "user-approval");
   assert.equal(
-    decideAudience("public", { toolName: "post", toolTags: ["effect:external"] }),
+    decidePrivateContext(personal, sink("sink:internal"), "alice", { sensitiveFlows: "allow" }),
+    "user-approval",
+  );
+  assert.equal(decidePrivateContext(sensitive, sink("sink:public"), "alice"), "user-approval");
+  assert.equal(
+    decidePrivateContext(sensitive, sink("sink:public"), "alice", { sensitiveFlows: "allow" }),
     undefined,
   );
+  assert.equal(decidePrivateContext(personal, sink("sink:user"), "alice"), undefined);
+  assert.equal(decidePrivateContext(alice, sink("effect:external"), "alice"), undefined);
+});
+
+test("denies reads by what the conversation's readers may see", () => {
+  const personalRead = { toolName: "notion_search", toolTags: ["reads:personal"] };
+  const sensitiveRead = { toolName: "wiki_search", toolTags: ["reads:sensitive"] };
+  const personalDenied = { reason: PERSONAL_AUDIENCE_REASON, type: "denied" };
+  const sensitiveDenied = { reason: SENSITIVE_AUDIENCE_REASON, type: "denied" };
+  assert.equal(decideAudience("private", personalRead), undefined);
+  assert.equal(decideAudience("private", sensitiveRead), undefined);
+  // eve's public is the workspace: sensitive data may be read there, personal data may not.
+  assert.deepEqual(decideAudience("public", personalRead), personalDenied);
+  assert.equal(decideAudience("public", sensitiveRead), undefined);
+  assert.deepEqual(decideAudience("unknown", personalRead), personalDenied);
+  assert.deepEqual(decideAudience("unknown", sensitiveRead), sensitiveDenied);
+  assert.equal(decideAudience("unknown", sensitiveRead, { treatUnknownAs: "internal" }), undefined);
+  assert.equal(decideAudience("unknown", personalRead, { treatUnknownAs: "private" }), undefined);
+  assert.equal(decideAudience("public", sink("effect:external")), undefined);
 });
 
 test("keeps the strictest status, and the first of equals", () => {

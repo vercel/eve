@@ -199,6 +199,37 @@ describe("eve/extensions/private-context", () => {
     });
   }, 90_000);
 
+  it("sends personal data back to its owner, but asks before it reaches an internal sink", async () => {
+    const result = await runSession(
+      "private-context-within-caps",
+      [
+        { name: "notion_search" },
+        { name: "send_dm" },
+        { name: "wiki_search" },
+        { name: "post_to_team" },
+      ],
+      [
+        notionSearch,
+        {
+          logicalPath: "tools/send_dm.ts",
+          value: tool({ tags: ["effect:external", "sink:user"] }),
+        },
+        { logicalPath: "tools/wiki_search.ts", value: tool({ tags: ["reads:sensitive"] }) },
+        {
+          logicalPath: "tools/post_to_team.ts",
+          value: tool({ tags: ["effect:external", "sink:internal"] }),
+        },
+      ],
+    );
+
+    expect(result.interactions).toHaveLength(1);
+    expect(result.settled).toEqual([
+      { name: "notion_search", outcome: "completed" },
+      { name: "send_dm", outcome: "completed" },
+      { name: "wiki_search", outcome: "completed" },
+    ]);
+  }, 90_000);
+
   it("doesn't ask after a personal read that failed", async () => {
     const result = await runSession(
       "private-context-failed",

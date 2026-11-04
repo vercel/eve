@@ -1,7 +1,7 @@
 import { defineHook } from "eve/hooks";
 
 import { personal } from "../lib/personal.ts";
-import { admitted, readsPersonal, requested, settled } from "../lib/private-context.ts";
+import { admitted, readLevelOf, requested, settled } from "../lib/private-context.ts";
 
 export default defineHook({
   events: {
@@ -14,8 +14,9 @@ export default defineHook({
     // Tags ride only on `call.requested`; the call's row in `ctx.view` doesn't carry them.
     "call.requested"(event) {
       const { callId, capability } = event.data;
-      if (!readsPersonal(capability)) return;
-      personal.update((state) => requested(state, callId, capability.name));
+      const level = readLevelOf(capability);
+      if (level === undefined) return;
+      personal.update((state) => requested(state, callId, capability.name, level));
     },
     "call.settled"(event) {
       const { callId, outcome } = event.data;

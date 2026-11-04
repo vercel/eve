@@ -2,7 +2,7 @@
   "name": "@eve/private-context",
   "version": "0.0.0",
   "private": true,
-  "description": "Source of the eve/extensions/private-context extension: records whose private data a session read, so an agent-wide approval policy can ask before writes and deny personal reads in public conversations.",
+  "description": "Source of the eve/extensions/private-context extension: records what confidential data a session read, so an agent-wide approval policy can ask before it leaves past a sink cap and deny confidential reads in conversations that are too open.",
   "type": "module",
   "exports": {
     "./package.json": "./package.json"

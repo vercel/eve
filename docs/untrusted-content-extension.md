@@ -115,16 +115,19 @@ untrustedContentPolicy({
 
 ### Combine with a confidentiality check
 
-On its own, the policy asks before every external call in an exposed session. `when` narrows that to the calls that also matter for confidentiality, such as a call that would send sensitive data somewhere its readers shouldn't see it. That gives the Rule of Two: ask only when untrusted content, sensitive data, and an external effect meet.
+On its own, the policy asks before every external call in an exposed session. `when` narrows that to the calls that also matter for confidentiality. With [`eve/extensions/private-context`](./private-context-extension), `exceedsCap` matches a call that would send confidential data past what its destination may see, which gives Meta's Rule of Two: ask only when untrusted content, confidential data, and an external effect meet.
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
+import { exceedsCap, privateContext, strictest } from "eve/extensions/private-context";
 import { untrustedContentPolicy } from "eve/extensions/untrusted-content";
 
 export default defineAgent({
   model: "anthropic/claude-sonnet-4.6",
-  // `sendsSensitiveData` is your own check of what the call would send, and where.
-  approval: untrustedContentPolicy({ when: (ctx) => sendsSensitiveData(ctx) }),
+  approval: strictest(
+    untrustedContentPolicy({ when: exceedsCap }),
+    privateContext({ sensitiveFlows: "allow" }),
+  ),
 });
 ```
 

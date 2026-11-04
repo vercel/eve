@@ -1,15 +1,15 @@
 # @eve/private-context Extension Package
 
-This private package is the source of the `eve/extensions/private-context` extension: a hook that records in `defineState` whose personal data a session read, and approval policies that act on it and on `ctx.session.audience`.
+This private package is the source of the `eve/extensions/private-context` extension: a hook that records in `defineState` what confidential data a session read and whose it is, and approval policies that compare it with sink caps and `ctx.session.audience`.
 
 Before writing code, read the installed eve package docs for extensions, hooks, state, and approvals.
 
 ## Boundaries
 
 - Use only public eve APIs: entry `tags`, `defineState`, hooks, `ctx.session.audience`, and the agent-wide `approval` policy. Don't change eve's harness, execution, or protocol for this extension.
-- Stay independent of `eve/extensions/taint`: an agent can mount either one or both, and `strictest()` combines their policies.
+- Stay independent of `eve/extensions/untrusted-content`: an agent can mount either one or both, and `strictest()` combines their policies.
 - Keep state transitions and policy decisions in `extension/lib/private-context.ts`, free of eve runtime imports, so unit tests cover them directly.
-- Keep only principal ids, tool names, and call ids in state, never call inputs or outputs.
+- Keep only principal ids, tool names, levels, and call ids in state, never call inputs or outputs.
 
 ## Build and publish
 
