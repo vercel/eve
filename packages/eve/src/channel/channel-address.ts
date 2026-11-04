@@ -10,6 +10,7 @@ import {
 } from "#channel/delivery-metadata.js";
 import type { SendPayload } from "#channel/routes.js";
 import { normalizeSendInput, serializeFilePartsInMessage } from "#channel/send-input.js";
+import { attachInputText, readInputText } from "#internal/input-text.js";
 import { createSession, sessionCallbackToTurnCaller, type Session } from "#channel/session.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { describeStrandedSession, SessionStrandedError } from "#channel/session-stranded-error.js";
@@ -145,13 +146,16 @@ export function createChannelAddress<TState = undefined>(input: {
         continuationToken: namespacedToken,
         delivery,
         initiatorAuth: options.initiatorAuth,
-        input: {
-          context: payload.context,
-          history: payload.history,
-          message: serializeFilePartsInMessage(payload.message) ?? "",
-          outputSchema: payload.outputSchema,
-          state: payload.state,
-        },
+        input: attachInputText(
+          {
+            context: payload.context,
+            history: payload.history,
+            message: serializeFilePartsInMessage(payload.message) ?? "",
+            outputSchema: payload.outputSchema,
+            state: payload.state,
+          },
+          readInputText(payload),
+        ),
         requestId: metadata.requestId,
         title: options.title,
       };

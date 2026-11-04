@@ -15,7 +15,6 @@ import type { SessionView } from "#protocol/session-projection/tables.js";
 import {
   interaction,
   decidingAnswer,
-  promptQueueHead,
   responderOf,
   type Interaction,
 } from "#protocol/session-projection/reader.js";
@@ -79,16 +78,6 @@ export function requestBatchOf(
     if ("callId" in row.subject) result.callId = row.subject.callId;
   }
   return result;
-}
-
-/**
- * The request a typed reply answers: the first open one. A budget prompt comes first, since the
- * session settles it before anything else; the rest follow the order they opened. Channels that
- * can only show text show this request alone, so a reply answers the request the person sees.
- */
-export function firstOpenRequest(view: SessionView): Interaction | undefined {
-  const first = promptQueueHead(view);
-  return first === undefined ? undefined : interaction(view, first.interactionId);
 }
 
 /** How a request ended, from its `interaction.settled`. */
