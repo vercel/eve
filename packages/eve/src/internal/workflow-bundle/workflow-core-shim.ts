@@ -1,6 +1,8 @@
-import { HookConflictError } from "#compiled/@workflow/errors/index.js";
-
-export { FatalError, RetryableError } from "#compiled/@workflow/errors/index.js";
+import {
+  FatalError as SdkFatalError,
+  HookConflictError,
+  RetryableError as SdkRetryableError,
+} from "#compiled/@workflow/errors/index.js";
 
 const WORKFLOW_CONTEXT_SYMBOL = Symbol.for("WORKFLOW_CONTEXT");
 const WORKFLOW_CREATE_HOOK = Symbol.for("WORKFLOW_CREATE_HOOK");
@@ -9,6 +11,12 @@ const WORKFLOW_SLEEP = Symbol.for("WORKFLOW_SLEEP");
 const WORKFLOW_USE_STEP = Symbol.for("WORKFLOW_USE_STEP");
 const STREAM_NAME_SYMBOL = Symbol.for("WORKFLOW_STREAM_NAME");
 const workflowGlobal = globalThis as typeof globalThis & Record<symbol, unknown>;
+
+// Driver layers bundle separate copies; hydration uses the SDK's first registration.
+export const FatalError = (workflowGlobal[Symbol.for("@workflow/errors//FatalError")] ??
+  SdkFatalError) as typeof SdkFatalError;
+export const RetryableError = (workflowGlobal[Symbol.for("@workflow/errors//RetryableError")] ??
+  SdkRetryableError) as typeof SdkRetryableError;
 
 interface WorkflowHook<T> extends AsyncIterable<T> {
   readonly token: string;
