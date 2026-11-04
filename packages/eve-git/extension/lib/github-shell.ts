@@ -76,14 +76,16 @@ export interface GitHubUserAuthorizeRequest {
   readonly argv: readonly string[];
   /** The session's current caller, or `null` when the session has none. */
   readonly auth: SessionAuthContext | null;
-  /** The `owner/name` repository the command declared, or `null`. */
-  readonly repository: string | null;
+  /** Always `null`: user tokens cannot be restricted to the declared repository. Use app tokens for repository allowlists. */
+  readonly repository: null;
   /** The token Connect minted for this command, for API lookups. It reaches the command only after `authorize` returns `true`. */
   readonly token: string;
 }
 
 /** What an `authorize` callback sees before a `gh` command runs with an installation token. */
-export interface GitHubAppAuthorizeRequest extends GitHubUserAuthorizeRequest {
+export interface GitHubAppAuthorizeRequest extends Omit<GitHubUserAuthorizeRequest, "repository"> {
+  /** The repository the installation token is scoped to, or `null` for owner-wide access. */
+  readonly repository: string | null;
   /** The owner whose installation minted the token. */
   readonly owner: string;
 }
@@ -195,9 +197,11 @@ export async function executeGitHubShell(
   }
   if (!token)
     throw new Error(`Connect returned an empty token for ${JSON.stringify(config.connector)}.`);
+  // The declaration is model-controlled and cannot narrow a user token.
+  // Never let it satisfy a repository allowlist for an unrestricted lease.
   const allowed =
     config.principalType === "user"
-      ? await config.authorize({ argv, auth, repository, token })
+      ? await config.authorize({ argv, auth, repository: null, token })
       : await config.authorize({ argv, auth, owner: owner!, repository, token });
   if (!allowed) {
     throw new Error(
