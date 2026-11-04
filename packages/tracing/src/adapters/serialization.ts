@@ -87,9 +87,18 @@ export function genAiInputMessagesAttribute(
       kind === undefined ? { parts, role: message.role } : { kind, parts, role: message.role },
     ];
   });
-  for (let start = 0; start < formatted.length; start += 1) {
-    const json = semanticJsonAttribute(formatted.slice(start));
-    if (json !== undefined) return { json, omitted: start };
+  // Drop the fewest oldest messages that fit: the fit is monotone in how many
+  // are dropped, so binary search it instead of stringifying every prefix.
+  let low = 0;
+  let high = formatted.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (semanticJsonAttribute(formatted.slice(middle)) !== undefined) high = middle;
+    else low = middle + 1;
+  }
+  if (low < formatted.length) {
+    const json = semanticJsonAttribute(formatted.slice(low));
+    if (json !== undefined) return { json, omitted: low };
   }
   const newest = truncateSingleSemanticMessage(formatted);
   if (newest !== undefined) return { json: newest, omitted: formatted.length - 1 };
@@ -249,10 +258,25 @@ function fitSemanticText(
     const full = semanticJsonAttribute(wrap(text));
     if (full !== undefined) return full;
   }
-  for (let length = Math.min(text.length, CONTENT_ATTRIBUTE_LIMIT); length > 0; length -= 256) {
-    const json = semanticJsonAttribute(wrap(`${text.slice(0, length)}… [truncated]`));
-    if (json !== undefined) return json;
+  // Binary search the largest cut that fits: each probe stringifies one
+  // candidate, so an attribute far over the cap costs a logarithmic number of
+  // encodes instead of re-encoding a near-full candidate every 256 characters.
+  const candidate = (length: number): string | undefined =>
+    semanticJsonAttribute(wrap(`${text.slice(0, length)}… [truncated]`));
+  let best: string | undefined;
+  let low = 1;
+  let high = Math.min(text.length, CONTENT_ATTRIBUTE_LIMIT);
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const probe = candidate(middle);
+    if (probe !== undefined) {
+      best = probe;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
   }
+  if (best !== undefined) return best;
   return semanticJsonAttribute(wrap("… [truncated]"));
 }
 

@@ -119,6 +119,27 @@ describe("GenAI message attributes", () => {
     },
   );
 
+  it("truncates escape-heavy megabyte payloads without re-encoding every cut", () => {
+    const started = performance.now();
+    const input = genAiInputMessagesAttribute([
+      { content: "\\\n".repeat(1_000_000), role: "user" },
+      { content: "keep this newest message", role: "user" },
+    ]);
+    const instructions = genAiSystemInstructionsAttribute("\\\n".repeat(1_000_000));
+    const elapsed = performance.now() - started;
+
+    expect(input).toBeDefined();
+    expect(input!.omitted).toBe(1);
+    expect(input!.json.length).toBeLessThanOrEqual(CONTENT_ATTRIBUTE_LIMIT);
+    expect(input!.json).toContain("keep this newest message");
+    expect(instructions).toBeDefined();
+    expect(instructions!.length).toBeLessThanOrEqual(CONTENT_ATTRIBUTE_LIMIT);
+    expect(instructions!).toContain("… [truncated]");
+    // A linear 256-character scan would re-encode a near-full candidate
+    // thousands of times; the binary search finishes in milliseconds.
+    expect(elapsed).toBeLessThan(2_000);
+  });
+
   it("formats model input, output, and system instructions for inspectors", () => {
     expect(
       genAiInputMessagesAttribute([
