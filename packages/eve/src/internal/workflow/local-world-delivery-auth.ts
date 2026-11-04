@@ -4,6 +4,10 @@ import type { ValidQueueName } from "#compiled/@workflow/world/index.js";
 import type { LocalWorld } from "#compiled/@workflow/world-local/index.js";
 import { timingSafeEqualStrings } from "#internal/nitro/dev-client-address.js";
 import {
+  localRecoveryMessage,
+  releaseOrphanedLocalSteps,
+} from "#internal/workflow/local-world-recovery.js";
+import {
   workflowQueuePrefix,
   WORKFLOW_QUEUE_NAMESPACE_ENV,
 } from "#internal/workflow/queue-namespace.js";
@@ -71,9 +75,16 @@ async function reenqueueActiveRuns(world: LocalWorld): Promise<void> {
       resolveData: "none",
       status: ["pending", "running"],
     });
+    await releaseOrphanedLocalSteps(
+      world,
+      page.data.map((run) => run.runId),
+    );
     for (const run of page.data) {
       try {
-        await world.queue(`${prefix}${run.workflowName}` as ValidQueueName, { runId: run.runId });
+        await world.queue(
+          `${prefix}${run.workflowName}` as ValidQueueName,
+          localRecoveryMessage(run),
+        );
       } catch (error) {
         console.warn(`[eve] Failed to re-enqueue workflow run ${run.runId}:`, error);
       }
