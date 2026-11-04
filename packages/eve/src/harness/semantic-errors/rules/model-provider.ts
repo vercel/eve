@@ -50,6 +50,14 @@ export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
     hint: "Review the request against your model provider's usage policies.",
   },
   {
+    id: "model-request-bio-policy-refused",
+    name: "Model request refused",
+    tags: ["model-provider", "recoverable", "refused"],
+    when: codeIs("bio_policy"),
+    message: "The model provider refused this request for possible biological risk.",
+    hint: "Review the request against your model provider's usage policies.",
+  },
+  {
     id: "model-capability-unsupported",
     name: "Model capability not supported",
     tags: ["model-provider"],

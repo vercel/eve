@@ -179,6 +179,19 @@ describe("summarizeKnownError (catalog table)", () => {
       id: "model-request-cyber-policy-refused",
     },
     {
+      title: "biological policy refusal",
+      error: named(
+        "AI_StreamProviderError",
+        "This content was flagged for possible biological risk.",
+        {
+          code: "bio_policy",
+          statusCode: 400,
+          type: "invalid_request",
+        },
+      ),
+      id: "model-request-bio-policy-refused",
+    },
+    {
       title: "unsupported model capability",
       error: named("AI_UnsupportedFunctionalityError", "tool type not supported"),
       id: "model-capability-unsupported",
