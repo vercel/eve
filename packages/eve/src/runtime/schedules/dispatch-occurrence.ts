@@ -1,6 +1,6 @@
 import { scheduleDisplayName } from "#runtime/schedules/record.js";
 import { ScheduleDispatcher } from "#channel/schedule.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import type { Runtime } from "#channel/types.js";
 import type {
   DynamicSchedulesDefinition,
   ScheduleOccurrenceIdentity,
@@ -15,6 +15,8 @@ export async function dispatchScheduledOccurrence(input: {
   readonly definition: DynamicSchedulesDefinition<any, any, any>;
   readonly occurrence: ScheduleOccurrenceIdentity;
   readonly payload: ScheduleCollectionPayload<unknown>;
+  /** The runtime the occurrence's sessions start in: the host's. */
+  readonly runtime: Runtime;
   readonly verifyDelivery?: () => Promise<void>;
 }): Promise<void> {
   const occurrence = {
@@ -22,9 +24,7 @@ export async function dispatchScheduledOccurrence(input: {
     displayName: scheduleDisplayName(input.occurrence.name),
   };
   const result = await new ScheduleDispatcher({
-    runtime: createWorkflowRuntime({
-      compiledArtifactsSource: input.bundle.compiledArtifactsSource,
-    }),
+    runtime: input.runtime,
     channels: input.bundle.graph.root.channels,
   }).triggerCollection({
     collectionId: input.collection,

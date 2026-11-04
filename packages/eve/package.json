@@ -51,6 +51,14 @@
       "eve-source": "./.generated/compiled/*",
       "default": "./dist/src/compiled/*"
     },
+    "#platform/*.js": {
+      "eve-source": {
+        "node": "./src/platform/*.ts",
+        "default": "./src/platform/*.web.ts"
+      },
+      "node": "./dist/src/platform/*.js",
+      "default": "./dist/src/platform/*.web.js"
+    },
     "#*.js": {
       "eve-source": "./src/*.ts",
       "default": "./dist/src/*.js"
@@ -595,6 +603,7 @@
     "test:watch": "vitest --config vitest.unit.config.ts",
     "typecheck": "pnpm run check:web-template && tsc -p tsconfig.json --noEmit",
     "generate:web-template": "node src/setup/build.ts --write",
+    "guard:browser-reach": "node scripts/browser-reach.mjs --check",
     "check:web-template": "node src/setup/build.ts --check",
     "test:tui": "tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs"
   },

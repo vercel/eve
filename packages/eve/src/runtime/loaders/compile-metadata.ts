@@ -3,7 +3,7 @@ import {
   COMPILE_METADATA_KIND,
   COMPILE_METADATA_VERSION,
   type CompileMetadata,
-} from "#compiler/artifacts.js";
+} from "#compiler/artifact-contract.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { formatValidationError } from "#runtime/validation.js";
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";

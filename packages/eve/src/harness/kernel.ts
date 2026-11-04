@@ -39,12 +39,11 @@ import type {
   KernelConfig,
 } from "#harness/types.js";
 import type { InstrumentationStepScope } from "#instrumentation/runtime.js";
-import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { installedEveVersion } from "#platform/package-info.js";
 import { eventsOf } from "#harness/publication.js";
 import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 
 const environment = process.env.NODE_ENV ?? "unknown";
-const eveVersion = resolveInstalledPackageInfo().version;
 
 /**
  * Creates the harness step: one step of a session, backed by the AI SDK's `ToolLoopAgent`.
@@ -80,7 +79,12 @@ export function createKernel(config: KernelConfig): StepFn {
     };
     return (
       config.instrumentation?.runStep(
-        { environment, eveVersion, hasInput: hasStepInput(input), session: initialSession },
+        {
+          environment,
+          eveVersion: installedEveVersion(),
+          hasInput: hasStepInput(input),
+          session: initialSession,
+        },
         executeStep,
       ) ?? executeStep()
     );

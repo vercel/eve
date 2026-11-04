@@ -4,7 +4,7 @@ import {
   restoreSessionStep,
   type PublishedSessionEvents,
   type RestoredSessionStep,
-  type SessionStepState,
+  type SessionStepInput,
 } from "#execution/publish-session-events.js";
 import { type SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
@@ -13,7 +13,7 @@ import { relay } from "#harness/session-machine/transitions.js";
 
 /** Relays one child interaction fact through its parent channel across a durable step boundary. */
 export async function runProxySubagentEventStep(
-  input: SessionStepState & {
+  input: SessionStepInput & {
     readonly workflowAsk?: WorkflowAskRoute;
     readonly runId?: string;
     readonly hookPayload: SubagentInteractionHookPayload;

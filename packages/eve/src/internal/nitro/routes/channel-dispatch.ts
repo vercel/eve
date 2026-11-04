@@ -17,7 +17,7 @@ import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import { createAttachSessionFn } from "#channel/session.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
-import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 import {
   attachAgentInfoRouteResponse,
   attachHomeRouteMetadata,

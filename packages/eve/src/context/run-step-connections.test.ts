@@ -15,9 +15,6 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 vi.mock("#context/providers/session.js", () => ({
   sessionProvider: { create: () => undefined, key: { name: "test.session" } },
 }));
-vi.mock("#context/providers/tool-stubs.js", () => ({
-  toolStubProvider: { create: () => undefined, key: { name: "test.toolStubs" } },
-}));
 vi.mock("#context/providers/sandbox.js", () => ({
   sandboxProvider: { create: () => undefined, key: { name: "test.sandbox" } },
 }));

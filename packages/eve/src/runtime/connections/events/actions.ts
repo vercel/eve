@@ -1,3 +1,4 @@
+import { installedDurableHost } from "#execution/hosts.js";
 import { createMcpTraceFetch } from "#runtime/connections/mcp-tracing.js";
 import { createMcpTracing } from "#tracing/eve/mcp.js";
 import { withConnectionEventSpan } from "#tracing/eve/connection-events.js";
@@ -180,18 +181,20 @@ export class ConnectionEventActions {
   ): Promise<unknown> {
     const args = parseJsonObject(input);
     const { ctx, principal, backend, sessionId, owner, executionPrincipal, caller } = this.scope();
-    // Discovery also runs in the harness. Load the workflow runtime only when executing an action.
-    const { findConnectionEventOwner, startConnectionEventOwner, retireConnectionEventOwner } =
-      await import("#runtime/connections/events/owner.js");
+    const owners = installedDurableHost()?.connectionEvents;
+    if (owners === undefined)
+      throw new Error(
+        "This host keeps no connection event subscriptions: watch events from a deployed agent.",
+      );
     if (name === GET || name === STOP) {
       if (typeof args.id !== "string") throw new Error("id must be a subscription id.");
       const bindingId = args.id;
-      const handler = await findConnectionEventOwner(bindingId);
+      const handler = await owners.find(bindingId);
       if (handler === undefined || !sameEventOwner(handler.owner, caller))
         throw new Error("Unknown subscription for this caller and account.");
       // The watch's run unsubscribes, and repeats it until Connect finishes cleaning up.
       if (name === STOP) {
-        if (!(await retireConnectionEventOwner(bindingId)))
+        if (!(await owners.retire(bindingId)))
           throw new Error("Unknown subscription for this caller and account.");
         return { id: bindingId, status: "stopping" as const };
       }
@@ -267,7 +270,7 @@ export class ConnectionEventActions {
         },
       };
       // A watch already running under this id answers instead of a new one.
-      const subscription = await startConnectionEventOwner(
+      const subscription = await owners.start(
         binding,
         requireCompiledBundle(ctx),
         options.abortSignal,

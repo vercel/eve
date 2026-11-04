@@ -5,7 +5,7 @@ import {
   signalSessionTimeoutStep,
   startSessionTimeoutStep,
 } from "#execution/session/timeout-steps.js";
-import { sessionTimeoutWorkflowReference } from "#execution/workflow-runtime.js";
+import { sessionTimeoutWorkflowReference } from "#execution/workflow-references.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";

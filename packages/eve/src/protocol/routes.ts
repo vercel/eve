@@ -213,3 +213,9 @@ export function createEveCallbackRoutePath(token: string): string {
 export function createEveSessionStubsRoutePath(sessionId: string): string {
   return `${createEveSessionRoutePath(sessionId)}/stubs`;
 }
+
+/** The route where an `eve dev` worker reaches the Workflow World its CLI parent serves. */
+export const DEVELOPMENT_WORKFLOW_WORLD_ROUTE = `${EVE_ROUTE_PREFIX}/dev/internal/workflow-world`;
+
+/** The parent's route for a World stream an `eve dev` worker reads. */
+export const DEVELOPMENT_WORKFLOW_STREAM_ROUTE = `${DEVELOPMENT_WORKFLOW_WORLD_ROUTE}/stream`;

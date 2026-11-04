@@ -1,4 +1,5 @@
 import * as workflowRuntime from "#execution/workflow-runtime.js";
+import { installWorkflowHost } from "#execution/workflow-host/host.js";
 import { eventTracing } from "#internal/testing/event-tracing.js";
 import { trace } from "@opentelemetry/api";
 import { connectionEntry } from "#execution/catalog/connection-entry.js";
@@ -86,6 +87,9 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
 vi.mock("#execution/terminal-session-completion-step.js", () => ({
   emitTerminalSessionCompletionStep: vi.fn(),
 }));
+// The watches run on Workflow, the durable host a step bundle installs; this realm loads none.
+installWorkflowHost();
+
 let ctx: ContextContainer;
 let actions: ConnectionEventActions;
 let connection: ResolvedConnectionDefinition;

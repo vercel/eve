@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
 const stored = vi.hoisted(() => new Map<string, string>());
 vi.mock("#compiled/just-secrets/index.js", () => ({
   secrets: {

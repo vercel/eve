@@ -1,4 +1,4 @@
-import { posix } from "node:path";
+import { isAbsolutePosix, resolvePosix } from "#platform/posix-path.js";
 
 import type { SandboxConnection } from "#sandbox/provider.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
@@ -35,12 +35,12 @@ export function createConnectionSession<Extensions extends object>(
   connection: SandboxConnection<Extensions>,
 ): SandboxSession & Extensions {
   const workspaceRoot = connection.workspaceRoot ?? WORKSPACE_ROOT;
-  if (!posix.isAbsolute(workspaceRoot)) {
+  if (!isAbsolutePosix(workspaceRoot)) {
     throw new Error(
       `Sandbox connection workspaceRoot must be an absolute path, but received "${workspaceRoot}".`,
     );
   }
-  const resolveSandboxPath = (path: string) => posix.resolve(workspaceRoot, path);
+  const resolveSandboxPath = (path: string) => resolvePosix(workspaceRoot, path);
   async function read(options: { readonly signal?: AbortSignal; readonly path: string }) {
     return await connection.readFile({
       signal: options.signal,
