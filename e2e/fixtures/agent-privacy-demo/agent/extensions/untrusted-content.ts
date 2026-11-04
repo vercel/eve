@@ -1,3 +1,3 @@
-import taint from "eve/extensions/taint";
+import untrustedContent from "eve/extensions/untrusted-content";
 
-export default taint({});
+export default untrustedContent({});

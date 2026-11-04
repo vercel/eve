@@ -3,7 +3,7 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   description:
-    "After the agent reads a public issue but nothing private, posting a triage note runs without approval: two legs of the Rule of Two aren't enough.",
+    "After the agent reads a public issue but nothing private, posting a triage note runs without approval: untrusted content alone, with no confidential data to leak.",
 
   async test(t) {
     requireMockModel(t);
