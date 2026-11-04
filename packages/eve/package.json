@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "1.0.0-rc.2",
+  "version": "1.0.0-rc.3",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -612,7 +612,8 @@
     "test:tui": "tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs"
   },
   "dependencies": {
-    "nitro": "3.0.260903-beta",
+    "nitro": "3.0.261103-rc",
+    "rolldown": "1.2.16",
     "undici": "8.12.3"
   },
   "devDependencies": {
@@ -668,7 +669,7 @@
     "commander": "14.0.3",
     "dd-trace": "6.13.0",
     "emulate": "0.6.0",
-    "env-runner": "0.1.16",
+    "env-runner": "0.3.11",
     "eventsource-parser": "3.1.0",
     "jose": "6.2.3",
     "js-yaml": "4.3.2",

@@ -133,6 +133,22 @@ describe("auto", () => {
     expect(decider.doDecide).toHaveBeenCalledOnce();
   });
 
+  it("forwards provider options to the decision model", async () => {
+    const decider = decisionModel();
+    const handler = auto({
+      model: decider.model,
+      modelOptions: { providerOptions: { gateway: { zeroDataRetention: true } } },
+      options,
+    });
+
+    await expect(run(handler, context())).resolves.toBe("openai/small");
+    expect(decider.doDecide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerOptions: { gateway: { zeroDataRetention: true } },
+      }),
+    );
+  });
+
   it("routes provider language models by alias and preserves reasoning", async () => {
     const languageModel = anthropic("sonnet-5");
     const decider = decisionModel("private");

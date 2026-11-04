@@ -3,7 +3,7 @@ import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install
 import { defaultDevelopmentExtensions } from "#compiler/development-extensions.js";
 
 import { createDevelopmentBuilds } from "#internal/nitro/host/dev-build-host.js";
-import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
+import { DevHostSupervisor } from "#internal/nitro/host/dev-host-supervisor.js";
 import type { AuthoredSourceWatcherHandle } from "#internal/nitro/host/dev-authored-source-watcher.js";
 import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
 import { createDevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
@@ -75,8 +75,6 @@ function isAddressInUseError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && error.code === "EADDRINUSE";
 }
 
-type NitroDevelopmentServer = DrainedNitroDevServer;
-
 async function detectDevelopmentCommandPackageManager(
   appRoot: string,
 ): Promise<PackageManagerKind> {
@@ -117,7 +115,7 @@ async function createDevelopmentServerAlreadyRunningError(
 
 function addDevelopmentControlHandler(input: {
   readonly appRoot: string;
-  readonly devServer: DrainedNitroDevServer;
+  readonly devServer: DevHostSupervisor;
   readonly getWatcher: () => AuthoredSourceWatcherHandle | undefined;
   readonly workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
   readonly transportSecret: string;
@@ -217,7 +215,7 @@ function createDevelopmentServerStartupCleanupError(
 }
 
 async function listenForDevelopmentServer(input: {
-  readonly devServer: NitroDevelopmentServer;
+  readonly devServer: DevHostSupervisor;
   readonly host: string;
   readonly port: number | string | undefined;
   readonly retryOnAddressInUse: boolean;
@@ -355,7 +353,7 @@ async function startNitroDevelopmentServer(
       }
     });
     pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
-    const devServer = new DrainedNitroDevServer();
+    const devServer = new DevHostSupervisor();
     cleanup.defer(async () => {
       try {
         await devServer.close();
@@ -424,7 +422,7 @@ async function startNitroDevelopmentServer(
         build.close();
         const workspace = preparedHost.workspace;
         initialWorkspaceTransferred = true;
-        await devServer.replaceWorker({
+        await devServer.swapTo({
           dispose: async () => await removeDevelopmentHostWorkspace(workspace),
           entry: payload.entry,
           workerData: payload.workerData,
@@ -437,7 +435,7 @@ async function startNitroDevelopmentServer(
       },
       options.onBootProgress,
     );
-    devServer.prepareSpareWorker();
+    devServer.prepareSpare();
     await workflowWorld?.start();
 
     const rebuildCoordinator = await createDevelopmentAuthoredRebuildCoordinator({

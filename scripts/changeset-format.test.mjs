@@ -175,10 +175,12 @@ async function createReleaseFixture(t) {
       name: "release-fixture",
       private: true,
       type: "module",
-      packageManager: "pnpm@12.14.0",
+      packageManager: "pnpm@12.17.0",
     }),
   );
-  await write("pnpm-workspace.yaml", "packages:\n  - packages/*\n");
+  // The fixture borrows the repository's node_modules through a symlink. Without
+  // this, pnpm's pre-run install in the fixture prunes that shared tree.
+  await write("pnpm-workspace.yaml", "verifyDepsBeforeRun: false\npackages:\n  - packages/*\n");
   await write("packages/eve/package.json", JSON.stringify({ name: "eve", version: "1.0.0" }));
   await write("packages/eve/CHANGELOG.md", "# eve\n\n## 1.0.0\n\nOld release.\n");
   await write(
@@ -378,9 +380,10 @@ for (const mode of ["stable", "rc"]) {
   test(`version-packages releases desktop independently without eve compatibility noise (${mode})`, async (t) => {
     const { root, write, git } = await createReleaseFixture(t);
     const desktop = JSON.parse(await readFile("packages/eve-agent-desktop/package.json", "utf8"));
+    // Pin the unreleased version: release PRs bump the real manifest and would shift the expected result.
     const desktopManifest = JSON.stringify({
       name: desktop.name,
-      version: desktop.version,
+      version: "0.0.0",
       peerDependencies: desktop.peerDependencies,
       devDependencies: { eve: desktop.devDependencies.eve },
     });

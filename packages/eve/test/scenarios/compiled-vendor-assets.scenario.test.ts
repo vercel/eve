@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -22,6 +23,23 @@ const EVE_CATALOG_FINGERPRINT_FILES = [
   "tsconfig.json",
 ] as const;
 const COMPILED_VENDOR_ROOT = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
+
+/** The version of `name` that `from` resolves, for packages that do not export their manifest. */
+function installedVersion(name: string, from: string): string {
+  let directory = dirname(createRequire(from).resolve(name));
+  for (;;) {
+    try {
+      const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8")) as {
+        name?: string;
+        version: string;
+      };
+      if (manifest.name === name) return manifest.version;
+    } catch {}
+    const parent = dirname(directory);
+    if (parent === directory) throw new Error(`Cannot find the manifest of ${name}.`);
+    directory = parent;
+  }
+}
 const execFileAsync = promisify(execFile);
 const createTemporaryDirectory = useTemporaryDirectories();
 const require = createRequire(import.meta.url);
@@ -177,16 +195,18 @@ type Note = 'request from "./not-an-import"';`,
     expect(schema._zod.bag.validator).toBeUndefined();
   });
 
-  it("stamps the compiler versions that drive vendored output", async () => {
+  it("stamps the tool and bundled server versions that drive vendored output", async () => {
     const stamp = JSON.parse(
       await readFile(join(COMPILED_VENDOR_ROOT, ".vendor-stamp.json"), "utf8"),
-    ) as { toolVersions?: { rolldown?: string; typescript?: string } };
-    const nitroRequire = createRequire(require.resolve("nitro/package.json"));
-    const rolldownPackage = nitroRequire("rolldown/package.json") as { version: string };
-    const typescriptPackage = require("typescript/package.json") as { version: string };
+    ) as { toolVersions?: Record<string, string> };
+    const envRunnerEntry = require.resolve("env-runner");
 
-    expect(stamp.toolVersions?.rolldown).toBe(rolldownPackage.version);
-    expect(stamp.toolVersions?.typescript).toBe(typescriptPackage.version);
+    expect(stamp.toolVersions).toEqual({
+      "env-runner>crossws": installedVersion("crossws", envRunnerEntry),
+      "env-runner>srvx": installedVersion("srvx", envRunnerEntry),
+      rolldown: (require("rolldown/package.json") as { version: string }).version,
+      typescript: (require("typescript/package.json") as { version: string }).version,
+    });
   });
 
   it("copies generated catalog declarations and fingerprints their sources", async () => {

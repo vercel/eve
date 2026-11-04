@@ -354,6 +354,7 @@ describe("compileAgentManifest source graph", () => {
   it.each<WebSearchToolInput>([
     { provider: "parallel" },
     { provider: "browserbase" },
+    { provider: "tako" },
     { fallback: "exa", provider: "native" },
   ])(
     "preserves the %o search selection through serialization and runtime preparation",

@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { resolvePackageRoot } from "#internal/application/package.js";
 import type { ExternalsPolicy } from "#internal/nitro/host/externals-policy.js";
 import { createHostedGraphPlugin } from "#internal/nitro/host/hosted-graph-plugin.js";
 import { bundleThroughPlugins } from "#internal/testing/rolldown-plugin-harness.js";
@@ -61,7 +62,7 @@ async function checkOutput(input: {
   }
 
   const plugin = checkingPlugin(["pg"]);
-  await plugin?.writeBundle?.(
+  await plugin.writeBundle?.(
     { dir: serverDir },
     {
       "_chunks/db.mjs": {
@@ -69,8 +70,6 @@ async function checkOutput(input: {
         dynamicImports: [],
         fileName: "_chunks/db.mjs",
         imports: ["pg/lib/client"],
-        isEntry: false,
-        name: "chunk",
         type: "chunk",
       },
       "index.mjs": {
@@ -78,8 +77,6 @@ async function checkOutput(input: {
         dynamicImports: ["pg"],
         fileName: "index.mjs",
         imports: ["_chunks/db.mjs", "zod"],
-        isEntry: false,
-        name: "chunk",
         type: "chunk",
       },
     },
@@ -96,7 +93,7 @@ async function checkInstalledPackage(files: Readonly<Record<string, string>>) {
   for (const [path, contents] of Object.entries(files)) {
     await writeFile(join(packageDir, path), contents);
   }
-  await checkingPlugin(["pg"])?.writeBundle?.(
+  await checkingPlugin(["pg"]).writeBundle?.(
     { dir: serverDir },
     {
       "index.mjs": {
@@ -104,8 +101,6 @@ async function checkInstalledPackage(files: Readonly<Record<string, string>>) {
         dynamicImports: [],
         fileName: "index.mjs",
         imports: ["pg"],
-        isEntry: false,
-        name: "chunk",
         type: "chunk",
       },
     },
@@ -170,23 +165,20 @@ describe("hosted graph output check", () => {
       }),
     ).rejects.toThrow(missing("pg", "index.mjs"));
   });
-
-  it("adds no plugin when the policy needs no substitutions or checks", () => {
-    expect(createHostedGraphPlugin({ appRoot: APP_ROOT, externals: NO_EXTERNALS })).toBeNull();
-  });
 });
 
 function hostedGraph(externals: Partial<ExternalsPolicy>) {
-  const plugin = createHostedGraphPlugin({
+  return createHostedGraphPlugin({
     appRoot: APP_ROOT,
     externals: { ...NO_EXTERNALS, ...externals },
   });
-  if (plugin === null) throw new Error("Expected a hosted graph plugin.");
-  return plugin;
 }
 
 /** The bundled code of a module that re-exports `specifier` through the plugin. */
-async function bundleImport(plugin: object, specifier: string): Promise<string> {
+async function bundleImport(
+  plugin: ReturnType<typeof hostedGraph>,
+  specifier: string,
+): Promise<string> {
   return await bundleThroughPlugins({ plugins: [plugin], reexports: [specifier] });
 }
 
@@ -245,6 +237,31 @@ describe("hosted graph substitutions", () => {
     expect(code).toContain('import "unresolved:just-bash/browser";');
     expect(code).toContain('import "unresolved:zod";');
   });
+
+  it("stubs eve's own Rolldown import in production and leaves other importers alone", async () => {
+    const eveModule = join(resolvePackageRoot(), "src", "internal", "bundler", "probe.js");
+    const appModule = join(APP_ROOT, "agent", "tools", "probe.js");
+    const lazyRolldown = (name: string) =>
+      `export const ${name} = () => import("rolldown/parseAst");\n`;
+
+    const code = await bundleThroughPlugins({
+      files: { [appModule]: lazyRolldown("loadForApp"), [eveModule]: lazyRolldown("loadForEve") },
+      plugins: [hostedGraph({ pruneDevelopmentRuntime: true })],
+      reexports: [eveModule, appModule],
+    });
+
+    expect(code).toContain("Rolldown is not part of hosted eve servers");
+    expect(code).toContain('import("unresolved:rolldown/parseAst")');
+  });
+
+  it.each(["nitro/storage", "nitro/kv", "nitro/database"])(
+    "rejects %s, which would make Nitro install a storage or database driver",
+    async (specifier) => {
+      await expect(bundleImport(hostedGraph({}), specifier)).rejects.toThrow(
+        `"${specifier}" is not available in eve agents`,
+      );
+    },
+  );
 
   it("applies only the substitutions the policy enables", async () => {
     const plugin = hostedGraph({ untracedExternals: ["just-bash"] });

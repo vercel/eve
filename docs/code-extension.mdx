@@ -32,7 +32,7 @@ The line on each correctness row shows the 95% interval. When the lines of two h
 <summary>How the results update</summary>
 
 1. The `eve-code` workflow runs on `main` with the `deepswe-lean` dataset every Monday at 06:00 UTC. A maintainer can also start it manually on `main`.
-2. The workflow runs eve-code, opencode, and pi on each benchmark model, one model at a time. It saves each complete result in the eve-bench result store.
+2. The workflow runs eve-code, opencode, pi, and [fx](https://fx.sh) on each benchmark model, one model at a time. It saves each complete result in the eve-bench result store.
 3. The workflow opens a pull request with a summary of the default Anthropic model's result. This page shows only that model.
 4. After a maintainer approves and merges the pull request, the next docs deployment shows the new results.
 

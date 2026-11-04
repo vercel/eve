@@ -1,8 +1,13 @@
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 
-import { findAuthoredPackageRoot, isNodeModulesPath } from "#internal/authored-package-boundary.js";
+import type { Plugin } from "rolldown";
+
+import {
+  findAuthoredPackageRoot,
+  isAuthoredSourcePath,
+} from "#internal/authored-package-boundary.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 const AUTHORED_ASSET_CODE_EXTENSIONS = [
@@ -36,7 +41,7 @@ export function createAuthoredAssetImportPlugin(input: {
    * installed dependency imports stay with the host bundler.
    */
   readonly authoredSourceOnly?: boolean;
-}) {
+}): Plugin {
   const packageRoot = toCanonicalPath(input.packageRoot);
   // Built here rather than at module scope: runtime modules import this file.
   const loadFilter = [
@@ -46,7 +51,7 @@ export function createAuthoredAssetImportPlugin(input: {
     ),
   ];
   const handles = (path: string): boolean =>
-    input.authoredSourceOnly !== true || (isAbsolute(path) && !isNodeModulesPath(path));
+    input.authoredSourceOnly !== true || isAuthoredSourcePath(path);
   return {
     name: "eve-authored-asset-import",
     resolveId: {
@@ -62,6 +67,10 @@ export function createAuthoredAssetImportPlugin(input: {
 
         const { path, suffix } = splitImportSuffix(source);
         const resolvedPath = isAbsolute(path) ? path : resolve(dirname(importer), path);
+        // A dotted code import, such as `./schema.v1` or a `./helpers.v2/` index, is no asset.
+        if (!isFile(resolvedPath)) {
+          return undefined;
+        }
         const canonicalPath = toCanonicalPath(resolvedPath);
         const importerPackageRoot =
           findAuthoredPackageRoot(dirname(toCanonicalPath(importer))) ?? packageRoot;
@@ -112,6 +121,15 @@ export function createAuthoredAssetImportPlugin(input: {
       },
     },
   };
+}
+
+/** Unreadable paths, such as one that is too long, fall through to the next resolver. */
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function toCanonicalPath(path: string): string {

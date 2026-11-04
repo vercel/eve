@@ -605,6 +605,49 @@ describe("buildToolSet", () => {
     expect(direct.web_search).toMatchObject({ id: "openai.web_search" });
   });
 
+  it("injects Tako search with its Gateway schemas", async () => {
+    const tools: HarnessToolMap = new Map([
+      [
+        "web_search",
+        {
+          behavior: {
+            availability: [],
+            handling: { kind: "provider-tool", provider: "tako" },
+          },
+          description: "Search.",
+          inputSchema: jsonSchema({}),
+          name: "web_search",
+        },
+      ],
+    ]);
+    const result = await buildToolSetWithProviderTools({
+      profile: resolveModelProfile("openai/gpt-5.4"),
+      describe: describeTool,
+      tools,
+    });
+    const search = result.web_search!;
+    expect(search).toMatchObject({ type: "provider", id: "gateway.tako_search", args: {} });
+    expect(search.execute).toBeUndefined();
+    await expect(
+      asSchema(search.outputSchema!).validate?.({
+        request_id: "search-1",
+        cards: [
+          {
+            title: "Intel Revenue",
+            webpage_url: "https://tako.com/card/abc/",
+            content: {
+              content_format: "csv",
+              data: "date,revenue\n2025-12-31,13.7",
+              total_rows: 1,
+              truncated: false,
+            },
+          },
+        ],
+        web_results: [{ title: "Example Domain", url: "https://example.com" }],
+      }),
+    ).resolves.toMatchObject({ success: true });
+  });
+
   it("omits provider-managed web_search when no provider backend is available", async () => {
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       [

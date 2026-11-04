@@ -334,28 +334,33 @@ export const result = true;
     expect(moduleNamespace.result).toBe("local-dotted-basename");
   });
 
-  it("resolves extensionless relative directory imports to index modules", async () => {
-    const app = await createApp({
-      files: {
-        "agent/tools/use_helpers.ts": [
-          'import { helperValue } from "./helpers";',
-          "",
-          "export const result = helperValue;",
-          "",
-        ].join("\n"),
-        "agent/tools/helpers/index.ts": ['export const helperValue = "directory-index";', ""].join(
-          "\n",
-        ),
-      },
-      name: "directory-index-import",
-    });
+  // A dotted directory name looks like an asset import until its index resolves.
+  it.each(["helpers", "helpers.v2"])(
+    "resolves extensionless relative directory imports to index modules (%s)",
+    async (directory) => {
+      const app = await createApp({
+        files: {
+          "agent/tools/use_helpers.ts": [
+            `import { helperValue } from "./${directory}";`,
+            "",
+            "export const result = helperValue;",
+            "",
+          ].join("\n"),
+          [`agent/tools/${directory}/index.ts`]: [
+            'export const helperValue = "directory-index";',
+            "",
+          ].join("\n"),
+        },
+        name: "directory-index-import",
+      });
 
-    const moduleNamespace = await loadAuthoredModuleNamespace(
-      join(app.appRoot, "agent", "tools", "use_helpers.ts"),
-    );
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(app.appRoot, "agent", "tools", "use_helpers.ts"),
+      );
 
-    expect(moduleNamespace.result).toBe("directory-index");
-  });
+      expect(moduleNamespace.result).toBe("directory-index");
+    },
+  );
 
   it("resolves extensionless CommonJS requires with dotted JavaScript basenames", async () => {
     const app = await createApp({
@@ -1605,34 +1610,37 @@ export const result = true;
     });
   });
 
-  it("rejects asset imports outside the authored package", async () => {
-    const app = await createApp({
-      files: {
-        "agent/tools/outside_asset.ts": `export default {};
+  it.each(["?raw", ""])(
+    "rejects asset imports outside the authored package (%j)",
+    async (suffix) => {
+      const app = await createApp({
+        files: {
+          "agent/tools/outside_asset.ts": `export default {};
 `,
-      },
-      name: "outside-asset-import",
-    });
-    const outsideFileName = `${basename(app.appRoot)}.txt`;
-    const outsidePath = join(app.appRoot, "..", outsideFileName);
-    const modulePath = join(app.appRoot, "agent", "tools", "outside_asset.ts");
+        },
+        name: "outside-asset-import",
+      });
+      const outsideFileName = `${basename(app.appRoot)}.txt`;
+      const outsidePath = join(app.appRoot, "..", outsideFileName);
+      const modulePath = join(app.appRoot, "agent", "tools", "outside_asset.ts");
 
-    try {
-      await Promise.all([
-        writeFile(outsidePath, "outside\n"),
-        writeFile(
-          modulePath,
-          `import value from "../../../${outsideFileName}?raw";\nexport default value;\n`,
-        ),
-      ]);
+      try {
+        await Promise.all([
+          writeFile(outsidePath, "outside\n"),
+          writeFile(
+            modulePath,
+            `import value from "../../../${outsideFileName}${suffix}";\nexport default value;\n`,
+          ),
+        ]);
 
-      await expect(loadAuthoredModuleNamespace(modulePath)).rejects.toThrow(
-        /resolves outside package root/,
-      );
-    } finally {
-      await rm(outsidePath, { force: true });
-    }
-  });
+        await expect(loadAuthoredModuleNamespace(modulePath)).rejects.toThrow(
+          /resolves outside package root/,
+        );
+      } finally {
+        await rm(outsidePath, { force: true });
+      }
+    },
+  );
 
   it("loads ?raw imports inside a symlinked workspace package", async () => {
     const app = await createApp({

@@ -11,6 +11,7 @@ import { turnInputText } from "#definitions/turn.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";
 import type {
+  AgentModelOptionsDefinition,
   PublicAgentDynamicModelResult,
   PublicAgentModelSelectionDefinition,
   PublicAgentStaticModelDefinition,
@@ -29,6 +30,8 @@ export interface AutoConfig<
 > {
   /** Decision model instance or ID. Defaults to TypeSafe Jev through AI SDK model resolution. */
   readonly model?: DecisionModel;
+  /** Provider options for the decision call, not the selected model. */
+  readonly modelOptions?: Pick<AgentModelOptionsDefinition, "providerOptions">;
   /** Model selection to use when decision fails. */
   readonly fallback?: AutoModelSelection;
   readonly options: T;
@@ -212,6 +215,7 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
           },
         },
         signal: abortSignal,
+        providerOptions: config.modelOptions?.providerOptions,
       });
       abortSignal.throwIfAborted();
       return result.answers.route.choice;
