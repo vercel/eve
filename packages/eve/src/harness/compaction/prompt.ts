@@ -234,14 +234,17 @@ function renderToolResultOutput(value: unknown, limit: number): string {
 
 /**
  * The text a tool-result output is measured and clipped by, in history
- * capping and in the summarizer transcript alike: a text output is its
- * value, any other output its JSON. Sharing it keeps a capped history
- * result whole when the summarizer renders it.
+ * capping and in the summarizer transcript alike: a text or error-text
+ * output is its value, any other output its JSON. Sharing it keeps a capped
+ * history result whole when the summarizer renders it.
  */
 export function serializeToolResultOutput(output: unknown): string {
   if (output !== null && typeof output === "object") {
     const candidate = output as { readonly type?: unknown; readonly value?: unknown };
-    if (candidate.type === "text" && typeof candidate.value === "string") {
+    if (
+      (candidate.type === "text" || candidate.type === "error-text") &&
+      typeof candidate.value === "string"
+    ) {
       return candidate.value;
     }
   }

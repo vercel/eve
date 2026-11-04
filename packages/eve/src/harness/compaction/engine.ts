@@ -446,7 +446,8 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
       return {
         ...part,
         output: {
-          type: "text" as const,
+          // A capped failure stays a failure for the model.
+          type: output.type === "error-text" ? ("error-text" as const) : ("text" as const),
           value: `${CAPPED_RESULT_PREFIX}${clipMiddleUtf16Safe(serialized, TRANSCRIPT_PAYLOAD_LIMIT - CAPPED_RESULT_PREFIX.length)}`,
         },
       };

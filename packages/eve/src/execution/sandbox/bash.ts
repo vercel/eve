@@ -25,11 +25,12 @@ const JOB_ROOT = "/tmp/.eve/jobs";
 
 const MAX_LOG_COMMAND_LENGTH = 240;
 
-// A finished command keeps its job directory when either stream may have been
-// truncated, so the truncation note can point at the full output. The
-// thresholds sit below the output limits, so every truncated stream is kept.
-const KEEP_OUTPUT_BYTES = MAX_OUTPUT_BYTES / 2;
-const KEEP_OUTPUT_LINES = MAX_OUTPUT_LINES / 2;
+// A finished command keeps its job directory when a stream reaches the output
+// limits, so the truncation note can point at the full output. `truncateTail`
+// counts the empty line after a final newline and a newline byte per line,
+// so a stream truncates once `wc` reaches either limit.
+const KEEP_OUTPUT_BYTES = MAX_OUTPUT_BYTES - 1;
+const KEEP_OUTPUT_LINES = MAX_OUTPUT_LINES - 1;
 
 // The launcher runs the command in its own process group with its output in
 // files, so the command can outlive this call. If the command finishes first,

@@ -100,7 +100,10 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
 
       return await withFileMutationQueue(`${ctx.session.id}\0${absolutePath}`, async () => {
         throwIfAborted();
-        const buffer = await sandbox.readBinaryFile({ path: absolutePath });
+        const [buffer, mode] = await Promise.all([
+          sandbox.readBinaryFile({ path: absolutePath }),
+          readFileMode(sandbox, absolutePath),
+        ]);
         throwIfAborted();
         if (buffer === null) {
           throw new Error(`Could not edit file: ${path}. Error code: ENOENT.`);
@@ -114,8 +117,11 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
 
         const written = restoreLineEndings(newContent, originalEnding);
         await sandbox.writeTextFile({ path: absolutePath, content: bom + written });
+        if (mode !== undefined && mode !== DEFAULT_FILE_MODE) {
+          await restoreFileMode(sandbox, absolutePath, mode);
+        }
         // readTextFile drops the BOM, so write_file compares against the text without it.
-        refreshReadFileStamp(absolutePath, written);
+        refreshReadFileStamp(absolutePath, content, written);
         return { path, replacements: edits.length };
       });
     },
@@ -125,6 +131,33 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
 );
 
 export default editFile;
+
+// Some sandboxes, such as Vercel's, give every written file this mode, so an
+// edit restores any other mode the file had, like an executable bit.
+const DEFAULT_FILE_MODE = "644";
+
+async function readFileMode(sandbox: SandboxSession, path: string): Promise<string | undefined> {
+  try {
+    const result = await sandbox.run({ command: `stat -c %a -- ${quoteShell(path)}` });
+    const mode = result.stdout.trim();
+    return result.exitCode === 0 && /^[0-7]{3,4}$/u.test(mode) ? mode : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Best effort: the edit already landed, so a failed chmod must not report it as failed.
+async function restoreFileMode(sandbox: SandboxSession, path: string, mode: string): Promise<void> {
+  try {
+    await sandbox.run({ command: `chmod ${mode} -- ${quoteShell(path)}` });
+  } catch {
+    // The file keeps the sandbox's default mode.
+  }
+}
+
+function quoteShell(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
 
 // Keeps a leading BOM as U+FEFF so it can be split off and written back.
 const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });

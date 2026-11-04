@@ -401,7 +401,9 @@ function toolExchange(input: {
 }
 
 function toolResultExchange(
-  output: { type: "json"; value: { content: string } } | { type: "text"; value: string },
+  output:
+    | { type: "json"; value: { content: string } }
+    | { type: "text" | "error-text"; value: string },
 ): [ModelMessage, ModelMessage] {
   return [
     {
@@ -418,7 +420,7 @@ function toolResultExchange(
 function toolResultValue(message: ModelMessage | undefined): string {
   const part = Array.isArray(message?.content) ? message.content[0] : undefined;
   const output = part?.type === "tool-result" ? part.output : undefined;
-  return output?.type === "text" ? output.value : "";
+  return output?.type === "text" || output?.type === "error-text" ? output.value : "";
 }
 
 function isCheckpointHead(messages: readonly ModelMessage[]): boolean {
@@ -694,6 +696,24 @@ describe("compactMessages: tool-result cap heuristic", () => {
     expect(value).toContain("chars omitted");
     expect(value).toContain(String.raw`FAIL src/auth.test.ts\nTest Files  1 failed`);
     expect(value).toContain('"exitCode":1,"status":"completed"}');
+  });
+
+  it("keeps a large failed bash result a plain-text failure when capping", async () => {
+    const value = `${"✓ passing test\n".repeat(300)}FAIL src/auth.test.ts\n\n[exit code: 1]`;
+    const messages = [
+      user("run the tests"),
+      ...toolResultExchange({ type: "error-text", value }),
+      user("what failed?"),
+    ];
+
+    const { result } = await compact(messages, { recentWindowSize: 1 });
+
+    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
+    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
+    expect(output?.type).toBe("error-text");
+    const capped = toolResultValue(result[2]);
+    expect(capped.startsWith("[Truncated by eve")).toBe(true);
+    expect(capped.endsWith("FAIL src/auth.test.ts\n\n[exit code: 1]")).toBe(true);
   });
 
   it.each([

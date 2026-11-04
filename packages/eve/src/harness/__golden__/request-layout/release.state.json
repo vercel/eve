@@ -190,7 +190,7 @@
         "compaction": {
           "lastKnownInputTokens": 1,
           "lastKnownPromptMessageCount": 6,
-          "requestEnvelopeTokens": 2576
+          "requestEnvelopeTokens": 2565
         },
         "continuationToken": "http:layout-release",
         "sandboxState": {

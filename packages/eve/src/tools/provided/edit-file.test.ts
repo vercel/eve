@@ -13,7 +13,11 @@ import { editFile, type EditFileToolEdit, type EditFileToolOutput } from "./edit
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
 
-function createSandbox(files: Record<string, string | Uint8Array>) {
+function createSandbox(
+  files: Record<string, string | Uint8Array>,
+  options: { mode?: string } = {},
+) {
+  const commands: string[] = [];
   const contents = new Map(
     Object.entries(files).map(([path, file]) => [
       path,
@@ -30,7 +34,15 @@ function createSandbox(files: Record<string, string | Uint8Array>) {
         await Promise.resolve();
         contents.set(path, encoder.encode(content));
       },
-      async run() {
+      async run({ command }: { command: string }) {
+        commands.push(command);
+        if (command.startsWith("stat ")) {
+          return {
+            exitCode: options.mode === undefined ? 1 : 0,
+            stdout: `${options.mode ?? ""}\n`,
+            stderr: "",
+          };
+        }
         return { exitCode: 0, stdout: "/home/alice\n", stderr: "" };
       },
     };
@@ -40,6 +52,7 @@ function createSandbox(files: Record<string, string | Uint8Array>) {
     session: { id: "session-1" } as ToolContext["session"],
   } as ToolContext;
   return {
+    commands,
     read: (path: string) => decoder.decode(contents.get(path)),
     bytes: (path: string) => contents.get(path),
     edit: async (path: string, edits: EditFileToolEdit[]) =>
@@ -208,5 +221,43 @@ describe("edit_file", () => {
     });
 
     expect(sandbox.files.get(path)).toBe("final\n");
+  });
+
+  it("restores a file mode other than the sandbox default after writing", async () => {
+    const executable = createSandbox({ "/workspace/bin/run": "echo old\n" }, { mode: "755" });
+    const regular = createSandbox({ "/workspace/notes.md": "old\n" }, { mode: "644" });
+
+    await executable.edit("bin/run", [{ oldText: "old", newText: "new" }]);
+    await regular.edit("notes.md", [{ oldText: "old", newText: "new" }]);
+
+    expect(executable.commands.at(-1)).toBe("chmod 755 -- '/workspace/bin/run'");
+    expect(regular.commands.some((command) => command.startsWith("chmod"))).toBe(false);
+  });
+
+  it("still rejects write_file after a change made since read_file", async () => {
+    const sandbox = mockSandbox({ initialFiles: { "notes.md": "draft\n" } });
+    const path = sandbox.session.resolvePath("notes.md");
+    const ctx = {
+      abortSignal: new AbortController().signal,
+      getSandbox: async () => sandbox.session as SandboxSession,
+      session: { id: "session-1" } as ToolContext["session"],
+    } as ToolContext;
+
+    const write = contextStorage.run(new ContextContainer(), async () => {
+      await executeReadFileOnSandbox(sandbox.session, { filePath: "notes.md" });
+      // A formatter rewrites the file after the read.
+      await sandbox.session.writeTextFile({ path, content: "draft\nformatted\n" });
+      await editFile.execute(
+        { path: "notes.md", edits: [{ oldText: "draft", newText: "plan" }] },
+        ctx,
+      );
+      await executeWriteFileOnSandbox(sandbox.session, {
+        content: "final\n",
+        filePath: "notes.md",
+      });
+    });
+
+    await expect(write).rejects.toThrow("modified since it was last read");
+    expect(sandbox.files.get(path)).toBe("plan\nformatted\n");
   });
 });
