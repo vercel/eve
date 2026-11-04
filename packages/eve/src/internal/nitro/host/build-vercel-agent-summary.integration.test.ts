@@ -46,4 +46,23 @@ export default disableInstrumentation();
     const summary = JSON.parse(await readFile(outputPath, "utf8")) as { agentRuns?: unknown };
     expect(summary.agentRuns).toEqual({ enabled });
   });
+
+  it("omits agentRuns when agent-runs.ts cannot load at build time", async () => {
+    const { agentRoot, appRoot } = await createAppRoot("eve-agent-runs-summary-", {
+      files: {
+        "agent/instrumentation/agent-runs.ts": `throw new Error("runtime-only configuration");\n`,
+      },
+    });
+    const { manifest } = await compileFromMemory({
+      agentRoot,
+      appRoot,
+      model: "openai/gpt-5.4",
+    });
+    const outputPath = join(appRoot, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH);
+
+    await emitVercelAgentSummary({ appRoot, manifest, outputPath });
+
+    const summary = JSON.parse(await readFile(outputPath, "utf8")) as Record<string, unknown>;
+    expect(summary).not.toHaveProperty("agentRuns");
+  });
 });

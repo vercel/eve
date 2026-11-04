@@ -39,13 +39,13 @@ import {
  * write-out side.
  */
 export function buildVercelAgentSummary(input: {
-  agentRuns: NonNullable<VercelEveAgentSummary["agentRuns"]>;
+  agentRuns: VercelEveAgentSummary["agentRuns"];
   manifest: CompiledAgentManifest;
   generatorVersion?: string;
 }): VercelEveAgentSummary {
   const { manifest } = input;
 
-  return {
+  const summary: VercelEveAgentSummary = {
     kind: VERCEL_EVE_AGENT_SUMMARY_KIND,
     schemaVersion: VERCEL_EVE_AGENT_SUMMARY_VERSION,
     generatorVersion: input.generatorVersion ?? resolveInstalledPackageInfo().version,
@@ -78,8 +78,8 @@ export function buildVercelAgentSummary(input: {
       errors: manifest.diagnosticsSummary.errors,
       warnings: manifest.diagnosticsSummary.warnings,
     },
-    agentRuns: input.agentRuns,
   };
+  return input.agentRuns === undefined ? summary : { ...summary, agentRuns: input.agentRuns };
 }
 
 /**
@@ -88,22 +88,32 @@ export function buildVercelAgentSummary(input: {
  *
  * The manifest does not record instrumentation, so the slot module is
  * evaluated here the way the compiler evaluates other authored definitions.
+ * The summary is advisory, so a module that cannot load at build time (for
+ * example, one that reads runtime-only environment) omits the field instead
+ * of failing the build; Vercel treats an absent field as unknown.
  */
 async function resolveAgentRunsSummary(input: {
   appRoot: string;
   manifest: CompiledAgentManifest;
-}): Promise<NonNullable<VercelEveAgentSummary["agentRuns"]>> {
+}): Promise<VercelEveAgentSummary["agentRuns"]> {
   const modulePath = resolveInstrumentationLayout({ agentRoot: input.manifest.agentRoot })
     .modulePathsBySlot[AGENT_RUNS_INSTRUMENTATION_SLOT];
   if (modulePath === undefined) {
     return { enabled: true };
   }
 
-  const namespace = await loadAuthoredModuleNamespace(modulePath, {
-    appRoot: input.appRoot,
-    externalDependencies: input.manifest.config.build?.externalDependencies,
-  });
-  return { enabled: !isInstrumentationDisabled(namespace.default) };
+  try {
+    const namespace = await loadAuthoredModuleNamespace(modulePath, {
+      appRoot: input.appRoot,
+      externalDependencies: input.manifest.config.build?.externalDependencies,
+    });
+    return { enabled: !isInstrumentationDisabled(namespace.default) };
+  } catch (error) {
+    console.warn(
+      `[eve] Could not load ${modulePath} while writing the agent summary, so the summary does not record whether Agent Runs is enabled. Vercel will not turn on default tracing for this deployment. ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return undefined;
+  }
 }
 
 /**
