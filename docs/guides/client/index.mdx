@@ -140,7 +140,7 @@ Per-request headers override client-level headers with the same name. For exampl
 
 Set `EVE_INBOX_HANDLE_SECRET` to the same server-only random secret, at least 32 characters, on every deployment that shares sessions. Omit it to disable handles. The server verifies a handle's signature before using it. After a secret rotation, the server ignores old handles and looks the session up as usual.
 
-Handles also require a Workflow SDK that exports `parseHookResumeHandle`, a world adapter that declares `resolvedHookResume`, and a backend that supports resolved hook resumes. Without all three, the server neither issues nor uses handles, even with the secret set.
+eve validates handles with the bundled Workflow SDK's hook schema. Reusing a handle also requires a world adapter that declares `deploymentAffinity` and `resolvedHookResume`, and a backend that supports guarded, deduplicated hook resumes. Without that support, sends use the normal lookup path even with the secret set.
 
 Handles contain no user metadata, short-lived runtime access, or trace data. The signature proves a handle is authentic but doesn't hide its contents.
 
