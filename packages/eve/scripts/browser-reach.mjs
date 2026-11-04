@@ -31,12 +31,14 @@ const option = (name, fallback) => {
 
 /**
  * The Workflow-free entries: the session core's host-neutral roots, which every host runs a
- * session through. The session loop, the turn step it runs, and a session's first-owner boot.
+ * session through (the session loop, the turn step it runs, and a session's first-owner boot),
+ * and the in-process host, which runs sessions through them without Workflow.
  */
 const ENTRIES = option("--entry", undefined)?.split(",") ?? [
   "src/execution/session/program.ts",
   "src/execution/session/turn-step.ts",
   "src/execution/session/owner-boot.ts",
+  "src/execution/in-process/runtime.ts",
 ];
 
 /**
