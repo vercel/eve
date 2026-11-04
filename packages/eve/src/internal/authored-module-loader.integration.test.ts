@@ -1028,6 +1028,48 @@ export const result = true;
     }
   });
 
+  it("keeps packages that reach a host-traced dependency in the generated bundle", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_echo.ts": [
+          'import { result } from "gadget-extension/extension/tools/echo.ts";',
+          "",
+          "export const toolResult = result;",
+          "",
+        ].join("\n"),
+      },
+      name: "store-sibling-traced",
+    });
+    const storeRoot = await mkdtemp(join(tmpdir(), "eve-store-sibling-traced-"));
+
+    try {
+      await createStoreSiblingInstall({ appRoot: app.appRoot, storeRoot });
+      await writeFile(
+        join(storeRoot, "node_modules", "gadget-extension", "package.json"),
+        JSON.stringify({
+          dependencies: { "store-sibling": "1.0.0" },
+          name: "gadget-extension",
+          type: "module",
+        }),
+      );
+      const entry = join(app.appRoot, "agent", "tools", "use_echo.ts");
+
+      const traced = await bundleAuthoredModuleForGeneration(entry, {
+        tracedDependencies: ["store-sibling*"],
+      });
+      expect(traced).toContain("store-sibling-value");
+      expect(traced).not.toContain("node_modules/gadget-extension");
+
+      const untraced = await bundleAuthoredModuleForGeneration(entry, {
+        tracedDependencies: ["unrelated-package"],
+      });
+      expect(untraced).not.toContain("store-sibling-value");
+      expect(untraced).toContain("node_modules/gadget-extension");
+    } finally {
+      await rm(storeRoot, { force: true, recursive: true });
+    }
+  });
+
   it("resolves store siblings for generation bundles entered at node_modules paths", async () => {
     const app = await createApp({
       files: {

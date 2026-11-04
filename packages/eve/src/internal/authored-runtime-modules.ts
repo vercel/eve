@@ -4,6 +4,7 @@ import {
   bundleAuthoredModuleForGeneration,
   bundleAuthoredModuleMapForGeneration,
 } from "#internal/authored-module-loader.js";
+import { collectHostTracedDependencies } from "#internal/host-traced-dependencies.js";
 import { resolveInstrumentationLayout } from "#internal/instrumentation-layout.js";
 import { mapConcurrent } from "#shared/map-concurrent.js";
 
@@ -35,8 +36,12 @@ export async function prepareAuthoredRuntimeModules(input: {
   } = await bundleAuthoredModuleMapForGeneration(input);
   const layout = resolveInstrumentationLayout({ agentRoot: input.manifest.agentRoot });
   const externalDependencies = input.manifest.config.build?.externalDependencies ?? [];
+  const tracedDependencies = collectHostTracedDependencies(input.manifest);
   const bundleInstrumentationModule = async (sourcePath: string): Promise<string> =>
-    await bundleAuthoredModuleForGeneration(sourcePath, { externalDependencies });
+    await bundleAuthoredModuleForGeneration(sourcePath, {
+      externalDependencies,
+      tracedDependencies,
+    });
   const moduleCodeBySlot = Object.fromEntries(
     await mapConcurrent(Object.entries(layout.modulePathsBySlot), async ([slot, sourcePath]) => [
       slot,

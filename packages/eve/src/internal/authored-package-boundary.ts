@@ -11,6 +11,7 @@ import {
   resolvePackageRoot,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
+import { matchesHostTracedDependency } from "#internal/host-traced-dependencies.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 export const RESOLVE_EXTENSIONS = [
@@ -35,7 +36,11 @@ export function createGenerationPackageBoundaryPlugin(input: {
   readonly packageRoot: string;
   readonly extensionSpecifiers?: ReadonlySet<string>;
   readonly resolveExternalPaths?: boolean;
+  /** The host's traced dependencies; see `collectHostTracedDependencies`. */
+  readonly tracedDependencies?: readonly string[];
 }): Plugin {
+  const tracedDependencies = input.tracedDependencies ?? [];
+  const dependencyClosures = new Map<string, ReadonlySet<string>>();
   return {
     name: "eve-generation-package-boundary",
     async resolveId(source, importer, options) {
@@ -87,6 +92,9 @@ export function createGenerationPackageBoundaryPlugin(input: {
       // include each package once. The resolved path, not the bare specifier, keeps the import
       // resolvable from the generated file, which may sit outside the importer's package scope.
       // eve's own modules that reach here, such as the self-modification mounts, stay bundled.
+      // So does any package that reaches a host-traced dependency: the host externalizes those by
+      // name wherever it sees them, so handing it such a package would trace a second copy, such
+      // as an extension-owned dependency beside the version another package resolves.
       const resolved = await this.resolve(source, importer, {
         kind: options.kind,
         skipSelf: true,
@@ -96,7 +104,8 @@ export function createGenerationPackageBoundaryPlugin(input: {
         typeof resolved.id === "string" &&
         !resolved.id.startsWith("\0") &&
         isNodeModulesPath(resolved.id) &&
-        !isFrameworkPackagePath(resolved.id)
+        !isFrameworkPackagePath(resolved.id) &&
+        !reachesHostTracedDependency(resolved.id, tracedDependencies, dependencyClosures)
       ) {
         return {
           external: true,
@@ -353,6 +362,84 @@ function nearestPackageName(filePath: string): string | undefined {
       : undefined;
   } catch {
     return undefined;
+  }
+}
+
+function reachesHostTracedDependency(
+  resolvedId: string,
+  tracedDependencies: readonly string[],
+  dependencyClosures: Map<string, ReadonlySet<string>>,
+): boolean {
+  if (tracedDependencies.length === 0) return false;
+  const packageRoot = installedPackageRoot(resolvedId);
+  if (packageRoot === undefined) return true;
+  let closure = dependencyClosures.get(packageRoot);
+  if (closure === undefined) {
+    closure = installedDependencyClosure(packageRoot);
+    dependencyClosures.set(packageRoot, closure);
+  }
+  return [...closure].some((name) => matchesHostTracedDependency(name, tracedDependencies));
+}
+
+/** Names of the package at `packageRoot` and every package it can load, as installed on disk. */
+function installedDependencyClosure(packageRoot: string): ReadonlySet<string> {
+  const names = new Set<string>();
+  const visitedRoots = new Set<string>();
+  const pendingRoots = [packageRoot];
+  for (let root = pendingRoots.pop(); root !== undefined; root = pendingRoots.pop()) {
+    if (visitedRoots.has(root)) continue;
+    visitedRoots.add(root);
+    const manifest = readPackageManifest(root);
+    if (manifest.name !== undefined) names.add(manifest.name);
+    for (const dependency of manifest.dependencies) {
+      names.add(dependency);
+      const dependencyRoot = findInstalledDependencyRoot(dependency, root);
+      if (dependencyRoot !== undefined) pendingRoots.push(dependencyRoot);
+    }
+  }
+  return names;
+}
+
+function readPackageManifest(packageRoot: string): {
+  readonly name: string | undefined;
+  readonly dependencies: readonly string[];
+} {
+  try {
+    const pkg = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const dependencyNames = ["dependencies", "optionalDependencies", "peerDependencies"].flatMap(
+      (field) =>
+        pkg[field] !== null && typeof pkg[field] === "object"
+          ? Object.keys(pkg[field] as Record<string, unknown>)
+          : [],
+    );
+    return {
+      name: typeof pkg.name === "string" ? pkg.name : undefined,
+      dependencies: [...new Set(dependencyNames)],
+    };
+  } catch {
+    return { name: undefined, dependencies: [] };
+  }
+}
+
+function findInstalledDependencyRoot(dependency: string, fromRoot: string): string | undefined {
+  const searchPaths = createRequire(join(fromRoot, "package.json")).resolve.paths(dependency) ?? [];
+  const packageJsonPath = searchPaths
+    .map((searchPath) => join(searchPath, dependency, "package.json"))
+    .find(existsSync);
+  return packageJsonPath === undefined ? undefined : toCanonicalPath(dirname(packageJsonPath));
+}
+
+/** The nearest enclosing directory whose package.json names a package, skipping nested stubs. */
+function installedPackageRoot(filePath: string): string | undefined {
+  let directory = dirname(toCanonicalPath(filePath));
+  while (true) {
+    if (readPackageManifest(directory).name !== undefined) return directory;
+    const parent = dirname(directory);
+    if (parent === directory) return undefined;
+    directory = parent;
   }
 }
 
