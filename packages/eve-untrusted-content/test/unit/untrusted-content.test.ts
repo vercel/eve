@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { ApprovalStatus } from "eve/tools/approval";
+
 import {
   decide,
   expose,
@@ -12,6 +14,8 @@ import {
   settled,
   type Exposure,
 } from "../../extension/lib/untrusted-content.ts";
+
+const typeOf = (status: ApprovalStatus) => (typeof status === "object" ? status.type : status);
 
 const exposed: Exposure = expose(initialExposure(), "read_issue");
 
@@ -30,23 +34,31 @@ test("denies publishing with the sources, and asks before external and irreversi
       "This session read untrusted content from read_issue, so `share_doc` can't publish data. Finish without publishing, or ask the user to publish it themselves.",
     type: "denied",
   });
-  assert.equal(decide(exposed, publish, { onPublish: "user-approval" }), "user-approval");
+  assert.equal(typeOf(decide(exposed, publish, { onPublish: "user-approval" })), "user-approval");
   assert.equal(
-    decide(exposed, { toolName: "send_email", toolTags: ["effect:external"] }),
+    typeOf(decide(exposed, { toolName: "send_email", toolTags: ["effect:external"] })),
     "user-approval",
   );
-  assert.equal(decide(exposed, deleteRepo), "user-approval");
+  assert.equal(typeOf(decide(exposed, deleteRepo)), "user-approval");
   // A public sink that isn't irreversible is an ordinary external call.
   assert.equal(
-    decide(exposed, { toolName: "post", toolTags: ["effect:external", "sink:public"] }),
+    typeOf(decide(exposed, { toolName: "post", toolTags: ["effect:external", "sink:public"] })),
     "user-approval",
   );
   assert.equal(decide(exposed, { toolName: "list_labels", toolTags: [] }), undefined);
 });
 
+test("tells the approver which untrusted sources it read", () => {
+  assert.deepEqual(decide(exposed, deleteRepo), {
+    reason:
+      "This session read untrusted content from read_issue, which could be steering this call.",
+    type: "user-approval",
+  });
+});
+
 test("still asks before irreversible calls when `when` doesn't match, and nothing else", () => {
-  assert.equal(decide(exposed, deleteRepo, {}, false), "user-approval");
-  assert.equal(decide(exposed, publish, {}, false), "user-approval");
+  assert.equal(typeOf(decide(exposed, deleteRepo, {}, false)), "user-approval");
+  assert.equal(typeOf(decide(exposed, publish, {}, false)), "user-approval");
   assert.equal(
     decide(exposed, { toolName: "post", toolTags: ["effect:external"] }, {}, false),
     undefined,
@@ -66,7 +78,7 @@ test("treats untagged connection tools as external only when asked, unless read-
   const options = { untaggedConnections: "treat-as-external" as const };
   const write = { toolName: "linear__create_issue" };
   assert.equal(decide(exposed, write), undefined);
-  assert.equal(decide(exposed, write, options), "user-approval");
+  assert.equal(typeOf(decide(exposed, write, options)), "user-approval");
   assert.equal(
     decide(
       exposed,
@@ -77,11 +89,13 @@ test("treats untagged connection tools as external only when asked, unless read-
   );
   // A destructive hint makes it irreversible, which `when` can't wave through.
   assert.equal(
-    decide(
-      exposed,
-      { toolAnnotations: { destructiveHint: true }, toolName: "drop" },
-      options,
-      false,
+    typeOf(
+      decide(
+        exposed,
+        { toolAnnotations: { destructiveHint: true }, toolName: "drop" },
+        options,
+        false,
+      ),
     ),
     "user-approval",
   );

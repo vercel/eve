@@ -205,8 +205,18 @@ export function decidePrivateContext(
   options: PrivateContextPolicyOptions = {},
 ): ApprovalStatus {
   const level = exceeded(state, call, caller, options);
-  if (level === "personal") return "user-approval";
-  if (level === "sensitive" && options.sensitiveFlows !== "allow") return "user-approval";
+  if (level === "personal") {
+    return {
+      reason: `This session read personal data belonging to ${state.owners.join(", ")} from ${state.sources.join(", ")}, and this call could share it with others.`,
+      type: "user-approval",
+    };
+  }
+  if (level === "sensitive" && options.sensitiveFlows !== "allow") {
+    return {
+      reason: `This session read sensitive data from ${state.sensitiveSources.join(", ")}, and this call could make it public.`,
+      type: "user-approval",
+    };
+  }
   return undefined;
 }
 
