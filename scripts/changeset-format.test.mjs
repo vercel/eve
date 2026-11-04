@@ -175,10 +175,12 @@ async function createReleaseFixture(t) {
       name: "release-fixture",
       private: true,
       type: "module",
-      packageManager: "pnpm@12.14.0",
+      packageManager: "pnpm@12.17.0",
     }),
   );
-  await write("pnpm-workspace.yaml", "packages:\n  - packages/*\n");
+  // The fixture borrows the repository's node_modules through a symlink. Without
+  // this, pnpm's pre-run install in the fixture prunes that shared tree.
+  await write("pnpm-workspace.yaml", "verifyDepsBeforeRun: false\npackages:\n  - packages/*\n");
   await write("packages/eve/package.json", JSON.stringify({ name: "eve", version: "1.0.0" }));
   await write("packages/eve/CHANGELOG.md", "# eve\n\n## 1.0.0\n\nOld release.\n");
   await write(
