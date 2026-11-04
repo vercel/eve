@@ -5,7 +5,8 @@ import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { runtimeWait, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import type { SessionStateMap } from "#harness/types.js";
-import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { getRun } from "#internal/workflow/runtime.js";
+import { cancelRoutedRun, hostedRunEnded, resumeRoutedHook } from "#execution/hook-routes.js";
 import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("execution.stop-runs");
@@ -81,7 +82,7 @@ export async function stopRuns(
 
 async function tell(run: WorkflowToolRunAddress, stop: RunStop): Promise<boolean> {
   try {
-    await resumeHook(run.hookToken, stop);
+    await resumeRoutedHook(run.hookToken, stop);
     return true;
   } catch (error) {
     // A fresh run may not have registered its control hook yet.
@@ -110,6 +111,8 @@ async function runsStillRunning(runIds: readonly string[]): Promise<readonly str
 
 /** A run whose status can't be read counts as live, so the deadline still stops it. */
 async function isRunLive(runId: string): Promise<boolean> {
+  const ended = hostedRunEnded(runId);
+  if (ended !== undefined) return !ended;
   try {
     const status = await getRun(runId).status;
     return status === "pending" || status === "running";
@@ -121,7 +124,7 @@ async function isRunLive(runId: string): Promise<boolean> {
 /** True when the run was still live and is now cancelled. */
 async function cancelOutright(runId: string, reason: string): Promise<boolean> {
   try {
-    await cancelRun(await getWorld(), runId, { cancelReason: reason });
+    await cancelRoutedRun(runId, reason);
     return true;
   } catch (error) {
     if (!isTaskWorkflowTargetGone(error)) {

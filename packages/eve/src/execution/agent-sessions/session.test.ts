@@ -1,3 +1,4 @@
+import { workflowRunHost } from "#execution/tools/workflow/workflow-run-host.js";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
@@ -127,6 +128,7 @@ function serveRun() {
       return agentContext(current.callId);
     },
     asks: new WorkflowToolRunAsks("run"),
+    host: workflowRunHost,
     get auth() {
       return current.auth;
     },

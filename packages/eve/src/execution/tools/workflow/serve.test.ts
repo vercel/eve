@@ -1,3 +1,4 @@
+import { workflowRunHost } from "#execution/tools/workflow/workflow-run-host.js";
 import { expect, it, vi } from "vitest";
 
 import type { SessionAuth, SessionContext, SessionTurn } from "#context/session-context.js";
@@ -44,6 +45,9 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: mocks.deliver,
 }));
 vi.mock("#execution/agent-sessions/steps.js", () => ({
+  cancelAgentSessionTurnStep: async () => {},
+  endAgentSessionsStep: async () => {},
+  stopLateAgentSessionStep: async () => {},
   openAgentSessionStep: mocks.openAgent,
   sendAgentSessionMessageStep: mocks.sendAgent,
 }));
@@ -65,6 +69,7 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
           [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
           token: "agent-turn",
         },
+  getWorkflowMetadata: () => ({ workflowRunId: "run-1" }),
   sleep: mocks.sleep,
 }));
 
@@ -100,6 +105,7 @@ function agentContext(
 
 const input: WorkflowBodyInput = {
   agentContext: agentContext("call-1", { id: "turn", sequence: 1 }, { reviewer }),
+  host: workflowRunHost,
   callId: "call-1",
   entry: { entryPoint: "serve", taskId: "plan-7k2m9q" },
   input: { request: "Draft the plan." },
