@@ -327,7 +327,7 @@ You can also override from the agent root with the prefixed name. `agent/tools/c
 
 The bundled `eve/extensions/computer-use` extension exports `computer_use` from
 `eve/extensions/computer-use/tools`. Reuse that tool definition in a same-named
-override, as described in [Override a contribution](#override-a-contribution).
+override, as with the [code extension's tools](/docs/code-extension#override-bundled-tools).
 
 For a custom sandbox, `eve/extensions/computer-use/sandbox` exports
 `installComputerUse(sandbox)` and `startComputerUse(sandbox)`. Run the installer

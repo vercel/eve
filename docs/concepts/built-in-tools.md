@@ -441,7 +441,7 @@ export default askQuestion;
 
 ### `edit_file`
 
-`edit_file` edits one sandbox file by exact text replacement. Add it:
+`edit_file` edits one sandbox file by exact text replacement. The [code extension](/docs/code-extension) mounts it as `code__edit_file`. In other agents, add it:
 
 ```sh
 eve add tool/edit_file
