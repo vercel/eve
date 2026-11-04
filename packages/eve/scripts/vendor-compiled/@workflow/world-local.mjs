@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
-import { workflowWorldLocalStreamReadPlugin } from "../../workflow-world-local-stream-reads.mjs";
+import { workflowWorldLocalStreamReadPlugin } from "./world-local-stream-reads.mjs";
 import { loadDeclaration } from "../_shared.mjs";
 
 const require = createRequire(import.meta.url);
