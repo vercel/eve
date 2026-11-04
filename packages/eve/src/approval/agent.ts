@@ -4,6 +4,7 @@ import {
   type ApprovalStatus,
   resolveApprovalPolicy,
 } from "#approval/definition.js";
+import { approvalEvaluation } from "#approval/evaluation.js";
 import { normalizeApprovalStatus } from "#approval/status.js";
 
 /** How restrictive a status is: a denial beats a person, who beats a policy's clearance. */
@@ -16,20 +17,37 @@ function rank(status: ApprovalStatus): number {
   return 0;
 }
 
+/** The reason a status carries, when it's an object with one. */
+function reasonOf(status: ApprovalStatus): string | undefined {
+  const normalized = normalizeApprovalStatus(status);
+  return typeof normalized === "object" ? normalized.reason : undefined;
+}
+
 /**
  * Runs `policies` in order and returns the most restrictive status, unchanged, so a `once()`
  * status keeps the identity its memory depends on. A denial stops the rest; on a tie the later
- * policy wins, so the entry's own `once()` outranks an agent-wide ask.
+ * policy wins, so the entry's own `once()` outranks an agent-wide ask. An ask keeps the first
+ * reason any asking policy gave, so the approver still learns why the agent's policy asked.
  */
 export function strictestApproval(policies: readonly ApprovalPolicy[]): ApprovalPolicy {
   return async (ctx) => {
     let strictest: ApprovalStatus = undefined;
+    let askReason: string | undefined;
     for (const policy of policies) {
       const status = await policy(ctx);
+      if (rank(status) === 2) askReason ??= reasonOf(status);
       if (rank(status) >= rank(strictest)) strictest = status;
       if (rank(strictest) === 3) break;
     }
-    return strictest;
+    if (rank(strictest) !== 2 || askReason === undefined || reasonOf(strictest) !== undefined) {
+      return strictest;
+    }
+    return (
+      approvalEvaluation(ctx)?.explain(strictest, askReason) ?? {
+        reason: askReason,
+        type: "user-approval",
+      }
+    );
   };
 }
 

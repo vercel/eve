@@ -92,7 +92,7 @@ The state lists up to 20 sources, newest last: tool names and `message`.
 | Exposed     | `effect:external`                     | `"user-approval"`                                        |
 | Exposed     | anything else                         | `undefined`                                              |
 
-The agent-wide policy runs beside each entry's own `approval`, and the stricter decision wins, so it can add a gate but never remove one. A denied call returns the reason to the model.
+When it asks, the approval prompt names the sources, such as `Approve Send email? This session read untrusted content from read_issue, which could be steering this call.` The agent-wide policy runs beside each entry's own `approval`, and the stricter decision wins, so it can add a gate but never remove one. A denied call returns the reason to the model.
 
 `untrustedContentPolicy()` takes options:
 
@@ -169,5 +169,4 @@ The extension's hook runs before eve continues past each event, so a call the mo
 - Exposure doesn't pass from a parent to its subagents. It passes from a subagent to its parent only through the subagent's tags.
 - Sessions that started before you mounted the extension aren't tracked.
 - There's no live view of exposure for clients and no run-level tag in Agent Runs.
-- An agent-wide `"user-approval"` can't carry a reason, so the approver sees the tool's own prompt.
 - The policy doesn't gate provider-executed tools, `ctx.agent()` from workflow code, a remote agent's own calls, or memory recall.

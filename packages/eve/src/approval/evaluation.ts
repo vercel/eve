@@ -37,6 +37,8 @@ export interface ApprovalEvaluation {
   };
   /** Asks a person; their decision is remembered under `remember.key` when it settles. */
   readonly ask: (remember: RememberRequest) => ApprovalStatus;
+  /** `status`, an ask, with `reason` attached, still remembered where `status` was. */
+  readonly explain: (status: ApprovalStatus, reason: string) => ApprovalStatus;
 }
 
 // Bundles may load eve's policies and the harness from separate copies of this module. The global
@@ -64,6 +66,12 @@ export async function evaluateApproval(
       const status = Object.freeze({ type: "user-approval" as const });
       asked.set(status, { ...remember, key: scoped(remember.key) });
       return status;
+    },
+    explain: (status: ApprovalStatus, reason: string) => {
+      const explained = Object.freeze({ type: "user-approval" as const, reason });
+      const remember = typeof status === "object" ? asked.get(status) : undefined;
+      if (remember !== undefined) asked.set(explained, remember);
+      return explained;
     },
     read: (key: string) => ({
       entry: memory.remembered[scoped(key)],

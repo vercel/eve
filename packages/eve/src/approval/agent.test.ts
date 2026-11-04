@@ -71,6 +71,19 @@ describe("withAgentApproval", () => {
     expect(decision.remember).toBeDefined();
   });
 
+  it("keeps the agent's reason for asking, and the entry's once() memory, when both ask", async () => {
+    const agent: ApprovalPolicy = () => ({
+      reason: "Alice's notes are in context.",
+      type: "user-approval",
+    });
+    const decision = await evaluateApproval(
+      resolveApprovalPolicy(withAgentApproval(agent, once())!),
+      ctx("deploy"),
+    );
+    expect(decision).toMatchObject({ awaitsPerson: true, reason: "Alice's notes are in context." });
+    expect(decision.remember).toBeDefined();
+  });
+
   describe("after a person approved the tool's once()", () => {
     const approvedOnce = {
       memory: {

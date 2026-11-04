@@ -125,10 +125,10 @@ export function decide(
   const effect = effectOf(call, options);
   if (effect === undefined) return undefined;
   if (effect === "irreversible" && call.toolTags?.includes(PUBLIC_SINK_TAG) === true && gated) {
-    if (options.onPublish === "user-approval") return "user-approval";
+    if (options.onPublish === "user-approval") return askReason(exposure.sources);
     return { reason: deniedReason(call.toolName, exposure.sources), type: "denied" };
   }
-  return effect === "irreversible" || gated ? "user-approval" : undefined;
+  return effect === "irreversible" || gated ? askReason(exposure.sources) : undefined;
 }
 
 /** What the call does outside the session, from its tags or, untagged, its server's hints. */
@@ -155,6 +155,14 @@ function effectOf(
 function isConnectionTool(call: DecisionInput): boolean {
   if (call.toolAnnotations !== undefined) return true;
   return call.toolName.includes("__") && !call.toolName.startsWith("eve__");
+}
+
+/** Asks a person, and tells them why. */
+function askReason(sources: readonly string[]): ApprovalStatus {
+  return {
+    reason: `This session read untrusted content from ${sources.join(", ")}, which could be steering this call.`,
+    type: "user-approval",
+  };
 }
 
 function deniedReason(toolName: string, sources: readonly string[]): string {

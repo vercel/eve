@@ -75,6 +75,8 @@ export interface CallOutcome {
   /** What `execute` returned, for `endsTurn`. */
   readonly toolResults: readonly TypedToolResult<ToolSet>[];
   readonly awaitsApproval?: true;
+  /** Why the call needs a person, from its approval policy. */
+  readonly approvalReason?: string;
   readonly signIn?: ToolSignIn;
 }
 
@@ -154,7 +156,13 @@ export async function executeToolCall(
       recheck: approval === "recheck",
     });
     if (decision.awaitsPerson === true)
-      return { awaitsApproval: true, remember: decision.remember, settled, toolResults };
+      return {
+        approvalReason: decision.reason,
+        awaitsApproval: true,
+        remember: decision.remember,
+        settled,
+        toolResults,
+      };
     if (decision.denied) {
       await input.beforeResult?.(decision.reason ?? TOOL_EXECUTION_DENIED_MESSAGE);
       const denial = await publishDenial(
@@ -486,7 +494,10 @@ export async function executeInlineCalls(input: {
             : await decideDeferredCall(action, definition, input);
           const approval =
             executed.awaitsApproval === true
-              ? { ...approvalRequest(call, definition), remember: executed.remember }
+              ? {
+                  ...approvalRequest(call, definition, executed.approvalReason),
+                  remember: executed.remember,
+                }
               : undefined;
           return { call, executed, approval };
         } catch (error) {
@@ -534,7 +545,13 @@ async function decideDeferredCall(
     input: call.input,
   });
   if (decision.awaitsPerson === true)
-    return { awaitsApproval: true, remember: decision.remember, settled: [], toolResults: [] };
+    return {
+      approvalReason: decision.reason,
+      awaitsApproval: true,
+      remember: decision.remember,
+      settled: [],
+      toolResults: [],
+    };
   if (!decision.denied)
     return {
       settled: [],
@@ -582,11 +599,13 @@ export async function publishDenial(
 
 /**
  * What a person answers to approve or cancel a call the model made. The prompt is the one the
- * tool's approval writes for the call, or names the call by the label its entry gives it.
+ * tool's approval writes for the call, or names the call by the label its entry gives it, followed
+ * by the reason the policy gave for asking.
  */
 function approvalRequest(
   call: TypedToolCall<ToolSet>,
   definition: HarnessToolDefinition | undefined,
+  reason: string | undefined,
 ): ApprovalAsk {
   const { toolCallId: callId, toolName } = call;
   const input = resolveToolCallInputObject(call.input, { callId, toolName });
@@ -608,7 +627,7 @@ function approvalRequest(
         { id: "approve", label: "Approve" },
         { id: "deny", label: "Deny" },
       ],
-      prompt: prompt ?? `Approve ${label}?`,
+      prompt: [prompt ?? `Approve ${label}?`, reason].filter(Boolean).join(" "),
     },
   };
 }

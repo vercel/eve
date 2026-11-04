@@ -20,17 +20,12 @@ export function normalizeApprovalStatus(value: unknown): NormalizedApprovalStatu
   }
   if (typeof value !== "object" || value === null) return type;
   const reason: unknown = Reflect.get(value, "reason");
-  if (
-    reason !== undefined &&
-    (typeof reason !== "string" || (type !== "approved" && type !== "denied"))
-  ) {
-    throw new Error("Only approved and denied approval statuses accept a string reason.");
+  if (reason !== undefined && (typeof reason !== "string" || type === "not-applicable")) {
+    throw new Error(
+      "Only approved, denied, and user-approval approval statuses accept a string reason.",
+    );
   }
-  return type === "approved" || type === "denied"
-    ? reason === undefined
-      ? { type }
-      : { type, reason }
-    : { type };
+  return type === "not-applicable" || reason === undefined ? { type } : { type, reason };
 }
 
 export interface ApprovalDecision {
@@ -38,6 +33,7 @@ export interface ApprovalDecision {
   readonly clearedBy?: ClearedBy;
   readonly denied: boolean;
   readonly awaitsPerson?: true;
+  /** Why the call was denied, or why it needs a person. */
   readonly reason?: string;
 }
 
@@ -45,7 +41,11 @@ export function approvalDecision(value: unknown): ApprovalDecision {
   const status = normalizeApprovalStatus(value);
   const type = typeof status === "object" ? status.type : status;
   const reason = typeof status === "object" ? status.reason : undefined;
-  if (type === "user-approval") return { denied: false, awaitsPerson: true };
+  if (type === "user-approval") {
+    return reason === undefined
+      ? { denied: false, awaitsPerson: true }
+      : { denied: false, awaitsPerson: true, reason };
+  }
   if (type === "denied") return { denied: true, reason };
   if (type === "approved") return { denied: false, clearedBy: { policy: "approval" } };
   return { denied: false };

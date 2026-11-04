@@ -79,7 +79,7 @@ A call is a sink when it has a `sink:*` tag or an `effect:*` tag. Its `sink:*` t
 | Sensitive              | exceeds       | runs            | runs                              |
 | Personal               | exceeds       | exceeds         | runs when the user owns all of it |
 
-`privateContextPolicy()` asks before a call that exceeds its cap. Options:
+`privateContextPolicy()` asks before a call that exceeds its cap, and the approval prompt says why, such as `Approve Post to slack? This session read personal data belonging to alice from notion_search, and this call could share it with others.` Options:
 
 ```ts
 privateContextPolicy({
@@ -142,7 +142,7 @@ Each session has its own state. A subagent starts with none, and its own calls r
 - **Tags describe a tool, not one result.** A tool tagged `reads:personal` counts on every call, even when a result holds nothing personal. MCP's draft annotations label each result; eve doesn't read them yet.
 - **`sink:user` assumes the destination is the caller.** The policy can't see who a tool sends to, so a `sink:user` tool must only reach the user it's helping.
 - **`public` means the workspace.** eve doesn't tell a Slack channel shared with another company from an ordinary public channel, so sensitive data can be read in both.
-- **Approvers.** An agent-wide `"user-approval"` can't carry a reason, so the approver sees the tool's own prompt. It also can't choose who may answer. By default only the person whose turn made the call can, so after Bob's message, Bob approves a post built from Alice's notes.
+- **Approvers.** An agent-wide policy can't choose who may answer an approval. By default only the person whose turn made the call can, so after Bob's message, Bob approves a post built from Alice's notes.
 - **Shared credentials.** Owners assume per-user credentials. A tool that reads through a shared account needs `reads:sensitive`, not `reads:personal`.
 - **Memory.** A capture from a session that holds personal data, into memory others can recall, leaks it without a call to gate.
 - A hook's write can be lost if a step is interrupted after the event is recorded and before the step's state is saved.
