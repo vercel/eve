@@ -30,10 +30,16 @@ export type GitHubLeaseReader = (sandbox: SandboxSession) => Promise<GitHubLease
 
 /** What a lease's token was issued for. It travels in the placeholder, so it holds no secret. */
 export interface GitHubLeaseScope {
-  /** A hash of the user principal the token belongs to, or `"app"` for installation tokens. */
+  /**
+   * A hash of who can re-issue the token: the connector and caller for user
+   * tokens, or the connector for installation tokens. Only a command with the
+   * same principal re-issues this lease's token.
+   */
   readonly principal: string;
   readonly owner: string | null;
   readonly name: string | null;
+  /** The permissions an installation token was limited to, or `null` for all of them. */
+  readonly permissions: readonly string[] | null;
 }
 
 interface Lease extends GitHubLeaseScope {
@@ -47,24 +53,34 @@ const LEASE_TTL_MS = (GITHUB_COMMAND_TIMEOUT_SECONDS + 60) * 1000;
 const LOCK_PATH = "/tmp/eve-git-lease.lock";
 const LOCK_WAIT_SECONDS = 30;
 /** The lock holder exits after this, so a writer that dies cannot hold the lock forever. */
-const LOCK_HOLD_SECONDS = 60;
+const LOCK_HOLD_SECONDS = 120;
+/**
+ * A write that takes longer fails and leaves the lock to expire, so a write
+ * still in flight lands at least this long before the lock can pass on.
+ */
+const UPDATE_TIMEOUT_MS = 45_000;
 const PLACEHOLDER = /eve-github-[0-9a-f-]{36}\.[A-Za-z0-9_-]+/gu;
 
 /** A placeholder that names the lease, its start time and its scope. */
 export function leasePlaceholder(scope: GitHubLeaseScope, now = Date.now()): string {
-  const lease = [now, scope.principal, scope.owner, scope.name];
+  const lease = [now, scope.principal, scope.owner, scope.name, scope.permissions];
   return `eve-github-${crypto.randomUUID()}.${Buffer.from(JSON.stringify(lease)).toString("base64url")}`;
 }
 
 function readLease(placeholder: string): Lease | null {
   try {
-    const [startedAt, principal, owner, name] = JSON.parse(
+    const [startedAt, principal, owner, name, permissions = null] = JSON.parse(
       Buffer.from(placeholder.slice(placeholder.indexOf(".") + 1), "base64url").toString(),
     ) as unknown[];
     if (typeof startedAt !== "number" || typeof principal !== "string") return null;
     if (owner !== null && typeof owner !== "string") return null;
     if (name !== null && typeof name !== "string") return null;
-    return { startedAt, principal, owner, name };
+    if (
+      permissions !== null &&
+      !(Array.isArray(permissions) && permissions.every((entry) => typeof entry === "string"))
+    )
+      return null;
+    return { startedAt, principal, owner, name, permissions };
   } catch {
     return null;
   }
@@ -132,6 +148,7 @@ export interface GitHubLeaseDependencies {
    */
   readonly tokenFor: (lease: GitHubLeaseScope) => Promise<string | null>;
   readonly now?: () => number;
+  readonly updateTimeoutMs?: number;
 }
 
 /**
@@ -164,31 +181,52 @@ async function updateLeases(
   change: "add" | "remove",
   dependencies: GitHubLeaseDependencies,
 ): Promise<void> {
-  const now = dependencies.now ?? Date.now;
+  const timeoutMs = dependencies.updateTimeoutMs ?? UPDATE_TIMEOUT_MS;
   const release = await acquireLock(sandbox);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<"expired">((resolve) => {
+    timer = setTimeout(() => resolve("expired"), timeoutMs);
+  });
+  const write = writeLeases(sandbox, own, change, dependencies);
+  let outcome: "written" | "expired";
   try {
-    const deadline = now() + (LOCK_HOLD_SECONDS - 10) * 1000;
-    const live = new Set(placeholdersIn(await dependencies.read(sandbox)));
-    if (change === "add") live.add(own.placeholder);
-    else live.delete(own.placeholder);
-    const rules: Record<string, GitHubLeaseRule[]> = {};
-    for (const placeholder of live) {
-      const lease = readLease(placeholder);
-      if (!lease || now() - lease.startedAt > LEASE_TTL_MS) continue;
-      const token =
-        placeholder === own.placeholder ? own.token : await dependencies.tokenFor(lease);
-      if (!token) continue;
-      for (const [host, list] of Object.entries(leaseRules(placeholder, lease, token))) {
-        (rules[host] ??= []).push(...list);
-      }
-    }
-    if (now() > deadline) {
-      throw new Error("Updating the GitHub credential rules outlasted the sandbox lock.");
-    }
-    await dependencies.broker(sandbox, Object.keys(rules).length > 0 ? rules : null);
-  } finally {
+    outcome = await Promise.race([write.then(() => "written" as const), expired]);
+  } catch (error) {
+    clearTimeout(timer);
     await release();
+    throw error;
   }
+  clearTimeout(timer);
+  if (outcome === "expired") {
+    write.catch(() => {});
+    // Keep the lock until it expires: releasing it now would let the next
+    // writer read the policy while this write may still land on top of it.
+    throw new Error(`Updating the GitHub credential rules took longer than ${timeoutMs / 1000}s.`);
+  }
+  await release();
+}
+
+async function writeLeases(
+  sandbox: SandboxSession,
+  own: { readonly placeholder: string; readonly token: string },
+  change: "add" | "remove",
+  dependencies: GitHubLeaseDependencies,
+): Promise<void> {
+  const now = dependencies.now ?? Date.now;
+  const live = new Set(placeholdersIn(await dependencies.read(sandbox)));
+  if (change === "add") live.add(own.placeholder);
+  else live.delete(own.placeholder);
+  const rules: Record<string, GitHubLeaseRule[]> = {};
+  for (const placeholder of live) {
+    const lease = readLease(placeholder);
+    if (!lease || now() - lease.startedAt > LEASE_TTL_MS) continue;
+    const token = placeholder === own.placeholder ? own.token : await dependencies.tokenFor(lease);
+    if (!token) continue;
+    for (const [host, list] of Object.entries(leaseRules(placeholder, lease, token))) {
+      (rules[host] ??= []).push(...list);
+    }
+  }
+  await dependencies.broker(sandbox, Object.keys(rules).length > 0 ? rules : null);
 }
 
 /**

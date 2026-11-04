@@ -122,17 +122,20 @@ If `git({ github })` gets GitHub tokens through Vercel Connect, its `github.auth
 
 - Set `github.principalType`, which is required: `"app"` for GitHub App installation tokens, or `"user"` for the caller's own token.
 - Remove `github.org` and enforce the same restriction in `authorize`, as in the example below.
+- Add `github.readRules`, which is required: a `readRules(sandbox)` callback that returns the GitHub rules your `broker` wrote, from the sandbox's live network policy. On a Vercel Sandbox, read them with `sandbox.getNetworkPolicy()` and drop your own non-GitHub hosts, as in the example below. `broker` now receives the rules of every running `gh` command, not one command's.
+- If your app `getConnectToken` wrapper adds `permissions` to the authorization details, move them to `github.permissions`, so a token re-minted for another running command keeps that command's permissions.
 - The `gh` tool takes an optional `repository` instead of `permissions`, and it runs any `gh` or `git` subcommand. If your policy depends on the command, check `argv` in `authorize`.
 
 ```ts title="agent/extensions/git.ts"
 import git from "eve/extensions/git";
 
-import { brokerGitHubLease } from "../lib/github";
+import { brokerGitHubLease, readGitHubLease } from "../lib/github";
 
 export default git({
   github: {
     connector: "github/my-agent",
     broker: brokerGitHubLease,
+    readRules: readGitHubLease,
     principalType: "app",
     authorize: ({ owner }) => owner.toLowerCase() === "acme",
   },

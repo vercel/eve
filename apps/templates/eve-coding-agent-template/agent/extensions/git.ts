@@ -1,6 +1,6 @@
 import git from "eve/extensions/git";
 
-import { brokerGitHubLease, GITHUB_CONNECTOR } from "../lib/github";
+import { brokerGitHubLease, GITHUB_CONNECTOR, readGitHubLease } from "../lib/github";
 
 const org = process.env.GITHUB_ORG;
 
@@ -13,6 +13,7 @@ const github = org && {
   connector: GITHUB_CONNECTOR,
   org,
   broker: brokerGitHubLease,
+  readRules: readGitHubLease,
   principalType: "app" as const,
   // Older releases pass only `repository`; newer ones pass the installation `owner`.
   authorize: ({ owner, repository }: { owner?: string; repository: string | null }) =>

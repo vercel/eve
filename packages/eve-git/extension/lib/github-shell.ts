@@ -78,6 +78,11 @@ export interface GitHubAppConfig extends GitHubConfigBase {
   /** The only access control: commands run only when it returns `true`. */
   readonly authorize: GitHubAuthorize<GitHubAppAuthorizeRequest>;
   readonly principalType: "app";
+  /**
+   * GitHub App permissions each installation token is limited to, such as
+   * `["contents:read"]`. Omit for the installation's own permissions.
+   */
+  readonly permissions?: readonly string[];
 }
 
 /** Resolves the caller's own token through `ctx.getToken`, signing them in when needed. */
@@ -126,6 +131,7 @@ interface GitHubShellDependencies {
       authorizationDetails: {
         type: "github_app_installation";
         org: string;
+        permissions?: string[];
         repositories?: string[];
       }[];
       subject: { type: "app" };
@@ -192,32 +198,41 @@ export async function executeGitHubShell(
     // One unscoped grant therefore covers every repository after one sign-in.
     userAuth = connectUserAuthorization(config.connector);
     ({ token } = await dependencies.getToken(userAuth));
-    scope = { principal: userPrincipal(config.connector, auth), owner, name };
+    scope = { principal: userPrincipal(config.connector, auth), owner, name, permissions: null };
     // Another live command of the same caller gets this caller's token; any
     // other caller's rule is dropped rather than given this caller's token.
     tokenFor = async (lease) => (lease.principal === scope.principal ? token : null);
   } else {
-    const mint = (org: string, repository: string | null) => {
+    const mint = (
+      org: string,
+      repository: string | null,
+      permissions: readonly string[] | null,
+    ) => {
       // Scope the installation token to the repository, or to the owner's
       // installation for owner-level commands such as `gh repo list <owner>`.
       const installation: {
         type: "github_app_installation";
         org: string;
+        permissions?: string[];
         repositories?: string[];
       } = { type: "github_app_installation", org };
+      if (permissions) installation.permissions = [...permissions];
       if (repository) installation.repositories = [repository];
       return (dependencies.getConnectToken ?? getToken)(config.connector, {
         authorizationDetails: [installation],
         subject: { type: "app" },
       });
     };
-    token = await mint(owner!, name);
-    scope = { principal: "app", owner, name };
+    const permissions = config.permissions ? [...config.permissions].sort() : null;
+    token = await mint(owner!, name, permissions);
+    scope = { principal: appPrincipal(config.connector), owner, name, permissions };
     const minted = new Map<string, Promise<string>>();
+    // Another live command's token is re-minted with that command's own
+    // permissions, so a write token never reaches a read-only command's rule.
     tokenFor = async (lease) => {
-      if (lease.principal !== "app" || !lease.owner) return null;
-      const key = `${lease.owner}/${lease.name ?? ""}`;
-      if (!minted.has(key)) minted.set(key, mint(lease.owner, lease.name));
+      if (lease.principal !== scope.principal || !lease.owner) return null;
+      const key = JSON.stringify([lease.owner, lease.name, lease.permissions]);
+      if (!minted.has(key)) minted.set(key, mint(lease.owner, lease.name, lease.permissions));
       return await minted.get(key)!;
     };
   }
@@ -312,6 +327,15 @@ function userPrincipal(connector: string, auth: SessionAuthContext | null): stri
     .update(JSON.stringify([connector, ...identity]))
     .digest("base64url")
     .slice(0, 16);
+}
+
+/** Identifies the connector that mints an installation token. */
+function appPrincipal(connector: string): string {
+  const hash = createHash("sha256")
+    .update(JSON.stringify(["app", connector]))
+    .digest("base64url")
+    .slice(0, 16);
+  return `app.${hash}`;
 }
 
 export function parseCommand(command: string): string[] {

@@ -20,6 +20,7 @@ import {
   type GitHubLeaseRule,
   type GitHubShellInput,
 } from "../../extension/lib/github-shell.ts";
+import { leasePlaceholder, withGitHubLease } from "../../extension/lib/github-lease.ts";
 
 type NetworkPolicy = Parameters<NetworkPolicySandboxSession["setNetworkPolicy"]>[0];
 
@@ -890,6 +891,98 @@ test("drops rules it cannot vouch for: expired leases and other callers' user le
   assert.equal(during.length, 1);
   assert.doesNotMatch(JSON.stringify(during), new RegExp(stale.split(".")[1]!, "u"));
   assert.equal(shared.policy, "allow-all");
+});
+
+test("re-mints another app command's token with that command's own permissions", async () => {
+  const shared = sharedSandbox();
+  const minted: (string[] | undefined)[] = [];
+  let releaseReader!: () => void;
+  const readerHeld = new Promise<void>((resolve) => (releaseReader = resolve));
+  let readerStarted = false;
+  const tokenOf = (placeholder: string) =>
+    (shared.policy as { allow: Record<string, GitHubLeaseRule[]> }).allow["api.github.com"]?.find(
+      (rule) =>
+        rule.match?.headers?.[0]?.value?.regex?.includes(placeholder.replaceAll(".", "\\.")),
+    )?.transform[0]?.headers.authorization;
+  let readerPlaceholder = "";
+  const execute = (permissions: string[] | undefined, hold: boolean) =>
+    executeGitHubShell(
+      READ,
+      { ...CONFIG, permissions },
+      {
+        async getConnectToken(_connector, params) {
+          const detail = params.authorizationDetails[0]!;
+          minted.push(detail.permissions);
+          return `token-${detail.permissions?.join("+") ?? "all"}`;
+        },
+        async getSandbox() {
+          return Object.assign(
+            fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" }, [], shared),
+            {
+              async run(input: Parameters<SandboxSession["run"]>[0]) {
+                if (hold) {
+                  readerPlaceholder = input.env!.GH_TOKEN!;
+                  readerStarted = true;
+                  await readerHeld;
+                }
+                return { exitCode: 0, stdout: "", stderr: "" };
+              },
+            },
+          );
+        },
+      },
+    );
+
+  const reader = execute(["pull_requests:read", "contents:read"], true);
+  while (!readerStarted) await new Promise(setImmediate);
+  await execute(undefined, false);
+  // The writer's last write re-minted the reader's lease, with the reader's permissions.
+  assert.equal(tokenOf(readerPlaceholder), "Bearer token-contents:read+pull_requests:read");
+  assert.deepEqual(minted.at(-1), ["contents:read", "pull_requests:read"]);
+  releaseReader();
+  await reader;
+  assert.equal(shared.policy, "allow-all");
+});
+
+test("a rules write that outlasts its timeout fails and keeps the lock until it expires", async () => {
+  let killed = false;
+  const base = fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" });
+  const spawn = base.spawn.bind(base);
+  const sandbox = Object.assign(base, {
+    async spawn(input: Parameters<SandboxSession["spawn"]>[0]) {
+      const holder = await spawn(input);
+      return Object.assign(holder, {
+        async kill() {
+          killed = true;
+        },
+      });
+    },
+  });
+  const placeholder = leasePlaceholder({
+    principal: "p",
+    owner: "vercel",
+    name: "eve",
+    permissions: null,
+  });
+  let ran = false;
+  await assert.rejects(
+    withGitHubLease(
+      sandbox,
+      { placeholder, token: "secret" },
+      {
+        broker: () => new Promise<void>(() => {}),
+        read: async () => ({}),
+        tokenFor: async () => null,
+        updateTimeoutMs: 10,
+      },
+      async () => {
+        ran = true;
+      },
+    ),
+    /took longer than/u,
+  );
+  assert.equal(ran, false);
+  assert.equal(killed, false);
 });
 
 function fakeSandbox(
