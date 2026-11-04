@@ -55,6 +55,8 @@ export default defineExtension({
           authorize: fn<GitHubAuthorize<GitHubAppAuthorizeRequest>>(),
           /** `"app"` mints GitHub App installation tokens. */
           principalType: z.literal("app"),
+          /** App permissions each installation token is limited to, such as `["contents:read"]`. */
+          permissions: z.array(z.string().min(1)).optional(),
         }),
         z.object({
           ...githubBase,

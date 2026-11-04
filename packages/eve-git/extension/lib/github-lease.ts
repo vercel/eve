@@ -52,13 +52,14 @@ export const GITHUB_COMMAND_TIMEOUT_SECONDS = 30 * 60;
 const LEASE_TTL_MS = (GITHUB_COMMAND_TIMEOUT_SECONDS + 60) * 1000;
 const LOCK_PATH = "/tmp/eve-git-lease.lock";
 const LOCK_WAIT_SECONDS = 30;
-/** The lock holder exits after this, so a writer that dies cannot hold the lock forever. */
-const LOCK_HOLD_SECONDS = 120;
 /**
- * A write that takes longer fails and leaves the lock to expire, so a write
- * still in flight lands at least this long before the lock can pass on.
+ * How long after the invocation's deadline the lock outlives a writer that
+ * never released it, for a policy write the API had already received.
  */
-const UPDATE_TIMEOUT_MS = 45_000;
+const LOCK_MARGIN_SECONDS = 30;
+/** The longest a Vercel Function runs (`maxDuration: "max"`), when the invocation names no deadline. */
+const MAX_INVOCATION_SECONDS = 800;
+const VERCEL_REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
 const PLACEHOLDER = /eve-github-[0-9a-f-]{36}\.[A-Za-z0-9_-]+/gu;
 
 /** A placeholder that names the lease, its start time and its scope. */
@@ -148,7 +149,12 @@ export interface GitHubLeaseDependencies {
    */
   readonly tokenFor: (lease: GitHubLeaseScope) => Promise<string | null>;
   readonly now?: () => number;
-  readonly updateTimeoutMs?: number;
+  /**
+   * When the platform kills the process running this command, in epoch ms, or
+   * `undefined` when it names none. Defaults to the Vercel Function
+   * invocation's deadline.
+   */
+  readonly deadline?: () => number | undefined;
 }
 
 /**
@@ -181,29 +187,35 @@ async function updateLeases(
   change: "add" | "remove",
   dependencies: GitHubLeaseDependencies,
 ): Promise<void> {
-  const timeoutMs = dependencies.updateTimeoutMs ?? UPDATE_TIMEOUT_MS;
-  const release = await acquireLock(sandbox);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<"expired">((resolve) => {
-    timer = setTimeout(() => resolve("expired"), timeoutMs);
-  });
-  const write = writeLeases(sandbox, own, change, dependencies);
-  let outcome: "written" | "expired";
+  const now = dependencies.now ?? Date.now;
+  const deadline = (dependencies.deadline ?? invocationDeadline)();
+  // The API has no conditional write, so nothing can stop a late write from
+  // landing. The lock therefore outlives this process: a write that never
+  // settles keeps it until the platform kills the process, and only then can
+  // the next writer read the policy.
+  const release = await acquireLock(sandbox, lockSeconds(now(), deadline));
   try {
-    outcome = await Promise.race([write.then(() => "written" as const), expired]);
-  } catch (error) {
-    clearTimeout(timer);
+    await writeLeases(sandbox, own, change, dependencies);
+  } finally {
     await release();
-    throw error;
   }
-  clearTimeout(timer);
-  if (outcome === "expired") {
-    write.catch(() => {});
-    // Keep the lock until it expires: releasing it now would let the next
-    // writer read the policy while this write may still land on top of it.
-    throw new Error(`Updating the GitHub credential rules took longer than ${timeoutMs / 1000}s.`);
-  }
-  await release();
+}
+
+/** How long the lock holder keeps the lock if this process never releases it. */
+export function lockSeconds(now: number, deadline: number | undefined): number {
+  const remaining =
+    deadline === undefined ? MAX_INVOCATION_SECONDS : Math.max(0, (deadline - now) / 1000);
+  return Math.ceil(remaining) + LOCK_MARGIN_SECONDS;
+}
+
+function invocationDeadline(): number | undefined {
+  const context = (
+    globalThis as { [VERCEL_REQUEST_CONTEXT]?: { get?: () => { deadline?: unknown } | undefined } }
+  )[VERCEL_REQUEST_CONTEXT]?.get?.();
+  const deadline = context?.deadline;
+  if (deadline === undefined) return undefined;
+  const ms = new Date(deadline as string | number).getTime();
+  return Number.isNaN(ms) ? undefined : ms;
 }
 
 async function writeLeases(
@@ -230,13 +242,13 @@ async function writeLeases(
 }
 
 /**
- * Holds an exclusive `flock` in the sandbox until the returned function runs.
- * The lock file holds no secret: sandbox code that takes it can only delay
- * commands, by at most the wait.
+ * Holds an exclusive `flock` in the sandbox until the returned function runs,
+ * or for `seconds` if it never does. The lock file holds no secret: sandbox
+ * code that takes it can only delay commands, by at most the wait.
  */
-async function acquireLock(sandbox: SandboxSession): Promise<() => Promise<void>> {
+async function acquireLock(sandbox: SandboxSession, seconds: number): Promise<() => Promise<void>> {
   const holder = await sandbox.spawn({
-    command: `exec 9>${shellQuote(LOCK_PATH)} && flock -w ${LOCK_WAIT_SECONDS} 9 && echo locked && exec sleep ${LOCK_HOLD_SECONDS}`,
+    command: `exec 9>${shellQuote(LOCK_PATH)} && flock -w ${LOCK_WAIT_SECONDS} 9 && echo locked && exec sleep ${seconds}`,
   });
   const reader = holder.stdout.getReader();
   const decoder = new TextDecoder();

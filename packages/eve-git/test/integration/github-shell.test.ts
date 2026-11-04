@@ -20,7 +20,12 @@ import {
   type GitHubLeaseRule,
   type GitHubShellInput,
 } from "../../extension/lib/github-shell.ts";
-import { leasePlaceholder, withGitHubLease } from "../../extension/lib/github-lease.ts";
+import git from "../../extension/extension.ts";
+import {
+  leasePlaceholder,
+  lockSeconds,
+  withGitHubLease,
+} from "../../extension/lib/github-lease.ts";
 
 type NetworkPolicy = Parameters<NetworkPolicySandboxSession["setNetworkPolicy"]>[0];
 
@@ -944,45 +949,87 @@ test("re-mints another app command's token with that command's own permissions",
   assert.equal(shared.policy, "allow-all");
 });
 
-test("a rules write that outlasts its timeout fails and keeps the lock until it expires", async () => {
-  let killed = false;
-  const base = fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" });
-  const spawn = base.spawn.bind(base);
-  const sandbox = Object.assign(base, {
-    async spawn(input: Parameters<SandboxSession["spawn"]>[0]) {
-      const holder = await spawn(input);
-      return Object.assign(holder, {
-        async kill() {
-          killed = true;
-        },
-      });
+test("a stalled rules write keeps the lock until its process's deadline has passed", async () => {
+  const shared = sharedSandbox();
+  const order: string[] = [];
+  let clock = 1_000_000;
+  const deadline = clock + 300_000;
+  const lease = (label: string) => ({
+    placeholder: leasePlaceholder({
+      principal: label,
+      owner: "vercel",
+      name: label,
+      permissions: null,
+    }),
+    token: `token-${label}`,
+  });
+  const sandbox = () => fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" }, [], shared);
+  let stalled!: () => void;
+  const stalling = new Promise<void>((resolve) => (stalled = resolve));
+  // Writer A stalls in `broker` and never resumes, as when the platform kills its process.
+  void withGitHubLease(
+    sandbox(),
+    lease("a"),
+    {
+      broker: async () => {
+        stalled();
+        await new Promise<never>(() => {});
+      },
+      read: async (box) => readGitHubRules(box),
+      tokenFor: async () => null,
+      now: () => clock,
+      deadline: () => deadline,
+    },
+    async () => assert.fail("must not run without its rule"),
+  );
+  await stalling;
+  assert.equal(shared.holdSeconds, 330);
+  const b = withGitHubLease(
+    sandbox(),
+    lease("b"),
+    {
+      broker: async (box, rules) => {
+        order.push("b write");
+        await CONFIG.broker(box, rules);
+      },
+      read: async (box) => {
+        order.push("b read");
+        return readGitHubRules(box);
+      },
+      tokenFor: async () => null,
+      now: () => clock,
+    },
+    async () => order.push("b runs"),
+  );
+  clock = deadline - 1;
+  for (let tick = 0; tick < 20; tick += 1) await new Promise(setImmediate);
+  assert.deepEqual(order, [], "B waits while A's process may still write");
+  clock = deadline + 30_001;
+  shared.expire!();
+  await b;
+  assert.deepEqual(order, ["b read", "b write", "b runs", "b read", "b write"]);
+});
+
+test("the lock never expires before the deadline plus its margin", () => {
+  const now = 1_000_000;
+  for (const remaining of [0, 1, 999, 1_000, 59_500, 300_000, 799_999, 3_600_000]) {
+    assert.ok(lockSeconds(now, now + remaining) * 1000 >= remaining + 30_000, String(remaining));
+  }
+  assert.equal(lockSeconds(now, now - 5_000), 30);
+  // With no deadline, the lock outlasts the longest Vercel Function.
+  assert.equal(lockSeconds(now, undefined), 830);
+});
+
+test("git({ github }) keeps app permissions", () => {
+  git({
+    github: {
+      ...CONFIG,
+      principalType: "app",
+      permissions: ["contents:read"],
     },
   });
-  const placeholder = leasePlaceholder({
-    principal: "p",
-    owner: "vercel",
-    name: "eve",
-    permissions: null,
-  });
-  let ran = false;
-  await assert.rejects(
-    withGitHubLease(
-      sandbox,
-      { placeholder, token: "secret" },
-      {
-        broker: () => new Promise<void>(() => {}),
-        read: async () => ({}),
-        tokenFor: async () => null,
-        updateTimeoutMs: 10,
-      },
-      async () => {
-        ran = true;
-      },
-    ),
-    /took longer than/u,
-  );
-  assert.equal(ran, false);
-  assert.equal(killed, false);
+  const github = git.config.github as { permissions?: string[] };
+  assert.deepEqual(github.permissions, ["contents:read"]);
 });
 
 function fakeSandbox(
@@ -1015,6 +1062,15 @@ function fakeSandbox(
       let release!: () => void;
       shared.lock = new Promise<void>((resolve) => (release = resolve));
       await previous;
+      let exit!: () => void;
+      const exited = new Promise<void>((resolve) => (exit = resolve));
+      const end = () => {
+        shared.expire = undefined;
+        release();
+        exit();
+      };
+      shared.expire = end;
+      shared.holdSeconds = Number(/exec sleep (\d+)$/u.exec(input.command)?.[1]);
       return {
         stdout: new ReadableStream({
           start(controller) {
@@ -1023,10 +1079,11 @@ function fakeSandbox(
         }),
         stderr: new ReadableStream(),
         async wait() {
+          await exited;
           return { exitCode: 0 };
         },
         async kill() {
-          release();
+          end();
         },
       };
     },
@@ -1045,6 +1102,10 @@ const sandboxes = new WeakMap<object, SharedSandbox>();
 interface SharedSandbox {
   lock: Promise<void>;
   policy: NetworkPolicy;
+  /** Ends the current lock holder, as its `sleep` running out would. */
+  expire?: () => void;
+  /** How long the current lock holder keeps the lock if never released. */
+  holdSeconds?: number;
 }
 
 /** The state every handle to one sandbox sees, whichever process holds the handle. */
