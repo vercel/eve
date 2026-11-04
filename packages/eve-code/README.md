@@ -1,6 +1,6 @@
 # eve/extensions/code
 
-`eve/extensions/code` is an eve extension for coding work. It contributes eve's built-in `edit_file` tool, coding instructions, investigation and review skills, and sandbox tooling. Vercel credentials are brokered before each turn. GitHub instructions, the `pr` skill, and the authenticated `gh` tool live in [`eve/extensions/git`](../eve-git/README.md).
+`eve/extensions/code` is an eve extension for coding work. It contributes eve's built-in `edit_file` tool, coding instructions, the workspace root's `AGENTS.md` or `CLAUDE.md` as project instructions before each turn, investigation and review skills, and sandbox tooling. Vercel credentials are brokered before each turn. GitHub instructions, the `pr` skill, and the authenticated `gh` tool live in [`eve/extensions/git`](../eve-git/README.md).
 
 It ships inside the `eve` package. This private `@eve/code` workspace package is its source of truth: eve's build copies `extension/` into `packages/eve/src/extensions/code/extension` and publishes it with these entry points:
 

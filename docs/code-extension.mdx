@@ -74,6 +74,12 @@ With firewall delivery, Vercel tokens never enter sandbox processes. Firewall de
 
 To use a personal access token or another credential provider, omit the connector. Call `authenticateGitHub` or `authenticateVercel` from `eve/extensions/code/sandbox` in your own sandbox setup code. These helpers authenticate commands you run yourself, not the `gh` tool.
 
+## Project instructions
+
+Before each turn, the extension reads `AGENTS.md` from the workspace root, or `CLAUDE.md` when there is no `AGENTS.md`, and adds it to the conversation as project instructions. The content joins the conversation again only when it changes. A file over 64,000 characters is cut off with a note that tells the model where to read the rest.
+
+Reading the file starts the session's sandbox at the first model call of each turn. For other directories, the extension's instructions tell the model to read the nearest `AGENTS.md` or `CLAUDE.md` before working there.
+
 ## Publish with the git extension
 
 `eve/extensions/git` adds the GitHub instructions and the `pr` skill. Mount it next to the code extension when the agent should open pull requests. `code()` rejects a `github` option, so configure GitHub here. Import `gh` and the GitHub sandbox helpers from `eve/extensions/git/tools` and `eve/extensions/git/sandbox`:

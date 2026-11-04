@@ -63,6 +63,7 @@ test("built extension adds no grep tool or GitHub contributions to the root agen
     assert.ok(manifest.tools.some((tool) => tool.name === "code__edit_file"));
     assert.ok(!manifest.tools.some((tool) => tool.name === "code__grep"));
     assert.ok(!compiledOf(manifest, "skill").some((entry) => entry.slug === "code__pr"));
+    assert.ok(compiledOf(manifest, "instructions").some((entry) => entry.slug === "code__project"));
     assert.ok(!compiledOf(manifest, "instructions").some((entry) => entry.slug === "code__github"));
   } finally {
     await rm(root, { recursive: true, force: true });
