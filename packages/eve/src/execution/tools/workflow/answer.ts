@@ -3,7 +3,7 @@ import type {
   WorkflowToolRunControlMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hook-routes.js";
 import type { Answer } from "#shared/input.js";
 import type { Principal } from "#protocol/session-events/envelope.js";
 
@@ -30,6 +30,6 @@ export async function sendWorkflowAskAnswers(
       requestId: response.interactionId,
       response: answered,
     };
-    await resumeHook(route.control, answer);
+    await resumeRoutedHook(route.control, answer);
   }
 }

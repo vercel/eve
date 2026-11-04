@@ -358,6 +358,7 @@ export function startServeBody(input: WorkflowBodyInput): StartedWorkflowBody {
     get from() {
       return calls.current.from;
     },
+    host: input.host,
     owner: input.owner,
   };
   const agentSessions = createAgentSessions(run, calls.usage);

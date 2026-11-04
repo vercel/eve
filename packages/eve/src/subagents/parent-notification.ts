@@ -17,7 +17,7 @@ import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hook-routes.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import {
   REMOTE_CALLBACK_NOT_PENDING,
@@ -335,7 +335,7 @@ async function resumeSettledTurnHook(
   result: RuntimeSubagentChildResult,
 ): Promise<void> {
   try {
-    await resumeHook(token, {
+    await resumeRoutedHook(token, {
       kind: "runtime-action-result",
       results: [result],
     });

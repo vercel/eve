@@ -51,6 +51,14 @@ export async function agentToolServeWorkflow(
 ): Promise<never> {
   "use workflow";
 
+  return await serveAgentTool(receive, ctx);
+}
+
+/** {@link agentToolServeWorkflow}'s body, for a host that runs it without Workflow. */
+export async function serveAgentTool(
+  receive: AgentToolReceive,
+  ctx: WorkflowServeContext<string>,
+): Promise<never> {
   const agent = ctx.agent(ctx.toolName);
   let turn = sendToAgent(agent, await receive());
   let next = receive();
