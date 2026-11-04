@@ -1,3 +1,4 @@
+import { applyRunMessagesStep } from "#execution/tools/workflow/apply-run-messages-step.js";
 import { describe, expect, it, vi } from "vitest";
 
 import type { DurableSession, DurableSessionState } from "#execution/durable-session-store.js";
@@ -27,6 +28,7 @@ import type { TokenUsage } from "#shared/token-usage.js";
 
 /** Turn steps and dispatches as Workflow runs them, and its sleep. */
 const WORKFLOW_TURN_HOST: SessionTurnHost = {
+  applyRunMessages: (input) => applyRunMessagesStep(input),
   dispatchRuns: (input) => dispatchCoordinationStep(input),
   runTurnStep: (input) => turnStep(input),
   sleep: (ms) => sleep(ms),
