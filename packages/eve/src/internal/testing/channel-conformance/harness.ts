@@ -10,8 +10,6 @@ import { idle } from "#protocol/session-projection/selectors.js";
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { type CompiledChannel, isCompiledChannel } from "#channel/compiled-channel.js";
 import { type RouteHandlerArgs, isHttpRouteDefinition } from "#channel/routes.js";
-import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -30,7 +28,7 @@ import {
   askDayAndTimeWorkflow,
   askRetroDayWorkflow,
 } from "#internal/testing/channel-conformance/question-workflows.js";
-import { getRun, getWorld } from "#internal/workflow/runtime.js";
+import { conformanceHost, type ConformanceHost, type ConformanceHostKind } from "./hosts.js";
 import {
   type ConnectionAuthorizationChallenge,
   ConnectionAuthorizationRequiredError,
@@ -456,6 +454,8 @@ const CLIENT_PERSON = {
 export interface ConversationOptions {
   /** The test agent's session usage limits. */
   readonly limits?: AgentLimitsDefinition;
+  /** The host the conversation's sessions run on; Workflow when omitted. */
+  readonly host?: ConformanceHostKind;
   readonly waitTimeoutMs?: number;
 }
 
@@ -852,15 +852,16 @@ async function converse(
     const entry = bundle.graph.root.channels.find((candidate) => candidate.name === channelName);
     if (entry?.adapter === undefined) throw new Error(`Expected the ${channelName} adapter.`);
     const { adapter, turnPolicy } = entry;
-    const workflowRuntime = createWorkflowRuntime({ compiledArtifactsSource });
+    const host = conformanceHost(options.host ?? "workflow", compiledArtifactsSource);
+    const sessionRuntime = host.runtime;
     // Mirrors the route arguments production channel dispatch builds for each request.
     const operations = createChannelOperations({
       adapter,
       channelName,
-      runtime: workflowRuntime,
+      runtime: sessionRuntime,
       turnPolicy,
     });
-    const attachSession = createAttachSessionFn(workflowRuntime, {
+    const attachSession = createAttachSessionFn(sessionRuntime, {
       channelKind: adapter.kind,
       channelName,
       turnPolicy,
@@ -911,7 +912,7 @@ async function converse(
             input.deliveryId === undefined
               ? generated
               : { ...generated, deliveryId: input.deliveryId };
-          const handle = await workflowRuntime.createSession({
+          const handle = await sessionRuntime.createSession({
             ...input,
             delivery,
             adapter,
@@ -952,7 +953,7 @@ async function converse(
 
     const conversation: ChannelConversation = {
       async say(text, person = "alice", files) {
-        await waitForStepsToFinish([...sessions.values()], wait);
+        await waitForStepsToFinish(host, [...sessions.values()], wait);
         // A step can be done before its aliases are claimed; see waitForAddress.
         const address = view.nextAddress?.();
         if (address !== undefined) await waitForAddress(address);
@@ -1051,10 +1052,10 @@ async function converse(
       runsOf: (tool) => runs[tool],
       callersOf: () => callers,
       spacesOf: () => spaces,
-      waitForRest: () => waitForRest([...sessions.values()], wait),
+      waitForRest: () => waitForRest(host, [...sessions.values()], wait),
       async cancelRunsInWorld() {
-        await waitForStepsToFinish([...sessions.values()], wait);
-        await Promise.all([...sessions.keys()].map((runId) => getRun(runId).cancel()));
+        await waitForStepsToFinish(host, [...sessions.values()], wait);
+        await Promise.all([...sessions.keys()].map((runId) => host.cancelRunOutsideEve(runId)));
         runsCancelledInWorld = true;
         // A cancelled run never rests, so there is nothing left to settle.
         sessions.clear();
@@ -1075,15 +1076,10 @@ async function converse(
      * finds no session.
      */
     async function waitForAddress(address: string): Promise<void> {
-      const world = await getWorld();
-      const token = sessionInboxHookToken(`${channelName}:${address}`);
+      const token = `${channelName}:${address}`;
       await wait(
         `the channel to claim the address "${address}"`,
-        () =>
-          world.hooks.getByToken(token).then(
-            () => true,
-            () => undefined,
-          ),
+        async () => ((await host.addressClaimed(token)) ? true : undefined),
         () => "",
       );
     }
@@ -1123,7 +1119,7 @@ async function converse(
     // The test file's workflow world closes after its last test, so a session
     // still writing then fails with an unhandled rejection.
     const settle = async () => {
-      await Promise.all([...sessions.values()].map(cancelUntilResting));
+      await Promise.all([...sessions.values()].map((session) => cancelUntilResting(host, session)));
       await Promise.all(background);
     };
     try {
@@ -1131,28 +1127,28 @@ async function converse(
     } catch (error) {
       await view.close().catch(() => {});
       await settle().catch(() => {});
+      await host.dispose().catch(() => {});
       throw error;
     }
     await view.close();
     await settle();
+    await host.dispose();
   });
 }
-
-const TERMINAL_STEP_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 /**
  * Cancels `session` until it rests: idle, as the shared fold reads its stream, with none of its
  * steps still running. A turn that starts after the first cancel needs another. A cancel is a
  * delivery the stream records, so a resting session isn't cancelled again.
  */
-async function cancelUntilResting(session: Session): Promise<void> {
+async function cancelUntilResting(host: ConformanceHost, session: Session): Promise<void> {
   const deadline = Date.now() + WAIT_TIMEOUT_MS;
   let last: string | undefined;
   let running: string[] = [];
   while (Date.now() < deadline) {
     const events = await readThroughTail(session);
     last = events.at(-1)?.type;
-    running = await runningSteps(session);
+    running = await host.runningSteps(session.id);
     if (idle(viewOfEvents(events).view) && running.length === 0) return;
     await session.cancel();
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -1191,42 +1187,37 @@ async function readThroughTail(session: Session, startIndex = 0): Promise<Sessio
   return events;
 }
 
-/** The names of `session`'s steps that haven't finished. */
-async function runningSteps(session: Session): Promise<string[]> {
-  const world = await getWorld();
-  const steps = await world.steps.list({ resolveData: "none", runId: session.id });
-  return steps.data
-    .filter((step) => !TERMINAL_STEP_STATUSES.has(step.status))
-    .map((step) => `${step.stepName} (${step.status})`);
-}
-
 /**
  * Waits until no session has a step running. A person writes once the bot has
  * finished, and a channel claims the address of a message it posted, such as
  * the Telegram message a person replies to, only once the step that posted it
  * commits. Writing sooner starts a second session instead of continuing this one.
  */
-async function waitForStepsToFinish(sessions: readonly Session[], wait: Wait): Promise<void> {
+async function waitForStepsToFinish(
+  host: ConformanceHost,
+  sessions: readonly Session[],
+  wait: Wait,
+): Promise<void> {
   await wait(
     "every session's steps to finish",
     async () => {
-      const running = await Promise.all(sessions.map(runningSteps));
+      const running = await Promise.all(sessions.map((session) => host.runningSteps(session.id)));
       return running.every((steps) => steps.length === 0) ? true : undefined;
     },
     () => "",
   );
 }
 
-/** How long a session's stream must stay unchanged to count as resting. */
-const REST_QUIET_MS = 250;
-
 /**
  * Waits until each session's stream ends waiting on its next message or on a
  * person, with no step running, and stays that way. A response just delivered
  * may not have reached the stream yet, so one quiet read is not enough.
  */
-async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<void> {
-  const world = await getWorld();
+async function waitForRest(
+  host: ConformanceHost,
+  sessions: readonly Session[],
+  wait: Wait,
+): Promise<void> {
   let quietSince: number | undefined;
   let lastTails = "";
   await wait(
@@ -1236,8 +1227,7 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
         sessions.map(async (session) => {
           const tail = await internalSession(session).getStreamTailIndex();
           const waiting = (await readThroughTail(session, Math.max(tail, 0))).some(endsTurn);
-          const steps = await world.steps.list({ resolveData: "none", runId: session.id });
-          const idle = steps.data.every((step) => TERMINAL_STEP_STATUSES.has(step.status));
+          const idle = (await host.runningSteps(session.id)).length === 0;
           return { resting: waiting && idle, tail };
         }),
       );
@@ -1249,7 +1239,7 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
         return undefined;
       }
       quietSince ??= Date.now();
-      return Date.now() - quietSince >= REST_QUIET_MS ? true : undefined;
+      return Date.now() - quietSince >= host.quietMs ? true : undefined;
     },
     () => "",
   );
