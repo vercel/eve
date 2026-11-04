@@ -217,7 +217,8 @@
  *             checkpoint and step entry (`execution/session/{turn-step,
  *             owner-boot,checkpoint,step-state-delta}.ts`), the inbox
  *             (`execution/session-inbox/inbox.ts`), the host registry and tool
- *             stub port (`execution/{hosts,tool-stub-host}.ts`) import none of
+ *             stub port (`execution/{hosts,tool-stub-host}.ts`), and the in-process
+ *             test host (`execution/in-process/`) import none of
  *             rule 61's specifiers, nor `#execution/workflow-runtime.js`, nor
  *             Workflow's side of a port (`#execution/workflow-host/*`,
  *             `#execution/session/workflow-host.js`,
@@ -1235,13 +1236,17 @@ const WORKFLOW_PORT_MODULES = new Set([
   "#execution/session-inbox/workflow-transport.js",
 ]);
 const EVE_SRC = "packages/eve/src/";
+/** Directories whose every file is host-neutral: the in-process test host runs sessions without Workflow. */
+const HOST_NEUTRAL_DIRS = ["packages/eve/src/execution/in-process/"];
 /** Each import's specifier and line, static or lazy, wherever its quotes fall. */
 const RULE66_IMPORT_RE = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)["']([^"']+)["']/gm;
 
 /** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
 function checkRule66(posix, lines, violations) {
   if (posix.endsWith(".test.ts")) return;
-  if (!HOST_NEUTRAL_FILES.has(posix)) return;
+  if (!HOST_NEUTRAL_FILES.has(posix) && !HOST_NEUTRAL_DIRS.some((dir) => posix.startsWith(dir))) {
+    return;
+  }
   const text = lines.join("\n");
   for (const match of text.matchAll(RULE66_IMPORT_RE)) {
     const specifier = aliasOfSpecifier(posix, match[1]);
