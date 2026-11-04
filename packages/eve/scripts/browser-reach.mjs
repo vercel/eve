@@ -33,16 +33,18 @@ const option = (name, fallback) => {
 
 /**
  * The entries that promise no Node built-in and no eve file naming a Node global: the session
- * core's host-neutral roots, which every host runs a session through. The session loop, the turn
- * step it runs, and a session's first-owner boot.
+ * core's host-neutral roots, which every host runs a session through (the session loop, the turn
+ * step it runs, and a session's first-owner boot), and the in-process host, which runs sessions
+ * through them without Workflow.
  */
 const NODE_FREE_ENTRIES = [
   "src/execution/session/program.ts",
   "src/execution/session/turn-step.ts",
   "src/execution/session/owner-boot.ts",
+  "src/execution/in-process/runtime.ts",
 ];
 
-/** The Workflow-free entries: the session core's roots. */
+/** The Workflow-free entries: the session core's roots and the in-process host. */
 const ENTRIES = option("--entry", undefined)?.split(",") ?? [...NODE_FREE_ENTRIES];
 
 /**

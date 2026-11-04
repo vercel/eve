@@ -40,5 +40,19 @@
     "total.globalFiles": 0,
     "total.vendorGlobalFiles": 6,
     "total.workflow": 0
+  },
+  "src/execution/in-process/runtime.ts": {
+    "static.modules": 691,
+    "static.kib": 3381,
+    "static.builtinFiles": 0,
+    "static.globalFiles": 0,
+    "static.vendorGlobalFiles": 6,
+    "static.workflow": 0,
+    "total.modules": 708,
+    "total.kib": 4035,
+    "total.builtinFiles": 0,
+    "total.globalFiles": 0,
+    "total.vendorGlobalFiles": 6,
+    "total.workflow": 0
   }
 }
