@@ -51,6 +51,7 @@ test("with github config, GitHub goes through the brokered gh tool and signed co
       connector: "github/acme-bot",
       authorize: () => true,
       broker: async () => {},
+      readRules: async () => ({}),
       principalType: "app",
     },
   });
@@ -80,7 +81,12 @@ test("github config without authorize is rejected, so brokered access never defa
   assert.throws(
     () =>
       extension({
-        github: { connector: "github/acme-bot", broker: async () => {}, principalType: "app" },
+        github: {
+          connector: "github/acme-bot",
+          broker: async () => {},
+          readRules: async () => ({}),
+          principalType: "app",
+        },
       } as never),
     /github\.authorize/u,
   );
@@ -88,7 +94,12 @@ test("github config without authorize is rejected, so brokered access never defa
   assert.throws(
     () =>
       extension({
-        github: { connector: "github/acme-bot", broker: async () => {}, authorize: () => true },
+        github: {
+          connector: "github/acme-bot",
+          broker: async () => {},
+          readRules: async () => ({}),
+          authorize: () => true,
+        },
       } as never),
     /github\.principalType/u,
   );
@@ -100,6 +111,7 @@ test("with a user principal, guidance describes the caller's token instead of re
       connector: "github/acme-bot",
       authorize: () => true,
       broker: async () => {},
+      readRules: async () => ({}),
       principalType: "user",
     },
   });

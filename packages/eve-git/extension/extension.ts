@@ -9,7 +9,7 @@ import type {
   GitHubUserAuthorizeRequest,
 } from "./lib/github-shell.ts";
 
-export type { GitHubLeaseRule } from "./lib/github-shell.ts";
+export type { GitHubLeaseReader, GitHubLeaseRule, GitHubLeaseRules } from "./lib/github-shell.ts";
 export type { GitHubCoAuthor } from "./lib/github-shell.ts";
 export type {
   GitHubAppAuthorizeRequest,
@@ -25,6 +25,8 @@ const fn = <T>() => z.custom<T>((value) => typeof value === "function");
 const githubBase = {
   connector: z.string().min(1),
   broker: fn<GitHubLeaseBroker>(),
+  /** Reads back the GitHub rules `broker` wrote, from the sandbox's live network policy. */
+  readRules: fn<GitHubConfig["readRules"]>(),
   /**
    * Resolves the person each turn publishes for. Their
    * `Co-authored-by` trailer ends signed commits and new pull requests.

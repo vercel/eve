@@ -24,6 +24,7 @@ import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import {
   applyInitialVercelNetworkPolicy,
+  createVercelNetworkPolicyReader,
   createVercelNetworkPolicySetter,
   ensureVercelSandboxBaseRuntime,
   toVercelNetworkPolicy,
@@ -79,7 +80,10 @@ export type VercelSandboxSessionState = {
 };
 
 /** Capabilities a Vercel connection adds to the session. */
-export type VercelSandboxExtensions = Pick<VercelSandboxSession, "name" | "setNetworkPolicy">;
+export type VercelSandboxExtensions = Pick<
+  VercelSandboxSession,
+  "getNetworkPolicy" | "name" | "setNetworkPolicy"
+>;
 
 interface CreateVercelSandboxInput {
   readonly createSandbox?: CreateVercelSandbox;
@@ -160,12 +164,16 @@ export function createVercelSandbox(
         );
       }
       await ensureVercelSandboxBaseRuntime(sandbox);
-      return createVercelConnection(sandbox);
+      return createVercelConnection(sandbox, { createOptions, sandboxModule });
     },
     async start(context, options, artifact) {
       const sandboxName = vercelSessionName(context.session.id);
       const sandbox = await openSession(context, options, artifact, sandboxName);
-      return { connection: createVercelConnection(sandbox), state: { sandboxName, version: 3 } };
+      const sandboxModule = await loadSandboxModule();
+      return {
+        connection: createVercelConnection(sandbox, { createOptions, sandboxModule }),
+        state: { sandboxName, version: 3 },
+      };
     },
     // Saved filesystems expire, so a keyed tool session's sandbox is bounded.
     toolSessions: true,
@@ -378,7 +386,9 @@ async function prepareTemplateSnapshot(
     input.context.log("preparing base runtime inside sandbox");
     await ensureVercelSandboxBaseRuntime(sandbox);
     await applyInitialVercelNetworkPolicy(sandbox, input.createOptions.networkPolicy);
-    await input.context.populate(createVercelConnection(sandbox));
+    await input.context.populate(
+      createVercelConnection(sandbox, { createOptions: input.createOptions, sandboxModule }),
+    );
     // Authored preparation can change the base paths inherited by every new session.
     await ensureVercelSandboxBaseRuntime(sandbox);
     // The returned snapshot, not the handle's cached `currentSnapshotId`, which the SDK may not refresh.
@@ -561,9 +571,13 @@ function createSessionCreateParams(
 
 function createVercelConnection(
   sandbox: VercelSandbox,
+  lookup: { readonly createOptions: VercelCreateOptions; readonly sandboxModule: VercelModule },
 ): SandboxConnection<VercelSandboxExtensions> {
   return {
     extensions: {
+      getNetworkPolicy: createVercelNetworkPolicyReader(() =>
+        getNamedVercelSandbox({ ...lookup, sandboxName: sandbox.name }),
+      ),
       name: sandbox.name,
       setNetworkPolicy: createVercelNetworkPolicySetter(sandbox),
     },

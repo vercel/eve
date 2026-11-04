@@ -82,7 +82,7 @@ test("built extension mounts as git with only session-resolved GitHub contributi
 test("git__gh resolves an executable tool when GitHub is configured", async () => {
   const { appRoot, manifest } = await compileConsumer(
     "git-gh-consumer",
-    '{ github: { connector: "github/acme-bot", authorize: () => true, async broker() {}, principalType: "app" } }',
+    '{ github: { connector: "github/acme-bot", authorize: () => true, async broker() {}, async readRules() { return {}; }, principalType: "app" } }',
   );
   const resolver = compiledOf(manifest, "tool").find((entry) => entry.slug === "git__gh");
   assert.ok(resolver);

@@ -5,7 +5,9 @@
   "GitHubAuthorizeRequest",
   "GitHubCoAuthor",
   "GitHubLeaseBroker",
+  "GitHubLeaseReader",
   "GitHubLeaseRule",
+  "GitHubLeaseRules",
   "GitHubUserAuthorizeRequest",
   "default"
 ]

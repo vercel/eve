@@ -38,6 +38,9 @@ const CONFIG = {
       rules ? { allow: { "*": [], ...allow } } : "allow-all",
     );
   },
+  async readRules(sandbox: SandboxSession) {
+    return readGitHubRules(sandbox);
+  },
 };
 
 const READ: GitHubShellInput = {
@@ -89,7 +92,6 @@ test("runs clone without approval while retaining repository-scoped write-capabl
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
 
   await executeGitHubShell(CLONE, CONFIG, {
-    sessionId: "session-1",
     async getConnectToken(connector, params) {
       tokenCalls.push({ connector, params });
       return "secret-token";
@@ -130,7 +132,6 @@ test("asks authorize with the argv, caller, owner, repository, and token before 
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
   const dependencies = {
     auth,
-    sessionId: "session-authorize",
     async getConnectToken() {
       return "secret-token";
     },
@@ -185,7 +186,6 @@ test("resolves one user grant for every repository through ctx.getToken and re-a
   const dependencies = {
     getToken,
     requireAuth,
-    sessionId: "session-user-auth",
     async getConnectToken(): Promise<string> {
       throw new Error("user-scoped access must not mint app tokens");
     },
@@ -260,7 +260,6 @@ test("user tokens cannot satisfy repository allowlists with a declared target", 
           },
         },
         {
-          sessionId: "session-user-allowlist",
           getToken: async () => ({ token: "user-token" }),
           requireAuth() {
             assert.fail("must not request re-authorization");
@@ -330,7 +329,6 @@ test("rejects invalid repositories before sandbox access or token minting", asyn
     assert.equal(typeof decision, "object", repository);
     await assert.rejects(
       executeGitHubShell(input, CONFIG, {
-        sessionId: "session-1",
         async getSandbox() {
           assert.fail("invalid repositories must not access the sandbox");
         },
@@ -347,7 +345,6 @@ test("rejects invalid repositories before sandbox access or token minting", asyn
 test("requires an owner for app tokens before sandbox access", async () => {
   await assert.rejects(
     executeGitHubShell({ command: "gh api user/repos", description: "List repos" }, CONFIG, {
-      sessionId: "session-1",
       async getSandbox() {
         assert.fail("must not access the sandbox");
       },
@@ -364,7 +361,6 @@ test("mints a repository-scoped token only during execution and redacts output",
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
   const policies: NetworkPolicy[] = [];
   const output = await executeGitHubShell(WRITE, CONFIG, {
-    sessionId: "session-1",
     async getConnectToken(connector, params) {
       tokenCalls.push({ connector, params });
       return "secret-token";
@@ -408,7 +404,7 @@ test("mints a repository-scoped token only during execution and redacts output",
   const push = runs[0]!;
   assert.equal(
     push.command,
-    "cd '/workspace/internal-agents' && exec 'git' 'push' 'origin' 'HEAD:refs/heads/rui/my-branch'",
+    "cd '/workspace/internal-agents' && exec timeout -k 10 1800 'git' 'push' 'origin' 'HEAD:refs/heads/rui/my-branch'",
   );
   assert.equal(push.env?.GH_TOKEN, undefined);
   assert.equal(push.env?.GIT_CONFIG_COUNT, "6");
@@ -432,7 +428,6 @@ test("mints a repository-scoped token only during execution and redacts output",
 test("leases the token to uploads.github.com the same way as api.github.com", async () => {
   const policies: NetworkPolicy[] = [];
   await executeGitHubShell(READ, CONFIG, {
-    sessionId: "session-1",
     async getConnectToken() {
       return "secret-token";
     },
@@ -440,15 +435,21 @@ test("leases the token to uploads.github.com the same way as api.github.com", as
       return fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" }, policies);
     },
   });
-  const lease = policies[0] as { allow: Record<string, unknown> };
+  const lease = policies[0] as { allow: Record<string, GitHubLeaseRule[]> };
   assert.match(JSON.stringify(lease.allow["api.github.com"]), /Bearer secret-token/u);
-  assert.deepEqual(lease.allow["uploads.github.com"], lease.allow["api.github.com"]);
+  assert.deepEqual(
+    lease.allow["uploads.github.com"]![0]!.transform,
+    lease.allow["api.github.com"]![0]!.transform,
+  );
+  assert.deepEqual(
+    lease.allow["uploads.github.com"]![0]!.match!.headers,
+    lease.allow["api.github.com"]![0]!.match!.headers,
+  );
 });
 
 test("rewrites SSH GitHub remotes to HTTPS so they carry the credential", async () => {
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
   await executeGitHubShell(WRITE, CONFIG, {
-    sessionId: "session-1",
     async getConnectToken() {
       return "secret-token";
     },
@@ -490,7 +491,6 @@ test("runs gh auth token with only the placeholder credential and redacts inject
   const runs: Parameters<SandboxSession["run"]>[0][] = [];
   const policies: NetworkPolicy[] = [];
   const output = await executeGitHubShell({ ...READ, command: "gh auth token" }, CONFIG, {
-    sessionId: "session-1",
     async getConnectToken() {
       return "secret-token";
     },
@@ -525,7 +525,6 @@ test("accepts workspace-relative working directories and rejects escapes", async
     { ...READ, workingDirectory: "internal-agents" },
     CONFIG,
     {
-      sessionId: "session-1",
       async getConnectToken() {
         return "token";
       },
@@ -539,7 +538,6 @@ test("accepts workspace-relative working directories and rejects escapes", async
 
   await assert.rejects(
     executeGitHubShell({ ...READ, workingDirectory: "../outside" }, CONFIG, {
-      sessionId: "session-1",
       async getConnectToken() {
         return "token";
       },
@@ -557,7 +555,6 @@ test("rejects owner-only repositories for user tokens before sandbox access", as
       { command: "gh repo list vercel", description: "List repos", repository: "vercel" },
       { ...CONFIG, principalType: "user", authorize: () => true },
       {
-        sessionId: "session-1",
         async getSandbox() {
           assert.fail("must not access the sandbox");
         },
@@ -580,7 +577,6 @@ test("leaves explicit command targets to authorize through argv", async () => {
         },
       },
       {
-        sessionId: "session-1",
         async getConnectToken() {
           return "token";
         },
@@ -617,7 +613,6 @@ test("mints an owner-wide installation token for owner-level discovery", async (
       },
     },
     {
-      sessionId: "session-1",
       async getConnectToken(_connector, params) {
         tokenCalls.push(params);
         return "token";
@@ -656,7 +651,6 @@ test("scopes app tokens to the declared owner's installation and leaves owners t
         },
       },
       {
-        sessionId: "session-1",
         async getConnectToken(_connector, params) {
           tokenCalls.push(params);
           return "token";
@@ -693,7 +687,6 @@ test("attributes pull requests to the person the tool context resolves", async (
   };
   const dependencies = {
     context,
-    sessionId: "session-1",
     async getConnectToken() {
       return "secret-token";
     },
@@ -717,6 +710,188 @@ test("attributes pull requests to the person the tool context resolves", async (
   );
 });
 
+test("concurrent commands on one sandbox keep each other's credential rules", async () => {
+  // A parent turn and its subagents share one sandbox through separate handles
+  // in separate processes; only the sandbox (its policy and its lock) is shared.
+  const shared = sharedSandbox();
+  const tokens = new Map<string, string>();
+  let releaseParent!: () => void;
+  const parentHeld = new Promise<void>((resolve) => (releaseParent = resolve));
+  const seen: string[] = [];
+  const run = (label: string) => async (input: Parameters<SandboxSession["run"]>[0]) => {
+    // What the firewall would do with this command's placeholder right now.
+    const rules = (shared.policy as { allow: Record<string, GitHubLeaseRule[]> }).allow;
+    const placeholder = input.env!.GH_TOKEN!;
+    const rule = rules["api.github.com"]?.find((entry) =>
+      entry.match?.headers?.[0]?.value?.regex?.includes(placeholder.replaceAll(".", "\\.")),
+    );
+    seen.push(`${label}:${rule?.transform[0]?.headers.authorization ?? "401"}`);
+    if (label === "parent") await parentHeld;
+    return { exitCode: 0, stdout: "", stderr: "" };
+  };
+  const handle = (label: string) => {
+    const sandbox = fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" }, [], shared);
+    return Object.assign(sandbox, { run: run(label) });
+  };
+  const execute = (label: string, repository: string) =>
+    executeGitHubShell(
+      { command: `gh api repos/${repository}`, description: "Read", repository },
+      CONFIG,
+      {
+        async getConnectToken(_connector, params) {
+          const detail = params.authorizationDetails![0] as { repositories?: string[] };
+          const token = `token-${detail.repositories![0]}`;
+          tokens.set(label, token);
+          return token;
+        },
+        async getSandbox() {
+          return handle(label);
+        },
+      },
+    );
+
+  const parent = execute("parent", "vercel/eve");
+  while (!seen.some((entry) => entry.startsWith("parent:"))) await new Promise(setImmediate);
+  for (let index = 0; index < 5; index += 1) {
+    await Promise.all([execute("a", "vercel/a"), execute("b", "vercel/b")]);
+  }
+  // The parent's rule outlives every subagent command that started and ended meanwhile.
+  const rules = (shared.policy as { allow: Record<string, GitHubLeaseRule[]> }).allow;
+  assert.equal(rules["api.github.com"]!.length, 1);
+  assert.equal(
+    rules["api.github.com"]![0]!.transform[0]!.headers.authorization,
+    "Bearer token-eve",
+  );
+  releaseParent();
+  await parent;
+
+  assert.deepEqual(
+    new Set(seen),
+    new Set(["parent:Bearer token-eve", "a:Bearer token-a", "b:Bearer token-b"]),
+  );
+  assert.equal(shared.policy, "allow-all");
+});
+
+test("scopes each rule to the declared repository by request path", async () => {
+  const policies: NetworkPolicy[] = [];
+  await executeGitHubShell(READ, CONFIG, {
+    async getConnectToken() {
+      return "secret-token";
+    },
+    async getSandbox() {
+      return fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" }, policies);
+    },
+  });
+  const rules = (policies[0] as { allow: Record<string, GitHubLeaseRule[]> }).allow;
+  const path = (host: string) =>
+    new RegExp(rules[host]![0]!.match!.path!.regex.replace("(?i)", ""), "iu");
+  assert.ok(path("api.github.com").test("/repos/vercel/internal-agents/pulls/1"));
+  assert.ok(path("api.github.com").test("/repos/vercel/internal-agents"));
+  assert.ok(path("api.github.com").test("/graphql"));
+  assert.ok(!path("api.github.com").test("/repos/vercel/internal-agents-fork/pulls"));
+  assert.ok(!path("api.github.com").test("/user"));
+  assert.ok(path("uploads.github.com").test("/repos/vercel/internal-agents/releases/1/assets"));
+  assert.ok(!path("uploads.github.com").test("/repos/vercel/other/releases/1/assets"));
+  assert.ok(path("github.com").test("/vercel/internal-agents.git/git-receive-pack"));
+  assert.ok(path("github.com").test("/Vercel/Internal-Agents/info/refs"));
+  assert.ok(!path("github.com").test("/vercel/other.git/info/refs"));
+
+  // A command with no repository gets an unscoped rule for that command only.
+  const unscoped: NetworkPolicy[] = [];
+  await executeGitHubShell(
+    { command: "gh api user", description: "Read the caller" },
+    { ...CONFIG, principalType: "user", authorize: () => true },
+    {
+      getToken: async () => ({ token: "user-token" }),
+      requireAuth() {
+        assert.fail("must not request re-authorization");
+      },
+      async getSandbox() {
+        return fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" }, unscoped);
+      },
+    },
+  );
+  const open = (unscoped[0] as { allow: Record<string, GitHubLeaseRule[]> }).allow;
+  for (const host of ["api.github.com", "uploads.github.com", "github.com"]) {
+    assert.equal(open[host]![0]!.match!.path, undefined, host);
+  }
+});
+
+test("drops rules it cannot vouch for: expired leases and other callers' user leases", async () => {
+  const shared = sharedSandbox();
+  const policies: NetworkPolicy[] = [];
+  const userConfig = { ...CONFIG, principalType: "user" as const, authorize: () => true };
+  const user = (principalId: string, inspect?: () => void) =>
+    executeGitHubShell(READ, userConfig, {
+      auth: { attributes: {}, authenticator: "hub", principalId, principalType: "user" },
+      getToken: async () => ({ token: `token-${principalId}` }),
+      requireAuth() {
+        assert.fail("must not request re-authorization");
+      },
+      async getSandbox() {
+        return Object.assign(
+          fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" }, policies, shared),
+          {
+            async run() {
+              inspect?.();
+              return { exitCode: 0, stdout: "", stderr: "" };
+            },
+          },
+        );
+      },
+    });
+  // Leave a live rule behind for rui, as a command still running would.
+  let ruiRule: GitHubLeaseRule[] = [];
+  await user("rui", () => {
+    ruiRule = (shared.policy as { allow: Record<string, GitHubLeaseRule[]> }).allow[
+      "api.github.com"
+    ]!;
+  });
+  shared.policy = { allow: { "*": [], "api.github.com": ruiRule } } as NetworkPolicy;
+
+  // Another caller's command never gives rui's lease its own token.
+  let during: GitHubLeaseRule[] = [];
+  await user("alice", () => {
+    during = (shared.policy as { allow: Record<string, GitHubLeaseRule[]> }).allow[
+      "api.github.com"
+    ]!;
+  });
+  assert.equal(during.length, 1);
+  assert.equal(during[0]!.transform[0]!.headers.authorization, "Bearer token-alice");
+
+  // An expired lease is dropped even for the same caller.
+  const placeholder = /eve-github-[^$]+/u.exec(ruiRule[0]!.match!.headers![0]!.value!.regex!)![0];
+  const [, encoded] = placeholder.replaceAll("\\.", ".").split(".");
+  const lease = JSON.parse(Buffer.from(encoded!, "base64url").toString()) as unknown[];
+  const stale = `${placeholder.replaceAll("\\.", ".").split(".")[0]}.${Buffer.from(JSON.stringify([0, ...lease.slice(1)])).toString("base64url")}`;
+  shared.policy = {
+    allow: {
+      "*": [],
+      "api.github.com": [
+        {
+          match: {
+            headers: [
+              {
+                key: { exact: "authorization" },
+                value: { regex: `^(?:token|Bearer) ${stale.replaceAll(".", "\\.")}$` },
+              },
+            ],
+          },
+          transform: [{ headers: { authorization: "<redacted>" } }],
+        },
+      ],
+    },
+  };
+  await user("rui", () => {
+    during = (shared.policy as { allow: Record<string, GitHubLeaseRule[]> }).allow[
+      "api.github.com"
+    ]!;
+  });
+  assert.equal(during.length, 1);
+  assert.doesNotMatch(JSON.stringify(during), new RegExp(stale.split(".")[1]!, "u"));
+  assert.equal(shared.policy, "allow-all");
+});
+
 function fakeSandbox(
   runs: Parameters<SandboxSession["run"]>[0][],
   result:
@@ -727,8 +902,9 @@ function fakeSandbox(
         stderr: string;
       }),
   policies: NetworkPolicy[] = [],
+  shared: SharedSandbox = sharedSandbox(),
 ): SandboxSession {
-  const sandbox: Pick<SandboxSession, "resolvePath" | "run" | "removePath"> &
+  const sandbox: Pick<SandboxSession, "resolvePath" | "run" | "removePath" | "spawn"> &
     Pick<NetworkPolicySandboxSession, "setNetworkPolicy"> = {
     resolvePath(path: string) {
       if (path === ".") return "/workspace";
@@ -739,10 +915,67 @@ function fakeSandbox(
       runs.push(input);
       return typeof result === "function" ? result(input) : result;
     },
+    // The lease lock: `flock` on one file, so only one holder at a time.
+    async spawn(input) {
+      assert.match(input.command, /flock -w \d+ 9 && echo locked/u);
+      const previous = shared.lock;
+      let release!: () => void;
+      shared.lock = new Promise<void>((resolve) => (release = resolve));
+      await previous;
+      return {
+        stdout: new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("locked\n"));
+          },
+        }),
+        stderr: new ReadableStream(),
+        async wait() {
+          return { exitCode: 0 };
+        },
+        async kill() {
+          release();
+        },
+      };
+    },
     async removePath() {},
     async setNetworkPolicy(policy: NetworkPolicy) {
       policies.push(policy);
+      shared.policy = policy;
     },
   };
+  sandboxes.set(sandbox, shared);
   return sandbox as NetworkPolicySandboxSession;
+}
+
+const sandboxes = new WeakMap<object, SharedSandbox>();
+
+interface SharedSandbox {
+  lock: Promise<void>;
+  policy: NetworkPolicy;
+}
+
+/** The state every handle to one sandbox sees, whichever process holds the handle. */
+function sharedSandbox(): SharedSandbox {
+  return { lock: Promise.resolve(), policy: "allow-all" };
+}
+
+/** What the Vercel Sandbox API returns: injected header values redacted, matches as written. */
+function readGitHubRules(sandbox: SandboxSession): Record<string, GitHubLeaseRule[]> {
+  const policy = sandboxes.get(sandbox)!.policy;
+  if (typeof policy === "string" || Array.isArray(policy.allow)) return {};
+  return Object.fromEntries(
+    Object.entries(policy.allow ?? {})
+      .filter(([host]) => host !== "*")
+      .map(([host, rules]) => [
+        host,
+        (rules as GitHubLeaseRule[]).map((rule) => ({
+          ...rule,
+          transform: rule.transform.map((transform) => ({
+            headers: Object.fromEntries(
+              Object.keys(transform.headers).map((key) => [key, "<redacted>"]),
+            ),
+          })),
+        })),
+      ]),
+  );
 }

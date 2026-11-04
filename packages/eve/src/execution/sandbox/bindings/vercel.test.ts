@@ -1703,6 +1703,46 @@ describe("createVercelSandbox", () => {
     });
   });
 
+  it("reads the network policy from a fresh lookup, not the handle's cached metadata", async () => {
+    const templateSandbox = createMockSandbox({ name: "template" });
+    const sessionSandbox = createMockSandbox({ name: "session" });
+    const written = {
+      allow: {
+        "api.github.com": [
+          {
+            match: { headers: [{ key: { exact: "authorization" }, value: { regex: "^p$" } }] },
+            transform: [{ headers: { authorization: "<redacted>" } }],
+          },
+        ],
+      },
+    };
+    const fresh = { ...createMockSandbox({ name: "session" }), networkPolicy: written };
+    const sandboxModule = {
+      Sandbox: {
+        create: createSandboxesInOrder(templateSandbox, sessionSandbox),
+        get: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const provider = createTestVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+    await provider.prepare({ appRoot: "/tmp/test-app-root" });
+    const handle = await provider.openSession({
+      appRoot: "/tmp/test-app-root",
+      sandboxName: "session-key",
+    });
+
+    sandboxModule.Sandbox.get.mockClear();
+    sandboxModule.Sandbox.get.mockResolvedValueOnce(fresh);
+    await expect(handle.sandbox.getNetworkPolicy()).resolves.toEqual(written);
+    expect(sandboxModule.Sandbox.get).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "session", resume: false }),
+    );
+
+    sandboxModule.Sandbox.get.mockResolvedValueOnce(null);
+    await expect(handle.sandbox.getNetworkPolicy()).rejects.toThrow("no longer exists");
+  });
+
   it("runs commands in a working directory resolved from /workspace", async () => {
     const { handle, sessionSandbox } = await createTestVercelSession();
     vi.mocked(sessionSandbox.runCommand).mockResolvedValue(createMockDetachedCommand() as never);

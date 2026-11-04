@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import { getToken } from "@vercel/connect";
 import type { SessionAuthContext } from "eve/context";
@@ -12,11 +13,25 @@ import {
 } from "./attribution.ts";
 import { validateRepositoryRoot } from "./repository-root.ts";
 import { connectUserAuthorization } from "./connect-user-auth.ts";
+import {
+  GITHUB_COMMAND_TIMEOUT_SECONDS,
+  leasePlaceholder,
+  withGitHubLease,
+  type GitHubLeaseBroker,
+  type GitHubLeaseReader,
+  type GitHubLeaseScope,
+} from "./github-lease.ts";
 import { GITHUB_TARGET } from "./github-shell-schema.ts";
 import { shellQuote } from "./shell.ts";
 import { GITHUB_TOOLING_PATHS } from "./tooling.ts";
 
 export type { GitHubCoAuthor } from "./attribution.ts";
+export type {
+  GitHubLeaseBroker,
+  GitHubLeaseReader,
+  GitHubLeaseRule,
+  GitHubLeaseRules,
+} from "./github-lease.ts";
 
 export interface GitHubShellInput {
   readonly command: string;
@@ -47,10 +62,14 @@ interface GitHubConfigBase {
    * requester's linked accounts.
    */
   readonly attribution?: GitHubAttribution;
-  readonly broker: (
-    sandbox: SandboxSession,
-    rules: Readonly<Record<string, readonly GitHubLeaseRule[]>> | null,
-  ) => Promise<void>;
+  /**
+   * Writes the sandbox's GitHub rules for every live command, replacing the
+   * ones it wrote before, and keeps your other network rules. `null` removes
+   * them all.
+   */
+  readonly broker: GitHubLeaseBroker;
+  /** Reads back the GitHub rules `broker` last wrote, from the sandbox's live network policy. */
+  readonly readRules: GitHubLeaseReader;
   readonly connector: string;
 }
 
@@ -97,16 +116,6 @@ export type GitHubAuthorize<Request extends GitHubAuthorizeRequest = GitHubAutho
   request: Request,
 ) => boolean | Promise<boolean>;
 
-export interface GitHubLeaseRule {
-  readonly match?: {
-    readonly headers?: readonly {
-      readonly key?: { readonly exact: string };
-      readonly value?: { readonly exact?: string; readonly regex?: string };
-    }[];
-  };
-  readonly transform: readonly { readonly headers: Readonly<Record<string, string>> }[];
-}
-
 interface GitHubShellDependencies {
   /** The calling tool's context, passed to `attribution`. */
   readonly context?: ToolContext;
@@ -126,12 +135,9 @@ interface GitHubShellDependencies {
   readonly getToken?: ToolContext["getToken"];
   readonly requireAuth?: ToolContext["requireAuth"];
   readonly getSandbox: () => Promise<SandboxSession>;
-  /** Serializes credential leases per eve session; every `ctx.getSandbox()` call returns a new handle. */
-  readonly sessionId: string;
 }
 
 const MAX_OUTPUT_BYTES = 100_000;
-const leaseQueues = new Map<string, Promise<void>>();
 const EXECUTABLES = new Set(["gh", "git", "gh-signed-commit"]);
 /** How `gh` and `git` report a rejected token. */
 const GITHUB_UNAUTHORIZED = /HTTP 401\b|Bad credentials|Authentication failed for|failed: 401\b/u;
@@ -176,6 +182,8 @@ export async function executeGitHubShell(
   const auth = dependencies.auth ?? null;
   let userAuth: ToolAuthProvider | undefined;
   let token: string;
+  let scope: GitHubLeaseScope;
+  let tokenFor: (lease: GitHubLeaseScope) => Promise<string | null>;
   if (config.principalType === "user") {
     if (!dependencies.getToken || !dependencies.requireAuth)
       throw new Error("User-scoped GitHub access requires ctx.getToken and ctx.requireAuth.");
@@ -184,16 +192,34 @@ export async function executeGitHubShell(
     // One unscoped grant therefore covers every repository after one sign-in.
     userAuth = connectUserAuthorization(config.connector);
     ({ token } = await dependencies.getToken(userAuth));
+    scope = { principal: userPrincipal(config.connector, auth), owner, name };
+    // Another live command of the same caller gets this caller's token; any
+    // other caller's rule is dropped rather than given this caller's token.
+    tokenFor = async (lease) => (lease.principal === scope.principal ? token : null);
   } else {
-    // Scope the installation token to the repository, or to the owner's
-    // installation for owner-level commands such as `gh repo list <owner>`.
-    const installation: { type: "github_app_installation"; org: string; repositories?: string[] } =
-      { type: "github_app_installation", org: owner! };
-    if (name) installation.repositories = [name];
-    token = await (dependencies.getConnectToken ?? getToken)(config.connector, {
-      authorizationDetails: [installation],
-      subject: { type: "app" },
-    });
+    const mint = (org: string, repository: string | null) => {
+      // Scope the installation token to the repository, or to the owner's
+      // installation for owner-level commands such as `gh repo list <owner>`.
+      const installation: {
+        type: "github_app_installation";
+        org: string;
+        repositories?: string[];
+      } = { type: "github_app_installation", org };
+      if (repository) installation.repositories = [repository];
+      return (dependencies.getConnectToken ?? getToken)(config.connector, {
+        authorizationDetails: [installation],
+        subject: { type: "app" },
+      });
+    };
+    token = await mint(owner!, name);
+    scope = { principal: "app", owner, name };
+    const minted = new Map<string, Promise<string>>();
+    tokenFor = async (lease) => {
+      if (lease.principal !== "app" || !lease.owner) return null;
+      const key = `${lease.owner}/${lease.name ?? ""}`;
+      if (!minted.has(key)) minted.set(key, mint(lease.owner, lease.name));
+      return await minted.get(key)!;
+    };
   }
   if (!token)
     throw new Error(`Connect returned an empty token for ${JSON.stringify(config.connector)}.`);
@@ -217,20 +243,20 @@ export async function executeGitHubShell(
     : argv;
 
   const executable = executablePath(commandArgv[0]!);
-  const command = `cd ${shellQuote(workingDirectory)} && exec ${shellQuote(executable)} ${commandArgv
+  const command = `cd ${shellQuote(workingDirectory)} && exec timeout -k 10 ${GITHUB_COMMAND_TIMEOUT_SECONDS} ${shellQuote(executable)} ${commandArgv
     .slice(1)
     .map(shellQuote)
     .join(" ")}`;
   const authorization = `Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
-  const placeholder = `eve-github-${invocationId}`;
+  const placeholder = leasePlaceholder(scope);
   const githubConfig = `/tmp/eve-code-gh-${invocationId}`;
   const placeholderAuthorization = `Basic ${Buffer.from(`x-access-token:${placeholder}`).toString("base64")}`;
   let result: Awaited<ReturnType<SandboxSession["run"]>>;
   try {
-    result = await withGitHubCredentialLease(
+    result = await withGitHubLease(
       sandbox,
-      dependencies.sessionId,
-      { authorization, placeholder, placeholderAuthorization, token },
+      { placeholder, token },
+      { broker: config.broker, read: config.readRules, tokenFor },
       () => {
         const env: Record<string, string> = {
           GH_CONFIG_DIR: githubConfig,
@@ -258,7 +284,6 @@ export async function executeGitHubShell(
         env.PATH = "/usr/local/bin:/usr/bin:/bin";
         return sandbox.run({ command, env });
       },
-      config.broker,
     );
   } finally {
     await sandbox.removePath({ path: githubConfig, recursive: true, force: true });
@@ -278,67 +303,15 @@ export async function executeGitHubShell(
   };
 }
 
-async function withGitHubCredentialLease<T>(
-  sandbox: SandboxSession,
-  sessionId: string,
-  credential: {
-    readonly authorization: string;
-    readonly placeholder: string;
-    readonly placeholderAuthorization: string;
-    readonly token: string;
-  },
-  run: () => PromiseLike<T>,
-  broker: GitHubConfig["broker"],
-): Promise<T> {
-  const previous = leaseQueues.get(sessionId) ?? Promise.resolve();
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const current = previous.then(() => gate);
-  leaseQueues.set(sessionId, current);
-  await previous;
-  try {
-    const api: GitHubLeaseRule[] = [
-      {
-        match: {
-          headers: [
-            {
-              key: { exact: "authorization" },
-              value: { regex: `^(?:token|Bearer) ${credential.placeholder}$` },
-            },
-          ],
-        },
-        transform: [{ headers: { authorization: `Bearer ${credential.token}` } }],
-      },
-    ];
-    await broker(sandbox, {
-      "api.github.com": api,
-      // `gh release upload` and `gh release create` with assets send files here.
-      "uploads.github.com": api,
-      "github.com": [
-        {
-          match: {
-            headers: [
-              {
-                key: { exact: "authorization" },
-                value: { exact: credential.placeholderAuthorization },
-              },
-            ],
-          },
-          transform: [{ headers: { authorization: credential.authorization } }],
-        },
-      ],
-    });
-    return await run();
-  } finally {
-    try {
-      await broker(sandbox, null);
-    } finally {
-      release();
-      if (leaseQueues.get(sessionId) === current) leaseQueues.delete(sessionId);
-    }
-  }
+/** Identifies the caller a user token belongs to, without naming them. */
+function userPrincipal(connector: string, auth: SessionAuthContext | null): string {
+  const identity = auth
+    ? [auth.authenticator, auth.issuer ?? "", auth.principalType, auth.principalId]
+    : [];
+  return createHash("sha256")
+    .update(JSON.stringify([connector, ...identity]))
+    .digest("base64url")
+    .slice(0, 16);
 }
 
 export function parseCommand(command: string): string[] {

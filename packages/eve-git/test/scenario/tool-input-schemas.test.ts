@@ -22,6 +22,7 @@ test("every extension tool advertises an object-root input schema without root u
       connector: "github/acme-bot",
       authorize: () => true,
       broker: async () => {},
+      readRules: async () => ({}),
       principalType: "app",
     },
   });

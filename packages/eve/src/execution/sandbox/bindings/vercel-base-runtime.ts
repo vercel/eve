@@ -39,6 +39,21 @@ export function createVercelNetworkPolicySetter(
   };
 }
 
+/**
+ * Reads the policy from a fresh lookup, not the handle's cached metadata, so it
+ * reflects writes made through other handles. Injected header values come back
+ * as `"<redacted>"`; match values come back as written.
+ */
+export function createVercelNetworkPolicyReader(
+  lookup: () => Promise<VercelSandbox | null>,
+): () => Promise<SandboxNetworkPolicy> {
+  return async () => {
+    const sandbox = await lookup();
+    if (sandbox === null) throw new Error("The Vercel sandbox no longer exists.");
+    return (sandbox.networkPolicy ?? "allow-all") as SandboxNetworkPolicy;
+  };
+}
+
 /** eve's policy is the SDK's shape with readonly members, and the SDK never mutates it. */
 export function toVercelNetworkPolicy(
   policy: SandboxNetworkPolicy,

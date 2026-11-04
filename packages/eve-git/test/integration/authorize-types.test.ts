@@ -3,6 +3,7 @@ import test from "node:test";
 import git from "../../extension/extension.ts";
 
 const broker = async () => {};
+const readRules = async () => ({});
 
 // Typechecked by `pnpm typecheck`: what `authorize` receives depends on `principalType`.
 test("authorize receives owner only for app tokens", () => {
@@ -10,6 +11,7 @@ test("authorize receives owner only for app tokens", () => {
     github: {
       connector: "c",
       broker,
+      readRules,
       principalType: "app",
       authorize: ({ owner }) => owner.toLowerCase() === "acme",
     },
@@ -18,6 +20,7 @@ test("authorize receives owner only for app tokens", () => {
     github: {
       connector: "c",
       broker,
+      readRules,
       principalType: "user",
       authorize: ({ repository, auth }) => {
         const unscoped: null = repository;
@@ -29,6 +32,7 @@ test("authorize receives owner only for app tokens", () => {
     github: {
       connector: "c",
       broker,
+      readRules,
       principalType: "user",
       // @ts-expect-error User tokens are not scoped to an owner.
       authorize: ({ owner }) => owner === "acme",
