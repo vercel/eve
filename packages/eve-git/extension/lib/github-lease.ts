@@ -1,3 +1,5 @@
+import { hostname } from "node:os";
+
 import type { SandboxSession } from "eve/sandbox";
 
 import { shellQuote } from "./shell.ts";
@@ -51,14 +53,16 @@ export const GITHUB_COMMAND_TIMEOUT_SECONDS = 30 * 60;
 /** A rule older than this belongs to a command that can no longer be running. */
 const LEASE_TTL_MS = (GITHUB_COMMAND_TIMEOUT_SECONDS + 60) * 1000;
 const LOCK_PATH = "/tmp/eve-git-lease.lock";
+/** Who holds the lock: the holder's sandbox pid, then its encoded `LockOwner`. */
+const OWNER_PATH = "/tmp/eve-git-lease.owner";
 const LOCK_WAIT_SECONDS = 30;
+/** `flock` timed out; the holder printed the owner line. */
+const LOCK_BUSY_EXIT = 75;
 /**
  * How long after the invocation's deadline the lock outlives a writer that
  * never released it, for a policy write the API had already received.
  */
 const LOCK_MARGIN_SECONDS = 30;
-/** The longest a Vercel Function runs (`maxDuration: "max"`), when the invocation names no deadline. */
-const MAX_INVOCATION_SECONDS = 800;
 const VERCEL_REQUEST_CONTEXT = Symbol.for("@vercel/request-context");
 const PLACEHOLDER = /eve-github-[0-9a-f-]{36}\.[A-Za-z0-9_-]+/gu;
 
@@ -155,6 +159,10 @@ export interface GitHubLeaseDependencies {
    * invocation's deadline.
    */
   readonly deadline?: () => number | undefined;
+  /** Whether a process on this host is alive. Defaults to `process.kill(pid, 0)`. */
+  readonly processAlive?: (pid: number) => boolean;
+  /** Waits the lock margin before breaking a dead owner's lock. */
+  readonly wait?: (ms: number) => Promise<void>;
 }
 
 /**
@@ -193,7 +201,7 @@ async function updateLeases(
   // landing. The lock therefore outlives this process: a write that never
   // settles keeps it until the platform kills the process, and only then can
   // the next writer read the policy.
-  const release = await acquireLock(sandbox, lockSeconds(now(), deadline));
+  const release = await acquireLock(sandbox, lockSeconds(now(), deadline), dependencies);
   try {
     await writeLeases(sandbox, own, change, dependencies);
   } finally {
@@ -201,11 +209,14 @@ async function updateLeases(
   }
 }
 
-/** How long the lock holder keeps the lock if this process never releases it. */
-export function lockSeconds(now: number, deadline: number | undefined): number {
-  const remaining =
-    deadline === undefined ? MAX_INVOCATION_SECONDS : Math.max(0, (deadline - now) / 1000);
-  return Math.ceil(remaining) + LOCK_MARGIN_SECONDS;
+/**
+ * How long the lock holder keeps the lock if this process never releases it,
+ * or `null` to keep it until released: with no deadline nothing bounds how
+ * long this process lives, so no expiry is safe.
+ */
+export function lockSeconds(now: number, deadline: number | undefined): number | null {
+  if (deadline === undefined) return null;
+  return Math.ceil(Math.max(0, (deadline - now) / 1000)) + LOCK_MARGIN_SECONDS;
 }
 
 function invocationDeadline(): number | undefined {
@@ -241,14 +252,95 @@ async function writeLeases(
   await dependencies.broker(sandbox, Object.keys(rules).length > 0 ? rules : null);
 }
 
+/** The process that took a lock with no expiry. */
+interface LockOwner {
+  readonly hostname: string;
+  readonly pid: number;
+  readonly instance: string;
+}
+
+function readOwner(line: string): LockOwner | null {
+  try {
+    const owner = JSON.parse(
+      Buffer.from(line.split(" ")[1] ?? "", "base64url").toString(),
+    ) as Partial<LockOwner>;
+    if (typeof owner.hostname !== "string" || typeof owner.instance !== "string") return null;
+    if (typeof owner.pid !== "number") return null;
+    return { hostname: owner.hostname, pid: owner.pid, instance: owner.instance };
+  } catch {
+    return null;
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 /**
  * Holds an exclusive `flock` in the sandbox until the returned function runs,
- * or for `seconds` if it never does. The lock file holds no secret: sandbox
- * code that takes it can only delay commands, by at most the wait.
+ * or for `seconds` if it never does. With `null`, nothing bounds the owner's
+ * life, so the lock has no expiry: a waiter on the owner's host breaks it only
+ * once the owner process is gone and the margin has passed. Any other waiter
+ * fails, naming the owner. The lock files hold no secret: sandbox code that
+ * takes the lock can only delay commands.
  */
-async function acquireLock(sandbox: SandboxSession, seconds: number): Promise<() => Promise<void>> {
+async function acquireLock(
+  sandbox: SandboxSession,
+  seconds: number | null,
+  dependencies: GitHubLeaseDependencies,
+): Promise<() => Promise<void>> {
+  const owner =
+    seconds === null
+      ? Buffer.from(
+          JSON.stringify({ hostname: hostname(), pid: process.pid, instance: crypto.randomUUID() }),
+        ).toString("base64url")
+      : "-";
+  let stale: string | null = null;
+  for (;;) {
+    const result = await tryLock(sandbox, seconds, owner, stale);
+    if (typeof result === "function") return result;
+    const holder = readOwner(result);
+    const dead =
+      stale === null &&
+      holder !== null &&
+      holder.hostname === hostname() &&
+      !(dependencies.processAlive ?? processAlive)(holder.pid);
+    if (!dead) {
+      throw new Error(
+        `Timed out after ${LOCK_WAIT_SECONDS}s waiting for the GitHub credential lock in the sandbox${
+          holder
+            ? `, held by process ${holder.pid} on ${holder.hostname} (instance ${holder.instance})`
+            : ""
+        }.`,
+      );
+    }
+    await (dependencies.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(
+      LOCK_MARGIN_SECONDS * 1000,
+    );
+    stale = result;
+  }
+}
+
+/** One `flock` attempt: the release function, or the owner line of whoever holds it. */
+async function tryLock(
+  sandbox: SandboxSession,
+  seconds: number | null,
+  owner: string,
+  stale: string | null,
+): Promise<(() => Promise<void>) | string> {
+  const lock = shellQuote(LOCK_PATH);
+  const ownerPath = shellQuote(OWNER_PATH);
+  // Ends the dead owner's holder only if it still holds the lock.
+  const breakStale = stale
+    ? `if [ "$(cat ${ownerPath} 2>/dev/null)" = ${shellQuote(stale)} ]; then kill ${Number(stale.split(" ")[0])}; fi; `
+    : "";
   const holder = await sandbox.spawn({
-    command: `exec 9>${shellQuote(LOCK_PATH)} && flock -w ${LOCK_WAIT_SECONDS} 9 && echo locked && exec sleep ${seconds}`,
+    command: `${breakStale}exec 9>${lock} && { flock -w ${LOCK_WAIT_SECONDS} 9 || { cat ${ownerPath} 2>/dev/null; exit ${LOCK_BUSY_EXIT}; }; } && echo "$$ ${owner}" > ${ownerPath} && echo locked && exec sleep ${seconds ?? "infinity"}`,
   });
   const reader = holder.stdout.getReader();
   const decoder = new TextDecoder();
@@ -257,8 +349,9 @@ async function acquireLock(sandbox: SandboxSession, seconds: number): Promise<()
     const { done, value } = await reader.read();
     if (done) {
       const { exitCode } = await holder.wait();
+      if (exitCode === LOCK_BUSY_EXIT) return output.trim();
       throw new Error(
-        `Timed out after ${LOCK_WAIT_SECONDS}s waiting for the GitHub credential lock in the sandbox (exit ${exitCode}).`,
+        `The GitHub credential lock holder exited with ${exitCode}: ${output.trim()}`,
       );
     }
     output += decoder.decode(value, { stream: true });

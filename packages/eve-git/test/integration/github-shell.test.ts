@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ConnectTokenParams } from "@vercel/connect";
@@ -1013,12 +1013,158 @@ test("a stalled rules write keeps the lock until its process's deadline has pass
 test("the lock never expires before the deadline plus its margin", () => {
   const now = 1_000_000;
   for (const remaining of [0, 1, 999, 1_000, 59_500, 300_000, 799_999, 3_600_000]) {
-    assert.ok(lockSeconds(now, now + remaining) * 1000 >= remaining + 30_000, String(remaining));
+    assert.ok(lockSeconds(now, now + remaining)! * 1000 >= remaining + 30_000, String(remaining));
   }
   assert.equal(lockSeconds(now, now - 5_000), 30);
-  // With no deadline, the lock outlasts the longest Vercel Function.
-  assert.equal(lockSeconds(now, undefined), 830);
+  // With no deadline nothing bounds the writer's life, so the lock never expires.
+  assert.equal(lockSeconds(now, undefined), null);
 });
+
+test("with no deadline, a writer that resumes after any delay keeps the next lease intact", async () => {
+  const shared = sharedSandbox();
+  const order: string[] = [];
+  let clock = 1_000_000;
+  const lease = (label: string) => ({
+    placeholder: leasePlaceholder({
+      principal: label,
+      owner: "vercel",
+      name: label,
+      permissions: null,
+    }),
+    token: `token-${label}`,
+  });
+  const sandbox = () => fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" }, [], shared);
+  const dependencies = (
+    label: string,
+    broker: (box: SandboxSession, rules: Parameters<typeof CONFIG.broker>[1]) => Promise<void>,
+  ) => ({
+    broker,
+    read: async (box: SandboxSession) => {
+      order.push(`${label} read`);
+      return readGitHubRules(box);
+    },
+    tokenFor: async () => null,
+    now: () => clock,
+    deadline: () => undefined,
+  });
+  let stalled!: () => void;
+  const stalling = new Promise<void>((resolve) => (stalled = resolve));
+  let resume!: () => void;
+  const resumed = new Promise<void>((resolve) => (resume = resolve));
+  // Writer A stalls in `broker`, as a suspended local process does, then resumes and writes.
+  const a = withGitHubLease(
+    sandbox(),
+    lease("a"),
+    dependencies("a", async (box, rules) => {
+      if (order.includes("a write")) return CONFIG.broker(box, rules);
+      order.push("a write");
+      stalled();
+      await resumed;
+      await CONFIG.broker(box, rules);
+      order.push("a write done");
+    }),
+    async () => order.push("a runs"),
+  );
+  await stalling;
+  const b = withGitHubLease(
+    sandbox(),
+    lease("b"),
+    dependencies("b", async (box, rules) => {
+      order.push("b write");
+      await CONFIG.broker(box, rules);
+    }),
+    async () => {
+      order.push("b runs");
+      assert.match(JSON.stringify(shared.policy), /token-b/u, "B runs with its rule installed");
+    },
+  );
+  clock += 3_600_000;
+  // An hour later, a holder with any finite `sleep` has run out.
+  if (Number.isFinite(shared.holdSeconds)) shared.expire!();
+  for (let tick = 0; tick < 20; tick += 1) await new Promise(setImmediate);
+  assert.deepEqual(order, ["a read", "a write"], "B waits however long A stays suspended");
+  resume();
+  await Promise.all([a, b]);
+  assert.ok(order.indexOf("b read") > order.indexOf("a write done"), order.join(", "));
+  assert.ok(order.includes("b runs"));
+});
+
+for (const alive of [false, true]) {
+  test(`with no deadline, a waiter ${alive ? "fails naming a live owner" : "breaks a dead owner's lock after the margin"}`, async () => {
+    const shared = sharedSandbox();
+    const order: string[] = [];
+    const lease = (label: string) => ({
+      placeholder: leasePlaceholder({
+        principal: label,
+        owner: "vercel",
+        name: label,
+        permissions: null,
+      }),
+      token: `token-${label}`,
+    });
+    const sandbox = () => fakeSandbox([], { exitCode: 0, stdout: "", stderr: "" }, [], shared);
+    let stalled!: () => void;
+    const stalling = new Promise<void>((resolve) => (stalled = resolve));
+    // Owner A stalls in `broker` and never resumes, as when its process is killed.
+    void withGitHubLease(
+      sandbox(),
+      lease("a"),
+      {
+        broker: async () => {
+          stalled();
+          await new Promise<never>(() => {});
+        },
+        read: async (box) => readGitHubRules(box),
+        tokenFor: async () => null,
+        deadline: () => undefined,
+      },
+      async () => assert.fail("must not run without its rule"),
+    );
+    await stalling;
+    shared.busyTimesOut = true;
+    const waits: number[] = [];
+    let marginPassed!: () => void;
+    const margin = new Promise<void>((resolve) => (marginPassed = resolve));
+    const b = withGitHubLease(
+      sandbox(),
+      lease("b"),
+      {
+        broker: async (box, rules) => {
+          order.push("b write");
+          await CONFIG.broker(box, rules);
+        },
+        read: async (box) => {
+          order.push("b read");
+          return readGitHubRules(box);
+        },
+        tokenFor: async () => null,
+        deadline: () => undefined,
+        processAlive: (pid) => {
+          assert.equal(pid, process.pid);
+          return alive;
+        },
+        wait: async (ms) => {
+          waits.push(ms);
+          await margin;
+        },
+      },
+      async () => order.push("b runs"),
+    );
+    if (alive) {
+      await assert.rejects(b, new RegExp(`held by process ${process.pid} on ${hostname()}`, "u"));
+      assert.deepEqual(waits, []);
+      assert.deepEqual(order, []);
+      return;
+    }
+    for (let tick = 0; tick < 20; tick += 1) await new Promise(setImmediate);
+    assert.deepEqual(waits, [30_000]);
+    assert.deepEqual(order, [], "B waits out the margin before breaking the lock");
+    shared.busyTimesOut = false;
+    marginPassed();
+    await b;
+    assert.deepEqual(order, ["b read", "b write", "b runs", "b read", "b write"]);
+  });
+}
 
 test("git({ github }) keeps app permissions", () => {
   git({
@@ -1057,7 +1203,27 @@ function fakeSandbox(
     },
     // The lease lock: `flock` on one file, so only one holder at a time.
     async spawn(input) {
-      assert.match(input.command, /flock -w \d+ 9 && echo locked/u);
+      assert.match(input.command, /flock -w \d+ 9 \|\|/u);
+      const stream = (text: string) =>
+        new ReadableStream({
+          start(controller) {
+            if (text) controller.enqueue(new TextEncoder().encode(text));
+            controller.close();
+          },
+        });
+      const stale =
+        /^if \[ "\$\(cat \S+ 2>\/dev\/null\)" = '([^']*)' \]; then kill \d+; fi; /u.exec(
+          input.command,
+        )?.[1];
+      if (stale !== undefined && stale === shared.owner) shared.expire?.();
+      if (shared.expire && shared.busyTimesOut) {
+        return {
+          stdout: stream(`${shared.owner}\n`),
+          stderr: stream(""),
+          wait: async () => ({ exitCode: 75 }),
+          kill: async () => {},
+        };
+      }
       const previous = shared.lock;
       let release!: () => void;
       shared.lock = new Promise<void>((resolve) => (release = resolve));
@@ -1070,7 +1236,10 @@ function fakeSandbox(
         exit();
       };
       shared.expire = end;
-      shared.holdSeconds = Number(/exec sleep (\d+)$/u.exec(input.command)?.[1]);
+      shared.pids = (shared.pids ?? 100) + 1;
+      shared.owner = `${shared.pids} ${/echo "\$\$ (\S+)"/u.exec(input.command)?.[1]}`;
+      const hold = /exec sleep (\d+|infinity)$/u.exec(input.command)?.[1];
+      shared.holdSeconds = hold === "infinity" ? Number.POSITIVE_INFINITY : Number(hold);
       return {
         stdout: new ReadableStream({
           start(controller) {
@@ -1106,6 +1275,11 @@ interface SharedSandbox {
   expire?: () => void;
   /** How long the current lock holder keeps the lock if never released. */
   holdSeconds?: number;
+  /** The owner file: the holder's pid and its encoded owner. */
+  owner?: string;
+  pids?: number;
+  /** A waiter's `flock -w` runs out while the lock is held. */
+  busyTimesOut?: boolean;
 }
 
 /** The state every handle to one sandbox sees, whichever process holds the handle. */
