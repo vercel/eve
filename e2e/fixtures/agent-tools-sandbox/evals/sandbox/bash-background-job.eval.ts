@@ -14,7 +14,7 @@ interface BashOutput {
 export default defineEval({
   description:
     "Sandbox Bash: a slow command returns running, keeps writing its output file, and stops with kill.",
-  // A model that omits `timeout` waits the default 30 seconds before the command is reported.
+  // A model that omits `timeout` waits the default 60 seconds before the command is reported.
   timeoutMs: 150_000,
   async test(t) {
     const turn = await t.send(

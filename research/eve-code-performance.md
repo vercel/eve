@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: proposed
-last_updated: "2026-11-02"
+last_updated: "2026-11-04"
 ---
 
 # eve-code performance and surface reduction
@@ -264,56 +264,35 @@ restates the consumer policies 2a removes.
 ## Phase 3: Tools and context
 
 1. **Core `bash` output and wait.** Both change core `bash`, so every agent
-   gets them, not only eve-code:
-   - plain-text results: stdout, then stderr after a `[stderr]` line, then a
-     final `[exit code: N]` or still-running line (#5822). The structured
-     output that `execute` returns does not change;
-   - an optional `timeout` input, 1-120 s, default 30 s, before a command
-     goes to the background (#5813).
-2. **Edit tool per model.** Add `code__edit` (see Observable changes) and
-   decide the selection semantics before building it:
-   - **Rule:** by provider family, `openai/*` gets `apply_patch` and everyone
-     else gets `edit`. No model-name heuristics.
-   - **Overrides:** `apply_patch` stays a static, exported tool, and the
-     documented `agent/tools/code__apply_patch.ts` override
-     (`docs/code-extension.mdx:157-170`) must keep working. Today's primitives
-     cannot express the selection. A dynamic tool replaces a same-named
-     static one (`execution/catalog/step-catalog.ts:275`), so a dynamic
-     `code__apply_patch` would replace the consumer's override. `disableTool()`
-     is a static sentinel, and a dynamic resolver returns only tools or `null`
-     (`tools/dynamic.ts:17`), so nothing can hide a static tool per model.
-     Selection needs a core primitive for model-conditional tool availability
-     that keeps consumer overrides in charge, proposed as its own change.
-   - **Model switch mid-session:** history may hold calls to a tool that is no
-     longer offered. Specify that behavior, and test it in a scenario test.
-
-   Adoption may stay low on Claude, so gate on resolve rate and on edit
-   failures in real repositories.
-
-3. **Cost of `apply_patch` checks.** Each patch runs 3-6 sandbox commands, and
-   type-checks TypeScript files twice. Measure on the GPT row, and merge the
-   checks into one `sandbox.run` if they add more than about 200 ms per edit.
-4. **Stop mounting `code__grep` (#5815).** It is core `grep` under another name (about
-   1.6K characters of schema). Models use `rg`, and `code__grep` was called 9
-   times in 108 trials. Keep the `grep` export from
-   `eve/extensions/code/tools`, which is stable.
-5. **Environment context.**
-   - Inject cwd, date, platform, git branch, and a capped root `AGENTS.md`
-     (about 4KB, using `lib/guidelines.ts`) through dynamic instructions.
-   - Collect only when a sandbox already exists, so chat-only turns never
-     start one.
-   - Refresh per turn, so repositories cloned mid-session are picked up. Skip
-     dirty state, which goes stale.
-   - Once this lands, drop the root `AGENTS.md` line from the prompt, but keep
-     the nested-file instruction.
-   - This depends on giving dynamic instructions sandbox or state access,
-     which is a separate PR.
-   - deepswe-lean repositories may not have an AGENTS.md, so judge this on
-     real-repository use as well.
-6. **History growth.** History grows from about 11K to about 65K tokens per
+   gets them, not only eve-code (#5892):
+   - plain-text results: stdout, then stderr after a `[stderr]` line. A
+     non-zero exit ends with `[exit code: N]` as an `error-text` result. The
+     structured output that `execute` returns does not change;
+   - an optional `timeout` input, 1-120 s, default 60 s, before a command
+     goes to the background;
+   - a truncated stream names a sandbox file with its full output.
+2. **Edit tool.** Decided in #5892: core ships pi's `edit` as `edit_file`
+   (`eve/tools/edit_file`), a default tool beside `write_file` for every model. `apply_patch` and its diagnostics are
+   removed, along with the `code__apply_patch` override. In deepswe-lean on
+   Sonnet, no harness called its edit tool, so the decision rests on matching
+   pi and on less code. Revisit per-model selection only if the weekly GPT row
+   shows `edit_file` failing where a patch tool would not. Selecting tools per
+   model would need a core primitive, proposed as its own change.
+3. **Stop mounting `code__grep`.** Done (#5815). #5892 also removes the
+   `eve/extensions/code/tools` entry in the next major; import `grep` from
+   `eve/tools/grep`.
+4. **Project instructions.** The code extension reads the workspace root's
+   `AGENTS.md`, or `CLAUDE.md`, once per session on the first turn, with one
+   sandbox command capped at 64 KB, and adds it as a user instruction in pi's
+   format (#5892). Core does not, because not every agent codes. Still open:
+   - cwd, date, platform, and git branch;
+   - parent-directory and nested files, which the instructions tell the model
+     to read;
+   - a file created after the first turn is not loaded until the next session.
+5. **History growth.** History grows from about 11K to about 65K tokens per
    step over a deepswe-lean trial, and bash output volume equals pi's. Reduce
    per-step input, and track steps with the Phase 0 metrics.
-7. **Core Tasks section.** About 1.3K characters on every step while the
+6. **Core Tasks section.** About 1.3K characters on every step while the
    `agent` tool is present. If Phase 0 shows it matters, propose a shorter
    version in core, as its own change.
 

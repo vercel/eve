@@ -509,6 +509,19 @@
       ]
     },
     {
+      "name": "tool/edit_file",
+      "type": "registry:item",
+      "title": "Edit File",
+      "description": "Edit sandbox files by exact text replacement.",
+      "files": [
+        {
+          "path": "registry/tools/edit_file.ts",
+          "type": "registry:file",
+          "target": "agent/tools/edit_file.ts"
+        }
+      ]
+    },
+    {
       "name": "tool/glob",
       "type": "registry:item",
       "title": "Glob",

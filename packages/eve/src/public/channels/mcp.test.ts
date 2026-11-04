@@ -646,6 +646,15 @@ describe("mcpChannel tools", () => {
       ["note", completed("saved", "Saved."), { content: [{ text: "Saved.", type: "text" }] }],
       [
         "note",
+        {
+          modelOutput: { type: "error-text", value: "Not saved.\n\n[exit code: 1]" },
+          output: { exitCode: 1 },
+          outcome: "completed",
+        },
+        { content: [{ text: "Not saved.\n\n[exit code: 1]", type: "text" }], isError: true },
+      ],
+      [
+        "note",
         { outcome: "failed", error: { code: "INVALID_INPUT", message: "Bad id." } },
         { code: "invalid_input" },
       ],

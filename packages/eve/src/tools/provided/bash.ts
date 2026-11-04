@@ -105,7 +105,7 @@ export const BASH_OUTPUT_SCHEMA = defineJsonSchema<BashToolOutput>({
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = frameworkTool(
   defineTool({
     label: { start: (input) => toolLabel("Run", input.command) },
-    description: `Execute a shell command in the shared workspace environment. The call waits ${BASH_YIELD_SECONDS} seconds for the command, or \`timeout\` seconds from 1 to ${BASH_MAX_YIELD_SECONDS}. For builds, installs, and test suites whose full output you need, pass a larger \`timeout\` instead of shortening or splitting the command. The result is the command's stdout, then any stderr after a \`[stderr]\` line. The final line is always \`[exit code: N]\` or a note that the command is still running, and only that final line reports how the command ended. A command still running after the wait keeps running in the background, and the note says how to check on or stop it.`,
+    description: `Execute a shell command in the shared workspace environment. The call waits ${BASH_YIELD_SECONDS} seconds for the command, or \`timeout\` seconds from 1 to ${BASH_MAX_YIELD_SECONDS}. For builds, installs, and test suites whose full output you need, pass a larger \`timeout\` instead of shortening or splitting the command. The result is the command's stdout, then any stderr after a \`[stderr]\` line, or \`(no output)\`. A command that fails ends with \`[exit code: N]\` and is reported as an error. A command still running after the wait keeps running in the background, and a final note says how to check on or stop it.`,
     async execute(input, ctx) {
       return await executeBashOnSandbox(await ctx.getSandbox(), input as BashInput, {
         abortSignal: ctx.abortSignal,
@@ -131,17 +131,21 @@ const BASH_OUTPUT_KEYS = new Set([
 
 /**
  * Shows the model plain text, so source, diffs, and logs read as printed
- * instead of JSON-escaped. A wrapper's `execute` may return another value: a
- * string stays text, and any other shape stays JSON.
+ * instead of JSON-escaped. Like pi, a successful command shows only its
+ * output, and a non-zero exit is an error result that ends with its code. A
+ * wrapper's `execute` may return another value: a string stays text, and any
+ * other shape stays JSON.
  */
 function bashModelOutput(output: unknown): ToolModelOutput {
   if (typeof output === "string") return toolOutput.text(output);
   if (!isBashResult(output)) return toolOutput.json(output);
-  const streams = [output.stdout, output.stderr && `[stderr]\n${output.stderr}`]
-    .filter((text) => text.length > 0)
-    .map((text) => (text.endsWith("\n") ? text : `${text}\n`));
-  const status = output.status === "running" ? output.message : `[exit code: ${output.exitCode}]`;
-  return toolOutput.text(`${streams.join("\n")}${status}`);
+  const text = [output.stdout, output.stderr && `[stderr]\n${output.stderr}`]
+    .filter((stream) => stream.length > 0)
+    .map((stream) => (stream.endsWith("\n") ? stream : `${stream}\n`))
+    .join("\n");
+  if (output.status === "running") return toolOutput.text(`${text}${output.message}`);
+  if (output.exitCode !== 0) return toolOutput.errorText(`${text}[exit code: ${output.exitCode}]`);
+  return toolOutput.text(text === "" ? "(no output)" : text);
 }
 
 /** A `bash` result with no extra keys and the fields its status requires. */

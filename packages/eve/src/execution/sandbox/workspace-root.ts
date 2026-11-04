@@ -16,7 +16,7 @@ export interface WorkspaceSandbox {
 const MAX_ERROR_DETAIL_CHARS = 2_000;
 
 /** NUL-delimited output keeps paths that contain newlines unambiguous. */
-export async function sandboxRealPath(
+async function sandboxRealPath(
   sandbox: WorkspaceSandbox,
   path: string,
   label: string,
@@ -58,18 +58,4 @@ export async function resolveInWorkspace(
   const inside = workspace === "/" || real === workspace || real.startsWith(`${workspace}/`);
   if (!inside) throw new Error(`${label} resolves outside the workspace ${workspace}: ${real}`);
   return { path: real, workspace };
-}
-
-/**
- * An absolute directory inside the workspace (default: the workspace root).
- * Git is not required; `validateRepositoryRoot` adds that check.
- */
-export async function resolveWorkspaceDirectory(
-  sandbox: WorkspaceSandbox,
-  root?: string,
-): Promise<string> {
-  if (root !== undefined && !root.startsWith("/")) {
-    throw new Error("root must be an absolute sandbox path");
-  }
-  return (await resolveInWorkspace(sandbox, root, "root")).path;
 }

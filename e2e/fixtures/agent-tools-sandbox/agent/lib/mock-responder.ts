@@ -118,12 +118,15 @@ function respondToFileTools(
   message: string,
   request: MockModelRequest,
 ): MockModelResponse | string {
-  const [, path = "", content = ""] =
+  const [, path = "", draft = ""] =
     /create (\S+) with exactly this content: (\S+)/u.exec(message) ?? [];
+  const [, oldText = "", newText = ""] = /replace (\S+) with (\S+) in /u.exec(message) ?? [];
   const steps = [
-    { input: { content, filePath: path }, name: "write_file" },
+    { input: { content: draft, filePath: path }, name: "write_file" },
     { input: { filePath: path }, name: "read_file" },
-    { input: { outputMode: "content", path: "notes", pattern: content }, name: "grep" },
+    // Edits as a JSON string, a shape models send, which edit_file repairs before validation.
+    { input: { edits: JSON.stringify([{ newText, oldText }]), path }, name: "edit_file" },
+    { input: { outputMode: "content", path: "notes", pattern: newText }, name: "grep" },
     { input: { command: `cat ${path}` }, name: "bash" },
   ];
   const next = steps[request.toolResults.length];
@@ -150,7 +153,7 @@ function bashStdout(request: MockModelRequest): string {
   const output = formatOutput(
     [...request.toolResults].reverse().find((result) => result.name === "bash")?.output,
   );
-  // bash shows the model its stdout, then any `[stderr]` section, then `[exit code: N]` last.
+  // bash shows the model its stdout, then any `[stderr]` section; a failed command ends with `[exit code: N]`.
   const body = output.replace(/\[exit code: -?\d+\]$/u, "");
   const stderrAt = body.lastIndexOf("\n[stderr]\n");
   const end = stderrAt !== -1 ? stderrAt : body.startsWith("[stderr]\n") ? 0 : body.length;

@@ -155,7 +155,7 @@ Type the context in a `"use step"` helper as `WorkflowStepToolContext`, which ex
 | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `eve`                                                                             | `defineAgent`, `defineRemoteAgent`, `defineDynamic`, agent config types, `TokenUsage`                             |
 | `eve/tools`                                                                       | `defineTool`, `defineWorkflowTool`, `defineDynamic`, `disableTool`, tool types                                    |
-| `eve/tools/{bash,read_file,write_file,web_fetch,glob,grep}`                       | Individual reusable tool definitions                                                                              |
+| `eve/tools/{bash,read_file,write_file,edit_file,web_fetch,glob,grep}`             | Individual reusable tool definitions                                                                              |
 | `eve/tools/approval`                                                              | Approval types and `auto`, `always`, `once`, `never`                                                              |
 | `eve/tools/ask_question`                                                          | Opt-in `askQuestion` tool definition                                                                              |
 | `eve/tools/web_search`                                                            | Provider-managed `webSearch` configuration                                                                        |

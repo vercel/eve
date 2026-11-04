@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import test from "node:test";
+import { test } from "vitest";
 
 import {
   MAX_GREP_COMMAND_BYTES,
@@ -18,7 +18,7 @@ import {
   executeGrepSearch,
   processGrepOutput,
   shouldUseFixedStrings,
-} from "eve/internal/grep";
+} from "./grep-search.js";
 
 test("defaults to files_with_matches and a tight row cap", () => {
   assert.equal(effectiveOutputMode(undefined), "files_with_matches");
@@ -370,12 +370,6 @@ test("ripgrep and fallback content modes emit an unambiguous filename protocol",
 
   assert.match(buildRipgrepCommand(input), /--with-filename --json/u);
   assert.match(buildPosixGrepCommand(input), /-n -H -Z/u);
-});
-
-test("the code tools entry point exports the canonical grep", async () => {
-  const { grep: exported } = await import("eve/extensions/code/tools");
-  const { grep } = await import("eve/tools/grep");
-  assert.equal(exported, grep);
 });
 
 test("canonical grep executes native search modes and rejects errors without swallowing pipeline status", async () => {

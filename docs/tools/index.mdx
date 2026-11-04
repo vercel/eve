@@ -119,7 +119,7 @@ toModelOutput(output) {
 
 `toModelOutput` receives the typed `execute` return and changes only what the model sees. Channel handlers and hooks still get the full output on `call.settled`, so a channel can render Slack Block Kit the model never sees.
 
-Return `{ type: "text", value }` for a summary or `{ type: "json", value }` for a smaller, JSON-serializable object.
+Return `{ type: "text", value }` for a summary or `{ type: "json", value }` for a smaller, JSON-serializable object. Return `{ type: "error-text", value }`, or `toolOutput.errorText(value)`, to show the model a failure, such as a command that exited non-zero. Providers mark it as an error result, and so does the MCP channel (`isError`). The call still completes, so channels and hooks get the full output.
 
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before you return them.
 
@@ -197,7 +197,7 @@ export default defineTool({
 
 The label changes only what users see, not the tool name, input, or behavior. eve records it on the call's public action event, so channels show `Deploy storefront to production` and stream consumers can read it. If the callback throws or returns an empty label, activity shows the tool name in readable form, such as `Sync accounts` for `sync_accounts`.
 
-The provided `bash`, `glob`, `grep`, `read_file`, `web_fetch`, `web_search`, and `write_file` tools define labels. A deferred tool, agent, or connection tool called through [`eve__tool`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) shows its own label. Other built-in labels:
+The provided `bash`, `edit_file`, `glob`, `grep`, `read_file`, `web_fetch`, `web_search`, and `write_file` tools define labels. A deferred tool, agent, or connection tool called through [`eve__tool`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) shows its own label. Other built-in labels:
 
 - An `eve__search` call shows `Search tools for “linear issues”`, then `Searched tools for “linear issues”, found 5`.
 - A skill load shows `Load skill release-notes`, then `Loaded skill release-notes`.
