@@ -10,6 +10,7 @@ import {
 import { getIntegration } from "./data";
 import { integrationMarkdown } from "./discovery";
 import sentConnection from "../../registry/connections/sent";
+import tinyfish from "../../registry/connections/tinyfish";
 
 // Connect's runtime pulls in channel auth; these tests exercise only the authored approval policy.
 vi.mock("@vercel/connect/eve", () => ({
@@ -70,6 +71,45 @@ describe("Agentcard connection setup", () => {
     expect(quickStart).not.toContain("AGENTCARD_CONNECTOR");
     expect(setup.configureVariants["mcp:user"]).toContain("vercel connect create agentcard");
     expect(setup.configureVariants["mcp:user"]).not.toContain("--name");
+  });
+});
+
+describe("TinyFish connection setup", () => {
+  it("keeps the gallery quick start and registry approval policy aligned", () => {
+    const integration = getIntegration("tinyfish")!;
+    const setup = buildConnectionSetup(integration);
+    const quickStart = setup.variants["mcp:user"];
+    const policy = tinyfish.approval;
+
+    expect(quickStart).toContain('url: "https://agent.tinyfish.ai/mcp"');
+    expect(quickStart).toContain('auth: connect("tinyfish")');
+    expect(setup.configureVariants["mcp:user"]).toContain("vercel connect create tinyfish");
+    expect(integration.quickStart).toContain("const READ_ONLY_TOOLS = new Set([");
+    expect(integration.quickStart).toContain("approval: ({ toolName }) =>");
+    expect(integrationMarkdown(integration)).toContain("requires approval for browser automation");
+    expect(integrationMarkdown(integration)).toContain("fail-closed policy");
+
+    expect(typeof policy).toBe("function");
+    if (typeof policy !== "function") throw new Error("TinyFish must define an approval policy.");
+    const approvalFor = (toolName: string) => policy({ toolName } as Parameters<typeof policy>[0]);
+
+    for (const toolName of [
+      "search",
+      "fetch_content",
+      "tinyfish__search",
+      "tinyfish__fetch_content",
+    ]) {
+      expect(approvalFor(toolName)).toBe("not-applicable");
+    }
+    for (const toolName of [
+      "run_web_automation",
+      "create_browser_session",
+      "top_up_wallet",
+      "cancel_monitor",
+      "tinyfish__future_tool",
+    ]) {
+      expect(approvalFor(toolName)).toBe("user-approval");
+    }
   });
 });
 
