@@ -31,15 +31,23 @@ interface ResolvedAuthoredExternalModule {
   readonly resolvedId: string;
 }
 
+/** How the host treats a generated bundle it bundles again. */
+export interface GenerationHostBundle {
+  /** The host's traced dependencies; see `collectHostTracedDependencies`. */
+  readonly tracedDependencies: readonly string[];
+}
+
 export function createGenerationPackageBoundaryPlugin(input: {
   readonly externalDependencies: readonly string[];
   readonly packageRoot: string;
   readonly extensionSpecifiers?: ReadonlySet<string>;
   readonly resolveExternalPaths?: boolean;
-  /** The host's traced dependencies; see `collectHostTracedDependencies`. */
-  readonly tracedDependencies?: readonly string[];
+  /**
+   * Set when the host bundles this output again. Node loads other generations directly, and
+   * leaving a CommonJS package external there would lose the bundler's interop for its imports.
+   */
+  readonly hostBundle?: GenerationHostBundle;
 }): Plugin {
-  const tracedDependencies = input.tracedDependencies ?? [];
   const dependencyClosures = new Map<string, ReadonlySet<string>>();
   return {
     name: "eve-generation-package-boundary",
@@ -95,6 +103,7 @@ export function createGenerationPackageBoundaryPlugin(input: {
       // So does any package that reaches a host-traced dependency: the host externalizes those by
       // name wherever it sees them, so handing it such a package would trace a second copy, such
       // as an extension-owned dependency beside the version another package resolves.
+      if (input.hostBundle === undefined) return undefined;
       const resolved = await this.resolve(source, importer, {
         kind: options.kind,
         skipSelf: true,
@@ -105,7 +114,11 @@ export function createGenerationPackageBoundaryPlugin(input: {
         !resolved.id.startsWith("\0") &&
         isNodeModulesPath(resolved.id) &&
         !isFrameworkPackagePath(resolved.id) &&
-        !reachesHostTracedDependency(resolved.id, tracedDependencies, dependencyClosures)
+        !reachesHostTracedDependency(
+          resolved.id,
+          input.hostBundle.tracedDependencies,
+          dependencyClosures,
+        )
       ) {
         return {
           external: true,

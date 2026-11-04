@@ -30,6 +30,7 @@ import {
   RESOLVE_EXTENSIONS,
   createDistributionPackageBoundaryPlugin,
   createGenerationPackageBoundaryPlugin,
+  type GenerationHostBundle,
   createRuntimeLoaderPackageBoundaryPlugin,
   isNodeModulesPath,
   normalizeExternalDependencies,
@@ -39,7 +40,6 @@ import { expectObjectRecord, interopAuthoredModuleNamespace } from "#internal/au
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { buildSingleRolldownChunk, buildWithRolldown } from "#internal/bundler/rolldown.js";
-import { collectHostTracedDependencies } from "#internal/host-traced-dependencies.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import { prepareAuthoredWorkflowDirectives } from "#internal/workflow-bundle/authored-workflow-directives.js";
@@ -223,13 +223,13 @@ export async function bundleAuthoredModuleCode(
  */
 export async function bundleAuthoredModuleForGeneration(
   modulePath: string,
-  options: AuthoredModuleLoadOptions & { readonly tracedDependencies?: readonly string[] } = {},
+  options: AuthoredModuleLoadOptions & { readonly hostBundle?: GenerationHostBundle } = {},
 ): Promise<string> {
   return await buildAuthoredModuleBundle(modulePath, options, {
     packageBoundaryPlugin: createGenerationPackageBoundaryPlugin({
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
       packageRoot: resolveAuthoredPackageRoot(modulePath),
-      tracedDependencies: options.tracedDependencies,
+      hostBundle: options.hostBundle,
     }),
     plugins: [createAuthoredDirectiveGuardPlugin()],
     sourcemap: false,
@@ -321,6 +321,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   readonly manifest: CompiledAgentManifest;
   readonly moduleMapPath: string;
   readonly resolveExternalPaths?: boolean;
+  readonly hostBundle?: GenerationHostBundle;
 }): Promise<AuthoredModuleMapBundle> {
   // The package root owns dependency resolution, while the selected app root
   // owns authored workflow IDs and must match the workflow driver.
@@ -366,7 +367,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
           packageRoot,
           extensionSpecifiers: new Set(extensionMounts.map((mount) => mount.specifier)),
           resolveExternalPaths: input.resolveExternalPaths,
-          tracedDependencies: collectHostTracedDependencies(input.manifest),
+          hostBundle: input.hostBundle,
         }),
         packageRoot,
         plugins: [

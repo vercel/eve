@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -961,20 +961,7 @@ export const result = true;
     }
   }
 
-  /** Generated bundles keep installed packages external, bound to the copy the importer resolves. */
-  async function expectStoreSiblingImport(code: string, storeRoot: string): Promise<void> {
-    const siblingEntry = join(
-      await realpath(storeRoot),
-      "node_modules",
-      "store-sibling",
-      "index.cjs",
-    );
-    expect(code).toContain(JSON.stringify(siblingEntry));
-    expect(code).not.toMatch(/from\s*["']store-sibling["']/);
-    expect(code).not.toContain("decoy");
-  }
-
-  it("binds store-sibling dependencies of modules reached through literal symlink paths", async () => {
+  it("inlines store-sibling dependencies of modules reached through literal symlink paths", async () => {
     const app = await createApp({
       files: {
         "agent/tools/use_echo.ts": [
@@ -995,7 +982,8 @@ export const result = true;
         join(app.appRoot, "agent", "tools", "use_echo.ts"),
       );
 
-      await expectStoreSiblingImport(code, storeRoot);
+      expect(code).toContain("store-sibling-value");
+      expect(code).not.toMatch(/from\s*["']store-sibling["']/);
     } finally {
       await rm(storeRoot, { force: true, recursive: true });
     }
@@ -1022,13 +1010,14 @@ export const result = true;
         join(app.appRoot, "agent", "tools", "use_echo.ts"),
       );
 
-      await expectStoreSiblingImport(code, storeRoot);
+      expect(code).toContain("store-sibling-value");
+      expect(code).not.toContain("decoy-value");
     } finally {
       await rm(storeRoot, { force: true, recursive: true });
     }
   });
 
-  it("keeps packages that reach a host-traced dependency in the generated bundle", async () => {
+  it("keeps host-bundled packages that reach a host-traced dependency in the generated bundle", async () => {
     const app = await createApp({
       files: {
         "agent/tools/use_echo.ts": [
@@ -1055,13 +1044,13 @@ export const result = true;
       const entry = join(app.appRoot, "agent", "tools", "use_echo.ts");
 
       const traced = await bundleAuthoredModuleForGeneration(entry, {
-        tracedDependencies: ["store-sibling*"],
+        hostBundle: { tracedDependencies: ["store-sibling*"] },
       });
       expect(traced).toContain("store-sibling-value");
       expect(traced).not.toContain("node_modules/gadget-extension");
 
       const untraced = await bundleAuthoredModuleForGeneration(entry, {
-        tracedDependencies: ["unrelated-package"],
+        hostBundle: { tracedDependencies: ["unrelated-package"] },
       });
       expect(untraced).not.toContain("store-sibling-value");
       expect(untraced).toContain("node_modules/gadget-extension");
@@ -1086,7 +1075,8 @@ export const result = true;
         join(app.appRoot, "node_modules", "gadget-extension", "extension", "tools", "echo.ts"),
       );
 
-      await expectStoreSiblingImport(code, storeRoot);
+      expect(code).toContain("store-sibling-value");
+      expect(code).not.toContain("decoy-value");
     } finally {
       await rm(storeRoot, { force: true, recursive: true });
     }

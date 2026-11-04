@@ -75,10 +75,11 @@ describe("createGenerationPackageBoundaryPlugin", () => {
     });
   });
 
-  it("keeps installed packages external at their resolved path", async () => {
+  it("keeps installed packages external at their resolved path for host bundles", async () => {
     const plugin = createGenerationPackageBoundaryPlugin({
       externalDependencies: [],
       packageRoot: PACKAGE_ROOT,
+      hostBundle: { tracedDependencies: [] },
     });
     const installedEntry = join(PACKAGE_ROOT, "node_modules/zod/index.js");
     const resolve: PluginContext["resolve"] = async (source) =>
@@ -92,10 +93,25 @@ describe("createGenerationPackageBoundaryPlugin", () => {
     });
   });
 
-  it("leaves workspace and virtual modules to the bundle", async () => {
+  it("leaves installed packages to the bundle when Node loads the output directly", async () => {
     const plugin = createGenerationPackageBoundaryPlugin({
       externalDependencies: [],
       packageRoot: PACKAGE_ROOT,
+    });
+    const resolve: PluginContext["resolve"] = async () => {
+      throw new Error("direct generations should not resolve installed packages");
+    };
+
+    await expect(
+      resolveThrough(plugin, resolve, "zod", join(PACKAGE_ROOT, "agent/tools/probe.ts")),
+    ).resolves.toBeUndefined();
+  });
+
+  it("leaves workspace and virtual modules to host bundles", async () => {
+    const plugin = createGenerationPackageBoundaryPlugin({
+      externalDependencies: [],
+      packageRoot: PACKAGE_ROOT,
+      hostBundle: { tracedDependencies: [] },
     });
     const resolved: Record<string, string> = {
       "@acme/shared": join(PACKAGE_ROOT, "../shared/src/index.ts"),

@@ -84,6 +84,7 @@ export async function writeCompiledArtifactsFiles(input: {
     appRoot: input.compileResult.project.appRoot,
     manifest: input.compileResult.manifest,
     moduleMapPath: input.compileResult.paths.moduleMapPath,
+    hostBundled: true,
   });
 
   await mkdir(input.outDir, { recursive: true });
