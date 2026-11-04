@@ -182,7 +182,6 @@ it("reads what a turn did: its calls by kind, the request it waits on, and its m
     interactions: [{ interactionId: "i_0" }],
     messageCount: 0,
     models: ["big-model"],
-    openInteractions: [{ call: { name: "deploy" }, interactionId: "i_0" }],
     parked: true,
     reasoningBlockCount: 1,
     skillLoads: [{ sessionId: "s", skill: "deploy-guide", status: "completed", turnIndex: 0 }],
@@ -219,7 +218,6 @@ it("counts a call an earlier turn asked for when this segment settles it, and th
     interactions: [],
     messageCount: 1,
     models: ["small-model"],
-    openInteractions: [],
     parked: false,
     toolCalls: [{ callId: "call_deploy", output: "deployed", status: "completed" }],
     usage: { inputTokens: 200, outputTokens: 20 },
@@ -342,60 +340,7 @@ it("reads a partial answer's segment as parked on the request it left open", () 
 
   expect(deriveRunFacts(segment, { usageEvents: all })).toMatchObject({
     interactions: [],
-    // The open request comes from the earlier segment.
-    openInteractions: [{ interactionId: "i_web" }],
     parked: true,
     toolCalls: [{ callId: "call_api", output: "deployed", status: "completed" }],
   });
-});
-
-it("reads only the requests the last pause waits on, not every open request", () => {
-  const opened = (interactionId: string, kind: "approval" | "question"): SessionEvent =>
-    ({
-      data: { interactionId, request: { kind, prompt: `${kind}?` }, subject: turn0 },
-      scope: turn0,
-      type: "interaction.opened",
-    }) as SessionEvent;
-  const events = stream([
-    {
-      data: { cause: { deliveryId: "d_0" }, follows: null, turnId: "turn_0" },
-      scope: turn0,
-      type: "turn.started",
-    },
-    opened("i_approval", "approval"),
-    opened("i_question", "question"),
-    // The question is answered but stays open until the rest of its batch is decided.
-    {
-      data: { awaiting: [{ interactionId: "i_approval" }], turnId: "turn_0" },
-      scope: turn0,
-      type: "turn.paused",
-    },
-  ]);
-
-  expect(deriveRunFacts(events).openInteractions).toMatchObject([{ interactionId: "i_approval" }]);
-});
-
-it("lists no requests when the pause names one this read didn't see", () => {
-  // The read starts after `i_unread` opened, as an attach at a later stream index does.
-  const events = stream([
-    {
-      data: {
-        interactionId: "i_read",
-        request: { kind: "approval", prompt: "Deploy?" },
-        subject: turn0,
-      },
-      scope: turn0,
-      type: "interaction.opened",
-    },
-    {
-      data: {
-        awaiting: [{ interactionId: "i_unread" }, { interactionId: "i_read" }],
-        turnId: "turn_0",
-      },
-      scope: turn0,
-      type: "turn.paused",
-    },
-  ] as SessionEvent[]);
-
-  expect(deriveRunFacts(events)).toMatchObject({ openInteractions: [], parked: true });
 });

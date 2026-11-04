@@ -29,7 +29,6 @@ export default defineEval({
       );
       session.requireInteraction({ toolName: "gated_deploy", display: "confirmation" });
       parked.calledTool("gated_deploy", { count: 1, status: "pending" });
-      parked.awaitingInput({ kind: "approval", toolName: "gated_deploy" });
       parked.notEvent("call.progress");
       parked.notEvent("call.settled");
       // The approval holds the turn, so answering it resumes that turn.

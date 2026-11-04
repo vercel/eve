@@ -110,12 +110,6 @@ export interface EveEvalDerivedFacts {
   readonly interactions: readonly Interaction[];
   /** True when the run ended parked on unanswered HITL input requests. */
   readonly parked: boolean;
-  /**
-   * The unanswered requests the run ended parked on, from every session in it, including requests
-   * an earlier turn opened. Empty unless `parked`, and empty when the eval didn't read every request
-   * the run waits on, such as after attaching at a later `startIndex`.
-   */
-  readonly openInteractions: readonly Interaction[];
   readonly messageCount: number;
   readonly reasoningBlockCount: number;
   /**
@@ -317,8 +311,7 @@ export interface AssertionResult {
 /** Recorded assertions shared by aggregate, session, and turn scopes. */
 export interface EveEvalAssertions {
   succeeded(): AssertionHandle;
-  /** Asserts the run parked on HITL input; with `filter`, every request it parked on must match. */
-  awaitingInput(filter?: EveEvalInteractionMatchOptions): AssertionHandle;
+  awaitingInput(): AssertionHandle;
   messageIncludes(token: string | RegExp): AssertionHandle;
   calledTool(name: string, options?: EveEvalToolCallMatchOptions): AssertionHandle;
   /** Asserts a completed load of `skill`, constrained like `calledTool`. */

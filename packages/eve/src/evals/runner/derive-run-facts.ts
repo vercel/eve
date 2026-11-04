@@ -138,8 +138,6 @@ export function deriveRunFacts(
     ];
   });
   const spent = Object.keys(view.usage.byKind).length > 0 ? view.usage.total : undefined;
-  const awaited = awaitedInteractionIds(events);
-  const waitingOn = awaited.flatMap((interactionId) => interaction(view, interactionId) ?? []);
   return {
     toolCalls,
     toolCallCount: toolCalls.length,
@@ -147,9 +145,7 @@ export function deriveRunFacts(
     subagentCalls,
     subagentCallCount: subagentCalls.length,
     interactions,
-    parked: awaited.length > 0,
-    // A pause can list a request opened before the events this scope read; the list is then unknown.
-    openInteractions: waitingOn.length === awaited.length ? waitingOn : [],
+    parked: endedParkedOnInput(events),
     messageCount,
     reasoningBlockCount,
     models: [...models],
@@ -167,24 +163,20 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
     subagentCallCount: 0,
     interactions: [],
     parked: false,
-    openInteractions: [],
     messageCount: 0,
     reasoningBlockCount: 0,
     models: [],
   };
 }
 
-/**
- * The requests the last pause waits on. The explicit pause says whether the turn is waiting on a
- * person rather than background work, and leaves out answered requests still open in their batch.
- */
-function awaitedInteractionIds(events: readonly SessionStreamEvent[]): readonly string[] {
+/** The explicit pause says whether the turn is waiting on a person rather than background work. */
+function endedParkedOnInput(events: readonly SessionStreamEvent[]): boolean {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event?.type === "turn.paused") {
-      return event.data.awaiting.map(({ interactionId }) => interactionId);
+      return event.data.awaiting.some((awaiting) => "interactionId" in awaiting);
     }
-    if (event?.type === "turn.settled" || event?.type === "session.ended") return [];
+    if (event?.type === "turn.settled" || event?.type === "session.ended") return false;
   }
-  return [];
+  return false;
 }

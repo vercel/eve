@@ -62,7 +62,6 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
         subagentCallCount: 0,
         interactions: [],
         parked: false,
-        openInteractions: [],
         messageCount: 1,
         reasoningBlockCount: 0,
         models: [],

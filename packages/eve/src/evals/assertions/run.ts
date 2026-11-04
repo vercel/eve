@@ -3,17 +3,13 @@ import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { failureOf } from "#client/session-utils.js";
 import { replyTextOf } from "#public/channels/reply.js";
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-import type { Interaction } from "#protocol/session-projection/reader.js";
 import {
   deepEquals,
   eventMatches,
-  formatInteractionFilter,
-  interactionMatches,
   subagentCallMatches,
   testRegExp,
   toolCallMatches,
   type EveEvalCountMatcher,
-  type EveEvalInteractionMatchOptions,
   type EveEvalSkillLoadMatchOptions,
   type EveEvalSubagentCallMatchOptions,
   type EveEvalToolCallMatchOptions,
@@ -55,30 +51,17 @@ export function succeeded(): RunAssertion {
 }
 
 /**
- * Asserts the run ended cleanly parked on HITL input. With `filter`, every
- * request the run parked on must match it.
+ * Asserts the run ended cleanly parked on HITL input.
  */
-export function awaitingInput(filter: EveEvalInteractionMatchOptions = {}): RunAssertion {
+export function awaitingInput(): RunAssertion {
   return {
     name: "awaitingInput",
     evaluate(result) {
       const failure = runFailure(result);
       if (failure !== undefined) return failure;
-      if (!result.derived.parked) {
-        return fail(
-          `expected the run to park on HITL input; it ended "${result.status}" with no pending requests`,
-        );
-      }
-      const pending = result.derived.openInteractions;
-      if (pending.length === 0 && Object.keys(filter).length > 0) {
-        return fail(
-          "the run parked on requests this eval didn't read; attach from an earlier startIndex to check them against the filter",
-        );
-      }
-      const unmatched = pending.filter((request) => !interactionMatches(request, filter));
-      if (unmatched.length === 0) return PASS;
+      if (result.derived.parked) return PASS;
       return fail(
-        `expected every pending request to match ${formatInteractionFilter(filter)}; unmatched: ${unmatched.map(formatPendingRequest).join("; ")}`,
+        `expected the run to park on HITL input; it ended "${result.status}" with no pending requests`,
       );
     },
   };
@@ -400,16 +383,6 @@ function joinCompletedMessages(events: readonly SessionStreamEvent[]): string {
     if (text !== undefined) parts.push(text);
   }
   return parts.join("\n");
-}
-
-function formatPendingRequest(request: Interaction): string {
-  const parts = [
-    `kind=${request.request.kind}`,
-    request.call === undefined ? undefined : `tool=${request.call.name}`,
-    `interactionId=${request.interactionId}`,
-    request.taskId === undefined ? undefined : `taskId=${request.taskId}`,
-  ];
-  return parts.filter((part) => part !== undefined).join(" ");
 }
 
 function failureDetail(prefix: string, code: string | undefined): string {

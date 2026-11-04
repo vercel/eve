@@ -32,7 +32,7 @@ export function createScopedAssertions(
 
   return {
     succeeded: () => record(RunAssertions.succeeded()),
-    awaitingInput: (filter) => record(RunAssertions.awaitingInput(filter)),
+    awaitingInput: () => record(RunAssertions.awaitingInput()),
     messageIncludes: (token) => record(RunAssertions.messageIncludes(token)),
     calledTool: (name, options) => record(RunAssertions.calledTool(toolName(name), options)),
     calledSkill: (skill, options) => record(RunAssertions.calledSkill(skill, options)),
