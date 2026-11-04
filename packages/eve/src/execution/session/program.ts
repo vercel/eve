@@ -17,7 +17,7 @@ import { turnCoordinates } from "#protocol/session-projection.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
 import { SessionInputQueue, type ControlOrigin } from "#execution/session/input-queue.js";
-import { SessionExecution } from "#execution/session/turn.js";
+import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
 import { createTurnControl, type TurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelWorkingTasks, sessionTaskTable } from "#execution/tasks/session.js";
@@ -27,7 +27,7 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import { finalizeSession, type SessionTerminalOutcome } from "#execution/session/finalization.js";
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import type { SessionTimeoutControl } from "#execution/session/timeout-control.js";
-import { SessionHandoff, sessionAnchorToken } from "#execution/session/handoff.js";
+import { sessionAnchorToken, type SessionHandoff } from "#execution/session/handoff.js";
 import { signalSessionAnchorStep } from "#execution/session/handoff-steps.js";
 import { prewarmSessionStep } from "#execution/session/prewarm-step.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
@@ -100,10 +100,31 @@ interface SessionProgress {
   turnId?: string;
 }
 
+/**
+ * How a session moves between owners: to a successor deployment, to a fresh run after a
+ * compaction or prewarm, and back from one that took it over. Workflow moves sessions between
+ * runs (`SessionHandoff`); a host that keeps a session in one place retains it every time.
+ */
+export type SessionMoves = Pick<
+  SessionHandoff,
+  | "adoptTakeover"
+  | "awaitAnchoredResult"
+  | "disposeAnchor"
+  | "tryCompactionTransfer"
+  | "tryPrewarmTransfer"
+  | "tryTransfer"
+>;
+
+/** What runs a session besides its boot and inbox: its turn steps, its clock, and its moves. */
+export interface SessionHost extends SessionTurnHost {
+  readonly moves: SessionMoves;
+}
+
 /** Runs an already prepared owner against its session's existing stream. */
 export async function runPreparedSession(
   boot: SessionBoot,
   inbox: SessionInboxHandle,
+  host: SessionHost,
 ): Promise<WorkflowEntryResult> {
   const scope = boot.serializedContext[STUB_CONTEXT_KEY] as StubScope | undefined;
   if (scope !== undefined && scope.rootSessionId === undefined) {
@@ -117,25 +138,14 @@ export async function runPreparedSession(
     sessionState: boot.sessionState,
   });
   const progress: SessionProgress = { caller: boot.caller };
-  const handoff = new SessionHandoff({
-    checkpoint: {
-      capabilities: boot.capabilities,
-      retention: boot.retention,
-      sessionTimeoutMs: boot.sessionTimeoutMs,
-    },
-    deploymentId: boot.deploymentId,
-    inbox,
-    isInitialOwner: boot.anchor.kind === "self",
-    sessionId: boot.sessionId,
-    sessionWritable: boot.sessionWritable,
-  });
+  const handoff = host.moves;
   let result: WorkflowEntryResult = { output: "", isError: true };
   let loop: SessionLoopOutcome | undefined;
   let finalizing = false;
   try {
     result = await withStubPlayback(scope, boot.sessionId, async () => {
       try {
-        loop = await runSessionLoop(boot, { cursor, handoff, inbox, progress });
+        loop = await runSessionLoop(boot, { cursor, host, inbox, progress });
       } finally {
         await inbox.dispose();
       }
@@ -204,7 +214,7 @@ export async function failSession(input: {
 async function reportResultToAnchor(
   boot: SessionBoot,
   result: WorkflowEntryResult,
-  handoff: SessionHandoff,
+  handoff: SessionMoves,
   loop: SessionLoopOutcome | undefined,
 ): Promise<void> {
   switch (boot.anchor.kind) {
@@ -223,16 +233,18 @@ async function runSessionLoop(
   boot: SessionBoot,
   deps: {
     readonly cursor: SessionStateCursor;
-    readonly handoff: SessionHandoff;
+    readonly host: SessionHost;
     readonly inbox: SessionInboxHandle;
     readonly progress: SessionProgress;
   },
 ): Promise<SessionLoopOutcome> {
-  const { cursor, handoff, inbox, progress } = deps;
+  const { cursor, host, inbox, progress } = deps;
+  const handoff = host.moves;
   const queue = new SessionInputQueue(boot.admittedDeliveryKeys);
   const execution = new SessionExecution({
     capabilities: boot.capabilities,
     cursor,
+    host,
     inbox,
     queue,
     sessionId: boot.sessionId,

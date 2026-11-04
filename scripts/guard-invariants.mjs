@@ -211,6 +211,14 @@
  *             never reach a Node builtin through their value imports. One
  *             import of a server module from a shared one breaks every client
  *             bundle that loads the entry.
+ *   rule 66 — The session loop doesn't reach Workflow: the loop
+ *             (`execution/session/{program,turn,active-turn,state-cursor,
+ *             input-queue,next-input}.ts`) and the inbox
+ *             (`execution/session-inbox/inbox.ts`) import none of rule 61's
+ *             specifiers, nor `#execution/workflow-runtime.js`. Workflow
+ *             reaches them through their host ports (`SessionHost`,
+ *             `SessionInboxTransport`, `SessionLineStore`, `SessionStepHost`).
+ *             Only direct imports are checked.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -342,6 +350,7 @@ function isTsLike(relPath) {
  *   rule62: Violation[];
  *   rule63: Violation[];
  *   rule64: Violation[];
+ *   rule66: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -432,6 +441,7 @@ async function scanRepo(state) {
     checkRule62(posix, lines, state.rule62);
     checkRule63(posix, lines, state.rule63);
     checkRule64(posix, lines, state.rule64);
+    checkRule66(posix, lines, state.rule66);
   }
 }
 
@@ -1191,6 +1201,39 @@ function checkRule63(posix, lines, violations) {
       file: posix,
       line: index + 1,
       message: `imports ${specifier}, which the kernel doesn't offer definitions. Use a module rule 63 lists, or add one there deliberately.`,
+    });
+  }
+}
+
+// ---------- Rule 66: the session loop doesn't reach Workflow ----------
+
+const HOST_NEUTRAL_SESSION_FILES = new Set([
+  "packages/eve/src/execution/session/program.ts",
+  "packages/eve/src/execution/session/turn.ts",
+  "packages/eve/src/execution/session/active-turn.ts",
+  "packages/eve/src/execution/session/state-cursor.ts",
+  "packages/eve/src/execution/session/input-queue.ts",
+  "packages/eve/src/execution/session/next-input.ts",
+  "packages/eve/src/execution/session-inbox/inbox.ts",
+]);
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule66(posix, lines, violations) {
+  if (!HOST_NEUTRAL_SESSION_FILES.has(posix)) return;
+  for (const [index, line] of lines.entries()) {
+    const specifier = IMPORT_SPECIFIER_RE.exec(line)?.[1];
+    if (specifier === undefined) continue;
+    if (
+      !WORKFLOW_RUNTIME_SPECIFIER_RE.test(specifier) &&
+      specifier !== "#execution/workflow-runtime.js"
+    )
+      continue;
+    violations.push({
+      rule: 66,
+      file: posix,
+      line: index + 1,
+      message:
+        "imports Workflow into the host-neutral session loop. Reach Workflow through a host port (`SessionHost`, `SessionInboxTransport`, `SessionLineStore`, or `SessionStepHost`), and implement Workflow's side in its own module.",
     });
   }
 }
@@ -2269,6 +2312,7 @@ async function main() {
     rule62: /** @type {Violation[]} */ ([]),
     rule63: /** @type {Violation[]} */ ([]),
     rule64: /** @type {Violation[]} */ ([]),
+    rule66: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -2402,6 +2446,7 @@ async function main() {
   violations.push(...state.rule63);
   violations.push(...state.rule64);
   violations.push(...(await checkRule65()));
+  violations.push(...state.rule66);
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });
