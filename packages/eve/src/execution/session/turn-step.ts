@@ -93,7 +93,11 @@ import {
   createDurableSessionValues,
   readDurableSession,
 } from "#execution/durable-session-store.js";
-import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
+import {
+  buildRuntimeIdentity,
+  createExecutionNodeStep,
+  type CreateRuntime,
+} from "#execution/node-step.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { resolveSessionUsageLimit } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
@@ -115,6 +119,34 @@ interface PendingStepAttributes {
   title?: Promise<void>;
 }
 
+/**
+ * What a session step needs from the host that runs it, beyond its input: where its callbacks
+ * reach it, where the session's attributes go, and the runtime its durable calls start in.
+ * Workflow is one host (`turnStep`).
+ */
+export interface SessionStepHost {
+  /** The base URL sign-in and hook callbacks reach this session at, when the host serves them. */
+  readonly callbackBaseUrl?: string;
+  /** Records the session's attributes, such as its title. */
+  setAttributes(attributes: Parameters<typeof setEveAttributes>[0]): Promise<void>;
+  /** The runtime a durable call, such as a workflow tool's, starts in. */
+  readonly createRuntime: CreateRuntime;
+}
+
+/** The Workflow host: its run's metadata, attributes, and runtime. */
+async function workflowStepHost(): Promise<SessionStepHost> {
+  let callbackBaseUrl: string | undefined;
+  try {
+    const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
+    const metadata = getWorkflowMetadata();
+    if (typeof metadata.url === "string")
+      callbackBaseUrl = resolveWorkflowCallbackBaseUrl(metadata.url);
+  } catch {
+    // Outside a workflow context (e.g. tests) — getHookUrl will return undefined.
+  }
+  return { callbackBaseUrl, createRuntime: createWorkflowRuntime, setAttributes: setEveAttributes };
+}
+
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
   "use step";
@@ -130,18 +162,33 @@ export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
       },
     );
   }
-  return await withSessionStateDelta(input, (state) =>
-    runSessionStep({
-      ...state,
-      serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
-    }),
-  );
+  return await turnStepOn(await workflowStepHost())(input);
 }
 
-async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {
+/** A turn step on `host`: the step `turnStep` runs inside Workflow's `"use step"` boundary. */
+export function turnStepOn(
+  host: SessionStepHost,
+): (input: TurnStepInput) => Promise<TurnStepResult> {
+  return async (input) =>
+    await withSessionStateDelta(input, (state) =>
+      runSessionStep(
+        {
+          ...state,
+          serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
+        },
+        host,
+      ),
+    );
+}
+
+/** One session step, on whichever host runs it. */
+async function runSessionStep(
+  input: TurnStepInput,
+  host: SessionStepHost,
+): Promise<DurableStepResult> {
   const pendingAttributes: PendingStepAttributes = {};
   try {
-    return await runSessionStepBody(input, pendingAttributes);
+    return await runSessionStepBody(input, pendingAttributes, host);
   } finally {
     await pendingAttributes.title;
   }
@@ -150,6 +197,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
 async function runSessionStepBody(
   input: TurnStepInput,
   pendingAttributes: PendingStepAttributes,
+  host: SessionStepHost,
 ): Promise<DurableStepResult> {
   // The delivery as accepted, before authorization callbacks are matched out of it.
   const rawDelivery = input.input?.delivery;
@@ -177,17 +225,8 @@ async function runSessionStepBody(
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
 
-  // Populate the callback base URL so getHookUrl() works during tool
-  // execution, preferring eve's active local origin over metadata fallback.
-  try {
-    const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
-    const metadata = getWorkflowMetadata();
-    if (typeof metadata.url === "string") {
-      ctx.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(metadata.url));
-    }
-  } catch {
-    // Outside a workflow context (e.g. tests) — getHookUrl will return undefined.
-  }
+  // Populate the callback base URL so getHookUrl() works during tool execution.
+  if (host.callbackBaseUrl !== undefined) ctx.set(CallbackBaseUrlKey, host.callbackBaseUrl);
 
   const { signIns } = readHitlState(durableSession.state);
   let completedAuths: ReturnType<typeof matchAuthorizationCallbacks>["matches"] | undefined;
@@ -262,7 +301,7 @@ async function runSessionStepBody(
     const title = deriveSessionTitle(rawDelivery?.title ?? message);
     if (title !== undefined) {
       ctx.set(SessionTitleKey, title);
-      pendingAttributes.title = setEveAttributes({ "$eve.title": title });
+      pendingAttributes.title = host.setAttributes({ "$eve.title": title });
     }
   }
 
@@ -617,7 +656,7 @@ async function runSessionStepBody(
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
         controlDelivery: input.input?.controlDelivery,
-        createRuntime: createWorkflowRuntime,
+        createRuntime: host.createRuntime,
         handleEvent,
         signInCompletions,
         typedAnswers: !hasDelegatedSessionContext(input.serializedContext),
@@ -631,7 +670,7 @@ async function runSessionStepBody(
         // The title's write finishes first.
         setAttributes: async (attributes) => {
           await pendingAttributes.title;
-          await setEveAttributes(attributes);
+          await host.setAttributes(attributes);
         },
       });
       return step(lifecycleSession, stepInput);

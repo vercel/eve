@@ -39,7 +39,7 @@ const log = createLogger("execution.node-step");
  * `createWorkflowRuntime`, so callers pass the constructor directly —
  * no wrapper needed.
  */
-type CreateRuntime = (config: {
+export type CreateRuntime = (config: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId?: string;
 }) => Runtime;
