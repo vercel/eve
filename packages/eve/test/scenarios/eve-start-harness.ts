@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 const EVE_BIN_PATH = fileURLToPath(new URL("../../bin/eve.js", import.meta.url));
 
 export interface RunningEveStart {
+  /** SIGKILLs `eve start` and its server child, as a crash would. */
+  crash(): Promise<void>;
   readonly url: string;
   stderr(): string;
   stdout(): string;
@@ -17,6 +19,8 @@ export async function startPackagedEveStart(appRoot: string): Promise<RunningEve
     [EVE_BIN_PATH, "start", "--host", "127.0.0.1", "--port", "0"],
     {
       cwd: appRoot,
+      // Own process group, so `crash()` also kills the server child `eve start` runs.
+      detached: true,
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
@@ -47,6 +51,11 @@ export async function startPackagedEveStart(appRoot: string): Promise<RunningEve
   }
 
   return {
+    async crash() {
+      const exited = new Promise((resolve) => child.once("exit", resolve));
+      process.kill(-child.pid!, "SIGKILL");
+      await exited;
+    },
     stderr: () => stderr,
     stdout: () => stdout,
     async stop() {
