@@ -14,12 +14,15 @@ import { defineHook } from "#public/definitions/hook.js";
 import { defineDynamic as defineDynamicModel } from "#public/definitions/model.js";
 import { defineTool } from "#tools/definition.js";
 
-import extension, { taintPolicy, type TaintPolicyOptions } from "./extension/extension.ts";
+import extension, {
+  untrustedContentPolicy,
+  type UntrustedContentPolicyOptions,
+} from "./extension/extension.ts";
 import track from "./extension/hooks/track.ts";
 import { exposure } from "./extension/lib/exposure.ts";
 
 // One session per test: the model makes a scripted call after each tool result, and the agent-wide
-// `taintPolicy()` decides each call from what the extension's hook recorded on earlier ones.
+// `untrustedContentPolicy()` decides each call from what the extension's hook recorded on earlier ones.
 
 const ALICE = {
   attributes: {},
@@ -69,7 +72,7 @@ async function runSession(
   name: string,
   script: readonly ScriptedCall[],
   modules: readonly { readonly logicalPath: string; readonly value: unknown }[],
-  policy: TaintPolicyOptions = {},
+  policy: UntrustedContentPolicyOptions = {},
 ) {
   const settled: { readonly name: string; readonly outcome: string; readonly reason?: string }[] =
     [];
@@ -99,7 +102,7 @@ async function runSession(
   const runtime = await createTestRuntime({
     agent: {
       definition: defineAgent({
-        approval: taintPolicy(policy),
+        approval: untrustedContentPolicy(policy),
         model: defineDynamicModel(() => ({ model, modelContextWindowTokens: 200_000 })),
       }),
       name,
@@ -179,12 +182,12 @@ const sendEmail = {
   value: tool({ tags: ["effect:external"] }),
 };
 
-describe("eve/extensions/taint", () => {
+describe("eve/extensions/untrusted-content", () => {
   it("asks before an external effect once the session read untrusted content", async () => {
     extension({});
 
     const result = await runSession(
-      "taint-external",
+      "untrusted-content-external",
       [{ name: "read_issue" }, { name: "send_email" }],
       [readIssue, sendEmail],
     );
@@ -198,7 +201,7 @@ describe("eve/extensions/taint", () => {
     extension({});
 
     const result = await runSession(
-      "taint-publish",
+      "untrusted-content-publish",
       [{ name: "read_issue" }, { name: "share_doc" }],
       [
         readIssue,
@@ -225,7 +228,7 @@ describe("eve/extensions/taint", () => {
     extension({});
 
     const result = await runSession(
-      "taint-rejected",
+      "untrusted-content-rejected",
       [{ name: "read_issue" }, { name: "send_email" }],
       [
         {
@@ -250,7 +253,7 @@ describe("eve/extensions/taint", () => {
     extension({});
 
     const result = await runSession(
-      "taint-subagent",
+      "untrusted-content-subagent",
       [
         { input: { message: CHILD_TASK }, name: "agent" },
         // The child runs as a task; the parent reads its result once the task settles the call.
@@ -269,7 +272,7 @@ describe("eve/extensions/taint", () => {
     extension({});
 
     const result = await runSession(
-      "taint-mark-on-request",
+      "untrusted-content-mark-on-request",
       [{ name: "read_issue" }, { name: "send_email" }],
       [
         {
@@ -293,7 +296,7 @@ describe("eve/extensions/taint", () => {
     extension({});
 
     const result = await runSession(
-      "taint-when",
+      "untrusted-content-when",
       [{ name: "read_issue" }, { name: "send_email" }, { name: "delete_repo" }],
       [
         readIssue,
@@ -314,7 +317,7 @@ describe("eve/extensions/taint", () => {
     extension({});
 
     const result = await runSession(
-      "taint-clean",
+      "untrusted-content-clean",
       [{ name: "list_labels" }, { name: "send_email" }],
       [{ logicalPath: "tools/list_labels.ts", value: tool({}) }, sendEmail],
     );

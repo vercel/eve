@@ -1,8 +1,8 @@
 /**
  * Copies the private extension packages into eve's `src/`
  * so eve compiles and ships them as built-in extensions: `@eve/code` becomes
- * `eve/extensions/code`, `@eve/git` becomes `eve/extensions/git`, `@eve/taint`
- * becomes `eve/extensions/taint`, and `@eve/computer-use` becomes
+ * `eve/extensions/code`, `@eve/git` becomes `eve/extensions/git`, `@eve/untrusted-content`
+ * becomes `eve/extensions/untrusted-content`, and `@eve/computer-use` becomes
  * `eve/extensions/computer-use`. The
  * packages stay the source of truth; the copies are gitignored. eve cannot
  * depend on them (they depend on eve), so the sibling workspace paths are read
@@ -28,9 +28,9 @@ export const builtInExtensions = [
     target: join(packageRoot, "src", "extensions", "git", "extension"),
   },
   {
-    name: "taint",
-    source: join(packageRoot, "..", "eve-taint", "extension"),
-    target: join(packageRoot, "src", "extensions", "taint", "extension"),
+    name: "untrusted-content",
+    source: join(packageRoot, "..", "eve-untrusted-content", "extension"),
+    target: join(packageRoot, "src", "extensions", "untrusted-content", "extension"),
   },
   {
     name: "computer-use",

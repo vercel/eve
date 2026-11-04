@@ -1,9 +1,9 @@
 ---
-title: "Taint Extension"
+title: "Untrusted Content Extension"
 description: "Record when a session reads untrusted content, then ask a person before external effects and deny publishing."
 ---
 
-`eve/extensions/taint` tracks integrity. It records when a session's model reads content that someone outside your trust boundary could have written, such as a public issue, a web page, or a message from another user. An agent-wide [approval policy](./human-in-the-loop#gate-every-call-from-one-policy) then acts on it. Once the session is exposed, it asks a person before external and irreversible calls, and denies calls that would publish data for good. Until then, it changes nothing.
+`eve/extensions/untrusted-content` tracks integrity. It records when a session's model reads content that someone outside your trust boundary could have written, such as a public issue, a web page, or a message from another user. An agent-wide [approval policy](./human-in-the-loop#gate-every-call-from-one-policy) then acts on it. Once the session is exposed, it asks a person before external and irreversible calls, and denies calls that would publish data for good. Until then, it changes nothing.
 
 It tracks only who could have written what the model read, not how sensitive that data is. To ask only when untrusted content and sensitive data meet, Meta's [Rule of Two](https://ai.meta.com/blog/practical-ai-agent-security/), combine it with a confidentiality check through [`when`](#combine-with-a-confidentiality-check).
 
@@ -13,35 +13,35 @@ The extension is a proof of concept. It ships inside the `eve` package and uses 
 
 Mount the extension, then set its policy as the agent's `approval`:
 
-```ts title="agent/extensions/taint.ts"
-import taint from "eve/extensions/taint";
+```ts title="agent/extensions/untrusted-content.ts"
+import untrustedContent from "eve/extensions/untrusted-content";
 
-export default taint({});
+export default untrustedContent({});
 ```
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
-import { taintPolicy } from "eve/extensions/taint";
+import { untrustedContentPolicy } from "eve/extensions/untrusted-content";
 
 export default defineAgent({
   model: "anthropic/claude-sonnet-4.6",
-  approval: taintPolicy(),
+  approval: untrustedContentPolicy(),
 });
 ```
 
 Mount it once. The policy reads the mount's state, and with two mounts the build can't tell which one `agent.ts` means.
 
-To keep a policy of your own, return the taint policy's answer when it has one:
+To keep a policy of your own, return the untrusted content policy's answer when it has one:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
-import { taintPolicy } from "eve/extensions/taint";
+import { untrustedContentPolicy } from "eve/extensions/untrusted-content";
 
-const taint = taintPolicy();
+const untrusted = untrustedContentPolicy();
 
 export default defineAgent({
   model: "anthropic/claude-sonnet-4.6",
-  approval: async (ctx) => (await taint(ctx)) ?? myPolicy(ctx),
+  approval: async (ctx) => (await untrusted(ctx)) ?? myPolicy(ctx),
 });
 ```
 
@@ -78,7 +78,7 @@ Built-in tools have no tags, so the extension treats `web_fetch`, `web_search`, 
 ## What exposes a session
 
 - **An untrusted call.** A call tagged `reads:untrusted` exposes the session when it settles, unless it was rejected before it ran. A failed or interrupted call still exposes it, because it can return text it read.
-- **A message from someone else.** A delivery whose principal isn't the session's initiator exposes the session, with source `message`. Turn this off with `taint({ untrustedMessages: false })`.
+- **A message from someone else.** A delivery whose principal isn't the session's initiator exposes the session, with source `message`. Turn this off with `untrustedContent({ untrustedMessages: false })`.
 
 The state lists up to 20 sources, newest last: tool names and `message`.
 
@@ -94,10 +94,10 @@ The state lists up to 20 sources, newest last: tool names and `message`.
 
 The agent-wide policy runs beside each entry's own `approval`, and the stricter decision wins, so it can add a gate but never remove one. A denied call returns the reason to the model.
 
-`taintPolicy()` takes options:
+`untrustedContentPolicy()` takes options:
 
 ```ts
-taintPolicy({
+untrustedContentPolicy({
   // Ask a person before publishing instead of denying it. Default "deny".
   onPublish: "user-approval",
   // Judge connection tools with no tags by their server's hints. Default "ignore".
@@ -119,12 +119,12 @@ On its own, the policy asks before every external call in an exposed session. `w
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
-import { taintPolicy } from "eve/extensions/taint";
+import { untrustedContentPolicy } from "eve/extensions/untrusted-content";
 
 export default defineAgent({
   model: "anthropic/claude-sonnet-4.6",
   // `sendsSensitiveData` is your own check of what the call would send, and where.
-  approval: taintPolicy({ when: (ctx) => sendsSensitiveData(ctx) }),
+  approval: untrustedContentPolicy({ when: (ctx) => sendsSensitiveData(ctx) }),
 });
 ```
 
@@ -141,14 +141,14 @@ A subagent runs as a task. Its call settles, and exposes the parent, when its re
 
 ## Telemetry
 
-`taintRuntimeContext()` returns `taint.exposed` and `taint.sources` (comma-joined, truncated to 256 characters) for [`runtimeContext`](./observability/otel#add-runtime-context):
+`untrustedContentRuntimeContext()` returns `untrusted.exposed` and `untrusted.sources` (comma-joined, truncated to 256 characters) for [`runtimeContext`](./observability/otel#add-runtime-context):
 
 ```ts title="agent/instrumentation/traces.ts"
 import { otelIntegration } from "eve/instrumentation/otel";
-import { taintRuntimeContext } from "eve/extensions/taint";
+import { untrustedContentRuntimeContext } from "eve/extensions/untrusted-content";
 
 export default otelIntegration({
-  runtimeContext: () => taintRuntimeContext(),
+  runtimeContext: () => untrustedContentRuntimeContext(),
 });
 ```
 
@@ -160,7 +160,7 @@ The extension's hook runs before eve continues past each event, so a call the mo
 
 ## Limits
 
-- Tags describe a tool, not one result. A tool tagged `reads:untrusted` taints the session even when a given result is trusted, and an untagged tool never does. MCP's draft annotations label each result; eve doesn't read them yet.
+- Tags describe a tool, not one result. A tool tagged `reads:untrusted` exposes the session even when a given result is trusted, and an untagged tool never does. MCP's draft annotations label each result; eve doesn't read them yet.
 - Unlabeled output counts as trusted. FIDES treats it as untrusted.
 - A hook's write can be lost if a step is interrupted after the event is recorded and before the step's state is saved. `markOnRequest` narrows this.
 - Exposure doesn't pass from a parent to its subagents. It passes from a subagent to its parent only through the subagent's tags.

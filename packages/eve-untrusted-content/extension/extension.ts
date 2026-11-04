@@ -1,15 +1,15 @@
 import { defineExtension } from "eve/extension";
 import { z } from "zod";
 
-export { taintPolicy, taintRuntimeContext } from "./lib/policy.ts";
+export { untrustedContentPolicy, untrustedContentRuntimeContext } from "./lib/policy.ts";
 export {
   EXTERNAL_TAG,
   IRREVERSIBLE_TAG,
   PUBLIC_SINK_TAG,
   UNTRUSTED_TAG,
   type Exposure,
-  type TaintPolicyOptions,
-} from "./lib/taint.ts";
+  type UntrustedContentPolicyOptions,
+} from "./lib/untrusted-content.ts";
 
 export default defineExtension({
   config: z.object({

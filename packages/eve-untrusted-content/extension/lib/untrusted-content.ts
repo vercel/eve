@@ -76,8 +76,8 @@ export function settled(state: Exposure, callId: string, outcome: string): Expos
   return outcome === "rejected" ? next : expose(next, name);
 }
 
-/** Options for {@link decide} and `taintPolicy()`. */
-export interface TaintPolicyOptions {
+/** Options for {@link decide} and `untrustedContentPolicy()`. */
+export interface UntrustedContentPolicyOptions {
   /**
    * What an exposed session gets for a call tagged both `effect:irreversible` and `sink:public`,
    * which puts data somewhere public for good. Default `"deny"`.
@@ -118,7 +118,7 @@ export interface DecisionInput {
 export function decide(
   exposure: Exposure,
   call: DecisionInput,
-  options: Omit<TaintPolicyOptions, "when"> = {},
+  options: Omit<UntrustedContentPolicyOptions, "when"> = {},
   gated = true,
 ): ApprovalStatus {
   if (!exposure.exposed) return undefined;
@@ -134,7 +134,7 @@ export function decide(
 /** What the call does outside the session, from its tags or, untagged, its server's hints. */
 function effectOf(
   call: DecisionInput,
-  options: Omit<TaintPolicyOptions, "when">,
+  options: Omit<UntrustedContentPolicyOptions, "when">,
 ): "external" | "irreversible" | undefined {
   const tags = call.toolTags;
   if (tags !== undefined) {
@@ -166,13 +166,13 @@ export const MAX_SOURCES_ATTRIBUTE_LENGTH = 256;
 
 /** Span attributes for the session's exposure. */
 export function runtimeContextOf(exposure: Exposure): {
-  readonly "taint.exposed": boolean;
-  readonly "taint.sources": string;
+  readonly "untrusted.exposed": boolean;
+  readonly "untrusted.sources": string;
 } {
   const sources = exposure.sources.join(",");
   return {
-    "taint.exposed": exposure.exposed,
-    "taint.sources":
+    "untrusted.exposed": exposure.exposed,
+    "untrusted.sources":
       sources.length > MAX_SOURCES_ATTRIBUTE_LENGTH
         ? `${sources.slice(0, MAX_SOURCES_ATTRIBUTE_LENGTH - 1)}…`
         : sources,

@@ -2,7 +2,13 @@ import { defineHook } from "eve/hooks";
 
 import extension from "../extension.ts";
 import { exposure } from "../lib/exposure.ts";
-import { expose, MESSAGE_SOURCE, readsUntrusted, requested, settled } from "../lib/taint.ts";
+import {
+  expose,
+  MESSAGE_SOURCE,
+  readsUntrusted,
+  requested,
+  settled,
+} from "../lib/untrusted-content.ts";
 
 export default defineHook({
   events: {

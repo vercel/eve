@@ -1,8 +1,8 @@
 {
-  "name": "@eve/taint",
+  "name": "@eve/untrusted-content",
   "version": "0.0.0",
   "private": true,
-  "description": "Source of the eve/extensions/taint extension: records when a session reads untrusted content, so an agent-wide approval policy can ask before external effects and deny exports.",
+  "description": "Source of the eve/extensions/untrusted-content extension: records when a session reads untrusted content, so an agent-wide approval policy can ask before external effects and deny publishing.",
   "type": "module",
   "exports": {
     "./package.json": "./package.json"

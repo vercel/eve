@@ -8,7 +8,7 @@
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
-        "$TURBO_ROOT$/packages/eve-taint/extension/**",
+        "$TURBO_ROOT$/packages/eve-untrusted-content/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "$TURBO_ROOT$/docs/**",
         "$TURBO_ROOT$/scripts/stage-package.mjs",
@@ -22,7 +22,7 @@
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
-        "!src/extensions/taint/extension/**",
+        "!src/extensions/untrusted-content/extension/**",
         "!src/computer-use/extension/**"
       ],
       "outputs": ["$TURBO_EXTENDS$", "docs/**"]
@@ -33,19 +33,19 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
-        "$TURBO_ROOT$/packages/eve-taint/extension/**",
+        "$TURBO_ROOT$/packages/eve-untrusted-content/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
-        "!src/extensions/taint/extension/**",
+        "!src/extensions/untrusted-content/extension/**",
         "!src/computer-use/extension/**"
       ],
       "outputs": [
         ".generated/compiled/**",
         "src/extensions/code/extension/**",
         "src/extensions/git/extension/**",
-        "src/extensions/taint/extension/**",
+        "src/extensions/untrusted-content/extension/**",
         "src/computer-use/extension/**"
       ]
     },
@@ -55,12 +55,12 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
-        "$TURBO_ROOT$/packages/eve-taint/extension/**",
+        "$TURBO_ROOT$/packages/eve-untrusted-content/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
-        "!src/extensions/taint/extension/**",
+        "!src/extensions/untrusted-content/extension/**",
         "!src/computer-use/extension/**"
       ],
       "outputs": ["dist/**"]
@@ -71,12 +71,12 @@
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
-        "$TURBO_ROOT$/packages/eve-taint/extension/**",
+        "$TURBO_ROOT$/packages/eve-untrusted-content/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
-        "!src/extensions/taint/extension/**",
+        "!src/extensions/untrusted-content/extension/**",
         "!src/computer-use/extension/**"
       ]
     },
@@ -89,12 +89,12 @@
         "$TURBO_EXTENDS$",
         "$TURBO_ROOT$/packages/eve-code/extension/**",
         "$TURBO_ROOT$/packages/eve-git/extension/**",
-        "$TURBO_ROOT$/packages/eve-taint/extension/**",
+        "$TURBO_ROOT$/packages/eve-untrusted-content/extension/**",
         "$TURBO_ROOT$/packages/eve-computer-use/extension/**",
         "!.generated/**",
         "!src/extensions/code/extension/**",
         "!src/extensions/git/extension/**",
-        "!src/extensions/taint/extension/**",
+        "!src/extensions/untrusted-content/extension/**",
         "!src/computer-use/extension/**"
       ]
     },

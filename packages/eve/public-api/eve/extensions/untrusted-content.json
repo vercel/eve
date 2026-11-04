@@ -3,9 +3,9 @@
   "Exposure",
   "IRREVERSIBLE_TAG",
   "PUBLIC_SINK_TAG",
-  "TaintPolicyOptions",
   "UNTRUSTED_TAG",
+  "UntrustedContentPolicyOptions",
   "default",
-  "taintPolicy",
-  "taintRuntimeContext"
+  "untrustedContentPolicy",
+  "untrustedContentRuntimeContext"
 ]

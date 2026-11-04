@@ -11,7 +11,7 @@ import {
   runtimeContextOf,
   settled,
   type Exposure,
-} from "../../extension/lib/taint.ts";
+} from "../../extension/lib/untrusted-content.ts";
 
 const exposed: Exposure = expose(initialExposure(), "read_issue");
 
@@ -126,9 +126,9 @@ test("dedupes sources, keeps the newest, and caps them", () => {
 
 test("truncates the sources span attribute", () => {
   assert.deepEqual(runtimeContextOf(exposed), {
-    "taint.exposed": true,
-    "taint.sources": "read_issue",
+    "untrusted.exposed": true,
+    "untrusted.sources": "read_issue",
   });
   const long = expose(exposed, "x".repeat(400));
-  assert.equal(runtimeContextOf(long)["taint.sources"].length, 256);
+  assert.equal(runtimeContextOf(long)["untrusted.sources"].length, 256);
 });
