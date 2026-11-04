@@ -92,6 +92,19 @@ describe("snapshotRecord's oversized-node fallback", () => {
     expect((truncated as string).includes("… [truncated]")).toBe(true);
   });
 
+  it("truncates an attribute far over the budget", () => {
+    const input = JSON.stringify([
+      { role: "user", parts: [{ content: "z".repeat(1_000_000), type: "text" }] },
+    ]);
+    const snapshot = snapshotRecord(turnWithContent({ input }), aiSdkContentSerializer);
+    expect(validSnapshot(snapshot)).toBe(true);
+    expect(snapshot.attributes?.["agent.trace.content.input"]).toBe(true);
+    const truncated = snapshot.attributes?.["gen_ai.input.messages"];
+    expect(typeof truncated).toBe("string");
+    expect((truncated as string).length).toBeLessThan(40_000);
+    expect((truncated as string).includes("… [truncated]")).toBe(true);
+  });
+
   it("keeps declined capture flagged as false", () => {
     const input = JSON.stringify([
       { role: "user", parts: [{ content: "x".repeat(60_000), type: "text" }] },

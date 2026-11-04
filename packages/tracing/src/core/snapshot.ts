@@ -31,6 +31,9 @@ function messageText(parts: unknown): string {
  * Shrinks a serialized GenAI message array to `budgetBytes` while keeping it
  * valid JSON: the newest message's text is truncated with the library's
  * truncation marker, mirroring how the serializer caps oversized prompts.
+ * The cut is binary searched, so an attribute far over the budget costs a
+ * logarithmic number of encodes instead of re-encoding a near-full candidate
+ * at every step.
  */
 function fitTurnContent(input: string, budgetBytes: number): string | undefined {
   if (budgetBytes <= 0) return undefined;
@@ -51,18 +54,28 @@ function fitTurnContent(input: string, budgetBytes: number): string | undefined 
     typeof message.kind === "string"
       ? { kind: message.kind, role: message.role }
       : { role: message.role };
-  for (let length = text.length; length > 0; length -= 256) {
-    const candidate = JSON.stringify([
+  const candidate = (length: number): string =>
+    JSON.stringify([
       {
         ...base,
         parts: [{ content: `${text.slice(0, length)}${TRUNCATION_MARKER}`, type: "text" }],
       },
     ]);
-    if (byteLength(candidate) <= budgetBytes) return candidate;
+  let best: string | undefined;
+  let low = 1;
+  let high = text.length;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const probe = candidate(middle);
+    if (byteLength(probe) <= budgetBytes) {
+      best = probe;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
   }
-  const minimal = JSON.stringify([
-    { ...base, parts: [{ content: TRUNCATION_MARKER, type: "text" }] },
-  ]);
+  if (best !== undefined) return best;
+  const minimal = candidate(0);
   return byteLength(minimal) <= budgetBytes ? minimal : undefined;
 }
 
