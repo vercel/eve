@@ -90,6 +90,23 @@ function exportedAttributeValue(
 }
 
 /**
+ * Re-applies the capture-policy attributes that a size-based content strip
+ * must not rewrite. Dropping content to fit a checkpoint budget is not the
+ * destination declining it, so `agent.trace.content.input` and
+ * `agent.trace.content.output` keep the record's real decision; otherwise a
+ * restored turn would report "omitted" although capture was on.
+ */
+export function preservingCapturePolicy(
+  attributes: Readonly<Record<string, unknown>>,
+  original: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const kept = { ...attributes };
+  for (const key of [INPUT_POLICY_ATTRIBUTE, OUTPUT_POLICY_ATTRIBUTE])
+    if (key in original) kept[key] = original[key];
+  return kept;
+}
+
+/**
  * The attributes with the declined content removed, or `undefined` when there
  * was none to remove.
  *
