@@ -55,7 +55,8 @@ type Beat =
       time: string;
       body: ReactNode;
       attachment?: ReactNode;
-      /** WhatsApp: the emoji the other side reacted to this message with. */
+      /** WhatsApp: the emoji the other side reacted to this message with. It lands with the
+       * next message, as the other side reacts while replying. */
       reaction?: { emoji: string; label: string };
       delay: number;
     }
@@ -339,6 +340,13 @@ const WHATSAPP_BEATS: Beat[] = [
     reaction: { emoji: "👍", label: "thumbs up" },
     delay: 1800,
   },
+  {
+    kind: "message",
+    author: "Maya",
+    time: "9:14 AM",
+    body: "Thx!",
+    delay: 1600,
+  },
 ];
 
 const CONVERSATIONS: {
@@ -510,7 +518,11 @@ function ReadTicks() {
  */
 function Quote({ author, children }: { author: string; children: string }) {
   return (
-    <span className="-mx-1.5 mb-1 block rounded-[8px] border-green-700 border-l-4 bg-green-400 px-2 py-1">
+    // Concentric with the bubble: its 10px radius less the 6px inset.
+    <span className="relative -mx-1.5 mb-1 block overflow-hidden rounded-[4px] bg-green-400 py-1 pr-2 pl-3">
+      {/* A straight bar the rounded corners clip, as in WhatsApp; a left border would curve
+          its inner edge around them. */}
+      <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-green-700" />
       <span className="block font-medium text-copy-13 text-green-900">{author}</span>
       <span className="block truncate text-copy-13 text-gray-900">{children}</span>
     </span>
@@ -544,7 +556,7 @@ function ReplyButtons({ buttons }: { buttons: { label: string; icon: ReactNode }
 
 /**
  * A WhatsApp reaction: the emoji in a pill overlapping the bubble's bottom edge. In a demo it
- * lands a beat after its bubble the way WhatsApp's does: the pill grows in and the emoji
+ * lands just after the next message the way WhatsApp's does: the pill grows in and the emoji
  * overshoots it before settling. Through the Web Animations API, so it runs while a
  * conversation has its CSS entrances off.
  */
@@ -565,7 +577,8 @@ function BubbleReaction({
   // Only on mount: a reaction arriving in a demo, not one re-rendered after.
   useEffect(() => {
     if (!demo || !pill.current || !glyph.current) return;
-    const delay = 700;
+    // Just after the reply it lands with has scaled in.
+    const delay = 500;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       pill.current.animate([{ opacity: 0 }, { opacity: 1 }], {
         delay,
@@ -623,6 +636,7 @@ function Bubble({
   tail,
   attachment,
   reaction,
+  reacted,
   demo,
   children,
 }: {
@@ -633,6 +647,8 @@ function Bubble({
   tail: boolean;
   attachment?: ReactNode;
   reaction?: { emoji: string; label: string };
+  /** Whether the reaction has landed; its room below the bubble is kept either way. */
+  reacted: boolean;
   demo: boolean;
   children: ReactNode;
 }) {
@@ -676,7 +692,9 @@ function Bubble({
           </span>
         </div>
         <Attachment>{attachment}</Attachment>
-        {reaction ? <BubbleReaction demo={demo} outgoing={outgoing} {...reaction} /> : null}
+        {reaction && reacted ? (
+          <BubbleReaction demo={demo} outgoing={outgoing} {...reaction} />
+        ) : null}
       </div>
     </li>
   );
@@ -870,6 +888,7 @@ export function SessionTimeline(): JSX.Element {
                       demo={playing || ended}
                       tail={beat.author !== authorOf(beats.slice(0, shown)[i + 1])}
                       key={i}
+                      reacted={i < shown - 1}
                       reaction={beat.reaction}
                       time={beat.time}
                     >
