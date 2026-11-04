@@ -154,6 +154,58 @@ it("asks with the prompt a tool's approval writes for the call", async () => {
   expect(results.approvals.map((ask) => ask.request.prompt)).toEqual(["Send $125 to Ada?"]);
 });
 
+it("appends the reason a policy gave for asking to the prompt", async () => {
+  const tool = (
+    name: string,
+    approval: HarnessToolDefinition["approval"],
+  ): HarnessToolDefinition => ({
+    approval,
+    description: "Share notes.",
+    execute: async () => "shared",
+    inputSchema: jsonSchema({ type: "object" }),
+    name,
+  });
+  const asking = () => ({
+    reason: "Alice's notes are in context.",
+    type: "user-approval" as const,
+  });
+  const ctx = new ContextContainer();
+  ctx.set(SessionKey, {
+    auth: { current: null, initiator: null },
+    sessionId: "session-1",
+    turn: { id: "turn_0", sequence: 0 },
+  });
+
+  const results = await contextStorage.run(ctx, () =>
+    executeInlineCalls({
+      abortSignal: undefined,
+      approvalMemory: { pending: [], remembered: {} },
+      beforeExecute: () => {},
+      excludedCallIds: new Set(),
+      messages: [],
+      publish: async () => {},
+      toolCalls: ["post_notes", "send_notes"].map((toolName, index) => ({
+        input: {},
+        toolCallId: `call-${index}`,
+        toolName,
+        type: "tool-call" as const,
+      })),
+      tools: new Map([
+        ["post_notes", tool("post_notes", asking)],
+        [
+          "send_notes",
+          tool("send_notes", { prompt: () => "Send the notes to Bob?", request: asking }),
+        ],
+      ]),
+    }),
+  );
+
+  expect(results.approvals.map((ask) => ask.request.prompt)).toEqual([
+    "Approve Post notes? Alice's notes are in context.",
+    "Send the notes to Bob? Alice's notes are in context.",
+  ]);
+});
+
 it("keeps a thrown tool error's name in the durable call ending", async () => {
   const events: import("#protocol/session-event.js").SessionEvent[] = [];
   await executeInlineCalls({

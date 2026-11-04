@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { ApprovalStatus } from "eve/tools/approval";
+
 import {
   admitted,
   decideAudience,
@@ -18,6 +20,8 @@ import {
   type PersonalContext,
   type ReadLevel,
 } from "../../extension/lib/private-context.ts";
+
+const typeOf = (status: ApprovalStatus) => (typeof status === "object" ? status.type : status);
 
 function read(
   state: PersonalContext,
@@ -112,18 +116,39 @@ test("lets sensitive data go to internal and user sinks, not public ones", () =>
 });
 
 test("asks for personal flows always, and sensitive flows unless allowed", () => {
-  assert.equal(decidePrivateContext(personal, sink("sink:internal"), "alice"), "user-approval");
   assert.equal(
-    decidePrivateContext(personal, sink("sink:internal"), "alice", { sensitiveFlows: "allow" }),
+    typeOf(decidePrivateContext(personal, sink("sink:internal"), "alice")),
     "user-approval",
   );
-  assert.equal(decidePrivateContext(sensitive, sink("sink:public"), "alice"), "user-approval");
+  assert.equal(
+    typeOf(
+      decidePrivateContext(personal, sink("sink:internal"), "alice", { sensitiveFlows: "allow" }),
+    ),
+    "user-approval",
+  );
+  assert.equal(
+    typeOf(decidePrivateContext(sensitive, sink("sink:public"), "alice")),
+    "user-approval",
+  );
   assert.equal(
     decidePrivateContext(sensitive, sink("sink:public"), "alice", { sensitiveFlows: "allow" }),
     undefined,
   );
   assert.equal(decidePrivateContext(personal, sink("sink:user"), "alice"), undefined);
   assert.equal(decidePrivateContext(alice, sink("effect:external"), "alice"), undefined);
+});
+
+test("tells the approver whose data it read, and where from", () => {
+  assert.deepEqual(decidePrivateContext(personal, sink("sink:internal"), "alice"), {
+    reason:
+      "This session read personal data belonging to alice from notion_search, and this call could share it with others.",
+    type: "user-approval",
+  });
+  assert.deepEqual(decidePrivateContext(sensitive, sink("sink:public"), "alice"), {
+    reason:
+      "This session read sensitive data from wiki_search, and this call could make it public.",
+    type: "user-approval",
+  });
 });
 
 test("denies reads by what the conversation's readers may see", () => {

@@ -113,13 +113,14 @@ approval: ({ session, toolInput }) => {
 
 The policy returns an `ApprovalStatus`, directly or as a promise:
 
-| Return                        | Result                                     |
-| ----------------------------- | ------------------------------------------ |
-| `"user-approval"` or `true`   | Pause for a person.                        |
-| `"not-applicable"` or `false` | Continue without a prompt.                 |
-| `"approved"`                  | Run the call without a person.             |
-| `"denied"`                    | Deny the call without a person.            |
-| `{ type: "denied", reason }`  | Deny the call and give the model `reason`. |
+| Return                              | Result                                                  |
+| ----------------------------------- | ------------------------------------------------------- |
+| `"user-approval"` or `true`         | Pause for a person.                                     |
+| `"not-applicable"` or `false`       | Continue without a prompt.                              |
+| `"approved"`                        | Run the call without a person.                          |
+| `"denied"`                          | Deny the call without a person.                         |
+| `{ type: "denied", reason }`        | Deny the call and give the model `reason`.              |
+| `{ type: "user-approval", reason }` | Pause for a person, and show `reason` after the prompt. |
 
 When you write a policy:
 
@@ -158,6 +159,8 @@ export default defineAgent({
 ```
 
 For each call, eve runs this policy and the tool's own `approval` and keeps the stricter result: denied, then user approval, then approved. The agent's policy can add a gate but never remove one, and `undefined` leaves the tool's decision. When both ask, the tool's prompt and response policy apply.
+
+To tell the approver why the agent's policy asked, return `{ type: "user-approval", reason }`. eve shows the reason after the call's prompt, such as `Approve Post to slack? This session read Alice's notes.`, and keeps it when the tool's own approval also asks.
 
 A plain `"user-approval"` from the agent's policy asks on every call, like `always()`, even for a tool whose `once()` a person already approved. To let one approval cover the rest of the session, return `once()`'s status from the agent's policy; it shares the tool's `once()` memory:
 

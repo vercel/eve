@@ -77,7 +77,14 @@ export type ApprovalStatus =
   | { readonly type: "not-applicable"; readonly reason?: never }
   | { readonly type: "approved"; readonly reason?: string }
   | { readonly type: "denied"; readonly reason?: string }
-  | { readonly type: "user-approval"; readonly reason?: never };
+  | {
+      readonly type: "user-approval";
+      /**
+       * Why the call needs a person, shown to the approver after the call's prompt. An
+       * agent-wide policy's reason survives when the entry's own approval also asks.
+       */
+      readonly reason?: string;
+    };
 
 /** Request-time approval policy shared by authored tools and connections. */
 export type ApprovalPolicy<TInput = Record<string, unknown>> = (
