@@ -11,7 +11,7 @@ import {
 } from "#compiled/@ai-sdk/mcp/index.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey, SessionTraceSeedKey } from "#context/keys.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { requireCompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition, ResolvedConnectionEvents } from "#runtime/types.js";
 import type {
   ConnectionToolExecuteOptions,
@@ -63,7 +63,7 @@ export class ConnectionEventActions {
   private scope() {
     const ctx = contextStorage.getStore();
     if (ctx === undefined) throw new Error("Event subscriptions require an active eve session.");
-    if (ctx.get(BundleKey)?.nodeId !== undefined)
+    if (ctx.get(SessionAgentKey)?.nodeId !== undefined)
       throw new Error(
         "Experimental event subscriptions currently require a root-agent connection.",
       );
@@ -269,7 +269,7 @@ export class ConnectionEventActions {
       // A watch already running under this id answers instead of a new one.
       const subscription = await startConnectionEventOwner(
         binding,
-        ctx.require(BundleKey),
+        requireCompiledBundle(ctx),
         options.abortSignal,
       );
       return subscription === undefined

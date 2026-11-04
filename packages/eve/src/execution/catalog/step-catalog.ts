@@ -28,7 +28,7 @@ import type {
 } from "#harness/types.js";
 import { SKILL_ENTRY_NAME } from "#protocol/catalog-tools.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { refineJsonSchema } from "#tools/schema.js";
@@ -93,7 +93,7 @@ export interface CatalogInput {
 /** What a step's tools can run, keeping only what the session sees: routes run nothing. */
 export function callableOf(input: CatalogInput): Callable {
   const { connections, skills } = input.table;
-  const bundle = input.ctx.get(BundleKey);
+  const bundle = compiledBundleOf(input.ctx);
   const agentApproval = bundle === undefined ? undefined : resolveAgentApproval(bundle);
   // Only what this session sees, so a delegated session of the same agent doesn't reach or search
   // for root-only entries. Every entry runs under the agent-wide approval policy.
@@ -222,7 +222,7 @@ export function sessionOffersTasks(input: {
   readonly tools: readonly HarnessToolDefinition[];
 }): boolean {
   return (
-    (input.ctx.get(BundleKey)?.subagentRegistry.dynamicResolvers.length ?? 0) > 0 ||
+    (compiledBundleOf(input.ctx)?.subagentRegistry.dynamicResolvers.length ?? 0) > 0 ||
     input.tools.some(
       (definition) => isVisible(definition, input.session) && startsTasks(definition),
     )

@@ -19,7 +19,7 @@ import {
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
 import { formatAvailableSkillsSection, skillFilePath } from "#execution/skills/instructions.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import { slotsOf, slotValueOf } from "#definitions/state.js";
 import { namedEntries, type EntryKind } from "./named.js";
 import {
@@ -37,7 +37,7 @@ import {
  */
 export const skills: Definition = {
   contribute: ({ container }) => {
-    const own = container.get(BundleKey)?.resolvedAgent.skills ?? [];
+    const own = compiledBundleOf(container)?.resolvedAgent.skills ?? [];
     return {
       tools: () => ({
         skills: new Map(
@@ -144,7 +144,7 @@ function ownedSkills(ctx: Pick<ContextReader, "get">): {
   readonly live?: unknown;
   readonly skills: DurableDynamicSkillMetadata[];
 }[] {
-  const bundle = ctx?.get(BundleKey);
+  const bundle = compiledBundleOf(ctx);
   if (bundle === undefined) return [];
   const owners = new Set<string>();
   const slots = new Map(slotsOf(ctx, "skill").map((slot) => [slot.id, slot]));

@@ -72,6 +72,9 @@ interface CreateExecutionNodeStepInput {
   readonly instrumentation: ExecutionInstrumentation | undefined;
   readonly setAttributes?: KernelConfig["setAttributes"];
   readonly modelResolutionScope: RuntimeModelResolutionScope;
+  /** Who runs the step, as its events name it. */
+  readonly agent: RuntimeAgentIdentity;
+  /** The compiled node whose `agent/tools/` the step runs. */
   readonly node: ResolvedRuntimeAgentNode;
   readonly sessionUsageLimit?: KernelConfig["sessionUsageLimit"];
 }
@@ -97,7 +100,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     signInCompletions: input.signInCompletions,
     typedAnswers: input.typedAnswers,
     resolveModel,
-    runtimeIdentity: buildRuntimeIdentity(input.node),
+    runtimeIdentity: buildRuntimeIdentity(input.agent),
     sessionUsageLimit: input.sessionUsageLimit,
     tools,
     setAttributes: input.setAttributes,
@@ -112,16 +115,22 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   };
 }
 
+/** The agent a step runs, as its runtime identity names it. */
+export interface RuntimeAgentIdentity {
+  readonly id: string;
+  readonly name?: string;
+}
+
 /**
- * Builds a {@link RuntimeIdentity} from the resolved runtime agent node
- * and the current eve package installation.
+ * Builds a {@link RuntimeIdentity} from the session's agent and the current eve package
+ * installation.
  */
-export function buildRuntimeIdentity(node: ResolvedRuntimeAgentNode): RuntimeIdentity {
+export function buildRuntimeIdentity(agent: RuntimeAgentIdentity): RuntimeIdentity {
   const packageInfo = resolveInstalledPackageInfo();
 
   const identity: RuntimeIdentity = {
-    agentId: node.turnAgent.id,
-    agentName: node.agent.config?.name,
+    agentId: agent.id,
+    agentName: agent.name,
     eveVersion: packageInfo.version,
   };
 

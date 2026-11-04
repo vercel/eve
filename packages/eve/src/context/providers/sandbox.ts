@@ -3,8 +3,8 @@ import type { HarnessSessionBase } from "#harness/types.js";
 import type { SandboxAccess, SandboxState } from "#sandbox/state.js";
 import type { ContextContainer } from "#context/container.js";
 import { SandboxKey, SandboxTerminalCleanupKey, SessionIdKey } from "#context/keys.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { getActiveRuntimeNode } from "#context/node.js";
+import { ChannelKey, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import { runtimeNodeId } from "#runtime/sessions/session-agent.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 import type { SessionPrewarmer } from "#context/prewarm.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -30,10 +30,10 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
   key: SandboxKey,
 
   async create(ctx: ContextContainer, session: HarnessSessionBase) {
-    const bundle = ctx.get(BundleKey);
-    if (bundle === undefined) return undefined;
-    const node = getActiveRuntimeNode(ctx);
-    const registry = node.sandboxRegistry;
+    const agent = ctx.get(SessionAgentKey);
+    const sandbox = await agent?.sandbox();
+    if (agent === undefined || sandbox === undefined) return undefined;
+    const { registry } = sandbox;
     const sessionId = ctx.require(SessionIdKey);
     const channel = ctx.get(ChannelKey);
     const adapterState = channel?.state as Record<string, unknown> | undefined;
@@ -44,8 +44,8 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
     const sandboxSessionId = reusesOwnerSandbox ? (ownerSandboxSessionId ?? sessionId) : sessionId;
 
     const access = await ensureSandboxAccess({
-      compiledArtifactsSource: bundle.compiledArtifactsSource,
-      nodeId: node.nodeId,
+      ...sandbox.template,
+      nodeId: runtimeNodeId(agent),
       ownsSandbox: !reusesOwnerSandbox,
       registry,
       sessionId: sandboxSessionId,
