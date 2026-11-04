@@ -47,6 +47,7 @@ import {
 import { decideApproval } from "#harness/tools.js";
 import { changedSinceOffered, changedToolMessage, failedCall } from "#harness/approval-outcome.js";
 import { settleCall } from "#harness/session-machine/calls.js";
+import { startEach } from "#harness/tool-concurrency.js";
 
 /**
  * What a delivery leaves for its step once its answers are admitted. `stop` ends the step: a
@@ -290,7 +291,7 @@ async function runApproved(
   );
   if (calls.length === 0) return undefined;
   const executed = await Promise.all(
-    local.map(async ({ approvals, tools }) => {
+    startEach(local, async ({ approvals, tools }) => {
       if (approvals.length === 0) return { settled: [], signIns: [] };
       const view = step.view().projection.view;
       const call = view.calls[approvals[0]!.call.callId];

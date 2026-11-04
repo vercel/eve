@@ -13,3 +13,28 @@ export function isAbsolutePosix(path: string): boolean {
 export function resolvePosix(...segments: string[]): string {
   return posix.resolve(...segments);
 }
+
+/** The last segment of `path`, without `suffix` when it ends with it. */
+export function basenamePosix(path: string, suffix?: string): string {
+  return posix.basename(path, suffix);
+}
+
+/** `path` without its last segment. */
+export function dirnamePosix(path: string): string {
+  return posix.dirname(path);
+}
+
+/** The extension of `path`'s last segment, from its last `.`, or "". */
+export function extnamePosix(path: string): string {
+  return posix.extname(path);
+}
+
+/** `segments` joined and normalized. */
+export function joinPosix(...segments: string[]): string {
+  return posix.join(...segments);
+}
+
+/** `path` normalized: `.` and `..` segments and repeated slashes resolved. */
+export function normalizePosix(path: string): string {
+  return posix.normalize(path);
+}

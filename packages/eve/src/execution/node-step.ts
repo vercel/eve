@@ -30,6 +30,7 @@ import {
   WEB_SEARCH_TOOL_NAME,
 } from "#harness/provider-tool-schemas.js";
 import type { KernelConfig } from "#harness/types.js";
+import { readEnv } from "#platform/env.js";
 
 const log = createLogger("execution.node-step");
 
@@ -132,9 +133,9 @@ export function buildRuntimeIdentity(agent: RuntimeAgentIdentity): RuntimeIdenti
     eveVersion: installedEveVersion(),
   };
 
-  const gitSha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
-  const gitBranch = process.env.VERCEL_GIT_COMMIT_REF?.trim();
-  const deployedAt = process.env.VERCEL_DEPLOYMENT_CREATED_AT?.trim();
+  const gitSha = readEnv("VERCEL_GIT_COMMIT_SHA")?.trim();
+  const gitBranch = readEnv("VERCEL_GIT_COMMIT_REF")?.trim();
+  const deployedAt = readEnv("VERCEL_DEPLOYMENT_CREATED_AT")?.trim();
 
   if (gitSha || gitBranch || deployedAt) {
     return {

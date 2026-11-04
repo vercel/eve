@@ -1,4 +1,3 @@
-import { createHash, randomUUID } from "node:crypto";
 import { scheduleDisplayName } from "#runtime/schedules/record.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
@@ -31,6 +30,9 @@ import {
   type ScheduleCollectionPayload,
 } from "#runtime/schedules/payload.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
+import { readEnv } from "#platform/env.js";
+import { randomUUID } from "#platform/uuid.js";
+import { sha256Hex } from "#shared/digest.js";
 
 export { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 
@@ -147,9 +149,7 @@ export class ScheduleDispatcher {
     const scheduledToken = (channelToken: string | undefined, key: string | undefined) =>
       key === undefined
         ? `eve-scheduled-send:${randomUUID()}`
-        : `eve-scheduled-send:${createHash("sha256")
-            .update(JSON.stringify([occurrence.scheduleId, channelToken, key]))
-            .digest("hex")}`;
+        : `eve-scheduled-send:${sha256Hex(JSON.stringify([occurrence.scheduleId, channelToken, key]))}`;
     const freshRun = (run: RunInput): RunInput => ({
       ...run,
       auth,
@@ -211,7 +211,7 @@ export class ScheduleDispatcher {
     // On Vercel, the deployment serving the schedule accepts its sends, so a
     // session they continue hands off to it like one a route reaches.
     const toChannel = createCrossChannelToFn(runtime, toCrossChannelTargets(this.channels), {
-      acceptedDeploymentId: process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined,
+      acceptedDeploymentId: readEnv("VERCEL_DEPLOYMENT_ID")?.trim() || undefined,
     });
     return {
       args: {

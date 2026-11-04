@@ -29,7 +29,7 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
-import { maxBytesOf } from "#internal/attachments/limited-read.js";
+import { maxBytesOf } from "#internal/attachments/upload-limit.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { attachInputText } from "#internal/input-text.js";
 import type { Answer, StrictAnswers, ValidatedAnswer } from "#shared/input.js";

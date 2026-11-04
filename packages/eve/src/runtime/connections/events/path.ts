@@ -4,13 +4,14 @@ import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,
 } from "#shared/public-route-prefix.js";
+import { readEnv } from "#platform/env.js";
 
 export function connectionEventRoute(connectionName: string): string {
   return `${EVE_ROUTE_PREFIX}/hooks/${encodeURIComponent(connectionName)}`;
 }
 export function connectionEventDestination(connectionName: string): string {
   return joinEveRoutePath(
-    normalizePublicRoutePrefix(process.env[EVE_PUBLIC_ROUTE_PREFIX_ENV]) ?? "",
+    normalizePublicRoutePrefix(readEnv(EVE_PUBLIC_ROUTE_PREFIX_ENV)) ?? "",
     connectionEventRoute(connectionName),
   );
 }

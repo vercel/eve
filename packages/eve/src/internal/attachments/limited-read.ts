@@ -1,10 +1,4 @@
 import { EveAttachmentError } from "#internal/attachments/errors.js";
-import type { UploadPolicy } from "#public/channels/upload-policy.js";
-
-/** The byte cap an upload policy sets; a disabled policy accepts nothing. */
-export function maxBytesOf(policy: UploadPolicy): number {
-  return policy === "disabled" ? 0 : policy.maxBytes;
-}
 
 /**
  * Reads a download's or request's body, failing as soon as it passes `maxBytes`. Checks a

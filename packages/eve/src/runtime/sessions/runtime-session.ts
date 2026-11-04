@@ -1,9 +1,8 @@
-import { AsyncLocalStorage } from "node:async_hooks";
-
 import type { DescribedAgent } from "#channel/agent-description.js";
 import type { InstalledSkillFiles } from "#channel/skill-files.js";
 import type { BundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { createScopeStorage, type ScopeStorage } from "#context/scope-storage.js";
 
 /**
  * Process-scoped container for mutable runtime state owned by one eve
@@ -115,14 +114,15 @@ const RUNTIME_SESSION_STORAGE_GLOBAL_KEY = Symbol.for("eve.runtime-session-stora
 const RUNTIME_SESSION_DEFAULT_GLOBAL_KEY = Symbol.for("eve.runtime-session-default");
 
 interface RuntimeSessionGlobal {
-  [RUNTIME_SESSION_STORAGE_GLOBAL_KEY]?: AsyncLocalStorage<RuntimeSession>;
+  [RUNTIME_SESSION_STORAGE_GLOBAL_KEY]?: ScopeStorage<RuntimeSession>;
   [RUNTIME_SESSION_DEFAULT_GLOBAL_KEY]?: RuntimeSession;
 }
 
 const globalContainer = globalThis as typeof globalThis & RuntimeSessionGlobal;
 
 if (globalContainer[RUNTIME_SESSION_STORAGE_GLOBAL_KEY] === undefined) {
-  globalContainer[RUNTIME_SESSION_STORAGE_GLOBAL_KEY] = new AsyncLocalStorage<RuntimeSession>();
+  globalContainer[RUNTIME_SESSION_STORAGE_GLOBAL_KEY] =
+    createScopeStorage<RuntimeSession>("runtime session");
 }
 
 const runtimeSessionStorage = globalContainer[RUNTIME_SESSION_STORAGE_GLOBAL_KEY];

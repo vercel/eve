@@ -5,7 +5,7 @@ import {
   isInteractionOnly,
   markInteractionOnly,
 } from "#tools/provided/framework-tool.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import { registerDefinitionSource } from "#internal/authored-definition/source-identity.js";

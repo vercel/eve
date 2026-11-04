@@ -4,7 +4,7 @@ import type {
   CompiledInstructionsDefinition,
 } from "#compiler/manifest.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import { resolveChannelDefinition } from "#runtime/resolve-channel.js";
 
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";

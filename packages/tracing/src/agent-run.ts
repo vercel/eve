@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID } from "./core/random.js";
 import { otelTelemetry } from "./adapters/otel.js";
 import { aiSdkContentSerializer } from "./adapters/serialization.js";
 import { createScopes, type LiveOperation } from "./core/scopes.js";

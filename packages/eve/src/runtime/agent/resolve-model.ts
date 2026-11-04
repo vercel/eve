@@ -1,6 +1,6 @@
-import { localGatewayModel } from "#internal/model-auth/transport.js";
+import { localGatewayModel } from "#platform/local-gateway.js";
 import type { LanguageModel } from "ai";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import {
   normalizeAgentDefinition,
   normalizeAgentPromptCache,

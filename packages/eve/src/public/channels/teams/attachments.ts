@@ -2,7 +2,8 @@ import type { MessageContent, MessageFilePart, MessageTextPart } from "#shared/m
 
 import type { FetchFileResult } from "#channel/adapter.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
-import { maxBytesOf, readLimitedBytes } from "#internal/attachments/limited-read.js";
+import { readLimitedBytes } from "#internal/attachments/limited-read.js";
+import { maxBytesOf } from "#internal/attachments/upload-limit.js";
 import { createLogger } from "#internal/logging.js";
 import {
   resolveTeamsAccessToken,

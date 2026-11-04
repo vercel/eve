@@ -1,7 +1,7 @@
 import { type AlsContext, ContextContainer } from "#context/container.js";
 import { resolveKey } from "#context/key.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
+import { loadCompiledManifest } from "#platform/compiled-agents.js";
 import { mountedStateKeyName } from "#public/definitions/state.js";
 import { type CompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 

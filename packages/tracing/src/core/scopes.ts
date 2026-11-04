@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomHex } from "./random.js";
 import { boundedTraceError } from "../adapters/serialization.js";
 import { createSpanWriter, type TraceOperation } from "./writer.js";
 import { usageAttributes } from "./attributes.js";
@@ -189,8 +189,8 @@ export function createScopes(input: {
               binding.reference?.traceId ??
               parent?.reference.traceId ??
               binding.parent?.traceId ??
-              randomBytes(16).toString("hex"),
-            spanId: binding.reference?.spanId ?? randomBytes(8).toString("hex"),
+              randomHex(16),
+            spanId: binding.reference?.spanId ?? randomHex(8),
             traceFlags: 0,
           },
         },

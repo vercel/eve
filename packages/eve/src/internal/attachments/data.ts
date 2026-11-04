@@ -9,10 +9,12 @@
  */
 
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
+import { fromBase64, utf8ByteLength, utf8Bytes } from "#shared/bytes.js";
+import { hostBytes } from "#platform/host-bytes.js";
 
 /** What a `FilePart.data` value carries. */
 export type FileData =
-  | { readonly kind: "bytes"; readonly bytes: Buffer }
+  | { readonly kind: "bytes"; readonly bytes: Uint8Array }
   | { readonly kind: "link"; readonly url: URL }
   | { readonly kind: "reference" }
   | { readonly kind: "unreadable" };
@@ -30,10 +32,10 @@ const UNREADABLE: FileData = { kind: "unreadable" };
  */
 export function readFileData(data: unknown): FileData {
   if (data instanceof Uint8Array) {
-    return { bytes: Buffer.isBuffer(data) ? data : Buffer.from(data), kind: "bytes" };
+    return { bytes: hostBytes(data), kind: "bytes" };
   }
   if (data instanceof ArrayBuffer) {
-    return { bytes: Buffer.from(new Uint8Array(data)), kind: "bytes" };
+    return { bytes: hostBytes(new Uint8Array(data)), kind: "bytes" };
   }
   if (data instanceof URL) {
     return data.protocol === "data:" ? decodeDataUrl(data.href) : { kind: "link", url: data };
@@ -54,7 +56,7 @@ export function readFileData(data: unknown): FileData {
         : UNREADABLE;
     case "text":
       return typeof tagged.text === "string"
-        ? { bytes: Buffer.from(tagged.text, "utf8"), kind: "bytes" }
+        ? { bytes: hostBytes(utf8Bytes(tagged.text)), kind: "bytes" }
         : UNREADABLE;
     case "reference":
       return REFERENCE;
@@ -117,7 +119,7 @@ function readStringData(data: string): FileData {
     return url === null ? UNREADABLE : { kind: "link", url };
   }
   // Bare strings are base64 payloads, matching AI SDK's `DataContent`.
-  return { bytes: Buffer.from(data, "base64"), kind: "bytes" };
+  return { bytes: hostBytes(fromBase64(data)), kind: "bytes" };
 }
 
 /** A bare AI SDK `ProviderReference`: provider names mapped to file ids. */
@@ -134,10 +136,10 @@ function decodeDataUrl(value: string): FileData {
   const header = value.slice(5, comma);
   const body = value.slice(comma + 1);
   if (header.endsWith(";base64")) {
-    return { bytes: Buffer.from(body, "base64"), kind: "bytes" };
+    return { bytes: hostBytes(fromBase64(body)), kind: "bytes" };
   }
   try {
-    return { bytes: Buffer.from(decodeURIComponent(body), "utf8"), kind: "bytes" };
+    return { bytes: hostBytes(utf8Bytes(decodeURIComponent(body))), kind: "bytes" };
   } catch {
     return UNREADABLE;
   }
@@ -156,9 +158,9 @@ function computeStringByteLength(value: string): number | null {
   // Percent-encoded UTF-8 payload: count the decoded octets, not the
   // percent-encoded string length.
   try {
-    return Buffer.byteLength(decodeURIComponent(body), "utf8");
+    return utf8ByteLength(decodeURIComponent(body));
   } catch {
-    return Buffer.byteLength(body, "utf8");
+    return utf8ByteLength(body);
   }
 }
 

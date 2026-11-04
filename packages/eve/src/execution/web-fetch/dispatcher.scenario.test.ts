@@ -9,7 +9,7 @@ import {
 import { Agent, Dispatcher1Wrapper } from "undici";
 import { describe, expect, it } from "vitest";
 
-import { createPublicDispatcher, fetchWithDispatcher } from "#execution/public-destination.js";
+import { createPublicDispatcher, fetchWithDispatcher } from "#execution/public-dispatcher.js";
 
 // Self-signed test certificates, valid until 2126.
 const LOCALHOST = {

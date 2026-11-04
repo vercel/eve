@@ -45,6 +45,7 @@ import { chooseModel, effectiveModelId } from "./model.js";
 import { sessionDefinitions } from "./agent.js";
 import { bindOpeningCancel, settleHookCommands } from "./hooks.js";
 import { staticUserInstructions } from "./instructions.js";
+import { readEnv } from "#platform/env.js";
 
 // The kernel asks definitions what they add, on two schedules. Before each model call it evaluates
 // what they keep, with the conversation that call reads; everything else reads what that left,
@@ -238,7 +239,7 @@ export async function restoreDefinitions(
   }
   // Outside production, EVE_DEFINITIONS_COLD=1 makes every step build its code as a fresh process
   // would, which tests recovery without a restart. A deployment never reads it.
-  if (process.env.NODE_ENV !== "production" && process.env.EVE_DEFINITIONS_COLD === "1") {
+  if (process.env.NODE_ENV !== "production" && readEnv("EVE_DEFINITIONS_COLD") === "1") {
     const sessionId = ctx.get(SessionIdKey);
     if (sessionId !== undefined) forgetSessionLive(sessionId);
   }

@@ -1,4 +1,4 @@
-import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { loadCompiledBundle } from "#platform/compiled-agents.js";
 import {
   type DurableCompiledArtifactsSource,
   resolveDurableCompiledArtifactsSource,
@@ -46,7 +46,7 @@ export async function createSessionStep(input: {
 }): Promise<CreateSessionStepResult> {
   "use step";
 
-  const bundle = await getCompiledRuntimeAgentBundle({
+  const bundle = await loadCompiledBundle({
     compiledArtifactsSource: resolveDurableCompiledArtifactsSource(input.compiledArtifactsSource),
     nodeId: input.nodeId,
   });

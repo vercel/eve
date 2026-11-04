@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
 import type { ModelMessage } from "ai";
 
 import type { HistoryState } from "#context/keys.js";
 import type { UserMessageKind } from "#harness/messages.js";
+import { sha256Base64Url } from "#shared/digest.js";
 
 /**
  * Something a definition tells the model once, and again each time it changes: it joins the
@@ -26,10 +26,7 @@ export interface Announcement {
 
 /** Names an announcement's message by its kind and content, which a rewrite keeps verbatim. */
 export function announcementDigest(kind: unknown, content: unknown): string {
-  return createHash("sha256")
-    .update(JSON.stringify([kind, content]))
-    .digest("base64url")
-    .slice(0, 22);
+  return sha256Base64Url(JSON.stringify([kind, content])).slice(0, 22);
 }
 
 /** What the history state still says once the history is `history`: the keys whose message it kept. */

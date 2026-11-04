@@ -1,7 +1,7 @@
 import * as aiSdk from "ai";
 import type { DecisionOptions, DecisionQuestion } from "#ai/decision-types.js";
 import { ensureAiSdkWarningLogger } from "#instrumentation/ai-sdk-warnings.js";
-import { localGatewayDecisionModel } from "#internal/model-auth/transport.js";
+import { localGatewayDecisionModel } from "#platform/local-gateway.js";
 
 export const DEFAULT_DECISION_MODEL = "typesafe-ai/jev";
 

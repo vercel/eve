@@ -1,7 +1,6 @@
-import { AsyncLocalStorage } from "node:async_hooks";
-
 import { type ContextAccessor, type ContextKey, resolveKey } from "#context/key.js";
 import { LocalDevRequestKey, type LocalDevRequestProvenance } from "#context/keys.js";
+import { createScopeStorage, type ScopeStorage } from "#context/scope-storage.js";
 
 const EVE_CONTEXT_STORAGE_KEY = Symbol.for("eve.context-storage");
 
@@ -126,18 +125,18 @@ interface ContextScope {
 }
 
 type AlsContextStorageGlobal = typeof globalThis & {
-  [EVE_CONTEXT_STORAGE_KEY]?: AsyncLocalStorage<ContextScope>;
+  [EVE_CONTEXT_STORAGE_KEY]?: ScopeStorage<ContextScope>;
 };
 
 const globalContextStorage = globalThis as AlsContextStorageGlobal;
 
 if (globalContextStorage[EVE_CONTEXT_STORAGE_KEY] === undefined) {
-  globalContextStorage[EVE_CONTEXT_STORAGE_KEY] = new AsyncLocalStorage<ContextScope>();
+  globalContextStorage[EVE_CONTEXT_STORAGE_KEY] = createScopeStorage<ContextScope>("context");
 }
 
 /**
- * Process-wide AsyncLocalStorage used by every eve module copy in the current
- * runtime.
+ * Process-wide scope storage (AsyncLocalStorage where the platform has it; see
+ * `scope-storage.ts`) used by every eve module copy in the current runtime.
  *
  * Nitro step bundles can inline parts of eve while authored modules still
  * import `eve/*` from disk. Backing the storage with a global
@@ -146,6 +145,8 @@ if (globalContextStorage[EVE_CONTEXT_STORAGE_KEY] === undefined) {
  */
 const storage = globalContextStorage[EVE_CONTEXT_STORAGE_KEY];
 export const contextStorage = {
+  /** Which storage backs eve's context in this realm; see `ScopeStorage.kind`. */
+  kind: storage.kind,
   getStore: (): AlsContext | undefined => storage.getStore()?.context,
   run: <T>(context: AlsContext, fn: () => T): T => storage.run({ context }, fn),
 };

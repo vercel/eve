@@ -25,6 +25,7 @@ import type { ApprovedCall } from "#harness/session-machine/state.js";
 import { callSignInsSettled } from "#harness/session-machine/transitions.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { startEach } from "#harness/tool-concurrency.js";
 
 export { APPROVED_CALL_INTERRUPTED_MESSAGE } from "#harness/call-executor.js";
 
@@ -73,7 +74,7 @@ export async function runApprovedCalls(input: {
     if (events.length > 0) await input.publish(commitOf(events));
   };
   const executed = await Promise.allSettled(
-    input.approvals.map(async (approval): Promise<CallOutcome> => {
+    startEach(input.approvals, async (approval): Promise<CallOutcome> => {
       const { call } = approval;
       const { callId, toolName } = call;
       const definition = input.tools.get(toolName);

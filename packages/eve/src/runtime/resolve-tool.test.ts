@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import { toolResultFrom } from "#public/tools/result.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
 import type { ToolResultSource } from "#public/tools/result.js";

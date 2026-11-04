@@ -14,7 +14,7 @@ import {
   resolveDurableCompiledArtifactsSource,
 } from "#runtime/durable-compiled-artifacts-source.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
-import { loadCompiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
+import { loadCompiledSessionAgent } from "#platform/compiled-agents.js";
 import type { SessionAgent, SessionAgentReference } from "#runtime/sessions/session-agent.js";
 
 /** Wire format for a serialized channel adapter. */
