@@ -19,7 +19,10 @@ test("authorize receives owner only for app tokens", () => {
       connector: "c",
       broker,
       principalType: "user",
-      authorize: ({ repository }) => repository?.startsWith("acme/") ?? false,
+      authorize: ({ repository, auth }) => {
+        const unscoped: null = repository;
+        return unscoped === null && auth !== null;
+      },
     },
   });
   git({
