@@ -68,16 +68,43 @@ export function createGenerationPackageBoundaryPlugin(input: {
         packageRoot: input.packageRoot,
         source,
       });
-      if (externalModule === undefined) {
-        return undefined;
+      if (externalModule !== undefined) {
+        return {
+          external: true,
+          id: input.resolveExternalPaths
+            ? toExternalModuleId(
+                normalizeEsmImportSpecifier(externalModule.resolvedId),
+                options.kind,
+              )
+            : source,
+        };
       }
 
-      return {
-        external: true,
-        id: input.resolveExternalPaths
-          ? toExternalModuleId(normalizeEsmImportSpecifier(externalModule.resolvedId), options.kind)
-          : source,
-      };
+      // Each generated bundle (the module map and every instrumentation slot) is built on its own
+      // and then bundled again by the host. Inlining installed packages here gives each generated
+      // bundle a private copy that the host can't recognize, so a package that several bundles
+      // import ships, parses, and evaluates once per bundle. Leaving them external lets the host
+      // include each package once. The resolved path, not the bare specifier, keeps the import
+      // resolvable from the generated file, which may sit outside the importer's package scope.
+      // eve's own modules that reach here, such as the self-modification mounts, stay bundled.
+      const resolved = await this.resolve(source, importer, {
+        kind: options.kind,
+        skipSelf: true,
+      });
+      if (
+        resolved !== null &&
+        typeof resolved.id === "string" &&
+        !resolved.id.startsWith("\0") &&
+        isNodeModulesPath(resolved.id) &&
+        !isFrameworkPackagePath(resolved.id)
+      ) {
+        return {
+          external: true,
+          id: toExternalModuleId(normalizeEsmImportSpecifier(resolved.id), options.kind),
+        };
+      }
+
+      return undefined;
     },
   };
 }

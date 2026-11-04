@@ -33,8 +33,11 @@ describe("createGenerationPackageBoundaryPlugin", () => {
       externalDependencies: [],
       packageRoot: PACKAGE_ROOT,
     });
-    const resolve: PluginContext["resolve"] = async () => {
-      throw new Error("framework imports should resolve before delegating");
+    const resolve: PluginContext["resolve"] = async (source) => {
+      if (source === "eve/tools") {
+        throw new Error("framework imports should resolve before delegating");
+      }
+      return { id: join(PACKAGE_ROOT, "dist/src/self-modification/index.js") } as ResolvedId;
     };
 
     await expect(
@@ -70,6 +73,42 @@ describe("createGenerationPackageBoundaryPlugin", () => {
     ).resolves.toEqual({
       id: join(PACKAGE_ROOT, "dist/src/shared/git.js"),
     });
+  });
+
+  it("keeps installed packages external at their resolved path", async () => {
+    const plugin = createGenerationPackageBoundaryPlugin({
+      externalDependencies: [],
+      packageRoot: PACKAGE_ROOT,
+    });
+    const installedEntry = join(PACKAGE_ROOT, "node_modules/zod/index.js");
+    const resolve: PluginContext["resolve"] = async (source) =>
+      source === "zod" ? ({ id: installedEntry } as ResolvedId) : null;
+
+    await expect(
+      resolveThrough(plugin, resolve, "zod", join(PACKAGE_ROOT, "agent/tools/probe.ts")),
+    ).resolves.toEqual({
+      external: true,
+      id: normalizeEsmImportSpecifier(installedEntry),
+    });
+  });
+
+  it("leaves workspace and virtual modules to the bundle", async () => {
+    const plugin = createGenerationPackageBoundaryPlugin({
+      externalDependencies: [],
+      packageRoot: PACKAGE_ROOT,
+    });
+    const resolved: Record<string, string> = {
+      "@acme/shared": join(PACKAGE_ROOT, "../shared/src/index.ts"),
+      "virtual:probe": "\0virtual:probe",
+    };
+    const resolve: PluginContext["resolve"] = async (source) =>
+      resolved[source] === undefined ? null : ({ id: resolved[source] } as ResolvedId);
+
+    for (const specifier of [...Object.keys(resolved), "missing-package"]) {
+      await expect(
+        resolveThrough(plugin, resolve, specifier, join(PACKAGE_ROOT, "agent/tools/probe.ts")),
+      ).resolves.toBeUndefined();
+    }
   });
 });
 

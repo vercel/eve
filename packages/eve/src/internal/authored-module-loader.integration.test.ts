@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -961,7 +961,20 @@ export const result = true;
     }
   }
 
-  it("inlines store-sibling dependencies of modules reached through literal symlink paths", async () => {
+  /** Generated bundles keep installed packages external, bound to the copy the importer resolves. */
+  async function expectStoreSiblingImport(code: string, storeRoot: string): Promise<void> {
+    const siblingEntry = join(
+      await realpath(storeRoot),
+      "node_modules",
+      "store-sibling",
+      "index.cjs",
+    );
+    expect(code).toContain(JSON.stringify(siblingEntry));
+    expect(code).not.toMatch(/from\s*["']store-sibling["']/);
+    expect(code).not.toContain("decoy");
+  }
+
+  it("binds store-sibling dependencies of modules reached through literal symlink paths", async () => {
     const app = await createApp({
       files: {
         "agent/tools/use_echo.ts": [
@@ -982,8 +995,7 @@ export const result = true;
         join(app.appRoot, "agent", "tools", "use_echo.ts"),
       );
 
-      expect(code).toContain("store-sibling-value");
-      expect(code).not.toMatch(/from\s*["']store-sibling["']/);
+      await expectStoreSiblingImport(code, storeRoot);
     } finally {
       await rm(storeRoot, { force: true, recursive: true });
     }
@@ -1010,8 +1022,7 @@ export const result = true;
         join(app.appRoot, "agent", "tools", "use_echo.ts"),
       );
 
-      expect(code).toContain("store-sibling-value");
-      expect(code).not.toContain("decoy-value");
+      await expectStoreSiblingImport(code, storeRoot);
     } finally {
       await rm(storeRoot, { force: true, recursive: true });
     }
@@ -1033,8 +1044,7 @@ export const result = true;
         join(app.appRoot, "node_modules", "gadget-extension", "extension", "tools", "echo.ts"),
       );
 
-      expect(code).toContain("store-sibling-value");
-      expect(code).not.toContain("decoy-value");
+      await expectStoreSiblingImport(code, storeRoot);
     } finally {
       await rm(storeRoot, { force: true, recursive: true });
     }
