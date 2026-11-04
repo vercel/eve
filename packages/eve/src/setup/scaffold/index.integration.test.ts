@@ -1114,7 +1114,7 @@ describe("scaffoldExtensionProject", () => {
 
     const agentsMd = await readFile(join(projectRoot, "AGENTS.md"), "utf8");
     expect(agentsMd).toContain("eve extension");
-    expect(agentsMd).toContain("extensions.md");
+    expect(agentsMd).toContain("docs/extensions/index.md");
     expect(agentsMd).toContain("development dependency pinned exactly");
     expect(agentsMd).toContain("cannot declare");
   });
@@ -1171,7 +1171,7 @@ describe("scaffoldBaseProject", () => {
       compilerOptions: { types?: string[] };
       include?: string[];
     };
-    expect(tsconfig.compilerOptions.types).toEqual(["node", "eve/workflow-modules"]);
+    expect(tsconfig.compilerOptions.types).toEqual(["node"]);
     expect(tsconfig.include).toEqual(["agent/**/*.ts", "evals/**/*.ts"]);
     await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       PNPM_WORKSPACE_CONTENT,

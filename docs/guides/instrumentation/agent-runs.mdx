@@ -11,9 +11,9 @@ url: "/observability/agent-runs"
   plans.
 </Callout>
 
-Use Vercel Agent Runs to browse eve sessions and inspect conversation traces
-in the project's **Observability** view. The tab requires enablement for your
-Vercel team; contact your Vercel representative if it does not appear.
+Vercel Agent Runs lets you browse eve sessions and inspect conversation traces
+in the project's **Observability** view. The tab must be enabled for your
+Vercel team. If it doesn't appear, contact your Vercel representative.
 
 Agent Runs usage is billed at
 [Always-on Tracing rates](https://vercel.com/docs/tracing/always-on-tracing#usage-and-pricing)
@@ -22,9 +22,8 @@ during beta. All plans include 30-day Agent Runs retention during beta.
 ## Enable tracing on Vercel
 
 When `eve deploy` creates a new Vercel project, it configures 100% trace
-sampling for all environments. Existing Vercel projects need a sampling rule
-configured to collect traces. To enable tracing for an existing project, select
-your team and project, then open
+sampling for all environments. An existing project needs a sampling rule before
+it collects traces. Select your team and project, then open
 [**Settings → Tracing**](https://vercel.com/d?to=%2F%5Bteam%5D%2F%5Bproject%5D%2Fsettings%2Ftracing&title=Go+to+Tracing+settings):
 
 1. Select **Add Sampling Rule**.
@@ -34,26 +33,26 @@ your team and project, then open
 5. Select **Save**.
 
 Vercel applies the first matching rule. If an existing rule matches these
-requests, update it to use a 100% rate; a later rule will not override it.
+requests, set its rate to 100% instead of adding a later rule.
 
-Tracing starts as soon as you save the rule. You can also manage sampling
+Tracing starts when you save the rule. You can also manage sampling
 rules with [`vercel traces config`](https://vercel.com/docs/cli/traces#manage-trace-sampling-rules).
-The CLI accepts rates from 1 to 100%; add a 0% rule from the dashboard.
+The CLI accepts rates from 1 to 100%. Add a 0% rule from the dashboard.
 
 ## Trace selected paths
 
-If you prefer path-scoped sampling, replace the all-path rule with 100% rules
-for each required **Request Path Prefix**. For a single agent at the default
+To sample only some paths, replace the all-path rule with a 100% rule
+for each **Request Path Prefix** you need. For a single agent at the default
 mount, start with:
 
 - `/eve/v1`: eve's HTTP API and default channel endpoints.
 - `/.well-known/workflow`: workflow execution and webhooks.
 
 For named agents, use their deployed prefixes, such as `/eve/support/v1`,
-instead of `/eve/v1`. Include custom channel routes and, for Vercel-backed
-schedule collections,
-`/.well-known/eve/v1/schedules/consumer`. Missing paths can leave traces
-incomplete. The workflow prefix also includes non-eve workflows in the same
+instead of `/eve/v1`. Also include custom channel routes. For
+[dynamic schedules](/docs/experimental/dynamic-schedules) on Vercel, include
+`/.well-known/eve/v1/schedules/consumer`. A missing path can leave traces
+incomplete. The workflow prefix also samples non-eve workflows in the same
 project.
 
 ## Configure Agent Runs
@@ -66,8 +65,8 @@ default-export `agentRuns(...)` from that file, or default-export
 ## Filter Agent Runs exports
 
 `agentRuns()` accepts one `exportPolicy` object or an array applied in order.
-Each policy filters spans and attributes before the Agent Runs destination
-receives them:
+Each policy filters spans and attributes before Agent Runs receives them.
+The return values match [Filter a destination](./otel#filter-a-destination):
 
 ```ts title="agent/instrumentation/agent-runs.ts"
 import { agentRuns } from "eve/instrumentation/otel";
@@ -80,19 +79,17 @@ export default agentRuns({
 });
 ```
 
-Return `{ emit: true }` from `span` to retain a span unchanged, or
-`{ emit: false }` to omit it from Agent Runs. To retain the span while redacting
-content, return `{ redact: true }` with `inputs: true`, `outputs: true`, or
-both. A redaction decision implies emission and requires at least one
-direction. A throwing `span` callback drops the span from Agent Runs. Return
-`{ emit: true }`, `{ emit: false }`, or `{ replace: true, value }` from
-`attribute` to retain, remove, or change one attribute.
+From `span`, return `{ emit: true }` to keep a span, `{ emit: false }` to omit
+it, or `{ redact: true }` with `inputs: true`, `outputs: true`, or both to keep
+it without that content. A throwing `span` callback drops the span from Agent
+Runs. From `attribute`, return `{ emit: true }`, `{ emit: false }`, or
+`{ replace: true, value }` to keep, remove, or change one attribute.
 
 ## Redact content
 
-The `exportPolicy` can further narrow what Agent Runs receives after the
-process-wide `otel({ tracePolicy })` has admitted a trace. For example, keep
-spans while redacting inputs and outputs unless the session is public:
+`exportPolicy` can only narrow what the process-wide `otel({ tracePolicy })`
+already allows. This policy keeps spans but redacts inputs and outputs unless
+the session is public:
 
 ```ts title="agent/instrumentation/agent-runs.ts"
 import { agentRuns } from "eve/instrumentation/otel";
@@ -107,11 +104,10 @@ export default agentRuns({
 
 Input redaction removes eve's known prompt, instruction, document, and
 tool-argument attributes. Output redaction removes response, reasoning,
-tool-result, exception, and status attributes. Redaction narrows only Agent
-Runs; it does not mutate spans sent to another destination.
+tool-result, exception, and status attributes. Redaction applies only to Agent
+Runs, not to spans sent to other destinations.
 
 ## What to read next
 
 - [OpenTelemetry](./otel): configure process-wide settings and third-party destinations.
 - [Vercel deployment](/docs/guides/deployment/vercel): deploy an eve agent and inspect its runtime.
-- [Migrate instrumentation](/docs/observability/instrumentation-migration): replace `agent/instrumentation.ts`.

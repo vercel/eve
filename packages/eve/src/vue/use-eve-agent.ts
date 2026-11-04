@@ -74,7 +74,8 @@ export interface UseEveAgentReturn {
   readonly prewarm: () => Promise<void>;
   /** Clear all state and start a new session. */
   readonly newSession: () => void;
-  readonly reset: () => Promise<Delivery>;
+  /** Retires the server-side session; call newSession() to prepare a fresh conversation. */
+  readonly end: () => Promise<Delivery>;
   readonly clear: () => Promise<Delivery>;
   readonly compact: () => Promise<Delivery>;
   /** Submits a message and resolves on acceptance, not execution. */
@@ -166,7 +167,7 @@ export interface UseEveAgentOptions extends SessionStoreCallbacks {
  *
  * Returns reactive refs for the conversation (`messages`, `agents`, `view`) and for `error`,
  * `events`, `session`, and `status`, plus `prewarm`, `send`, `respond`, `resume`, `cancel`,
- * `newSession`, and `reset`. Configuration is read once on store creation;
+ * `newSession`, and `end`. Configuration is read once on store creation;
  * remount to change it. On scope dispose, the in-flight request is detached and
  * the store unsubscribed.
  */
@@ -219,7 +220,7 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
     error: computed(() => snapshot.value.error),
     events: computed(() => snapshot.value.events),
     prewarm: () => store.prewarm(),
-    reset: () => store.reset(),
+    end: () => store.end(),
     newSession: () => store.newSession(),
     clear: () => store.clear(),
     compact: () => store.compact(),

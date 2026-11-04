@@ -521,9 +521,10 @@ function requiresApproval(decision: unknown): boolean {
 
 // oxlint-disable-next-line typescript/no-explicit-any -- graded modules are untyped.
 async function resolveDynamic(definition: any, caller: Caller): Promise<unknown> {
-  expect(definition?.kind).toBe("eve:dynamic");
-  expect(typeof definition.evaluate).toBe("function");
-  return definition.evaluate({
+  // A defineDynamic() value is opaque; eve keeps its function under this cross-instance brand.
+  const evaluate = definition?.[Symbol.for("eve.dynamic")];
+  expect(typeof evaluate).toBe("function");
+  return evaluate({
     session: session(caller),
     channel: { kind: caller === "schedule" ? "schedule" : "http", metadata: {} },
     // eve's view is opaque; a gate has no reason to read it here.

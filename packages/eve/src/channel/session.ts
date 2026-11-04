@@ -49,7 +49,8 @@ export interface Session extends SessionReader {
   prewarm(): Promise<PrewarmSessionResult>;
   clear(options?: SessionControlOptions): Promise<Delivery>;
   compact(options?: SessionControlOptions): Promise<Delivery>;
-  reset(options?: SessionControlOptions & { readonly reason?: string }): Promise<Delivery>;
+  /** Retires this session without creating a replacement or changing this handle's ID. */
+  end(options?: SessionControlOptions & { readonly reason?: string }): Promise<Delivery>;
   /**
    * Opens the recorded stream. Following it throws `SessionStrandedError`
    * while its owner is stranded; `follow: false` reads recorded history up to
@@ -242,7 +243,7 @@ export function createSession(
       const result = await runtime.dispatchSession({ command, sessionId: id });
       return commandDelivery(runtime, result, command.deliveryId);
     },
-    async reset(options) {
+    async end(options) {
       const command = controlCommand({ kind: "reset" as const, reason: options?.reason }, options);
       const result = await runtime.dispatchSession({ command, sessionId: id });
       return commandDelivery(runtime, result, command.deliveryId, { follow: false });

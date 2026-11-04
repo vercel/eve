@@ -14,7 +14,7 @@ export interface VerifiedRemoteAgentInspection {
   readonly vercelScope?: string;
 }
 
-/** @internal Dependencies for testing verified remote inspection. */
+/** Dependencies for testing verified remote inspection. */
 export interface InspectVerifiedRemoteAgentDeps {
   readonly createClient: (options: ClientOptions) => Pick<Client, "info">;
   readonly resolveVerifiedRemoteDevelopmentClient: (

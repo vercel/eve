@@ -25,6 +25,8 @@ import { getWorld } from "#internal/workflow/runtime.js";
 import { emptySessionView, foldReceivedEvent } from "#protocol/session-projection/fold.js";
 import { openRequests, openSignIns, interaction } from "#protocol/session-projection/reader.js";
 import {
+  type Activity,
+  activity,
   failure,
   interactionBatches,
   reply,
@@ -360,7 +362,26 @@ function projectInvocation(
   if (failure !== undefined) return failed();
   if (settled === "cancelled") return { ...info, status: "cancelled" };
   if (settled === "completed") return { ...info, result, status: "completed" };
-  return { ...info, pollAfterMs: 1_000, result, status: "working" };
+  return {
+    ...info,
+    pollAfterMs: 1_000,
+    result,
+    status: "working",
+    statusMessage: statusMessage(activity(stream.view)),
+  };
+}
+
+/** The latest running call or task, plus how many others are still running. */
+function statusMessage(current: Activity): string | undefined {
+  const names =
+    current.kind === "calling"
+      ? current.names
+      : current.kind === "waiting-on-tasks"
+        ? current.tasks.map((task) => task.name)
+        : [];
+  const latest = names.at(-1);
+  if (latest === undefined) return undefined;
+  return names.length === 1 ? latest : `${latest} (+${String(names.length - 1)} more)`;
 }
 
 function workingInvocation(

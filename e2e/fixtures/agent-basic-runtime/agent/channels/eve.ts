@@ -1,5 +1,5 @@
 import type { AuthFn } from "eve/channels/auth";
-import { defaultEveAuth, eveChannel } from "eve/channels/eve";
+import { defaultEveAuth, eveChannel, type EveAuthFn } from "eve/channels/eve";
 import type { SessionAuthContext } from "eve/context";
 import { authenticateWorkspaceMember } from "../lib/workspace";
 
@@ -23,7 +23,11 @@ const authenticateB: AuthFn<Request> = (request) =>
   request.headers.get("authorization") === PRINCIPAL_B ? principal("issuer-b") : null;
 const authenticateMember: AuthFn<Request> = (request) =>
   authenticateWorkspaceMember(request.headers.get("authorization"));
-const authenticateEvalDriver: AuthFn<Request> = () => principal("eval-driver");
+// The eval driver reads agent info; the named fixture users above stay end users without it.
+const authenticateEvalDriver: EveAuthFn = () => ({
+  ...principal("eval-driver"),
+  allowAgentInfo: true,
+});
 const authenticateRetentionCheck: AuthFn<Request> = (request) =>
   request.headers.get("authorization") === "Bearer e2e-metadata-retention"
     ? { ...principal("retention-check"), principalType: "metadata-only" }

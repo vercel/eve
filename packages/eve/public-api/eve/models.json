@@ -5,6 +5,7 @@
   "DynamicModelResult",
   "DynamicSentinel",
   "DynamicTurn",
+  "EveLanguageModel",
   "Memo",
   "ModelSelection",
   "Occurrence",

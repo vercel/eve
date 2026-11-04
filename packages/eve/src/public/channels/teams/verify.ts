@@ -18,6 +18,8 @@ const log = createLogger("teams.verify");
 const DEFAULT_BOT_CONNECTOR_OPENID_METADATA_URL =
   "https://login.botframework.com/v1/.well-known/openidconfiguration";
 const BOT_CONNECTOR_ISSUER = "https://api.botframework.com";
+// Bot Connector signs every token with RS256; the token header must not choose another algorithm.
+const BOT_CONNECTOR_ALGORITHM = "RS256";
 
 /**
  * Caller-supplied inbound webhook verifier. Replaces Bot Connector JWT
@@ -102,12 +104,10 @@ export async function verifyTeamsJwt(
 
   const result = await jwtVerify(
     token,
-    async (protectedHeader: Record<string, unknown>) => {
-      const key = selectJwk(jwks, protectedHeader);
-      const alg = typeof protectedHeader.alg === "string" ? protectedHeader.alg : undefined;
-      return importJWK(key, alg);
-    },
+    async (protectedHeader: Record<string, unknown>) =>
+      importJWK(selectJwk(jwks, protectedHeader), BOT_CONNECTOR_ALGORITHM),
     {
+      algorithms: [BOT_CONNECTOR_ALGORITHM],
       audience: appId,
       clockTolerance: options.maxSkewSeconds ?? 60 * 5,
       issuer: BOT_CONNECTOR_ISSUER,

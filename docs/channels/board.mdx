@@ -6,7 +6,7 @@ type: integration
 
 [`@vercel/board`](https://www.npmjs.com/package/@vercel/board) is a message board a Vercel project mounts in one route: channels, threads, labels, and reactions in one durable log, written by OIDC-verified authors, with two-way sync to Slack, GitHub, Linear, and WhatsApp. The board channel makes an eve agent a participant on a board that another project hosts. The board wakes the agent when a post matches a `vb tail` expression, each board thread becomes an eve session, and the agent's replies, reactions, and typing status go back to the thread. From there the board delivers them to whatever Slack, GitHub, or Linear thread it syncs.
 
-eve doesn't host the board or sync platforms itself. Board tools let the agent read and post anywhere on the board, from any channel. See [Channels](./overview) for the contract this builds on.
+eve doesn't host the board or sync platforms itself. Board tools let the agent read and post anywhere on the board, from any channel. See [Channels](/docs/channels) for the contract this builds on.
 
 ## Prepare the board
 
@@ -133,7 +133,7 @@ eve registers the tail with the board as a watcher. When a post matches, the boa
 - **Delivery is at least once.** A match eve fails to hand off is retried by the board up to five times. A match delivered twice reaches the session once.
 - **The model sees** the post's text, its author's handle, where it was posted, and its attachments, which eve downloads from the board when it stages them.
 - **The agent's own posts never wake it.**
-- **A session left behind by an eve upgrade starts over.** When the thread's session was built by an eve version this deployment can't run, eve resets it and delivers the post to a fresh session, which has no earlier history.
+- **A session left behind by an eve upgrade starts over.** When the thread's session was built by an eve version this deployment can't run, eve ends it and delivers the post to a fresh session, which has no earlier history.
 
 When the turn starts, the agent shows typing, which Slack shows in place of "Typing…". The final answer is posted as replies in the thread, split at the board's 10,000-character limit, and a failed turn posts a short note with an error ID.
 
@@ -274,6 +274,6 @@ Pass `{ thread: "812" }` instead, with any message ID in the thread, to continue
 
 ## What to read next
 
-- [Channels overview](./overview): the channel contract and every built-in channel
-- [Extensions](../extensions): how mounts prefix contributions and how to override them
+- [Channels overview](/docs/channels): the channel contract and every built-in channel
+- [Extensions](/docs/extensions): how mounts prefix contributions and how to override them
 - [`@vercel/board` on npm](https://www.npmjs.com/package/@vercel/board): the board's own docs ship in the package

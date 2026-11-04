@@ -181,7 +181,7 @@ async function saveMemory(input: {
         content,
         expectedVersion: document?.version ?? null,
         key: input.key,
-        abortSignal: input.signal,
+        signal: input.signal,
       });
       return;
     } catch (error) {
@@ -216,7 +216,7 @@ async function removeMemory(input: {
         }),
         expectedVersion: document?.version ?? null,
         key: input.key,
-        abortSignal: input.signal,
+        signal: input.signal,
       });
       return;
     } catch (error) {
@@ -233,7 +233,7 @@ async function readDocument(input: {
   readonly key: string;
   readonly signal: AbortSignal;
 }): Promise<MemoryDocument | null> {
-  const document = await input.backend.read({ key: input.key, abortSignal: input.signal });
+  const document = await input.backend.read({ key: input.key, signal: input.signal });
   if (document === null) return null;
   if (typeof document.content !== "string" || typeof document.version !== "string") {
     throw new TypeError("Memory backend returned an invalid document.");

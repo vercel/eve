@@ -122,7 +122,10 @@ describe("cross-channel receive end-to-end", () => {
     );
 
     await mkdir(join(agentRoot, "channels"), { recursive: true });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "test agent\n");
     await writeFile(join(agentRoot, "channels", "webhook.mjs"), WEBHOOK_CHANNEL);
     await writeFile(join(agentRoot, "channels", "target.mjs"), TARGET_CHANNEL);
@@ -204,7 +207,10 @@ describe("cross-channel receive end-to-end", () => {
     );
 
     await mkdir(join(agentRoot, "channels"), { recursive: true });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "test agent\n");
     await writeFile(join(agentRoot, "channels", "target.mjs"), TARGET_CHANNEL);
 

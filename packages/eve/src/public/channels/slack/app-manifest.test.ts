@@ -15,9 +15,28 @@ describe("Slack app manifests", () => {
         },
         bot_user: { display_name: "support" },
       },
-      oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
+      oauth_config: {
+        scopes: {
+          bot: [
+            "app_mentions:read",
+            "channels:history",
+            "chat:write",
+            "groups:history",
+            "im:history",
+            "mpim:history",
+          ],
+        },
+      },
       settings: {
-        event_subscriptions: { bot_events: ["app_mention"] },
+        event_subscriptions: {
+          bot_events: [
+            "app_mention",
+            "message.channels",
+            "message.groups",
+            "message.im",
+            "message.mpim",
+          ],
+        },
         org_deploy_enabled: false,
         socket_mode_enabled: false,
         token_rotation_enabled: false,
@@ -41,11 +60,13 @@ describe("Slack app manifests", () => {
         scopes: {
           bot: [
             "app_mentions:read",
-            "chat:write",
             "channels:history",
+            "chat:write",
+            "groups:history",
+            "im:history",
+            "mpim:history",
             "channels:read",
             "code_channels:manage",
-            "groups:history",
             "groups:read",
             "im:read",
             "mpim:read",
@@ -54,9 +75,32 @@ describe("Slack app manifests", () => {
       },
       settings: {
         event_subscriptions: {
-          bot_events: ["app_mention", "agent_session_stopped", "message.session"],
+          bot_events: [
+            "app_mention",
+            "message.channels",
+            "message.groups",
+            "message.im",
+            "message.mpim",
+            "agent_session_stopped",
+            "message.session",
+          ],
         },
       },
     });
+  });
+
+  it("adds users:read for names and users:read.email only for emails", () => {
+    const botScopes = (options: { users?: boolean; userEmails?: boolean }) =>
+      (
+        defineSlackAppManifest(options).build("support") as {
+          oauth_config: { scopes: { bot: string[] } };
+        }
+      ).oauth_config.scopes.bot;
+
+    expect(botScopes({ users: true })).toContain("users:read");
+    expect(botScopes({ users: true })).not.toContain("users:read.email");
+    expect(botScopes({ users: true, userEmails: true })).toEqual(
+      expect.arrayContaining(["users:read", "users:read.email"]),
+    );
   });
 });

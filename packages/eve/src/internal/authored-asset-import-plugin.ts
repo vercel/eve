@@ -1,8 +1,14 @@
-import { realpathSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, extname, isAbsolute, resolve } from "node:path";
 
-import { findAuthoredPackageRoot, isNodeModulesPath } from "#internal/authored-package-boundary.js";
+import type { Plugin } from "rolldown";
+
+import {
+  findAuthoredPackageRoot,
+  isAuthoredSourcePath,
+} from "#internal/authored-package-boundary.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 const AUTHORED_ASSET_CODE_EXTENSIONS = [
   ".ts",
@@ -15,6 +21,9 @@ const AUTHORED_ASSET_CODE_EXTENSIONS = [
   ".cjs",
   ".json",
 ] as const;
+
+// Supersets of isPotentialAuthoredAssetImport, so most imports skip the JS hook.
+const RESOLVE_FILTER = /^(?:\.|\/|[A-Za-z]:[\\/])/;
 
 /**
  * Creates the Rollup-compatible plugin that gives authored modules a small
@@ -32,70 +41,95 @@ export function createAuthoredAssetImportPlugin(input: {
    * installed dependency imports stay with the host bundler.
    */
   readonly authoredSourceOnly?: boolean;
-}): Record<string, unknown> {
+}): Plugin {
   const packageRoot = toCanonicalPath(input.packageRoot);
+  // Built here rather than at module scope: runtime modules import this file.
+  const loadFilter = [
+    /\?raw$/,
+    new RegExp(
+      String.raw`\.(?!(?:${AUTHORED_ASSET_CODE_EXTENSIONS.map((extension) => extension.slice(1)).join("|")}|node)(?:[?#]|$))[^./?#]*(?:[?#].*)?$`,
+    ),
+  ];
   const handles = (path: string): boolean =>
-    input.authoredSourceOnly !== true || (isAbsolute(path) && !isNodeModulesPath(path));
+    input.authoredSourceOnly !== true || isAuthoredSourcePath(path);
   return {
     name: "eve-authored-asset-import",
-    resolveId(source: string, importer: string | undefined) {
-      if (!isPotentialAuthoredAssetImport(source) || importer === undefined || !handles(importer)) {
-        return undefined;
-      }
+    resolveId: {
+      filter: { id: RESOLVE_FILTER },
+      handler(source: string, importer: string | undefined) {
+        if (
+          !isPotentialAuthoredAssetImport(source) ||
+          importer === undefined ||
+          !handles(importer)
+        ) {
+          return undefined;
+        }
 
-      const { path, suffix } = splitImportSuffix(source);
-      const resolvedPath = isAbsolute(path) ? path : resolve(dirname(importer), path);
-      const canonicalPath = toCanonicalPath(resolvedPath);
-      const importerPackageRoot =
-        findAuthoredPackageRoot(dirname(toCanonicalPath(importer))) ?? packageRoot;
-      if (
-        !isPathInsideOrEqual(canonicalPath, packageRoot) &&
-        !isPathInsideOrEqual(canonicalPath, importerPackageRoot)
-      ) {
-        throw new Error(
-          `Authored asset import "${source}" from "${importer}" resolves outside package root "${importerPackageRoot}".`,
-        );
-      }
+        const { path, suffix } = splitImportSuffix(source);
+        const resolvedPath = isAbsolute(path) ? path : resolve(dirname(importer), path);
+        // A dotted code import, such as `./schema.v1` or a `./helpers.v2/` index, is no asset.
+        if (!isFile(resolvedPath)) {
+          return undefined;
+        }
+        const canonicalPath = toCanonicalPath(resolvedPath);
+        const importerPackageRoot =
+          findAuthoredPackageRoot(dirname(toCanonicalPath(importer))) ?? packageRoot;
+        if (
+          !isPathInsideOrEqual(canonicalPath, packageRoot) &&
+          !isPathInsideOrEqual(canonicalPath, importerPackageRoot)
+        ) {
+          throw new Error(
+            `Authored asset import "${source}" from "${importer}" resolves outside package root "${importerPackageRoot}".`,
+          );
+        }
 
-      return `${canonicalPath}${suffix}`;
+        return `${canonicalPath}${suffix}`;
+      },
     },
-    async load(id: string) {
-      const { path, suffix } = splitImportSuffix(id);
+    load: {
+      filter: { id: loadFilter },
+      async handler(id: string) {
+        const { path, suffix } = splitImportSuffix(id);
 
-      if (!isPotentialAuthoredAssetImport(id) || !handles(path)) {
-        return undefined;
-      }
+        if (!isPotentialAuthoredAssetImport(id) || !handles(path)) {
+          return undefined;
+        }
 
-      if (suffix === "?raw") {
-        const source = await readAssetText(path);
+        if (suffix === "?raw") {
+          const source = await readAssetText(path);
 
-        if (source === undefined) {
+          if (source === undefined) {
+            return undefined;
+          }
+
+          return {
+            code: `export default ${JSON.stringify(source)};`,
+            moduleType: "js" as const,
+          };
+        }
+
+        const dataUrl = await readAssetDataUrl(path);
+
+        if (dataUrl === undefined) {
           return undefined;
         }
 
         return {
-          code: `export default ${JSON.stringify(source)};`,
+          code: `export default ${JSON.stringify(dataUrl)};`,
           moduleType: "js" as const,
         };
-      }
-
-      const dataUrl = await readAssetDataUrl(path);
-
-      if (dataUrl === undefined) {
-        return undefined;
-      }
-
-      return {
-        code: `export default ${JSON.stringify(dataUrl)};`,
-        moduleType: "js" as const,
-      };
+      },
     },
   };
 }
 
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const relativePath = relative(directory, resolve(path));
-  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+/** Unreadable paths, such as one that is too long, fall through to the next resolver. */
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function toCanonicalPath(path: string): string {

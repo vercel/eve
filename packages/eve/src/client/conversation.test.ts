@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { call, interaction, turn } from "#protocol/session-projection/public-view.js";
+import { call, interaction, reply, turn } from "#protocol/session-projection/public-view.js";
 import { Conversation, conversationOf } from "#client/conversation.js";
 import type { EveMessagePart, EveToolPart } from "#client/message-types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -141,6 +141,32 @@ describe("the conversation", () => {
         part.type === "text" ? part.text : part.type === "tool" ? part.callId : part.type,
       ),
     ).toEqual(["Checking.", "call_0", "Done."]);
+  });
+
+  it("shows a call and a reply the turn made without a model run in the turn's message", () => {
+    const own = { turnId };
+    const conversation = observe([
+      ...started.filter((event) => event.type !== "model.requested"),
+      { data: { ...requested.data, owner: own }, scope: own, type: "call.requested" },
+      { data: { callId: "call_0" }, scope: own, type: "call.started" },
+      { data: { callId: "call_0", outcome: "completed" }, scope: own, type: "call.settled" },
+      {
+        data: { kind: "text", partId: "p_0", phase: "reply", value: "Deployed." },
+        scope: own,
+        type: "content.completed",
+      },
+      {
+        data: { outcome: "completed", reply: ["p_0"], turnId },
+        scope: own,
+        type: "turn.settled",
+      },
+    ]);
+    expect(
+      assistantParts(conversation).map((part) =>
+        part.type === "text" ? part.text : part.type === "tool" ? part.callId : part.type,
+      ),
+    ).toEqual(["call_0", "Deployed."]);
+    expect(reply(conversation.state.view, turnId).map((part) => part.value)).toEqual(["Deployed."]);
   });
 
   it("shows what still streams as previews, until its fact completes it", () => {
@@ -557,5 +583,88 @@ describe("the conversation", () => {
     expect(new Set(messages.map((message) => message.id)).size).toBe(messages.length);
     // The delivery's row keeps no copy of the history its fact carried.
     expect(conversation.view.deliveries.d_0).not.toHaveProperty("history");
+  });
+
+  it("shows only the turns of the current conversation", () => {
+    const exchange = (id: string, follows: string | null, ask: string): SessionEvent[] => {
+      const at = { runId: `run_${id}`, turnId: `turn_${id}` };
+      return [
+        { data: { deliveryId: `d_${id}` }, type: "delivery.admitted" },
+        {
+          data: { cause: { deliveryId: `d_${id}` }, follows, turnId: at.turnId },
+          scope: { turnId: at.turnId },
+          type: "turn.started",
+        },
+        {
+          data: { deliveryId: `d_${id}`, parts: [{ kind: "text", text: ask }], turnId: at.turnId },
+          scope: { turnId: at.turnId },
+          type: "delivery.consumed",
+        },
+        {
+          data: { owner: { turnId: at.turnId }, runId: at.runId },
+          scope: at,
+          type: "model.requested",
+        },
+        {
+          data: {
+            kind: "text",
+            partId: `p_${id}`,
+            phase: "reply",
+            runId: at.runId,
+            value: `Re: ${ask}`,
+          },
+          scope: at,
+          type: "content.completed",
+        },
+        { data: { outcome: "completed", runId: at.runId }, scope: at, type: "model.settled" },
+        {
+          data: { outcome: "completed", reply: [`p_${id}`], turnId: at.turnId },
+          scope: { turnId: at.turnId },
+          type: "turn.settled",
+        },
+      ];
+    };
+    const contextChange = (
+      changeId: string,
+      selects: null | { turnId: string },
+    ): SessionEvent[] => [
+      { data: { changeId, kind: selects === null ? "clear" : "rewind" }, type: "context.started" },
+      {
+        data: {
+          changeId,
+          kind: selects === null ? "clear" : "rewind",
+          outcome: "completed",
+          selects,
+        },
+        type: "context.settled",
+      },
+    ];
+    const shown = (conversation: Conversation) =>
+      conversation.state.messages.map(
+        (message) =>
+          `${message.role}: ${message.parts.map((part) => ("text" in part ? part.text : part.type)).join("")}`,
+      );
+
+    const conversation = observe([...exchange("1", null, "Q1"), ...exchange("2", "turn_1", "Q2")]);
+    // A change that selects an earlier turn hides the turns after it, which stay in the view.
+    observe(contextChange("c_1", { turnId: "turn_1" }), conversation);
+    expect(shown(conversation)).toEqual(["user: Q1", "assistant: Re: Q1"]);
+    expect(conversation.view.turns).toHaveProperty("turn_2");
+
+    // The next turn continues from the selected one.
+    observe(exchange("3", "turn_1", "Q2 again"), conversation);
+    expect(shown(conversation)).toEqual([
+      "user: Q1",
+      "assistant: Re: Q1",
+      "user: Q2 again",
+      "assistant: Re: Q2 again",
+    ]);
+
+    // A clear hides everything before it; a message this client sent still shows.
+    observe(contextChange("c_2", null), conversation);
+    conversation.setSubmissions([{ id: "local_0", message: "Q4", turnId: "turn_3" }]);
+    expect(shown(conversation)).toEqual(["user: Q4"]);
+    observe(exchange("4", null, "Q5"), conversation);
+    expect(shown(conversation)).toEqual(["user: Q5", "assistant: Re: Q5", "user: Q4"]);
   });
 });

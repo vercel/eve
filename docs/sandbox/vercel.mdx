@@ -3,19 +3,21 @@ title: "Vercel Sandbox"
 description: "Create persistent sandboxes on Vercel, from a prepared snapshot when the environment has build-time setup."
 ---
 
-`VercelSandbox.environment()` prepares a reusable Vercel Sandbox snapshot when the environment has build-time setup, and creates persistent session sandboxes from its recorded snapshot ID.
+`VercelSandbox.environment()` runs each eve session in its own Vercel Sandbox, which keeps its files between turns. When the environment has build-time setup, eve prepares a reusable snapshot and starts session sandboxes from it.
 
-```ts
+```ts title="agent/sandbox.ts"
 import { defineSandbox } from "eve/sandbox";
 import { VercelSandbox } from "eve/sandbox/vercel";
 
 export const environment = VercelSandbox.environment({
+  // optional: setup captured in the snapshot that every session starts from
   prepare: async (sandbox) => {
     await sandbox.run({ command: "npm ci" });
   },
 });
 
 export default defineSandbox(() =>
+  // optional: live sandbox options, applied when eve creates the sandbox
   environment.open({
     networkPolicy: {
       allow: {
@@ -29,9 +31,7 @@ export default defineSandbox(() =>
 
 ## Authentication
 
-eve needs a Vercel token, team ID, and project ID to create Vercel Sandboxes. `eve build` needs them to capture the snapshot, and the runtime needs them to create and resume session sandboxes. Deployments on Vercel provide them automatically.
-
-eve resolves each value from the first source that is set:
+eve needs a Vercel token, team ID, and project ID. `eve build` uses them to capture the snapshot, and the runtime uses them to create and resume session sandboxes. Deployments on Vercel provide them automatically. eve resolves each value from the first source that is set:
 
 | Value      | Sources, in order                                               |
 | ---------- | --------------------------------------------------------------- |
@@ -39,7 +39,7 @@ eve resolves each value from the first source that is set:
 | Team ID    | `teamId` environment option, `VERCEL_TEAM_ID`, `VERCEL_ORG_ID`  |
 | Project ID | `projectId` environment option, `VERCEL_PROJECT_ID`             |
 
-When all three resolve, eve uses them. Otherwise, eve requests a Vercel OIDC token and reads the team and project from the token. On Vercel, the deployment provides that token. Elsewhere, eve reads `VERCEL_OIDC_TOKEN` and, when it is missing or expired, refreshes it with your Vercel CLI login and the project linked in `.vercel/project.json`. If that also fails, eve falls back to the Vercel Sandbox SDK's own credential lookup, which reports an authentication error if it finds none.
+When any of the three is unset, eve uses a Vercel OIDC token and reads the team and project from it. Outside a Vercel deployment, eve reads `VERCEL_OIDC_TOKEN`. It refreshes a missing or expired token with your Vercel CLI login and the project linked in `.vercel/project.json`. If that fails, the Vercel Sandbox SDK's own credential lookup runs, and it reports an authentication error when it finds none.
 
 For local development, link the app to a Vercel project and pull its environment into `.env.local`:
 
@@ -49,21 +49,27 @@ eve link
 
 `vercel link` followed by `vercel env pull` produces the same `.env.local`. A running `eve dev` reloads env files automatically.
 
-Outside Vercel and without a linked project, such as in CI or on a self-hosted server, set `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID`, or pass `token`, `teamId`, and `projectId` to `VercelSandbox.environment()`.
+Outside Vercel and without a linked project, such as in CI or on a self-hosted server, set `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID`. You can also pass `token`, `teamId`, and `projectId` to `VercelSandbox.environment()`.
+
+## Live sandbox options
+
+`open()` accepts Vercel compute resources, timeout, environment variables, network policy, and Drive mounts. They apply only when eve creates the sandbox. Reopening the sandbox or resuming it keeps the original environment variables, mounts, and network policy. Pass `env` to `run()` or `spawn()` to override a variable for one command, or call `setNetworkPolicy()` to change the live policy.
+
+Set `image`, `source`, `tags`, project credentials, and `fetch` on the environment, because `open()` doesn't accept them. eve sets the sandbox's name and persistence itself.
+
+If initialization fails, eve keeps the sandbox and runs the selector against it again on the next access. If the named Vercel Sandbox later disappears, eve runs the selector again to start a fresh sandbox.
 
 ## Snapshot preparation
 
-eve creates a temporary, non-persistent Vercel Sandbox during build, installs the base runtime, writes managed workspace and skill files, and runs the authored `prepare` callback. It then checks the base runtime again before capturing the snapshot, so a `prepare` callback that breaks it fails the build. The build artifact records the snapshot ID.
+During build, eve installs its base runtime in a temporary Vercel Sandbox, writes managed workspace and skill files, and runs the authored `prepare` callback. A `prepare` callback that breaks the base runtime fails the build. eve creates each new session sandbox from the captured snapshot.
 
-When a live session sandbox does not exist, eve creates it directly from that snapshot ID. Runtime does not need to look up the temporary template Sandbox.
+eve skips the snapshot when the environment has no `prepare` callback, managed workspace or skill files, or `source`. Each new session sandbox then starts from the image and installs the base runtime itself. A `source` always produces a snapshot, so sessions start from what the build captured instead of fetching the source again.
 
-When the environment has no `prepare` callback, no managed workspace or skill files, and no `source`, a snapshot would contain only the base runtime. eve skips it: the build records no snapshot ID, and each new session sandbox starts from the image and installs the base runtime itself. A `source` always produces a snapshot, so sessions start from what the build captured instead of fetching the source again.
-
-A new session sandbox created from a prepared snapshot of [eve's default image](/docs/sandbox/docker#eves-default-image), without Drive mounts, inherits the base runtime the build checked and runs no setup command. Existing or resumed sandboxes, custom images or snapshot sources, sandboxes with Drive mounts, and sandboxes created without a prepared snapshot still run base-runtime setup when eve attaches them.
+A new session sandbox from a snapshot of [eve's default image](/docs/sandbox/docker#eves-default-image), without Drive mounts, runs no setup command. eve runs base-runtime setup when it attaches any other sandbox. These include existing or resumed sandboxes, custom images or snapshot sources, sandboxes with Drive mounts, and sandboxes created without a snapshot.
 
 ## Initialize after open
 
-Initialize session-specific state after `open()` and before returning the sandbox. This selector writes a configuration file into the persistent `/workspace` filesystem:
+Initialize state for one session after `open()` and before you return the sandbox. Relative paths, including a relative `workingDirectory` passed to `run()` or `spawn()`, resolve from `/workspace`:
 
 ```ts
 import { defineSandbox } from "eve/sandbox";
@@ -73,35 +79,22 @@ export const environment = VercelSandbox.environment();
 
 export default defineSandbox(async ({ session }) => {
   const sandbox = await environment.open();
+  // writes /workspace/.eve/session.json
   await sandbox.writeTextFile({
     content: JSON.stringify({ sessionId: session.id, workspace: "analysis" }),
     path: ".eve/session.json",
   });
-  return sandbox;
-});
-```
-
-The selector runs until initialization succeeds. Later workflow steps and process restarts resume the same provider state without rerunning the selector, so the file is not rewritten at each boundary.
-
-You can also configure the live sandbox and run setup commands before returning it:
-
-```ts
-export default defineSandbox(async () => {
-  const sandbox = await environment.open();
-  await sandbox.setNetworkPolicy("deny-all");
   const result = await sandbox.run({ command: "mkdir -p .cache/app" });
   if (result.exitCode !== 0) throw new Error(result.stderr);
   return sandbox;
 });
 ```
 
-Relative paths, including a relative `workingDirectory` passed to `run()` or `spawn()`, resolve from `/workspace`.
-
-Use the environment's `prepare` callback for immutable setup that every new session should inherit. Use post-open initialization for state that belongs only to one durable session.
+Later workflow steps and process restarts resume the sandbox without running the selector again, so the file isn't rewritten at each step. Use the environment's `prepare` callback for setup that every new session inherits, and post-open initialization for state that belongs to one session. See [Initialize a session's sandbox](/docs/sandbox#initialize-a-sessions-sandbox) for why initialization must be safe to repeat.
 
 ## Network policy
 
-Pass the initial policy to `open()`. It applies to the new live Vercel Sandbox, not to the environment definition:
+Pass the initial policy for the live sandbox to `open()`:
 
 ```ts
 return environment.open({
@@ -117,7 +110,9 @@ return environment.open({
 });
 ```
 
-Credential transforms inject headers at the network boundary so the secret does not enter the sandbox process. The dedicated Vercel environment returns a session where `setNetworkPolicy()` is required, so you can update the policy directly after `open()` without a capability check:
+Credential transforms add headers at the network boundary, so the secret never enters the sandbox process.
+
+Sandboxes from a Vercel environment always have `setNetworkPolicy()`, so you can update the policy without checking that the method exists:
 
 ```ts
 const sandbox = await environment.open();
@@ -127,7 +122,7 @@ return sandbox;
 
 ## Live sandbox name
 
-Sessions returned by `environment.open()` and `ctx.getSandbox(environment)` expose a read-only `name` property. The name identifies the live Vercel Sandbox and stays stable across stop/resume for the session. Use it as `sandboxName` when creating Vercel git-credential-broker grants scoped to that sandbox:
+Sandboxes from `environment.open()` and `ctx.getSandbox(environment)` have a read-only `name`. It identifies the live Vercel Sandbox and stays the same across stop and resume. Use it as `sandboxName` when you create Vercel git-credential-broker grants for that sandbox:
 
 ```ts
 const sandbox = await ctx.getSandbox(environment);
@@ -136,7 +131,7 @@ const sandboxName = sandbox.name;
 
 ## Mount a Drive
 
-A [Vercel Sandbox Drive](https://vercel.com/docs/sandbox/concepts/drives) stores files independently of a sandbox. Install `@vercel/sandbox` in your app, create or retrieve the Drive before calling `open()`, then pass its name and mount mode in `mounts` under an absolute path:
+A [Vercel Sandbox Drive](https://vercel.com/docs/sandbox/concepts/drives) stores files independently of a sandbox. Install `@vercel/sandbox` in your app and create or retrieve the Drive before calling `open()`. Then pass its name and mount mode in `mounts` under an absolute path:
 
 ```bash
 pnpm add @vercel/sandbox
@@ -147,6 +142,7 @@ import { Drive } from "@vercel/sandbox";
 import { defineSandbox } from "eve/sandbox";
 import { VercelSandbox } from "eve/sandbox/vercel";
 
+// use one region for the environment and the Drive, so sandboxes run next to the Drive
 const REGION = "iad1";
 
 export const environment = VercelSandbox.environment({ region: REGION });
@@ -165,13 +161,24 @@ export default defineSandbox(async () => {
 });
 ```
 
-`Drive.getOrCreate()` comes from your app's own `@vercel/sandbox`, so it resolves credentials through the SDK, not eve: it reads `token`, `teamId`, and `projectId` passed to it, or a Vercel OIDC token, which the SDK refreshes from your Vercel CLI login and linked project. It does not read `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`, or the credentials passed to `VercelSandbox.environment()`, so outside Vercel without a linked project, pass them to `Drive.getOrCreate()` too.
+Files written to `/data` remain on the Drive after the sandbox stops. Keep Drive mounts separate from eve's managed `/workspace` directory.
 
-This example mounts the Drive read-write at `/data`. Files written there remain on the Drive after the sandbox stops. Keep Drive mounts separate from eve's managed `/workspace` directory.
+Each `mounts` entry is one of these:
 
-Set the same region on the environment and the Drive. The environment region places the prepared snapshot and each session sandbox together with the Drive.
+- A `Drive`, which mounts read-write.
+- A `{ drive, mode }` reference to an existing Drive by name, where `mode` is `"read-write"` or `"snapshot"`. `drive.snapshot()` returns such a reference.
 
-A Drive supports one active read-write mount. Because each eve session gets its own sandbox, the fixed `agent-workspace` name works only when one eve session uses the Drive at a time. If sessions can overlap, derive an opaque, stable Drive name per owner or tenant. The [Vercel guide to using Drives with eve](https://vercel.com/kb/guide/vercel-drives-eve-agent) shows how to derive a Drive name from the session initiator.
+Vercel allows up to four non-overlapping, absolute Drive mount paths per sandbox. See the Vercel documentation for [how Drives work, their limits, and pricing](https://vercel.com/docs/sandbox/concepts/drives).
+
+### Drive credentials
+
+`Drive.getOrCreate()` gets credentials through your app's `@vercel/sandbox`, not through eve. It reads the `token`, `teamId`, and `projectId` passed to it. Without them, it uses a Vercel OIDC token that the SDK refreshes from your Vercel CLI login and linked project.
+
+`Drive.getOrCreate()` ignores `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, `VERCEL_PROJECT_ID`, and the credentials passed to `VercelSandbox.environment()`. Outside Vercel without a linked project, pass the credentials to `Drive.getOrCreate()` too.
+
+### Concurrent sessions
+
+A Drive supports one active read-write mount, and each eve session gets its own sandbox. The fixed `agent-workspace` name therefore works only when one session uses the Drive at a time. If sessions can overlap, derive an opaque, stable Drive name per user or tenant. The [Vercel guide to using Drives with eve](https://vercel.com/kb/guide/vercel-drives-eve-agent) shows how to derive a Drive name from the user who started the session.
 
 To share a point-in-time view across concurrent sandboxes, mount a read-only snapshot instead:
 
@@ -183,20 +190,6 @@ return environment.open({
 });
 ```
 
-Before mounting a Drive snapshot, seed a new Drive by mounting it read-write and writing at least one file. An uninitialized Drive cannot be mounted as a snapshot.
+Before you mount a Drive snapshot, seed a new Drive by mounting it read-write and writing at least one file. An uninitialized Drive can't be mounted as a snapshot.
 
-Each `mounts` entry is a `Drive`, which mounts read-write, or a `{ drive, mode }` reference to an existing Drive by name, where `mode` is `"read-write"` or `"snapshot"`. `drive.snapshot()` returns such a reference.
-
-Vercel allows up to four non-overlapping, absolute Drive mount paths per sandbox. See the Vercel documentation for [Drive lifecycle, limits, and pricing](https://vercel.com/docs/sandbox/concepts/drives).
-
-## Live sandbox options
-
-`open()` also accepts Vercel compute resources, timeout, environment variables, and Drive mounts. These options apply only when creating the sandbox. Reopening the same key or resuming recorded state keeps the native sandbox's original environment variables, mounts, and network policy. Pass `env` to `run()` or `spawn()` for a per-command override, or call `setNetworkPolicy()` to change the live network policy.
-
-Configure project credentials and custom fetch behavior on the environment, not in `open()`, because resume does not reconstruct start-only options.
-
-Initialize the returned sandbox directly in `defineSandbox()`. If initialization fails, eve keeps the sandbox and runs the selector against it again on the next access, so make initialization safe to repeat; session end deletes the sandbox. After initialization succeeds, the provider persists only immutable JSON-compatible state. If the named Vercel Sandbox later disappears, resume does not recreate it; eve reruns the selector to start a fresh sandbox instead.
-
-eve owns the persistent sandbox identity and prepared snapshot source.
-
-See the [sandbox overview](/docs/sandbox) for managed workspace, skills, parent inheritance, and custom providers.
+See the [sandbox overview](/docs/sandbox) for managed workspace, skills, parent inheritance, and custom providers. Use [Docker Sandbox](/docs/sandbox/docker) for local containers.

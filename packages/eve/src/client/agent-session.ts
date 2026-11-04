@@ -19,7 +19,7 @@ export class ClientAgentSession implements SessionReader {
   readonly #rootId: string;
   readonly #children: readonly DescendantHop[];
 
-  /** @internal */
+  /** Built by the eve client when the parent stream opens this child. */
   constructor(
     context: ClientSessionContext,
     rootId: string,
@@ -67,7 +67,7 @@ export class ClientAgentSession implements SessionReader {
       resolveHeaders: () => this.#context.resolveHeaders(),
       signal: options?.signal,
       startIndex: options?.startIndex ?? 0,
-      streamReconnectPolicy: options?.streamReconnectPolicy,
+      reconnect: options?.reconnect,
       onOpen: (headers) => {
         if (onIdentity === undefined) return;
         const key = headers.get(EVE_OBSERVATION_KEY_HEADER);

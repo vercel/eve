@@ -68,7 +68,7 @@ export function renderInteractionComponents(
             options: options.slice(0, DISCORD_SELECT_OPTION_LIMIT).map((option) => {
               const result: Record<string, unknown> = {
                 label: truncate(option.label, DISCORD_SELECT_OPTION_TEXT_MAX_LENGTH),
-                value: truncate(option.id, DISCORD_SELECT_OPTION_TEXT_MAX_LENGTH),
+                value: selectOptionValue(option.id),
               };
               if (option.description !== undefined) {
                 result.description = truncate(
@@ -232,6 +232,19 @@ function decodeHitlCustomId(customId: string, prefix: string): HitlCustomIdPaylo
   if (typeof requestId !== "string" || requestId.length === 0) return null;
   if (optionId === undefined) return { requestId };
   return typeof optionId === "string" ? { optionId, requestId } : null;
+}
+
+/**
+ * Discord echoes a select option's `value` as the answer, so it must be the exact option id.
+ * A truncated id would come back as an id the request never offered.
+ */
+function selectOptionValue(optionId: string): string {
+  if (optionId.length > DISCORD_SELECT_OPTION_TEXT_MAX_LENGTH) {
+    throw new Error(
+      `discordChannel: select option ids must be at most ${DISCORD_SELECT_OPTION_TEXT_MAX_LENGTH} characters, Discord's option value limit.`,
+    );
+  }
+  return optionId;
 }
 
 function toDiscordButtonStyle(style: InteractionOption["style"]): number {

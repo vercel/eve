@@ -454,14 +454,139 @@ describe("Client request policy", () => {
     ]);
   });
 
-  it("rejects unknown fields in the agent info payload", async () => {
+  it("ignores fields added by a newer server", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json({ ...AGENT_INFO, ignoredByClient: true }),
+      Response.json({
+        ...AGENT_INFO,
+        addedByNewerServer: true,
+        agent: { ...AGENT_INFO.agent, addedByNewerServer: { nested: true } },
+      }),
+    );
+    const client = new Client({ baseUrl: "https://eve.test" });
+
+    const info = await client.info();
+
+    expect(info).not.toHaveProperty("addedByNewerServer");
+    expect(info.agent).not.toHaveProperty("addedByNewerServer");
+    expect(info.agent.name).toBe("Weather Agent");
+  });
+
+  it("reads enum values added by a newer server as unrecognized", async () => {
+    const owner = { kind: "application" as const };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        ...AGENT_INFO,
+        agent: {
+          ...AGENT_INFO.agent,
+          model: {
+            ...AGENT_INFO.agent.model,
+            endpoint: { connected: true, credential: "passkey", kind: "gateway" },
+          },
+        },
+        channels: {
+          ...AGENT_INFO.channels,
+          routes: [
+            {
+              logicalPath: "channels/events.ts",
+              method: "SUBSCRIBE",
+              name: "events",
+              owner,
+              sourceId: "channels/events.ts",
+              sourceKind: "stream",
+              urlPath: "/events",
+            },
+          ],
+        },
+        mode: "preview",
+      }),
+    );
+    const client = new Client({ baseUrl: "https://eve.test" });
+
+    const info = await client.info();
+
+    expect(info.mode).toBe("unrecognized");
+    expect(info.agent.model.endpoint).toEqual({
+      connected: true,
+      credential: "unrecognized",
+      kind: "gateway",
+    });
+    expect(info.channels.routes[0]).toMatchObject({
+      method: "unrecognized",
+      sourceKind: "unrecognized",
+    });
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["non-string", 42],
+  ])("rejects a %s enum value instead of reading it as unrecognized", async (_case, mode) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ ...AGENT_INFO, mode }));
+    const client = new Client({ baseUrl: "https://eve.test" });
+
+    const error = await client.info().catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(AgentInfoResponseError);
+    expect((error as AgentInfoResponseError).issues.join("\n")).toContain("mode");
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["non-string", 42],
+  ])("still requires a binding when a source kind is %s", async (_case, sourceKind) => {
+    const { binding: _binding, ...unbound } = AGENT_INFO.sandbox;
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ...AGENT_INFO, sandbox: { ...unbound, sourceKind } }),
     );
     const client = new Client({ baseUrl: "https://eve.test" });
 
     await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
+
+  it("accepts several unrecognized channel methods on one path", async () => {
+    const owner = { kind: "application" as const };
+    const route = (method: string) => ({
+      binding: testBinding(`channels/${method}.ts`, owner),
+      logicalPath: `channels/${method}.ts`,
+      method,
+      name: method,
+      owner,
+      sourceId: `channels/${method}.ts`,
+      sourceKind: "module",
+      urlPath: "/events",
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        ...AGENT_INFO,
+        channels: { ...AGENT_INFO.channels, routes: [route("QUERY"), route("SUBSCRIBE")] },
+      }),
+    );
+    const client = new Client({ baseUrl: "https://eve.test" });
+
+    const info = await client.info();
+
+    expect(info.channels.routes.map((entry) => entry.method)).toEqual([
+      "unrecognized",
+      "unrecognized",
+    ]);
+  });
+
+  it.each([
+    [4, "Upgrade eve in the agent and redeploy it."],
+    [6, "Upgrade the eve package this client runs from."],
+  ])(
+    "names the side to upgrade when the server sends agent-info version %i",
+    async (version, hint) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ ...AGENT_INFO, version }));
+      const client = new Client({ baseUrl: "https://eve.test" });
+
+      const error = await client.info().catch((cause: unknown) => cause);
+
+      expect(error).toBeInstanceOf(AgentInfoResponseError);
+      expect((error as AgentInfoResponseError).issues).toEqual([
+        `version: the server sent agent-info version ${version}, but this client reads version 5. ${hint}`,
+      ]);
+    },
+  );
 
   it("rejects duplicate public identities in the agent info payload", async () => {
     const owner = { kind: "application" as const };
@@ -582,7 +707,7 @@ describe("Client request policy", () => {
         },
         diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
         kind: "eve-agent-info",
-        version: 1,
+        version: 5,
       }),
     );
     const client = new Client({ baseUrl: "https://eve.test" });
@@ -601,7 +726,7 @@ describe("Client request policy", () => {
         },
         diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
         kind: "eve-agent-info",
-        version: 1,
+        version: 5,
       }),
     );
     const client = new Client({ baseUrl: "https://eve.test" });

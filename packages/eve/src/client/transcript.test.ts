@@ -179,4 +179,63 @@ describe("transcriptOf", () => {
       { role: "user", text: "Ship it." },
     ]);
   });
+
+  it("keeps only the turns the selected conversation follows back", () => {
+    const exchange = (turnId: string, follows: string | null, ask: string, answer: string) =>
+      [
+        { data: { cause: { deliveryId: `d_${turnId}` }, follows, turnId }, type: "turn.started" },
+        {
+          data: { deliveryId: `d_${turnId}`, parts: [{ kind: "text", text: ask }], turnId },
+          type: "delivery.consumed",
+        },
+        {
+          data: {
+            kind: "text",
+            partId: `p_${turnId}`,
+            phase: "reply",
+            runId: `r_${turnId}`,
+            value: answer,
+          },
+          scope: { runId: `r_${turnId}`, turnId },
+          type: "content.completed",
+        },
+      ] as SessionEvent[];
+    const selecting = (turnId: string): SessionEvent => ({
+      data: { changeId: "change_1", kind: "rewind", outcome: "completed", selects: { turnId } },
+      type: "context.settled",
+    });
+    const original = [...exchange("t1", null, "Q1", "A1"), ...exchange("t2", "t1", "Q2", "A2")];
+
+    // A change that selects an earlier turn leaves the turns after it out.
+    expect(reduce([...original, selecting("t1")]).messages).toEqual([
+      { role: "user", text: "Q1" },
+      { role: "assistant", text: "A1" },
+    ]);
+    // The next turn continues from the selected one.
+    expect(
+      reduce([...original, selecting("t1"), ...exchange("t3", "t1", "Q2 again", "A3")]).messages,
+    ).toEqual([
+      { role: "user", text: "Q1" },
+      { role: "assistant", text: "A1" },
+      { role: "user", text: "Q2 again" },
+      { role: "assistant", text: "A3" },
+    ]);
+    // A turn that follows an earlier one says so on its own.
+    expect(reduce([...original, ...exchange("t3", "t1", "Q2 again", "A3")]).messages).toEqual([
+      { role: "user", text: "Q1" },
+      { role: "assistant", text: "A1" },
+      { role: "user", text: "Q2 again" },
+      { role: "assistant", text: "A3" },
+    ]);
+    // A change that didn't complete selects nothing.
+    expect(
+      reduce([
+        ...original,
+        {
+          ...selecting("t1"),
+          data: { changeId: "c", kind: "rewind", outcome: "failed" },
+        } as SessionEvent,
+      ]).messages,
+    ).toHaveLength(4);
+  });
 });

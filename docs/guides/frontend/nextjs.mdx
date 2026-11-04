@@ -150,7 +150,7 @@ export function Chat() {
 }
 ```
 
-A real chat also needs to show tool calls, approvals, questions, and sign-ins. Without them, a turn that waits on the user can't continue. The generated chat handles all of these. To build your own, see [Human-in-the-loop prompts](./overview#human-in-the-loop-prompts) and [Sign-ins](./overview#sign-ins-and-other-interactions).
+A real chat also needs to show tool calls, approvals, questions, and sign-ins. Without them, a turn that waits on the user can't continue. The generated chat handles all of these. To build your own, see [Human-in-the-loop prompts](/docs/guides/frontend#human-in-the-loop-prompts) and [Sign-ins](/docs/guides/frontend#sign-ins-and-other-interactions).
 
 ## Give each conversation a URL
 
@@ -276,7 +276,7 @@ Then:
 3. **Load on the server.** Read the saved chat in a Server Component, and pass `events` and `session` to the Client Component as `initialEvents` and `initialSession`, with `resume: true`. Saved messages show at once, and the live reply picks up from there.
 4. **Store `session` as eve gives it to you.** Don't compute the cursor from the number of events.
 
-See [Resume a saved session](./use-eve-agent#resume-a-saved-session) for exactly how saved events and catch-up fit together. Upgrading saved chats from eve v26? See [Upgrade to v27 events](../../concepts/upgrade-to-v27-events).
+See [Resume a saved session](./use-eve-agent#resume-a-saved-session) for how saved events and catch-up fit together.
 
 ## Call the agent from server code
 
@@ -308,7 +308,7 @@ export async function POST(request: Request) {
 - The token identifies your app, not a user. To act as the signed-in user, forward their cookie in `headers` instead.
 - Without an incoming request, as in a cron job, use `https://${process.env.VERCEL_URL}` as the domain.
 
-See [Client SDK](../client/overview) for more.
+See [Client SDK](/docs/guides/client) for more.
 
 ## Use multiple agents
 
@@ -375,7 +375,7 @@ With several agents, a root `eve build` doesn't build them for `next start`. Run
 
 ### Self-host
 
-- **Vercel services:** run the app and each agent with your own process manager and proxy. See [Self-host eve](../deployment/self-hosting#run-workspace-members).
+- **Vercel services:** run the app and each agent with your own process manager and proxy. See [Self-host eve](../deployment/self-hosted-operations#run-workspace-members).
 - **Next.js hosting:** `next start` runs the agent for you. To run the agent yourself instead, put it behind a proxy that serves it under the private path `/_eve_internal/eve` (the `servicePrefix` option), then set `EVE_NEXT_PRODUCTION_ORIGIN` to that proxy's address when you build and start Next.js.
 
 ## Troubleshooting
@@ -414,7 +414,7 @@ Options for `withEve` from `eve/next`. All are optional.
 
 ## What to read next
 
-- [Frontend overview](./overview): everything the chat hook can do
+- [Frontend overview](/docs/guides/frontend): everything the chat hook can do
 - [Authentication](../auth-and-route-protection): checking who's calling
 - [Deploy to Vercel](../deployment/vercel): services, credentials, and sandboxes
-- [Client SDK](../client/overview): calling the agent from server code
+- [Client SDK](/docs/guides/client): calling the agent from server code

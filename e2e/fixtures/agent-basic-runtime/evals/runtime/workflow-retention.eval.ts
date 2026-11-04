@@ -3,7 +3,7 @@ import { equals, satisfies } from "eve/evals/expect";
 
 export default defineEval({
   description:
-    "Metadata-only sessions lose their durable transcript after reset, while full-capture sessions retain it.",
+    "Metadata-only sessions lose their durable transcript after ending, while full-capture sessions retain it.",
   async test(t) {
     const message =
       "Alice has finished reviewing her notes. Greet her briefly without calling tools.";
@@ -24,13 +24,13 @@ export default defineEval({
       await t.require(live.status, equals(200));
       await t.require((await live.text()).includes(message), equals(true));
 
-      const reset = await t.target.fetch(`${sessionPath}/reset`, {
+      const ended = await t.target.fetch(`${sessionPath}/end`, {
         headers,
         method: "POST",
         signal: t.abortSignal,
       });
-      await t.require(reset.status, equals(202));
-      await reset.body?.cancel();
+      await t.require(ended.status, equals(202));
+      await ended.body?.cancel();
       if (!metadataOnly) {
         const retained = await readHistory();
         await t.require(retained.status, equals(200));
@@ -74,7 +74,7 @@ export default defineEval({
         purged,
         satisfies(
           (value: boolean) => value,
-          "metadata-only session history is expired or empty after reset",
+          "metadata-only session history is expired or empty after ending",
         ),
       );
     }

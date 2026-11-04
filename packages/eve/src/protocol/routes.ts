@@ -15,9 +15,18 @@ export const EVE_HEALTH_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/health`;
 /**
  * Stable framework-owned route exposing the JSON inspection payload for
  * the current agent. The eve channel registers and authenticates this route
- * with the same `auth` input as its session routes.
+ * with the same `auth` input as its session routes, then serves operator
+ * principals (`service`, `runtime`, or `local-dev`) unless the auth result
+ * sets `allowAgentInfo`.
  */
 export const EVE_INFO_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/info`;
+
+/** Error code the info route returns with `403` to a caller it does not serve. */
+export const AGENT_INFO_FORBIDDEN_CODE = "info_forbidden";
+
+/** Why the info route refused a caller and how to grant access; shared by server and clients. */
+export const AGENT_INFO_FORBIDDEN_MESSAGE =
+  'Agent info is served only to operator credentials (principalType "service", "runtime", or "local-dev"). Authenticate as a service principal, for example with Vercel OIDC, or return allowAgentInfo: true from the eve channel\'s auth for this caller.';
 
 /** Stable route for creating ID-addressed sessions. */
 export const EVE_SESSION_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/session`;
@@ -34,7 +43,13 @@ export const EVE_SESSION_COMPACT_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:ses
 /** Stable route pattern for clearing one exact session ID. */
 export const EVE_SESSION_CLEAR_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/clear`;
 
-/** Stable route pattern for resetting one exact session ID. */
+/** Stable route pattern for ending one exact session ID. */
+export const EVE_SESSION_END_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/end`;
+
+/**
+ * Legacy alias of `/end`. Still called by remote-agent parent cleanup and older clients;
+ * keep until parents switch to `/end`.
+ */
 export const EVE_SESSION_RESET_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/reset`;
 
 /** Stable route pattern for eval tool-stub verification. */
@@ -154,7 +169,12 @@ export function createEveSessionClearRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/clear`;
 }
 
-/** Builds the ID-addressed reset route for one session. */
+/** Builds the ID-addressed end route for one session. */
+export function createEveSessionEndRoutePath(sessionId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/end`;
+}
+
+/** Compatibility path used when ending a remote child on an older deployment. */
 export function createEveSessionResetRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/reset`;
 }

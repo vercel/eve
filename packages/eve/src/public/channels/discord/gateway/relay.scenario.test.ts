@@ -7,8 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   DiscordGatewayFatalError,
-  experimental_runDiscordGatewayRelay,
-} from "#public/channels/discord/gateway/index.js";
+  runDiscordGatewayRelay,
+} from "#public/experimental/channels/discord/gateway.js";
 
 const WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -166,7 +166,7 @@ function messageCreate(s: number, id: string) {
   return { d: { id }, op: 0, s, t: "MESSAGE_CREATE" };
 }
 
-describe("experimental_runDiscordGatewayRelay", () => {
+describe("runDiscordGatewayRelay", () => {
   it("forwards message dispatches unchanged and in order, resuming across a reconnect", async () => {
     const connections: GatewayConnection[] = [];
     const discord = await startFakeDiscord((connection) => {
@@ -175,7 +175,7 @@ describe("experimental_runDiscordGatewayRelay", () => {
     });
     const shutdown = new AbortController();
 
-    const relay = experimental_runDiscordGatewayRelay({
+    const relay = runDiscordGatewayRelay({
       api: { apiBaseUrl: `${discord.url}/api/v10` },
       auth: async () => ({ headers: { authorization: "Bearer relay" } }),
       credentials: { botToken: "bot-token" },
@@ -228,7 +228,7 @@ describe("experimental_runDiscordGatewayRelay", () => {
       connection.send({ d: { heartbeat_interval: 50 }, op: 10 });
     });
     const shutdown = new AbortController();
-    const relay = experimental_runDiscordGatewayRelay({
+    const relay = runDiscordGatewayRelay({
       api: { apiBaseUrl: `${discord.url}/api/v10` },
       credentials: { botToken: "bot-token" },
       signal: shutdown.signal,
@@ -261,7 +261,7 @@ describe("experimental_runDiscordGatewayRelay", () => {
       [429, 502],
     );
     const shutdown = new AbortController();
-    const relay = experimental_runDiscordGatewayRelay({
+    const relay = runDiscordGatewayRelay({
       api: { apiBaseUrl: `${discord.url}/api/v10` },
       credentials: { botToken: "bot-token" },
       signal: shutdown.signal,
@@ -287,7 +287,7 @@ describe("experimental_runDiscordGatewayRelay", () => {
       void waitFor(() => connection.received.length === 1).then(() => connection.close(4014));
     });
 
-    const relay = experimental_runDiscordGatewayRelay({
+    const relay = runDiscordGatewayRelay({
       api: { apiBaseUrl: `${discord.url}/api/v10` },
       credentials: { botToken: "bot-token" },
       messageContent: true,

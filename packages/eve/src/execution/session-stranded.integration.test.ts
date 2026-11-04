@@ -216,7 +216,12 @@ describe("stranded sessions", () => {
         );
         freshSessionId = fresh.sessionId;
 
+        // A stream that never recorded its start starts in the commit that ends it.
         await expect(waiting).resolves.toMatchObject({
+          done: false,
+          value: { type: "session.started" },
+        });
+        await expect(reader.read()).resolves.toMatchObject({
           done: false,
           value: {
             type: "session.ended",
@@ -410,14 +415,16 @@ describe("stranded sessions", () => {
         await expect(stranded.status).resolves.toBe("running");
 
         const reader = readSessionEventStream(stranded.runId).getReader();
-        const admitted = reader.read();
+        const started = reader.read();
         await expect(
           runtime.dispatchSession({
             command: { deliveryId: "reset-delivery", kind: "reset" },
             sessionId: stranded.runId,
           }),
         ).resolves.toEqual({ previousSessionId: stranded.runId, status: "reset" });
-        await expect(admitted).resolves.toMatchObject({
+        // A stream that never recorded its start starts in the commit that ends it.
+        await expect(started).resolves.toMatchObject({ value: { type: "session.started" } });
+        await expect(reader.read()).resolves.toMatchObject({
           value: {
             type: "delivery.admitted",
             data: { deliveryId: "reset-delivery", source: { control: "reset" } },
@@ -550,12 +557,12 @@ describe("stranded sessions", () => {
       try {
         // A stranded owner cannot run, so `created: false` would hand back a dead session.
         await expect(address.create({ auth: null, history })).rejects.toThrow(
-          "Call reset() on the address, then create() again",
+          "Call end() on the address, then create() again",
         );
         expect(runtime.createSession).not.toHaveBeenCalled();
         await expect(stranded.status).resolves.toBe("running");
 
-        await address.reset();
+        await address.end();
         const result = await address.create({ auth: null, history });
         createdSessionId = result.session.id;
         expect(result.created).toBe(true);

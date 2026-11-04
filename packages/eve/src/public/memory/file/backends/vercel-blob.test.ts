@@ -57,7 +57,7 @@ describe("Vercel Blob file-memory backend", () => {
       token: "rw",
     });
 
-    await expect(backend.read({ key: "mem_scope", abortSignal: signal })).resolves.toEqual({
+    await expect(backend.read({ key: "mem_scope", signal })).resolves.toEqual({
       content: "# Memory",
       version: "etag-1",
     });
@@ -77,7 +77,7 @@ describe("Vercel Blob file-memory backend", () => {
     const backend = vercelBlob();
 
     await expect(
-      backend.write({ content: "new", expectedVersion: null, key: "mem_a", abortSignal: signal }),
+      backend.write({ content: "new", expectedVersion: null, key: "mem_a", signal }),
     ).resolves.toEqual({ content: "new", version: "etag-next" });
     expect(put).toHaveBeenNthCalledWith(1, "eve/memory/file/mem_a/MEMORY.md", "new", {
       abortSignal: signal,
@@ -95,7 +95,7 @@ describe("Vercel Blob file-memory backend", () => {
       content: "next",
       expectedVersion: "etag-old",
       key: "mem_a",
-      abortSignal: signal,
+      signal,
     });
     expect(put).toHaveBeenNthCalledWith(2, "eve/memory/file/mem_a/MEMORY.md", "next", {
       abortSignal: signal,
@@ -119,14 +119,14 @@ describe("Vercel Blob file-memory backend", () => {
         content: "next",
         expectedVersion: "stale",
         key: "mem_a",
-        abortSignal: signal,
+        signal,
       }),
     ).rejects.toSatisfy(MemoryDocumentConflictError.is);
 
     vi.mocked(put).mockRejectedValueOnce(new Error("already exists"));
     vi.mocked(get).mockResolvedValueOnce(getBlobResult("current", "etag-current"));
     await expect(
-      backend.write({ content: "new", expectedVersion: null, key: "mem_a", abortSignal: signal }),
+      backend.write({ content: "new", expectedVersion: null, key: "mem_a", signal }),
     ).rejects.toSatisfy(MemoryDocumentConflictError.is);
   });
 

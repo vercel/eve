@@ -1,30 +1,26 @@
+import { EveError } from "#shared/eve-error.js";
 import { SessionStrandedError } from "#channel/session-stranded-error.js";
 
-const CODE = "EVE_SESSION_NOT_ACTIVE";
-
-/** A session could not accept a command. No delivery was accepted. */
-export class SessionNotActiveError extends Error {
-  readonly code = CODE;
+/**
+ * A session could not accept a command. No delivery was accepted.
+ *
+ * `code` is the HTTP channel's `409` code: `session_not_ready` (with `retryable: true`) while an
+ * accepted session is still starting, otherwise `session_not_active`.
+ */
+export class SessionNotActiveError extends EveError {
+  static override readonly errorName = "SessionNotActiveError";
+  declare readonly code: "session_not_active" | "session_not_ready";
   readonly retryable: boolean;
 
   constructor(options: { readonly retryable?: boolean } = {}) {
+    const retryable = options.retryable === true;
     super(
-      options.retryable === true
+      retryable ? "session_not_ready" : "session_not_active",
+      retryable
         ? "The session is not ready to accept commands. Retry shortly."
         : "The session is no longer active. Start a new session.",
     );
-    this.name = "SessionNotActiveError";
-    this.retryable = options.retryable === true;
-  }
-
-  /** Recognizes errors across bundles without depending on constructor identity. */
-  static is(error: unknown): error is SessionNotActiveError {
-    return (
-      error !== null &&
-      typeof error === "object" &&
-      Reflect.get(error, "code") === CODE &&
-      typeof Reflect.get(error, "retryable") === "boolean"
-    );
+    this.retryable = retryable;
   }
 }
 

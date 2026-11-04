@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2347
 status: implemented
-last_updated: "2026-09-30"
+last_updated: "2026-10-29"
 ---
 
 # Programmatic agent sources
@@ -797,7 +797,7 @@ The eve channel and home compose as two slots. An authored `channels/eve.ts`
 — typically another `eveChannel(...)` call with different auth — replaces the
 complete default surface, and a disable sentinel removes it; health, info,
 and the callbacks are not independently replaceable. This is an intentional
-pre-1.0 breaking change. A replacement owns its implementation, but the
+breaking change. A replacement owns its implementation, but the
 public payload contracts remain client-enforced: `Client.health()` validates
 successful JSON with `HealthResultSchema` — a non-success response throws
 `ClientError` and an invalid successful payload throws `HealthResponseError`
@@ -1272,6 +1272,6 @@ The implementation is complete only when:
   behavior is limited to the closed tool-handling union, the localized
   `final_output` interception, and the host inventory; a universal native-tool,
   route, or adapter escape hatch is rejected.
-- Pre-1.0 cleanup is a breaking replacement: no legacy manifest reader,
+- This cleanup is a breaking replacement: no legacy manifest reader,
   agent-info schema, health fallback, history reconstruction, duplicate status
   state, or compatibility path is retained.

@@ -1,4 +1,5 @@
 import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
+import { declared } from "#runtime/types.js";
 import { createRequire } from "node:module";
 import { dirname, join, relative } from "node:path";
 
@@ -260,14 +261,15 @@ describe("mounted extension installed under node_modules", () => {
     });
     const app = await createAppRoot("eve-mounted-extension-installed-", {
       files: {
-        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/subagents/manager/agent.mjs": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  model: "openai/gpt-5.4",',
           '  description: "Manage CRM reviews.",',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "agent/subagents/manager/extensions/nested.mjs": [
@@ -383,7 +385,7 @@ describe("mounted extension installed under node_modules", () => {
       readFile(join(skillsResourceRoot, "crm__research", "references", "checklist.md"), "utf8"),
     ).resolves.toBe("# Checklist\n");
 
-    const dynamicTools = graph.root.agent.dynamicToolResolvers.find(
+    const dynamicTools = declared(graph.root.agent, "tool").find(
       (resolver) => resolver.slug === "crm__dynamic",
     );
     const producedTools = (await dynamicTools?.evaluate({} as never)) as {
@@ -391,7 +393,7 @@ describe("mounted extension installed under node_modules", () => {
     };
     await expect(producedTools.quote.execute({}, {})).resolves.toEqual({ apiKey: "sk-installed" });
 
-    const dynamicSkills = graph.root.agent.dynamicSkillResolvers.find(
+    const dynamicSkills = declared(graph.root.agent, "skill").find(
       (resolver) => resolver.slug === "crm__oncall",
     );
     const producedSkills = (await dynamicSkills?.evaluate({} as never)) as {
@@ -399,7 +401,7 @@ describe("mounted extension installed under node_modules", () => {
     };
     expect(producedSkills.escalation.content).toContain("Page the on-call.");
 
-    const dynamicInstructions = graph.root.agent.dynamicInstructionsResolvers.find(
+    const dynamicInstructions = declared(graph.root.agent, "instructions").find(
       (resolver) => resolver.slug === "crm__dynamic",
     );
     const producedInstructions = (await dynamicInstructions?.evaluate({} as never)) as {
@@ -441,7 +443,7 @@ describe("mounted extension installed under node_modules", () => {
     ).toBe(true);
     const app = await createAppRoot("eve-mounted-extension-chunks-", {
       files: {
-        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/extensions/crm.mjs": [
@@ -450,10 +452,11 @@ describe("mounted extension installed under node_modules", () => {
           "",
         ].join("\n"),
         "agent/subagents/manager/agent.mjs": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  model: "openai/gpt-5.4",',
           '  description: "Manage CRM reviews.",',
-          "};",
+          "});",
           "",
         ].join("\n"),
         "agent/subagents/manager/extensions/crm.mjs": [

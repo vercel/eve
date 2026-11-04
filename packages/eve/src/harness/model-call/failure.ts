@@ -13,6 +13,12 @@ import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { fail } from "#harness/session-machine/transitions.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
+import { changeHistory } from "#harness/session-machine/history.js";
+import {
+  createFrameworkUserMessage,
+  type HarnessModelMessage,
+  turnAnchorOf,
+} from "#harness/messages.js";
 
 const log = createLogger("harness.tool-loop");
 
@@ -100,8 +106,39 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
         : { done: true, output: "" },
       session: step.session,
     };
+  if (summary?.tags.includes("refused") === true && turnId !== undefined) {
+    const rewrite = withoutTurnInput(step.session.history, turnId);
+    if (rewrite !== undefined) step.session = changeHistory(step.session, { rewrite });
+  }
   step.session = { ...step.session, outputSchema: undefined };
   return { next: null, session: step.session, settledTurn: { isError: true, output } };
+}
+
+// The model learns a turn was refused, so it doesn't repeat it unaware, without reading what it said.
+const REFUSED_TURN_NOTE = createFrameworkUserMessage(
+  "context.instruction",
+  "The model provider refused a response in this turn, so the turn ended with an error and the request that started it was removed from this conversation. Any tool calls that follow ran before the refusal.",
+);
+
+/**
+ * History with the turn's input replaced by a note, or `undefined` when history holds none of it.
+ * The input stays in the stream, but the model doesn't read it again: sent with the next turn, it
+ * would be refused too. The tool calls the turn already ran stay, since they happened, and the
+ * note keeps them behind a user message, as providers require.
+ */
+function withoutTurnInput(
+  history: readonly HarnessModelMessage[],
+  turnId: string,
+): HarnessModelMessage[] | undefined {
+  let noted = false;
+  const rewrite = history.flatMap((message, index) => {
+    if (turnAnchorOf(message) !== turnId) return [message];
+    if (noted) return [];
+    noted = true;
+    // Consecutive refused turns share one note.
+    return history[index - 1]?.content === REFUSED_TURN_NOTE.content ? [] : [REFUSED_TURN_NOTE];
+  });
+  return noted ? rewrite : undefined;
 }
 
 /**

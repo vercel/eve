@@ -11,8 +11,12 @@ type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][numbe
 type InlineToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
 import type { AssistantStepFinishReason } from "#harness/finish-reason.js";
-import { announcedKind, callRequested, callSettledFrom } from "#harness/call-facts.js";
+import { announcedKind } from "#harness/call-facts.js";
+import { requestCall, settleCall } from "#harness/session-machine/calls.js";
+import { completeParts } from "#harness/session-machine/content.js";
+import type { FactOf } from "#protocol/session-events/facts.js";
 import type { SessionEvent } from "#protocol/session-event.js";
+import type { CallRow } from "#protocol/session-projection/tables.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import type { JsonObject } from "#shared/json.js";
 import {
@@ -54,6 +58,8 @@ interface StreamActionEmissionOptions {
   readonly held?: boolean;
   /** A child or schedule's caller reads only the final reply, including at an explicit task wait. */
   readonly finalReplyOnly?: boolean;
+  /** The session's call with this id, as its view holds it now. */
+  readonly sessionCall: (callId: string) => CallRow | undefined;
   readonly tools: HarnessToolLookup;
   /** A deliberate turn cancel or steering interrupt, not a provider failure/retry. */
   readonly interruptSignal?: AbortSignal;
@@ -142,7 +148,7 @@ async function consumeStreamContent(
     value: string,
     phase: "narration" | "reply",
   ): Promise<void> => {
-    await emitFn({ data: { kind, partId, phase, runId, value }, type: "content.completed" });
+    await emitFn(completeParts([{ kind, partId, phase, runId, value }]));
   };
 
   const flushCurrentMessage = async (phase: "narration" | "reply" = "narration"): Promise<void> => {
@@ -197,7 +203,7 @@ async function consumeStreamContent(
 
     emittedActionCallIds.add(action.callId);
     actionInputs.set(action.callId, action.input);
-    await emitFn(callRequested({ action, owner: { runId }, label: projection.presentationLabel }));
+    await emitFn(requestCall({ action, owner: { runId }, label: projection.presentationLabel }));
   };
 
   const collectProviderToolCall = async (toolCall: {
@@ -235,16 +241,32 @@ async function consumeStreamContent(
     providerActionBatch.observe(resolved.request);
   };
 
+  /**
+   * Settles a provider call with its result or error. A provider can answer a call an earlier run
+   * introduced at the start of a later response: that call isn't introduced again, and once an
+   * abandoned attempt settled it, the retry's copy of the answer publishes nothing.
+   */
+  const settleProviderCall = async (
+    toolCall: Parameters<typeof collectProviderToolCall>[0],
+    result: RuntimeToolResultActionResult,
+  ): Promise<void> => {
+    const held = options?.sessionCall(toolCall.toolCallId);
+    if (held?.status === "settled") return;
+    if (held === undefined) await collectProviderToolCall(toolCall);
+    await providerActionBatch.flush();
+    await emitActionResult(result);
+  };
+
   /** A call whose input didn't validate is introduced with its error, and fails at once. */
   const emitInvalidCall = async (
-    action: Parameters<typeof callRequested>[0]["action"],
+    action: Parameters<typeof requestCall>[0]["action"],
     result: RuntimeToolResultActionResult,
   ): Promise<void> => {
     emittedActionCallIds.add(action.callId);
     const message =
       typeof result.output === "string" ? result.output : JSON.stringify(result.output ?? null);
     await emitFn(
-      callRequested({
+      requestCall({
         action,
         inputError: { code: "INVALID_TOOL_INPUT", message },
         owner: { runId },
@@ -267,7 +289,7 @@ async function consumeStreamContent(
             actionInputs.get(result.callId),
             result.output,
           );
-    await emitFn(callSettledFrom(result, { label: resultPresentation }));
+    await emitFn(settleCall(result, { label: resultPresentation }));
   };
 
   const emitToolCall = async (toolCall: TypedToolCall<ToolSet>): Promise<void> => {
@@ -398,21 +420,20 @@ async function consumeStreamContent(
           const providerResult = part as TypedToolResult<ToolSet>;
           if (providerResult.providerExecuted !== true || providerResult.preliminary === true)
             break;
-          await collectProviderToolCall({
-            input: "input" in providerResult ? providerResult.input : undefined,
-            toolCallId: providerResult.toolCallId,
-            toolName: providerResult.toolName,
-          });
-          await providerActionBatch.flush();
-          await emitActionResult(createRuntimeToolResultFromStepResult(providerResult));
+          await settleProviderCall(
+            {
+              input: "input" in providerResult ? providerResult.input : undefined,
+              toolCallId: providerResult.toolCallId,
+              toolName: providerResult.toolName,
+            },
+            createRuntimeToolResultFromStepResult(providerResult),
+          );
           break;
         }
         case "tool-error": {
           const toolError = part as TypedToolError<ToolSet>;
           if (toolError.providerExecuted !== true) break;
-          await collectProviderToolCall(toolError);
-          await providerActionBatch.flush();
-          await emitActionResult(createRuntimeToolResultFromToolError(toolError));
+          await settleProviderCall(toolError, createRuntimeToolResultFromToolError(toolError));
           break;
         }
         case "finish-step":
@@ -438,32 +459,26 @@ async function consumeStreamContent(
     // Interrupted text stands; a failed/retried attempt instead leaves its incomplete previews
     // behind. Complete the streamed prefixes as one content transition before the run closes.
     if (options?.interruptSignal?.aborted === true) {
-      const completed: SessionEvent[] = [];
+      const completed: FactOf<"content.completed">["data"][] = [];
       if (reasoningPartId !== undefined && currentReasoning.length > 0)
         completed.push({
-          type: "content.completed",
-          data: {
-            partId: reasoningPartId,
-            runId,
-            kind: "reasoning",
-            phase: "narration",
-            value: currentReasoning,
-            interrupted: true,
-          },
+          partId: reasoningPartId,
+          runId,
+          kind: "reasoning",
+          phase: "narration",
+          value: currentReasoning,
+          interrupted: true,
         });
       if (messagePartId !== undefined && currentMessage.length > 0)
         completed.push({
-          type: "content.completed",
-          data: {
-            partId: messagePartId,
-            runId,
-            kind: "text",
-            phase: "narration",
-            value: currentMessage,
-            interrupted: true,
-          },
+          partId: messagePartId,
+          runId,
+          kind: "text",
+          phase: "narration",
+          value: currentMessage,
+          interrupted: true,
         });
-      if (completed.length > 0) await emitFn(completed);
+      if (completed.length > 0) await emitFn(completeParts(completed));
     }
     throw error;
   }

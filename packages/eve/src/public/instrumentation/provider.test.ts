@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  defineInstrumentation,
-  disableInstrumentation,
-  isInstrumentationDisabled,
-} from "#public/instrumentation/index.js";
+import { defineInstrumentation } from "#public/instrumentation/index.js";
 
 describe("defineInstrumentation", () => {
   it("brands a provider-shaped declaration", () => {
@@ -89,19 +85,6 @@ describe("isInstrumentationProvider", () => {
 
   it.each([[null], [undefined], ["provider"], [42]])("rejects %p", (value) => {
     expect(isInstrumentationProvider(value)).toBe(false);
-  });
-});
-
-describe("disableInstrumentation", () => {
-  it("is recognizable as a disabled slot rather than a provider", () => {
-    const disabled = disableInstrumentation();
-
-    expect(isInstrumentationDisabled(disabled)).toBe(true);
-    expect(isInstrumentationProvider(disabled)).toBe(false);
-  });
-
-  it("does not treat a provider as a disabled slot", () => {
-    expect(isInstrumentationDisabled(defineInstrumentation({}))).toBe(false);
   });
 });
 

@@ -1,20 +1,47 @@
 # @vercel/agent-runs
 
+## 1.0.0-rc.1
+
+Released 2026-11-03 · [Compare with 1.0.0-rc.0](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.0...%40vercel%2Fagent-runs%401.0.0-rc.1)
+
+### Bug Fixes
+
+- Fix durable agent traces keeping every finished turn that called tools in parallel: each one stayed in the session's serialized context, so step inputs grew with every turn.
+  A checkpoint this process had already written, read back through another execution context, was treated as another process's write and forked the turn's trace tree; the stale copy then overwrote the tool completions and the checkpoint was never deleted. A replaced tree now also stops persisting. ([#5835](https://github.com/vercel/eve/pull/5835))
+
+## 1.0.0-rc.0
+
+Released 2026-10-30 · [Compare with 0.0.4](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%400.0.4...%40vercel%2Fagent-runs%401.0.0-rc.0)
+
+### Breaking Changes
+
+- `@vercel/agent-runs` 1.0 puts its public API under semantic versioning, so it changes incompatibly only in a major release. ([#5620](https://github.com/vercel/eve/pull/5620))
+
+## 0.0.4
+
+Released 2026-10-29 · [Compare with 0.0.3](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%400.0.3...%40vercel%2Fagent-runs%400.0.4)
+
+### Bug Fixes
+
+- Release notes now list breaking changes first and use plain headings, one paragraph per change, and a single compare link.
+  A `minor` changeset always appears under Breaking Changes, so breaking changes merged with an internal PR title are no longer left out. The 0.86.0 and 0.87.0 notes now include the two breaking changes they missed. ([#5588](https://github.com/vercel/eve/pull/5588))
+
+## 0.0.3
+
+Released 2026-10-28 · [Compare with 0.0.2](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%400.0.2...%40vercel%2Fagent-runs%400.0.3)
+
+### Bug Fixes
+
+- Resolve catalog dependencies in staged packages so npm can install them. ([#5554](https://github.com/vercel/eve/pull/5554))
+- Restore current release notes to `CHANGELOG.md` at the package root. ([#5552](https://github.com/vercel/eve/pull/5552))
+
 ## 0.0.2
 
-### Release @vercel/agent-runs@0.0.2 | 2026-10-28 | patch
+Released 2026-10-28 · [Compare with 0.0.1](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%400.0.1...%40vercel%2Fagent-runs%400.0.2)
 
-### 🚀 Features
+### Features
 
-- Ship current release notes at `dist/CHANGELOG.md` with a version-pinned link to the full changelog. [#5446](https://github.com/vercel/eve/pull/5446)
-
-### Other Changes
-
-See the [full list of changes](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%400.0.1...%40vercel%2Fagent-runs%400.0.2).
-
-### Contributors
-
-- [@chadhietala](https://github.com/chadhietala)
+- Ship current release notes at `dist/CHANGELOG.md` with a version-pinned link to the full changelog. ([#5446](https://github.com/vercel/eve/pull/5446))
 
 ## 0.0.1
 

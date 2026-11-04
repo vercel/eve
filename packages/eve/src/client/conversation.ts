@@ -17,7 +17,7 @@ import {
   emptySessionView,
   foldReceivedEvent,
 } from "#protocol/session-projection/fold.js";
-import { runTurn } from "#protocol/session-projection/selectors.js";
+import { conversation, runTurn } from "#protocol/session-projection/selectors.js";
 import type { SessionPreviews, SessionView } from "#protocol/session-projection/tables.js";
 import {
   snapshotOf,
@@ -235,11 +235,15 @@ export class Conversation {
   }
 
   /**
-   * Each turn's messages in turn order, as the stream placed them: what people sent it where it
-   * consumed them, between the agent's messages, then what this client sent it that eve hasn't
-   * consumed. Messages this client sent for no known turn come last.
+   * The messages of each turn in the session's current conversation, oldest first, as the stream
+   * placed them: what people sent it where it consumed them, between the agent's messages, then
+   * what this client sent it that eve hasn't consumed. A turn a clear or another context change
+   * left out of the conversation shows nothing. Messages this client sent for no turn shown come
+   * last.
    */
   #orderedMessages(): readonly EveMessage[] {
+    const turnIds = conversation(this.view).map((turn) => turn.turnId);
+    const inConversation = new Set(turnIds);
     const sent = new Map<string, PlacedMessage[]>();
     const imported = new Map<string, PlacedMessage[]>();
     for (const row of Object.values(this.view.deliveries)) {
@@ -272,7 +276,7 @@ export class Conversation {
     const local = new Map<string | undefined, EveMessage[]>();
     for (const submission of this.#submissions) {
       const turnId =
-        submission.turnId !== undefined && this.view.turns[submission.turnId] !== undefined
+        submission.turnId !== undefined && inConversation.has(submission.turnId)
           ? submission.turnId
           : undefined;
       const message: EveMessage = {
@@ -289,7 +293,7 @@ export class Conversation {
       else messages.push(message);
     }
     const messages: EveMessage[] = [];
-    for (const turnId of Object.keys(this.view.turns)) {
+    for (const turnId of turnIds) {
       // On one line, imported history sorts before what people sent, as the model reads them, and
       // a person's message sorts before the agent's that starts there.
       const placed = [

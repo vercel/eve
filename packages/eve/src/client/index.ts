@@ -6,7 +6,13 @@ export { SessionStore } from "#client/session-store.js";
 export { Client } from "#client/client.js";
 export { AgentInfoResponseError } from "#client/agent-info-error.js";
 export { HealthResponseError } from "#client/health-response-error.js";
-export { ClientError, ClientSessionStrandedError } from "#client/client-error.js";
+export { EveError } from "#shared/eve-error.js";
+export {
+  ClientError,
+  ClientSessionStrandedError,
+  type ClientErrorCode,
+} from "#client/client-error.js";
+export { SessionNotActiveError } from "#channel/session-not-active-error.js";
 export { conversationOf } from "#client/conversation.js";
 export { agentCallActivity } from "#client/conversation-state.js";
 export {
@@ -80,10 +86,10 @@ export type {
   RespondTurnOptions,
   SendTurnInput,
   SendTurnOptions,
+  SendTurnPayload,
   SessionSnapshot,
   ClientSessionState,
-  StreamReconnectPolicy,
-  StreamReconnectRetryPolicy,
+  ReconnectOptions,
   TokenValue,
 } from "#client/types.js";
 
@@ -100,7 +106,7 @@ export type {
   SessionEventMeta,
   SessionStreamEvent,
 } from "#protocol/session-event.js";
-export { endsTurn, failureOf } from "#client/session-utils.js";
+export { endsTurn } from "#client/session-utils.js";
 
 export type { AskedCall } from "#protocol/session-projection/reader.js";
 export { isAnswer, parseAnswer, parseAnswers } from "#shared/input.js";

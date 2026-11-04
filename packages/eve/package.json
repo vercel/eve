@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.86.0",
+  "version": "1.0.0-rc.4",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -178,6 +178,11 @@
       "import": "./dist/src/public/tools/write-file.js",
       "default": "./dist/src/public/tools/write-file.js"
     },
+    "./tools/edit_file": {
+      "types": "./dist/src/public/tools/edit-file.d.ts",
+      "import": "./dist/src/public/tools/edit-file.js",
+      "default": "./dist/src/public/tools/edit-file.js"
+    },
     "./tools/web_fetch": {
       "types": "./dist/src/public/tools/web-fetch.d.ts",
       "import": "./dist/src/public/tools/web-fetch.js",
@@ -202,6 +207,18 @@
       "types": "./dist/src/public/tools/workflow.d.ts",
       "import": "./dist/src/public/tools/workflow.js",
       "default": "./dist/src/public/tools/workflow.js"
+    },
+    "./workflow": {
+      "eve-source": "./src/public/workflow/index.ts",
+      "types": "./dist/src/public/workflow/index.d.ts",
+      "import": "./dist/src/public/workflow/index.js",
+      "default": "./dist/src/public/workflow/index.js"
+    },
+    "./workflow/api": {
+      "eve-source": "./src/public/workflow/api.ts",
+      "types": "./dist/src/public/workflow/api.d.ts",
+      "import": "./dist/src/public/workflow/api.js",
+      "default": "./dist/src/public/workflow/api.js"
     },
     "./workflow-modules": {
       "eve-source": "./dist/src/public/workflow-modules.d.ts",
@@ -334,12 +351,6 @@
       "import": "./dist/src/extensions/code/extension/extension.js",
       "default": "./dist/src/extensions/code/extension/extension.js"
     },
-    "./extensions/code/tools": {
-      "eve-source": "./dist/src/extensions/code/tools.js",
-      "types": "./dist/src/extensions/code/tools.d.ts",
-      "import": "./dist/src/extensions/code/tools.js",
-      "default": "./dist/src/extensions/code/tools.js"
-    },
     "./extensions/code/sandbox": {
       "eve-source": "./dist/src/extensions/code/sandbox.js",
       "types": "./dist/src/extensions/code/sandbox.d.ts",
@@ -406,6 +417,24 @@
       "types": "./dist/src/public/server/index.d.ts",
       "import": "./dist/src/public/server/index.js",
       "default": "./dist/src/public/server/index.js"
+    },
+    "./experimental/workspace": {
+      "eve-source": "./src/public/experimental/workspace/index.ts",
+      "types": "./dist/src/public/experimental/workspace/index.d.ts",
+      "import": "./dist/src/public/experimental/workspace/index.js",
+      "default": "./dist/src/public/experimental/workspace/index.js"
+    },
+    "./experimental/sandbox/just-bash": {
+      "eve-source": "./src/public/experimental/sandbox/just-bash.ts",
+      "types": "./dist/src/public/experimental/sandbox/just-bash.d.ts",
+      "import": "./dist/src/public/experimental/sandbox/just-bash.js",
+      "default": "./dist/src/public/experimental/sandbox/just-bash.js"
+    },
+    "./experimental/channels/discord/gateway": {
+      "eve-source": "./src/public/experimental/channels/discord/gateway.ts",
+      "types": "./dist/src/public/experimental/channels/discord/gateway.d.ts",
+      "import": "./dist/src/public/experimental/channels/discord/gateway.js",
+      "default": "./dist/src/public/experimental/channels/discord/gateway.js"
     },
     "./experimental/schedules/testing": {
       "eve-source": "./src/public/experimental/schedules/testing.ts",
@@ -475,11 +504,6 @@
       "import": "./dist/src/public/channels/discord/index.js",
       "default": "./dist/src/public/channels/discord/index.js"
     },
-    "./channels/discord/gateway": {
-      "types": "./dist/src/public/channels/discord/gateway/index.d.ts",
-      "import": "./dist/src/public/channels/discord/gateway/index.js",
-      "default": "./dist/src/public/channels/discord/gateway/index.js"
-    },
     "./channels/twilio": {
       "types": "./dist/src/public/channels/twilio/index.d.ts",
       "import": "./dist/src/public/channels/twilio/index.js",
@@ -523,24 +547,6 @@
       "types": "./dist/src/internal/scaffold.d.ts",
       "import": "./dist/src/internal/scaffold.js",
       "default": "./dist/src/internal/scaffold.js"
-    },
-    "./internal/code/prwatch": {
-      "eve-source": "./dist/src/extensions/code/extension/lib/prwatch.js",
-      "types": "./dist/src/extensions/code/extension/lib/prwatch.d.ts",
-      "import": "./dist/src/extensions/code/extension/lib/prwatch.js",
-      "default": "./dist/src/extensions/code/extension/lib/prwatch.js"
-    },
-    "./internal/grep": {
-      "eve-source": "./dist/src/internal/grep.js",
-      "types": "./dist/src/internal/grep.d.ts",
-      "import": "./dist/src/internal/grep.js",
-      "default": "./dist/src/internal/grep.js"
-    },
-    "./internal/workspace": {
-      "eve-source": "./dist/src/internal/workspace.js",
-      "types": "./dist/src/internal/workspace.d.ts",
-      "import": "./dist/src/internal/workspace.js",
-      "default": "./dist/src/internal/workspace.js"
     },
     "./internal/git": {
       "eve-source": "./dist/src/internal/git.js",
@@ -622,8 +628,9 @@
     "test:tui": "tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs"
   },
   "dependencies": {
-    "nitro": "3.0.260903-beta",
-    "undici": "8.10.2"
+    "nitro": "3.0.261103-rc",
+    "rolldown": "1.2.16",
+    "undici": "8.12.3"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.3.0",
@@ -667,19 +674,19 @@
     "@vercel/sandbox": "catalog:",
     "@vercel/schedules": "0.0.0-alpha.19",
     "@vercel/sdk": "1.28.8",
-    "@workflow/core": "5.2.3",
-    "@workflow/errors": "5.0.5",
+    "@workflow/core": "5.3.0",
+    "@workflow/errors": "5.1.0",
     "@workflow/serde": "5.0.0",
-    "@workflow/world": "5.0.5",
-    "@workflow/world-local": "5.1.2",
-    "@workflow/world-vercel": "5.2.3",
+    "@workflow/world": "5.1.0",
+    "@workflow/world-local": "5.2.0",
+    "@workflow/world-vercel": "5.3.0",
     "ai": "catalog:",
     "chat": "4.42.0",
     "chokidar": "5.0.0",
     "commander": "14.0.3",
     "dd-trace": "6.13.0",
     "emulate": "0.6.0",
-    "env-runner": "0.1.16",
+    "env-runner": "0.3.11",
     "eventsource-parser": "3.1.0",
     "jose": "6.2.3",
     "js-yaml": "4.3.2",
@@ -707,7 +714,7 @@
     "@nuxt/kit": "^4.0.0",
     "@nuxt/schema": "^4.0.0",
     "@opentelemetry/api": "^1.0.0",
-    "@vercel/connect": "^2.5.2",
+    "@vercel/connect": "^2.7.0",
     "ai": "catalog:",
     "braintrust": "^3.0.0",
     "chat": "^4.42.0",

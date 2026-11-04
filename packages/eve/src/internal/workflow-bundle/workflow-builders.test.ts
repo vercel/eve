@@ -376,7 +376,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
   const toolSource = [
     'import { readFile } from "node:fs/promises";',
     'import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";',
-    'import { sleep } from "workflow";',
+    'import { sleep } from "eve/workflow";',
     'import { z } from "zod";',
     "",
     'const APPROVE = [{ id: "approve", label: "Deploy" }];',
@@ -436,7 +436,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
     );
     expect(transformed.code).toContain("async function execute({ service }");
     expect(transformed.code).toContain("const APPROVE = ");
-    expect(transformed.code).toContain('import { sleep } from "workflow";');
+    expect(transformed.code).toContain('import { sleep } from "eve/workflow";');
     expect(transformed.code).not.toContain("export default");
     expect(transformed.code).not.toContain("defineWorkflowTool");
     expect(transformed.code).not.toContain("zod");

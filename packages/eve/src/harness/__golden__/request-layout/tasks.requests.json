@@ -1,0 +1,206 @@
+[
+  {
+    "prompt": [
+      {
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nTasks\n- A call that returns \"Started task <id>\" is a task: it keeps working while you continue. Every agent call is a task.\n- Each result arrives once, in a <task_result> message. Until then you know nothing about it, so don't guess or report its result.\n- Ending your reply doesn't end your turn. While tasks work, eve holds your turn and calls you again with each result.\n- If you have nothing to tell the person until a result arrives, call eve__task_wait. Start every independent task first, then wait.\n- If the person should hear from you now, for example to confirm work is underway when they don't need the result yet, reply. When results arrive, report them without repeating yourself.\n- Don't redo work you delegated. Never use sleep or shell commands to wait for a task.\n- To correct or continue an agent, or any task that accepts more input, call its tool again with its taskId. A new message never stops your tasks: answer it if it asks you something, decide whether it changes the work, then keep each task, correct an agent by taskId, or stop a task with eve__task_cancel.",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "text": "Did QA pass?",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "tools": [
+      "bash",
+      "read_file",
+      "write_file",
+      "edit_file",
+      "web_fetch",
+      "agent",
+      "eve__task_wait",
+      "eve__task_cancel"
+    ]
+  },
+  {
+    "prompt": [
+      {
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nTasks\n- A call that returns \"Started task <id>\" is a task: it keeps working while you continue. Every agent call is a task.\n- Each result arrives once, in a <task_result> message. Until then you know nothing about it, so don't guess or report its result.\n- Ending your reply doesn't end your turn. While tasks work, eve holds your turn and calls you again with each result.\n- If you have nothing to tell the person until a result arrives, call eve__task_wait. Start every independent task first, then wait.\n- If the person should hear from you now, for example to confirm work is underway when they don't need the result yet, reply. When results arrive, report them without repeating yourself.\n- Don't redo work you delegated. Never use sleep or shell commands to wait for a task.\n- To correct or continue an agent, or any task that accepts more input, call its tool again with its taskId. A new message never stops your tasks: answer it if it asks you something, decide whether it changes the work, then keep each task, correct an agent by taskId, or stop a task with eve__task_cancel.",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "text": "Did QA pass?",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "input": {
+              "message": "Check the QA status."
+            },
+            "toolCallId": "call-agent",
+            "toolName": "agent",
+            "type": "tool-call"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "output": {
+              "type": "text",
+              "value": "Started task <id0>. Its result will arrive in a <task_result> message. To send it another message, call agent again with taskId <id0>."
+            },
+            "toolCallId": "call-agent",
+            "toolName": "agent",
+            "type": "tool-result"
+          }
+        ],
+        "role": "tool"
+      },
+      {
+        "content": [
+          {
+            "text": "[Tasks]\n<tasks>\n<task id=\"<id0>\" tool=\"agent\" status=\"working\"/>\n</tasks>",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "tools": [
+      "bash",
+      "read_file",
+      "write_file",
+      "edit_file",
+      "web_fetch",
+      "agent",
+      "eve__task_wait",
+      "eve__task_cancel"
+    ]
+  },
+  {
+    "prompt": [
+      {
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "text": "You are the subagent \"agent\".\n\nThe caller delegated the following task to you. Complete it and return the result directly. The caller may send follow-up messages after you answer.\n\nCaller message:\nCheck the QA status.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "tools": [
+      "bash",
+      "read_file",
+      "write_file",
+      "edit_file",
+      "web_fetch"
+    ]
+  },
+  {
+    "prompt": [
+      {
+        "content": "Instructions (instructions/agent)\nYou are Ada, a release assistant.\n\nTasks\n- A call that returns \"Started task <id>\" is a task: it keeps working while you continue. Every agent call is a task.\n- Each result arrives once, in a <task_result> message. Until then you know nothing about it, so don't guess or report its result.\n- Ending your reply doesn't end your turn. While tasks work, eve holds your turn and calls you again with each result.\n- If you have nothing to tell the person until a result arrives, call eve__task_wait. Start every independent task first, then wait.\n- If the person should hear from you now, for example to confirm work is underway when they don't need the result yet, reply. When results arrive, report them without repeating yourself.\n- Don't redo work you delegated. Never use sleep or shell commands to wait for a task.\n- To correct or continue an agent, or any task that accepts more input, call its tool again with its taskId. A new message never stops your tasks: answer it if it asks you something, decide whether it changes the work, then keep each task, correct an agent by taskId, or stop a task with eve__task_cancel.",
+        "role": "system"
+      },
+      {
+        "content": [
+          {
+            "text": "Did QA pass?",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "input": {
+              "message": "Check the QA status."
+            },
+            "toolCallId": "call-agent",
+            "toolName": "agent",
+            "type": "tool-call"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "output": {
+              "type": "text",
+              "value": "Started task <id0>. Its result will arrive in a <task_result> message. To send it another message, call agent again with taskId <id0>."
+            },
+            "toolCallId": "call-agent",
+            "toolName": "agent",
+            "type": "tool-result"
+          }
+        ],
+        "role": "tool"
+      },
+      {
+        "content": [
+          {
+            "text": "[Tasks]\n<tasks>\n<task id=\"<id0>\" tool=\"agent\" status=\"working\"/>\n</tasks>",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "QA is still being checked.",
+            "type": "text"
+          }
+        ],
+        "role": "assistant"
+      },
+      {
+        "content": [
+          {
+            "text": "<task_result id=\"<id0>\" tool=\"agent\" status=\"completed\">QA passed.</task_result>",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      {
+        "content": [
+          {
+            "text": "[Tasks]\n<tasks>\n</tasks>\n<idle>\n<task id=\"<id0>\" tool=\"agent\"/>\n</idle>",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "tools": [
+      "bash",
+      "read_file",
+      "write_file",
+      "edit_file",
+      "web_fetch",
+      "agent",
+      "eve__task_wait",
+      "eve__task_cancel"
+    ]
+  }
+]

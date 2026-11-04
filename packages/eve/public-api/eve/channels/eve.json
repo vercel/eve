@@ -1,5 +1,7 @@
 [
   "ClientContextValue",
+  "EveAuthFn",
+  "EveAuthResult",
   "EveChannel",
   "EveChannelConfig",
   "EveChannelEvents",
@@ -8,8 +10,10 @@
   "EveMessageContext",
   "EveMessageResult",
   "EveMessageResultOrPromise",
+  "EveVercelOidcOptions",
   "ForwardedAssertion",
   "TrustedForwarders",
   "defaultEveAuth",
-  "eveChannel"
+  "eveChannel",
+  "eveVercelOidc"
 ]

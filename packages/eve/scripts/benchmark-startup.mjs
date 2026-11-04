@@ -111,16 +111,19 @@ for (let run = 1; run <= runs; run++) {
       if (mode === "dev") {
         const probes = await waitReady(child, port, "/eve/v1/info", start, () => log);
         const wallMs = Math.round(performance.now() - start);
-        const client = new Client({ host: `http://127.0.0.1:${port}` });
+        const baseUrl = `http://127.0.0.1:${port}`;
+        // eve 0.84.0 renamed the client's `host` to `baseUrl`, `response` to
+        // `delivery`, and the turn's `message` to `reply`. Release backfills
+        // run this script against older clients, so it accepts both shapes.
+        const client = new Client({ baseUrl, host: baseUrl });
         const signal = AbortSignal.timeout(30000);
-        const { response } = await client.sessions.create({ message: "Hello", signal });
+        const created = await client.sessions.create({ message: "Hello", signal });
         const sessionAcceptedMs = Math.round(performance.now() - start);
-        const turn = await response.result();
+        const turn = await (created.delivery ?? created.response).result();
         const firstTurnMs = Math.round(performance.now() - start);
-        if (turn.message !== "ready")
-          throw new Error(
-            `First turn ended without the mock reply: ${JSON.stringify(turn.message)}`,
-          );
+        const reply = turn.reply ?? turn.message;
+        if (reply !== "ready")
+          throw new Error(`First turn ended without the mock reply: ${JSON.stringify(reply)}`);
         results.push({ run, mode, wallMs, sessionAcceptedMs, firstTurnMs, probes });
       } else if (mode === "start") {
         const probes = await waitReady(child, port, "/eve/v1/health", start, () => log);

@@ -1,11 +1,11 @@
-import type { LanguageModel } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 
 import { contextStorage } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
+import type { LanguageModel } from "ai";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { TASK_RESULT_TAG, TASKS_NOTE_LABEL } from "#execution/tasks/render.js";
-import { isPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
+import { isPendingApprovalsNotice } from "#harness/hitl/approval-prompt.js";
 
 // A V4 model receives the prompt as the AI SDK builds it; a V3 model gets a
 // downgraded copy where tool-result files become legacy `file-data` parts.
@@ -153,7 +153,7 @@ export interface MockModelOptions {
  */
 export function mockModel(
   input: MockModelOptions | MockModelResponder | string = {},
-): LanguageModel {
+): Exclude<LanguageModel, string> {
   const options = normalizeOptions(input);
   const respond = normalizeResponder(options.respond);
   const modelId = options.modelId ?? DEFAULT_MODEL_ID;
@@ -215,7 +215,7 @@ function isFrameworkScaffolding(message: string): boolean {
   return (
     text.startsWith(TASKS_NOTE_LABEL) ||
     text.startsWith(TASK_RESULT_TAG) ||
-    isPendingApprovalsSnippet(text)
+    isPendingApprovalsNotice(text)
   );
 }
 

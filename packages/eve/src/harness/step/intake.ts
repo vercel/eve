@@ -1,4 +1,5 @@
 import { stageAttachmentsToSandbox, stageToolResultMedia } from "#harness/attachment-staging.js";
+import { stepCatalog } from "#definitions/step.js";
 import { forgetFinishedRuns, runtimeResultCalls } from "#harness/coordination.js";
 import {
   anchorToTurn,
@@ -13,7 +14,7 @@ import {
   type UserModelMessage,
 } from "#harness/messages.js";
 import { finishRun, settle } from "#harness/session-machine/transitions.js";
-import { delegatedUsageFact } from "#harness/facts.js";
+import { recordLateSpend as recordLateSpendFact } from "#harness/session-machine/runs.js";
 import { activeTurnId, runtimeWait } from "#harness/session-machine/view.js";
 import { getTurnClientContextState } from "#harness/turn-client-context.js";
 import type { HarnessStepInput } from "#harness/types.js";
@@ -47,7 +48,7 @@ export async function settleRuntimeWork(
   const finished = forgetFinishedRuns(step.session, ready, runtime.event.turnId);
   step.session = finished.session;
   await step.apply(finishRun(step.view(), { requestIds: finished.requestIds }));
-  const results = await runtimeResultCalls(ready, step.config.tools);
+  const results = await runtimeResultCalls(ready, await stepCatalog(step));
   const staged = await stageToolResultMedia([
     { role: "tool", content: results.map(({ part }) => part) },
   ]);
@@ -80,8 +81,7 @@ async function recordLateSpend(
   settled: ReadonlySet<string>,
 ): Promise<void> {
   const late = Object.entries(usage ?? {}).filter(([callId]) => !settled.has(callId));
-  if (late.length > 0)
-    await step.publish(late.map(([, spent]) => delegatedUsageFact(undefined, spent)));
+  if (late.length > 0) await step.publish(recordLateSpendFact(late.map(([, spent]) => spent)));
 }
 
 /** The turn's input as the model reads it. */
@@ -129,6 +129,11 @@ export async function prepareTurnInput(
       ? await stageAttachmentsToSandbox(userContentOf(content))
       : undefined;
   if (staged !== undefined) {
+    if (isContinuation(step, input)) {
+      messages.push(
+        anchorToTurn(createFrameworkUserMessage("context.instruction", CONTINUATION_NOTE), turnId),
+      );
+    }
     messages.push(
       anchorToTurn(
         kind === undefined
@@ -148,6 +153,26 @@ export async function prepareTurnInput(
     storedClientContext,
     turnId,
   };
+}
+
+const CONTINUATION_NOTE =
+  "The next message was sent automatically after the last turn, not by a person.";
+
+/**
+ * Whether hooks' `ctx.continue()` sent all of the input, read from its deliveries' `source.hook`,
+ * which the admission commit recorded before the step. The note goes into history with the
+ * message, so the prompt the model reads matches what's stored.
+ */
+function isContinuation(step: Step, input: HarnessStepInput | undefined): boolean {
+  const deliveries = input?.deliveries ?? [];
+  const rows = step.view().projection.view.deliveries;
+  return (
+    deliveries.length > 0 &&
+    deliveries.every(({ deliveryId }) => {
+      const source = rows[deliveryId]?.source;
+      return source !== undefined && "hook" in source && source.hook !== undefined;
+    })
+  );
 }
 
 /** The turn's input as it follows tool results: a user message needs a boundary before it. */

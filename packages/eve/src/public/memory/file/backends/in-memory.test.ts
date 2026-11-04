@@ -9,34 +9,34 @@ describe("inMemory file-memory backend", () => {
   it("reads and conditionally replaces isolated documents", async () => {
     const backend = inMemory();
 
-    expect(await backend.read({ key: "a", abortSignal: signal })).toBeNull();
+    expect(await backend.read({ key: "a", signal })).toBeNull();
     const first = await backend.write({
       content: "first",
       expectedVersion: null,
       key: "a",
-      abortSignal: signal,
+      signal,
     });
     const second = await backend.write({
       content: "second",
       expectedVersion: first.version,
       key: "a",
-      abortSignal: signal,
+      signal,
     });
 
     expect(second.version).not.toBe(first.version);
-    expect(await backend.read({ key: "a", abortSignal: signal })).toEqual(second);
-    expect(await backend.read({ key: "b", abortSignal: signal })).toBeNull();
+    expect(await backend.read({ key: "a", signal })).toEqual(second);
+    expect(await backend.read({ key: "b", signal })).toBeNull();
   });
 
   it("rejects stale and duplicate-create writes", async () => {
     const backend = inMemory();
-    await backend.write({ content: "first", expectedVersion: null, key: "a", abortSignal: signal });
+    await backend.write({ content: "first", expectedVersion: null, key: "a", signal });
 
     await expect(
-      backend.write({ content: "duplicate", expectedVersion: null, key: "a", abortSignal: signal }),
+      backend.write({ content: "duplicate", expectedVersion: null, key: "a", signal }),
     ).rejects.toSatisfy(MemoryDocumentConflictError.is);
     await expect(
-      backend.write({ content: "stale", expectedVersion: "old", key: "a", abortSignal: signal }),
+      backend.write({ content: "stale", expectedVersion: "old", key: "a", signal }),
     ).rejects.toSatisfy(MemoryDocumentConflictError.is);
   });
 
@@ -45,8 +45,17 @@ describe("inMemory file-memory backend", () => {
     controller.abort(new Error("cancelled"));
     const backend = inMemory();
 
-    await expect(backend.read({ key: "a", abortSignal: controller.signal })).rejects.toThrow(
+    await expect(backend.read({ key: "a", signal: controller.signal })).rejects.toThrow(
       "cancelled",
     );
+    await expect(
+      backend.write({
+        key: "a",
+        content: "cancelled write",
+        expectedVersion: null,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("cancelled");
+    expect(await backend.read({ key: "a", signal })).toBeNull();
   });
 });

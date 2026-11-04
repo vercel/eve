@@ -27,6 +27,7 @@ interface Choice {
 interface AdaptiveCard {
   readonly body?: readonly {
     readonly choices?: readonly Choice[];
+    readonly inlines?: readonly { readonly text?: string }[];
     readonly text?: string;
     readonly type?: string;
   }[];
@@ -244,9 +245,11 @@ function adaptiveCard(body: ActivityBody): AdaptiveCard | undefined {
 
 function cardText(card: AdaptiveCard | undefined): string {
   return (card?.body ?? [])
-    .flatMap((element) =>
-      element.type === "TextBlock" && element.text !== undefined ? [element.text] : [],
-    )
+    .flatMap((element) => {
+      if (element.type === "TextBlock" && element.text !== undefined) return [element.text];
+      if (element.type !== "RichTextBlock") return [];
+      return [(element.inlines ?? []).map((inline) => inline.text ?? "").join("")];
+    })
     .join("\n");
 }
 

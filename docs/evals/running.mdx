@@ -3,7 +3,7 @@ title: "Running Evals"
 description: "The eve eval CLI: flags, filters, exit codes, artifacts, and how to wire evals into CI."
 ---
 
-`eve eval` discovers every `.eval.ts` file under `evals/`, boots a local dev server (or targets a remote one), runs the evals concurrently, and prints a per-eval summary.
+`eve eval` runs every `.eval.ts` file under `evals/` concurrently and prints a per-eval summary. It boots a local dev server, or targets a remote one with `--url`.
 
 ```bash
 eve eval                       # run all discovered evals locally
@@ -25,7 +25,7 @@ eve eval --keep-state          # keep the local server's state and Workflow data
 
 Positional ids match exactly or by directory prefix: `eve eval weather` runs `evals/weather.eval.ts`, every eval under `evals/weather/`, and every entry of an array-exported `weather.eval.ts`.
 
-Tag filters compose: `--tag` keeps evals carrying at least one listed tag, then `--exclude-tag` drops any eval carrying an excluded tag. A `--tag` filter that matches nothing is a configuration error (exit `2`), but a run where `--exclude-tag` removes every match succeeds with nothing executed — exclusion expresses "this suite does not apply here."
+Tag filters compose: `--tag` keeps evals carrying at least one listed tag, then `--exclude-tag` drops any eval carrying an excluded tag. A `--tag` filter that matches nothing is a configuration error (exit `2`). A run where `--exclude-tag` removes every match succeeds with nothing executed.
 
 ## Exit codes
 
@@ -37,13 +37,13 @@ Tag filters compose: `--tag` keeps evals carrying at least one listed tag, then 
 
 An eval that calls `t.skip(reason)` is reported as skipped, does not count as passed or failed, and never changes the exit code.
 
-`eve eval --json` flushes the complete report before exiting, including when stdout is piped to another process or redirected to a file.
+`eve eval --json` writes the complete report before exiting, including when stdout is piped to another process or redirected to a file.
 
-With `--verbose`, eve prefixes each line with its eval ID. It streams authored `t.log()` lines as they occur, then prints the workflow run ID for every captured primary and secondary session. Use those `wrun_...` IDs to find the corresponding runs in your workflow provider.
+With `--verbose`, eve prefixes each line with its eval ID and prints `t.log()` lines as they happen. It then prints the `wrun_...` workflow run ID for every session the eval read, so you can find the runs in your workflow provider.
 
 ## Repeat evals
 
-Model-backed evals can pass on one run and fail on the next. To measure how often an eval passes, pass `--repeat <n>` or set `repeat` in `evals.config.ts`, and eve runs every selected eval `n` times in one run. The CLI flag overrides the config value. The default is `1`, and output does not change at that value.
+Evals that call a real model can pass on one run and fail on the next. To measure how often an eval passes, pass `--repeat <n>` or set `repeat` in `evals.config.ts`. eve then runs every selected eval `n` times. The CLI flag overrides the config value. The default is `1`.
 
 ```bash
 eve eval weather --repeat 5
@@ -55,15 +55,22 @@ With `n` greater than `1`, each attempt is a separate result with a 1-based `att
 - `--json` results, JUnit test cases (named `<id>#<attempt>`), and [reporters](./reporters) receive one result per attempt.
 - Every attempt counts toward the run totals and the exit code, so one failed attempt fails the run.
 
-Attempts share the `--max-concurrency` pool with every other eval, so attempts of the same eval can run at the same time. If an eval depends on shared state or a rate-limited provider, lower `--max-concurrency` so contention does not show up as flakiness.
+Attempts share the `--max-concurrency` limit with every other eval, so attempts of one eval can run at the same time. If an eval depends on shared state or a rate-limited provider, lower `--max-concurrency` so contention doesn't look like flakiness.
 
 ## Artifacts
 
-Each run drops artifacts under `.eve/evals/<timestamp>/`: a run `summary.json`, a `results.jsonl` index, and per-eval assertion results, verdicts, start and completion times, captured event streams with the client's send and arrival times for each session, and `t.log` lines under `evals/`. In a repeated run, each attempt's detail and event files get an `.attempt-<n>` suffix, such as `evals/weather.attempt-2.json`. The console output stays tight on purpose; when an eval fails, the artifact has the full story.
+Each run writes artifacts under `.eve/evals/<timestamp>/`:
+
+- `summary.json` summarizes the run.
+- `results.jsonl` indexes the results, one line per eval.
+- `evals/` holds each eval's assertion results, verdict, start and completion times, and `t.log` lines.
+- `evals/` also holds each session's events, with when the client sent each request and received each event.
+
+In a repeated run, each attempt's detail and event files get an `.attempt-<n>` suffix, such as `evals/weather.attempt-2.json`. When an eval fails, check its artifact for details the console omits.
 
 ## CI
 
-A solid CI invocation is strict and machine-reportable:
+In CI, run evals strict and machine-reportable:
 
 ```bash
 eve eval --strict --junit .eve/junit.xml

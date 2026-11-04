@@ -17,19 +17,15 @@ import { getSiteOrigin } from "@/lib/geistdocs/url";
 
 type DocsPageEntry = NonNullable<ReturnType<typeof geistdocsSource.source.getPage>>;
 
-const resolveTitle = (page: DocsPageEntry, lang: string): string => {
-  const title = resolveDocsPageTitle({
-    pageTitle: page.data.title,
-    pageUrl: page.url,
-    tree: geistdocsSource.source.getPageTree(lang),
-  });
+const resolveTitle = (page: DocsPageEntry): string => {
+  const title = resolveDocsPageTitle({ pageTitle: page.data.title, pageUrl: page.url });
   if (!title) throw new Error(`Missing title for docs page ${page.url}`);
   return title;
 };
 
 const DocsStructuredData = ({ page }: { page: DocsPageEntry }) => {
   const lang = page.locale ?? defaultLanguage;
-  const title = resolveTitle(page, lang);
+  const title = resolveTitle(page);
   const pathname = getPublicPath(page.url, config.basePath);
   const data = docsArticleStructuredData({
     breadcrumbs: docsBreadcrumbs({
@@ -58,7 +54,7 @@ const docsPage = createDocsPage({
     return getMDXComponents(components);
   },
   metadata: ({ metadata, page, params }) => {
-    const titleMetadata = pageTitleMetadata(resolveTitle(page, params.lang));
+    const titleMetadata = pageTitleMetadata(resolveTitle(page));
     const pathname = getPublicPath(page.url, config.basePath);
     const ogImage = docsOgImage(page.slugs);
 

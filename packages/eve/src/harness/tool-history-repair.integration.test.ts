@@ -6,7 +6,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { createUserMessage } from "#harness/messages.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { repairToolHistory } from "#harness/tool-history-repair.js";
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createTestKernel } from "#internal/testing/kernel.js";
 import { setTurnClientContextState } from "#harness/turn-client-context.js";
 import type { HarnessSession } from "#harness/types.js";
 import { foldingHandler, withOpenTurn } from "#internal/testing/session-machine.js";
@@ -66,7 +66,8 @@ describe("saved tool history", () => {
         inputSchema: jsonSchema({ type: "object" }),
         execute,
       };
-      const step = createToolLoopHarness({
+      const step = createTestKernel({
+        agent: { model: { id: "repair-test" } },
         handleEvent: foldingHandler(),
         resolveModel: async () => new MockLanguageModelV4({ doStream }),
         tools: new Map([["work", tool]]),
@@ -79,8 +80,7 @@ describe("saved tool history", () => {
       const initial = setTurnClientContextState(
         withOpenTurn(
           {
-            agent: { modelReference: { id: "repair-test" }, system: "Test assistant", tools: [] },
-            compaction: { recentWindowSize: 10, threshold: 100_000 },
+            compaction: {},
             continuationToken: "http:repair-test",
             sessionId: "repair-test",
             history,
@@ -129,6 +129,8 @@ describe("saved tool history", () => {
     "duplicate-call",
     "late-result",
     "earlier-result",
+    "nested-provider-call",
+    "provider-approval",
   ])("leaves %s history untouched", (kind) => {
     let messages: ModelMessage[] = [calling, user];
     if (kind === "provider")
@@ -145,6 +147,34 @@ describe("saved tool history", () => {
     if (kind === "duplicate-call") messages.push(calling);
     if (kind === "late-result") messages.push({ role: "tool", content: [result] });
     if (kind === "earlier-result") messages.unshift({ role: "tool", content: [result] });
+    if (kind === "nested-provider-call") {
+      // An Anthropic programmatic run calls tools from inside `code_execution`; the run's result,
+      // which arrives a response late, covers what it called.
+      const run = { ...call, providerExecuted: true, toolCallId: "srvtoolu_run" };
+      const fromRun = {
+        anthropic: { caller: { toolId: run.toolCallId, type: "code_execution_20260120" } },
+      };
+      const nested = { ...run, providerOptions: fromRun, toolCallId: "srvtoolu_nested" };
+      messages = [
+        { role: "assistant", content: [run, { ...call, providerOptions: fromRun }, nested] },
+        { role: "tool", content: [result] },
+        { role: "assistant", content: [{ ...result, toolCallId: run.toolCallId }] },
+        user,
+      ];
+    }
+    if (kind === "provider-approval") {
+      const asked = { ...call, providerExecuted: true, toolCallId: "mcp_call" };
+      const request = {
+        type: "tool-approval-request" as const,
+        approvalId: "approval",
+        toolCallId: asked.toolCallId,
+      };
+      messages = [
+        { role: "assistant", content: [asked, request, call] },
+        { role: "tool", content: [result] },
+        user,
+      ];
+    }
     const original = structuredClone(messages);
     expect(repairToolHistory({ messages, insertionIndex: 1 })).toEqual({
       messages: original,

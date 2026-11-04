@@ -118,6 +118,8 @@ export interface ChannelDeliveryMetadata {
   readonly channelKind: string;
   readonly channelName: string;
   readonly deliveryId: string;
+  /** The hook whose `ctx.continue()` made the delivery, recorded on its `delivery.admitted`. */
+  readonly hook?: string;
   readonly requestId?: string;
   readonly requestTraceContext?: SessionTraceSeed;
 }
@@ -238,8 +240,8 @@ export type SessionSendCommandResult =
       readonly retryable?: boolean;
     };
 
-/** Result of terminally resetting a session. */
-export type ResetSessionResult =
+/** Result of ending a session. The `"reset"` status is kept for wire compatibility. */
+export type EndSessionResult =
   | { readonly status: "reset"; readonly previousSessionId: string }
   | { readonly status: "no_active_session" };
 
@@ -254,7 +256,7 @@ export type SessionCommandResult<TCommand extends SessionCommand = SessionComman
           ? CompactSessionResult
           : TCommand extends { readonly kind: "clear" }
             ? ClearSessionResult
-            : ResetSessionResult;
+            : EndSessionResult;
 
 export interface DispatchContinuationInput<TCommand extends SessionCommand = SessionCommand> {
   readonly command: TCommand;
@@ -627,7 +629,7 @@ export interface Runtime {
    * Sends a command to whichever session owns a continuation address. When
    * that owner is stranded, a send with a `successor` ends it and is accepted
    * by the successor; a send without one, or a `clear`, throws
-   * `SessionStrandedError`, and a `reset` ends it.
+   * `SessionStrandedError`, and an `end()` call retires it.
    */
   dispatchContinuation<TCommand extends SessionCommand>(
     input: DispatchContinuationInput<TCommand>,
@@ -635,7 +637,7 @@ export interface Runtime {
 
   /**
    * Sends a command to one exact session. A send or `clear` to a stranded
-   * session throws `SessionStrandedError`; a `reset` ends it.
+   * session throws `SessionStrandedError`; an `end()` call retires it.
    */
   dispatchSession<TCommand extends SessionCommand>(
     input: DispatchSessionInput<TCommand>,

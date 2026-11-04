@@ -64,7 +64,7 @@ async function createMinimalAppRoot(prefix: string): Promise<string> {
   );
   await writeFile(
     join(appRoot, "agent", "agent.mjs"),
-    'export default { model: "openai/gpt-5.4" };\n',
+    'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
   );
   await writeFile(join(appRoot, "agent", "instructions.md"), "You are a precise assistant.\n");
 
@@ -422,7 +422,7 @@ describe("runCli", () => {
     );
     await writeFile(
       join(workspaceRoot, "agent", "agent.mjs"),
-      'export default { model: "openai/gpt-5.4" };\n',
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
     );
     // No instructions.md or instructions.ts â discovery should fail with
     // DISCOVER_REQUIRED_INSTRUCTIONS_MISSING.

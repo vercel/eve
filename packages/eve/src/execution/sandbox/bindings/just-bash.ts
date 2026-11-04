@@ -51,8 +51,7 @@ export function createJustBashSandboxProvider(
 
   async function connect(context: SandboxSessionContext, rootPath: string) {
     return await createBashSandbox({
-      customCommands: options.customCommands,
-      filesystem: options.filesystem,
+      experimental: options.experimental,
       justBash: await importJustBashModule(context.resolveProjectPath(".")),
       resolveProjectPath: (path) => context.resolveProjectPath(path),
       rootPath,

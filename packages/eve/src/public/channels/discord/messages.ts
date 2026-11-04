@@ -1,8 +1,8 @@
 /**
  * Ordinary Discord messages, which Discord delivers only over its Gateway
- * WebSocket. A relay such as `experimental_runDiscordGatewayRelay` from
- * `eve/channels/discord/gateway` holds that connection and forwards each
- * dispatch, unchanged, to the route this module mounts.
+ * WebSocket. A relay such as `runDiscordGatewayRelay` from
+ * `eve/experimental/channels/discord/gateway` holds that connection and
+ * forwards each dispatch, unchanged, to the route this module mounts.
  */
 
 import type { SessionAuthContext } from "#channel/types.js";
@@ -136,7 +136,7 @@ export interface DiscordGatewayConfig {
    * Authenticates the relay. The body names the message author, so whoever
    * passes can act as any Discord user. Defaults to `localDev()` plus Vercel
    * OIDC tokens from this project's own runtime in the same environment,
-   * which is what `experimental_runDiscordGatewayRelay` sends from a Vercel Daemon.
+   * which is what `runDiscordGatewayRelay` sends from a Vercel Daemon.
    */
   readonly auth?: AuthFn<Request> | readonly AuthFn<Request>[];
   /**

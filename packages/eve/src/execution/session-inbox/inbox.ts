@@ -95,8 +95,8 @@ export interface SessionInboxReader {
   /** Resolves once a payload is ready or the inbox closes, without consuming anything. */
   whenPending(): Promise<void>;
   /**
-   * Called from the pump the moment an interrupt (`cancel`, `reset`,
-   * `session-timeout`) is accepted, ahead of any consumer read. Handlers must
+   * Called from the pump the moment an interrupt (`cancel`, `clear`,
+   * `reset`, `session-timeout`) is accepted, ahead of any consumer read. Handlers must
    * be synchronous and idempotent. The payload stays in the queue so the
    * consumer still processes it in order.
    */
@@ -177,6 +177,7 @@ export interface SessionInboxHandle extends SessionInbox {
 export function isInterrupt(value: SessionInboxPayload): boolean {
   return (
     value.kind === "cancel" ||
+    value.kind === "clear" ||
     value.kind === "reset" ||
     value.kind === "session-timeout" ||
     value.kind === "session-failure"

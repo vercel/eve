@@ -10,8 +10,7 @@ import type { HarnessSession } from "#harness/types.js";
 import { subagentTool } from "#internal/testing/catalog-fixtures.js";
 
 const session: HarnessSession = {
-  agent: { modelReference: { id: "test-model" }, system: "", tools: [] },
-  compaction: { recentWindowSize: 10, threshold: 100_000 },
+  compaction: {},
   continuationToken: "http:test-session",
   history: [],
   sessionId: "test-session",
@@ -65,7 +64,12 @@ describe("text beside a task wait", () => {
         }),
         { runId: "run_0", sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn_0" },
         stream(),
-        { excludedActionToolNames: new Set(), finalReplyOnly, tools: new Map() },
+        {
+          excludedActionToolNames: new Set(),
+          finalReplyOnly,
+          sessionCall: () => undefined,
+          tools: new Map(),
+        },
       );
 
       expect(events.filter((event) => event.type === "content.completed")).toEqual([

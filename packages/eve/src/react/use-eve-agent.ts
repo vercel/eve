@@ -64,7 +64,8 @@ export interface UseEveAgentReturn extends UseEveAgentSnapshot {
   readonly prewarm: () => Promise<void>;
   /** Resets the session: detaches any local stream and clears events and projected data. */
   readonly newSession: () => void;
-  readonly reset: () => Promise<Delivery>;
+  /** Retires the server-side session; call newSession() to prepare a fresh conversation. */
+  readonly end: () => Promise<Delivery>;
   readonly clear: () => Promise<Delivery>;
   readonly compact: () => Promise<Delivery>;
   /** Resolves on acceptance. Use `turnPolicy` to steer or queue during a running turn. */
@@ -153,7 +154,7 @@ export interface UseEveAgentOptions extends SessionStoreCallbacks {
  *
  * Returns the current snapshot (the conversation's `messages`, `agents`, and `view`, plus
  * `events`, `session`, `status`, and `error`) and the commands `prewarm`, `send`, `respond`,
- * `resume`, `cancel`, `newSession`, and `reset`. Read lifecycle from `view` with selectors
+ * `resume`, `cancel`, `newSession`, and `end`. Read lifecycle from `view` with selectors
  * from `eve/events`.
  *
  * Session-shaping options (`baseUrl`, `session`, `initialEvents`,
@@ -243,7 +244,7 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
   }, [store]);
 
   const cancel = useCallback(() => store.cancel(), [store]);
-  const reset = useCallback(() => store.reset(), [store]);
+  const end = useCallback(() => store.end(), [store]);
   const clear = useCallback(() => store.clear(), [store]);
   const compact = useCallback(() => store.compact(), [store]);
   const newSession = useCallback(() => {
@@ -282,7 +283,7 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
       compact,
       newSession,
       prewarm,
-      reset,
+      end,
       respond,
       resume,
       follow,
@@ -295,7 +296,7 @@ export function useEveAgent(options: UseEveAgentOptions = {}): UseEveAgentReturn
       follow,
       newSession,
       prewarm,
-      reset,
+      end,
       respond,
       resume,
       send,

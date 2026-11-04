@@ -20,14 +20,5 @@ export function parseSummary(text, id) {
   if (!/[.!?]$/u.test(summary) || [...sentences.segment(summary)].length !== 1) {
     throw new Error(`Changeset ${id}: the first line must contain exactly one complete sentence.`);
   }
-  const details = notes.join("\n").trim();
-  const credits = [...sentences.segment(details)]
-    .map(({ segment }) => segment)
-    .filter((sentence) => /\bthanks\b/iu.test(sentence))
-    .join(" ")
-    .replace(/`[^`]*`|https?:\/\/\S+/gu, "");
-  const contributors = [
-    ...credits.matchAll(/(?<![\w@/])@([a-z\d](?:[a-z\d-]{0,37}[a-z\d])?)(?![\w/-])/giu),
-  ].map((match) => match[1]);
-  return { summary, details, contributors };
+  return { summary, details: notes.join("\n").trim() };
 }

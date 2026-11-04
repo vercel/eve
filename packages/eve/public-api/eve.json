@@ -13,6 +13,10 @@
   "AgentWorkflowDefinition",
   "AgentWorkflowRetentionDefinition",
   "AgentWorkflowWorldDefinition",
+  "ApprovalContext",
+  "ApprovalPolicy",
+  "ApprovalStatus",
+  "ConnectionToolAnnotations",
   "DefinedAgent",
   "DynamicContext",
   "DynamicKey",
@@ -22,6 +26,7 @@
   "DynamicSubagentDefinition",
   "DynamicSubagentResult",
   "DynamicTurn",
+  "EveLanguageModel",
   "Memo",
   "Occurrence",
   "RemoteAgentDefinition",
@@ -29,10 +34,8 @@
   "RemoteAgentUrl",
   "SessionFrame",
   "SessionUsageLimit",
-  "WorkspaceAgentDefinition",
-  "WorkspaceAgentTransport",
+  "TokenUsage",
   "defineAgent",
   "defineDynamic",
-  "defineRemoteAgent",
-  "defineWorkspaceAgent"
+  "defineRemoteAgent"
 ]

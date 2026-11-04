@@ -36,10 +36,12 @@ import { deliverCompletedSlackReply } from "#public/channels/slack/reply-deliver
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import type {
   SlackApprovalChannelResolver,
+  SlackChannelConfig,
   SlackChannelInternalEvents,
   SlackChannelState,
   SlackContext,
   SlackEventContext,
+  SlackInboundMessageContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
 import {
@@ -166,6 +168,7 @@ export function defaultSlackAuth(
 
   return buildSlackAuthContext({
     channelId: ctx.slack.channelId,
+    email: author.email,
     fullName: author.fullName,
     installationTeamId: message.installationTeamId,
     isBot: author.isBot,
@@ -183,6 +186,36 @@ export function defaultSlackAuth(
  */
 export function defaultOnMessage(ctx: SlackContext, message: SlackMessage): SlackMentionResult {
   return { auth: defaultSlackAuth(message, ctx) };
+}
+
+type SlackMessageHook = NonNullable<SlackChannelConfig["onMessage"]>;
+
+/**
+ * Default `onMessageEdited`: runs the hook a new message of the same kind would reach on the
+ * edited message, so the app's own checks decide edits too. Without authored hooks, that sends
+ * edits to DMs, code channel messages, and messages that mention the bot before or after the
+ * edit, and drops the rest.
+ */
+export function defaultOnMessageEdited(
+  hooks: Pick<SlackChannelConfig, "onAppMention" | "onDirectMessage" | "onMessage">,
+): NonNullable<SlackChannelConfig["onMessageEdited"]> {
+  return (ctx, edit) => {
+    const hook = editedMessageHook(hooks, ctx, edit.message);
+    return hook === undefined ? null : hook(ctx, edit.message);
+  };
+}
+
+function editedMessageHook(
+  hooks: Pick<SlackChannelConfig, "onAppMention" | "onDirectMessage" | "onMessage">,
+  ctx: SlackInboundMessageContext,
+  message: SlackMessage,
+): SlackMessageHook | undefined {
+  if (message.raw.channel_type === "im") {
+    return hooks.onDirectMessage ?? hooks.onMessage ?? defaultOnMessage;
+  }
+  if (ctx.isBotMentioned()) return hooks.onAppMention ?? hooks.onMessage ?? defaultOnMessage;
+  if (ctx.slack.codeChannel) return hooks.onMessage ?? hooks.onAppMention ?? defaultOnMessage;
+  return hooks.onMessage;
 }
 
 /** eve's default `received`: the `Thinking...` status, set the moment a message arrives. */
@@ -447,6 +480,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const { capability, owner } = data;
     const counts = !("callId" in owner) && capability.kind !== "control";
     if (!narration && !counts) return;
+    // A call its turn made has no run to count it with: it shows its own label.
+    if ("turnId" in owner) {
+      await showStatus(channel, narration ?? callLabel(data));
+      return;
+    }
     if (!("runId" in owner)) return;
     const stream = stepStream(channel.state, owner.runId);
     const label = callLabel(data);
@@ -486,7 +524,8 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const { channel } = ctx;
     if (data.kind === "reasoning") {
       const stream = streamByState.get(channel.state);
-      if (stream?.runId !== data.runId || typeof data.value !== "string") return;
+      if (stream === undefined || stream.runId !== data.runId || typeof data.value !== "string")
+        return;
       stream.reasoning = data.value;
       await showReasoning(channel, stream, { complete: true });
       stream.reasoning = "";

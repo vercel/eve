@@ -19,6 +19,7 @@ import {
   truncatePlainText,
   truncateSectionText,
 } from "#public/channels/slack/limits.js";
+import { escapeSlackText, unescapeSlackText } from "#compiled/@chat-adapter/slack/format.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import type { SlackInteractionCardParts } from "#public/channels/slack/renderers.js";
 import { type Answer, parseAnswer, type ValidatedAnswer } from "#shared/input.js";
@@ -224,7 +225,7 @@ export function renderInteractionBlocks(
   route?: SlackHitlRoute,
 ): BlockKitBlock[] {
   const prompt = {
-    text: { text: truncateSectionText(request.request.prompt), type: "mrkdwn" },
+    text: { text: truncateSectionText(escapeSlackText(request.request.prompt)), type: "mrkdwn" },
     type: "section",
   };
   const details = renderInteractionDetailBlocks(request);
@@ -299,7 +300,7 @@ export function renderInteractionPostParts(
   }
 
   return {
-    controls: { blocks: [firstBlock], text: request.request.prompt },
+    controls: { blocks: [firstBlock], text: escapeSlackText(request.request.prompt) },
     details: { blocks: details, text: formatInteractionFallbackText(request) },
   };
 }
@@ -310,8 +311,9 @@ export function renderInteractionPostParts(
  * that appear in the blocks.
  */
 export function formatInteractionFallbackText(request: Interaction): string {
+  const prompt = escapeSlackText(request.request.prompt);
   const details = formatToolInputDetails(request);
-  return details === undefined ? request.request.prompt : `${request.request.prompt}\n${details}`;
+  return details === undefined ? prompt : `${prompt}\n${details}`;
 }
 
 /**
@@ -333,7 +335,8 @@ export type HitlFreeformModalMetadata = SlackSessionTarget & {
 /**
  * Builds the `views.open` payload for the freeform-answer modal. The
  * triggering `prompt` is preserved as a header section so the user can
- * re-read what they're answering inside the modal.
+ * re-read what they're answering inside the modal. `prompt` is the posted
+ * card's mrkdwn, which was escaped when the card was rendered.
  *
  * Title is auto-truncated to the Slack modal-title limit.
  */
@@ -341,7 +344,8 @@ export function buildFreeformModalView(input: {
   readonly metadata: HitlFreeformModalMetadata;
   readonly prompt?: string;
 }): Record<string, unknown> {
-  const title = input.prompt ? truncateModalTitle(input.prompt) : "Your answer";
+  // The title is plain_text, which Slack shows without decoding `&amp;`.
+  const title = input.prompt ? truncateModalTitle(unescapeSlackText(input.prompt)) : "Your answer";
   const promptBlocks = input.prompt
     ? [{ type: "section", text: { type: "mrkdwn", text: truncateSectionText(input.prompt) } }]
     : [];
@@ -421,7 +425,7 @@ function renderInteractionCardBlock(
     type: "card",
     body: {
       type: "mrkdwn",
-      text: truncateCardBodyText(`*${request.request.prompt}*`),
+      text: truncateCardBodyText(`*${escapeSlackText(request.request.prompt)}*`),
       verbatim: false,
     },
     actions: cardButtonOptions(request).map((opt, index) => buildCardButton(opt, actionId, index)),
@@ -479,7 +483,7 @@ export function buildAnsweredBlocks(input: {
   // Freeform answers echo user-typed text, which can exceed the section
   // limit on its own; cap the label so `chat.update` cannot fail.
   const answerLabel = truncateWithEllipsis(
-    input.answerLabel,
+    escapeSlackText(input.answerLabel),
     SLACK_SECTION_TEXT_MAX_LENGTH - ANSWERED_TEXT_PREFIX.length - ANSWERED_TEXT_SUFFIX.length,
   );
   blocks.push({
@@ -520,10 +524,11 @@ function formatToolInputContainerText(request: Interaction): string | undefined 
 
   const json = JSON.stringify(request.call?.input ?? {}, null, 2);
   if (json === "{}") return undefined;
+  const escaped = escapeSlackText(json);
 
   const bodyBudget =
     SLACK_SECTION_TEXT_MAX_LENGTH - TOOL_INPUT_CODE_PREFIX.length - TOOL_INPUT_SUFFIX.length;
-  const body = truncateWithEllipsis(json, bodyBudget);
+  const body = truncateWithEllipsis(escaped, bodyBudget);
   return `${TOOL_INPUT_CODE_PREFIX}${body}${TOOL_INPUT_SUFFIX}`;
 }
 
@@ -532,10 +537,11 @@ function formatToolInputDetails(request: Interaction): string | undefined {
 
   const json = JSON.stringify(request.call?.input ?? {}, null, 2);
   if (json === "{}") return undefined;
+  const escaped = escapeSlackText(json);
 
   const bodyBudget =
     SLACK_SECTION_TEXT_MAX_LENGTH - TOOL_INPUT_PREFIX.length - TOOL_INPUT_SUFFIX.length;
-  const body = truncateWithEllipsis(json, bodyBudget);
+  const body = truncateWithEllipsis(escaped, bodyBudget);
   return `${TOOL_INPUT_PREFIX}${body}${TOOL_INPUT_SUFFIX}`;
 }
 

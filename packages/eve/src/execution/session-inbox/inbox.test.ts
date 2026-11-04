@@ -210,6 +210,18 @@ describe("createSessionInbox", () => {
     expect(await inbox.release()).toEqual([]);
   });
 
+  it("pushes a clear to interrupt handlers, so it stops the running turn", async () => {
+    const input = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(createMockHook({ token: "stable", reads: [input.promise] }));
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    const interrupt = nextInterrupt(inbox);
+    input.resolve(resolved({ deliveryId: "clear-delivery", kind: "clear" }));
+    await expect(interrupt).resolves.toEqual({ deliveryId: "clear-delivery", kind: "clear" });
+    expect(inbox.drain()).toEqual([{ deliveryId: "clear-delivery", kind: "clear" }]);
+    expect(await inbox.release()).toEqual([]);
+  });
+
   it("stops notifying an unsubscribed interrupt handler", async () => {
     const first = createDeferred<IteratorResult<SessionInboxPayload>>();
     const second = createDeferred<IteratorResult<SessionInboxPayload>>();

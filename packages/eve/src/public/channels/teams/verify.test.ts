@@ -1,4 +1,4 @@
-import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { exportJWK, generateKeyPair, importJWK, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -17,6 +17,17 @@ describe("Teams request verification", () => {
         jwksUrl: "https://keys.example.test/jwks",
       }),
     ).resolves.toMatchObject({ aud: "APP", iss: "https://api.botframework.com" });
+  });
+
+  it("rejects a token signed with an algorithm other than RS256", async () => {
+    const fixture = await createJwtFixture({ algorithm: "PS256", audience: "APP" });
+    await expect(
+      verifyTeamsJwt(fixture.token, {
+        appId: "APP",
+        fetch: fixture.fetch,
+        jwksUrl: "https://keys.example.test/jwks",
+      }),
+    ).rejects.toThrow();
   });
 
   it("rejects bad audiences", async () => {
@@ -84,22 +95,27 @@ describe("Teams request verification", () => {
 });
 
 async function createJwtFixture(input: {
+  readonly algorithm?: "PS256";
   readonly audience: string;
   readonly issuer?: string;
   readonly serviceUrl?: string;
 }): Promise<{ readonly fetch: typeof fetch; readonly token: string }> {
-  const { privateKey, publicKey } = await generateKeyPair("RS256");
-  const jwk = await exportJWK(publicKey);
-  const key = { ...jwk, alg: "RS256", kid: "kid-1", use: "sig" };
+  const { privateKey, publicKey } = await generateKeyPair("RS256", { extractable: true });
+  // Bot Connector JWKS entries carry no `alg`, so the key does not pin one either.
+  const key = { ...(await exportJWK(publicKey)), kid: "kid-1", use: "sig" };
   const token = await new SignJWT(
     input.serviceUrl === undefined ? {} : { serviceurl: input.serviceUrl },
   )
-    .setProtectedHeader({ alg: "RS256", kid: "kid-1" })
+    .setProtectedHeader({ alg: input.algorithm ?? "RS256", kid: "kid-1" })
     .setAudience(input.audience)
     .setIssuer(input.issuer ?? "https://api.botframework.com")
     .setExpirationTime("5m")
     .setNotBefore("0s")
-    .sign(privateKey);
+    .sign(
+      input.algorithm === undefined
+        ? privateKey
+        : await importJWK(await exportJWK(privateKey), input.algorithm),
+    );
 
   return {
     fetch: vi.fn(async () => Response.json({ keys: [key] })) as typeof fetch,

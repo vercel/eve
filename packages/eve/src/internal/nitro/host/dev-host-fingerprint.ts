@@ -1,57 +1,70 @@
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { isAbsolute, relative } from "node:path";
 
 import { readDevelopmentEnvironmentHostValues } from "#cli/dev/environment.js";
-import { computeChannelRouteRegistrations } from "#internal/nitro/host/channel-routes.js";
+import { createHostSpec } from "#internal/nitro/host/host-spec.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
-import { usesLocalVercelSchedules } from "#internal/schedules/consumer-route.js";
 
+/**
+ * Hashes everything that shapes a development host build: the host spec minus
+ * its locations, plus the inputs the host bundles or bakes in from disk.
+ */
 export async function computeDevelopmentHostFingerprint(
   host: PreparedDevelopmentApplicationHost,
 ): Promise<string> {
-  const manifest = host.compileResult.manifest;
-  const agentNodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
+  const { appRoot, workspace } = host;
+  const {
+    authored,
+    locations: _locations,
+    extensionMounts,
+    extensionOverridePaths,
+    ...spec
+  } = createHostSpec(
+    host,
+    { kind: "development" },
+    { buildDir: workspace.nitroBuildDir, outputDir: workspace.nitroOutputDir },
+  );
+  // Equivalent hosts in different app roots or package stores share a
+  // fingerprint. Some paths are canonical, so the app root may appear as either.
+  const roots = [appRoot, realpathSync(appRoot)];
+  const portable = (path: string) =>
+    roots
+      .map((root) => relative(root, path))
+      .find((candidate) => !candidate.startsWith("..") && !isAbsolute(candidate)) ??
+    relative(appRoot, path);
   const payload = {
-    agentName: manifest.config.name,
-    bundler: {
-      externalDependencies: [
-        ...new Set([
-          ...(manifest.config.build?.externalDependencies ?? []),
-          ...manifest.subagents.flatMap((subagent) =>
-            subagent.configResolver === undefined
-              ? (subagent.agent.config.build?.externalDependencies ?? [])
-              : [],
-          ),
-        ]),
-      ].sort((left, right) => left.localeCompare(right)),
-      extensionScopes: agentNodes
-        .flatMap((node) => node.extensionMounts)
-        .map((mount) => ({
-          mountId: mount.mountId,
-          sourceRoot: mount.sourceRoot,
-        }))
-        .sort((left, right) => left.mountId.localeCompare(right.mountId)),
-      sandboxProviders: [
-        ...new Set(
-          agentNodes
-            .map((node) => node.sandbox?.providerName)
-            .filter((providerName): providerName is string => providerName !== undefined),
-        ),
-      ].sort((left, right) => left.localeCompare(right)),
-    },
-    channels: computeChannelRouteRegistrations(host),
-    environment: readDevelopmentEnvironmentHostValues(host.appRoot),
+    environment: readDevelopmentEnvironmentHostValues(appRoot),
     instrumentation: await readInstrumentationSource(host),
-    localScheduleConsumer: usesLocalVercelSchedules(manifest),
-    workflow: {
-      // Authored workflow bodies and step registrations are bundled into the
-      // host, so their sources are structural, not runtime, state.
-      authoredSources: host.generation.workflowSourceFingerprint ?? null,
-      enabled: agentNodes.some((node) =>
-        node.tools.some((tool) => tool.workflowProgram !== undefined),
+    spec: {
+      ...spec,
+      authored: {
+        packageRoot: portable(authored.packageRoot),
+        tsconfig: authored.tsconfig === false ? false : portable(authored.tsconfig),
+      },
+      extensionMounts: extensionMounts.map(
+        ({ mountSourcePath, programmaticImport, sourceRoot, ...mount }) => ({
+          ...mount,
+          mountSourcePath: portable(mountSourcePath),
+          // Its config reaches the extension through the runtime module map.
+          ...(programmaticImport && {
+            programmaticImport: {
+              entryPath: portable(programmaticImport.entryPath),
+              specifier: programmaticImport.specifier,
+            },
+          }),
+          sourceRoot: portable(sourceRoot),
+        }),
       ),
-      world: manifest.config.experimental?.workflow?.world ?? "local",
+      extensionOverridePaths: [...extensionOverridePaths].map(([sourcePath, mountId]) => [
+        portable(sourcePath),
+        mountId,
+      ]),
     },
+    // Authored workflow bodies and step registrations are bundled into the
+    // host, so their sources are structural, not runtime, state.
+    workflowSources: host.generation.workflowSourceFingerprint ?? null,
   };
 
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");

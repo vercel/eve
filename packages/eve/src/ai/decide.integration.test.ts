@@ -68,13 +68,11 @@ describe("decide", () => {
     const decider = decisionModel();
     const factory = vi.fn(() => decider.model);
     vi.stubGlobal("AI_SDK_DEFAULT_PROVIDER", { decisionModel: factory });
-    localDecisionModel.mockReturnValue(decisionModel().model);
 
     await decide({ state, questions });
     await decide({ model: "internal-decider", state, questions });
 
     expect(factory.mock.calls).toEqual([["typesafe-ai/jev"], ["internal-decider"]]);
-    expect(localDecisionModel).not.toHaveBeenCalled();
   });
 
   it("translates stable request options for explicit provider model instances", async () => {
@@ -86,6 +84,7 @@ describe("decide", () => {
       questions,
       signal: abortSignal,
       maxRetries: 0,
+      providerOptions: { gateway: { zeroDataRetention: true } },
     });
 
     expect(localDecisionModel).not.toHaveBeenCalled();
@@ -94,6 +93,7 @@ describe("decide", () => {
         state: [{ type: "json", value: state }],
         questions,
         abortSignal,
+        providerOptions: { gateway: { zeroDataRetention: true } },
       }),
     );
   });
@@ -109,7 +109,10 @@ describe("decide", () => {
     ).rejects.toThrow("not just its identity");
     const decider = decisionModel();
     const newerModel = { ...decider.model, specificationVersion: "v-next" };
-    await expect(decide({ model: newerModel, state, questions })).rejects.toThrow(/version/i);
+    await expect(
+      // @ts-expect-error Only the specification versions the AI SDK supports are accepted.
+      decide({ model: newerModel, state, questions }),
+    ).rejects.toThrow(/version/i);
     expect(decider.doDecide).not.toHaveBeenCalled();
   });
 

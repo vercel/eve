@@ -56,7 +56,7 @@ function boardHarness(
   if (!wake || !isHttpRouteDefinition(wake)) throw new Error("Expected the wake route.");
 
   const deliveries: Delivery[] = [];
-  const resets: string[] = [];
+  const ends: string[] = [];
   const context = mockChannelContext<BoardChannelState>((address, input) => {
     deliver(address);
     if ("message" in input) deliveries.push({ ...input, address });
@@ -66,7 +66,7 @@ function boardHarness(
   return {
     acks,
     deliveries,
-    resets,
+    ends,
     team,
     /** Posts before the next pull; resolves with the posted message once it lands. */
     queue(post: () => Promise<{ id: string; thread: string }>) {
@@ -91,9 +91,9 @@ function boardHarness(
             const source = context.from(address);
             return {
               ...source,
-              async reset(options) {
-                resets.push(address);
-                return await source.reset(options);
+              async end(options) {
+                ends.push(address);
+                return await source.end(options);
               },
             };
           },
@@ -147,7 +147,7 @@ describe("boardChannel against @vercel/board", () => {
     const root = await posted;
 
     const address = `eve:thread:${root.thread}`;
-    expect(board.resets).toEqual([address]);
+    expect(board.ends).toEqual([address]);
     expect(board.deliveries.map((delivery) => [delivery.address, delivery.message])).toEqual([
       [address, "Is the deploy done?"],
     ]);

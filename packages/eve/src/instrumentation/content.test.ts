@@ -102,6 +102,33 @@ describe("withInstrumentationDecision", () => {
     );
   });
 
+  it("keeps a responder's id only when content is recorded both ways", () => {
+    const resolved = {
+      idempotencyKey: "request-1",
+      kind: "approval",
+      outcome: "accepted",
+      interactionId: "request-1",
+      responder: { id: "slack:T1:U2", type: "user" },
+      scope,
+      type: "interaction.settled",
+    } satisfies InstrumentationInteractionSettledEvent;
+
+    expect(
+      withInstrumentationDecision(resolved, {
+        action: "record",
+        recordInputs: true,
+        recordOutputs: true,
+      }),
+    ).toMatchObject({ responder: { id: "slack:T1:U2", type: "user" } });
+    expect(
+      withInstrumentationDecision(resolved, {
+        action: "record",
+        recordInputs: true,
+        recordOutputs: false,
+      }),
+    ).toEqual(expect.objectContaining({ responder: { type: "user" } }));
+  });
+
   it("treats recalled memory records as inputs", () => {
     const completed = {
       outcome: "completed",

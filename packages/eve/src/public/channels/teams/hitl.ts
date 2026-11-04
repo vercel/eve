@@ -38,6 +38,27 @@ export const TEAMS_HITL_REQUEST_KIND_KEY = "kind";
 /** Prompt carried on approval actions so a response can recover its card record. */
 export const TEAMS_HITL_PROMPT_KEY = "prompt";
 
+/**
+ * A literal Adaptive Card paragraph. TextBlock renders markdown, so a model-written
+ * `[docs](https://evil.example)` would show as a link to a different address. TextRun does not.
+ */
+function literalText(
+  text: string,
+  run: { readonly color?: string; readonly fontType?: "Monospace" } = {},
+): Record<string, unknown> {
+  return {
+    inlines: [
+      {
+        ...(run.color !== undefined && { color: run.color }),
+        ...(run.fontType !== undefined && { fontType: run.fontType }),
+        text: truncate(text, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
+        type: "TextRun",
+      },
+    ],
+    type: "RichTextBlock",
+  };
+}
+
 /** Renders one input request as a Teams message body containing an Adaptive Card. */
 export function renderInteractionMessage(
   request: Interaction,
@@ -53,6 +74,7 @@ export function renderInteractionMessage(
     text: renderedDetails
       ? `${request.request.prompt}\n\nTool input:\n${renderedDetails}`
       : request.request.prompt,
+    textFormat: "plain",
   };
 }
 
@@ -73,21 +95,8 @@ export function renderInteractionAttachment(
     $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
     actions: renderActions(request, options.replyToActivityId),
     body: [
-      {
-        text: truncate(request.request.prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
-        type: "TextBlock",
-        wrap: true,
-      },
-      ...(details
-        ? [
-            {
-              fontType: "Monospace",
-              text: truncate(details, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
-              type: "TextBlock",
-              wrap: true,
-            },
-          ]
-        : []),
+      literalText(request.request.prompt),
+      ...(details ? [literalText(details, { fontType: "Monospace" })] : []),
       ...renderInputs(request),
     ],
     type: "AdaptiveCard",
@@ -108,7 +117,7 @@ export function renderAnsweredInteractionMessage(input: {
 }): TeamsMessageBody {
   const text = input.label ? `Answered: ${input.label}` : "Answered";
   const result = renderSettledInputRequestMessage(input.prompt, { color: "good", text });
-  if (input.includeText !== false) return { ...result, text };
+  if (input.includeText !== false) return { ...result, text, textFormat: "plain" };
   return result;
 }
 
@@ -128,22 +137,13 @@ function renderSettledInputRequestMessage(
   prompt: string | undefined,
   status: { readonly color?: string; readonly text: string },
 ): TeamsMessageBody {
-  const promptBlocks =
-    prompt === undefined
-      ? []
-      : [
-          {
-            text: truncate(prompt, TEAMS_ADAPTIVE_CARD_TEXT_MAX_LENGTH),
-            type: "TextBlock",
-            wrap: true,
-          },
-        ];
+  const promptBlocks = prompt === undefined ? [] : [literalText(prompt)];
   return {
     attachments: [
       {
         content: parseJsonObject({
           $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-          body: [...promptBlocks, { ...status, type: "TextBlock", wrap: true }],
+          body: [...promptBlocks, literalText(status.text, { color: status.color })],
           type: "AdaptiveCard",
           version: "1.5",
         }),

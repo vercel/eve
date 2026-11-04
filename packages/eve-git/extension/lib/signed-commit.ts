@@ -1,4 +1,4 @@
-export const GH_SIGNED_COMMIT_VERSION = "3";
+export const GH_SIGNED_COMMIT_VERSION = "4";
 
 export const GH_SIGNED_COMMIT_SOURCE = String.raw`#!/usr/bin/env node
 const { execFileSync } = require("node:child_process");
@@ -17,7 +17,7 @@ for (let i = 0; i < args.length; i += 1) {
 if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(options.repo || "")) fail("--repo owner/name is required");
 if (!options.branch) fail("--branch is required");
 if (!options.message) fail("-m headline is required");
-if (!process.env.GH_TOKEN) fail('GH_TOKEN is not set; invoke the configured authenticated gh tool with command "gh-signed-commit --repo owner/name --branch branch -m headline", permissions [{"provider":"github","repositories":["owner/name"],"access":"write"}], a description of the intended commit, and workingDirectory set to the repository. Use the same repository for --repo and permissions; the tool supplies the scoped credential lease.');
+if (!process.env.GH_TOKEN) fail('GH_TOKEN is not set; invoke the configured authenticated gh tool with command "gh-signed-commit --repo owner/name --branch branch -m headline", repository "owner/name", a description of the intended commit, and workingDirectory set to the repository. Use the same repository for --repo and repository; the tool supplies the credential lease.');
 
 const [owner, repo] = options.repo.split("/");
 const api = "https://api.github.com";
@@ -32,6 +32,10 @@ main().catch((error) => fail(error instanceof Error ? error.message : String(err
 
 async function main() {
   ensureNoUnstagedTrackedChanges();
+  const changes = stagedChanges();
+  if (changes.additions.length === 0 && changes.deletions.length === 0) {
+    throw new Error("no staged changes; stage files with git add before running gh-signed-commit");
+  }
   let head = await branchHead(options.branch);
   if (head === null) {
     const base = options.base || (await request("GET", "/repos/" + owner + "/" + repo)).default_branch;
@@ -44,10 +48,6 @@ async function main() {
     head = baseHead;
   }
 
-  const changes = stagedChanges();
-  if (changes.additions.length === 0 && changes.deletions.length === 0) {
-    throw new Error("no staged changes; stage files with git add before running gh-signed-commit");
-  }
   const query = "mutation CreateCommitOnBranch($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }";
   const message = { headline: options.message };
   if (options.body) message.body = options.body;
@@ -89,16 +89,20 @@ function ensureNoUnstagedTrackedChanges() {
 }
 
 function stagedChanges() {
-  const output = git("diff", "--cached", "--no-renames", "--name-status", "-z", "HEAD");
+  const output = git("diff", "--cached", "--no-renames", "--raw", "-z", "HEAD");
   const tokens = output.toString().split("\0").filter(Boolean);
   const additions = [];
   const deletions = [];
   for (let index = 0; index < tokens.length; index += 2) {
-    const status = tokens[index]?.[0];
+    const [oldMode, newMode, , , status] = tokens[index].slice(1).split(" ");
     const path = tokens[index + 1];
     if (!status || !path) throw new Error("unexpected staged diff output");
     if (status === "A" || status === "M" || status === "T") {
-      additions.push({ path, contents: git("show", ":" + path).toString("base64") });
+      // FileAddition carries no mode, so it cannot express every index entry safely.
+      if (newMode !== "100644" || (oldMode !== "000000" && oldMode !== "100644")) {
+        throw new Error("cannot safely publish " + JSON.stringify(path) + " (mode " + oldMode + " -> " + newMode + "); gh-signed-commit only adds or updates non-executable regular files. Use native git commit -S with a configured signing key and git push for executable files, symlinks, submodules, or mode changes. Your staged changes are preserved.");
+      }
+      additions.push({ path, contents: git("show", ":0:" + path).toString("base64") });
     } else if (status === "D") deletions.push({ path });
     else if (status === "U") throw new Error("unmerged path: " + path);
     else throw new Error("unsupported staged status " + status + " for " + path);

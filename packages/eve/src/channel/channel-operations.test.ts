@@ -147,7 +147,7 @@ describe("createChannelOperations", () => {
     await source.cancel({ turnId: "turn_1" });
     await source.compact();
     await source.clear();
-    await source.reset({ reason: "fresh start" });
+    await source.end({ reason: "fresh start" });
 
     expect(runtime.dispatchContinuation).toHaveBeenNthCalledWith(1, {
       command: { deliveryId: expect.any(String), kind: "cancel", turnId: "turn_1" },

@@ -10,22 +10,20 @@ import type {
 } from "ai";
 import { usageOf } from "#harness/facts.js";
 import { createRuntimeToolResultFromMessagePart } from "#harness/action-result-helpers.js";
-import { callSettledFrom, toJsonValue } from "#harness/call-facts.js";
+import { toJsonValue } from "#harness/call-facts.js";
+import { settleCall } from "#harness/session-machine/calls.js";
+import { settleRun } from "#harness/session-machine/runs.js";
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
-import type { SessionEvent } from "#protocol/session-event.js";
 import type { Usage } from "#protocol/session-events/envelope.js";
 import type { ToolSignIn } from "#harness/call-executor.js";
 import type { TurnPosition } from "#harness/session-machine/view.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { applyConversationCacheControl, mergeGatewayAutoCaching } from "#harness/prompt-cache.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
-import {
-  type HarnessEmitFn,
-  type HarnessSession,
-  requireSessionModelReference,
-} from "#harness/types.js";
+import { type HarnessEmitFn, type HarnessSession } from "#harness/types.js";
 import { contextStorage } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
 import type { ApprovalAsk } from "#harness/session-machine/view.js";
@@ -54,9 +52,8 @@ export type HarnessStepResult = Pick<
   readonly invalidInputToolCallIds?: ReadonlySet<string>;
   /** The calls eve ran that wait on a person's approval. */
   readonly approvalRequests?: readonly ApprovalAsk[];
-  readonly policyApprovals?: Readonly<
-    Record<string, import("#protocol/session-events/families/call.js").ClearedBy>
-  >;
+  /** The calls eve cleared that the runtime runs, and what cleared each. */
+  readonly policyApprovals?: Readonly<Record<string, import("#harness/clearance.js").Clearance>>;
   /** The calls eve ran that stopped for a sign-in. */
   readonly signIns?: readonly ToolSignIn[];
 };
@@ -70,6 +67,8 @@ export type HarnessStepResult = Pick<
  */
 interface StepHooksInput {
   readonly auth?: import("#channel/types.js").SessionAuthContext | null;
+  /** The model the call runs. */
+  readonly model: RuntimeModelReference;
   readonly profile: ModelProfile;
   /**
    * Starts the model step the SDK is about to run. Omitted when the step already started, as
@@ -162,11 +161,10 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
         : messages,
     };
 
-    const modelReference = requireSessionModelReference(session);
     const providerOptions = resolveCallProviderOptions({
       auth: input.auth ?? contextStorage.getStore()?.get(AuthKey) ?? null,
       profile,
-      providerOptions: modelReference.providerOptions,
+      providerOptions: input.model.providerOptions,
       session,
     });
     if (profile.gateway) {
@@ -213,41 +211,33 @@ export async function emitStepActions(
 ): Promise<void> {
   const { runId } = state;
   for (const part of notRun) {
-    await emitFn(callSettledFrom(createRuntimeToolResultFromMessagePart(part, part.toolName)));
+    await emitFn(settleCall(createRuntimeToolResultFromMessagePart(part, part.toolName)));
   }
   if (runId === undefined) return;
-  const commit: SessionEvent[] = [];
   const result = finalOutputOf(step);
-  if (result !== undefined) {
-    commit.push({
-      data: { kind: "result", partId: `${runId}.result`, phase: "reply", runId, value: result },
-      type: "content.completed",
-    });
-  }
-  const settled: {
-    runId: string;
-    outcome: "completed";
-    finishReason: string;
-    generationId?: string;
-  } = {
-    finishReason: normalizeAssistantStepFinishReason(step.finishReason),
-    outcome: "completed",
-    runId,
-  };
-  const generationId = readGatewayGenerationId(step.providerMetadata);
-  if (generationId !== undefined) settled.generationId = generationId;
-  commit.push({ data: settled, type: "model.settled" });
-  const usage = runUsageOf({
-    costUsd: extractGatewayCostUsd(step.providerMetadata),
-    usage: step.usage,
-  });
-  if (usage !== undefined) {
-    commit.push({
-      data: { kind: "model", owner: { runId }, usage },
-      type: "usage.recorded",
-    });
-  }
-  await emitFn(commit);
+  await emitFn(
+    settleRun(
+      {
+        finishReason: normalizeAssistantStepFinishReason(step.finishReason),
+        generationId: readGatewayGenerationId(step.providerMetadata),
+        outcome: "completed",
+        runId,
+        usage: runUsageOf({
+          costUsd: extractGatewayCostUsd(step.providerMetadata),
+          usage: step.usage,
+        }),
+      },
+      result === undefined
+        ? undefined
+        : {
+            kind: "result",
+            partId: `${runId}.result`,
+            phase: "reply",
+            runId,
+            value: result,
+          },
+    ),
+  );
 }
 
 /** The run's structured result: the input of its valid `eve__reply` call. */

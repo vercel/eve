@@ -450,7 +450,7 @@ async function sendRecovering(
     log.warn("board thread's session was stranded by an eve upgrade; starting a new one", {
       error,
     });
-    await source.reset({ reason: "Stranded by an eve upgrade; the board thread starts over." });
+    await source.end({ reason: "Stranded by an eve upgrade; the board thread starts over." });
     return await source.send(message, options);
   }
 }

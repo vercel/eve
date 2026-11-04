@@ -1,8 +1,10 @@
-import { isAbsolute, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
 
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
+import { isDefinedAgent } from "#public/definitions/agent.js";
+import { isDynamicSentinel } from "#dynamic/definition.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { isMockModel } from "#internal/mock-model-identity.js";
@@ -24,6 +26,7 @@ import {
 } from "#compiler/normalize-helpers.js";
 import type { AgentModuleBinding } from "#compiler/source-graph.js";
 import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -42,20 +45,25 @@ export async function compileAgentConfig(
 ): Promise<CompiledAgentDefinition> {
   const configModule = options.source;
   const configModulePath = formatAgentConfigModulePath(manifest, configModule, options.binding);
-  const definition = normalizeAgentDefinition(
-    Object.hasOwn(options, "definition")
-      ? options.definition
-      : await loadModuleBackedDefinition({
-          binding: options.binding,
-          displayPath: configModulePath,
-          kind: "agent config",
-          loadNamespace: createCompiledBindingNamespaceLoader({
-            appRoot: manifest.appRoot,
-            bindings: { [configModule.sourceId]: options.binding },
-            registries: context.registries,
-          }),
-          source: configModule,
+  const authored = Object.hasOwn(options, "definition")
+    ? options.definition
+    : await loadModuleBackedDefinition({
+        binding: options.binding,
+        displayPath: configModulePath,
+        kind: "agent config",
+        loadNamespace: createCompiledBindingNamespaceLoader({
+          appRoot: manifest.appRoot,
+          bindings: { [configModule.sourceId]: options.binding },
+          registries: context.registries,
         }),
+        source: configModule,
+      });
+  // A defineDynamic() export gets normalizeAgentDefinition's more specific error.
+  if (!isDefinedAgent(authored) && !isDynamicSentinel(authored)) {
+    throw new Error(`Export defineAgent({...}) from "${configModulePath}".`);
+  }
+  const definition = normalizeAgentDefinition(
+    authored,
     `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public eve shape.`,
   );
   const dynamicModelDefinition = isDynamicModelDefinition(definition.model)
@@ -80,6 +88,7 @@ export async function compileAgentConfig(
   } = {};
 
   const compiledConfig: {
+    approval?: boolean;
     build?: CompiledAgentDefinition["build"];
     compaction: {
       model?: CompiledRuntimeModelReference;
@@ -105,6 +114,11 @@ export async function compileAgentConfig(
 
   if (definition.description !== undefined) {
     compiledConfig.description = definition.description;
+  }
+
+  // A function can't enter the manifest; the runtime loads it from the agent config module.
+  if (definition.approval !== undefined) {
+    compiledConfig.approval = true;
   }
 
   let dynamicModel: CompiledAgentDefinition["dynamicModel"] | undefined;
@@ -142,7 +156,10 @@ export async function compileAgentConfig(
   if (definition.limits !== undefined) {
     compiledConfig.limits = {
       sessionTimeoutMs: definition.limits.sessionTimeoutMs,
-      sessionUsage: definition.limits.sessionUsage === undefined ? undefined : true,
+      sessionUsage:
+        typeof definition.limits.sessionUsage === "function"
+          ? true
+          : definition.limits.sessionUsage,
     };
   }
 
@@ -159,8 +176,8 @@ export async function compileAgentConfig(
     });
   }
 
-  if (definition.compaction?.thresholdPercent !== undefined) {
-    compaction.thresholdPercent = definition.compaction.thresholdPercent;
+  if (definition.compaction?.threshold !== undefined) {
+    compaction.thresholdPercent = definition.compaction.threshold;
   }
 
   if (dynamicModel !== undefined) {
@@ -335,17 +352,11 @@ function resolveTopLevelAgentRoot(manifest: AgentSourceManifest): string {
   const nestedAgentRoot = resolve(appRoot, "agent");
   const agentRoot = resolve(manifest.agentRoot);
 
-  if (isPathInsideOrEqual(nestedAgentRoot, agentRoot)) {
+  if (isPathInsideOrEqual(agentRoot, nestedAgentRoot)) {
     return nestedAgentRoot;
   }
 
   return appRoot;
-}
-
-function isPathInsideOrEqual(parentPath: string, childPath: string): boolean {
-  const relativePath = relative(parentPath, childPath);
-
-  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
 
 async function withCompiledRuntimeModelLimits(

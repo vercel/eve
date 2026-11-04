@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { scheduleCollectionTools } from "#context/schedule-collection-tools.js";
 import { z } from "#compiled/zod/index.js";
 import {
   resolveApprovalPolicy,
@@ -87,12 +88,7 @@ describe("schedule creation and invocation", () => {
     });
     await app.runAsSession(undefined, async () => {
       await bindCaller();
-      const wrapper = app.manifest.dynamicTools.find(
-        (entry) => entry.logicalPath === "tools/schedule__requests.ts",
-      )!;
-      const dynamic = app.moduleMap.nodes.__root__!.modules[wrapper.sourceId]!
-        .default as ReturnType<typeof import("#dynamic/definition.js").defineDynamic>;
-      const tools = (await dynamic.evaluate({} as never)) as Record<
+      const tools = scheduleCollectionTools(subscription, "requests") as Record<
         string,
         ToolDefinition<never, unknown> & {
           execute(input: unknown, ctx: never): Promise<unknown>;

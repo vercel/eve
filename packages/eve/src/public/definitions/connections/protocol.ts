@@ -19,16 +19,7 @@ export function stampConnectionProtocol(definition: object, protocol: Connection
 }
 
 /**
- * Reads the stamped protocol from a connection definition, defaulting
- * to `"mcp"` when unstamped so connection modules authored before the
- * marker existed continue to compile as MCP connections.
- */
-export function readConnectionProtocol(definition: unknown): ConnectionProtocol {
-  return readStampedConnectionProtocol(definition) ?? "mcp";
-}
-
-/**
- * Reads the protocol marker without applying the legacy MCP fallback.
+ * Reads the protocol marker stamped by the connection helper.
  * Dynamic connection resolvers use this to distinguish one branded
  * connection definition from a map of branded definitions.
  */

@@ -12,7 +12,7 @@ import { collectOtelPipeline } from "#tracing/eve/otel-declaration.js";
 import {
   isInstrumentationDisabled,
   type InstrumentationProvider,
-} from "#public/instrumentation/provider.js";
+} from "#instrumentation/provider.js";
 
 /**
  * Process-global registry of the providers authored under

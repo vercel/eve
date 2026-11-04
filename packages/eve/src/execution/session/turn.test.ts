@@ -1062,11 +1062,13 @@ describe("SessionExecution checkpoints", () => {
     });
     expect(execution.cursor.sessionState).toEqual(completedState);
     expect(publishSessionEvents).toHaveBeenCalledWith(expect.anything(), [
-      {
-        type: "delivery.admitted",
-        data: { deliveryId: "cancel-delivery", source: { control: "cancel" } },
-      },
-      { type: "delivery.settled", data: { deliveryId: "cancel-delivery", outcome: "ignored" } },
+      [
+        {
+          type: "delivery.admitted",
+          data: { deliveryId: "cancel-delivery", source: { control: "cancel" } },
+        },
+        { type: "delivery.settled", data: { deliveryId: "cancel-delivery", outcome: "ignored" } },
+      ],
     ]);
     expect(cancelTasksStep).not.toHaveBeenCalled();
     expect(queue.pendingCount).toBe(1);

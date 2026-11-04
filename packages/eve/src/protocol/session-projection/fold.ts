@@ -454,11 +454,25 @@ function foldSpecifics(
       if (previews !== undefined) delete previews.parts[partId];
       // A reply part joins its turn's reply as it completes. A later step's reply replaces an
       // earlier step's, such as a held turn's text while its tasks work: the turn's answer is the
-      // reply its last replying step writes, and a step that writes none leaves it standing.
-      const owner = view.runs[runId]?.owner;
-      const turn = owner !== undefined && "turnId" in owner ? view.turns[owner.turnId] : undefined;
+      // reply its last replying step writes, and a step that writes none leaves it standing. Parts
+      // the turn wrote without a run count as one step of their own. Only a run its turn made
+      // answers it: a context change's run, such as a compaction's summary, never does.
+      const runOwner = runId === undefined ? undefined : view.runs[runId]?.owner;
+      const turnId =
+        runId === undefined
+          ? fact.scope?.turnId
+          : runOwner !== undefined && "turnId" in runOwner
+            ? runOwner.turnId
+            : undefined;
+      // A part no run wrote belongs to the turn its scope names.
+      if (runId === undefined && turnId !== undefined)
+        view.parts[partId] = { ...view.parts[partId]!, turnId };
+      const turn = turnId === undefined ? undefined : view.turns[turnId];
       if (phase === "reply" && turn !== undefined && turn.status !== "settled") {
-        const sameStep = (turn.reply ?? []).filter((id) => view.parts[id]?.runId === runId);
+        const sameStep = (turn.reply ?? []).filter((id) => {
+          const part = view.parts[id];
+          return part !== undefined && part.runId === runId;
+        });
         view.turns[turn.turnId] = { ...turn, reply: [...sameStep, partId] };
       }
       return;
@@ -575,7 +589,13 @@ function prune(view: MutableView, keep: FoldOptions["keep"]): void {
     pinned.add(`parts:${partId}`);
   const retained = (family: Family, id: string) => {
     if (pinned.has(`${tableOf(family)}:${id}`) || keep?.(tableOf(family), id) === true) return true;
-    const turnId = family === "part" ? undefined : turnOf(view, { family, id });
+    // A settled delivery no longer belongs to its turn, but it's still the turn's input.
+    const turnId =
+      family === "part"
+        ? undefined
+        : family === "delivery"
+          ? view.deliveries[id]?.turnId
+          : turnOf(view, { family, id });
     return turnId !== undefined && turns.has(turnId);
   };
   const dropWhere = <TRow>(

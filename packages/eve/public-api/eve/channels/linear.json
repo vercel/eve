@@ -36,7 +36,6 @@
   "callLinearGraphQL",
   "createLinearAgentActivity",
   "defaultLinearAuth",
-  "defaultOnAgentSession",
   "linearChannel",
   "linearContinuationToken"
 ]

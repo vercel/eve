@@ -12,10 +12,27 @@ export function defineSlackAppManifest(input: {
   readonly botName?: string;
   /** Adds the scopes, events, and feature flag Slack code channels need. */
   readonly codeChannels?: boolean;
+  /** Adds the `users:read` scope `messageContext.users` needs for names. */
+  readonly users?: boolean;
+  /** Adds the `users:read.email` scope `messageContext.users.email` needs. */
+  readonly userEmails?: boolean;
 }): SlackAppManifestBuildDefinition {
   return {
     build(channelName) {
       const name = (input.botName ?? channelName).slice(0, 35);
+      // Slack sends message edits only through the message events, which need the history scopes.
+      const botScopes = [
+        "app_mentions:read" as const,
+        "channels:history" as const,
+        "chat:write" as const,
+        "groups:history" as const,
+        "im:history" as const,
+        "mpim:history" as const,
+        ...(input.users === true ? (["users:read"] as const) : []),
+        ...(input.users === true && input.userEmails === true
+          ? (["users:read.email"] as const)
+          : []),
+      ];
       const manifest = {
         $type: SLACK_APP_MANIFEST_TYPE,
         display_information: { name },
@@ -27,9 +44,17 @@ export function defineSlackAppManifest(input: {
           },
           bot_user: { display_name: name },
         },
-        oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
+        oauth_config: { scopes: { bot: botScopes } },
         settings: {
-          event_subscriptions: { bot_events: ["app_mention"] },
+          event_subscriptions: {
+            bot_events: [
+              "app_mention",
+              "message.channels",
+              "message.groups",
+              "message.im",
+              "message.mpim",
+            ],
+          },
           org_deploy_enabled: false,
           socket_mode_enabled: false,
           token_rotation_enabled: false,
@@ -53,10 +78,8 @@ function withCodeChannels(manifest: {
       scopes: {
         bot: [
           ...manifest.oauth_config.scopes.bot,
-          "channels:history",
           "channels:read",
           "code_channels:manage",
-          "groups:history",
           "groups:read",
           "im:read",
           "mpim:read",

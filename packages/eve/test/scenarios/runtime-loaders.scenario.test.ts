@@ -96,7 +96,9 @@ async function writeRuntimeLoaderFixture(agentRoot: string): Promise<void> {
   );
   await writeFile(
     join(agentRoot, "agent.mjs"),
-    ['export default { model: "openai/gpt-5.4" };\n'].join("\n"),
+    [
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    ].join("\n"),
   );
   await writeFile(
     join(agentRoot, "instructions.mjs"),
@@ -151,7 +153,10 @@ async function writeRuntimeLoaderSubagentFixture(agentRoot: string): Promise<voi
   await mkdir(join(researcherRoot, "tools"), {
     recursive: true,
   });
-  await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+  await writeFile(
+    join(agentRoot, "agent.mjs"),
+    'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+  );
   await writeFile(
     join(agentRoot, "instructions.md"),
     "You are a precise runtime loader test agent.",
@@ -159,10 +164,11 @@ async function writeRuntimeLoaderSubagentFixture(agentRoot: string): Promise<voi
   await writeFile(
     join(researcherRoot, "agent.mjs"),
     [
-      "export default {",
+      'import { defineAgent } from "eve";',
+      "export default defineAgent({",
       '  model: "openai/gpt-5.4",',
       '  description: "Research one topic in depth.",',
-      "};\n",
+      "});\n",
     ].join("\n"),
   );
   await writeFile(
@@ -237,9 +243,10 @@ async function writeRuntimeLoaderTsconfigAliasFixture(input: {
   await writeFile(
     join(input.agentRoot, "agent.ts"),
     [
+      'import { defineAgent } from "eve";',
       'import { runtimeModelId } from "@/lib/model.ts";',
       "",
-      "export default { model: runtimeModelId };\n",
+      "export default defineAgent({ model: runtimeModelId });\n",
     ].join("\n"),
   );
   await writeFile(
@@ -292,13 +299,14 @@ describe("runtime compiled artifact loaders", () => {
     await writeFile(
       join(agentRoot, "agent.mjs"),
       [
-        "export default {",
+        'import { defineAgent } from "eve";',
+        "export default defineAgent({",
         '  model: "openai/gpt-5.4",',
         "  compaction: {",
         '    model: "openai/gpt-5.4-mini",',
-        "    thresholdPercent: 0.75,",
+        "    threshold: 0.75,",
         "  },",
-        "};",
+        "});",
         "",
       ].join("\n"),
     );
@@ -419,12 +427,10 @@ describe("runtime compiled artifact loaders", () => {
     expect(resolvedChannel.urlPath).toBe("/slack");
     expect(typeof resolvedChannel.fetch).toBe("function");
     expect(resolvedAgent.channels.filter((channel) => channel.name === "slack")).toHaveLength(1);
-    // The schedule wrapper loads its authored source to distinguish static
-    // schedules from collections; static schedules still execute via Cron.
+    // A static prompt schedule runs through Cron, without its module at runtime.
     const rootModuleIds = Object.keys(moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules ?? {});
     expect(rootModuleIds.filter((moduleId) => !moduleId.startsWith("eve:"))).toEqual([
       "channels/slack.mjs",
-      "schedules/daily-digest.mjs",
       "tools/get_weather.mjs",
     ]);
     expect(rootModuleIds.some((moduleId) => moduleId.startsWith("eve:"))).toBe(true);
@@ -704,7 +710,10 @@ describe("runtime compiled artifact loaders", () => {
       APP_ROOT_OPTIONS,
     );
 
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
 
     await compileAgent({

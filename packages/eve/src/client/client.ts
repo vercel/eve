@@ -3,7 +3,10 @@ import { AgentInfoResponseError } from "#client/agent-info-error.js";
 import { HealthResponseError } from "#client/health-response-error.js";
 import { HealthResultSchema } from "#client/health-schema.js";
 import { encodeBasicCredentials } from "#internal/http/basic-auth.js";
-import { AgentInfoResultSchema } from "#client/agent-info-schema.js";
+import {
+  AgentInfoResultSchema,
+  describeAgentInfoVersionMismatch,
+} from "#client/agent-info-schema.js";
 import { ClientError } from "#client/client-error.js";
 import { ClientSessions } from "#client/sessions.js";
 import { createClientUrl } from "#client/url.js";
@@ -88,9 +91,11 @@ export class Client {
    *
    * @throws {ClientError} If the server returns a non-successful status.
    * @throws {AgentInfoResponseError} If an authorized response carries a body
-   * that is not a recognized agent-info payload (not JSON, or a mismatched
-   * shape). Inspection is best-effort: a working connection does not depend on
-   * this route, so connection probes treat this distinctly from a failed request.
+   * that is not a recognized agent-info payload (not JSON, another agent-info
+   * version, or a mismatched shape). Unknown fields are ignored and unknown
+   * enum values read as `"unrecognized"`. Inspection is best-effort: a working
+   * connection does not depend on this route, so connection probes treat this
+   * distinctly from a failed request.
    */
   async info(options: { readonly signal?: AbortSignal } = {}): Promise<AgentInfoResult> {
     const response = await this.fetch(EVE_INFO_ROUTE_PATH, options);
@@ -106,6 +111,9 @@ export class Client {
     } catch {
       throw new AgentInfoResponseError();
     }
+
+    const versionMismatch = describeAgentInfoVersionMismatch(payload);
+    if (versionMismatch !== undefined) throw new AgentInfoResponseError([versionMismatch]);
 
     const result = AgentInfoResultSchema.safeParse(payload);
     if (!result.success) {

@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { compiledOf } from "#compiler/manifest.js";
+import { declared } from "#runtime/types.js";
 
 import {
   createAgentSourceManifest,
@@ -10,6 +12,7 @@ import {
   defineProgrammaticAgentSource,
   type ProgrammaticAgentModule,
 } from "#compiler/source-graph.js";
+import { scheduleCollectionTools } from "#context/schedule-collection-tools.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { assertRootOnlyConfig } from "#compiler/normalize-manifest-helpers.js";
 import type { CompilerDiagnostic } from "#compiler/diagnostics.js";
@@ -17,7 +20,7 @@ import { createProgrammaticCompiledModuleMap } from "#compiler/module-map.js";
 import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
 import { defineAgent } from "#public/definitions/agent.js";
-import { defineChannel, GET, POST } from "#public/definitions/channel.js";
+import { defineChannel, GET, POST, WS } from "#public/definitions/channel.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
@@ -144,6 +147,32 @@ describe("compileAgentManifest source graph", () => {
       sourceRegistry,
     ]);
     expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
+  });
+
+  it("rejects an agent.ts plain object that did not come from defineAgent()", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({ default: { model: "openai/gpt-5.4" } }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow('Export defineAgent({...}) from "agent.ts".');
+  });
+
+  it("does not treat a hand-written disabled-tool shape as disableTool()", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/bash.ts",
+        loadNamespace: async () => ({ default: { kind: "eve:disabled-tool" } }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow();
   });
 
   it("omits the built-in agent tool when the root sets tool false", async () => {
@@ -325,6 +354,7 @@ describe("compileAgentManifest source graph", () => {
   it.each<WebSearchToolInput>([
     { provider: "parallel" },
     { provider: "browserbase" },
+    { provider: "tako" },
     { fallback: "exa", provider: "native" },
   ])(
     "preserves the %o search selection through serialization and runtime preparation",
@@ -416,43 +446,34 @@ describe("compileAgentManifest source graph", () => {
     expect(staticFactory).toHaveBeenCalledOnce();
   });
 
-  it("keeps nested collection identity but flattens generated management tool names", async () => {
+  it("keeps nested collection identity but flattens its management tool names", async () => {
+    const collection = defineDynamicSchedules({
+      provider: inMemoryScheduleProvider(),
+      inputSchema: z.object({ task: z.string() }),
+      auth: () => null,
+      run: async () => {},
+      tool: "deferred",
+    });
     const sourceRegistry = registry([
       {
         logicalPath: "schedules/billing/requests.ts",
-        loadNamespace: async () => ({
-          default: defineDynamicSchedules({
-            provider: inMemoryScheduleProvider(),
-            inputSchema: z.object({ task: z.string() }),
-            auth: () => null,
-            run: async () => {},
-            tool: "deferred",
-          }),
-        }),
+        loadNamespace: async () => ({ default: collection }),
       },
     ]);
     const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
     expect(compiled.scheduleCollections).toContainEqual(
       expect.objectContaining({ name: "billing/requests", tools: "deferred" }),
     );
-    const wrapper = compiled.dynamicTools.find(
-      (tool) => tool.logicalPath === "tools/schedule__billing-requests.ts",
-    )!;
-    expect(wrapper).toMatchObject({ slug: "schedule__billing-requests" });
-    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
-      frameworkAgentSourceRegistry,
-      sourceRegistry,
-    ]);
-    const namespace = moduleMap.nodes.__root__!.modules[wrapper.sourceId]!;
-    const tools = await (namespace.default as ReturnType<typeof defineDynamic>).evaluate(
-      {} as never,
-    );
-    expect(Object.keys(tools as object).sort()).toEqual(
+    expect(compiledOf(compiled, "tool")).toEqual([]);
+    const entries = scheduleCollectionTools(collection, "billing/requests") as Record<
+      string,
+      import("#tools/definition.js").ToolDefinition
+    >;
+    expect(Object.keys(entries).sort()).toEqual(
       ["create", "delete", "disable", "enable", "get", "invoke", "list", "update"].map(
         (operation) => `schedule__billing-requests__${operation}`,
       ),
     );
-    const entries = tools as Record<string, import("#tools/definition.js").ToolDefinition>;
     expect(Object.values(entries).every((entry) => entry.deferred)).toBe(true);
     expect(
       entries["schedule__billing-requests__create"]!.label?.start({ name: "daily-digest" }),
@@ -562,7 +583,7 @@ describe("compileAgentManifest source graph", () => {
       Object.values(compiled.bindings).map((binding) => [binding.logicalPath, binding.usage]),
     );
 
-    expect(compiled.dynamicConnections).toContainEqual(
+    expect(compiledOf(compiled, "connection")).toContainEqual(
       expect.objectContaining({
         logicalPath: "connections/accounts.ts",
         slug: "accounts",
@@ -576,7 +597,7 @@ describe("compileAgentManifest source graph", () => {
       "instructions/dynamic.ts": { compile: true, runtimeEntry: true },
       "instructions/static.ts": { compile: true, runtimeEntry: false },
       "schedules/handler.ts": { compile: true, runtimeEntry: true },
-      "schedules/prompt.ts": { compile: true, runtimeEntry: true },
+      "schedules/prompt.ts": { compile: true, runtimeEntry: false },
       "skills/dynamic.ts": { compile: true, runtimeEntry: true },
       "skills/static.ts": { compile: true, runtimeEntry: false },
       "tools/dynamic.ts": { compile: true, runtimeEntry: true },
@@ -588,7 +609,7 @@ describe("compileAgentManifest source graph", () => {
   it("projects the root node once and finalizes its filesystem bindings after config", async () => {
     let toolSourceIterations = 0;
     const discovered = manifest();
-    discovered.tools = new Proxy(discovered.tools, {
+    discovered.sources = new Proxy(discovered.sources, {
       get(target, property, receiver) {
         if (property === Symbol.iterator) toolSourceIterations += 1;
         return Reflect.get(target, property, receiver);
@@ -903,6 +924,25 @@ describe("compileAgentManifest source graph", () => {
     ).rejects.toThrow("Provider tools can't be deferred");
   });
 
+  it("rejects a static connection without a protocol helper", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "connections/issues.ts",
+        loadNamespace: async () => ({
+          default: {
+            description: "Issues.",
+            url: "https://issues.example/mcp",
+          },
+        }),
+      },
+    ]);
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'Connection "connections/issues.ts" exports a plain object. Wrap it in defineMcpClientConnection({...}) or defineOpenAPIConnection({...}) from "eve/connections"; plain objects no longer default to MCP.',
+    );
+  });
+
   describe("connection name ownership", () => {
     const linear = {
       logicalPath: "connections/linear.ts",
@@ -979,7 +1019,7 @@ describe("compileAgentManifest source graph", () => {
       agentRoot: "/virtual/source-test/agent/subagents/child",
       appRoot: "/virtual/source-test",
     });
-    child.tools = new Proxy(child.tools, {
+    child.sources = new Proxy(child.sources, {
       get(target, property, receiver) {
         if (property === Symbol.iterator) toolSourceIterations += 1;
         return Reflect.get(target, property, receiver);
@@ -1103,6 +1143,52 @@ describe("compileAgentManifest source graph", () => {
     ).rejects.toThrow("compile/channel-route-duplicate");
   });
 
+  it("rejects a GET and WS route on one path that name its parameters differently", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "channels/rooms.ts",
+        loadNamespace: async () => ({
+          default: defineChannel({
+            routes: [
+              GET("/rooms/:id", async () => new Response()),
+              WS("/rooms/:room", async () => ({})),
+            ],
+          }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      "compile/channel-websocket-params-mismatch: GET /rooms/:id and WS /rooms/:room match the same requests but name their parameters differently (id vs room). One handler serves both, so rename the parameters in one route to match the other.",
+    );
+  });
+
+  it("allows a GET and WS route on one path with the same parameter names", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "channels/rooms.ts",
+        loadNamespace: async () => ({
+          default: defineChannel({
+            routes: [
+              GET("/rooms/:id", async () => new Response()),
+              WS("/rooms/:id", async () => ({})),
+            ],
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+
+    expect(
+      compiled.channelRoutes.effective
+        .filter((route) => route.urlPath === "/rooms/:id")
+        .map((route) => route.method),
+    ).toEqual(["GET", "WEBSOCKET"]);
+  });
+
   it("rejects conflicting CORS policies across overlapping route patterns", async () => {
     const sourceRegistry = registry([
       {
@@ -1178,9 +1264,10 @@ describe("compileAgentManifest source graph", () => {
       sourceRegistries: [sourceRegistry],
     });
 
-    expect(compiled.hooks).toContainEqual({
+    expect(compiledOf(compiled, "hook")).toContainEqual({
       eventNames: ["session.started", "model.requested"],
       exportName: "audit",
+      kind: "hook",
       logicalPath: "hooks/auth/guard.ts",
       slug: "auth/guard",
       sourceId: "test:application:hooks/auth/guard.ts",
@@ -1188,7 +1275,7 @@ describe("compileAgentManifest source graph", () => {
     });
   });
 
-  it("compiles a selected memory and its provider-tool wrapper through total bindings", async () => {
+  it("compiles a selected memory, which offers its provider's tools", async () => {
     const definitionFactory = vi.fn(() =>
       defineMemory({
         description: "Manage the caller profile.",
@@ -1221,30 +1308,19 @@ describe("compileAgentManifest source graph", () => {
     const compiled = await compileAgentManifest(manifest(), {
       sourceRegistries: [sourceRegistry],
     });
-    const memory = compiled.memories[0]!;
-    const wrapper = compiled.dynamicTools.find((tool) => tool.slug === "profile")!;
+    const memory = compiledOf(compiled, "memory")[0]!;
     expect(definitionFactory).toHaveBeenCalledTimes(1);
 
     expect(memory).toMatchObject({
       description: "Manage the caller profile.",
       logicalPath: "memory/profile.ts",
-      slot: "profile",
+      slug: "profile",
     });
-    expect(wrapper).toMatchObject({ logicalPath: "tools/profile.ts" });
-    expect(compiled.bindings[wrapper.sourceId]?.backing).toMatchObject({
-      dependencies: { memory: memory.sourceId },
-      kind: "programmatic",
-      parameters: {
-        memoryExportName: "default",
-        memoryLogicalPath: "memory/profile.ts",
-        slot: "profile",
-      },
-    });
+    expect(compiledOf(compiled, "tool")).toEqual([]);
+    expect(Object.values(compiled.bindings).map(({ logicalPath }) => logicalPath)).not.toContain(
+      "tools/profile.ts",
+    );
     expect(compiled.bindings[memory.sourceId]?.usage).toEqual({
-      compile: true,
-      runtimeEntry: true,
-    });
-    expect(compiled.bindings[wrapper.sourceId]?.usage).toEqual({
       compile: true,
       runtimeEntry: true,
     });
@@ -1255,15 +1331,14 @@ describe("compileAgentManifest source graph", () => {
     ]);
     expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
     expect(moduleMap.nodes.__root__?.modules[memory.sourceId]).toBeDefined();
-    expect(moduleMap.nodes.__root__?.modules[wrapper.sourceId]).toBeDefined();
-    expect(definitionFactory).toHaveBeenCalledTimes(2);
 
     const resolved = await resolveAgent({ manifest: compiled, moduleMap });
-    expect(resolved.memories).toHaveLength(1);
-    expect(definitionFactory).toHaveBeenCalledTimes(2);
+    expect(declared(resolved, "memory")).toEqual([
+      expect.objectContaining({ offersTools: true, slot: "profile" }),
+    ]);
   });
 
-  it("lets an application tool replace the derived provider-tool wrapper", async () => {
+  it("lets an application tool replace a memory's provider tools", async () => {
     const sourceRegistry = registry([
       {
         logicalPath: "memory/profile.ts",
@@ -1290,8 +1365,6 @@ describe("compileAgentManifest source graph", () => {
       sourceRegistries: [sourceRegistry],
     });
 
-    expect(compiled.memories).toHaveLength(1);
-    expect(compiled.dynamicTools).not.toContainEqual(expect.objectContaining({ slug: "profile" }));
     expect(compiled.tools).toContainEqual(
       expect.objectContaining({
         description: "Application-owned profile tool.",
@@ -1299,18 +1372,37 @@ describe("compileAgentManifest source graph", () => {
         name: "profile",
       }),
     );
-    expect(compiled.sourceComposition.entries).toContainEqual(
-      expect.objectContaining({
-        kind: "shadowed",
-        source: expect.objectContaining({
-          logicalPath: "tools/profile.ts",
-          owner: { feature: "memory", kind: "framework" },
-        }),
-      }),
-    );
+    expect(await resolvedMemories(compiled, sourceRegistry)).toEqual([
+      expect.not.objectContaining({ offersTools: true }),
+    ]);
   });
 
-  it("lets an application disable the derived provider-tool wrapper", async () => {
+  it("offers a memory's provider tools beside eve's built-in tool of the same name", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "memory/web_search.ts",
+        loadNamespace: async () => ({
+          default: defineMemory({
+            provider: { recall: { "turn.started": async () => null } },
+            scope: "user_1",
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.tools).toContainEqual(
+      expect.objectContaining({ logicalPath: "tools/web_search.ts", name: "web_search" }),
+    );
+    expect(await resolvedMemories(compiled, sourceRegistry)).toEqual([
+      expect.objectContaining({ offersTools: true, slot: "web_search" }),
+    ]);
+  });
+
+  it("lets an application disable a memory's provider tools", async () => {
     const sourceRegistry = registry([
       {
         logicalPath: "memory/profile.ts",
@@ -1331,9 +1423,10 @@ describe("compileAgentManifest source graph", () => {
       sourceRegistries: [sourceRegistry],
     });
 
-    expect(compiled.memories).toHaveLength(1);
-    expect(compiled.dynamicTools).not.toContainEqual(expect.objectContaining({ slug: "profile" }));
     expect(compiled.tools).not.toContainEqual(expect.objectContaining({ name: "profile" }));
+    expect(await resolvedMemories(compiled, sourceRegistry)).toEqual([
+      expect.not.objectContaining({ offersTools: true }),
+    ]);
   });
 
   it("rejects stale programmatic revisions before loading a namespace", async () => {
@@ -1442,3 +1535,14 @@ it("rejects subagent event connections whose receiver cannot resolve their scope
     }),
   ).rejects.toThrow("root-agent connection");
 });
+
+async function resolvedMemories(
+  compiled: Awaited<ReturnType<typeof compileAgentManifest>>,
+  sourceRegistry: ReturnType<typeof registry>,
+) {
+  const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+    frameworkAgentSourceRegistry,
+    sourceRegistry,
+  ]);
+  return declared(await resolveAgent({ manifest: compiled, moduleMap }), "memory");
+}

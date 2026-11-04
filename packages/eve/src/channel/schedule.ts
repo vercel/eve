@@ -212,7 +212,11 @@ export class ScheduleDispatcher {
   } {
     const sessions: Delivery[] = [];
     const waitUntilTasks: Promise<unknown>[] = [];
-    const toChannel = createCrossChannelToFn(runtime, toCrossChannelTargets(this.channels));
+    // On Vercel, the deployment serving the schedule accepts its sends, so a
+    // session they continue hands off to it like one a route reaches.
+    const toChannel = createCrossChannelToFn(runtime, toCrossChannelTargets(this.channels), {
+      acceptedDeploymentId: process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined,
+    });
     return {
       args: {
         appAuth: SCHEDULE_APP_AUTH,

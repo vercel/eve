@@ -122,6 +122,29 @@ describe("resolveEvalTargetHandle", () => {
       }),
     ).rejects.toThrow(/@acme\/agent/);
   });
+
+  it("names the operator credential to use when the info route refuses the caller", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      const url = fetchUrl(request);
+      if (url.endsWith("/eve/v1/health")) {
+        return Response.json({ ok: true, status: "ready", workflowId: "wf" });
+      }
+      return Response.json(
+        { code: "info_forbidden", error: "Forbidden.", ok: false },
+        { status: 403 },
+      );
+    });
+
+    await expect(
+      resolveEvalTargetHandle({
+        client: new Client({ baseUrl: "https://agent.example.com" }),
+        kind: "remote",
+        url: "https://agent.example.com",
+      }),
+    ).rejects.toThrow(
+      /Eval target https:\/\/agent\.example\.com refused GET \/eve\/v1\/info.*principalType "service".*allowAgentInfo: true/,
+    );
+  });
 });
 
 function fetchUrl(request: string | URL | Request): string {

@@ -58,6 +58,7 @@ export interface LinearChannelState extends PromptQueueState {
   /**
    * Buffered narration from a `content.completed` event (`phase: "narration"`). The default `call.requested` handler uses this
    * as the next ephemeral progress activity, matching Slack's typing status.
+   * @internal
    */
   pendingToolCallMessage?: string | null;
   readonly sourceCommentId?: string | null;

@@ -1,0 +1,89 @@
+---
+title: "Twilio"
+description: "Reach your agent over SMS and speech-transcribed phone calls with Twilio."
+type: integration
+---
+
+A Twilio agent lives on a phone number. People can text it, or call it and talk: eve transcribes the caller's speech, and the transcript joins the same session as their texts. Replies go out as SMS, and approvals arrive as numbered options. [Set up](#set-up) connects a Twilio number.
+
+For information on all configuration and customization options, see the [Twilio reference](/docs/channels/twilio/reference).
+
+## Set up
+
+Add the channel file. `allowFrom` lists the numbers that can reach the agent, and `messaging.from` is the number it texts from:
+
+```ts title="agent/channels/twilio.ts"
+import { twilioChannel } from "eve/channels/twilio";
+
+export default twilioChannel({
+  allowFrom: "+15551234567",
+  messaging: { from: "+15557654321" },
+});
+```
+
+Set your Twilio credentials:
+
+```bash
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+```
+
+After deploying, point your Twilio number's Messaging webhook at `https://your-agent.example/eve/v1/twilio/messages` and its Voice webhook at `https://your-agent.example/eve/v1/twilio/voice`. eve checks `X-Twilio-Signature` on every request.
+
+## Default channel behavior
+
+By default, the agent answers texts from numbers in `allowFrom` by SMS. When someone calls, eve answers, asks the caller to speak, and sends the transcript to the agent. The caller hears a short acknowledgement, and the reply arrives by SMS. Texts and calls from the same number share one session.
+
+- To customize what happens on a text, override `onText`. See [Dispatch](/docs/channels/twilio/reference#dispatch).
+- To customize the call greeting, language, or speech recognition, or to reject calls, use `onVoice` or the `voice` option. See [Dispatch](/docs/channels/twilio/reference#dispatch) and [Options](/docs/channels/twilio/reference#options).
+- To change how replies are sent, see [Delivery](/docs/channels/twilio/reference#delivery).
+
+## Restrict access
+
+`allowFrom` is required. Pass one number, a list, or an async resolver. `"*"` accepts any number, so only use it with your own check in `onText` and `onVoice`:
+
+```ts title="agent/channels/twilio.ts"
+import { twilioChannel } from "eve/channels/twilio";
+
+export default twilioChannel({
+  allowFrom: ["+15551234567", "+15557654321"],
+  messaging: { from: "+15557654321" },
+});
+```
+
+## Human-in-the-loop interactions
+
+By default, eve sends each approval or question as a text with numbered options, since SMS has no buttons. Replying `1` or `approve` runs an approval-gated tool, and `2` or `deny` stops it. Callers get these prompts by SMS too.
+
+- To require approval for a tool or ask the person a question, see [Human-in-the-loop](/docs/human-in-the-loop).
+- To word or format prompts differently, override `events["interaction.opened"]`. See [Human-in-the-loop](/docs/channels/twilio/reference#human-in-the-loop-hitl).
+
+## Start conversations proactively
+
+Start a session from a [schedule](/docs/schedules#handler-form-run) or [another channel](/docs/channels/custom#cross-channel-hand-off) with a `phoneNumber` target. Proactive texts need `messaging.from` or `messaging.messagingServiceSid`:
+
+```ts title="agent/schedules/reminder.ts"
+import { defineSchedule } from "eve/schedules";
+import twilio from "../channels/twilio";
+
+export default defineSchedule({
+  cron: "0 17 * * 5",
+  async run({ to, waitUntil, appAuth }) {
+    waitUntil(
+      to(twilio, { phoneNumber: "+15551234567" }).send("Send the weekly reminder.", {
+        auth: appAuth,
+      }),
+    );
+  },
+});
+```
+
+MMS photos and files reach the agent as files.
+
+## Disclosure and consent
+
+As the deployer, you're responsible for complying with applicable laws. You may need to tell callers and texters that an automated AI system processes and transcribes their messages, and get consent where required, including two-party-consent jurisdictions. For outbound texts and calls, you may need prior express consent, STOP and quiet-hour handling, and carrier registration.
+
+## Reference
+
+The [Twilio reference](/docs/channels/twilio/reference) covers options, credentials, routes, inbound hooks, proxies, delivery, human-in-the-loop, proactive sessions, and media downloads.

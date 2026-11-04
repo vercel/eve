@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import type { DescribedAgent } from "#channel/agent-description.js";
+import type { InstalledSkillFiles } from "#channel/skill-files.js";
 import type { BundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 
@@ -43,6 +44,8 @@ export interface RuntimeSession {
     string,
     { readonly agent: Promise<DescribedAgent>; readonly version: string }
   >;
+  /** The skill files a production build embeds, or `null` outside one. */
+  skillFiles: InstalledSkillFiles | null;
 }
 
 /**
@@ -55,6 +58,7 @@ export function createRuntimeSession(id: string = "test-session"): RuntimeSessio
     compiledArtifacts: null,
     describedAgents: new Map(),
     id,
+    skillFiles: null,
   };
 }
 

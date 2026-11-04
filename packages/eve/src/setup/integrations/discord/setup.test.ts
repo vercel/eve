@@ -89,7 +89,7 @@ describe("Discord setup", () => {
     expect(effects.configureEndpoint).toHaveBeenCalledWith("bot-token", "connector");
     expect(written().get("/project/agent/channels/discord.ts")).toContain("gateway: {},");
     expect(written().get("/project/daemon/main.ts")).toContain(
-      'experimental_runDiscordGatewayRelay({\n  credentials: connectDiscordCredentials("discord/agent")',
+      'runDiscordGatewayRelay({\n  credentials: connectDiscordCredentials("discord/agent")',
     );
     // Setup turned the intent on, so thread follow-ups work without a mention.
     expect(effects.enableMessageContent).toHaveBeenCalledWith("bot-token");

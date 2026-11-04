@@ -9,7 +9,7 @@ interface AcceptedResponse {
   readonly deliveryId?: string;
 }
 
-interface ResetResponse {
+interface EndResponse {
   readonly ok?: boolean;
   readonly sessionId?: string;
   readonly deliveryId?: string;
@@ -183,25 +183,25 @@ export default defineEval({
     followUp.notEvent("session.ended", { data: { outcome: "failed" } });
     followUp.messageIncludes(/HTTP-SESSION-FOLLOW-UP-OK/i);
 
-    const liveReset = t.target
+    const liveEnd = t.target
       .attach(sessionId, { startIndex: followUp.session.state!.streamIndex })
       .watch({ until: (event) => event.type === "session.ended" });
-    const reset = await postJson<ResetResponse>(
+    const ended = await postJson<EndResponse>(
       t.target,
-      `/eve/v1/session/${sessionId}/reset`,
+      `/eve/v1/session/${sessionId}/end`,
       { reason: "Verify immutable HTTP session identity" },
       202,
     );
     await t.require(
-      reset,
+      ended,
       satisfies(
-        (value: ResetResponse) =>
+        (value: EndResponse) =>
           typeof value.deliveryId === "string" && value.sessionId === sessionId,
-        "reset terminally retires the exact session ID",
+        "end terminally retires the exact session ID",
       ),
     );
 
-    const retired = await liveReset.result();
+    const retired = await liveEnd.result();
     retired.event("session.ended", { count: 1, data: { outcome: "completed" } });
 
     const probe = () =>
@@ -224,7 +224,7 @@ export default defineEval({
       satisfies(
         (value: { readonly code?: string; readonly ok?: boolean }) =>
           value.ok === false && value.code === "session_not_active",
-        "a reset session ID cannot send or create a replacement",
+        "an ended session ID cannot send or create a replacement",
       ),
     );
 

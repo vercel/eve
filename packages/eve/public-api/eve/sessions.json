@@ -2,6 +2,7 @@
   "Delivery",
   "DeliveryReadOptions",
   "DeliveryResult",
+  "EveError",
   "PrewarmSessionResult",
   "Session",
   "SessionNotActiveError",

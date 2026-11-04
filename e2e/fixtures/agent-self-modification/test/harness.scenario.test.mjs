@@ -187,7 +187,7 @@ test("close retires every session before restoring the complete source tree", as
       const released = Promise.withResolvers();
       const fetch = target.fetch;
       target.fetch = async (path, options) => {
-        if (path.endsWith("/child/reset")) {
+        if (path.endsWith("/child/end")) {
           retiring.resolve();
           await released.promise;
         }
@@ -205,15 +205,13 @@ test("close retires every session before restoring the complete source tree", as
 
       assert.deepEqual(
         calls
-          .filter((call) => call.path.endsWith("/reset"))
+          .filter((call) => call.path.endsWith("/end"))
           .map((call) => call.path)
           .sort(),
-        [parent, child, verification]
-          .map((turn) => `/eve/v1/session/${turn.sessionId}/reset`)
-          .sort(),
+        [parent, child, verification].map((turn) => `/eve/v1/session/${turn.sessionId}/end`).sort(),
       );
       assert.ok(
-        calls.findLastIndex((call) => call.path.endsWith("/reset")) <
+        calls.findLastIndex((call) => call.path.endsWith("/end")) <
           calls.findIndex((call) => call.path.includes("/suspend?lease=")),
       );
       await assertTreeRestored(root);
@@ -228,13 +226,13 @@ test("close retires every session before restoring the complete source tree", as
   );
 });
 
-test("one reset failure still retires other sessions and leaves unsafe source untouched", async () => {
+test("one end failure still retires other sessions and leaves unsafe source untouched", async () => {
   const root = await sourceTree();
   const calls = [];
   const target = targetFor({ calls });
   target.fetch = async (path, options = {}) => {
     calls.push({ path, options });
-    if (path.includes("bad/reset")) return new Response("no", { status: 500 });
+    if (path.includes("bad/end")) return new Response("no", { status: 500 });
     return response({ revision: "revision" });
   };
   const parentEvents = agentCallEvents("bad");
@@ -262,7 +260,7 @@ test("one reset failure still retires other sessions and leaves unsafe source un
   await writeFile(join(root, "keep.txt"), "unsafe mutation");
   await assert.rejects(populated.close(), /could not be retired/);
   assert.equal(await readFile(join(root, "keep.txt"), "utf8"), "unsafe mutation");
-  assert.equal(calls.filter((call) => call.path.endsWith("/reset")).length, 2);
+  assert.equal(calls.filter((call) => call.path.endsWith("/end")).length, 2);
   assert.equal(
     calls.some((call) => call.path.includes("/suspend?")),
     false,

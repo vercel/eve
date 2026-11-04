@@ -25,7 +25,6 @@ import {
   type LinqAdapterConfig,
   type LinqCredentialProvider,
   type LinqCredentials,
-  type LinqWebhookVerifier,
 } from "#compiled/@linqapp/chat-sdk-adapter/index.js";
 import type { Message, Thread } from "#compiled/chat/index.js";
 import { formatReplyContext } from "#public/channels/chat-sdk/reply-context.js";
@@ -56,16 +55,19 @@ export type LinqInboundResult = {
 /** A direct value or lazy resolver for a Linq credential. */
 export type LinqCredentialValue = string | (() => string | Promise<string>);
 
+/**
+ * Verifies a webhook forwarded by a trusted provider such as Vercel Connect, given the request
+ * and its raw body. Return a falsy value or throw to reject the request.
+ */
+export type LinqWebhookVerifier = (request: Request, rawBody: Uint8Array) => unknown;
+
 /** Linq credentials for outbound API calls and inbound webhook verification. */
 export interface LinqChannelCredentials {
   /** API key for outbound Linq API calls. */
   readonly apiKey?: LinqCredentialValue;
   /** Signing secret for direct Linq webhook delivery. */
   readonly signingSecret?: LinqCredentialValue;
-  /**
-   * Trusted verifier for webhooks forwarded by a provider such as Vercel Connect.
-   * Return a falsy value or throw to reject the request.
-   */
+  /** Trusted verifier for webhooks forwarded by a provider such as Vercel Connect. */
   readonly webhookVerifier?: LinqWebhookVerifier;
 }
 

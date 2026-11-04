@@ -1,9 +1,6 @@
 import { cardToSlackBlocks, type SlackCardChild } from "#compiled/@chat-adapter/slack/blocks.js";
-import {
-  cardChildToFallbackText,
-  type CardChild,
-  type CardElement,
-} from "#public/channels/slack/cards.js";
+import { cardChildToFallbackText } from "#compiled/chat/index.js";
+import type { CardChild, CardElement } from "#public/channels/slack/cards.js";
 
 /** A Slack Block Kit block emitted by {@link cardToBlocks}. */
 export type BlockKitBlock = Record<string, unknown>;
@@ -35,8 +32,6 @@ function toSlackCardChild(child: CardChild): SlackCardChild {
       children: child.children.map(toSlackCardChild),
     };
   }
-  // The Slack adapter's own card renderer shows a text input as its label; its block builder throws.
-  if (child.type === "text_input") return { content: child.label, type: "text" };
   if (child.type === "actions") {
     return {
       ...child,

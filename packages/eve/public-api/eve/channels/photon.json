@@ -8,8 +8,10 @@
   "PhotonIMessageChannel",
   "PhotonIMessageChannelConfig",
   "PhotonIMessageChannelCredentials",
+  "PhotonIMessageWebhookVerifier",
   "PhotonInboundMessageContext",
   "PhotonInboundResult",
+  "PhotonProjectCredentials",
   "defaultPhotonAuth",
   "photonIMessageChannel"
 ]

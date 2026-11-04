@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: proposed
-last_updated: "2026-10-08"
+last_updated: "2026-10-29"
 ---
 
 # Deferred tools and skills
@@ -851,7 +851,7 @@ start.
    another way.
 3. **No compatibility layer.** There are no aliases for removed tools, no
    flags that restore old behavior, and no code or comments that mention the
-   old surface. Pre-1.0, eve prefers the breaking change.
+   old surface. The change is breaking and needs a `major` changeset.
 4. **Old tests are deleted, not ported.** A test that covers a removed path
    is deleted along with the path. Tests for the new design are written fresh
    in the testing PR, against the new surface. Old assertions are never
@@ -930,7 +930,7 @@ tests. The third holds all of the new tests.
   pass unit tests on their own, but the e2e suites are only meaningful with
   [3/3] stacked on top.
 - **Docs and changesets go with the implementation.** [1/3] and [2/3] each
-  update the docs for the behavior they change and carry a `minor`
+  update the docs for the behavior they change and carry a `major`
   changeset.
 
 ## Tests and rollout
@@ -1014,7 +1014,7 @@ Everything in this section lands in [3/3].
   - `connections/overview`, `connections/mcp`, `guides/dynamic-capabilities`
     (bare map keys, and the connection prefix rule), and `extensions` (the
     reserved names and how mount prefixes nest with connections).
-- **Changesets,** one `minor` in each of [1/3] and [2/3]. Together they:
+- **Changesets,** one `major` in each of [1/3] and [2/3]. Together they:
   - remove `connection_search`, `connection_execute`, and `load_skill`;
   - reserve the `eve` namespace in every agent;
   - reject names that start with a connection's prefix, which an existing

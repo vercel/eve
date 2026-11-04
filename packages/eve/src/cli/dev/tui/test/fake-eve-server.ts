@@ -121,10 +121,14 @@ export class FakeEveServer {
     if (method === "POST" && action !== undefined && sessionId !== undefined) {
       const deliveryId = `control_${this.requests.length}`;
       const facts: SessionEvent[] = [
-        { type: "delivery.admitted", data: { deliveryId, source: { control: action } } },
+        {
+          type: "delivery.admitted",
+          data: { deliveryId, source: { control: action === "end" ? "reset" : action } },
+        },
         { type: "delivery.settled", data: { deliveryId, outcome: "applied" } },
       ];
-      if (action === "reset") facts.push({ type: "session.ended", data: { outcome: "completed" } });
+      if (action === "end" || action === "reset")
+        facts.push({ type: "session.ended", data: { outcome: "completed" } });
       this.emit(facts, deliveryId, sessionId);
       return Response.json({ ok: true, sessionId, deliveryId }, { status: 202 });
     }

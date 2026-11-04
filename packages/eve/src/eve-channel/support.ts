@@ -36,7 +36,7 @@ export function sessionCommandErrorResponse(error: unknown): Response | undefine
     return Response.json(
       {
         ok: false,
-        code: error.retryable ? "session_not_ready" : "session_not_active",
+        code: error.code,
         error: error.retryable
           ? "The session is not ready to accept messages yet."
           : "The session is no longer active.",

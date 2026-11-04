@@ -5,7 +5,7 @@ import type { SessionStreamOptions } from "#client/types.js";
 export interface SessionEventStreamOptions {
   readonly startIndex?: number;
   readonly headers?: Readonly<Record<string, string>>;
-  readonly streamReconnectPolicy?: SessionStreamOptions["streamReconnectPolicy"];
+  readonly reconnect?: SessionStreamOptions["reconnect"];
   readonly onEvent: (event: SessionStreamEvent, historical: boolean) => void;
   readonly onError: (error: unknown) => void;
 }
@@ -17,7 +17,7 @@ export class SessionEventStream {
   readonly caughtUp = this.#caughtUp.promise;
   #ended = false;
   #headers: SessionEventStreamOptions["headers"];
-  #reconnectPolicy: SessionStreamOptions["streamReconnectPolicy"];
+  #reconnectPolicy: SessionStreamOptions["reconnect"];
 
   constructor(session: ClientSession, options: SessionEventStreamOptions) {
     this.setOptions(options);
@@ -54,9 +54,9 @@ export class SessionEventStream {
     return this.#ended;
   }
 
-  setOptions(options: Pick<SessionEventStreamOptions, "headers" | "streamReconnectPolicy">): void {
+  setOptions(options: Pick<SessionEventStreamOptions, "headers" | "reconnect">): void {
     if ("headers" in options) this.#headers = options.headers;
-    if ("streamReconnectPolicy" in options) this.#reconnectPolicy = options.streamReconnectPolicy;
+    if ("reconnect" in options) this.#reconnectPolicy = options.reconnect;
   }
 
   close(): void {

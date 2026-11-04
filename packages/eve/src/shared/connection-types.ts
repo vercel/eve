@@ -8,6 +8,7 @@ import type { ConnectionEventsBackend } from "#shared/connection-events.js";
 
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type { SessionContext } from "#context/session-context.js";
+import type { ApprovedCall } from "#tools/definition.js";
 import type { JsonValue } from "#shared/json.js";
 
 /**
@@ -41,11 +42,27 @@ export interface TokenResult {
  */
 export type ConnectionProtocol = "mcp" | "openapi";
 
+/**
+ * Context passed to a connection's `headers` and `toolCall.providedArguments`
+ * callbacks.
+ */
+export interface ConnectionCallbackContext extends SessionContext {
+  /**
+   * Who approved the tool call these values are for. Present only while a
+   * connection tool call runs after a person approved it. The call still runs
+   * as the requester, `session.auth.current`, and its `auth` token is still
+   * the requester's. `approval.responder.getToken(provider)` resolves the
+   * approver's token as it does in a `defineTool` tool, so a callback can send
+   * the approver's credentials where the server should act for them.
+   */
+  readonly approval?: ApprovedCall;
+}
+
 /** A single header value, supporting static strings and per-caller resolution. */
 export type HeaderValue =
   | string
   | Promise<string>
-  | ((ctx: SessionContext) => string | Promise<string>);
+  | ((ctx: ConnectionCallbackContext) => string | Promise<string>);
 
 /**
  * Arbitrary HTTP headers sent with every request to a connection server.
@@ -53,13 +70,14 @@ export type HeaderValue =
  * Static form: key-value pairs where each value may be a string, Promise,
  * or callback. Function form: a callback returning the full headers map,
  * useful when multiple headers must be resolved together. Header callbacks
- * receive the active {@link SessionContext}, so credentials and routing
- * metadata can be selected from the current caller.
+ * receive the active {@link ConnectionCallbackContext}, so credentials and
+ * routing metadata can be selected from the current caller, or from the
+ * approver of an approved tool call.
  */
 export type HeadersDefinition =
   | Readonly<Record<string, HeaderValue>>
   | ((
-      ctx: SessionContext,
+      ctx: ConnectionCallbackContext,
     ) => Readonly<Record<string, string>> | Promise<Readonly<Record<string, string>>>);
 
 /**

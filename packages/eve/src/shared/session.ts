@@ -1,5 +1,5 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import type { StreamReconnectPolicy } from "#client/types.js";
+import type { ReconnectOptions } from "#client/types.js";
 
 /** Options common to session readers on the client and server. */
 export interface SessionStreamOptions {
@@ -14,7 +14,7 @@ export interface SessionStreamOptions {
   /** Stops the read and releases its stream reader. */
   readonly signal?: AbortSignal;
   /** Client-only reconnection policy; server-side readers do not reconnect. */
-  readonly streamReconnectPolicy?: StreamReconnectPolicy;
+  readonly reconnect?: false | ReconnectOptions;
 }
 
 /** A read-only session handle. Attaching it performs no I/O and grants no command authority. */

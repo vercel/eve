@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2055
 status: in-progress
-last_updated: "2026-08-13"
+last_updated: "2026-11-03"
 ---
 
 # Nitro-first build and runtime integration
@@ -50,6 +50,9 @@ eve a second host framework.
 ## Current-pass improvements with umbrella Nitro
 
 ### Contain the transitive Rolldown boundary
+
+> Superseded by [`nitro-3-rc-migration.md`](./nitro-3-rc-migration.md): eve now declares
+> `rolldown` itself and hands it to Nitro through `deps.paths`.
 
 eve invokes Rolldown directly for its published JavaScript, compiled vendor artifacts,
 authored-module evaluation, workflow bundles, and parser-backed transforms. In this pass, the

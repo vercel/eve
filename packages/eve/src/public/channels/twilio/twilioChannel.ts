@@ -75,7 +75,7 @@ export interface TwilioChannelState extends PromptQueueState {
   lastMessageSid?: string | null;
   /** Most recent inbound Call SID when this session was started by voice. */
   lastCallSid?: string | null;
-  /** The sign-ins the default flow sent a prompt for, by connection name. */
+  /** @internal The sign-ins the default flow sent a prompt for, by connection name. */
   pendingSignIns?: Record<string, string>;
 }
 

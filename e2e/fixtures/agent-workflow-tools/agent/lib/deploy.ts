@@ -1,5 +1,5 @@
 import type { WorkflowToolContext } from "eve/tools";
-import { sleep } from "workflow";
+import { sleep } from "eve/workflow";
 
 import { describePlan, hashPlan } from "@/agent/lib/plan.ts";
 

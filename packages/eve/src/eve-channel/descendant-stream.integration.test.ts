@@ -324,9 +324,7 @@ describe("authorized descendant readers", () => {
     const history = await collect(session.stream({ follow: false }));
     const child = history.find((event) => event.type === "child.opened")!;
     home.histories.set(child.data.sessionId, [{ type: "session.started", data: {} }]);
-    const events = await collect(
-      session.agent(child).stream({ follow: false, streamReconnectPolicy: { reconnect: false } }),
-    );
+    const events = await collect(session.agent(child).stream({ follow: false, reconnect: false }));
     expect(events.map((event) => event.type)).toEqual(["session.started"]);
   });
 
@@ -341,9 +339,9 @@ describe("authorized descendant readers", () => {
     const reader = new Client({ baseUrl: home.origin, auth: { bearer: "browser" } }).sessions
       .attach("root")
       .agent(forged);
-    await expect(
-      collect(reader.stream({ follow: false, streamReconnectPolicy: { reconnect: false } })),
-    ).rejects.toMatchObject({ status: 404 });
+    await expect(collect(reader.stream({ follow: false, reconnect: false }))).rejects.toMatchObject(
+      { status: 404 },
+    );
     expect(requests).toHaveBeenCalledTimes(1);
     expect(home.attached).toEqual(["root"]);
     expect(home.authorization).not.toHaveBeenCalled();
@@ -364,11 +362,7 @@ describe("authorized descendant readers", () => {
     for (const line of [0, 999]) {
       const wrong = { ...child, meta: { ...child.meta, position: { line, index: 0 } } };
       await expect(
-        collect(
-          session
-            .agent(wrong)
-            .stream({ follow: false, streamReconnectPolicy: { reconnect: false } }),
-        ),
+        collect(session.agent(wrong).stream({ follow: false, reconnect: false })),
       ).rejects.toMatchObject({ status: 404 });
       expect(home.attached).toEqual(["root"]);
       home.attached.splice(0);

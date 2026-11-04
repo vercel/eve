@@ -52,7 +52,7 @@ interface AdapterClientSession {
   send(message: SendTurnInput["message"]): Promise<AdapterDelivery>;
   respond(answers: readonly Answer[]): Promise<AdapterDelivery>;
   cancel(options?: { turnId?: string }): Promise<unknown>;
-  reset(): Promise<unknown>;
+  end(): Promise<unknown>;
 }
 
 interface AdapterClient {
@@ -111,7 +111,7 @@ export interface EveAcpAdapterOptions {
  * Translates stable ACP v1 sessions onto the public eve HTTP client.
  *
  * The adapter owns only process-local ACP identities. Conversation durability,
- * event cursors, cancellation, and reset behavior remain owned by
+ * event cursors, cancellation, and session retirement remain owned by
  * {@link ClientSession}.
  */
 export class EveAcpAdapter {
@@ -344,15 +344,15 @@ export class EveAcpAdapter {
     }
 
     try {
-      await session.client?.reset();
-    } catch (resetError) {
+      await session.client?.end();
+    } catch (endError) {
       if (cancellationError !== undefined) {
         throw new AggregateError(
-          [cancellationError, resetError],
-          "Could not cancel or reset the eve session",
+          [cancellationError, endError],
+          "Could not cancel or end the eve session",
         );
       }
-      throw resetError;
+      throw endError;
     }
     if (cancellationError !== undefined) throw cancellationError;
   }

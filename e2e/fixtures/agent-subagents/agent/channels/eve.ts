@@ -1,5 +1,5 @@
 import { ForbiddenError, type AuthFn } from "eve/channels/auth";
-import { eveChannel } from "eve/channels/eve";
+import { eveChannel, type EveAuthFn } from "eve/channels/eve";
 import type { SessionAuthContext } from "eve/context";
 
 import { TENANT_AUTHORIZATIONS, type Tenant } from "../../constants";
@@ -77,7 +77,11 @@ const guardTenantStreams: AuthFn<Request> = (request) => {
   return null;
 };
 
-const authenticateDefaultUser: AuthFn<Request> = () => createFixtureUserPrincipal("e2e-user");
+/** The eval driver lands here and reads agent info. */
+const authenticateDefaultUser: EveAuthFn = () => ({
+  ...createFixtureUserPrincipal("e2e-user"),
+  allowAgentInfo: true,
+});
 
 export default eveChannel({
   auth: [

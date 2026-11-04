@@ -116,7 +116,10 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
     );
 
     await mkdir(join(agentRoot, "schedules"), { recursive: true });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     // Markdown schedules cannot declare a channel
     // (`internal/helpers/markdown.ts`), so this is the broken-by-default
@@ -182,7 +185,10 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
     );
 
     await mkdir(join(agentRoot, "schedules"), { recursive: true });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     // TS schedule without a `channel` — the bug is not actually
     // markdown-specific; the markdown form only stood out because it
@@ -245,7 +251,10 @@ describe("schedule trigger end-to-end (channel-less schedules)", () => {
     );
 
     await mkdir(join(agentRoot, "schedules"), { recursive: true });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
+    );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     // `defineSchedule` is identity; the literal object avoids depending
     // on the framework package being resolvable from the temp app root.

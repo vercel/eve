@@ -3,7 +3,11 @@ import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { Client } from "#client/client.js";
 import type { CreatedClientSession, CreatedIdleClientSession } from "#client/sessions.js";
 import type { SendTurnInput } from "#client/types.js";
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/session-http.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_STREAM_TAIL_INDEX_HEADER,
+  EVE_STREAM_VERSION_HEADER,
+} from "#protocol/session-http.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { encodeTestLine } from "#internal/testing/events.js";
 import { encodeLine } from "#protocol/session-events/envelope.js";
@@ -13,7 +17,7 @@ afterEach(() => {
 });
 
 describe("Client.sessions", () => {
-  it("carries the refreshed inbox handle across sends and restored session state", async () => {
+  it("carries the refreshed inbox handle across sends, snapshots, and restored session state", async () => {
     const hints: Array<string | null> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
       hints.push(JSON.parse(String(init?.body)).inbox ?? null);
@@ -32,6 +36,29 @@ describe("Client.sessions", () => {
     await restored.send("Alice continues after reopening it.");
     expect(hints).toEqual([null, "handle_1", "handle_2"]);
     expect(restored.state.inbox).toBe("handle_3");
+  });
+
+  it("returns the full session state, including inbox, from snapshot()", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(encodeTestLine({ type: "session.started", data: {} }), {
+          headers: {
+            [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
+            [EVE_STREAM_TAIL_INDEX_HEADER]: "0",
+          },
+        }),
+    );
+    const client = new Client({ baseUrl: "https://eve.test" });
+    const session = client.sessions.attach("session_1", { inbox: "handle_1" });
+
+    const snapshot = await session.snapshot();
+
+    expect(snapshot.session).toEqual({
+      sessionId: "session_1",
+      streamIndex: 1,
+      inbox: "handle_1",
+    });
+    expect(session.state.streamIndex).toBe(0);
   });
 
   it("creates a session without starting a turn or opening its stream", async () => {
@@ -196,14 +223,14 @@ describe("Client.sessions", () => {
     await session.cancel();
     await session.compact();
     await session.clear();
-    await session.reset({ reason: "fresh start" });
+    await session.end({ reason: "fresh start" });
 
     expect(requests.map(({ url }) => new URL(url).pathname)).toEqual([
       "/eve/v1/session/wrun_A",
       "/eve/v1/session/wrun_A/cancel",
       "/eve/v1/session/wrun_A/compact",
       "/eve/v1/session/wrun_A/clear",
-      "/eve/v1/session/wrun_A/reset",
+      "/eve/v1/session/wrun_A/end",
     ]);
     expect(JSON.parse(requests[0]!.body!)).toEqual({ message: "follow-up" });
     expect(JSON.parse(requests[4]!.body!)).toEqual({ reason: "fresh start" });
@@ -242,7 +269,7 @@ describe("Client.sessions", () => {
     await session.cancel(options);
     await session.compact(options);
     await session.clear(options);
-    await session.reset(options);
+    await session.end(options);
 
     expect(requests.map(({ body }) => JSON.parse(body!))).toEqual([
       { turnId: "turn_1" },

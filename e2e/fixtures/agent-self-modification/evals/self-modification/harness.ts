@@ -271,7 +271,7 @@ export class SelfModificationHarness {
   }
 
   async close(): Promise<void> {
-    // Reset retires sessions and waits for their command hooks to close; cancel only requests it.
+    // End retires sessions and waits for their command hooks to close; cancel only requests it.
     // Discover even children emitted just before a failed/aborted parent stream was observed.
     const sessionIds = new Set<string>();
     for (const turn of this.#turns) {
@@ -284,7 +284,7 @@ export class SelfModificationHarness {
     const results = await Promise.allSettled(
       [...sessionIds].map(async (sessionId) => {
         const response = await this.#t.target.fetch(
-          `/eve/v1/session/${encodeURIComponent(sessionId)}/reset`,
+          `/eve/v1/session/${encodeURIComponent(sessionId)}/end`,
           {
             method: "POST",
             signal,

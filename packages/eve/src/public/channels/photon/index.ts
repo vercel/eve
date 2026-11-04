@@ -4,8 +4,10 @@ export {
   type PhotonIMessageChannel,
   type PhotonIMessageChannelConfig,
   type PhotonIMessageChannelCredentials,
+  type PhotonIMessageWebhookVerifier,
   type PhotonInboundMessageContext,
   type PhotonInboundResult,
+  type PhotonProjectCredentials,
 } from "#public/channels/photon/photonIMessageChannel.js";
 export {
   IMESSAGE_TAPBACKS,

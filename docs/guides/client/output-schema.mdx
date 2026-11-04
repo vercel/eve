@@ -3,11 +3,11 @@ title: "Output Schema"
 description: "Request structured results from eve client turns and read typed data from DeliveryResult."
 ---
 
-Pass `outputSchema` on a client turn when the caller needs structured data instead of only assistant text. The runtime makes the model satisfy the schema before the turn settles, then emits the final payload as a `content.completed` part with `kind: "result"`.
+`outputSchema` requests structured data from a client turn instead of only assistant text. The model must satisfy the schema before the turn ends, and the payload arrives as a `content.completed` part with `kind: "result"`.
 
 ## JSON Schema
 
-Raw JSON Schema objects work directly:
+Pass a JSON Schema object directly:
 
 ```ts
 import { Client } from "eve/client";
@@ -42,7 +42,7 @@ console.log(result.data?.count);
 
 ## Standard Schema
 
-The client also accepts Standard Schema implementations such as Zod, Valibot, and ArkType. The schema is lowered to JSON Schema before the request is sent:
+The client also accepts Standard Schema implementations such as Zod, Valibot, and ArkType, and converts them to JSON Schema before sending:
 
 ```ts
 import { z } from "zod";
@@ -61,11 +61,11 @@ const response = await session.send<Summary>("Summarize this turn.", {
 const { data } = await response.result();
 ```
 
-The server is authoritative for validation. The client types `DeliveryResult.data` from your generic and schema, but it doesn't revalidate the streamed payload client-side.
+The server validates the result. The client types `DeliveryResult.data` from your generic and schema but doesn't revalidate it.
 
 ## Stream the result event
 
-If you consume events manually, read the `content.completed` part with `kind: "result"`:
+When you consume events manually, read the `content.completed` part with `kind: "result"`:
 
 ```ts
 const response = await session.send<Summary>("Summarize this turn.", {
@@ -80,11 +80,11 @@ for await (const event of response.stream()) {
 }
 ```
 
-If more than one result part appears in the consumed event list, `result()` returns the most recent one as `data`.
+If more than one result part appears, `result()` returns the most recent one as `data`.
 
 ## Send payloads with output schema
 
-Pass `outputSchema` in the second argument to `send()` or `respond()` alongside headers, signal, or client context:
+Pass `outputSchema` in the second argument to `send()` or `respond()`, alongside headers, signal, or client context:
 
 ```ts
 const response = await session.send<Summary>("Summarize this PDF.", {
@@ -107,7 +107,7 @@ const result = await response.result();
 
 ## Per-turn scope
 
-Client `outputSchema` is scoped to the turn that sends it. It doesn't become a permanent setting for the conversation:
+Client `outputSchema` applies only to the turn that sends it:
 
 ```ts
 const response = await session.send("Return a structured summary.", { outputSchema });

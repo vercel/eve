@@ -1,7 +1,6 @@
 export {
   defineInstrumentation,
   disableInstrumentation,
-  isInstrumentationDisabled,
   type InstrumentationProvider,
   type InstrumentationDisabled,
   type InstrumentationSetupContext,

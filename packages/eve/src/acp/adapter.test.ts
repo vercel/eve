@@ -13,7 +13,7 @@ const scope = { runId, turnId };
 /** A fake eve session: each send or respond streams its next turn's facts. */
 class FakeClientSession {
   readonly cancel = vi.fn(async () => ({ sessionId: "session_test", status: "accepted" }));
-  readonly reset = vi.fn(async () => ({ status: "reset" }));
+  readonly end = vi.fn(async () => ({ status: "reset" }));
   readonly sends: SendTurnPayload[] = [];
   readonly #turns: SessionEvent[][];
 
@@ -312,12 +312,12 @@ describe("EveAcpAdapter", () => {
     });
   });
 
-  it("resets its eve session when the ACP session closes", async () => {
+  it("ends its eve session when the ACP session closes", async () => {
     const { adapter, session } = adapterWith([[...opening(), ...closing()]]);
     const { sessionId } = await adapter.newSession({ cwd: process.cwd(), mcpServers: [] });
     await adapter.prompt(textPrompt(sessionId), acpClient().client, new AbortController().signal);
 
     await adapter.closeSession(sessionId);
-    expect(session.reset).toHaveBeenCalledOnce();
+    expect(session.end).toHaveBeenCalledOnce();
   });
 });

@@ -12,7 +12,7 @@ describe("authored module lifecycle", () => {
   it("classifies static, dynamic, direct-model, and remote subagent configs", async () => {
     const app = await scenarioApp({
       files: {
-        "agent/agent.mjs": `export default { model: "openai/gpt-5.4" };
+        "agent/agent.mjs": `import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });
 `,
         "agent/subagents/direct-model/agent.mjs": [
           "const model = {",
@@ -22,31 +22,30 @@ describe("authored module lifecycle", () => {
           "  async doGenerate() { return {}; },",
           "  async doStream() { return {}; },",
           "};",
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  description: "Uses a direct provider model.",',
           "  model,",
           "  modelContextWindowTokens: 8192,",
-          "};",
+          "});",
           "",
         ].join("\n"),
         "agent/subagents/dynamic-model/agent.mjs": [
-          "export default {",
+          'import { defineAgent, defineDynamic } from "eve";',
+          "export default defineAgent({",
           '  description: "Chooses a model at runtime.",',
-          "  model: {",
-          '    kind: "eve:dynamic",',
-          '    evaluate: () => "openai/gpt-5.4",',
-          "  },",
-          "};",
+          '  model: defineDynamic(() => "openai/gpt-5.4"),',
+          "});",
           "",
         ].join("\n"),
         "agent/subagents/dynamic/agent.mjs": [
-          "export default {",
-          '  kind: "eve:dynamic",',
-          "  evaluate: () => ({",
+          'import { defineAgent, defineDynamic } from "eve";',
+          "export default defineDynamic(() =>",
+          "  defineAgent({",
           '    description: "Dynamically available.",',
           '    model: "openai/gpt-5.4",',
           "  }),",
-          "};",
+          ");",
           "",
         ].join("\n"),
         "agent/subagents/remote.mjs": [
@@ -59,10 +58,11 @@ describe("authored module lifecycle", () => {
           "",
         ].join("\n"),
         "agent/subagents/static/agent.mjs": [
-          "export default {",
+          'import { defineAgent } from "eve";',
+          "export default defineAgent({",
           '  description: "Always available.",',
           '  model: "openai/gpt-5.4",',
-          "};",
+          "});",
           "",
         ].join("\n"),
       },

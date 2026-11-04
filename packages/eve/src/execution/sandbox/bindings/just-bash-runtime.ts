@@ -66,8 +66,7 @@ export async function importJustBashModule(appRoot: string): Promise<JustBashMod
 }
 
 export async function createBashSandbox(input: {
-  readonly customCommands?: JustBashSandboxCreateOptions["customCommands"];
-  readonly filesystem?: JustBashSandboxCreateOptions["filesystem"];
+  readonly experimental?: JustBashSandboxCreateOptions["experimental"];
   readonly justBash: JustBashModule;
   resolveProjectPath(path: string): string;
   readonly rootPath: string;
@@ -86,9 +85,10 @@ export async function createBashSandbox(input: {
     root: filesystemRootPath,
   });
   let filesystem: JustBashFilesystem = defaultFilesystem;
-  if (input.filesystem !== undefined) {
+  const customFilesystem = input.experimental?.filesystem;
+  if (customFilesystem !== undefined) {
     try {
-      filesystem = await input.filesystem({
+      filesystem = await customFilesystem({
         defaultFilesystem,
         resolveProjectPath: (path) => input.resolveProjectPath(path),
         storagePath: input.storagePath,
@@ -125,7 +125,7 @@ export async function createBashSandbox(input: {
           return { stdout: "", stderr: `realpath: ${String(error)}`, exitCode: 1 };
         }
       }),
-      ...(input.customCommands ?? []),
+      ...(input.experimental?.customCommands ?? []),
     ],
     env: metadata === null ? undefined : { ...metadata.env },
     fs: filesystem,

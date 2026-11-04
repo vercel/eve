@@ -221,7 +221,7 @@ export function presentTool(
   }
   if (baseName === REPLY_TOOL_NAME) {
     // Structured-output terminal signal: its input is the
-    // structured result itself, kept behind the expanded `--tools full` view.
+    // structured result itself, kept behind the expanded `--show-tools full` view.
     return { title: REPLY_TITLE, subtitle: "", summarizeResult: () => undefined };
   }
 
@@ -234,7 +234,7 @@ export function presentTool(
         doneTitle: `${copy.pastVerb} ${item}`,
         subtitle: "",
         // The salient argument is the story; builtin outputs (page content,
-        // file bodies, stdout) stay behind the expanded `--tools full` view.
+        // file bodies, stdout) stay behind the expanded `--show-tools full` view.
         summarizeResult: () => undefined,
         group: {
           verb: copy.verb,
@@ -306,8 +306,8 @@ export function agentTaskLabel(name: string): string {
 }
 
 /**
- * A person's name for the agent a tool dispatches: `code__worker` →
- * `worker`. An extension's own subagent compiles to `<extension>__agent`, so
+ * A person's name for the agent a tool dispatches: `crm__researcher` →
+ * `researcher`. An extension's own subagent compiles to `<extension>__agent`, so
  * the extension names it.
  */
 export function agentDisplayName(toolName: string): string {

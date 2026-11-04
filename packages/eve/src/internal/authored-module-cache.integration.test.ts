@@ -21,7 +21,8 @@ describe("authored-module cache", () => {
   async function createCachedApp() {
     const app = await createAppRoot("eve-authored-module-cache-", {
       files: {
-        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/agent.ts":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });\n',
         "agent/tools/edited.ts": tool("first"),
         "agent/tools/unchanged.ts": tool("unchanged"),
       },

@@ -1,3 +1,4 @@
+import { escapeSlackText } from "#compiled/@chat-adapter/slack/format.js";
 import { callSlackApi } from "#public/channels/slack/api.js";
 import { buildAnsweredBlocks, isHitlAction } from "#public/channels/slack/hitl.js";
 import {
@@ -115,7 +116,7 @@ function formatAnsweredCardSubtext(input: {
     ANSWERED_CARD_SUBTEXT_PREFIX.length -
     ANSWERED_CARD_SUBTEXT_SUFFIX.length -
     attribution.length;
-  const label = truncateWithEllipsis(input.answerLabel, labelBudget);
+  const label = truncateWithEllipsis(escapeSlackText(input.answerLabel), labelBudget);
   return truncateCardSubtext(
     `${ANSWERED_CARD_SUBTEXT_PREFIX}${label}${ANSWERED_CARD_SUBTEXT_SUFFIX}${attribution}`,
   );

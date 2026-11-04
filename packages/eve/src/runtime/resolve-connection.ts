@@ -1,6 +1,7 @@
 import type { CompiledConnectionDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
+import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import {
   normalizeMcpClientConnectionDefinition,
@@ -173,8 +174,11 @@ export async function resolveConnectionDefinition(
       result.spec = resolvedRecord.spec as ResolvedConnectionDefinition["spec"];
     }
 
-    if (typeof resolvedRecord.approval === "function") {
-      result.approval = resolvedRecord.approval as ResolvedConnectionDefinition["approval"];
+    if (resolvedRecord.approval !== undefined) {
+      result.approval = normalizeApproval(
+        resolvedRecord.approval,
+        '"approval" must be a policy function or { request, response?, prompt? }.',
+      );
     }
 
     return result;

@@ -92,7 +92,7 @@ export const DefaultSandbox: SandboxProvider<
       Object.keys(options.justBash).some((key) => key !== "autoInstall" && key !== "prepare")
     ) {
       throw new Error(
-        "DefaultSandbox justBash settings support autoInstall and prepare only. Use JustBashSandbox.environment() for customCommands or filesystem.",
+        "DefaultSandbox justBash settings support autoInstall and prepare only. Use JustBashSandbox.environment({ experimental }) for customCommands or filesystem.",
       );
     }
     // Created on first use, so a hosted bundle never constructs the local providers it prunes.

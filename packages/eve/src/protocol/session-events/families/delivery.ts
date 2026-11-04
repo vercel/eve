@@ -4,12 +4,13 @@ import { conforming, envelopeOf, id, principal, userPart, known } from "../commo
 import type { Envelope, Principal, UserPart } from "../envelope.js";
 
 /**
- * Where a delivery came from: a channel (with the schedule that sent it), a control, or a
- * sign-in callback. The set is open. A parent session records which of its calls sent a child's
- * delivery on its own `child.sent`.
+ * Where a delivery came from: a channel (with the schedule or hook that sent it), a control, or a
+ * sign-in callback. A hook's `ctx.continue()` names the hook's slug and the session's channel.
+ * The set is open. A parent session records which of its calls sent a child's delivery on its own
+ * `child.sent`.
  */
 export type DeliverySource =
-  | { readonly channel: string; readonly scheduleId?: string }
+  | { readonly channel: string; readonly scheduleId?: string; readonly hook?: string }
   | { readonly control: string }
   | { readonly callback: string };
 
@@ -21,13 +22,14 @@ export interface DeliveryAdmittedData {
 }
 
 /**
- * A message from conversation eve did not run, such as a transcript an app stored. It is text
- * only: it names no turn or call, and records nothing eve did.
+ * A message from conversation eve did not run, such as a transcript an app stored. It names no
+ * turn or call, and records nothing eve ran.
  */
 export interface ImportedMessage {
   /** The app's own id for the message, when it gave one. eve never reads it. */
   readonly id?: string;
   readonly role: "user" | "assistant";
+  /** The message's plain text. */
   readonly text: string;
 }
 
@@ -69,6 +71,7 @@ const deliverySource = conforming<DeliverySource>()(
     z.object({
       channel: z.string(),
       scheduleId: z.string().optional(),
+      hook: z.string().optional(),
     }),
     z.object({ control: z.string() }),
     z.object({ callback: z.string() }),

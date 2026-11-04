@@ -1,12 +1,14 @@
+import { transition } from "#harness/session-machine/commit.js";
+import { changeHistory } from "#harness/session-machine/history.js";
 import type { ApprovalMemory } from "#approval/evaluation.js";
 import type { ModelMessage } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { AuthKey, SessionKey } from "#context/keys.js";
 import type { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
-import { validateHarnessModelMessages } from "#harness/messages.js";
+import { committedMessages, saveTransition } from "#harness/session-machine/commit.js";
 import { fail } from "#harness/session-machine/transitions.js";
-import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
+import { readTurnState } from "#harness/session-machine/state.js";
 import type { Step } from "#harness/step/context.js";
 import { park } from "#harness/step/park.js";
 import type {
@@ -17,11 +19,9 @@ import type {
 } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { ApprovalAsk, StepCoordinates } from "#harness/session-machine/view.js";
-import { renderPendingApprovalsInstruction } from "./approval-prompt.js";
 import {
   askApprovals,
   approvalMemory,
-  pendingApprovals,
   openLimit,
   requestLimit,
   requireSignIn,
@@ -70,7 +70,7 @@ export async function askStepApprovals(
     responseAuthRequiredRequestIds: responsePolicyRequestIds(input.tools, input.requests),
     tasks: input.tasks,
   });
-  await step.apply(transition, [...step.session.history, ...(transition.commit ?? [])]);
+  await step.apply(transition, [...step.session.history, ...committedMessages(transition)]);
 }
 
 /**
@@ -110,7 +110,7 @@ export async function enforceBudget(
   });
   if (limit.kind === "within") return undefined;
   if (limit.kind === "ask") {
-    step.session = { ...step.session, history: validateHarnessModelMessages([...messages]) };
+    step.session = changeHistory(step.session, { extend: messages });
     // The prompt is asked once; a gate that finds it open still waits on it.
     if (openLimit(step.view())?.row.interactionId !== limit.ask.interactionId)
       await step.apply(requestLimit(step.view(), limit.ask), step.session.history);
@@ -128,21 +128,9 @@ export async function enforceBudget(
   return { next: { done: true, output: "" }, session: step.session };
 }
 
-/**
- * What a model call needs from the approvals: what their policies remember, and
- * a note on the calls still awaiting approval, which a message may revise.
- */
-export function humanInputContext(step: Step): {
-  readonly approvalMemory: ApprovalMemory;
-  readonly pendingApprovalsNote?: string;
-} {
-  const view = step.view();
-  return {
-    approvalMemory: approvalMemory(view),
-    pendingApprovalsNote: renderPendingApprovalsInstruction(
-      view.turn.suspended.flatMap((parked) => pendingApprovals(view, parked)),
-    ),
-  };
+/** What a model call needs from the approvals: what their policies remember. */
+export function humanInputContext(step: Step): { readonly approvalMemory: ApprovalMemory } {
+  return { approvalMemory: approvalMemory(step.view()) };
 }
 
 /**
@@ -165,7 +153,7 @@ function responsePolicyRequestIds(
 
 /** The caller whose turn parks a step. */
 function currentRequester(step: Step): SessionAuthContext | null {
-  return step.ctx?.get(AuthKey) ?? step.ctx?.get(SessionKey)?.auth.current ?? null;
+  return step.ctx.get(AuthKey) ?? step.ctx.get(SessionKey)?.auth.current ?? null;
 }
 
 /**
@@ -180,7 +168,13 @@ export function takeDeferredMessage<T extends HarnessSessionBase>(
   const { message, ...rest } = queued;
   return {
     message,
-    session: writeTurnState(session, isEmptyInput(rest) ? turn : { ...turn, queued: rest }),
+    session: saveTransition(
+      session,
+      transition({
+        events: [],
+        turn: isEmptyInput(rest) ? turn : { ...turn, queued: rest },
+      }),
+    ),
   };
 }
 

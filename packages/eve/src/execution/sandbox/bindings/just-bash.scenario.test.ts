@@ -68,23 +68,25 @@ describe("just-bash sandbox file API", () => {
     await writeFile(join(sourceRoot, "instructions.md"), "before");
     let factoryCalls = 0;
     const provider = createJustBashProvider({
-      async filesystem(context) {
-        factoryCalls += 1;
-        expect(context.resolveProjectPath(".")).toBe(appRoot);
-        await context.defaultFilesystem.mkdir("/source", { recursive: true });
-        return new MountableFs({
-          base: context.defaultFilesystem,
-          mounts: [
-            {
-              filesystem: new ReadWriteFs({
-                allowSymlinks: false,
-                maxFileReadSize: Number.MAX_SAFE_INTEGER,
-                root: sourceRoot,
-              }),
-              mountPoint: "/source",
-            },
-          ],
-        });
+      experimental: {
+        async filesystem(context) {
+          factoryCalls += 1;
+          expect(context.resolveProjectPath(".")).toBe(appRoot);
+          await context.defaultFilesystem.mkdir("/source", { recursive: true });
+          return new MountableFs({
+            base: context.defaultFilesystem,
+            mounts: [
+              {
+                filesystem: new ReadWriteFs({
+                  allowSymlinks: false,
+                  maxFileReadSize: Number.MAX_SAFE_INTEGER,
+                  root: sourceRoot,
+                }),
+                mountPoint: "/source",
+              },
+            ],
+          });
+        },
       },
     });
 
@@ -133,9 +135,11 @@ describe("just-bash sandbox file API", () => {
     const appRoot = await createTemporaryCacheDirectory("filesystem-factory-lifecycle");
     let factoryCalls = 0;
     const provider = createJustBashProvider({
-      async filesystem({ defaultFilesystem }) {
-        factoryCalls += 1;
-        return defaultFilesystem;
+      experimental: {
+        async filesystem({ defaultFilesystem }) {
+          factoryCalls += 1;
+          return defaultFilesystem;
+        },
       },
     });
 
@@ -434,18 +438,20 @@ describe("just-bash custom commands", () => {
   it("forwards custom commands to live sessions", async () => {
     const appRoot = await createTemporaryCacheDirectory("custom-command");
     const provider = createJustBashProvider({
-      customCommands: [
-        defineCommand("cap", async (args, context) => {
-          if (args[0] === "fail") {
-            return { exitCode: 23, stderr: "cap failed\n", stdout: "" };
-          }
-          return {
-            exitCode: 0,
-            stderr: "",
-            stdout: decodeBytesToUtf8(context.stdin).toUpperCase(),
-          };
-        }),
-      ],
+      experimental: {
+        customCommands: [
+          defineCommand("cap", async (args, context) => {
+            if (args[0] === "fail") {
+              return { exitCode: 23, stderr: "cap failed\n", stdout: "" };
+            }
+            return {
+              exitCode: 0,
+              stderr: "",
+              stdout: decodeBytesToUtf8(context.stdin).toUpperCase(),
+            };
+          }),
+        ],
+      },
     });
     const handle = await provider.openSession({
       appRoot,

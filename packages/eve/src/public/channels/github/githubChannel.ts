@@ -43,6 +43,7 @@ import {
   dispatchWorkflowRun,
 } from "#public/channels/github/dispatch.js";
 import {
+  applyDeliveredGitHubState,
   continuationTokenFromState,
   conversationFromState,
   initialGitHubState,
@@ -248,6 +249,10 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
 
     context(state, session) {
       return rebuildGitHubContext(state, session, config);
+    },
+
+    deliver(payload, channel) {
+      applyDeliveredGitHubState(channel.state, payload.state);
     },
 
     routes: [

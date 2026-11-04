@@ -26,7 +26,8 @@ import {
   type SlackFileUpload,
   type SlackMessageOptions,
 } from "#compiled/@chat-adapter/slack/api.js";
-import { isCardElement, type CardElement, type FileUpload } from "#public/channels/slack/cards.js";
+import { isCardElement } from "#compiled/chat/index.js";
+import type { CardElement, FileUpload } from "#public/channels/slack/cards.js";
 
 import { createLogger, logError } from "#internal/logging.js";
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";

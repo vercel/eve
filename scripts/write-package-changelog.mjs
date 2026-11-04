@@ -40,16 +40,10 @@ const index = headings.findIndex(({ version }) => version === requested);
 const selected = index >= 0 ? index : headings.findIndex(({ version }) => version === base);
 if (selected < 0) throw new Error(`No changelog entry for ${manifest.name}@${requested}.`);
 
-const entryLines = lines.slice(headings[selected].index + 1, headings[selected + 1]?.index);
-const first = entryLines.findIndex((line) => line.trim());
-const releasePrefix = `### Release ${manifest.name}@${headings[selected].version} | `;
-const hasReleaseHeading = first >= 0 && entryLines[first].startsWith(releasePrefix);
-const releaseHeading = hasReleaseHeading
-  ? `# ${entryLines[first].slice(4)}`
-  : `# Release ${manifest.name}@${headings[selected].version}`;
-const bodyLines = entryLines.slice(hasReleaseHeading ? first + 1 : 0);
+const releaseHeading = `# ${manifest.name} ${headings[selected].version}`;
 let bodyFence;
-const entry = bodyLines
+const entry = lines
+  .slice(headings[selected].index + 1, headings[selected + 1]?.index)
   .map((line) => {
     const next = nextFence(bodyFence, line);
     const inside = bodyFence || next;

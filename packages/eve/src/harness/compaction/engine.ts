@@ -13,8 +13,9 @@ import {
 } from "#harness/compaction/prompt.js";
 import { createFrameworkUserMessage, isFrameworkUserMessage } from "#harness/messages.js";
 import { CompactionOverLimitError } from "#harness/compaction/over-limit-error.js";
+import { awaitsProviderToolResult } from "#harness/provider-tool-history.js";
 import { estimateTokens } from "#harness/token-estimate.js";
-import type { CompactionConfig } from "#harness/types.js";
+import type { CompactionConfig, CompactionState } from "#harness/types.js";
 
 /**
  * Most of the conversation kept word for word next to a compaction summary.
@@ -45,7 +46,7 @@ const COMPACTION_PROMPT_OVERHEAD_TOKENS = estimateTokens([
  */
 export function getInputTokenCount(
   messages: readonly ModelMessage[],
-  config: CompactionConfig,
+  config: CompactionState,
   requestEnvelopeTokens = 0,
   previousEnvelopeTokens = 0,
 ): number {
@@ -71,7 +72,7 @@ export function getInputTokenCount(
 }
 
 /** The settings without the last measured prompt, which a rewritten history no longer matches. */
-export function withoutPromptMeasurement(config: CompactionConfig): CompactionConfig {
+export function withoutPromptMeasurement(config: CompactionState): CompactionState {
   const { lastKnownInputTokens: _input, lastKnownPromptMessageCount: _count, ...rest } = config;
   return rest;
 }
@@ -81,13 +82,13 @@ export function withoutPromptMeasurement(config: CompactionConfig): CompactionCo
  * usable measurement, the next count is an estimate, and no envelope baseline applies.
  */
 export function withPromptMeasurement(
-  config: CompactionConfig,
+  config: CompactionState,
   measured: {
     readonly inputTokens?: number;
     readonly promptMessageCount?: number;
     readonly requestEnvelopeTokens?: number;
   },
-): CompactionConfig {
+): CompactionState {
   const { requestEnvelopeTokens: _envelope, ...next } = withoutPromptMeasurement(config);
   if (measured.inputTokens === undefined || measured.promptMessageCount === undefined) return next;
   return {
@@ -131,6 +132,7 @@ interface CompactionHeuristicInput {
   readonly previousCheckpoint: string | undefined;
   readonly recent: readonly ModelMessage[];
   readonly replay: ModelMessage | undefined;
+  readonly resume: boolean;
   readonly tokenEstimateAdjustment: number;
 }
 
@@ -167,11 +169,8 @@ function toolResultCapHeuristic(input: CompactionHeuristicInput): CompactionHeur
           createFrameworkUserMessage("context.compaction", COMPACTION_CHECKPOINT_MARKER),
           { content: input.previousCheckpoint, role: "assistant" },
         ];
-  const capped = withResumptionGuard(
-    [...checkpointHead, ...capToolResults(input.older), ...input.recent],
-    input.replay,
-    input.config.threshold,
-  );
+  const kept = [...checkpointHead, ...capToolResults(input.older), ...input.recent];
+  const capped = input.resume ? resumeAfter(kept, input.replay, input.config.threshold) : kept;
 
   // Evaluate on the same ruler shouldCompact uses (envelope included):
   // capping can be a near no-op when the older region holds few large
@@ -220,15 +219,22 @@ export async function compactMessages(
   summarize: CompactionSummarizer,
   forceSummary = false,
   historyInputTokenCount?: number,
+  /**
+   * Whether a request is waiting on the next model call. Between turns every request has its
+   * answer, and the next turn's input follows the summary: nothing is replayed or prompted.
+   */
+  resume = true,
 ): Promise<ModelMessage[]> {
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
+  const withResumptionGuard: typeof resumeAfter = (kept, replay, threshold) =>
+    resume ? resumeAfter(kept, replay, threshold) : kept;
   const budget = keptTailBudget(config);
   const recentConfig = forceSummary ? { ...config, recentWindowSize: 1 } : config;
 
   // The current request is replayed after every compaction. One over the tail
   // budget keeps its start and end; the cut-out middle goes to the summarizer.
   const planTail = (history: readonly ModelMessage[]) => {
-    const index = findLastRealUserIndex(history);
+    const index = resume ? findLastRealUserIndex(history) : -1;
     const current = history[index];
     const fit = current === undefined ? undefined : fitCurrentMessage(current, budget);
     const replay = fit?.replay ?? current;
@@ -265,6 +271,7 @@ export async function compactMessages(
         previousCheckpoint,
         recent,
         replay: first.replay,
+        resume,
         tokenEstimateAdjustment,
       });
       if (outcome.type === "within-limit") {
@@ -439,7 +446,8 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
       return {
         ...part,
         output: {
-          type: "text" as const,
+          // A capped failure stays a failure for the model.
+          type: output.type === "error-text" ? ("error-text" as const) : ("text" as const),
           value: `${CAPPED_RESULT_PREFIX}${clipMiddleUtf16Safe(serialized, TRANSCRIPT_PAYLOAD_LIMIT - CAPPED_RESULT_PREFIX.length)}`,
         },
       };
@@ -458,7 +466,7 @@ function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
  * "Continue." when the last real user message still survives in the kept
  * messages (the model was mid-work on it) or none exists.
  */
-function withResumptionGuard(
+function resumeAfter(
   messages: ModelMessage[],
   replay: ModelMessage | undefined,
   threshold: number,
@@ -471,11 +479,13 @@ function withResumptionGuard(
   if (lastRole !== undefined && lastRole !== "assistant") {
     // A retained tool tail must not displace a task that can fit in the budget.
     // Including it here lets tail selection make room before accepting a candidate.
+    // A provider tool's pending result must directly follow the tail, so nothing joins it.
     if (
       lastRole === "tool" &&
       replay !== undefined &&
       !alreadyKept &&
-      estimateTokens([replay]) <= threshold
+      estimateTokens([replay]) <= threshold &&
+      !awaitsProviderToolResult(messages)
     ) {
       return [...messages, replay];
     }
@@ -758,9 +768,10 @@ function splitMessagesForCompaction(
 
   // The recent tail survives verbatim, so it must not open with tool results
   // whose tool calls fall in the older region — providers reject a tool_result
-  // without its preceding tool_use. Snap such messages into the older region.
+  // without its preceding tool_use. Snap such messages into the older region,
+  // including a response that opens with a deferred provider tool result.
   let split = messages.length - keep;
-  while (split < messages.length && messages[split]?.role === "tool") {
+  while (split < messages.length && opensWithEarlierResult(messages[split]!)) {
     split += 1;
   }
 
@@ -768,4 +779,13 @@ function splitMessagesForCompaction(
     older: messages.slice(0, split),
     recent: messages.slice(split),
   };
+}
+
+function opensWithEarlierResult(message: ModelMessage): boolean {
+  if (message.role === "tool") return true;
+  if (message.role !== "assistant" || !Array.isArray(message.content)) return false;
+  const calls = new Set(
+    message.content.flatMap((part) => (part.type === "tool-call" ? [part.toolCallId] : [])),
+  );
+  return message.content.some((part) => part.type === "tool-result" && !calls.has(part.toolCallId));
 }

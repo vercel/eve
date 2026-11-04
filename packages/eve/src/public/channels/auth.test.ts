@@ -1,5 +1,5 @@
 import { exportSPKI, generateKeyPair, SignJWT } from "jose";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
 vi.mock("node:os", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:os")>()),
@@ -14,18 +14,22 @@ import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import type { EveAuthFn, EveAuthResult } from "#public/channels/eve.js";
 import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
 import {
   type AuthFn,
+  type AuthResult,
   createIpAllowList,
   createUnauthorizedResponse,
   extractBearerToken,
   ForbiddenError,
   httpBasic,
   isIpAllowed,
+  jwtEcdsa,
   jwtHmac,
   localDev,
   none,
+  oidc,
   placeholderAuth,
   routeAuth,
   type UnauthorizedChallenge,
@@ -40,6 +44,26 @@ import {
 } from "#public/channels/auth.js";
 
 const TEST_ROUTE_URL = `https://example.com${EVE_SESSION_ROUTE_PATH}`;
+
+describe("auth types", () => {
+  it("keeps shared identity separate from eve-channel permissions", () => {
+    expectTypeOf<AuthResult>().toEqualTypeOf<SessionAuthContext>();
+    expectTypeOf<Extract<"allowToolStubs", keyof AuthResult>>().toEqualTypeOf<never>();
+    expectTypeOf<EveAuthResult["allowToolStubs"]>().toEqualTypeOf<boolean | undefined>();
+    expectTypeOf<AuthFn>().toEqualTypeOf<AuthFn<Request, AuthResult>>();
+  });
+
+  it("accepts ordinary auth helpers as eve-channel authenticators", () => {
+    expectTypeOf<ReturnType<typeof none>>().toExtend<EveAuthFn>();
+    expectTypeOf<ReturnType<typeof localDev>>().toExtend<EveAuthFn>();
+    expectTypeOf<ReturnType<typeof placeholderAuth>>().toExtend<EveAuthFn>();
+    expectTypeOf<ReturnType<typeof httpBasic>>().toExtend<EveAuthFn>();
+    expectTypeOf<ReturnType<typeof jwtHmac>>().toExtend<EveAuthFn>();
+    expectTypeOf<ReturnType<typeof jwtEcdsa>>().toExtend<EveAuthFn>();
+    expectTypeOf<ReturnType<typeof oidc>>().toExtend<EveAuthFn>();
+    expectTypeOf<ReturnType<typeof vercelOidc>>().toExtend<EveAuthFn>();
+  });
+});
 
 describe("verifyHttpBasic", () => {
   it("returns ok with the authenticated principal when credentials match", () => {
@@ -58,8 +82,8 @@ describe("verifyHttpBasic", () => {
     }
   });
 
-  it("rejects mismatched credentials", () => {
-    const result = verifyHttpBasic(`Basic ${Buffer.from("ops:wrong", "utf8").toString("base64")}`, {
+  it.each(["ops:wrong", "other:top-secret"])("rejects mismatched credentials %s", (credentials) => {
+    const result = verifyHttpBasic(`Basic ${Buffer.from(credentials, "utf8").toString("base64")}`, {
       username: "ops",
       password: "top-secret",
     });
@@ -568,6 +592,22 @@ describe("routeAuth", () => {
     const result = await routeAuth(makeRequest(), () => SAMPLE_CONTEXT);
 
     expect(result).toEqual(SAMPLE_CONTEXT);
+  });
+
+  it("preserves custom grants through withAuthChallenges and routeAuth", async () => {
+    type GrantedAuth = AuthResult & { readonly allowToolStubs: true };
+    const grant: AuthFn<Request, GrantedAuth> = () => ({
+      ...SAMPLE_CONTEXT,
+      allowToolStubs: true,
+    });
+    const auth = withAuthChallenges(grant, [{ scheme: "Bearer" }]);
+    expectTypeOf(auth).toEqualTypeOf<typeof grant>();
+    expectTypeOf(auth).toExtend<EveAuthFn>();
+
+    const result = await routeAuth(makeRequest(), [auth]);
+
+    expectTypeOf(result).toEqualTypeOf<GrantedAuth | Response>();
+    expect(result).toEqual({ ...SAMPLE_CONTEXT, allowToolStubs: true });
   });
 
   it("awaits async AuthFn entries", async () => {
@@ -1458,12 +1498,18 @@ describe("vercelOidc strategy helper", () => {
     await expect(Promise.resolve(authFn(request))).resolves.toBeNull();
   });
 
-  it("grants stubs only through an explicitly granting matched subject entry", async () => {
-    const issuer = await installMockedVercelIssuer("stub-subject-grants");
+  it("points object subject entries to eveVercelOidc instead of never matching them", () => {
+    const subjects = [{ subject: "owner:acme:project:runner:environment:preview" }];
+    expect(() => vercelOidc({ subjects: subjects as never })).toThrow(/eveVercelOidc/);
+  });
+
+  it("returns identity only for project and subject matches despite a token-supplied stub grant", async () => {
+    const issuer = await installMockedVercelIssuer("identity-only-subjects");
     const subject = "owner:acme:project:eval-runner:environment:preview";
     const wildcard = "owner:acme:project:eval-runner:environment:*";
     try {
       const token = await issuer.signToken({
+        allowToolStubs: true,
         environment: "preview",
         project_id: "prj_eval",
         sub: subject,
@@ -1472,35 +1518,24 @@ describe("vercelOidc strategy helper", () => {
         headers: { authorization: `Bearer ${token}` },
       });
       const cases = [
-        { subjects: undefined, allowed: false },
-        { subjects: [], allowed: false },
-        { subjects: [subject], allowed: false },
-        { subjects: [{ subject }], allowed: false },
-        { subjects: [{ subject, allowToolStubs: false }], allowed: false },
-        { subjects: [{ subject: "another-project", allowToolStubs: true }], allowed: false },
-        { subjects: [{ subject: wildcard, allowToolStubs: true }], allowed: true },
-        { subjects: [subject, { subject: wildcard, allowToolStubs: true }], allowed: true },
+        { projectId: "prj_eval", subjects: undefined, principalType: "runtime" },
+        { projectId: "prj_eval", subjects: [], principalType: "runtime" },
+        { projectId: "prj_other", subjects: [subject], principalType: "service" },
+        { projectId: "prj_other", subjects: [wildcard], principalType: "service" },
+        { projectId: "prj_other", subjects: ["another-project"], principalType: null },
       ];
-      for (const { subjects, allowed } of cases) {
+      for (const { projectId, subjects, principalType } of cases) {
         const auth = await vercelOidc({
-          currentVercelProject: { projectId: "prj_eval", environment: "preview" },
+          currentVercelProject: { projectId, environment: "preview" },
           subjects,
         })(request);
-        expect(auth?.principalType).toBe("runtime");
-        expect(auth?.allowToolStubs === true).toBe(allowed);
+        if (principalType === null) {
+          expect(auth).toBeNull();
+        } else {
+          expect(auth).toMatchObject({ authenticator: "oidc", principalType, subject });
+          expect(auth).not.toHaveProperty("allowToolStubs");
+        }
       }
-      const userToken = await issuer.signToken({
-        environment: "development",
-        project_id: "prj_eval",
-        sub: subject,
-        user_id: "user_alice",
-      });
-      const user = await vercelOidc({
-        currentVercelProject: { projectId: "prj_eval", environment: "development" },
-        subjects: [{ subject: "*", allowToolStubs: true }],
-      })(new Request(TEST_ROUTE_URL, { headers: { authorization: `Bearer ${userToken}` } }));
-      expect(user?.principalType).toBe("user");
-      expect(user?.allowToolStubs).toBeUndefined();
     } finally {
       issuer.restore();
     }

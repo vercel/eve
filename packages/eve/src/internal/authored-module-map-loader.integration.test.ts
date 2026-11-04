@@ -22,7 +22,8 @@ describe("loadCompiledModuleMapFromAuthoredSource", () => {
   it("loads mounted extensions on a filesystem without hard links", async () => {
     const app = await createAppRoot("eve-no-hard-links-", {
       files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/agent.mjs":
+          'import { defineAgent } from "eve";\nexport default defineAgent({ model: "openai/gpt-5.4" });',
         "agent/instructions.md": "Work with the available tools.",
         "agent/extensions/one.mjs": 'import ext from "@acme/crm"; export default ext;',
         "node_modules/@acme/crm/package.json": JSON.stringify({

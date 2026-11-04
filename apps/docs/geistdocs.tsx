@@ -53,7 +53,7 @@ export const agent = {
   product: {
     name: "eve",
     description:
-      "A filesystem-first, Apache-2.0 framework for building durable backend AI agents that run on Vercel or your own infrastructure. eve is currently in beta.",
+      "A filesystem-first, Apache-2.0 framework for building durable backend AI agents that run on Vercel or your own infrastructure.",
     category: "Agent framework",
     audience: ["developers building AI agents", "teams running agents on any infrastructure"],
     useCases: [

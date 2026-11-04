@@ -23,12 +23,29 @@ describe("Teams HITL helpers", () => {
         name: "set_campaign_budget",
       },
     });
-    const card = body.attachments?.[0]?.content as {
-      body?: Array<{ text?: string }>;
-    };
+    const card = body.attachments?.[0]?.content as { body?: CardBlock[] };
 
-    expect(card.body?.[1]?.text).toContain('"campaign": "summer"');
+    expect(literalText(card.body?.[1])).toContain('"campaign": "summer"');
     expect(body.text).toContain('"dailyBudget": 500');
+  });
+
+  it("renders a model-written prompt and tool input as literal text, not markdown", () => {
+    const link = "[docs](https://evil.example)";
+    const body = renderInteractionMessage({
+      ...request(),
+      call: { callId: "TC", input: { url: link }, name: "fetch_page" },
+      request: { ...request().request, prompt: `Open ${link}?` },
+    });
+    const card = body.attachments?.[0]?.content as { body?: CardBlock[] };
+
+    expect(card.body?.slice(0, 2)).toEqual([
+      { inlines: [{ text: `Open ${link}?`, type: "TextRun" }], type: "RichTextBlock" },
+      {
+        inlines: [{ fontType: "Monospace", text: expect.stringContaining(link), type: "TextRun" }],
+        type: "RichTextBlock",
+      },
+    ]);
+    expect(body.textFormat).toBe("plain");
   });
 
   it("carries the continuation token in submit actions", () => {
@@ -58,9 +75,9 @@ describe("Teams HITL helpers", () => {
     });
     const card = body.attachments?.[0]?.content as {
       actions?: Array<{ data?: Record<string, Record<string, unknown>> }>;
-      body?: Array<{ text?: string }>;
+      body?: CardBlock[];
     };
-    const shown = card.body?.[0]?.text;
+    const shown = literalText(card.body?.[0]);
 
     expect(shown?.length).toBeLessThan(prompt.length);
     expect(card.actions).toHaveLength(6);
@@ -148,4 +165,12 @@ function activityWithValue(value: unknown): Record<string, unknown> {
     type: "message",
     value,
   };
+}
+
+interface CardBlock {
+  readonly inlines?: readonly { readonly text?: string }[];
+}
+
+function literalText(block: CardBlock | undefined): string | undefined {
+  return block?.inlines?.[0]?.text;
 }

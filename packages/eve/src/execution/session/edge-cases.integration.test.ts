@@ -23,6 +23,7 @@ import {
   registerInstrumentationProvider,
 } from "#instrumentation/providers.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
+import { toAiSdkLanguageModel } from "#internal/runtime-model.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import {
   textStreamResult,
@@ -49,8 +50,8 @@ import {
   type WorkflowExecuteToolDefinition,
 } from "#tools/workflow-definition.js";
 import {
+  holdUntilAbortedWorkflow,
   receiveDelegatedResultWorkflow,
-  waitingForCleanupWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
 
 // Sessions driven through their odd paths: tools that fail, approvals that are cancelled,
@@ -192,6 +193,18 @@ function gate<T = void>() {
   return { open, wait };
 }
 
+/** Workflow tool run ids so far. Tests share one world, so each excludes the runs before it. */
+async function workflowToolRunIds(): Promise<string[]> {
+  const runs = await (
+    await getWorld()
+  ).runs.list({
+    workflowName: workflowToolRunWorkflowReference.workflowId,
+    pagination: { limit: 100 },
+    resolveData: "none",
+  });
+  return runs.data.map((run) => run.runId);
+}
+
 async function waitForOwnerGate<T>(
   promise: Promise<T>,
   label: string,
@@ -252,7 +265,8 @@ interface ToolSpec {
   readonly allowOtherResponders?: boolean;
   readonly inputSchema?: z.ZodType;
   readonly execute?: (input: unknown) => unknown;
-  readonly workflow?: boolean;
+  /** A `"use workflow"` body from the test fixtures, which makes this a workflow tool. */
+  readonly workflow?: (...args: never[]) => unknown;
 }
 
 type Stage = SessionStreamEvent[];
@@ -320,7 +334,7 @@ async function withSession(
           default: tool.workflow
             ? defineWorkflowTool({
                 description: `Run ${tool.name}.`,
-                execute: waitingForCleanupWorkflow as WorkflowExecuteToolDefinition["execute"],
+                execute: tool.workflow as WorkflowExecuteToolDefinition["execute"],
                 inputSchema: {},
               })
             : defineTool({
@@ -825,6 +839,59 @@ describe("calls in flight", () => {
     expect(JSON.stringify(events)).not.toContain("The job finished.");
   });
 
+  // A workflow tool's question sent just before a cancel stopped its run can reach the session
+  // after the turn settled. Nobody can answer it then, so the next message must start a turn.
+  it("drops a workflow tool's question that arrives after its turn was cancelled", async () => {
+    const earlierRuns = await workflowToolRunIds();
+    const { events } = await withSession(
+      "edge-cancel-late-workflow-question",
+      {
+        message: "Prepare the deploy.",
+        model: scriptedModel(({ said }) =>
+          said("Prepare") ? [{ toolName: "prepare", toolCallId: "call_prepare" }] : "Ready.",
+        ),
+        tools: [{ name: "prepare", workflow: holdUntilAbortedWorkflow }],
+      },
+      async (session) => {
+        await session.until("started", (event) => event.type === "call.started");
+        await session.control("cancel");
+        await session.until("cancelled", (event) => event.type === "turn.settled");
+        const runIds = (await workflowToolRunIds()).filter((id) => !earlierRuns.includes(id));
+        expect(runIds).toHaveLength(1);
+        await waitForOwnerGate(
+          resumeHook(sessionInboxHookToken(`http:edge-cancel-late-workflow-question`), {
+            kind: "request",
+            from: {
+              callId: "call_prepare",
+              input: {},
+              runId: runIds[0]!,
+              sequence: 0,
+              stepIndex: 0,
+              toolName: "prepare",
+              turnId: "turn_0",
+            },
+            replyTo: "late-question",
+            request: {
+              kind: "ask",
+              control: "late-control",
+              request: { prompt: "A late question", title: "Late question", options: [] },
+            },
+          }),
+          "late question delivery",
+          session.events,
+        );
+        await session.send("Next turn.");
+        await session.next("next turn");
+        // A proxied answer to the stopped run's question would fail the session instead.
+        expect(ofType(session.events(), "session.ended")).toEqual([]);
+      },
+    );
+
+    expect(settlements(events)).toEqual(["call_prepare:interrupted"]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:cancelled", "turn_1:completed"]);
+    expect(ofType(events, "interaction.opened")).toEqual([]);
+  });
+
   it("preserves each forwarded call when two messages coalesce behind a running tool", async () => {
     const started = gate();
     const release = gate();
@@ -965,11 +1032,11 @@ describe("approvals off the happy path", () => {
   const deployModel = () =>
     scriptedModel(({ results, said }) => {
       if (said("Never mind")) return "Okay, stopping.";
+      if (results.length > 0) return `Deploy finished: ${JSON.stringify(results[0]?.output)}`;
       // A stale answer reaches the model as the person's text, naming the request it answered.
       // An answer to a request the session never made: the model asks for the deploy again.
       if (said("interaction_missing")) return [{ toolName: "deploy", toolCallId: "call_deploy" }];
       if (said("requestId")) return "That was already done.";
-      if (results.length > 0) return `Deploy finished: ${JSON.stringify(results[0]?.output)}`;
       return [{ toolName: "deploy", toolCallId: "call_deploy" }];
     });
   const deployTools: ToolSpec[] = [{ approval: true, name: "deploy" }];
@@ -1363,6 +1430,111 @@ describe("models that fail", () => {
     expect(calls.map((part) => part.callId)).toEqual(["call_second"]);
   });
 
+  it("drops a refused turn's input from history, and keeps the input of a turn that failed otherwise", async () => {
+    let nextPrompt = "";
+    const { events } = await withSession(
+      "edge-model-refused",
+      {
+        message: "Alice asks about the release.",
+        model: scriptedModel(({ said }, raw) => {
+          if (said("pricing")) {
+            nextPrompt = JSON.stringify(raw);
+            return "Usage-based.";
+          }
+          if (said("incident report")) {
+            return {
+              stream: simulateReadableStream({
+                chunks: [
+                  { type: "stream-start", warnings: [] },
+                  { id: "partial", type: "text-start" },
+                  { delta: "The report says", id: "partial", type: "text-delta" },
+                  { id: "partial", type: "text-end" },
+                  {
+                    finishReason: { raw: undefined, unified: "content-filter" },
+                    type: "finish",
+                    usage,
+                  },
+                ],
+              }) as StreamResult["stream"],
+            };
+          }
+          throw Object.assign(new Error("Payment required"), { statusCode: 402 });
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.next("unpaid");
+        await session.send("Alice pastes the incident report.");
+        await session.next("filtered");
+        await session.send("Alice pastes the incident report again.");
+        await session.next("filtered again");
+        await session.send("Alice asks about pricing.");
+        await session.next("answered");
+      },
+    );
+
+    expect(turnOutcomes(events)).toEqual([
+      "turn_0:failed",
+      "turn_1:failed",
+      "turn_2:failed",
+      "turn_3:completed",
+    ]);
+    // A failed call keeps the person's message, but a refused one would be refused again.
+    expect(nextPrompt).toContain("Alice asks about the release.");
+    expect(nextPrompt).toContain("Alice asks about pricing.");
+    expect(nextPrompt).not.toContain("incident report");
+    expect(nextPrompt).not.toContain("The report says");
+    // In their place, the model reads that a turn was refused, once for both.
+    expect(nextPrompt.split("The model provider refused a response in this turn")).toHaveLength(2);
+  });
+
+  it("keeps the record of a call a refused turn already ran", async () => {
+    let sends = 0;
+    let nextPrompt = "";
+    const { events } = await withSession(
+      "edge-refused-after-tool",
+      {
+        message: "Alice asks to send the March invoice to Bob.",
+        model: scriptedModel(({ said, results }, raw) => {
+          if (said("did it go out")) {
+            nextPrompt = JSON.stringify(raw);
+            return "Checking.";
+          }
+          if (results.length === 0) return [{ toolName: "send_invoice", toolCallId: "call_send" }];
+          return {
+            stream: simulateReadableStream({
+              chunks: [
+                { type: "stream-start", warnings: [] },
+                {
+                  finishReason: { raw: undefined, unified: "content-filter" },
+                  type: "finish",
+                  usage,
+                },
+              ],
+            }) as StreamResult["stream"],
+          };
+        }),
+        tools: [{ name: "send_invoice", execute: () => ({ sent: ++sends }) }],
+      },
+      async (session) => {
+        await session.next("filtered");
+        await session.send("Alice asks: did it go out?");
+        await session.next("answered");
+      },
+    );
+
+    expect(turnOutcomes(events)).toEqual(["turn_0:failed", "turn_1:completed"]);
+    expect(sends).toBe(1);
+    // The invoice went out, so the model must still read that it did, though not the request.
+    expect(nextPrompt).toContain("call_send");
+    expect(nextPrompt).toContain('"sent":1');
+    expect(nextPrompt).not.toContain("March invoice");
+    // The note takes the input's place, so the call still follows a user message.
+    expect(nextPrompt.indexOf("The model provider refused")).toBeLessThan(
+      nextPrompt.indexOf("call_send"),
+    );
+  });
+
   it("fails the turn when the account can't pay, and the session takes the next message", async () => {
     let declined = false;
     const { events } = await withSession(
@@ -1385,6 +1557,56 @@ describe("models that fail", () => {
 
     expect(turnOutcomes(events)).toEqual(["turn_0:failed", "turn_1:completed"]);
     expect(ofType(events, "session.ended")).toEqual([]);
+  });
+
+  it("fails the turn when OpenAI refuses the prompt for cybersecurity risk, and the session takes the next message", async () => {
+    const message = "This content was flagged for possible cybersecurity risk.";
+    const refusal = {
+      code: "cyber_policy",
+      data: { error: { code: "cyber_policy", message, type: "invalid_request" }, type: "error" },
+      isRetryable: false,
+      message,
+      statusCode: 400,
+      type: "invalid_request",
+    };
+    let nextPrompt = "";
+    const { events } = await withSession(
+      "edge-model-cyber-policy",
+      {
+        message: "What is a sandbox?",
+        model: scriptedModel(({ said }, raw) => {
+          if (said("sandbox")) return "An isolated VM.";
+          if (said("pricing")) {
+            nextPrompt = JSON.stringify(raw);
+            return "Usage-based.";
+          }
+          return {
+            stream: simulateReadableStream({
+              chunks: [
+                { type: "stream-start", warnings: [] },
+                { error: refusal, type: "error" },
+              ],
+            }) as StreamResult["stream"],
+          };
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.next("answered");
+        await session.send("How do I scan my own server for open ports?");
+        await session.next("refused");
+        await session.send("How does pricing work?");
+        await session.next("recovered");
+      },
+    );
+
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:failed", "turn_2:completed"]);
+    expect(ofType(events, "session.ended")).toEqual([]);
+    // The refused prompt stays out of the history, so it can't fail the next turn too.
+    expect(nextPrompt).toContain("What is a sandbox?");
+    expect(nextPrompt).toContain("An isolated VM.");
+    expect(nextPrompt).toContain("How does pricing work?");
+    expect(nextPrompt).not.toContain("scan my own server");
   });
 
   it("ends the session when the provider rejects the key, naming the turn it failed in", async () => {
@@ -1420,6 +1642,7 @@ describe("work delegated to a child session", () => {
   it("finishes a cancelled task even when its run never reports, then starts the next turn", async () => {
     const running = gate();
     const never = gate();
+    const earlierRuns = await workflowToolRunIds();
     const { events } = await withSession(
       "edge-cancel-hung-task",
       {
@@ -1452,21 +1675,15 @@ describe("work delegated to a child session", () => {
         await session.next("next turn");
         // The cancelled run may still address the owner after the task has ended.
         const taskId = ofType(session.events(), "task.ended")[0]!.data.taskId;
-        const runs = await (
-          await getWorld()
-        ).runs.list({
-          workflowName: workflowToolRunWorkflowReference.workflowId,
-          pagination: { limit: 100 },
-          resolveData: "none",
-        });
-        expect(runs.data).toHaveLength(1);
+        const runIds = (await workflowToolRunIds()).filter((id) => !earlierRuns.includes(id));
+        expect(runIds).toHaveLength(1);
         await waitForOwnerGate(
           resumeHook(sessionInboxHookToken(`http:edge-cancel-hung-task`), {
             kind: "request",
             from: {
               callId: "call_agent",
               input: { message: "CHILD: work" },
-              runId: runs.data[0]!.runId,
+              runId: runIds[0]!,
               sequence: 0,
               stepIndex: 0,
               taskId,
@@ -1689,6 +1906,97 @@ describe("work delegated to a child session", () => {
     expect([...blocks]).toEqual(["person"]);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed"]);
   });
+  it("stops a working task when the conversation is cleared, and its result never arrives", async () => {
+    const never = gate();
+    const prompts: string[] = [];
+    const { events } = await withSession(
+      "edge-clear-working-task",
+      {
+        message: "Delegate the deploy; no need to wait on it.",
+        model: scriptedModel((_prompt, raw) => {
+          const prompt = JSON.stringify(raw);
+          const first = raw.find((message) => message.role === "user");
+          if (JSON.stringify(first?.content).includes("CHILD:"))
+            return heldReply("Child deployed.", never.wait);
+          prompts.push(prompt);
+          if (prompt.includes("What now?")) return "Starting fresh.";
+          if (!prompt.includes('"toolName":"agent"'))
+            return [
+              {
+                input: { message: "CHILD: deploy it." },
+                toolName: "agent",
+                toolCallId: "call_agent",
+              },
+            ];
+          return "The deploy is underway.";
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.until(
+          "underway",
+          (event) => event.type === "content.completed" && event.data.kind === "text",
+        );
+        await session.control("clear");
+        await session.until("cleared", (event) => event.type === "context.settled");
+        await session.send("What now?");
+        await session.next("next turn");
+      },
+    );
+
+    const [ended] = ofType(events, "task.ended");
+    expect(ended?.data).toMatchObject({ outcome: "cancelled", reason: "turn-cancelled" });
+    expect(turnOutcomes(events)).toEqual(["turn_0:cancelled", "turn_1:completed"]);
+    // The cleared conversation's next turn reads only the new message: no task result or note.
+    const last = prompts.at(-1)!;
+    expect(last).not.toContain("call_agent");
+    expect(last).not.toContain(ended!.data.taskId);
+  });
+  it("drops a finished task's unread result when the conversation is cleared", async () => {
+    const never = gate();
+    const childReplied = gate();
+    const prompts: string[] = [];
+    const { events } = await withSession(
+      "edge-clear-unread-task-result",
+      {
+        message: "Delegate the deploy, then keep talking.",
+        model: scriptedModel((_prompt, raw) => {
+          const prompt = JSON.stringify(raw);
+          const first = raw.find((message) => message.role === "user");
+          if (JSON.stringify(first?.content).includes("CHILD:")) {
+            childReplied.open();
+            return "Child deployed.";
+          }
+          prompts.push(prompt);
+          if (prompt.includes("What now?")) return "Starting fresh.";
+          if (!prompt.includes('"toolName":"agent"'))
+            return [
+              {
+                input: { message: "CHILD: deploy it." },
+                toolName: "agent",
+                toolCallId: "call_agent",
+              },
+            ];
+          // The parent keeps generating while the child finishes, so its result stays unread.
+          return heldReply("Still", never.wait, "going");
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.until("generating", (event) => event.type === "content.delta");
+        await waitForOwnerGate(childReplied.wait, "child reply", session.events);
+        // The child's result reaches the parent's inbox while the parent still generates.
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        await session.control("clear");
+        await session.until("cleared", (event) => event.type === "context.settled");
+        await session.send("What now?");
+        await session.next("next turn");
+      },
+    );
+
+    expect(turnOutcomes(events)).toEqual(["turn_0:cancelled", "turn_1:completed"]);
+    expect(prompts.at(-1)).not.toContain("Child deployed.");
+  });
 });
 
 describe("deliveries a child session reads", () => {
@@ -1804,6 +2112,61 @@ describe("deliveries a child session reads", () => {
 });
 
 describe("controls between turns", () => {
+  it.each(["idle", "during a turn"] as const)(
+    "fails a command this owner does not know when %s, so its delivery settles",
+    async (when) => {
+      const release = gate();
+      const { events } = await withSession(
+        `edge-unknown-command-${when === "idle" ? "idle" : "turn"}`,
+        {
+          message: "Say hello.",
+          model: scriptedModel(({ said }) =>
+            said("Still there?")
+              ? "Still here."
+              : when === "idle"
+                ? "Hello."
+                : heldReply("Hello.", release.wait, "Hel"),
+          ),
+          tools: [],
+        },
+        async (session) => {
+          if (when === "idle") await session.next("first");
+          else await session.until("generating", (event) => event.type === "content.delta");
+          // A control from a newer eve, such as one an older owner on another deployment reads.
+          await session.control("from-the-future" as "clear", { turnId: "turn_0" });
+          release.open();
+          await session.until(
+            "unsupported",
+            (event) => event.type === "delivery.settled" && event.data.deliveryId === "control_0",
+          );
+          await session.send("Still there?");
+          await session.until(
+            "second",
+            (event) => event.type === "turn.settled" && event.data.turnId === "turn_1",
+          );
+        },
+      );
+
+      const settled = ofType(events, "delivery.settled").find(
+        (event) => event.data.deliveryId === "control_0",
+      );
+      expect(settled?.data).toEqual({
+        deliveryId: "control_0",
+        outcome: "failed",
+        reason: 'This session does not support the "from-the-future" command.',
+      });
+      expect(ofType(events, "delivery.admitted")).toContainEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            deliveryId: "control_0",
+            source: { control: "from-the-future" },
+          }),
+        }),
+      );
+      expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
+    },
+  );
+
   it.each([1, 4])(
     "keeps summary usage when a context.settled hook cancels with %s model calls per step",
     async (modelCallsPerStep) => {
@@ -1843,7 +2206,7 @@ describe("controls between turns", () => {
             }),
           },
           message: "Alice's fern has brown tips.",
-          model,
+          model: toAiSdkLanguageModel(model),
           modelCallsPerStep,
           sessionUsage: ({ window }) => {
             if (window.inputTokens < 203_000) return false;
@@ -1914,6 +2277,32 @@ describe("controls between turns", () => {
 
     expect(prompts).toEqual([1, 1]);
     expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:completed"]);
+  });
+
+  it("cancels a turn still generating when the conversation is cleared", async () => {
+    const never = gate();
+    const prompts: number[] = [];
+    const { events } = await withSession(
+      "edge-clear-running-turn",
+      {
+        message: "Write a long story.",
+        model: scriptedModel(({ said, users }) => {
+          prompts.push(users);
+          return said("What now?") ? "Fresh start." : heldReply("Once upon", never.wait, "a");
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.until("generating", (event) => event.type === "content.delta");
+        await session.control("clear");
+        await session.until("cleared", (event) => event.type === "context.settled");
+        await session.send("What now?");
+        await session.next("next turn");
+      },
+    );
+
+    expect(prompts).toEqual([1, 1]);
+    expect(turnOutcomes(events)).toEqual(["turn_0:cancelled", "turn_1:completed"]);
   });
 
   it("compacts between turns, and the next turn reads the summary", async () => {

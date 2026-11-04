@@ -1,14 +1,11 @@
 import { MockLanguageModelV3 } from "ai/test";
-import { expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 
-import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { createTestKernel } from "#internal/testing/kernel.js";
 import type { HarnessSession, HarnessStepInput } from "#harness/types.js";
 import { eachEvent, withPublished } from "#internal/testing/session-machine.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { ImportedMessage } from "#protocol/session-events/families/delivery.js";
-
-// The harness runs outside a workflow body here, where run attributes cannot be written.
-vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 const usage = {
   inputTokens: { cacheRead: 0, cacheWrite: 0, noCache: 10, total: 10 },
@@ -72,7 +69,8 @@ const prompted = (call: MockLanguageModelV3["doStreamCalls"][number] | undefined
 it("reads imported history before each turn's context and message, and records it consumed", async () => {
   const llm = model();
   const events: SessionEvent[] = [];
-  const harness = createToolLoopHarness({
+  const harness = createTestKernel({
+    agent: { model: { id: "m" } },
     handleEvent: eachEvent(async (event) => {
       events.push(event);
     }),
@@ -80,8 +78,7 @@ it("reads imported history before each turn's context and message, and records i
     tools: new Map(),
   });
   const session: HarnessSession = {
-    agent: { modelReference: { id: "m" }, system: "You help Alice.", tools: [] },
-    compaction: { recentWindowSize: 10, threshold: 100_000 },
+    compaction: {},
     continuationToken: "http:history",
     history: [],
     sessionId: "history",

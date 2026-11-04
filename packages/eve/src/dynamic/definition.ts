@@ -7,6 +7,7 @@ import type { UserPart } from "#protocol/session-events/envelope.js";
 import type { SessionView } from "#protocol/session-projection/session-view.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
+import type { SessionContext } from "#context/session-context.js";
 
 /**
  * The session's latest turn, running or not. Its `id` keys a memo that runs once per turn: it
@@ -96,15 +97,36 @@ export interface DynamicModelContext extends SessionFrame {
 export interface DynamicContext extends DynamicModelContext {
   /** The model chosen for the session. */
   readonly model: { readonly id: string };
+  /**
+   * Resolves the session's sandbox, starting it on first use, as `ctx.getSandbox()` does in a
+   * tool or hook. A dynamic value runs before every model call, so call it inside `ctx.memo`,
+   * keyed on what would change what you read: outside a memo, every model call waits on the
+   * sandbox, and the first one waits for it to start.
+   *
+   * ```ts
+   * const checkout = calls(ctx.view, { name: "checkout" })
+   *   .filter((call) => call.state === "completed")
+   *   .at(-1);
+   * if (!checkout) return null;
+   * const guidelines = await ctx.memo(["agents-md", checkout.callId], async () => {
+   *   const sandbox = await ctx.getSandbox();
+   *   return sandbox.readTextFile({ path: "AGENTS.md" });
+   * });
+   * ```
+   */
+  readonly getSandbox: SessionContext["getSandbox"];
 }
 
-/** Marker discriminator for a `defineDynamic()` export. */
-export const DYNAMIC_SENTINEL_KIND = "eve:dynamic" as const;
+/**
+ * Cross-instance brand on a `defineDynamic()` value, holding its function. `Symbol.for` lets the
+ * compiler's module copy and the author's import share the key, and keeping it unexported makes
+ * the sentinel opaque: only `defineDynamic()` (and eve's own resolvers built on it) produce one.
+ */
+const DYNAMIC_SENTINEL: unique symbol = Symbol.for("eve.dynamic");
 
-/** A `defineDynamic()` value, which the compiler detects by its `kind`. */
+/** An opaque `defineDynamic()` value. Only `defineDynamic()` produces one. */
 export interface DynamicSentinel<TResult = unknown, TContext = DynamicContext> {
-  readonly kind: typeof DYNAMIC_SENTINEL_KIND;
-  readonly evaluate: (ctx: TContext) => TResult | Promise<TResult>;
+  readonly [DYNAMIC_SENTINEL]: (ctx: TContext) => TResult | Promise<TResult>;
 }
 
 /** `defineDynamic()` typed for the folder it's authored in. */
@@ -136,7 +158,7 @@ export function defineDynamic<TResult, TContext extends DynamicModelContext = Dy
   fn: (ctx: TContext) => TResult | Promise<TResult>,
 ): DynamicSentinel<TResult, TContext> {
   assertDynamicFunction(fn, "defineDynamic()");
-  const sentinel = { evaluate: fn, kind: DYNAMIC_SENTINEL_KIND };
+  const sentinel = { [DYNAMIC_SENTINEL]: fn };
   stampDefinitionKey(sentinel, "dynamic");
   return sentinel;
 }
@@ -151,27 +173,15 @@ function assertDynamicFunction(value: unknown, subject: string): void {
   throw new Error(`${subject} takes a function: defineDynamic(async (ctx) => value).`);
 }
 
-const FRAMEWORK_DEFINITION = Symbol.for("eve.framework-definition");
-
-/**
- * Marks a definition eve generates, such as a memory slot's tools: its function receives eve's
- * own evaluation context, with the step's state.
- */
-export function asFrameworkDefinition<T extends object>(definition: T): T {
-  Object.defineProperty(definition, FRAMEWORK_DEFINITION, { value: true });
-  return definition;
-}
-
-export function isFrameworkDefinition(value: unknown): boolean {
-  return typeof value === "object" && value !== null && FRAMEWORK_DEFINITION in value;
-}
-
 export function isDynamicSentinel(value: unknown): value is DynamicSentinel {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === DYNAMIC_SENTINEL_KIND
-  );
+  return typeof value === "object" && value !== null && DYNAMIC_SENTINEL in value;
+}
+
+/** The function a `defineDynamic()` value wraps. */
+export function dynamicEvaluate<TResult, TContext>(
+  sentinel: DynamicSentinel<TResult, TContext>,
+): (ctx: TContext) => TResult | Promise<TResult> {
+  return sentinel[DYNAMIC_SENTINEL];
 }
 
 /**
@@ -179,8 +189,8 @@ export function isDynamicSentinel(value: unknown): value is DynamicSentinel {
  * The compiler and the runtime loader both use it, so every source agrees.
  */
 export function assertDynamicSentinelKeys(sentinel: DynamicSentinel, message: string): void {
-  assertDynamicFunction(sentinel.evaluate ?? sentinel, `${message} defineDynamic()`);
-  const unknownKeys = Object.keys(sentinel).filter((key) => key !== "kind" && key !== "evaluate");
+  assertDynamicFunction(dynamicEvaluate(sentinel), `${message} defineDynamic()`);
+  const unknownKeys = Object.keys(sentinel);
   if (unknownKeys.length > 0) {
     throw new Error(
       `${message} defineDynamic() takes only a function; unknown key(s): ${unknownKeys.join(", ")}. Packaging configuration such as build.externalDependencies belongs on the root agent.ts.`,

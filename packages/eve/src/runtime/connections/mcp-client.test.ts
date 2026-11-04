@@ -9,6 +9,8 @@ import {
 } from "#connections/errors.js";
 import type { SessionContext } from "#context/session-context.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
+import type { ConnectionCallbackContext } from "#shared/connection-types.js";
+import { withConnectionApproval } from "#runtime/connections/approval-scope.js";
 import { ConnectionAuthorizationTokensKey } from "#runtime/connections/authorization-tokens.js";
 import {
   isMcpAuthChallengeResult,
@@ -215,6 +217,31 @@ describe("McpConnectionClient", () => {
 
       const large = { ...userAuth("alice"), attributes: { blob: "a".repeat(16 * 1024) } };
       await expect(send(large)).rejects.toThrow(/Connection "test" cannot forward.*16384-byte/u);
+    } finally {
+      sent.mockRestore();
+    }
+  });
+
+  it("resolves each request's headers with the approver of the call that sent it", async () => {
+    createMCPClient.mockResolvedValue({ close: vi.fn() });
+    const connection = makeConnection({
+      headers: (ctx: ConnectionCallbackContext) => ({
+        "X-Approved-By": ctx.approval?.responder.principalId ?? "",
+      }),
+    });
+    const sent = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null));
+    try {
+      // Approved calls in one step run in parallel, in one context.
+      await contextStorage.run(ctxWithAuth(userAuth("alice")), async () => {
+        await new McpConnectionClient(connection).connect();
+        const fetch: typeof globalThis.fetch = createMCPClient.mock.calls[0]![0].transport.fetch;
+        const send = (responder?: SessionAuthContext) =>
+          withConnectionApproval("test", responder, () => fetch("https://mcp.example.com", {}));
+        await Promise.all([send(userAuth("bob")), send(userAuth("carol")), send()]);
+      });
+      expect(
+        sent.mock.calls.map(([, init]) => new Headers(init?.headers).get("X-Approved-By")),
+      ).toEqual(["bob", "carol", ""]);
     } finally {
       sent.mockRestore();
     }

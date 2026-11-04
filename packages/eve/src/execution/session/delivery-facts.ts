@@ -1,9 +1,9 @@
 import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import type { ConsumedDelivery } from "#harness/session-machine/transitions.js";
 import type { HarnessStepInput, StepInput } from "#harness/types.js";
-import { defined, fact } from "#harness/facts.js";
+import { defined } from "#harness/facts.js";
+import type { AdmittedDelivery } from "#harness/session-machine/deliveries.js";
 import { userPartsOf } from "#harness/user-parts.js";
-import type { SessionEvent } from "#protocol/session-event.js";
 import type { Principal } from "#protocol/session-events/envelope.js";
 import type { DeliverySource } from "#protocol/session-events/families/delivery.js";
 import type { DeliveryRow } from "#protocol/session-projection/tables.js";
@@ -13,15 +13,15 @@ import type { DeliveryRow } from "#protocol/session-projection/tables.js";
 // which consumes them. Deliveries are admitted at step boundaries, since only steps write.
 
 /**
- * What one step admits: the facts it writes first, and each consumed payload's input, carrying
- * its delivery and each answer bound to the response it submits.
+ * What one step admits: the deliveries it records first, and each consumed payload's input,
+ * carrying its delivery and each answer bound to the response it submits.
  */
 export interface DeliveryAdmission {
-  readonly facts: readonly SessionEvent[];
+  readonly deliveries: readonly AdmittedDelivery[];
   readonly inputs: readonly HarnessStepInput[];
 }
 
-export function admitDeliveries(input: {
+export function planAdmission(input: {
   /** The delivery as the session accepted it. */
   readonly delivery: DeliverHookPayload;
   /** The payloads left once sign-in callbacks were matched out, with what `deliver` made of each. */
@@ -34,7 +34,7 @@ export function admitDeliveries(input: {
   readonly channelKind: string;
 }): DeliveryAdmission {
   const { delivery } = input;
-  const facts: SessionEvent[] = [];
+  const deliveries: AdmittedDelivery[] = [];
   const inputs: HarnessStepInput[] = [];
   const principal = principalOf(delivery.auth);
   for (const { input: stepInput, payload } of input.payloads) {
@@ -47,19 +47,24 @@ export function admitDeliveries(input: {
     const deliveryId = metadata.deliveryId;
     const source: DeliverySource = defined({
       channel: metadata.channelKind ?? input.channelKind,
+      hook: metadata.hook,
       scheduleId: delivery.schedule?.definition,
     });
     // Turn context stays out of facts: stream readers may see it, and the turn reads it from
     // the payload and its private state instead.
     const status = input.status?.(deliveryId);
-    if (status === undefined) {
-      facts.push(fact("delivery.admitted", { deliveryId, principal, source }));
-    }
     if (stepInput === undefined) {
       if (status !== "settled")
-        facts.push(fact("delivery.settled", { deliveryId, outcome: "ignored" }));
+        deliveries.push({
+          deliveryId,
+          ignored: {},
+          principal,
+          recorded: status !== undefined,
+          source,
+        });
       continue;
     }
+    if (status === undefined) deliveries.push({ deliveryId, principal, source });
     const consumed: ConsumedDelivery = defined({
       deliveryId,
       history: (stepInput.history?.length ?? 0) > 0 ? stepInput.history : undefined,
@@ -84,7 +89,7 @@ export function admitDeliveries(input: {
           },
     );
   }
-  return { facts, inputs };
+  return { deliveries, inputs };
 }
 
 /** Who sent a delivery, as the wire names them. */

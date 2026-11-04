@@ -1,7 +1,7 @@
 ---
-issue: "None (maintainer-approved pre-1.0 client API proposal)"
+issue: "None (maintainer-approved client API proposal)"
 status: implemented
-last_updated: "2026-10-21"
+last_updated: "2026-10-29"
 ---
 
 # Client receipt following

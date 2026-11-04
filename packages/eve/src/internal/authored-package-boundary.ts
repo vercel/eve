@@ -1,7 +1,9 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire, isBuiltin } from "node:module";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import type { ImportKind, Plugin, PluginContext } from "rolldown";
 
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
@@ -9,6 +11,7 @@ import {
   resolvePackageRoot,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
+import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 export const RESOLVE_EXTENSIONS = [
   ".ts",
@@ -22,18 +25,6 @@ export const RESOLVE_EXTENSIONS = [
   ".json",
 ] as const;
 
-type RolldownResolveResult = {
-  readonly id: string;
-};
-
-export type RolldownResolveContext = {
-  resolve(
-    source: string,
-    importer: string | undefined,
-    options: { kind: string; skipSelf: boolean },
-  ): Promise<RolldownResolveResult | null>;
-};
-
 interface ResolvedAuthoredExternalModule {
   readonly packageName: string;
   readonly resolvedId: string;
@@ -44,15 +35,10 @@ export function createGenerationPackageBoundaryPlugin(input: {
   readonly packageRoot: string;
   readonly extensionSpecifiers?: ReadonlySet<string>;
   readonly resolveExternalPaths?: boolean;
-}): Record<string, unknown> {
+}): Plugin {
   return {
     name: "eve-generation-package-boundary",
-    async resolveId(
-      this: RolldownResolveContext,
-      source: string,
-      importer: string | undefined,
-      options: { kind: string },
-    ) {
+    async resolveId(source, importer, options) {
       if (!isPackageImport(source)) {
         return undefined;
       }
@@ -100,17 +86,12 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
   readonly externalDependencies: readonly string[];
   readonly packageRoot: string;
   readonly extensionSpecifiers?: ReadonlySet<string>;
-}): Record<string, unknown> {
+}): Plugin {
   const canonicalPackageRoot = toCanonicalPath(input.packageRoot);
 
   return {
     name: "eve-runtime-loader-package-boundary",
-    async resolveId(
-      this: RolldownResolveContext,
-      source: string,
-      importer: string | undefined,
-      options: { kind: string },
-    ) {
+    async resolveId(source, importer, options) {
       if (!isPackageImport(source)) {
         return undefined;
       }
@@ -212,17 +193,12 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
 export function createDistributionPackageBoundaryPlugin(input: {
   readonly runtimeDependencies: readonly string[];
   readonly packageRoot: string;
-}): Record<string, unknown> {
+}): Plugin {
   const declaredDependencies = new Set(input.runtimeDependencies);
 
   return {
     name: "eve-extension-distribution-package-boundary",
-    async resolveId(
-      this: RolldownResolveContext,
-      source: string,
-      importer: string | undefined,
-      options: { kind: string },
-    ) {
+    async resolveId(source, importer, options) {
       if (!isPackageImport(source)) {
         return undefined;
       }
@@ -282,11 +258,11 @@ export function createDistributionPackageBoundaryPlugin(input: {
 }
 
 async function resolveConfiguredExternalModule(
-  this: RolldownResolveContext,
+  this: PluginContext,
   input: {
     readonly externalDependencies: readonly string[];
     readonly importer: string | undefined;
-    readonly kind: string;
+    readonly kind: ImportKind;
     readonly packageRoot: string;
     readonly source: string;
   },
@@ -484,6 +460,11 @@ export function isNodeModulesPath(path: string): boolean {
   return path.replaceAll("\\", "/").includes("/node_modules/");
 }
 
+/** Authored source and workspace packages bundled from source, never installed dependencies. */
+export function isAuthoredSourcePath(path: string): boolean {
+  return isAbsolute(path) && !isNodeModulesPath(path);
+}
+
 export function resolveAuthoredPackageRoot(modulePath: string): string {
   const packageRoot = findAuthoredPackageRoot(dirname(modulePath));
   if (packageRoot === undefined) {
@@ -517,13 +498,4 @@ function toCanonicalPath(path: string): string {
   } catch {
     return resolve(path);
   }
-}
-
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
-
-  return (
-    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
-  );
 }

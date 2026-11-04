@@ -1,77 +1,34 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 
-import { HistoryStateKey } from "#context/keys.js";
-import { dynamicInstructionMessages } from "#reactions/kinds/instructions.js";
-import { memoryRecallContents } from "#reactions/kinds/memory.js";
-import { dynamicSkillManifest } from "#reactions/kinds/skill.js";
-import { catalogAnnouncements } from "#execution/catalog/listing.js";
-import type { StepCatalog } from "#execution/catalog/step-catalog.js";
-import { dynamicSkillAnnouncements } from "#execution/skills/instructions.js";
-import { taskSystemMessages } from "#execution/tasks/model-step.js";
-import { createCurrentMessages } from "#harness/current-messages.js";
+import type { HistoryState } from "#context/keys.js";
 import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { applySystemCacheBreakpoint } from "#harness/prompt-cache.js";
-import type { Step } from "#harness/step/context.js";
-import type { HarnessSession } from "#harness/types.js";
 
-export type RequestMessages = ReturnType<typeof createCurrentMessages>;
-
-/**
- * The messages one model call sends: the durable prompt, then the step's system instructions and
- * announcements. Announcements persist ahead of the new input, or after earlier tool results on a
- * continuation, or ahead of the turn's surviving input after a compaction, so later requests keep
- * the full prefix.
- */
-export function requestMessages(
-  step: Step,
-  input: {
-    readonly messages: readonly HarnessModelMessage[];
-    readonly projectedMessages: readonly HarnessModelMessage[];
-    readonly turnMessages: readonly HarnessModelMessage[];
-    readonly catalog: StepCatalog;
-    readonly pendingApprovalsNote: string | undefined;
-  },
-): RequestMessages {
-  const { ctx } = step;
-  const messages = createCurrentMessages(input.messages, {
-    historyState: ctx?.get(HistoryStateKey),
-    currentTurnMessages: input.turnMessages,
-    projectedMessages: input.projectedMessages,
-  });
-  messages.addSystem(dynamicInstructionMessages(ctx));
-  messages.addSystem(taskSystemMessages(input.catalog.offersTasks, step.finalReplyOnly));
-  const announced = ctx?.get(HistoryStateKey)?.announcements;
-  messages.addAnnouncements({
-    ...catalogAnnouncements(input.catalog, announced),
-    ...dynamicSkillAnnouncements(dynamicSkillManifest(ctx), announced),
-  });
-  if (input.pendingApprovalsNote !== undefined) {
-    messages.add(input.pendingApprovalsNote, "context.state", { cacheFriendly: false });
-  }
-  // Last, so nothing lands between a turn's recall and that turn's input.
-  messages.addAnchored(memoryRecallContents(ctx), "memory.load");
-  return messages;
+/** One model call's messages: what the step commits, and what the model reads. */
+export interface RequestMessages {
+  readonly history: readonly HarnessModelMessage[];
+  readonly historyState: HistoryState;
+  readonly nonSystemMessages: readonly HarnessModelMessage[];
 }
 
-/** The call's system instructions: a retry's note, the agent's system prompt, then the step's. */
+/**
+ * The call's system prompt: a retry's note, then exactly the instructions. A string alone is sent
+ * as it is; parts join into one system message, empty ones skipped, with the cache breakpoint at
+ * its end.
+ */
 export function modelInstructions(input: {
-  readonly session: HarnessSession;
-  readonly systemMessages: readonly SystemModelMessage[];
+  readonly instructions: string | readonly string[];
   readonly anthropicCache: ModelProfile["anthropicCache"];
   readonly extraSystemNote?: string;
 }): SystemModelMessage | string | undefined {
-  const { session } = input;
-  const extra: SystemModelMessage[] = input.extraSystemNote
-    ? [{ role: "system", content: input.extraSystemNote }]
-    : [];
-  if (input.systemMessages.length === 0 && extra.length === 0) {
-    return session.agent.system ?? undefined;
-  }
-  const base: SystemModelMessage[] = session.agent.system
-    ? [{ role: "system", content: session.agent.system }]
-    : [];
-  const instructions = [...extra, ...base, ...input.systemMessages];
+  const note = input.extraSystemNote ? [input.extraSystemNote] : [];
+  if (typeof input.instructions === "string" && note.length === 0) return input.instructions;
+  const parts = [
+    ...note,
+    ...(typeof input.instructions === "string" ? [input.instructions] : input.instructions),
+  ].filter((part) => part !== "");
+  const instructions = parts.map((content): SystemModelMessage => ({ content, role: "system" }));
   return mergeSystemInstructions(
     input.anthropicCache
       ? applySystemCacheBreakpoint(instructions, input.anthropicCache)

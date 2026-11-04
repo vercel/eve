@@ -13,7 +13,7 @@ const DEFAULTS = {
   scheduledDelayMillis: 5_000,
 } as const;
 
-/** @internal — exposed for tests; authors get the defaults. */
+/** Exposed for tests; authors get the defaults. */
 interface BatchSpanProcessorOptions {
   readonly diagnostic?: (
     message: string,

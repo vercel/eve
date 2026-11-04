@@ -161,3 +161,72 @@ describe("createRuntimeAdapterRegistry", () => {
     });
   });
 });
+
+describe("deserializeRuntimeAdapter", () => {
+  // A session serialized under an older seed lacks fields a later deploy added
+  // to the channel's `state`; `context(state)` still promises them.
+  it("fills seed fields missing from stored state while stored values win", () => {
+    const registry = createRuntimeAdapterRegistry({
+      channels: [
+        makeChannelDefinition({
+          kind: "channel:test",
+          state: { addedLater: "seed-default", mode: "seed", nested: { items: [] } },
+        }),
+      ],
+    });
+
+    const rehydrated = deserializeRuntimeAdapter(registry, {
+      kind: "channel:test",
+      state: { mode: "stored", threadId: null },
+    });
+
+    expect(rehydrated.state).toEqual({
+      addedLater: "seed-default",
+      mode: "stored",
+      nested: { items: [] },
+      threadId: null,
+    });
+  });
+
+  // Rehydration runs at every step boundary: an explicit `undefined` is a
+  // stored value, but a deleted key looks like a field added to the seed later.
+  it("keeps a stored undefined field and restores a deleted one", () => {
+    const registry = createRuntimeAdapterRegistry({
+      channels: [
+        makeChannelDefinition({ kind: "channel:test", state: { cursor: "seed", mode: "seed" } }),
+      ],
+    });
+
+    const rehydrated = deserializeRuntimeAdapter(registry, {
+      kind: "channel:test",
+      state: { mode: undefined },
+    });
+
+    expect(rehydrated.state).toStrictEqual({ cursor: "seed", mode: undefined });
+  });
+
+  it("restores stored state unchanged for an adapter without a seed", () => {
+    const registry = createRuntimeAdapterRegistry({
+      channels: [makeChannelDefinition({ kind: "channel:test" })],
+    });
+
+    const rehydrated = deserializeRuntimeAdapter(registry, {
+      kind: "channel:test",
+      state: { mode: "stored" },
+    });
+
+    expect(rehydrated.state).toStrictEqual({ mode: "stored" });
+  });
+
+  it("does not share nested seed values with the registry entry", () => {
+    const registry = createRuntimeAdapterRegistry({
+      channels: [makeChannelDefinition({ kind: "channel:test", state: { items: [] } })],
+    });
+
+    const first = deserializeRuntimeAdapter(registry, { kind: "channel:test", state: {} });
+    (first.state as { items: string[] }).items.push("leaked");
+    const second = deserializeRuntimeAdapter(registry, { kind: "channel:test", state: {} });
+
+    expect(second.state).toEqual({ items: [] });
+  });
+});
