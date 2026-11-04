@@ -130,6 +130,27 @@ export default defineAgent({
 
 `strictest()` keeps the strictest answer: denied, then user approval, then approved, then `undefined`. Among equals the first wins, so its reason is kept.
 
+## Telemetry
+
+`privateContextRuntimeContext()` returns `private.sensitive` and `private.personal`, and their sources as `private.sensitive_sources` and `private.personal_sources` (comma-joined, truncated to 256 characters), for [`runtimeContext`](./observability/otel#add-runtime-context). Owners are left out, because they're principal ids and would put personal identifiers into traces.
+
+With both extensions, merge the two helpers so every model span carries both sides, and filter on `untrusted.exposed=true` and `private.sensitive=true` to find sessions where the Rule of Two met:
+
+```ts title="agent/instrumentation/traces.ts"
+import { otelIntegration } from "eve/instrumentation/otel";
+import { privateContextRuntimeContext } from "eve/extensions/private-context";
+import { untrustedContentRuntimeContext } from "eve/extensions/untrusted-content";
+
+export default otelIntegration({
+  runtimeContext: () => ({
+    ...untrustedContentRuntimeContext(),
+    ...privateContextRuntimeContext(),
+  }),
+});
+```
+
+The values reach only the AI SDK spans of each model attempt. Tool spans already carry the call's tags as `agent.tool.tags`.
+
 ## Subagents
 
 Each session has its own state. A subagent starts with none, and its own calls run under the root agent's policy against the subagent's state.

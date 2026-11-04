@@ -5,6 +5,7 @@ export {
   exceedsCap,
   privateContext,
   privateContextPolicy,
+  privateContextRuntimeContext,
   strictest,
 } from "./lib/policy.ts";
 export {

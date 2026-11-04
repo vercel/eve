@@ -17,5 +17,6 @@
   "exceedsCap",
   "privateContext",
   "privateContextPolicy",
+  "privateContextRuntimeContext",
   "strictest"
 ]

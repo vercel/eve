@@ -5,6 +5,7 @@ import {
   decideAudience,
   decidePrivateContext,
   exceeded,
+  runtimeContextOf,
   strictestOf,
   type AudiencePolicyOptions,
   type PrivateContextPolicyOptions,
@@ -62,4 +63,13 @@ export function strictest(...policies: readonly ApprovalPolicy[]): ApprovalPolic
     for (const policy of policies) statuses.push(await policy(ctx));
     return strictestOf(statuses);
   };
+}
+
+/**
+ * Span attributes for `otelIntegration({ runtimeContext })`: `private.sensitive`,
+ * `private.personal`, and their comma-joined sources. They reach the AI SDK spans of each model
+ * call. Owners are left out, so traces carry no principal ids.
+ */
+export function privateContextRuntimeContext(): ReturnType<typeof runtimeContextOf> {
+  return runtimeContextOf(personal.get());
 }

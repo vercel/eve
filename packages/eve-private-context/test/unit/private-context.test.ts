@@ -11,6 +11,7 @@ import {
   PERSONAL_AUDIENCE_REASON,
   readLevelOf,
   requested,
+  runtimeContextOf,
   SENSITIVE_AUDIENCE_REASON,
   settled,
   sinkCapOf,
@@ -141,6 +142,25 @@ test("denies reads by what the conversation's readers may see", () => {
   assert.equal(decideAudience("unknown", sensitiveRead, { treatUnknownAs: "internal" }), undefined);
   assert.equal(decideAudience("unknown", personalRead, { treatUnknownAs: "private" }), undefined);
   assert.equal(decideAudience("public", sink("effect:external")), undefined);
+});
+
+test("reports both levels as span attributes, without owners", () => {
+  const both = read(personal, "call-2", "wiki_search", "sensitive");
+  assert.deepEqual(runtimeContextOf(both), {
+    "private.personal": true,
+    "private.personal_sources": "notion_search",
+    "private.sensitive": true,
+    "private.sensitive_sources": "wiki_search",
+  });
+  assert.equal(JSON.stringify(runtimeContextOf(both)).includes("alice"), false);
+  assert.deepEqual(runtimeContextOf(alice), {
+    "private.personal": false,
+    "private.personal_sources": "",
+    "private.sensitive": false,
+    "private.sensitive_sources": "",
+  });
+  const long = read(personal, "call-3", "x".repeat(400));
+  assert.equal(runtimeContextOf(long)["private.personal_sources"].length, 256);
 });
 
 test("keeps the strictest status, and the first of equals", () => {

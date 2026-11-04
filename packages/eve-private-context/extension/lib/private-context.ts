@@ -241,6 +241,34 @@ function isConnectionTool(call: DecisionInput): boolean {
   return call.toolName.includes("__") && !call.toolName.startsWith("eve__");
 }
 
+/** Most characters of a comma-joined sources span attribute. */
+export const MAX_SOURCES_ATTRIBUTE_LENGTH = 256;
+
+/**
+ * Span attributes for what confidential data the session holds. Owners stay out: they're
+ * principal ids, which would put personal identifiers into traces.
+ */
+export function runtimeContextOf(state: PersonalContext): {
+  readonly "private.sensitive": boolean;
+  readonly "private.sensitive_sources": string;
+  readonly "private.personal": boolean;
+  readonly "private.personal_sources": string;
+} {
+  return {
+    "private.sensitive": state.sensitive,
+    "private.sensitive_sources": joined(state.sensitiveSources),
+    "private.personal": state.sources.length > 0,
+    "private.personal_sources": joined(state.sources),
+  };
+}
+
+function joined(sources: readonly string[]): string {
+  const value = sources.join(",");
+  return value.length > MAX_SOURCES_ATTRIBUTE_LENGTH
+    ? `${value.slice(0, MAX_SOURCES_ATTRIBUTE_LENGTH - 1)}…`
+    : value;
+}
+
 /** How strict a status is: denied, then user approval, then approved, then no answer. */
 export function strictness(status: ApprovalStatus): number {
   const type = typeof status === "object" ? status.type : status;

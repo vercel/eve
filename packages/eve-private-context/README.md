@@ -40,6 +40,7 @@ The built-in `agent` tool has no tags, so it counts as `reads:personal` by name.
 - `exceedsCap(ctx)`: whether a call would exceed its cap, for `untrustedContentPolicy({ when: exceedsCap })`.
 - `audiencePolicy(options)`: denies `reads:personal` unless `ctx.session.audience` is `"private"`, and `reads:sensitive` outside the workspace (`treatUnknownAs`, default `"external"`).
 - `privateContext(options)`, both combined, and `strictest(...policies)`, which keeps the strictest answer.
+- `privateContextRuntimeContext()` for `otelIntegration({ runtimeContext })`: `private.sensitive`, `private.personal`, and their sources. Owners stay out of traces.
 
 Behavior and limits are documented in `docs/private-context-extension.md`.
 
