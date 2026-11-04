@@ -66,6 +66,8 @@ Forward both runtime route prefixes through your reverse proxy or ingress withou
 
 If the proxy forwards only `/eve/`, a session starts but the run stalls because its workflow callback can’t reach eve.
 
+The local world authenticates workflow queue deliveries by default. With the Postgres world or another custom world, enable authentication by setting `EVE_WORKFLOW_DELIVERY_SECRET` to the same random value of at least 32 characters on every server process.
+
 ## Verify the service
 
 After your proxy and authentication are active, check the health route:
