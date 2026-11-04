@@ -1,3 +1,4 @@
+import { commitOf } from "#harness/session-machine/commit.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import {
   BasicTracerProvider,
@@ -89,7 +90,7 @@ function session(
     ...child,
   })!;
   return {
-    commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => handle(facts)),
+    commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => handle(commitOf(facts))),
     async spans(): Promise<readonly ReadableSpan[]> {
       await provider.forceFlush();
       return exporter.getFinishedSpans();

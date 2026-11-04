@@ -1,7 +1,7 @@
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 
-import type { ApprovalDecision } from "#approval/status.js";
-import { decideApproval } from "#harness/tools.js";
+import { requireClearance } from "#harness/clearance.js";
+import { decideApproval, type GateDecision } from "#harness/tools.js";
 import type { InvokeToolOptions, InvokeToolResult } from "#channel/invoke-tool.js";
 import {
   compiledToolOwner,
@@ -298,27 +298,25 @@ async function runCall(input: {
   const { callId, definition, observer } = input;
   const signal = input.signal ?? new AbortController().signal;
 
-  let approval: ApprovalDecision = { denied: false };
-  if (definition.approval !== undefined) {
-    try {
-      approval = await decideApproval(definition, {
-        abortSignal: signal,
-        callId,
-        input: input.input,
-      });
-    } catch (error) {
-      observer.failedWith(error);
-      return failedFromError(error, definition.name, "approval policy failed");
-    }
-    if (approval.denied)
-      return {
-        outcome: "rejected",
-        reason:
-          approval.reason ?? `The tool "${definition.name}" was denied by its approval policy.`,
-        cause: { policy: "approval" },
-      };
-    if (approval.awaitsPerson === true) return { outcome: "rejected", reason: "approval-required" };
+  let approval: GateDecision;
+  try {
+    approval = await decideApproval(definition, {
+      abortSignal: signal,
+      callId,
+      input: input.input,
+    });
+  } catch (error) {
+    observer.failedWith(error);
+    return failedFromError(error, definition.name, "approval policy failed");
   }
+  if (approval.denied)
+    return {
+      outcome: "rejected",
+      reason: approval.reason ?? `The tool "${definition.name}" was denied by its approval policy.`,
+      cause: { policy: "approval" },
+    };
+  if (approval.clearance === undefined) return { outcome: "rejected", reason: "approval-required" };
+  requireClearance(approval.clearance, callId);
 
   const executeOptions: ToolExecuteOptions = {
     abortSignal: signal,

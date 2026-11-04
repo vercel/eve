@@ -5,8 +5,8 @@ import { ContextContainer } from "#context/container.js";
 import { dynamicEvaluate } from "#dynamic/definition.js";
 import { anthropic } from "#public/models/anthropic/index.js";
 
-import { openMemos } from "#reactions/records.js";
-import { latestTurn } from "#reactions/turn.js";
+import { openMemos } from "#definitions/memos.js";
+import { latestTurn } from "#definitions/turn.js";
 
 import { auto } from "./auto.js";
 
@@ -131,6 +131,22 @@ describe("auto", () => {
     await expect(run(handler, context())).resolves.toBe("openai/small");
     expect(runtime.localDecisionModel).toHaveBeenCalledWith("typesafe-ai/jev");
     expect(decider.doDecide).toHaveBeenCalledOnce();
+  });
+
+  it("forwards provider options to the decision model", async () => {
+    const decider = decisionModel();
+    const handler = auto({
+      model: decider.model,
+      modelOptions: { providerOptions: { gateway: { zeroDataRetention: true } } },
+      options,
+    });
+
+    await expect(run(handler, context())).resolves.toBe("openai/small");
+    expect(decider.doDecide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerOptions: { gateway: { zeroDataRetention: true } },
+      }),
+    );
   });
 
   it("routes provider language models by alias and preserves reasoning", async () => {

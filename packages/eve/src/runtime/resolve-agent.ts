@@ -8,12 +8,11 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { resolveChannelDefinition } from "#runtime/resolve-channel.js";
 
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
-import { resolveDynamicDefinition } from "#runtime/resolve-dynamic.js";
-import { resolveHookDefinition } from "#runtime/resolve-hook.js";
+import { resolveDefinition, resolveScheduleCollection } from "#runtime/resolve-definition.js";
+import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import { createResolvedModuleSourceRef } from "#runtime/resolve-helpers.js";
 import { resolveSandboxDefinition } from "#runtime/resolve-sandbox.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
-import { resolveMemoryDefinition } from "#runtime/resolve-memory.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import type {
@@ -63,43 +62,20 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       ),
     ),
   );
-  const scope = { moduleMap: input.moduleMap, nodeId: input.nodeId };
-  const resolvedDynamicConnectionResolvers = await Promise.all(
-    input.manifest.dynamicConnections.map((definition) =>
-      resolveDynamicDefinition(definition, { ...scope, kindLabel: "dynamic connection" }),
+  const scope = {
+    moduleMap: input.moduleMap,
+    nodeId: input.nodeId,
+    toolFiles: toolFileNames(input.manifest),
+  };
+  const definitions = await Promise.all([
+    ...input.manifest.definitions.map((definition) => resolveDefinition(definition, scope)),
+    ...input.manifest.scheduleCollections.map((collection) =>
+      resolveScheduleCollection(collection, scope),
     ),
-  );
-  const resolvedDynamicInstructionsResolvers = await Promise.all(
-    (input.manifest.dynamicInstructions ?? []).map((def) =>
-      resolveDynamicDefinition(def, { ...scope, kindLabel: "dynamic instructions" }),
-    ),
-  );
-  const resolvedDynamicSkillResolvers = await Promise.all(
-    (input.manifest.dynamicSkills ?? []).map((def) =>
-      resolveDynamicDefinition(def, { ...scope, kindLabel: "dynamic skill" }),
-    ),
-  );
-  const resolvedDynamicToolResolvers = await Promise.all(
-    input.manifest.dynamicTools.map((def) =>
-      resolveDynamicDefinition(def, { ...scope, kindLabel: "dynamic tool" }),
-    ),
-  );
-  // Hook resolution preserves the manifest's lexicographic-on-slug order
-  // produced by the discovery walker; the per-node registry inherits
-  // that order.
-  const resolvedHooks = await Promise.all(
-    input.manifest.hooks.map((hookDefinition) =>
-      resolveHookDefinition(hookDefinition, input.moduleMap, input.nodeId),
-    ),
-  );
+  ]);
   const resolvedConnections = await Promise.all(
     input.manifest.connections.map((connectionDefinition) =>
       resolveConnectionDefinition(connectionDefinition, input.moduleMap, input.nodeId),
-    ),
-  );
-  const resolvedMemories = await Promise.all(
-    input.manifest.memories.map((definition) =>
-      resolveMemoryDefinition(definition, input.moduleMap, input.nodeId),
     ),
   );
   const authoredSandbox = await resolveSandboxDefinition(
@@ -114,18 +90,13 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
   const resolvedAgent: ResolvedAgent = {
     channels: resolvedChannels,
     connections: resolvedConnections,
-    dynamicConnectionResolvers: resolvedDynamicConnectionResolvers,
-    dynamicInstructionsResolvers: resolvedDynamicInstructionsResolvers,
-    dynamicSkillResolvers: resolvedDynamicSkillResolvers,
-    dynamicToolResolvers: resolvedDynamicToolResolvers,
-    hooks: resolvedHooks,
+    definitions,
     instructions,
     metadata: {
       agentRoot: input.manifest.agentRoot,
       appRoot: input.manifest.appRoot,
       diagnosticsSummary: input.manifest.diagnosticsSummary,
     },
-    memories: resolvedMemories,
     sandbox: authoredSandbox,
     workspaceResourceRoot,
     skills: resolvedSkills,
@@ -349,4 +320,39 @@ function createResolvedAgentConfig(
             },
           },
   };
+}
+
+/**
+ * The names the agent's tool files take, selected or disabled: an eve feature that offers tools
+ * under one of them, such as a memory slot's, yields to the file. eve's own built-in tools aren't
+ * the agent's files, so a slot named like one still offers its tools beside it.
+ */
+function toolFileNames(
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
+): ReadonlySet<string> {
+  return new Set([
+    ...manifest.tools.flatMap(({ name, sourceId }) =>
+      manifest.bindings[sourceId]?.owner.kind === "framework" ? [] : [name],
+    ),
+    ...manifest.definitions.flatMap((definition) =>
+      definition.kind === "tool" && definition.extensionNamespace === undefined
+        ? [definition.slug]
+        : [],
+    ),
+    ...disabledToolNames(manifest),
+  ]);
+}
+
+/** The names of the tool files that export `disableTool()`. */
+export function disabledToolNames(
+  manifest: Pick<CompiledAgentResources, "sourceComposition">,
+): readonly string[] {
+  return manifest.sourceComposition.entries.flatMap((entry) => {
+    if (entry.kind !== "disabled" || !entry.source.logicalPath.startsWith("tools/")) return [];
+    return [
+      stripLogicalPathExtension(entry.source.logicalPath)
+        .replace(/^tools\//, "")
+        .replaceAll("/", "-"),
+    ];
+  });
 }

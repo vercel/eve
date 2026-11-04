@@ -32,7 +32,7 @@ The line on each correctness row shows the 95% interval. When the lines of two h
 <summary>How the results update</summary>
 
 1. The `eve-code` workflow runs on `main` with the `deepswe-lean` dataset every Monday at 06:00 UTC. A maintainer can also start it manually on `main`.
-2. The workflow runs eve-code, opencode, and pi on each benchmark model, one model at a time. It saves each complete result in the eve-bench result store.
+2. The workflow runs eve-code, opencode, pi, and [fx](https://fx.sh) on each benchmark model, one model at a time. It saves each complete result in the eve-bench result store.
 3. The workflow opens a pull request with a summary of the default Anthropic model's result. This page shows only that model.
 4. After a maintainer approves and merges the pull request, the next docs deployment shows the new results.
 
@@ -87,6 +87,8 @@ export default git({});
 `git({})` adds no tool and assumes the agent's shell already has GitHub credentials. The agent uses the `gh` and `git` CLIs in `bash`, and `git__pr` commits, pushes, and opens a draft with `gh pr create --draft`.
 
 Configure `github` to get GitHub tokens through Vercel Connect instead. The extension then adds the authenticated `git__gh` tool and tells the agent to use it for every authenticated GitHub operation. `git__pr` switches to `gh-signed-commit` for repositories that require verified signatures.
+
+`gh-signed-commit` adds or updates non-executable regular files and deletes tracked entries. It rejects additions or updates involving executable files, symlinks, submodules, or file-mode changes before contacting GitHub. Your staged changes remain intact. For those changes, use native `git commit -S` with a configured signing key, then `git push` through the authenticated tool.
 
 | Option                 | Required      | Effect                                                                                     |
 | ---------------------- | ------------- | ------------------------------------------------------------------------------------------ |

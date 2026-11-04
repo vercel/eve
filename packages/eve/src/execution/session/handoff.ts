@@ -43,7 +43,7 @@ import { isObject } from "#shared/guards.js";
  * refuses older ones; a bump that keeps its predecessor readable adds the upgrade
  * in `checkpoint-migrations.ts`.
  */
-export const SESSION_CHECKPOINT_VERSION = 18;
+export const SESSION_CHECKPOINT_VERSION = 19;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {

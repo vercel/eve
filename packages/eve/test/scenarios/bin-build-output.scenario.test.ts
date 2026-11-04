@@ -31,35 +31,6 @@ function stripAnsi(text: string): string {
     .join("");
 }
 
-function removeRolldownPluginTimingWarningBlock(stderr: string): string {
-  const lines = stripAnsi(stderr).split(/\r?\n/);
-  const retainedLines: string[] = [];
-  let inWarningBlock = false;
-
-  for (const line of lines) {
-    // The diagnostic is timing-dependent (it fires when plugins consume
-    // a large share of build time, e.g. on slow CI runners) and its
-    // first line varies between rolldown versions ("[PLUGIN_TIMINGS]
-    // Warning: ..." vs "[PLUGIN_TIMINGS] Your build spent ..."), so the
-    // trigger matches only the stable code prefix.
-    if (!inWarningBlock && line.includes("[PLUGIN_TIMINGS]")) {
-      inWarningBlock = true;
-      continue;
-    }
-
-    if (inWarningBlock) {
-      if (line.includes("https://rolldown.rs/options/checks#plugintimings")) {
-        inWarningBlock = false;
-      }
-      continue;
-    }
-
-    retainedLines.push(line);
-  }
-
-  return retainedLines.join("\n").trim();
-}
-
 async function createTemporaryAppRoot(input: {
   /**
    * When `true`, omit the authored `instructions.md` so discovery fails with
@@ -241,7 +212,7 @@ describe("eve build process output", () => {
 
     expect(result.code).toBe(0);
     expect(result.signal).toBeNull();
-    expect(removeRolldownPluginTimingWarningBlock(result.stderr)).toBe("");
+    expect(stripAnsi(result.stderr).trim()).toBe("");
     expect(result.stdout).toContain("[BUILD] built output at");
     expect(result.stdout).toContain(".output");
   }, 120_000);

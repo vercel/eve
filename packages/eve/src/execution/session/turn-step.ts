@@ -1,8 +1,9 @@
+import { checksSessionEvents } from "#shared/dev-checks.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
-import { channelOf } from "#reactions/frame.js";
+import { channelOf } from "#definitions/frame.js";
 import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
-import type { HandleEventFn } from "#harness/types.js";
+import type { Commit, HandleEventFn } from "#harness/types.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
@@ -28,7 +29,6 @@ import {
   ChannelInstrumentationKey,
   HandleEventKey,
   ToolChannelKey,
-  StaticModelReferenceKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -49,7 +49,12 @@ import {
   recordAppliedSession,
   saveSessionProjection,
 } from "#harness/session-machine/current.js";
-import { saveTransition, dropClosedRecords, sessionView } from "#harness/session-machine/commit.js";
+import {
+  commitTransitions,
+  saveTransition,
+  dropClosedRecords,
+  sessionView,
+} from "#harness/session-machine/commit.js";
 import { matchSignIns, receive } from "#harness/session-machine/transitions.js";
 import type { DeliverPayload } from "#channel/types.js";
 import { coalesceTurnInputs, validateHarnessModelMessages } from "#harness/messages.js";
@@ -64,7 +69,6 @@ import type {
 import { pausedOrParked, resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import {
-  checksSessionEvents,
   foldOrphanedLines,
   openSessionEventPublisher,
   readOrphanedLines,
@@ -75,14 +79,13 @@ import {
 } from "#execution/session/interrupted-step.js";
 import { stepDisagreement } from "#execution/session/step-decision-check.js";
 import { createLogger } from "#internal/logging.js";
-import { admitDeliveries, type DeliveryAdmission } from "#execution/session/delivery-facts.js";
+import { planAdmission, type DeliveryAdmission } from "#execution/session/delivery-facts.js";
 import { getAdapterKind } from "#channel/adapter.js";
-import type { SessionEvent } from "#protocol/session-event.js";
-import { fact } from "#harness/facts.js";
+import { admitDeliveries } from "#harness/session-machine/deliveries.js";
 import { eventsOf } from "#harness/publication.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
-import { applyReactionEffects, restoreReactions } from "#reactions/runner.js";
-import { bindMemoryInstrumentation } from "#reactions/kinds/memory.js";
+import { installDefinitions, restoreDefinitions } from "#definitions/kernel.js";
+import { bindMemoryInstrumentation } from "#memory/definition.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
@@ -92,12 +95,9 @@ import {
 } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
-import {
-  resolveEffectiveAgentRuntime,
-  resolveSessionUsageLimit,
-} from "#execution/effective-agent-config.js";
+import { resolveSessionUsageLimit } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
-import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
+import { hydrateDurableSession } from "#execution/session.js";
 import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { runModelCallBatch } from "#execution/model-call-batching.js";
@@ -176,7 +176,6 @@ async function runSessionStepBody(
   }
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
-  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
 
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.
@@ -242,17 +241,11 @@ async function runSessionStepBody(
       : undefined;
   if (requester !== undefined) ctx.set(AuthKey, requester);
   let initialSession: HarnessSession = {
-    ...hydrateDurableSession({
-      compactionOverrides: {
-        thresholdPercent: effectiveAgent.thresholdPercent,
-      },
-      durable: durableSession,
-      turnAgent: effectiveAgent.turnAgent,
-    }),
+    ...hydrateDurableSession(durableSession),
     history: validateHarnessModelMessages(input.history),
   };
   const instrumentation = bindSessionInstrumentation({
-    agentName: effectiveAgent.turnAgent.id,
+    agentName: bundle.turnAgent.id,
     ctx,
     rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
     sessionId: initialSession.sessionId,
@@ -300,7 +293,7 @@ async function runSessionStepBody(
       ? hookCancellation.signal
       : AbortSignal.any([input.abortSignal, hookCancellation.signal]);
   try {
-    const effectiveNode = { ...bundle.graph.root, turnAgent: effectiveAgent.turnAgent };
+    const effectiveNode = { ...bundle.graph.root, turnAgent: bundle.turnAgent };
     const sessionUsageLimit = resolveSessionUsageLimit(bundle);
     let compacted = false;
     const emitTurnEvent = createTurnEventHandler({
@@ -357,7 +350,7 @@ async function runSessionStepBody(
         await instrumentation?.flush();
         throw error;
       }
-      admission = admitDeliveries({
+      admission = planAdmission({
         channelKind: ctx.get(ChannelInstrumentationKey)?.kind ?? getAdapterKind(adapter),
         delivery: rawDelivery ?? delivery,
         status: (deliveryId) => currentProjection(ctx).view.deliveries[deliveryId]?.status,
@@ -437,25 +430,23 @@ async function runSessionStepBody(
 
     /** Whether the admission changed the session: its history or its sandbox. */
     let admissionChangedSession = false;
-    /** The admission's facts: the session's start if it hasn't, then each delivery admitted. */
-    const admissionFacts = (runtime: ReturnType<typeof buildRuntimeIdentity>): SessionEvent[] => {
-      if (admission === undefined || admission.facts.length === 0) return [];
-      const facts: SessionEvent[] = [];
-      if (!turnPosition(currentProjection(ctx)).sessionStarted) {
-        const parent = ctx.get(ParentSessionKey);
-        const predecessor = ctx.get(SessionPredecessorKey);
-        facts.push(
-          fact("session.started", {
-            parent:
-              parent === undefined
-                ? undefined
-                : { callId: parent.callId, sessionId: parent.sessionId },
-            predecessor,
-            runtime,
-          }),
-        );
-      }
-      return [...facts, ...admission.facts];
+    /** The admission's commit: the session's start if it hasn't, then each delivery admitted. */
+    const admissionFacts = (runtime: ReturnType<typeof buildRuntimeIdentity>): Commit => {
+      if (admission === undefined || admitDeliveries(admission.deliveries).length === 0)
+        return admitDeliveries([]);
+      const parent = ctx.get(ParentSessionKey);
+      return admitDeliveries(admission.deliveries, {
+        start: turnPosition(currentProjection(ctx)).sessionStarted
+          ? undefined
+          : {
+              parent:
+                parent === undefined
+                  ? undefined
+                  : { callId: parent.callId, sessionId: parent.sessionId },
+              predecessor: ctx.get(SessionPredecessorKey),
+              runtime,
+            },
+      });
     };
     /** The admission commit, with the session's providers its hooks read. */
     const publishAdmission = async (runtime: ReturnType<typeof buildRuntimeIdentity>) => {
@@ -502,9 +493,9 @@ async function runSessionStepBody(
         ({ deliveryId }) => projection.view.deliveries[deliveryId]?.status === "admitted",
       );
       if (waiting.length === 0) return;
-      const { events } = receive(sessionView(projection, initialSession.state), {
-        deliveries: waiting,
-      });
+      const received = commitTransitions([
+        receive(sessionView(projection, initialSession.state), { deliveries: waiting }),
+      ]);
       // The turn is already stopping, so this commit's hooks have nothing left to cancel.
       const emit = createTurnEventHandler({
         abortSignal,
@@ -514,7 +505,7 @@ async function runSessionStepBody(
         publisher,
       });
       const publish = instrumentation?.createHandleEvent({ handleEvent: emit }) ?? emit;
-      await contextStorage.run(ctx, () => publish(events));
+      await contextStorage.run(ctx, () => publish(received));
     };
 
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
@@ -539,8 +530,7 @@ async function runSessionStepBody(
 
     const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
     let restoration: Promise<void> | undefined;
-    const prepareReactions = (session: HarnessSession): Promise<void> => {
-      ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
+    const prepareDefinitions = (session: HarnessSession): Promise<void> => {
       return (restoration ??= (async () => {
         try {
           const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
@@ -550,7 +540,7 @@ async function runSessionStepBody(
                 bundle.compiledArtifactsSource,
               );
           await contextStorage.run(ctx, () =>
-            restoreReactions(ctx, { abortSignal, conversation: session.history, revision }),
+            restoreDefinitions(ctx, { abortSignal, conversation: session.history, revision }),
           );
         } catch (error) {
           await instrumentation?.flush();
@@ -570,7 +560,7 @@ async function runSessionStepBody(
         failed: input.recover,
         publish: async (events, session) => {
           const scoped = await withContextScope(ctx, session, async (current) => {
-            await prepareReactions(current);
+            await prepareDefinitions(current);
             const emit = createTurnEventHandler({
               abortSignal,
               canCancelTurn: false,
@@ -599,7 +589,7 @@ async function runSessionStepBody(
       initialSession = recovered.session;
       resolved = recovered.stepInput;
     }
-    await prepareReactions(initialSession);
+    await prepareDefinitions(initialSession);
 
     try {
       await publishAdmission(runtimeIdentity);
@@ -620,15 +610,6 @@ async function runSessionStepBody(
       stepInput: HarnessStepInput | undefined,
       signInCompletions: readonly AuthorizationChallenge[] | undefined,
     ): Promise<StepResult> => {
-      const refreshedSession = refreshSessionFromTurnAgent({
-        compactionOverrides: {
-          thresholdPercent: effectiveAgent.thresholdPercent,
-        },
-        session: lifecycleSession,
-        turnAgent: effectiveAgent.turnAgent,
-      });
-      const modelSession = refreshedSession;
-
       const step = createExecutionNodeStep({
         steeringSignal: input.steeringSignal,
         abortSignal,
@@ -647,9 +628,13 @@ async function runSessionStepBody(
         },
         node: effectiveNode,
         sessionUsageLimit,
-        titleAttributeWrite: pendingAttributes.title,
+        // The title's write finishes first.
+        setAttributes: async (attributes) => {
+          await pendingAttributes.title;
+          await setEveAttributes(attributes);
+        },
       });
-      return step(modelSession, stepInput);
+      return step(lifecycleSession, stepInput);
     };
 
     let completedModelCall: CompletedModelCallCheckpoint | undefined;
@@ -671,7 +656,6 @@ async function runSessionStepBody(
               startSessionPrewarmers(ctx, "turn");
             }
             ctx.setVirtualContext(HandleEventKey, handleEvent);
-            ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
             ctx.setVirtualContext(ToolChannelKey, {
               channel: channelOf(ctx),
               to: createToolChannelTo({
@@ -684,7 +668,7 @@ async function runSessionStepBody(
                 ? { ...enrichedSession, outputSchema: resolved.outputSchema }
                 : enrichedSession;
             // The scope's providers start empty; the slots fill what they own.
-            await applyReactionEffects(ctx);
+            await installDefinitions(ctx);
             // A sign-in completes before the turn it resumes, in the first call only.
             const completions =
               firstCall && completedAuths !== undefined

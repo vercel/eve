@@ -71,6 +71,14 @@ approval: auto({
 
 A dynamic tool rebuilds its policy each time eve evaluates the tool. To keep external data that configures a policy, save it with [`ctx.memo()`](/docs/guides/dynamic-capabilities).
 
+Pass `modelOptions.providerOptions` to configure the decision call, for example to keep it on Gateway providers with zero data retention:
+
+```ts
+approval: auto({
+  modelOptions: { providerOptions: { gateway: { zeroDataRetention: true } } },
+});
+```
+
 ### Customize the approval prompt
 
 Use the object form of `approval` to replace the default `Approve <tool label>?` text. The `prompt` callback receives the validated `input`, final `toolName`, and `callId`:

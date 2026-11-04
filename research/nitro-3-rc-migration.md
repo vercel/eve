@@ -1,15 +1,15 @@
 ---
 issue: "None (maintainer-requested migration plan)"
 status: in-progress
-last_updated: "2026-10-30"
+last_updated: "2026-11-03"
 ---
 
 # Nitro 3 RC migration and host foundation
 
 ## Decision
 
-Move eve from `nitro@3.0.260903-beta` to `nitro@3.0.261029-rc`. Replace the undeclared, transitive
-`rolldown@1.2.9` with an exact, eve-declared `rolldown@1.2.16`.
+Move eve from `nitro@3.0.260903-beta` to the Nitro 3 RC (`nitro@3.0.261103-rc` at the bump).
+Replace the undeclared, transitive `rolldown@1.2.9` with an exact, eve-declared `rolldown@1.2.16`.
 
 Use the migration to rebuild eve's host layer into a materially simpler, data-driven foundation:
 
@@ -59,7 +59,7 @@ from scratch and supersedes the outside pull request
 
 | Package      | Today (lockfile)                      | Target                   | Who declares it                    |
 | ------------ | ------------------------------------- | ------------------------ | ---------------------------------- |
-| `nitro`      | 3.0.260903-beta                       | 3.0.261029-rc            | eve, exact                         |
+| `nitro`      | 3.0.260903-beta                       | 3.0.261103-rc            | eve, exact                         |
 | `rolldown`   | 1.2.9, via pnpm hoist only            | 1.2.16                   | eve, exact (new)                   |
 | `h3`         | 2.0.1-rc.32                           | 2.0.8 (stable)           | Nitro                              |
 | `rou3`       | 0.9.2                                 | 1.0.x                    | Nitro                              |
@@ -77,15 +77,9 @@ Rolldown 1.2.16 rather than 1.2.15, for two reasons:
 - Vite 8.3.5 depends on `rolldown ~1.2.14`, so apps that also use Vite can dedupe to a single
   native binding.
 
-Every new release falls inside `minimumReleaseAge: 2880`:
-
-| Release             | Eligible from              |
-| ------------------- | -------------------------- |
-| Nitro RC            | about 2026-10-31 12:00 UTC |
-| Rolldown 1.2.16     | about 2026-10-31 14:31 UTC |
-| `env-runner@0.3.11` | about 2026-11-01 01:31 UTC |
-
-pnpm resolves `^0.3.10` to 0.3.10 until then. Wait for those times; add no release-age exclusions.
+Rolldown 1.2.16 and `env-runner@0.3.11` are past `minimumReleaseAge: 2880` at the bump. The bump
+takes the newest RC on the day it lands, so `pnpm-workspace.yaml` excludes `nitro` from the
+release-age window, as it already does for `workflow` and the AI SDK.
 
 ## What the RC changes for eve
 
@@ -210,9 +204,9 @@ named output shims (Vercel crons, service fallback) ──► publish
 | `workflow-bundle/builder.ts`        | Returns step targets as data, writes one workflow directory, and owns its external lists.                                                                               | Regex re-parsing of `steps.mjs`, duplicate `steps.mjs` and `workflows.mjs` copies, and the build queue.                                    |
 | `bundler/rolldown.ts`               | eve's Rolldown loader with types from `"rolldown"`.                                                                                                                     | The `nitro-rolldown` wrappers and hand-written option shapes.                                                                              |
 | `bundler/authored-plugins.ts`       | One authored-source plugin factory for the authored module graph, loader, extension builds, workflow builder, and host.                                                 | Five hand-ordered lists.                                                                                                                   |
-| `nitro/runtime/`                    | One generated eve runtime plugin, plus a lifecycle plugin that uses only close hooks.                                                                                   | Several side-effect plugins that talk through `process.env` and globals, and the signal handler with `process.exit`.                       |
-| `nitro/dev/host-supervisor.ts`      | Readiness-gated swaps, the spare worker, host refcounts, crash restart, and close, all on `RunnerManager`.                                                              | `DrainedNitroDevServer`.                                                                                                                   |
-| `nitro/dev/dev-runner.ts`           | `EveDevRunner extends NodeWorkerEnvRunner`, with a 15-second `shutdown` default.                                                                                        | The copied worker lifecycle.                                                                                                               |
+| `nitro/host/runtime-plugin.ts`      | One generated eve runtime plugin, plus a lifecycle plugin that uses only close hooks.                                                                                   | Several side-effect plugins that talk through `process.env` and globals, and the signal handler with `process.exit`.                       |
+| `nitro/host/dev-host-supervisor.ts` | Readiness-gated swaps, the spare worker, host refcounts, crash restart, and close, all on `RunnerManager`.                                                              | `DrainedNitroDevServer`.                                                                                                                   |
+| `nitro/host/dev-runner.ts`          | `EveDevRunner extends NodeWorkerEnvRunner`, with a 15-second `shutdown` default.                                                                                        | The copied worker lifecycle.                                                                                                               |
 | `internal/extension/`               | The extension producer modules (build config, declarations, distribution, workspace extensions, state usage), which don't use Nitro.                                    | Their current home under `nitro/host/`.                                                                                                    |
 
 The audits estimate the net change, before verification:
@@ -537,7 +531,7 @@ implementation details to behavior.
 - **Docs for any behavior that needs a decision** below, once decided.
 - **`apps/frameworks/tanstack`:** move the `nitro` pin to the RC in the bump PR.
 - **After the first eve release on the RC:**
-  - bump `apps/docs/registry.json` to `nitro@3.0.261029-rc` and `vite@8.3.5`;
+  - bump `apps/docs/registry.json` to the RC eve ships (`nitro@3.0.261103-rc`) and `vite@8.3.5`;
   - bump `personal-agent-template`'s `rolldown` to `~1.2.16`;
   - let template lockfiles follow the eve version.
 - **Docs changes:** use the `technical-writing` skill and run `pnpm docs:check`.
@@ -573,6 +567,31 @@ clean base and stays focused on what needs the RC.
    - The packed host-build scenario.
    - `AGENTS.md`, research docs, the tanstack framework pin, and a `patch` changeset with credit.
 4. **Post-release pins:** registry, Vite, and templates.
+
+### Status
+
+PRs 1 and 2 landed as #5692 and #5698. The bump moves eve onto the RC with every correctness item
+above: `deps: { install: false, paths: { rolldown } }`, `buildPlugins`, Rolldown output types,
+traced placeholders, the storage guard, Rolldown pruned from hosted graphs, the deleted routing
+plugin and debug-name filter, vendored env-runner 0.3, sandbox shutdown through close hooks, and
+the packed host-build scenario.
+
+A follow-up PR stacked on the bump completes the simplifications that don't depend on the RC:
+
+- `DevHostSupervisor` (`nitro/host/dev-host-supervisor.ts`) replaces `DrainedNitroDevServer`. It
+  keeps readiness-gated swaps with rollback, the spare worker, host refcounts, crash restart, and
+  the close sequence, and leaves request routing, exchange counting, and drain retirement to
+  env-runner's public `RunnerManager`. The rebuild coordinator depends on the narrow
+  `DevHostSwitch` port. Its scenario runs on real worker threads.
+- One generated `#eve/runtime` plugin (`nitro/host/runtime-plugin.ts`) installs the compiled
+  artifacts, the Workflow world, local tracing, and the workflow sandbox runtime. Boot failures
+  stay fatal. Instrumentation, skill files, local schedules, and the sandbox-shutdown close hook
+  stay separate plugins.
+- `bundler/authored-plugins.ts` gives every authored-source build one plugin list. Builds that
+  also bundle dependencies (the workflow driver and the host) resolve imports from authored
+  source only. Plugin factories and build options use Rolldown's types.
+- Host, authored, and workflow builds read one tsconfig: the authored package's own
+  `tsconfig.json` or `jsconfig.json`.
 
 Build each PR as ordered, individually reviewable commits. Upstream asks are filed as issues on
 Nitro and env-runner, not as eve PRs.
@@ -661,7 +680,8 @@ in CI.
 ## Upstream asks
 
 - **Nitro:**
-  - a `deps` switch that fails closed instead of auto-installing;
+  - a `deps` switch that fails closed instead of auto-installing (shipped in the RC as
+    `deps.install`);
   - a c12 switch to skip the main config file, so frameworks don't need to point `configFile`
     somewhere else;
   - a WebSocket resolver that rejects unmatched upgrades, or protocol-typed route entries;

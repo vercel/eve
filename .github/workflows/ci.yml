@@ -167,6 +167,82 @@ jobs:
       - name: Run scenario tests
         run: pnpm test:scenario
 
+  # The desktop job installs apt packages and pulls agent-desktop from npm, so it
+  # runs only when its package changes. It skips at the job level instead of
+  # using `on.pull_request.paths`: a skipped job still reports, and a skipped
+  # required check counts as satisfied. eve changes that break the extension are
+  # caught by the package's integration tests in test-integration.
+  agent-desktop-changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Check changed paths
+        id: filter
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # HEAD is the PR merge commit; HEAD^1 is the base branch tip.
+          if git diff --name-only HEAD^1 HEAD | grep -qE '^(\.nvmrc$|pnpm-lock\.yaml$|packages/eve-agent-desktop/|\.github/workflows/ci\.yml$)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  test-agent-desktop:
+    needs: agent-desktop-changes
+    if: needs.agent-desktop-changes.outputs.relevant == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the desktop extension and its workspace dependencies
+        run: pnpm exec turbo run build --filter=@eve/agent-desktop
+
+      - name: Install the targeted agent-desktop CLI
+        working-directory: packages/eve-agent-desktop
+        run: |
+          version=$(node --input-type=module -e 'import { AGENT_DESKTOP_VERSION } from "./dist/sandbox/sandbox.js"; console.log(AGENT_DESKTOP_VERSION)')
+          npm install --prefix "${{ runner.temp }}/agent-desktop-cli" --no-save "agent-desktop@$version"
+          echo "${{ runner.temp }}/agent-desktop-cli/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Check every tool against the real CLI
+        run: pnpm --filter @eve/agent-desktop test:conformance
+
+      - name: Drive a real Linux desktop
+        env:
+          AGENT_DESKTOP_LIVE: "1"
+        run: pnpm --filter @eve/agent-desktop test:live
+
   test-framework-fixtures:
     name: test-framework-fixtures (next, nuxt, sveltekit, tanstack)
     runs-on: ubuntu-latest

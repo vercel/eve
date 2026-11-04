@@ -1,9 +1,9 @@
 import { gateway, type LanguageModel, type LanguageModelMiddleware, wrapLanguageModel } from "ai";
 
-import type { CompactionConfig, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
-import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import { contextStorage } from "#context/container.js";
-import { getEffectiveModelSelection } from "#reactions/kinds/model.js";
+import type { KernelConfig } from "#harness/types.js";
+import type { ModelChoice } from "#definitions/model.js";
+import { stepModel } from "#definitions/step.js";
+import type { Step } from "#harness/step/context.js";
 import type { ModelProfile } from "#harness/model-profile.js";
 import { appendPackageUserAgent } from "#internal/user-agent.js";
 
@@ -13,7 +13,7 @@ import { appendPackageUserAgent } from "#internal/user-agent.js";
  */
 export function buildGatewayAttributionHeaders(
   profile: ModelProfile,
-  runtimeIdentity: ToolLoopHarnessConfig["runtimeIdentity"],
+  runtimeIdentity: KernelConfig["runtimeIdentity"],
 ): Record<string, string> | undefined {
   if (!profile.gateway) return undefined;
 
@@ -49,75 +49,19 @@ export function withGatewayTraceContext(
   return wrapLanguageModel({ model: gatewayModel, middleware });
 }
 
-export async function resolveEffectiveRuntimeModel(input: {
-  readonly config: ToolLoopHarnessConfig;
-  readonly ctx: ReturnType<typeof contextStorage.getStore>;
-  readonly session: HarnessSession;
-}): Promise<{
+/** The model the step's call runs, as its definitions chose it, and its provider. */
+export async function resolveEffectiveRuntimeModel(step: Step): Promise<{
+  readonly choice: ModelChoice;
   readonly model: LanguageModel;
-  readonly session: HarnessSession;
 }> {
-  if (input.ctx === undefined) {
-    const reference = input.session.agent.modelReference;
-    if (reference === undefined) {
-      throw new Error("Dynamic model selection is unavailable outside an eve runtime context.");
-    }
-    return {
-      model: await input.config.resolveModel(reference),
-      session: input.session,
-    };
-  }
-
-  const selected = getEffectiveModelSelection(input.ctx);
-
-  if (selected === null) {
+  const choice = await stepModel(step);
+  if (choice === undefined) {
     throw new Error(
       "The dynamic model returned no model, so there's none to call. Return a model from its render or record.",
     );
   }
-
   return {
-    model:
-      selected.model !== undefined
-        ? selected.model
-        : await input.config.resolveModel(selected.reference),
-    session: updateSessionModelReference(input.session, selected.reference),
-  };
-}
-
-function updateSessionModelReference(
-  session: HarnessSession,
-  modelReference: RuntimeModelReference,
-): HarnessSession {
-  if (session.agent.modelReference === modelReference) return session;
-  return {
-    ...session,
-    agent: {
-      ...session.agent,
-      modelReference,
-    },
-    compaction: updateCompactionThresholdForModelReference({
-      compaction: session.compaction,
-      modelReference,
-    }),
-  };
-}
-
-function updateCompactionThresholdForModelReference(input: {
-  readonly compaction: CompactionConfig;
-  readonly modelReference: RuntimeModelReference;
-}): CompactionConfig {
-  if (input.modelReference.contextWindowTokens === undefined) {
-    return input.compaction;
-  }
-
-  return {
-    ...input.compaction,
-    threshold: Math.max(
-      1,
-      Math.floor(
-        input.modelReference.contextWindowTokens * (input.compaction.thresholdPercent ?? 0.9),
-      ),
-    ),
+    choice,
+    model: choice.model ?? (await step.config.resolveModel(choice.reference)),
   };
 }

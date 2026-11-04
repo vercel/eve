@@ -32,9 +32,7 @@ export function decideWithMetadata<
   maxRetries,
   signal,
   providerOptions,
-}: DecisionOptions<Questions> & {
-  readonly providerOptions?: Parameters<AiSdkDecide>[0]["providerOptions"];
-}) {
+}: DecisionOptions<Questions>) {
   const decideWithAiSdk = resolveAiSdkDecide();
   ensureAiSdkWarningLogger();
   if (

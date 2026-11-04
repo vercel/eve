@@ -5,7 +5,7 @@
 import type { RelayedInteractionEvent } from "#channel/types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { askedCall } from "#protocol/session-projection/reader.js";
-import { defined, fact } from "#harness/facts.js";
+import { relayEvent } from "#channel/relay-event.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 import { interactionBatches } from "#protocol/session-projection/selectors.js";
 
@@ -29,7 +29,7 @@ export function relayedInteractionEvents(
   return (batch ?? []).map((entry) => {
     const call = askedCall(view, entry);
     const origin = { interactionId: entry.interactionId, sessionId };
-    return fact("interaction.opened", {
+    return relayEvent("interaction.opened", {
       audience: entry.audience,
       interactionId: entry.interactionId,
       origin: call === undefined ? origin : { ...origin, call },
@@ -42,14 +42,14 @@ export function relayedInteractionEvents(
 function relayedFact(view: SessionView, event: SessionEvent): RelayedInteractionEvent | undefined {
   switch (event.type) {
     case "interaction.settled":
-      return { data: event.data, type: "interaction.settled" };
+      return relayEvent("interaction.settled", event.data);
     case "response.admitted": {
       const row = view.responses[event.data.responseId];
       if (row === undefined) return undefined;
-      return {
-        data: { deliveryId: row.deliveryId, interactionId: row.interactionId },
-        type: "response.admitted",
-      };
+      return relayEvent("response.admitted", {
+        deliveryId: row.deliveryId,
+        interactionId: row.interactionId,
+      });
     }
     case "response.settled": {
       const { outcome, reason, responseId } = event.data;
@@ -57,10 +57,7 @@ function relayedFact(view: SessionView, event: SessionEvent): RelayedInteraction
       // A deciding answer settles with its interaction.
       if (row === undefined || outcome === "applied") return undefined;
       const { deliveryId, interactionId } = row;
-      return {
-        data: defined({ deliveryId, interactionId, outcome, reason }),
-        type: "response.settled",
-      };
+      return relayEvent("response.settled", { deliveryId, interactionId, outcome, reason });
     }
     default:
       return undefined;

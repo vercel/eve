@@ -11,7 +11,7 @@ import type {
   SessionInboxPayload,
 } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { pendingContinuation } from "#reactions/continuation.js";
+import { pendingContinuation } from "#definitions/continuation.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
@@ -20,8 +20,8 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
 vi.mock("../route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
 }));
-vi.mock("#reactions/continuation.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("#reactions/continuation.js")>()),
+vi.mock("#definitions/continuation.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#definitions/continuation.js")>()),
   pendingContinuation: vi.fn(),
 }));
 

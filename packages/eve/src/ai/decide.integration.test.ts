@@ -84,6 +84,7 @@ describe("decide", () => {
       questions,
       signal: abortSignal,
       maxRetries: 0,
+      providerOptions: { gateway: { zeroDataRetention: true } },
     });
 
     expect(localDecisionModel).not.toHaveBeenCalled();
@@ -92,6 +93,7 @@ describe("decide", () => {
         state: [{ type: "json", value: state }],
         questions,
         abortSignal,
+        providerOptions: { gateway: { zeroDataRetention: true } },
       }),
     );
   });

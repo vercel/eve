@@ -1,3 +1,5 @@
+import { cascade } from "#harness/session-machine/cascade.js";
+import { linesOf } from "#protocol/session-lines.js";
 import { viewOfEvents } from "#protocol/session-projection/fold.js";
 import type { SessionView as PublicSessionView } from "#protocol/session-projection/tables.js";
 import type { SessionEvent } from "#protocol/session-event.js";
@@ -7,14 +9,16 @@ import type { ModelMessage } from "ai";
 import { contextStorage } from "#context/container.js";
 import { askApprovals } from "#harness/hitl/approvals.js";
 import { suspendStep } from "#harness/session-machine/transitions.js";
-import { sessionView } from "#harness/session-machine/commit.js";
+import { saveTransition, sessionView } from "#harness/session-machine/commit.js";
 import { writeHitlState, type HitlStateChange } from "#harness/hitl/requests.js";
 import { readTurnState, writeTurnState } from "#harness/session-machine/state.js";
 import { eventsOf } from "#harness/publication.js";
 import {
+  advance,
+  checkFoldedLine,
   ensureSessionProjection,
+  foldPublication,
   saveProjection,
-  stepProjection,
 } from "#harness/session-machine/current.js";
 import {
   SESSION_PROJECTION_STATE_KEY,
@@ -44,9 +48,13 @@ export function withPublished(
   session: HarnessSession,
   events: readonly SessionEvent[],
 ): HarnessSession {
-  const projection = stepProjection(undefined, session.state);
-  projection.record(events);
-  return saveProjection(session, projection.read());
+  let projection = storedProjection(session.state);
+  for (const line of linesOf(cascade(projection.view, events), new Date().toISOString())) {
+    const folded = "facts" in line ? line.facts : [line.progress];
+    checkFoldedLine(projection.view, line, projection.view.position);
+    projection = advance(projection, line, projection.view.position, folded);
+  }
+  return saveProjection(session, projection);
 }
 
 /** The session with `position`'s turn open, at its step. */
@@ -123,14 +131,7 @@ export function withParkedStep(
           requests: step.requests ?? [],
           responseAuthRequiredRequestIds: step.responseAuthRequiredRequestIds,
         });
-  const parked = writeTurnState(
-    {
-      ...opened,
-      history: [...opened.history, ...(transition.commit ?? [])] as typeof opened.history,
-    },
-    transition.turn,
-  );
-  return withPublished(parked, transition.events);
+  return withPublished(saveTransition(opened, transition), transition.events);
 }
 
 /**
@@ -142,7 +143,7 @@ export function foldingHandler(handleEvent?: TestEventHandler): HarnessEmitFn {
     const ctx = contextStorage.getStore();
     if (ctx !== undefined) {
       ensureSessionProjection(ctx, undefined);
-      stepProjection(ctx, undefined).record(publication);
+      foldPublication(ctx, publication);
     }
     if (handleEvent !== undefined) await eachEvent(handleEvent)(publication, messages);
   };

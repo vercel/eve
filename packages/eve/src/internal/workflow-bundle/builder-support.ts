@@ -83,7 +83,6 @@ export interface WorkflowBundleCreateWorkflowsBundleOptions {
   readonly frameworkWorkflowFiles: readonly string[];
   readonly outfile: string;
   readonly stepRegistrationsPath: string;
-  readonly tsconfigPath?: string;
 }
 
 export interface WorkflowBundleCreateWorkflowsBundleResult {

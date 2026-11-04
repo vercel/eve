@@ -1,7 +1,6 @@
 import type { RuntimeActionRequestProjection } from "#harness/action-presentation.js";
-import { callRequested, callStarted } from "#harness/call-facts.js";
+import { requestProviderCalls } from "#harness/session-machine/calls.js";
 import type { HarnessEmitFn } from "#harness/types.js";
-import type { SessionEvent } from "#protocol/session-event.js";
 
 interface ActionEventCoordinates {
   readonly runId?: string;
@@ -37,11 +36,15 @@ export function createProviderStreamActionBatch(input: {
     pendingActions.clear();
     // The provider runs these as it streams: each is requested and started in one commit.
     const runId = input.state.runId ?? `${input.state.turnId}.run`;
-    const commit: SessionEvent[] = actions.flatMap(({ action, presentationLabel }) => [
-      callRequested({ action, owner: { runId }, label: presentationLabel }),
-      callStarted(action.callId, { clearedBy: { policy: "provider" } }),
-    ]);
-    await input.emitFn(commit);
+    await input.emitFn(
+      requestProviderCalls(
+        actions.map(({ action, presentationLabel }) => ({
+          action,
+          owner: { runId },
+          label: presentationLabel,
+        })),
+      ),
+    );
   };
 
   const scheduleFlush = (): void => {
