@@ -5,6 +5,14 @@ import type { JsonValue } from "#shared/json.js";
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 
 /**
+ * How long an `eve__task_wait` call without `timeoutSeconds` waits. A task that never
+ * reports, such as one parked on a question nobody answers, would otherwise hold the
+ * turn forever; after this the model sees that it stopped waiting and decides whether
+ * to cancel the task or wait again.
+ */
+export const TASK_WAIT_DEFAULT_TIMEOUT_MS = 30 * 60_000;
+
+/**
  * Calls to the task tools. They defer out of the model step like
  * workflow tool calls; the session answers them instead of a workflow run.
  */
@@ -46,15 +54,14 @@ export function pendingTaskToolCalls(messages: readonly ModelMessage[]): TaskToo
       } else if (part.toolName === TASK_WAIT_TOOL_NAME) {
         // Seconds, to match `sleep`.
         const timeoutSeconds: unknown = Reflect.get(input, "timeoutSeconds");
-        calls.push(
-          typeof timeoutSeconds === "number"
-            ? {
-                callId: part.toolCallId,
-                kind: TASK_WAIT_TOOL_NAME,
-                timeoutMs: timeoutSeconds * 1_000,
-              }
-            : { callId: part.toolCallId, kind: TASK_WAIT_TOOL_NAME },
-        );
+        calls.push({
+          callId: part.toolCallId,
+          kind: TASK_WAIT_TOOL_NAME,
+          timeoutMs:
+            typeof timeoutSeconds === "number"
+              ? timeoutSeconds * 1_000
+              : TASK_WAIT_DEFAULT_TIMEOUT_MS,
+        });
       }
     }
   }

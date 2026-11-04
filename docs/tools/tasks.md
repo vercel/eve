@@ -159,8 +159,9 @@ to withhold a message from the user while waiting for a result. Tasks keep runni
 results reach the model without it.
 
 The call pauses the turn until any task has a result, a new message arrives, or `timeoutSeconds`
-(a whole number of at least 1) pass. It returns at once when a result is already waiting, and it
-never stops a task. The model reads which tasks finished and which are still working:
+(a whole number of at least 1) pass. Without `timeoutSeconds` it waits at most 30 minutes, so a
+task that never reports can't hold the turn forever; the model then decides whether to cancel the
+task or wait again. It returns at once when a result is already waiting, and it never stops a task. The model reads which tasks finished and which are still working:
 
 ```text
 deploy-4hd8sa completed; its result follows. 1 task is still working: researcher-7k2m9q.
