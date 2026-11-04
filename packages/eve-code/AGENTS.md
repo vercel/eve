@@ -1,6 +1,6 @@
 # @eve/code Extension Package
 
-This private package is the source of the `eve/extensions/code` extension for CLI-based coding work. It contributes eve's `edit_file` tool, investigation and review skills, instruction fragments, Connect-backed authentication hooks, and consumer sandbox helpers.
+This private package is the source of the `eve/extensions/code` extension for CLI-based coding work. It contributes investigation and review skills, instruction fragments, Connect-backed authentication hooks, and consumer sandbox helpers.
 
 Before writing code, read the installed eve package docs for extensions, hooks, tools, skills, subagents, and sandboxes as applicable.
 

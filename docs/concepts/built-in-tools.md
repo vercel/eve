@@ -165,6 +165,8 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
+`edit_file` also changes existing files. If you disable or wrap `write_file` to limit writes, do the same for `edit_file`.
+
 ### `edit_file`
 
 `edit_file` edits one sandbox file by exact text replacement. To add it back after `defaultTools: false`:
@@ -189,6 +191,14 @@ import { always } from "eve/tools/approval";
 import { editFile } from "eve/tools/edit_file";
 
 export default defineTool({ ...editFile, approval: always() });
+```
+
+Disable it:
+
+```ts title="agent/tools/edit_file.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
 ```
 
 ### `web_fetch`

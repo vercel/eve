@@ -192,7 +192,7 @@ import { createAgentSourceManifest } from "./node_modules/eve/dist/src/discover/
 const manifest = createAgentSourceManifest({ agentId: "packed-dev", agentRoot: "/virtual/agent", appRoot: "/virtual" });
 const compiled = await compileAgentManifest(manifest, { developmentExtensions: defaultDevelopmentExtensions() });
 const subagent = compiled.subagents.find((entry) => entry.name === "self-modification__agent");
-if (compiled.subagents.length !== 1 || subagent === undefined || !subagent.agent.tools.some((tool) => tool.name === "edit_file")) {
+if (compiled.subagents.length !== 1 || subagent === undefined || !subagent.agent.tools.some((tool) => tool.name === "edit_file" && !tool.sourceId.startsWith("eve:defaults:"))) {
   throw new Error("Packed eve did not discover the bundled self-modification extension.");
 }
 `,
