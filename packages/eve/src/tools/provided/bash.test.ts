@@ -16,17 +16,22 @@ describe("bash model output", () => {
   // `output` is `unknown` so a row can carry a value a wrapper's own `execute` returns.
   it.each<{ name: string; output: unknown; expected: unknown }>([
     {
-      name: "a finished command's streams, then its exit code",
+      name: "a failed command's streams, then its exit code, as an error",
       output: finished,
       expected: {
-        type: "text",
+        type: "error-text",
         value: "ok   compiler\n\n[stderr]\nFAIL parser_test.go\n[exit code: 1]",
       },
     },
     {
-      name: "only the exit code when the command printed nothing",
+      name: "a successful command's output without an exit code",
+      output: { exitCode: 0, status: "completed", stderr: "", stdout: "ok\n", truncated: false },
+      expected: { type: "text", value: "ok\n" },
+    },
+    {
+      name: "(no output) when a successful command printed nothing",
       output: { exitCode: 0, status: "completed", stderr: "", stdout: "", truncated: false },
-      expected: { type: "text", value: "[exit code: 0]" },
+      expected: { type: "text", value: "(no output)" },
     },
     {
       name: "stderr alone when stdout is empty",
@@ -37,7 +42,7 @@ describe("bash model output", () => {
         stdout: "",
         truncated: false,
       },
-      expected: { type: "text", value: "[stderr]\ngofmt: not found\n[exit code: 127]" },
+      expected: { type: "error-text", value: "[stderr]\ngofmt: not found\n[exit code: 127]" },
     },
     {
       name: "a running command's output so far, then how to check on it",

@@ -119,7 +119,7 @@ toModelOutput(output) {
 
 `toModelOutput` receives the typed `execute` return and changes only what the model sees. Channel handlers and hooks still get the full output on `call.settled`, so a channel can render Slack Block Kit the model never sees.
 
-Return `{ type: "text", value }` for a summary or `{ type: "json", value }` for a smaller, JSON-serializable object.
+Return `{ type: "text", value }` for a summary or `{ type: "json", value }` for a smaller, JSON-serializable object. Return `{ type: "error-text", value }`, or `toolOutput.errorText(value)`, to show the model a failure, such as a command that exited non-zero. Providers mark it as an error result, and the call still completes, so channels and hooks get the full output.
 
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before you return them.
 

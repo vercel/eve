@@ -153,7 +153,7 @@ function bashStdout(request: MockModelRequest): string {
   const output = formatOutput(
     [...request.toolResults].reverse().find((result) => result.name === "bash")?.output,
   );
-  // bash shows the model its stdout, then any `[stderr]` section, then `[exit code: N]` last.
+  // bash shows the model its stdout, then any `[stderr]` section; a failed command ends with `[exit code: N]`.
   const body = output.replace(/\[exit code: -?\d+\]$/u, "");
   const stderrAt = body.lastIndexOf("\n[stderr]\n");
   const end = stderrAt !== -1 ? stderrAt : body.startsWith("[stderr]\n") ? 0 : body.length;
