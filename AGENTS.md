@@ -41,10 +41,11 @@ report only checks actually run. Never create an issue solely to accompany a PR.
 Use the [`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md)
 skill when drafting or updating one.
 
-Once the first implementation is done, use the
-[`pr-shepherd`](./.agents/skills/pr-shepherd/SKILL.md) skill to open the PR
-early, run a fresh-context review, address and resolve comments, get CI green,
-and merge.
+When the user explicitly asks to shepherd, land, or merge a PR, or to get one
+green, use the [`pr-shepherd`](./.agents/skills/pr-shepherd/SKILL.md) skill
+to run a fresh-context review, address and resolve comments, get CI green,
+and merge. Do not start it on your own after an implementation or when only
+asked to open a PR.
 
 ## Commands
 
