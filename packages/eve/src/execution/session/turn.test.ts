@@ -10,6 +10,8 @@ import { SessionExecution } from "#execution/session/turn.js";
 import { createTurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
+import { pendingTaskToolCalls } from "#execution/tasks/calls.js";
+import { sleep as workflowSleep } from "#compiled/@workflow/core/index.js";
 import { turnStep } from "#execution/session/turn-step.js";
 import { publishSessionEvents } from "#execution/publish-session-events.js";
 import type {
@@ -46,10 +48,14 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
-  ...(await importOriginal()),
-  getWorkflowMetadata: () => ({ url: "https://parent.example" }),
-}));
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#compiled/@workflow/core/index.js")>();
+  return {
+    ...actual,
+    getWorkflowMetadata: () => ({ url: "https://parent.example" }),
+    sleep: vi.fn(actual.sleep),
+  };
+});
 vi.mock("#execution/coordination-dispatch-step.js", () => ({
   dispatchCoordinationStep: vi.fn(),
   publishDispatchedCallsStep: vi.fn(),
@@ -1789,6 +1795,74 @@ describe("SessionExecution checkpoints", () => {
     expect(cancelTasksStep).toHaveBeenCalledWith(
       expect.objectContaining({ reason: "turn-ended", taskIds: [created.taskId] }),
     );
+  });
+
+  it("stops a task_wait without timeoutSeconds after 30 minutes while its task still works", async () => {
+    const base = state("");
+    const working = createTask(readTaskTable(undefined), {
+      callId: "task-call",
+      kind: "tool",
+      name: "research",
+      resumable: false,
+      turnId: "turn_0",
+    });
+    const sessionState: DurableSessionState = {
+      ...base,
+      snapshot: { session: writeTaskTable(base.snapshot.session, working.table) },
+    };
+    // The task never reports and nobody writes: only the wait's own sleep can end it.
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      takeLeading: () => [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: vi.fn(() => []),
+      hasPending: vi.fn(() => false),
+      whenPending: () => new Promise<void>(() => {}),
+      next: vi.fn(() => new Promise<never>(() => {})),
+      onDelivery: vi.fn(() => () => {}),
+      onInterrupt: vi.fn(() => () => {}),
+      restore: vi.fn(),
+    };
+    const slept: unknown[] = [];
+    vi.mocked(workflowSleep).mockImplementationOnce(async (duration: unknown) => {
+      slept.push(duration);
+    });
+    const taskToolCalls = pendingTaskToolCalls([
+      {
+        content: [
+          { input: {}, toolCallId: "wait-call", toolName: "eve__task_wait", type: "tool-call" },
+        ],
+        role: "assistant",
+      },
+    ]).filter((call) => call.kind === "eve__task_wait");
+    let resumedWith: unknown;
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async () => ({
+          action: "paused",
+          ...callsPause({ callIds: ["wait-call"], dispatch: false, taskToolCalls }),
+          serializedContext: {},
+          sessionState,
+        })),
+      )
+      .mockImplementationOnce(
+        turnStepWork(async (input) => {
+          resumedWith = input.input?.runtimeResults;
+          return { action: "done", output: "done", serializedContext: {}, sessionState };
+        }),
+      );
+
+    await expect(
+      createExecution({ inbox, sessionState }).runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Wait for the research." }] },
+      }),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(slept).toEqual([30 * 60_000]);
+    expect(JSON.stringify(resumedWith)).toContain("Stopped waiting");
+    expect(JSON.stringify(resumedWith)).toContain("still working");
   });
 
   it("does not let steering that woke a wait interrupt the step that reads it", async () => {

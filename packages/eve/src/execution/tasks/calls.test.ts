@@ -19,3 +19,14 @@ it("reads task_wait's timeoutSeconds as the milliseconds the turn waits", () => 
 
   expect(calls).toEqual([{ callId: "wait-1", kind: "eve__task_wait", timeoutMs: 90_000 }]);
 });
+
+it("bounds a task_wait with no timeoutSeconds by the default wait", () => {
+  const calls = pendingTaskToolCalls([
+    {
+      content: [{ input: {}, toolCallId: "wait-1", toolName: "eve__task_wait", type: "tool-call" }],
+      role: "assistant",
+    },
+  ]);
+
+  expect(calls).toEqual([{ callId: "wait-1", kind: "eve__task_wait", timeoutMs: 30 * 60_000 }]);
+});
