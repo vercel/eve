@@ -45,6 +45,7 @@ describe("buildVercelAgentSummary", () => {
     });
 
     const summary = buildVercelAgentSummary({
+      agentRuns: { enabled: true },
       generatorVersion: GENERATOR_VERSION,
       manifest,
     });
@@ -85,7 +86,7 @@ describe("buildVercelAgentSummary", () => {
 
   it("surfaces the installed package version by default", async () => {
     const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
-    const summary = buildVercelAgentSummary({ manifest });
+    const summary = buildVercelAgentSummary({ agentRuns: { enabled: true }, manifest });
 
     expect(summary.generatorVersion.length).toBeGreaterThan(0);
   });

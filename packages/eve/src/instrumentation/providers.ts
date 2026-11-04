@@ -10,6 +10,7 @@ import { agentRuns, localTraces } from "#public/instrumentation/otel.js";
 import { installInstrumentationRuntime } from "#tracing/eve/install-instrumentation-runtime.js";
 import { collectOtelPipeline } from "#tracing/eve/otel-declaration.js";
 import {
+  AGENT_RUNS_INSTRUMENTATION_SLOT,
   isInstrumentationDisabled,
   type InstrumentationProvider,
 } from "#instrumentation/provider.js";
@@ -51,7 +52,7 @@ function providerRegistry(): Map<string, InstrumentationProvider> {
 export function seedInstrumentationProviders(): void {
   const registry = providerRegistry();
   if (process.env.VERCEL_ENV === "preview" || process.env.VERCEL_ENV === "production") {
-    registry.set("agent-runs", agentRuns());
+    registry.set(AGENT_RUNS_INSTRUMENTATION_SLOT, agentRuns());
   }
   if (process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] !== undefined) {
     registry.set("local", localTraces());

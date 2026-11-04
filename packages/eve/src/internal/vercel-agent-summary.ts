@@ -251,6 +251,16 @@ export interface VercelEveAgentSummary {
   readonly sandbox: VercelEveSandboxEntry | null;
   readonly subagents: readonly VercelEveSubagentEntry[];
   readonly diagnostics: VercelEveDiagnosticsSummary;
+  /**
+   * Whether this build exports traces to Vercel Agent Runs from preview and
+   * production deployments. `enabled` is `false` only when
+   * `agent/instrumentation/agent-runs.ts` default-exports
+   * `disableInstrumentation()`; omitting the file keeps the default export on.
+   *
+   * eve versions that predate this field omit it. Consumers must treat an
+   * absent field as unknown, not as enabled or disabled.
+   */
+  readonly agentRuns?: { readonly enabled: boolean };
 }
 
 /**

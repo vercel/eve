@@ -11,7 +11,13 @@ import type {
   CompiledSubagentNode,
   CompiledToolDefinition,
 } from "#compiler/manifest.js";
+import {
+  AGENT_RUNS_INSTRUMENTATION_SLOT,
+  isInstrumentationDisabled,
+} from "#instrumentation/provider.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
+import { resolveInstrumentationLayout } from "#internal/instrumentation-layout.js";
 import {
   type VercelEveAgentSummary,
   type VercelEveChannelEntry,
@@ -33,6 +39,7 @@ import {
  * write-out side.
  */
 export function buildVercelAgentSummary(input: {
+  agentRuns: NonNullable<VercelEveAgentSummary["agentRuns"]>;
   manifest: CompiledAgentManifest;
   generatorVersion?: string;
 }): VercelEveAgentSummary {
@@ -71,7 +78,32 @@ export function buildVercelAgentSummary(input: {
       errors: manifest.diagnosticsSummary.errors,
       warnings: manifest.diagnosticsSummary.warnings,
     },
+    agentRuns: input.agentRuns,
   };
+}
+
+/**
+ * Resolves whether the agent exports to Vercel Agent Runs, using the same
+ * `agent/instrumentation/agent-runs.*` default export the runtime registers.
+ *
+ * The manifest does not record instrumentation, so the slot module is
+ * evaluated here the way the compiler evaluates other authored definitions.
+ */
+async function resolveAgentRunsSummary(input: {
+  appRoot: string;
+  manifest: CompiledAgentManifest;
+}): Promise<NonNullable<VercelEveAgentSummary["agentRuns"]>> {
+  const modulePath = resolveInstrumentationLayout({ agentRoot: input.manifest.agentRoot })
+    .modulePathsBySlot[AGENT_RUNS_INSTRUMENTATION_SLOT];
+  if (modulePath === undefined) {
+    return { enabled: true };
+  }
+
+  const namespace = await loadAuthoredModuleNamespace(modulePath, {
+    appRoot: input.appRoot,
+    externalDependencies: input.manifest.config.build?.externalDependencies,
+  });
+  return { enabled: !isInstrumentationDisabled(namespace.default) };
 }
 
 /**
@@ -92,11 +124,16 @@ export function buildVercelAgentSummary(input: {
  * whatever surface they want.
  */
 export async function emitVercelAgentSummary(input: {
+  appRoot: string;
   manifest: CompiledAgentManifest;
   generatorVersion?: string;
   outputPath: string;
 }): Promise<string> {
   const summary = buildVercelAgentSummary({
+    agentRuns: await resolveAgentRunsSummary({
+      appRoot: input.appRoot,
+      manifest: input.manifest,
+    }),
     generatorVersion: input.generatorVersion,
     manifest: input.manifest,
   });

@@ -62,6 +62,10 @@ Omit `agent/instrumentation/agent-runs.ts` to keep that default. To change it,
 default-export `agentRuns(...)` from that file, or default-export
 `disableInstrumentation()` to turn off Agent Runs export.
 
+On Vercel, eve records whether Agent Runs export is on with each deployment.
+When it is off, Vercel does not turn on default tracing automatically for a new
+project.
+
 ## Filter Agent Runs exports
 
 `agentRuns()` accepts one `exportPolicy` object or an array applied in order.

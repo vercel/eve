@@ -40,6 +40,9 @@ export const PROVIDER = Symbol.for("eve.instrumentation.provider");
 /** Marks a slot the author turned off rather than configured. */
 export const DISABLED = Symbol.for("eve.instrumentation.disabled");
 
+/** Reserved slot eve seeds with Vercel Agent Runs export in preview and production. */
+export const AGENT_RUNS_INSTRUMENTATION_SLOT = "agent-runs";
+
 /**
  * Passed to {@link InstrumentationProvider.setup} once at server startup,
  * before any event is published.

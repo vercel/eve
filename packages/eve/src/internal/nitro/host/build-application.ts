@@ -375,6 +375,7 @@ async function buildApplicationInWorkspace(
     }
     await measureBuildPhase(profiler, "agent-summary.emit", () =>
       emitVercelAgentSummary({
+        appRoot: preparedHost.appRoot,
         manifest: preparedHost.compileResult.manifest,
         outputPath: workspace.publication.summary.stagedPath,
       }),
