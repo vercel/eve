@@ -10,7 +10,7 @@ const finished: BashToolOutput = {
   truncated: false,
 };
 
-const RUNNING_NOTE = "The command is still running after 30 seconds as process group 42.";
+const RUNNING_NOTE = "The command is still running after 60 seconds as process group 42.";
 
 describe("bash model output", () => {
   // `output` is `unknown` so a row can carry a value a wrapper's own `execute` returns.

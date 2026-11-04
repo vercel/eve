@@ -1,4 +1,4 @@
-import { loadContext } from "#context/container.js";
+import { contextStorage, loadContext } from "#context/container.js";
 import {
   buildReadFileTargetKey,
   createReadFileStamp,
@@ -28,6 +28,22 @@ export interface WriteFileInput {
 export interface WriteFileResult {
   readonly existed: boolean;
   readonly path: string;
+}
+
+/**
+ * Keeps `write_file`'s read record current after another tool in the session
+ * rewrites a file the session has read, so that change is not reported as a
+ * stale read. `content` is the file's text as `readTextFile` decodes it. A
+ * file the session never read stays unread, and outside a session this does
+ * nothing.
+ */
+export function refreshReadFileStamp(filePath: string, content: string): void {
+  const ctx = contextStorage.getStore();
+  if (ctx === undefined) return;
+  const normalizedPath = normalizeModelPath(filePath);
+  const targetKey = buildReadFileTargetKey(normalizedPath);
+  if (ctx.get(ReadFileStateKey)?.byTarget[targetKey] === undefined) return;
+  setReadFileStamp(ctx, targetKey, createReadFileStamp({ content, filePath: normalizedPath }));
 }
 
 // ---------------------------------------------------------------------------

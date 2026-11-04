@@ -3,6 +3,7 @@ import { defineTool, toolOutput, type ToolDefinition } from "#public/tools/index
 import { defineJsonSchema, prepareJsonSchema } from "#tools/schema.js";
 
 import { frameworkTool } from "./framework-tool.js";
+import { refreshReadFileStamp } from "./write-file.js";
 
 // Ported from pi's `edit` tool (packages/coding-agent/src/core/tools/edit.ts and
 // edit-diff.ts in badlogic/pi-mono v1.5.0): the same input, matching, errors,
@@ -111,10 +112,10 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
         const newContent = applyEditsToNormalizedContent(normalizeToLF(content), edits, path);
         throwIfAborted();
 
-        await sandbox.writeTextFile({
-          path: absolutePath,
-          content: bom + restoreLineEndings(newContent, originalEnding),
-        });
+        const written = restoreLineEndings(newContent, originalEnding);
+        await sandbox.writeTextFile({ path: absolutePath, content: bom + written });
+        // readTextFile drops the BOM, so write_file compares against the text without it.
+        refreshReadFileStamp(absolutePath, written);
         return { path, replacements: edits.length };
       });
     },

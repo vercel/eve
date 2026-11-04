@@ -36,14 +36,14 @@ eve add tool/bash
 export { default } from "eve/tools/bash";
 ```
 
-`bash` waits up to 30 seconds for a command. The model can pass `timeout` to wait longer for a build or test suite, up to 120 seconds. Values above 120 wait 120, and values below 1 wait 1. The cap leaves room for the model call within the Vercel Functions time limit. A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A command that is still running keeps running in the sandbox as its own process group and returns `status: "running"` with:
+`bash` waits up to 60 seconds for a command. The model can pass `timeout` to wait longer for a build or test suite, up to 120 seconds. Values above 120 wait 120, and values below 1 wait 1. The cap leaves room for the model call within the Vercel Functions time limit. A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A command that is still running keeps running in the sandbox as its own process group and returns `status: "running"` with:
 
 - `pid`: the process group id
 - `outputDirectory`: a directory under `/tmp/.eve/jobs/`
 - `stdout`, `stderr`, and `truncated`: the output so far
 - `message`: instructions for the model
 
-The model reads the result as plain text: `stdout`, then any `stderr` after a `[stderr]` line, or `(no output)` when the command printed nothing. A command that exits non-zero ends with `[exit code: N]` and reaches the model as an error result. For a running command, `message` follows the output instead. Channels and hooks get the fields above on `call.settled`.
+The model reads the result as plain text: `stdout`, then any `stderr` after a `[stderr]` line, or `(no output)` when the command printed nothing. Each stream keeps its last 2,000 lines or 50 KB. A longer stream starts with a note that names a file in the sandbox holding its full output. A command that exits non-zero ends with `[exit code: N]` and reaches the model as an error result. For a running command, `message` follows the output instead. Channels and hooks get the fields above on `call.settled`.
 
 The command writes to `stdout` and `stderr` files in `outputDirectory`, and its exit code to an `exit` file when it finishes. The model checks on or stops it with shell commands in later `bash` calls, so the tool's approval policy applies to them:
 
@@ -453,7 +453,7 @@ export { default } from "eve/tools/edit_file";
 
 The model passes `path` and `edits`, a list of `{ oldText, newText }` replacements. Each `oldText` must match exactly one region of the file as it was before the call, and replacements must not overlap. When no exact match exists, `edit_file` ignores trailing whitespace and treats smart quotes, Unicode dashes, and special spaces as their ASCII forms. The file keeps its byte order mark, and every line gets the file's first line ending, so a CRLF file stays CRLF. `edit_file` rejects files that are not valid UTF-8.
 
-Relative paths resolve against the workspace root, and `~` or `$HOME` resolves to the sandbox's home directory. `edit_file` doesn't require a `read_file` call first, but `write_file` requires a new `read_file` call before it overwrites a file that `edit_file` changed. A failed edit changes nothing, and its error names the problem, such as a missing or ambiguous `oldText`. The model reads `Successfully replaced N block(s) in <path>.`, and channels and hooks get `{ path, replacements }` on `call.settled`.
+Relative paths resolve against the workspace root, and `~` or `$HOME` resolves to the sandbox's home directory. `edit_file` doesn't require a `read_file` call first. After it changes a file the session already read, `write_file` can overwrite that file without another `read_file` call. A failed edit changes nothing, and its error names the problem, such as a missing or ambiguous `oldText`. The model reads `Successfully replaced N block(s) in <path>.`, and channels and hooks get `{ path, replacements }` on `call.settled`.
 
 Customize it by wrapping the framework definition:
 

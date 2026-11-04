@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { executeReadFileOnSandbox } from "#execution/sandbox/read-file.js";
+import { executeWriteFileOnSandbox } from "#execution/sandbox/write-file.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { SandboxSession } from "#public/sandbox/index.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ToolSchema } from "#tools/schema.js";
@@ -180,5 +184,29 @@ describe("edit_file", () => {
     const result = await schema["~standard"].validate({ path: "a.txt", ...input });
 
     expect(result).toEqual({ value: { path: "a.txt", edits: [{ oldText: "a", newText: "b" }] } });
+  });
+
+  it("leaves a file it edited writable by write_file after read_file", async () => {
+    const sandbox = mockSandbox({ initialFiles: { "notes.md": "draft\n" } });
+    const path = sandbox.session.resolvePath("notes.md");
+    const ctx = {
+      abortSignal: new AbortController().signal,
+      getSandbox: async () => sandbox.session as SandboxSession,
+      session: { id: "session-1" } as ToolContext["session"],
+    } as ToolContext;
+
+    await contextStorage.run(new ContextContainer(), async () => {
+      await executeReadFileOnSandbox(sandbox.session, { filePath: "notes.md" });
+      await editFile.execute(
+        { path: "notes.md", edits: [{ oldText: "draft", newText: "plan" }] },
+        ctx,
+      );
+      await executeWriteFileOnSandbox(sandbox.session, {
+        content: "final\n",
+        filePath: "notes.md",
+      });
+    });
+
+    expect(sandbox.files.get(path)).toBe("final\n");
   });
 });

@@ -2,11 +2,15 @@ import { randomUUID } from "node:crypto";
 
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
-import { MAX_OUTPUT_BYTES, truncateTail } from "#execution/sandbox/truncate-output.js";
+import {
+  MAX_OUTPUT_BYTES,
+  MAX_OUTPUT_LINES,
+  truncateTail,
+} from "#execution/sandbox/truncate-output.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 
 /** How long a `bash` call waits by default before it leaves the command running in the background. */
-export const BASH_YIELD_SECONDS = 30;
+export const BASH_YIELD_SECONDS = 60;
 
 /**
  * The longest a `bash` call waits. A hosted step runs a model call and its tool
@@ -20,6 +24,12 @@ export const BASH_MAX_YIELD_SECONDS = 120;
 const JOB_ROOT = "/tmp/.eve/jobs";
 
 const MAX_LOG_COMMAND_LENGTH = 240;
+
+// A finished command keeps its job directory when either stream may have been
+// truncated, so the truncation note can point at the full output. The
+// thresholds sit below the output limits, so every truncated stream is kept.
+const KEEP_OUTPUT_BYTES = MAX_OUTPUT_BYTES / 2;
+const KEEP_OUTPUT_LINES = MAX_OUTPUT_LINES / 2;
 
 // The launcher runs the command in its own process group with its output in
 // files, so the command can outlive this call. If the command finishes first,
@@ -48,6 +58,9 @@ code=$?
 mkdir "$d/claimed" 2> /dev/null || exit 0
 cat "$d/stdout"
 cat "$d/stderr" >&2
+for f in "$d/stdout" "$d/stderr"; do
+  [ "$(($(wc -c < "$f")))" -gt ${KEEP_OUTPUT_BYTES} ] || [ "$(($(wc -l < "$f")))" -gt ${KEEP_OUTPUT_LINES} ] && exit "$code"
+done
 rm -rf "$d"
 exit "$code"`;
 
@@ -131,7 +144,8 @@ interface StreamTail {
  *
  * Both stdout and stderr are tail-truncated to keep the end of the output
  * (where errors and final results typically appear) within the shared
- * output limits.
+ * output limits. A truncated stream's note names the file with its full
+ * output when the sandbox kept it.
  */
 export async function executeBashOnSandbox(
   sandbox: SandboxSession,
@@ -189,13 +203,12 @@ async function runCommand(
       child.wait(),
     ]).then(([stdout, stderr, { exitCode }]) => ({ exitCode, stderr, stdout }));
     const done = await waitUpTo(finished, waitSeconds * 1000);
-    if (done !== undefined) return completed(done.exitCode, done);
+    if (done !== undefined) return await completed(sandbox, directory, done);
     const running = await claimRunningJob(sandbox, directory, jobId, waitSeconds);
     if (running === undefined) {
       // No job to claim: the sandbox cannot run background processes, or
       // the command finished as the yield began.
-      const result = await finished;
-      return completed(result.exitCode, result);
+      return await completed(sandbox, directory, await finished);
     }
     void finished.catch(() => {});
     return running;
@@ -245,7 +258,7 @@ async function claimRunningJob(
     stdout: Math.max(0, Number(match[2]) - Buffer.byteLength(stdout)),
   };
   return {
-    ...formatStreams({ stderr: raw.stderr, stdout }, omitted),
+    ...formatStreams({ stderr: raw.stderr, stdout }, omitted, directory),
     message:
       `The command is still running after ${waitSeconds} seconds as process group ${pid}; this result includes its output so far. ` +
       `It keeps writing to ${directory}/stdout and ${directory}/stderr, and writes its exit code to ${directory}/exit when it finishes. ` +
@@ -296,23 +309,42 @@ async function waitUpTo<T>(promise: Promise<T>, ms: number): Promise<T | undefin
   }
 }
 
-function completed(
-  exitCode: number,
-  { stderr, stdout }: { readonly stderr: StreamTail; readonly stdout: StreamTail },
-): BashResult {
-  const streams = formatStreams(
-    { stderr: stderr.text, stdout: stdout.text },
-    { stderr: stderr.omittedBytes, stdout: stdout.omittedBytes },
-  );
+async function completed(
+  sandbox: SandboxSession,
+  directory: string,
+  {
+    exitCode,
+    stderr,
+    stdout,
+  }: { readonly exitCode: number; readonly stderr: StreamTail; readonly stdout: StreamTail },
+): Promise<BashResult> {
+  const raw = { stderr: stderr.text, stdout: stdout.text };
+  const omitted = { stderr: stderr.omittedBytes, stdout: stdout.omittedBytes };
+  let streams = formatStreams(raw, omitted);
+  // Only a truncated result needs the files, and a sandbox without the
+  // launcher, such as `just-bash`, never writes them.
+  if (streams.truncated && (await hasJobOutput(sandbox, directory))) {
+    streams = formatStreams(raw, omitted, directory);
+  }
   return { ...streams, exitCode, status: "completed" };
+}
+
+async function hasJobOutput(sandbox: SandboxSession, directory: string): Promise<boolean> {
+  try {
+    const result = await sandbox.run({ command: `test -f ${shellQuote(directory)}/stdout` });
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
 }
 
 function formatStreams(
   streams: RawStreams,
   omittedBytes: { readonly stderr: number; readonly stdout: number },
+  outputDirectory?: string,
 ): BashStreams {
-  const stdout = formatStream("stdout", streams.stdout, omittedBytes.stdout);
-  const stderr = formatStream("stderr", streams.stderr, omittedBytes.stderr);
+  const stdout = formatStream("stdout", streams.stdout, omittedBytes.stdout, outputDirectory);
+  const stderr = formatStream("stderr", streams.stderr, omittedBytes.stderr, outputDirectory);
   return {
     stderr: stderr.output,
     stdout: stdout.output,
@@ -324,16 +356,23 @@ function formatStream(
   name: "stderr" | "stdout",
   text: string,
   omittedBytes: number,
+  outputDirectory: string | undefined,
 ): { readonly output: string; readonly truncated: boolean } {
   const result = truncateTail(text);
   if (!result.truncated && omittedBytes === 0) {
     return { output: result.output, truncated: false };
   }
-  const note =
+  const shown =
     omittedBytes === 0
-      ? `[${name} truncated: showing last ${result.outputLines} of ${result.totalLines} lines]`
-      : `[${name} truncated: showing last ${result.outputLines} lines; earlier output omitted]`;
-  return { output: `${note}\n${result.output}`, truncated: true };
+      ? `showing last ${result.outputLines} of ${result.totalLines} lines`
+      : `showing last ${result.outputLines} lines`;
+  const rest =
+    outputDirectory === undefined
+      ? omittedBytes === 0
+        ? ""
+        : "; earlier output omitted"
+      : `; full output: ${outputDirectory}/${name}`;
+  return { output: `[${name} truncated: ${shown}${rest}]\n${result.output}`, truncated: true };
 }
 
 async function withDevelopmentSandboxProgress<T>(
