@@ -1,11 +1,11 @@
 import type { SandboxSession } from "#public/sandbox/index.js";
 import { defineTool, toolOutput, type ToolDefinition } from "#public/tools/index.js";
-import { prepareJsonSchema } from "#tools/schema.js";
+import { defineJsonSchema, prepareJsonSchema } from "#tools/schema.js";
 
 import { frameworkTool } from "./framework-tool.js";
 
 // Ported from pi's `edit` tool (packages/coding-agent/src/core/tools/edit.ts and
-// edit-diff.ts in badlogic/pi-mono v0.85.1): the same input, matching, errors,
+// edit-diff.ts in badlogic/pi-mono v1.5.0): the same input, matching, errors,
 // and model text, running against the agent's sandbox.
 
 export interface EditFileToolEdit {
@@ -25,10 +25,8 @@ export interface EditFileToolOutput {
 }
 
 const GUIDELINES = [
-  "Use edit_file for precise changes (edits[].oldText must match exactly)",
-  "When changing multiple separate locations in one file, use one edit_file call with multiple entries in edits[] instead of multiple edit_file calls",
-  "Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
-  "Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
+  "Use edit_file for targeted changes. Batch changes to one file in a single call.",
+  "Each edits[].oldText must exactly and uniquely match the original file. Keep matches short and non-overlapping; merge nearby changes without including large unchanged regions.",
 ];
 
 // Before validation, repairs the shapes models send instead: `edits` as a JSON
@@ -61,12 +59,25 @@ const EDIT_FILE_INPUT_SCHEMA = prepareJsonSchema<EditFileToolInput>(
   prepareEditArguments,
 );
 
+const EDIT_FILE_OUTPUT_SCHEMA = defineJsonSchema<EditFileToolOutput>({
+  type: "object",
+  properties: {
+    path: { type: "string" },
+    replacements: { type: "integer" },
+  },
+  required: ["path", "replacements"],
+  additionalProperties: false,
+});
+
 /**
  * Framework-owned executor that edits files in the default sandbox.
  */
 export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = frameworkTool(
   defineTool({
-    label: { start: (input: EditFileToolInput) => `Edit ${input.path}` },
+    label: {
+      start: (input: EditFileToolInput) =>
+        typeof input.path === "string" ? `Edit ${input.path}` : "Edit",
+    },
     description: [
       "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
       "",
@@ -74,6 +85,7 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
       ...GUIDELINES.map((guideline) => `- ${guideline}`),
     ].join("\n"),
     inputSchema: EDIT_FILE_INPUT_SCHEMA,
+    outputSchema: EDIT_FILE_OUTPUT_SCHEMA,
     async execute(input, ctx): Promise<EditFileToolOutput> {
       const { path, edits } = input;
       if (!Array.isArray(edits) || edits.length === 0) {
@@ -94,7 +106,7 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
         }
 
         // The model will not include an invisible BOM in oldText.
-        const { bom, text: content } = splitBom(UTF8.decode(buffer));
+        const { bom, text: content } = splitBom(decodeUtf8(buffer, path));
         const originalEnding = detectLineEnding(content);
         const newContent = applyEditsToNormalizedContent(normalizeToLF(content), edits, path);
         throwIfAborted();
@@ -103,7 +115,6 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
           path: absolutePath,
           content: bom + restoreLineEndings(newContent, originalEnding),
         });
-        throwIfAborted();
         return { path, replacements: edits.length };
       });
     },
@@ -115,7 +126,16 @@ export const editFile: ToolDefinition<EditFileToolInput, EditFileToolOutput> = f
 export default editFile;
 
 // Keeps a leading BOM as U+FEFF so it can be split off and written back.
-const UTF8 = new TextDecoder("utf-8", { ignoreBOM: true });
+const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+/** Rejects non-UTF-8 files, which decoding and writing back would corrupt. */
+function decodeUtf8(buffer: Uint8Array, path: string): string {
+  try {
+    return UTF8.decode(buffer);
+  } catch {
+    throw new Error(`Could not edit file: ${path}. It is not valid UTF-8 text.`);
+  }
+}
 
 function prepareEditArguments(input: unknown): unknown {
   if (!isRecord(input)) return input;
@@ -150,15 +170,21 @@ function isSingleEdit(value: unknown): value is EditFileToolEdit {
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 
-/** Resolves like pi: Unicode spaces, a leading `@`, `~`, and `file://` URLs, then from the workspace root. */
+const HOME_PREFIX = /^(?:~|\$HOME)(?=\/|$)/u;
+
+/**
+ * Resolves like pi: Unicode spaces, a leading `@`, `~`, and `file://` URLs,
+ * then from the workspace root. `$HOME` also works, as in eve's other file tools.
+ */
 async function resolveEditPath(sandbox: SandboxSession, path: string): Promise<string> {
   let normalized = path.replace(UNICODE_SPACES, " ");
   if (normalized.startsWith("@")) normalized = normalized.slice(1);
-  if (normalized === "~" || normalized.startsWith("~/")) {
+  const home = HOME_PREFIX.exec(normalized)?.[0];
+  if (home !== undefined) {
     const probe = await sandbox.run({ command: `printf '%s' "$HOME"` });
-    const home = probe.exitCode === 0 ? probe.stdout.trim() : "";
-    if (home === "") throw new Error(`Could not edit file: ${path}. The sandbox has no $HOME.`);
-    normalized = normalized === "~" ? home : `${home.replace(/\/$/u, "")}/${normalized.slice(2)}`;
+    const dir = probe.exitCode === 0 ? probe.stdout.trim() : "";
+    if (dir === "") throw new Error(`Could not edit file: ${path}. The sandbox has no $HOME.`);
+    normalized = `${dir === "/" ? "" : dir}${normalized.slice(home.length)}` || "/";
   } else if (normalized.startsWith("file://")) {
     normalized = decodeURIComponent(new URL(normalized).pathname);
   }

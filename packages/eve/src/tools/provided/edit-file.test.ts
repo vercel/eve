@@ -9,9 +9,12 @@ import { editFile, type EditFileToolEdit, type EditFileToolOutput } from "./edit
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
 
-function createSandbox(files: Record<string, string>) {
+function createSandbox(files: Record<string, string | Uint8Array>) {
   const contents = new Map(
-    Object.entries(files).map(([path, text]) => [path, encoder.encode(text)]),
+    Object.entries(files).map(([path, file]) => [
+      path,
+      typeof file === "string" ? encoder.encode(file) : file,
+    ]),
   );
   const sandbox: Pick<SandboxSession, "readBinaryFile" | "resolvePath" | "run" | "writeTextFile"> =
     {
@@ -34,6 +37,7 @@ function createSandbox(files: Record<string, string>) {
   } as ToolContext;
   return {
     read: (path: string) => decoder.decode(contents.get(path)),
+    bytes: (path: string) => contents.get(path),
     edit: async (path: string, edits: EditFileToolEdit[]) =>
       (await editFile.execute({ path, edits }, ctx)) as EditFileToolOutput,
   };
@@ -137,12 +141,23 @@ describe("edit_file", () => {
     ).rejects.toThrow("Could not edit file: gone.txt. Error code: ENOENT.");
   });
 
-  it("resolves a leading @ and ~ like pi", async () => {
-    const sandbox = createSandbox({ "/home/alice/todo.txt": "draft\n" });
+  it("resolves a leading @, ~, and $HOME to the sandbox home", async () => {
+    const sandbox = createSandbox({ "/home/alice/todo.txt": "one\n" });
 
-    await sandbox.edit("@~/todo.txt", [{ oldText: "draft", newText: "final" }]);
+    await sandbox.edit("@~/todo.txt", [{ oldText: "one", newText: "two" }]);
+    await sandbox.edit("$HOME/todo.txt", [{ oldText: "two", newText: "three" }]);
 
-    expect(sandbox.read("/home/alice/todo.txt")).toBe("final\n");
+    expect(sandbox.read("/home/alice/todo.txt")).toBe("three\n");
+  });
+
+  it("rejects a file that is not UTF-8 instead of rewriting its bytes", async () => {
+    const latin1 = new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a, 0x6f, 0x6c, 0x64, 0x0a]);
+    const sandbox = createSandbox({ "/workspace/menu.txt": latin1 });
+
+    await expect(sandbox.edit("menu.txt", [{ oldText: "old", newText: "new" }])).rejects.toThrow(
+      "Could not edit file: menu.txt. It is not valid UTF-8 text.",
+    );
+    expect(sandbox.bytes("/workspace/menu.txt")).toEqual(latin1);
   });
 
   it("serializes concurrent edits to the same file", async () => {

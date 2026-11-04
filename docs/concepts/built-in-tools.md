@@ -451,9 +451,9 @@ eve add tool/edit_file
 export { default } from "eve/tools/edit_file";
 ```
 
-The model passes `path` and `edits`, a list of `{ oldText, newText }` replacements. Each `oldText` must match exactly one region of the file as it was before the call, and replacements must not overlap. When no exact match exists, `edit_file` ignores trailing whitespace and treats smart quotes, Unicode dashes, and special spaces as their ASCII forms. Untouched lines keep their original bytes, line endings, and byte order mark.
+The model passes `path` and `edits`, a list of `{ oldText, newText }` replacements. Each `oldText` must match exactly one region of the file as it was before the call, and replacements must not overlap. When no exact match exists, `edit_file` ignores trailing whitespace and treats smart quotes, Unicode dashes, and special spaces as their ASCII forms. The file keeps its byte order mark, and every line gets the file's first line ending, so a CRLF file stays CRLF. `edit_file` rejects files that are not valid UTF-8.
 
-Relative paths resolve against the workspace root, and `~` resolves to the sandbox's home directory. `edit_file` doesn't require a `read_file` call first, but `write_file` requires a new `read_file` call before it overwrites a file that `edit_file` changed. A failed edit changes nothing, and its error names the problem, such as a missing or ambiguous `oldText`. The model reads `Successfully replaced N block(s) in <path>.`, and channels and hooks get `{ path, replacements }` on `call.settled`.
+Relative paths resolve against the workspace root, and `~` or `$HOME` resolves to the sandbox's home directory. `edit_file` doesn't require a `read_file` call first, but `write_file` requires a new `read_file` call before it overwrites a file that `edit_file` changed. A failed edit changes nothing, and its error names the problem, such as a missing or ambiguous `oldText`. The model reads `Successfully replaced N block(s) in <path>.`, and channels and hooks get `{ path, replacements }` on `call.settled`.
 
 Customize it by wrapping the framework definition:
 

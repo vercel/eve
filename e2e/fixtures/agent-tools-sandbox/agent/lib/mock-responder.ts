@@ -118,12 +118,15 @@ function respondToFileTools(
   message: string,
   request: MockModelRequest,
 ): MockModelResponse | string {
-  const [, path = "", content = ""] =
+  const [, path = "", draft = ""] =
     /create (\S+) with exactly this content: (\S+)/u.exec(message) ?? [];
+  const [, oldText = "", newText = ""] = /replace (\S+) with (\S+) in /u.exec(message) ?? [];
   const steps = [
-    { input: { content, filePath: path }, name: "write_file" },
+    { input: { content: draft, filePath: path }, name: "write_file" },
     { input: { filePath: path }, name: "read_file" },
-    { input: { outputMode: "content", path: "notes", pattern: content }, name: "grep" },
+    // Edits as a JSON string, a shape models send, which edit_file repairs before validation.
+    { input: { edits: JSON.stringify([{ newText, oldText }]), path }, name: "edit_file" },
+    { input: { outputMode: "content", path: "notes", pattern: newText }, name: "grep" },
     { input: { command: `cat ${path}` }, name: "bash" },
   ];
   const next = steps[request.toolResults.length];
