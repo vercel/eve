@@ -1,11 +1,8 @@
 [
-  "EXPORT_TAG",
   "EXTERNAL_TAG",
   "Exposure",
-  "PERSONAL_TAG",
-  "ReadLeg",
-  "SENSITIVE_EFFECT_TAG",
-  "SENSITIVE_TAG",
+  "IRREVERSIBLE_TAG",
+  "PUBLIC_SINK_TAG",
   "TaintPolicyOptions",
   "UNTRUSTED_TAG",
   "default",

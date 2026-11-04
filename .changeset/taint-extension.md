@@ -2,6 +2,6 @@
 "eve": minor
 ---
 
-Add `eve/extensions/taint`, an experimental extension that applies Meta's Rule of Two: an agent-wide approval policy asks a person before an external effect only when the session has read untrusted content and holds sensitive data, and denies exports then.
+Add `eve/extensions/taint`, an experimental extension that records when a session reads untrusted content so an agent-wide approval policy can ask a person before external and irreversible calls, and deny publishing.
 
-Mount it with `export default taint({})` in `agent/extensions/taint.ts`, tag entries `reads:untrusted`, `reads:sensitive` (or `reads:personal`), `effect:sensitive`, `effect:external`, or `effect:export`, and set `approval: taintPolicy()` in `agent/agent.ts`. `taintPolicy({ assumeSensitive: true })` gates on untrusted content alone. `taintRuntimeContext()` adds both legs to model-call spans.
+Mount it with `export default taint({})` in `agent/extensions/taint.ts`, tag entries `reads:untrusted`, `effect:external`, `effect:irreversible`, or `sink:public`, and set `approval: taintPolicy()` in `agent/agent.ts`. `taintPolicy({ when })` gates external calls only when a confidentiality check also matches, for the Rule of Two. `taintRuntimeContext()` adds the session's exposure to model-call spans.

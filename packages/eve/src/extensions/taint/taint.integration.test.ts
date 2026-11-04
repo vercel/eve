@@ -174,66 +174,38 @@ const readIssue = {
   logicalPath: "tools/read_issue.ts",
   value: tool({ tags: ["reads:untrusted"] }),
 };
-const readNotes = {
-  logicalPath: "tools/read_notes.ts",
-  value: tool({ tags: ["reads:sensitive"] }),
-};
 const sendEmail = {
   logicalPath: "tools/send_email.ts",
   value: tool({ tags: ["effect:external"] }),
 };
 
 describe("eve/extensions/taint", () => {
-  it("asks before an external effect once untrusted content and sensitive data meet", async () => {
+  it("asks before an external effect once the session read untrusted content", async () => {
     extension({});
 
     const result = await runSession(
       "taint-external",
-      [{ name: "read_issue" }, { name: "read_notes" }, { name: "send_email" }],
-      [readIssue, readNotes, sendEmail],
-    );
-
-    expect(result.settled).toEqual([
-      { name: "read_issue", outcome: "completed" },
-      { name: "read_notes", outcome: "completed" },
-    ]);
-    expect(result.interactions).toHaveLength(1);
-    expect(result.exposure).toMatchObject({
-      exposed: true,
-      sensitive: true,
-      sensitiveSources: ["read_notes"],
-      sources: ["read_issue"],
-    });
-  }, 90_000);
-
-  it("doesn't ask for an external effect after untrusted content alone", async () => {
-    extension({});
-
-    const result = await runSession(
-      "taint-untrusted-only",
       [{ name: "read_issue" }, { name: "send_email" }],
       [readIssue, sendEmail],
     );
 
-    expect(result.interactions).toEqual([]);
-    expect(result.outcome).toBe("completed");
-    expect(result.settled).toEqual([
-      { name: "read_issue", outcome: "completed" },
-      { name: "send_email", outcome: "completed" },
-    ]);
-    expect(result.exposure).toMatchObject({ exposed: true, sensitive: false });
+    expect(result.settled).toEqual([{ name: "read_issue", outcome: "completed" }]);
+    expect(result.interactions).toHaveLength(1);
+    expect(result.exposure).toMatchObject({ exposed: true, sources: ["read_issue"] });
   }, 90_000);
 
-  it("denies an export once untrusted content and sensitive data meet", async () => {
+  it("denies publishing once the session read untrusted content", async () => {
     extension({});
 
     const result = await runSession(
-      "taint-export",
-      [{ name: "read_issue" }, { name: "read_notes" }, { name: "share_doc" }],
+      "taint-publish",
+      [{ name: "read_issue" }, { name: "share_doc" }],
       [
         readIssue,
-        readNotes,
-        { logicalPath: "tools/share_doc.ts", value: tool({ tags: ["effect:export"] }) },
+        {
+          logicalPath: "tools/share_doc.ts",
+          value: tool({ tags: ["effect:irreversible", "sink:public"] }),
+        },
       ],
     );
 
@@ -241,29 +213,25 @@ describe("eve/extensions/taint", () => {
     expect(result.outcome).toBe("completed");
     expect(result.settled).toEqual([
       { name: "read_issue", outcome: "completed" },
-      { name: "read_notes", outcome: "completed" },
       {
         name: "share_doc",
         outcome: "rejected",
-        reason: expect.stringContaining(
-          "read untrusted content from read_issue and sensitive data from read_notes",
-        ),
+        reason: expect.stringContaining("read untrusted content from read_issue"),
       },
     ]);
   }, 90_000);
 
-  it("doesn't count an untrusted call that was rejected", async () => {
+  it("doesn't expose the session for an untrusted call that was rejected", async () => {
     extension({});
 
     const result = await runSession(
       "taint-rejected",
-      [{ name: "read_issue" }, { name: "read_notes" }, { name: "send_email" }],
+      [{ name: "read_issue" }, { name: "send_email" }],
       [
         {
           logicalPath: "tools/read_issue.ts",
           value: tool({ denied: true, tags: ["reads:untrusted"] }),
         },
-        readNotes,
         sendEmail,
       ],
     );
@@ -271,16 +239,14 @@ describe("eve/extensions/taint", () => {
     expect(result.interactions).toEqual([]);
     expect(result.settled).toEqual([
       { name: "read_issue", outcome: "rejected", reason: expect.any(String) },
-      { name: "read_notes", outcome: "completed" },
       { name: "send_email", outcome: "completed" },
     ]);
-    expect(result.exposure).toMatchObject({ exposed: false, pending: {}, sensitive: true });
+    expect(result.exposure).toMatchObject({ exposed: false, pending: {} });
   }, 90_000);
 
   // The built-in `agent` tool stands in for a subagent: the in-memory runtime can't author one,
-  // and a tagged subagent reaches the hook the same way (#5871 covers its tags). By name, `agent`
-  // counts as both untrusted and sensitive, because its copy has the parent's tools.
-  it("records both legs through the subagent the parent called, once its result is in", async () => {
+  // and a subagent tagged `reads:untrusted` reaches the hook the same way (#5871 covers its tags).
+  it("exposes a parent through the subagent it called, once the subagent's result is in", async () => {
     extension({});
 
     const result = await runSession(
@@ -296,36 +262,66 @@ describe("eve/extensions/taint", () => {
 
     expect(result.settled[0]).toMatchObject({ name: "agent", outcome: "completed" });
     expect(result.interactions).toHaveLength(1);
-    expect(result.exposure).toMatchObject({
-      exposed: true,
-      sensitiveSources: ["agent"],
-      sources: ["agent"],
-    });
+    expect(result.exposure).toMatchObject({ exposed: true, sources: ["agent"] });
   }, 90_000);
 
-  it("records reads from the policy at request time with markOnRequest, even for a denied call", async () => {
+  it("marks exposure from the policy at request time with markOnRequest, even for a denied call", async () => {
     extension({});
 
     const result = await runSession(
       "taint-mark-on-request",
-      [{ name: "read_issue" }, { name: "read_notes" }, { name: "send_email" }],
+      [{ name: "read_issue" }, { name: "send_email" }],
       [
         {
           logicalPath: "tools/read_issue.ts",
           value: tool({ denied: true, tags: ["reads:untrusted"] }),
         },
-        readNotes,
         sendEmail,
       ],
       { markOnRequest: true },
     );
 
-    // The policy's write outlives its step: a later step's call sees it.
+    // The policy's write outlives its step: the next step's call sees it.
     expect(result.settled).toEqual([
       { name: "read_issue", outcome: "rejected", reason: expect.any(String) },
-      { name: "read_notes", outcome: "completed" },
     ]);
     expect(result.interactions).toHaveLength(1);
     expect(result.exposure).toMatchObject({ exposed: true, sources: ["read_issue"] });
+  }, 90_000);
+
+  it("gates only irreversible calls and the calls `when` matches", async () => {
+    extension({});
+
+    const result = await runSession(
+      "taint-when",
+      [{ name: "read_issue" }, { name: "send_email" }, { name: "delete_repo" }],
+      [
+        readIssue,
+        sendEmail,
+        { logicalPath: "tools/delete_repo.ts", value: tool({ tags: ["effect:irreversible"] }) },
+      ],
+      { when: async ({ toolName }) => toolName !== "send_email" },
+    );
+
+    expect(result.settled).toEqual([
+      { name: "read_issue", outcome: "completed" },
+      { name: "send_email", outcome: "completed" },
+    ]);
+    expect(result.interactions).toHaveLength(1);
+  }, 90_000);
+
+  it("asks nothing in a session that read nothing untrusted", async () => {
+    extension({});
+
+    const result = await runSession(
+      "taint-clean",
+      [{ name: "list_labels" }, { name: "send_email" }],
+      [{ logicalPath: "tools/list_labels.ts", value: tool({}) }, sendEmail],
+    );
+
+    expect(result.interactions).toEqual([]);
+    expect(result.outcome).toBe("completed");
+    expect(result.settled.map(({ outcome }) => outcome)).toEqual(["completed", "completed"]);
+    expect(result.exposure).toMatchObject({ exposed: false, sources: [] });
   }, 90_000);
 });

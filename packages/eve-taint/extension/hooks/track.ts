@@ -2,16 +2,16 @@ import { defineHook } from "eve/hooks";
 
 import extension from "../extension.ts";
 import { exposure } from "../lib/exposure.ts";
-import { expose, MESSAGE_SOURCE, readsOf, requested, settled } from "../lib/taint.ts";
+import { expose, MESSAGE_SOURCE, readsUntrusted, requested, settled } from "../lib/taint.ts";
 
 export default defineHook({
   events: {
     // Tags ride only on `call.requested`; the call's row in `ctx.view` doesn't carry them.
     "call.requested"(event) {
       const { callId, capability } = event.data;
-      const reads = readsOf(capability);
-      if (reads.length === 0) return;
-      exposure.update((state) => requested(state, callId, capability.name, reads));
+      if (readsUntrusted(capability)) {
+        exposure.update((state) => requested(state, callId, capability.name));
+      }
     },
     "call.settled"(event) {
       const { callId, outcome } = event.data;
@@ -23,7 +23,7 @@ export default defineHook({
       const principal = event.data.principal;
       if (principal === undefined) return;
       if (principal.id === ctx.session.auth.initiator?.principalId) return;
-      exposure.update((state) => expose(state, "untrusted", MESSAGE_SOURCE));
+      exposure.update((state) => expose(state, MESSAGE_SOURCE));
     },
   },
 });

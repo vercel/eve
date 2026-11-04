@@ -1,15 +1,11 @@
 ---
 title: "Taint Extension"
-description: "Ask a person before an external effect only when a session combines untrusted content and sensitive data, following the Rule of Two."
+description: "Record when a session reads untrusted content, then ask a person before external effects and deny publishing."
 ---
 
-`eve/extensions/taint` applies Meta's [Rule of Two](https://ai.meta.com/blog/practical-ai-agent-security/) to a session. A prompt injection can only cause real harm when three things meet:
+`eve/extensions/taint` tracks integrity. It records when a session's model reads content that someone outside your trust boundary could have written, such as a public issue, a web page, or a message from another user. An agent-wide [approval policy](./human-in-the-loop#gate-every-call-from-one-policy) then acts on it. Once the session is exposed, it asks a person before external and irreversible calls, and denies calls that would publish data for good. Until then, it changes nothing.
 
-1. The model read **untrusted content**: text someone outside your trust boundary could have written, such as a public issue, a web page, or a message from another user.
-2. The session has **sensitive data or systems** in reach: it read private data, or the call acts on a sensitive system.
-3. The call has an **external effect**: it changes state or sends data outside the session.
-
-The extension records the first two as the session runs. An agent-wide [approval policy](./human-in-the-loop#gate-every-call-from-one-policy) then asks a person before an external effect only when all three meet, and denies exports. Any two alone change nothing, so most sessions never see a prompt.
+It tracks only who could have written what the model read, not how sensitive that data is. To ask only when untrusted content and sensitive data meet, Meta's [Rule of Two](https://ai.meta.com/blog/practical-ai-agent-security/), combine it with a confidentiality check through [`when`](#combine-with-a-confidentiality-check).
 
 The extension is a proof of concept. It ships inside the `eve` package and uses only [tags](./human-in-the-loop#tag-entries-for-policies), [hooks](./guides/hooks), [state](./concepts/state), and the agent-wide `approval` policy. Read [Limits](#limits) before you rely on it.
 
@@ -51,18 +47,16 @@ export default defineAgent({
 
 ## Tag your entries
 
-eve doesn't interpret tags. The extension reads these:
+eve doesn't interpret tags. The extension reads these, named to line up with MCP's tool hints and draft annotations:
 
-| Tag                | Leg       | Meaning                                                                        |
-| ------------------ | --------- | ------------------------------------------------------------------------------ |
-| `reads:untrusted`  | untrusted | The result can contain text someone outside the trust boundary wrote.          |
-| `reads:sensitive`  | sensitive | The result can contain private or sensitive data.                              |
-| `reads:personal`   | sensitive | The result can contain the caller's private data.                              |
-| `effect:sensitive` | sensitive | The call acts on a sensitive system, such as production or billing.            |
-| `effect:external`  | effect    | The call changes state or sends data outside the session.                      |
-| `effect:export`    | effect    | The call moves data somewhere bulk or persistent: an export, upload, or share. |
+| Tag                   | Meaning                                                               | MCP counterpart                                                                                            |
+| --------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `reads:untrusted`     | The result can contain text someone outside the trust boundary wrote. | Trust annotations `untrusted: true`; action metadata source `UntrustedPublic`; FIDES integrity `untrusted` |
+| `effect:external`     | The call changes state or sends data outside the session.             | `readOnlyHint: false`; action metadata outcome `consequential`                                             |
+| `effect:irreversible` | The call can't be undone, such as deleting a repository.              | `destructiveHint: true`; action metadata outcome `irreversible`                                            |
+| `sink:public`         | The call can put data somewhere publicly accessible.                  | SEP-2061 destination `Public`                                                                              |
 
-`reads:personal` marks the caller's own data, such as their private notes or DMs. `effect:sensitive` covers the case where nothing sensitive was read but the call itself can do damage: after reading an injected issue, a `delete_repo` tagged `effect:external` and `effect:sensitive` asks.
+An irreversible call counts as external too. Trusted sources (MCP's `TrustedPublic`, `Internal`, `User`, and `System`) need no tag.
 
 Tag tools, connections, subagents, and remote agents:
 
@@ -74,29 +68,29 @@ export default defineMcpClientConnection({
   description: "Public issue tracker.",
   tags: {
     default: ["reads:untrusted"],
-    tools: { create_comment: ["effect:external"] },
+    tools: { create_comment: ["effect:external", "sink:public"] },
   },
 });
 ```
 
-Built-in tools have no tags, so the extension treats `web_fetch`, `web_search`, and `bash` as `reads:untrusted` by name. It treats `agent` as both `reads:untrusted` and `reads:sensitive`, because its copy has the agent's tools. A tool you author with one of those names is judged by its own tags.
+Built-in tools have no tags, so the extension treats `web_fetch`, `web_search`, `bash`, and `agent` as `reads:untrusted` by name. A tool you author with one of those names is judged by its own tags.
 
-## What the session records
+## What exposes a session
 
-- **Untrusted content.** A call tagged `reads:untrusted` counts when it settles, unless it was rejected before it ran. A failed or interrupted call still counts, because it can return text it read. A delivery whose principal isn't the session's initiator counts too, with source `message`. Turn that off with `taint({ untrustedMessages: false })`.
-- **Sensitive data.** A call tagged `reads:sensitive` or `reads:personal` counts the same way.
+- **An untrusted call.** A call tagged `reads:untrusted` exposes the session when it settles, unless it was rejected before it ran. A failed or interrupted call still exposes it, because it can return text it read.
+- **A message from someone else.** A delivery whose principal isn't the session's initiator exposes the session, with source `message`. Turn this off with `taint({ untrustedMessages: false })`.
 
-Each leg lists up to 20 sources, newest last: tool names, and `message`.
+The state lists up to 20 sources, newest last: tool names and `message`.
 
 ## What the policy decides
 
-| Untrusted content | Sensitive data or system | Call tagged       | Decision                                                 |
-| ----------------- | ------------------------ | ----------------- | -------------------------------------------------------- |
-| No                | either                   | anything          | `undefined`: the call's own approval decides.            |
-| Yes               | No                       | anything          | `undefined`                                              |
-| Yes               | Yes                      | `effect:export`   | Denied, with a reason that names both legs' sources.     |
-| Yes               | Yes                      | `effect:external` | `"user-approval"`: a person approves or denies the call. |
-| Yes               | Yes                      | anything else     | `undefined`                                              |
+| Session     | Call tagged                           | Decision                                                 |
+| ----------- | ------------------------------------- | -------------------------------------------------------- |
+| Not exposed | anything                              | `undefined`: the call's own approval decides.            |
+| Exposed     | `effect:irreversible` + `sink:public` | Denied, with a reason that names the sources.            |
+| Exposed     | `effect:irreversible`                 | `"user-approval"`: a person approves or denies the call. |
+| Exposed     | `effect:external`                     | `"user-approval"`                                        |
+| Exposed     | anything else                         | `undefined`                                              |
 
 The agent-wide policy runs beside each entry's own `approval`, and the stricter decision wins, so it can add a gate but never remove one. A denied call returns the reason to the model.
 
@@ -104,38 +98,50 @@ The agent-wide policy runs beside each entry's own `approval`, and the stricter 
 
 ```ts
 taintPolicy({
-  // Tags to read instead of the defaults.
-  exportTag: "effect:export",
-  externalTag: "effect:external",
-  // Ask a person before exports instead of denying them. Default "deny".
-  onExport: "user-approval",
-  // Count connection tools with no tags as external, unless the server marks them read-only. Default "ignore".
+  // Ask a person before publishing instead of denying it. Default "deny".
+  onPublish: "user-approval",
+  // Judge connection tools with no tags by their server's hints. Default "ignore".
   untaggedConnections: "treat-as-external",
-  // Treat every session as holding sensitive data, so untrusted content alone gates effects. Default false.
-  assumeSensitive: true,
-  // Also record a read when it's requested. Default false.
+  // Also mark the session exposed when an untrusted call is requested. Default false.
   markOnRequest: true,
+  // Gate external calls only when this also holds. Default: every call.
+  when: (ctx) => true,
 });
 ```
 
-`untaggedConnections: "treat-as-external"` treats a tool as a connection tool when its server sent annotations or its name has the `<connection>__<tool>` shape. Mounted extension tools have that shape too, so they also count.
+`untaggedConnections: "treat-as-external"` counts a connection tool with no tags as external unless its server marks it `readOnlyHint: true`, and as irreversible when the server marks it `destructiveHint: true`. A tool counts as a connection tool when its server sent annotations or its name has the `<connection>__<tool>` shape. Mounted extension tools have that shape too, so they also count.
 
-`assumeSensitive` is the stricter setup: an agent whose tools can all reach sensitive data, or whose sensitive reads you haven't tagged, gates on untrusted content alone.
+`markOnRequest` marks the session exposed from the policy, as soon as the untrusted call is requested. The mark lands in the same step as the request, so it doesn't depend on the hook. A call that is then denied still exposes the session.
 
-`markOnRequest` records a read from the policy, as soon as it's requested. The mark lands in the same step as the request, so it doesn't depend on the hook. A call that is then denied still counts.
+### Combine with a confidentiality check
+
+On its own, the policy asks before every external call in an exposed session. `when` narrows that to the calls that also matter for confidentiality, such as a call that would send sensitive data somewhere its readers shouldn't see it. That gives the Rule of Two: ask only when untrusted content, sensitive data, and an external effect meet.
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { taintPolicy } from "eve/extensions/taint";
+
+export default defineAgent({
+  model: "anthropic/claude-sonnet-4.6",
+  // `sendsSensitiveData` is your own check of what the call would send, and where.
+  approval: taintPolicy({ when: (ctx) => sendsSensitiveData(ctx) }),
+});
+```
+
+Irreversible calls ask in an exposed session whatever `when` returns, because an injected instruction can do damage with them without moving any data.
 
 ## Subagents
 
-Each session has its own record. A subagent starts clean, and its own calls run under the root agent's policy against the subagent's record, not the parent's.
+Each session has its own exposure. A subagent starts clean, and its own calls run under the root agent's policy against the subagent's exposure, not the parent's.
 
-- **Child to parent.** Tag a subagent or remote agent with the legs it can read, so calling it records them in the parent. The built-in `agent` tool counts as both.
-- **Parent to child.** Once the parent has both legs, it asks before calling a subagent tagged `effect:external`. Nothing passes the parent's record into the child.
+- **Child to parent.** Tag a subagent or remote agent that can read untrusted content with `reads:untrusted`, so calling it exposes the parent. The built-in `agent` tool counts as untrusted, because its copy has the parent's tools.
+- **Parent to child.** An exposed parent asks before calling a subagent tagged `effect:external`. Nothing passes the parent's exposure into the child.
 
-A subagent runs as a task. Its call settles, and records its legs in the parent, when its result is ready, so the parent's calls while it runs are decided on what the parent has read so far.
+A subagent runs as a task. Its call settles, and exposes the parent, when its result is ready, so the parent's calls while it runs are decided on what the parent has read so far.
 
 ## Telemetry
 
-`taintRuntimeContext()` returns `taint.exposed`, `taint.sensitive`, and their sources as `taint.sources` and `taint.sensitive_sources` (comma-joined, truncated to 256 characters) for [`runtimeContext`](./observability/otel#add-runtime-context):
+`taintRuntimeContext()` returns `taint.exposed` and `taint.sources` (comma-joined, truncated to 256 characters) for [`runtimeContext`](./observability/otel#add-runtime-context):
 
 ```ts title="agent/instrumentation/traces.ts"
 import { otelIntegration } from "eve/instrumentation/otel";
@@ -150,15 +156,15 @@ The values reach only the AI SDK spans of each model attempt. Tool spans already
 
 ## Timing
 
-The extension's hook runs before eve continues past each event, so a call the model makes in a later step sees what earlier calls recorded. Calls in the same model response are approved together, so a call made alongside the read that completes a leg isn't gated by it. The model wrote both before it read the result.
+The extension's hook runs before eve continues past each event, so a call the model makes in a later step sees what earlier calls exposed. Calls in the same model response are approved together, so a call made alongside an untrusted read isn't gated by it. The model wrote both before it read the result.
 
 ## Limits
 
-- The sensitive leg covers only what's tagged. Untagged reads of private data, and untagged calls to sensitive systems, don't count. Use `assumeSensitive` when you can't tag them.
-- The Rule of Two is about prompt injection. It doesn't stop the model from posting private data to the wrong audience on its own.
+- Tags describe a tool, not one result. A tool tagged `reads:untrusted` taints the session even when a given result is trusted, and an untagged tool never does. MCP's draft annotations label each result; eve doesn't read them yet.
+- Unlabeled output counts as trusted. FIDES treats it as untrusted.
 - A hook's write can be lost if a step is interrupted after the event is recorded and before the step's state is saved. `markOnRequest` narrows this.
-- Records don't pass from a parent to its subagents. They pass from a subagent to its parent only through the subagent's tags.
+- Exposure doesn't pass from a parent to its subagents. It passes from a subagent to its parent only through the subagent's tags.
 - Sessions that started before you mounted the extension aren't tracked.
-- There's no live view of the record for clients and no run-level tag in Agent Runs.
+- There's no live view of exposure for clients and no run-level tag in Agent Runs.
 - An agent-wide `"user-approval"` can't carry a reason, so the approver sees the tool's own prompt.
 - The policy doesn't gate provider-executed tools, `ctx.agent()` from workflow code, a remote agent's own calls, or memory recall.
