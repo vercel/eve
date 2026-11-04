@@ -7,7 +7,7 @@
  */
 
 /** Content attributes are capped so a giant payload cannot bloat a span segment. */
-export const CONTENT_ATTRIBUTE_LIMIT = 32 * 1024;
+export const CONTENT_ATTRIBUTE_LIMIT = 250 * 1024;
 import type { ContentSerializer, InputMessagesContent } from "../core/types.js";
 
 export const aiSdkContentSerializer: ContentSerializer = {

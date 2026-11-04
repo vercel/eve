@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { snapshotRecord, validSnapshot } from "./snapshot.js";
-import { aiSdkContentSerializer } from "../adapters/serialization.js";
+import { aiSdkContentSerializer, genAiInputMessagesAttribute } from "../adapters/serialization.js";
 import type { ScopeRecord } from "./types.js";
 
 const identity = { conversationId: "conversation", runId: "run", turnId: "turn" };
@@ -55,9 +55,37 @@ describe("snapshotRecord's oversized-node fallback", () => {
     });
   };
 
-  it("keeps the capture-policy attributes truthful and truncates the turn input", () => {
+  it("keeps a turn that fits the raised budgets untouched", () => {
     const input = JSON.stringify([
       { role: "user", parts: [{ content: "x".repeat(60_000), type: "text" }] },
+    ]);
+    const snapshot = snapshotRecord(turnWithContent({ input }), aiSdkContentSerializer);
+    expect(validSnapshot(snapshot)).toBe(true);
+    expect(snapshot.attributes?.["agent.trace.content.input"]).toBe(true);
+    expect(snapshot.attributes?.["agent.trace.content.output"]).toBe(true);
+    expect(snapshot.attributes?.["gen_ai.input.messages"]).toBe(input);
+  });
+
+  it("keeps a turn input capped by the content serializer", () => {
+    // Production copies the model scope's prepared attribute, which the
+    // serializer already capped at CONTENT_ATTRIBUTE_LIMIT.
+    const messages = [{ role: "user", content: "x".repeat(400_000) }];
+    const capped = genAiInputMessagesAttribute(messages)!.json;
+    expect(capped.length).toBeLessThanOrEqual(250 * 1024);
+    const snapshot = snapshotRecord(turnWithContent({ input: capped }), aiSdkContentSerializer);
+    expect(validSnapshot(snapshot)).toBe(true);
+    expect(snapshot.attributes?.["agent.trace.content.input"]).toBe(true);
+    const kept = snapshot.attributes?.["gen_ai.input.messages"];
+    expect(kept).toBe(capped);
+    expect((kept as string).includes("… [truncated]")).toBe(true);
+    expect(JSON.parse(kept as string)).toHaveLength(1);
+  });
+
+  it("shrinks an oversized checkpoint copy instead of denying capture", () => {
+    // A host can supply an attribute larger than the serializer would produce;
+    // the checkpoint then exceeds the node budget and the copy is fitted.
+    const input = JSON.stringify([
+      { role: "user", parts: [{ content: "x".repeat(600_000), type: "text" }] },
     ]);
     const snapshot = snapshotRecord(turnWithContent({ input }), aiSdkContentSerializer);
     expect(validSnapshot(snapshot)).toBe(true);
@@ -74,37 +102,6 @@ describe("snapshotRecord's oversized-node fallback", () => {
     expect((messages[0] as { role: string }).role).toBe("user");
   });
 
-  it("truncates the turn output too", () => {
-    const output = JSON.stringify([
-      {
-        finish_reason: "stop",
-        parts: [{ content: "y".repeat(60_000), type: "text" }],
-        role: "assistant",
-      },
-    ]);
-    const snapshot = snapshotRecord(
-      turnWithContent({ input: "[]", output }),
-      aiSdkContentSerializer,
-    );
-    expect(validSnapshot(snapshot)).toBe(true);
-    const truncated = snapshot.attributes?.["gen_ai.output.messages"];
-    expect(typeof truncated).toBe("string");
-    expect((truncated as string).includes("… [truncated]")).toBe(true);
-  });
-
-  it("truncates an attribute far over the budget", () => {
-    const input = JSON.stringify([
-      { role: "user", parts: [{ content: "z".repeat(1_000_000), type: "text" }] },
-    ]);
-    const snapshot = snapshotRecord(turnWithContent({ input }), aiSdkContentSerializer);
-    expect(validSnapshot(snapshot)).toBe(true);
-    expect(snapshot.attributes?.["agent.trace.content.input"]).toBe(true);
-    const truncated = snapshot.attributes?.["gen_ai.input.messages"];
-    expect(typeof truncated).toBe("string");
-    expect((truncated as string).length).toBeLessThan(40_000);
-    expect((truncated as string).includes("… [truncated]")).toBe(true);
-  });
-
   it("keeps declined capture flagged as false", () => {
     const input = JSON.stringify([
       { role: "user", parts: [{ content: "x".repeat(60_000), type: "text" }] },
@@ -119,13 +116,5 @@ describe("snapshotRecord's oversized-node fallback", () => {
     expect(snapshot.attributes?.["agent.trace.content.input"]).toBe(false);
     expect(snapshot.attributes?.["agent.trace.content.output"]).toBe(false);
     expect(snapshot.attributes?.["gen_ai.input.messages"]).toBeUndefined();
-  });
-
-  it("leaves a node that fits untouched", () => {
-    const input = JSON.stringify([{ role: "user", parts: [{ content: "hello", type: "text" }] }]);
-    const record = turnWithContent({ input });
-    const snapshot = snapshotRecord(record, aiSdkContentSerializer);
-    expect(snapshot.attributes?.["agent.trace.content.input"]).toBe(true);
-    expect(snapshot.attributes?.["gen_ai.input.messages"]).toBe(input);
   });
 });

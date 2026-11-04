@@ -1,8 +1,8 @@
 import type { ScopeRecord } from "./types.js";
 import type { ContentSerializer } from "./types.js";
 import { capturedScopeData } from "./span-kinds.js";
-const SERIALIZED_BYTES = 32768;
-const SNAPSHOT_BYTES = 65536;
+const SERIALIZED_BYTES = 256 * 1024;
+const SNAPSHOT_BYTES = 512 * 1024;
 const UNFINISHED_CHILDREN = 10000;
 import { preservingCapturePolicy, withoutDeclinedContent } from "./content-policy.js";
 
