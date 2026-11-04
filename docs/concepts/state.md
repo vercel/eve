@@ -5,6 +5,8 @@ description: "Durable per-session memory with defineState: get() and update(), p
 
 `defineState` declares a typed, named slot of per-session memory. Use it when the agent has to remember something between turns, such as a running budget, a glossary, or a checklist, without an external store. Values survive crashes, redeploys, and days-long sessions.
 
+Don't mirror session lifecycle facts such as active turns, call status, or open interactions in `defineState`; use [Session views and selectors](/docs/concepts/session-views-and-selectors) in contexts that expose a view. Business counters and budgets are still legitimate authored state. A session view is an operational snapshot subject to retention, not a historical record; persist historical data separately when needed.
+
 ```ts
 import { defineState } from "eve/context";
 
