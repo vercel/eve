@@ -230,6 +230,7 @@ describe("edit_file", () => {
     await executable.edit("bin/run", [{ oldText: "old", newText: "new" }]);
     await regular.edit("notes.md", [{ oldText: "old", newText: "new" }]);
 
+    expect(executable.commands).toContain("stat -L -c %a -- '/workspace/bin/run'");
     expect(executable.commands.at(-1)).toBe("chmod 755 -- '/workspace/bin/run'");
     expect(regular.commands.some((command) => command.startsWith("chmod"))).toBe(false);
   });

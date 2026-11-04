@@ -138,7 +138,8 @@ const DEFAULT_FILE_MODE = "644";
 
 async function readFileMode(sandbox: SandboxSession, path: string): Promise<string | undefined> {
   try {
-    const result = await sandbox.run({ command: `stat -c %a -- ${quoteShell(path)}` });
+    // -L reads the target's mode: chmod follows a symlink, so a link's own 777 must not reach it.
+    const result = await sandbox.run({ command: `stat -L -c %a -- ${quoteShell(path)}` });
     const mode = result.stdout.trim();
     return result.exitCode === 0 && /^[0-7]{3,4}$/u.test(mode) ? mode : undefined;
   } catch {
