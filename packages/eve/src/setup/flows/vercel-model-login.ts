@@ -6,6 +6,7 @@ import {
   vercelOAuthEndpoints,
   sessionFromToken,
   validateVercelAccess,
+  withVercelLoginLock,
   VERCEL_MODEL_CLIENT_ID,
   VERCEL_OAUTH_ISSUER,
 } from "#internal/model-auth/vercel.js";
@@ -120,7 +121,7 @@ export async function loginVercelModel(
   session.teamId = team.id;
   session.teamName = team.name;
   signal?.throwIfAborted();
-  await writeVercelSession(session, VERCEL_MODEL_CLIENT_ID);
+  await withVercelLoginLock(() => writeVercelSession(session, VERCEL_MODEL_CLIENT_ID));
   if (team.slug) rememberModelTeamSlug(team.id, team.slug);
   return { teamId: team.id, teamName: team.name };
 }
