@@ -55,8 +55,7 @@ type Beat =
       time: string;
       body: ReactNode;
       attachment?: ReactNode;
-      /** WhatsApp: the emoji the other side reacted to this message with. It lands with the
-       * next message, as the other side reacts while replying. */
+      /** WhatsApp only; lands with the next message. */
       reaction?: { emoji: string; label: string };
       delay: number;
     }
@@ -518,10 +517,8 @@ function ReadTicks() {
  */
 function Quote({ author, children }: { author: string; children: string }) {
   return (
-    // Concentric with the bubble: its 10px radius less the 6px inset.
+    // Bubble radius (10px) minus its 6px inset.
     <span className="relative -mx-1.5 mb-1 block overflow-hidden rounded-[4px] bg-green-400 py-1 pr-2 pl-3">
-      {/* A straight bar the rounded corners clip, as in WhatsApp; a left border would curve
-          its inner edge around them. */}
       <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-green-700" />
       <span className="block font-medium text-copy-13 text-green-900">{author}</span>
       <span className="block truncate text-copy-13 text-gray-900">{children}</span>
@@ -554,12 +551,7 @@ function ReplyButtons({ buttons }: { buttons: { label: string; icon: ReactNode }
   ));
 }
 
-/**
- * A WhatsApp reaction: the emoji in a pill overlapping the bubble's bottom edge. In a demo it
- * lands just after the next message the way WhatsApp's does: the pill grows in and the emoji
- * overshoots it before settling. Through the Web Animations API, so it runs while a
- * conversation has its CSS entrances off.
- */
+// Web Animations API, so it runs while the full view has CSS entrances off.
 function BubbleReaction({
   emoji,
   label,
@@ -574,10 +566,8 @@ function BubbleReaction({
   const pill = useRef<HTMLSpanElement>(null);
   const glyph = useRef<HTMLSpanElement>(null);
 
-  // Only on mount: a reaction arriving in a demo, not one re-rendered after.
   useEffect(() => {
     if (!demo || !pill.current || !glyph.current) return;
-    // Just after the reply it lands with has scaled in.
     const delay = 500;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       pill.current.animate([{ opacity: 0 }, { opacity: 1 }], {
@@ -616,8 +606,6 @@ function BubbleReaction({
       ref={pill}
       role="img"
     >
-      {/* A fixed box on its own layer, so the glyph scales smoothly instead of snapping to the
-          pixel grid frame by frame. */}
       <span
         aria-hidden
         className="inline-flex size-4 items-center justify-center text-[14px] leading-none will-change-transform"
@@ -647,7 +635,6 @@ function Bubble({
   tail: boolean;
   attachment?: ReactNode;
   reaction?: { emoji: string; label: string };
-  /** Whether the reaction has landed; its room below the bubble is kept either way. */
   reacted: boolean;
   demo: boolean;
   children: ReactNode;
@@ -661,7 +648,6 @@ function Bubble({
           ? "origin-top-right justify-end pr-2"
           : cn("origin-top-left justify-start pl-2", agentEntrance),
         continued ? "pt-1.5" : "pt-4",
-        // Room below for the reaction hanging off the bubble's bottom edge.
         reaction && "pb-4",
       )}
     >
