@@ -15,11 +15,9 @@ import {
 } from "#context/keys.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { ContextContainer } from "#context/container.js";
-import {
-  BundleKey,
-  ChannelKey,
-  type CompiledBundle,
-} from "#runtime/sessions/runtime-context-keys.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import type { SessionAgent } from "#runtime/sessions/session-agent.js";
+import { sessionAgent } from "#definitions/agent.js";
 import { deserializeContext } from "#context/serialize.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
@@ -38,7 +36,6 @@ import { type DurableSessionState, readDurableSession } from "#execution/durable
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
-import { resolveWorkflowAgentMetadata } from "#execution/agent-sessions/metadata.js";
 import { readDynamicSubagentSelections } from "#definitions/subagents.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
@@ -68,7 +65,8 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
   readonly adapterCtx: ChannelAdapterContext;
   readonly auth: Parameters<typeof buildSubagentRunInput>[0]["auth"];
   readonly batch: DispatchBatch;
-  readonly bundle: CompiledBundle;
+  /** The agent the dispatching session runs, which owns its calls. */
+  readonly owner: SessionAgent;
   readonly capabilities: Parameters<typeof buildSubagentRunInput>[0]["capabilities"];
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
   readonly dynamicSubagentSelections: DynamicSubagentSelections;
@@ -133,7 +131,6 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   readonly ctx: ContextContainer;
   readonly durableSession: Awaited<ReturnType<typeof readDurableSession>>;
   readonly plan: (input: {
-    readonly bundle: CompiledBundle;
     readonly ctx: ContextContainer;
     readonly requests: DispatchBatch["requests"];
     readonly session: HarnessSessionBase;
@@ -145,12 +142,11 @@ export async function prepareActionDispatch<PlanEntry>(input: {
 
   const ctx = input.ctx;
   enterSessionProjection(ctx, durableSession.state);
-  const bundle = ctx.require(BundleKey);
+  const owner = sessionAgent(ctx);
   const session = hydrateDurableSession(durableSession);
   const adapter = ctx.require(ChannelKey);
 
   const plan = input.plan({
-    bundle,
     ctx,
     requests: batch.requests,
     session,
@@ -164,13 +160,13 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     adapterCtx: buildAdapterContext(adapter, ctx),
     auth: ctx.get(AuthKey) ?? null,
     batch,
-    bundle,
     capabilities: ctx.get(CapabilitiesKey),
     channelMetadata: ctx.get(ChannelInstrumentationKey),
     dynamicSubagentSelections: readDynamicSubagentSelections(ctx),
     inheritedConversation: ctx.get(ConversationContextKey),
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     localDevRequest: ctx.get(LocalDevRequestKey),
+    owner,
     parentSession: ctx.get(ParentSessionKey),
     plan,
     sandboxSessionId,
@@ -178,7 +174,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     serializedContext: input.serializedContext,
     session,
     traceRoot: childTraceRoot(ctx, session.sessionId),
-    workflowAgents: resolveWorkflowAgentMetadata(ctx),
+    workflowAgents: owner.delegates(ctx),
   };
 }
 

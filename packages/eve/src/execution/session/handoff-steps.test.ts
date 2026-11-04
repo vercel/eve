@@ -14,7 +14,8 @@ import {
 } from "#execution/session/handoff-steps.js";
 import { positionState } from "#internal/testing/session-machine.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import type { AgentSandbox, SessionAgent } from "#runtime/sessions/session-agent.js";
 import { DefaultSandbox } from "#sandbox/providers/default.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 
@@ -116,6 +117,18 @@ vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
   startWorkflowOnDeployment: (...args: unknown[]) => startWorkflowOnDeploymentMock(...args),
 }));
 
+/** A deserialized context whose agent opens a sandbox from `registry`, when there is one. */
+function contextWithAgent(registry?: AgentSandbox["registry"]) {
+  const agent: Pick<SessionAgent, "sandbox"> = {
+    sandbox: async () =>
+      registry === undefined
+        ? undefined
+        : { registry, template: { compiledArtifactsSource: { kind: "bundled" } } },
+  };
+  const get = vi.fn((key: unknown) => (key === SessionAgentKey ? agent : undefined));
+  return { context: { get }, get };
+}
+
 const SOURCE_TOKENS = ["eve:session:session-1", "channel:alias"];
 
 describe("prepareSuccessorStep", () => {
@@ -124,14 +137,14 @@ describe("prepareSuccessorStep", () => {
   });
 
   it("hydrates the target bundle and durable state, then records this owner", async () => {
-    const require = vi.fn();
-    deserializeContextMock.mockResolvedValue({ require });
+    const { context, get } = contextWithAgent();
+    deserializeContextMock.mockResolvedValue(context);
     readDurableSessionMock.mockReturnValue({});
     const checkpoint = createCheckpoint();
 
     await expect(validate(checkpoint)).resolves.toEqual({ kind: "valid" });
 
-    expect(require).toHaveBeenCalledWith(BundleKey);
+    expect(get).toHaveBeenCalledWith(SessionAgentKey);
     expect(readDurableSessionMock).toHaveBeenCalledWith(checkpoint.sessionState);
     expect(setAttributesMock).toHaveBeenCalledWith(
       expect.objectContaining({ "$eve.session": "session-1" }),
@@ -144,7 +157,7 @@ describe("prepareSuccessorStep", () => {
     ["another run now holds an alias", ["run-a", "run-other"], "source-gone"],
     ["an address is no longer held", ["run-a", undefined], "source-gone"],
   ] as const)("checks the source still holds its addresses: %s", async (_name, holders, kind) => {
-    deserializeContextMock.mockResolvedValue({ require: vi.fn() });
+    deserializeContextMock.mockResolvedValue(contextWithAgent().context);
     readDurableSessionMock.mockReturnValue({});
     getHookByTokenMock.mockImplementation(async (token: string) => {
       const runId = holders[token.includes("channel:alias") ? 1 : 0];
@@ -167,7 +180,7 @@ describe("prepareSuccessorStep", () => {
   });
 
   it("ignores a sandbox record saved before the provider redesign", async () => {
-    deserializeContextMock.mockResolvedValue({ require: vi.fn() });
+    deserializeContextMock.mockResolvedValue(contextWithAgent().context);
     readDurableSessionMock.mockReturnValue({
       sandboxState: {
         initialized: true,
@@ -180,16 +193,11 @@ describe("prepareSuccessorStep", () => {
 
   it("accepts a sandbox record DefaultSandbox saved under the provider it picked", async () => {
     const environment = DefaultSandbox.environment();
-    deserializeContextMock.mockResolvedValue({
-      require: () => ({
-        graph: {
-          root: {
-            sandboxRegistry: { sandbox: { definition: { environment, kind: "independent" } } },
-          },
-        },
-        nodeId: "__root__",
-      }),
-    });
+    deserializeContextMock.mockResolvedValue(
+      contextWithAgent({
+        sandbox: { definition: { environment, kind: "independent" } },
+      } as never).context,
+    );
     readDurableSessionMock.mockReturnValue({
       sandboxState: {
         session: {
@@ -204,7 +212,7 @@ describe("prepareSuccessorStep", () => {
   });
 
   it("rejects an incompatible workflow tool run with the current checkpoint version", async () => {
-    deserializeContextMock.mockResolvedValue({ require: vi.fn() });
+    deserializeContextMock.mockResolvedValue(contextWithAgent().context);
     readDurableSessionMock.mockReturnValue({
       state: {
         "eve.work": {

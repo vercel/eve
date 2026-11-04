@@ -10,10 +10,8 @@ import type { InitialWorkflowEntryInput } from "#execution/session/entry-input.j
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import type { SessionPredecessor } from "#protocol/session-events/families/session.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import {
-  getCompiledRuntimeAgentBundle,
-  type CompiledRuntimeAgentBundle,
-} from "#runtime/sessions/compiled-agent-cache.js";
+import { loadCompiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
+import type { SessionAgent } from "#runtime/sessions/session-agent.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { validateToolStubTargets } from "#tool-stubs/validate-targets.js";
 
@@ -29,7 +27,7 @@ export interface SessionRuntimeConfig {
 export interface PreparedInitialEntry {
   /** The run input, with its delivery identified. */
   readonly input: RunInput;
-  readonly bundle: CompiledRuntimeAgentBundle;
+  readonly agent: SessionAgent;
   /** The first owner's entry input, without the deployment that owns it. */
   readonly entry: Omit<InitialWorkflowEntryInput, "ownerDeploymentId">;
   readonly serializedContext: Record<string, unknown>;
@@ -65,28 +63,34 @@ export async function prepareInitialEntry(
       continuationConflictCommand: { ...conflictCommand, delivery: input.delivery },
     };
   }
-  const bundle = await getCompiledRuntimeAgentBundle({
+  const agent = await loadCompiledSessionAgent({
     compiledArtifactsSource: config.compiledArtifactsSource,
     nodeId: config.nodeId,
   });
-  if (input.toolStubs !== undefined && input.toolStubs.rootSessionId === undefined) {
-    validateToolStubTargets(input.toolStubs.rules, bundle.graph);
+  // Only a compiled graph names tools ahead of a run.
+  const graph = agent.compiled?.graph;
+  if (
+    graph !== undefined &&
+    input.toolStubs !== undefined &&
+    input.toolStubs.rootSessionId === undefined
+  ) {
+    validateToolStubTargets(input.toolStubs.rules, graph);
   }
   const ctx = buildRunContext({
+    agent,
     agentSessionRuntimeOverrides: config.agentSessionRuntimeOverrides,
-    bundle,
     dynamicSubagentAgentConfig: config.dynamicSubagentAgentConfig,
     run: input,
   });
   if (predecessor !== undefined) ctx.set(SessionPredecessorKey, predecessor);
   const traceDecision = initializeSessionInstrumentation({
-    agentName: bundle.turnAgent.id,
+    agentName: agent.id,
     ctx,
   });
-  const sessionTimeoutMs = agentLimits(bundle, ctx)?.sessionTimeoutMs;
+  const sessionTimeoutMs = agentLimits(agent, ctx)?.sessionTimeoutMs;
   // Workflow cannot purge inputs and outputs independently.
   const retention =
-    bundle.resolvedAgent.config?.experimental?.workflow?.retention ??
+    agent.settings.retention ??
     (traceDecision.action === "record" && traceDecision.recordInputs && traceDecision.recordOutputs
       ? undefined
       : 0);
@@ -104,5 +108,5 @@ export async function prepareInitialEntry(
   }
   if (sessionTimeoutMs !== undefined) entry.sessionTimeoutMs = sessionTimeoutMs;
   if (retention !== undefined) entry.retention = retention;
-  return { bundle, entry, input, serializedContext };
+  return { agent, entry, input, serializedContext };
 }

@@ -23,7 +23,8 @@ import { writeDefinitionsState } from "#definitions/state.js";
 import { evaluateStepValues } from "#definitions/step.js";
 import { enterSessionProjection } from "#harness/session-machine/current.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
 import type { StepCatalog } from "./step-catalog.js";
@@ -182,13 +183,16 @@ describe("buildStepCatalog", () => {
     it("gives an agent no catalog tools for dynamic resolvers that returned nothing they reach", async () => {
       const bundle = catalogBundle({ dynamicSubagents: ["helper"] });
       const ctx = new ContextContainer();
-      ctx.set(BundleKey, {
-        ...bundle,
-        resolvedAgent: {
-          ...bundle.resolvedAgent,
-          definitions: [{ kind: "connection" }, { kind: "skill" }, { kind: "tool" }],
-        } as never,
-      });
+      ctx.set(
+        SessionAgentKey,
+        fromCompiledBundle({
+          ...bundle,
+          resolvedAgent: {
+            ...bundle.resolvedAgent,
+            definitions: [{ kind: "connection" }, { kind: "skill" }, { kind: "tool" }],
+          } as never,
+        }),
+      );
       const catalog = await nativeCatalog({
         agentTools: toolMap(inlineTool("add")),
         ctx,
@@ -220,7 +224,7 @@ describe("buildStepCatalog", () => {
         },
         { conversation: [] },
       );
-      ctx.set(BundleKey, catalogBundle({}));
+      ctx.set(SessionAgentKey, fromCompiledBundle(catalogBundle({})));
       ctx.delete(ConnectionRegistryKey);
       const later = await nativeCatalog({
         agentTools: toolMap(inlineTool("add")),

@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { loadContext } from "#context/container.js";
 import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type {
   ScheduleClient,
   ScheduleClientCreate,
@@ -108,7 +108,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
         key: callContext.application,
         deliver: async ({ payload, occurrence }) => {
           await dispatchScheduledOccurrence({
-            bundle: loadContext().require(BundleKey),
+            bundle: requireCompiledBundle(loadContext()),
             collection: callContext.collection,
             definition,
             occurrence: { ...occurrence, collection: callContext.collection },
