@@ -1,8 +1,8 @@
-import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { installedEvePackage } from "#platform/package-info.js";
 
 /** Product token for the installed package, such as `package-name/1.2.3`. */
 export function buildPackageUserAgent(): string {
-  const { name, version } = resolveInstalledPackageInfo();
+  const { name, version } = installedEvePackage();
   return `${name}/${version}`;
 }
 

@@ -4,6 +4,7 @@ import {
   type TrustedForwarders,
 } from "#channel/forwarded-principal.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import { fromBase64, toBase64Url, utf8Bytes } from "#shared/bytes.js";
 
 /** Request header carrying a forwarded principal on MCP requests. */
 export const FORWARDED_PRINCIPAL_HEADER = "eve-forwarded-principal";
@@ -68,7 +69,7 @@ export function encodeForwardedPrincipalHeader(
   principal: ForwardedPrincipal,
   connectionName: string,
 ): string {
-  const encoded = Buffer.from(JSON.stringify(principal), "utf8").toString("base64url");
+  const encoded = toBase64Url(utf8Bytes(JSON.stringify(principal)));
   if (encoded.length > FORWARDED_PRINCIPAL_HEADER_MAX_BYTES) {
     throw new Error(
       `Connection "${connectionName}" cannot forward the caller's principal: the ` +
@@ -88,7 +89,7 @@ function decodeHeader(value: string): { readonly value: unknown } | string {
     return `The ${FORWARDED_PRINCIPAL_HEADER} header must be unpadded base64url.`;
   }
   try {
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.from(value, "base64url"));
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(fromBase64(value));
     return { value: JSON.parse(text) as unknown };
   } catch {
     return `The ${FORWARDED_PRINCIPAL_HEADER} header must encode UTF-8 JSON.`;

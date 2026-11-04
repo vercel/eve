@@ -6,7 +6,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { createKernel } from "#harness/kernel.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
-import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { installedEveVersion } from "#platform/package-info.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/session-events/families/session.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
@@ -30,6 +30,7 @@ import {
   WEB_SEARCH_TOOL_NAME,
 } from "#harness/provider-tool-schemas.js";
 import type { KernelConfig } from "#harness/types.js";
+import { readEnv } from "#platform/env.js";
 
 const log = createLogger("execution.node-step");
 
@@ -128,17 +129,15 @@ export interface RuntimeAgentIdentity {
  * installation.
  */
 export function buildRuntimeIdentity(agent: RuntimeAgentIdentity): RuntimeIdentity {
-  const packageInfo = resolveInstalledPackageInfo();
-
   const identity: RuntimeIdentity = {
     agentId: agent.id,
     agentName: agent.name,
-    eveVersion: packageInfo.version,
+    eveVersion: installedEveVersion(),
   };
 
-  const gitSha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
-  const gitBranch = process.env.VERCEL_GIT_COMMIT_REF?.trim();
-  const deployedAt = process.env.VERCEL_DEPLOYMENT_CREATED_AT?.trim();
+  const gitSha = readEnv("VERCEL_GIT_COMMIT_SHA")?.trim();
+  const gitBranch = readEnv("VERCEL_GIT_COMMIT_REF")?.trim();
+  const deployedAt = readEnv("VERCEL_DEPLOYMENT_CREATED_AT")?.trim();
 
   if (gitSha || gitBranch || deployedAt) {
     return {

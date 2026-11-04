@@ -246,7 +246,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     },
     async writeFile(options: SandboxWriteFileOptions): Promise<void> {
       const resolved = resolveWorkspacePath(options.path);
-      const buf = await streamToBuffer(options.content);
+      const buf = Buffer.from(await streamToBuffer(options.content));
       writes.push({ content: buf, path: resolved });
       files.set(resolved, buf.toString("utf8"));
       fileBytes.set(resolved, buf);

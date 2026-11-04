@@ -25,7 +25,7 @@ import {
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import type { SessionLineStore } from "#execution/session-line-store.js";
-import { HookNotFoundError } from "#shared/run-errors.js";
+import { HookNotFoundError, isRunTargetGone, RunNotFoundError } from "#shared/run-errors.js";
 
 /** A store holding fixed lines for every session it's registered for. */
 function fixedStore(records: readonly unknown[]): SessionLineStore {
@@ -94,6 +94,12 @@ describe("the hosts in a realm", () => {
   it("without a durable host, an id no route holds is gone and no step is a retry", async () => {
     await expect(resumeRoutedHook("hook-alice", {})).rejects.toThrow(HookNotFoundError);
     await expect(routedRunLive("run-bob")).resolves.toBe(false);
+    // A run is gone as a run: not found by its id, which callers read as a target that's gone.
+    await expect(routedRunEnded("run-bob")).resolves.toBe(true);
+    const cancelled = await cancelRoutedRun("run-bob", "stop").catch((error: unknown) => error);
+    expect(cancelled).toBeInstanceOf(RunNotFoundError);
+    expect(cancelled).toMatchObject({ message: 'Run "run-bob" not found', runId: "run-bob" });
+    expect(isRunTargetGone(cancelled)).toBe(true);
     expect(isRetriedStep()).toBe(false);
     expect(installedDurableHost()).toBeUndefined();
     expect(() => sessionLineStore("session-alice")).toThrow(

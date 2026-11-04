@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import type { LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { z } from "#compiled/zod/index.js";
@@ -37,6 +35,9 @@ import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js
 import { REPLY_TOOL_NAME } from "#protocol/reply-tool.js";
 import { readTaskResults } from "#execution/tasks/render.js";
 import { SKILL_TOOL_NAME } from "#protocol/catalog-tools.js";
+import { fromBase64 } from "#shared/bytes.js";
+import { sha256Hex } from "#shared/digest.js";
+import { readEnv } from "#platform/env.js";
 
 const MOCK_RUNTIME_MODEL_PROVIDER = "eve-runtime-mock";
 const SKILL_LOAD_CALL_ID = "call_execute_skill";
@@ -68,7 +69,7 @@ const bootstrapWeatherPayloadSchema = z
  * variable so their package-manager build keeps its normal environment.
  */
 export function shouldMockAuthoredRuntimeModels(): boolean {
-  return process.env.NODE_ENV === "test" || process.env[MOCK_AUTHORED_MODELS_ENV] === "1";
+  return process.env.NODE_ENV === "test" || readEnv(MOCK_AUTHORED_MODELS_ENV) === "1";
 }
 
 /**
@@ -722,13 +723,13 @@ function listPromptAttachments(prompt: BootstrapPrompt): readonly Record<string,
       const data = fileData(part.data);
       if (data instanceof URL) return [{ mediaType: part.mediaType, name, url: data.href }];
       if (data === undefined) return [{ mediaType: part.mediaType, name }];
-      const bytes = typeof data === "string" ? Buffer.from(data, "base64") : Buffer.from(data);
+      const bytes = typeof data === "string" ? fromBase64(data) : data;
       return [
         {
           bytes: bytes.length,
           mediaType: part.mediaType,
           name,
-          sha256: createHash("sha256").update(bytes).digest("hex").slice(0, 16),
+          sha256: sha256Hex(bytes).slice(0, 16),
         },
       ];
     });

@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 
-import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { CompiledModuleMap } from "#compiler/module-map-schema.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import type { ModelMetadata } from "#internal/model-catalog.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";

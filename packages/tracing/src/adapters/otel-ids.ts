@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256Hex } from "../core/sha256.js";
 
 /**
  * ID generator installed by the host OTel provider for reserved-ID emission. A span
@@ -21,7 +21,7 @@ export class AgentSpanIdGenerator {
   }
 
   deriveTraceId(key: string): string {
-    const traceId = createHash("sha256").update(key).digest("hex").slice(0, 32);
+    const traceId = sha256Hex(key).slice(0, 32);
     return /^0+$/u.test(traceId) ? "00000000000000000000000000000001" : traceId;
   }
 
@@ -64,7 +64,7 @@ export class AgentSpanIdGenerator {
 }
 
 function deriveAgentSpanId(key: string): string {
-  const spanId = createHash("sha256").update(key).digest("hex").slice(0, 16);
+  const spanId = sha256Hex(key).slice(0, 16);
   return /^0+$/u.test(spanId) ? "0000000000000001" : spanId;
 }
 

@@ -16,11 +16,16 @@ const preserveApiSingleton = {
   },
 };
 
+// One API for every host, a browser's included (eve's logging imports it on every path), so it
+// builds platform-neutral in the client group. Other vendored bundles import this copy instead of
+// bundling their own (`sharedSpecifiers`), which keeps the one global proxy every tracer reads.
 export default {
   packageName: "@opentelemetry/api",
   compiledPath: "@opentelemetry/api",
-  chunkGroup: "workflow",
+  chunkGroup: "client",
   entry: "build/esm/index.js",
   declaration: await loadDeclaration("@opentelemetry/api.d.ts"),
+  platform: "neutral",
   plugins: [preserveApiSingleton],
+  sharedSpecifiers: { "@opentelemetry/api": "index" },
 };

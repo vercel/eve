@@ -1,3 +1,5 @@
+import { readEnv } from "#platform/env.js";
+import { fromBase64, utf8String } from "#shared/bytes.js";
 /**
  * Claims eve reads from a Vercel OIDC token payload.
  *
@@ -30,7 +32,7 @@ export function decodeVercelOidcTokenClaims(token: string): VercelOidcTokenClaim
 
   let payload: unknown;
   try {
-    payload = JSON.parse(Buffer.from(payloadSegment, "base64url").toString("utf8"));
+    payload = JSON.parse(utf8String(fromBase64(payloadSegment)));
   } catch {
     return EMPTY_CLAIMS;
   }
@@ -53,12 +55,12 @@ export function decodeVercelOidcTokenClaims(token: string): VercelOidcTokenClaim
  * from this value agree across the two phases.
  */
 export function resolveVercelProjectIdFromEnvironment(): string | undefined {
-  const projectId = process.env.VERCEL_PROJECT_ID?.trim();
+  const projectId = readEnv("VERCEL_PROJECT_ID")?.trim();
   if (projectId !== undefined && projectId.length > 0) {
     return projectId;
   }
 
-  const token = process.env.VERCEL_OIDC_TOKEN?.trim();
+  const token = readEnv("VERCEL_OIDC_TOKEN")?.trim();
   if (token === undefined || token.length === 0) {
     return undefined;
   }

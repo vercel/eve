@@ -1,7 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
-
-import { ensureDevelopmentSandboxesPrepared } from "#execution/sandbox/development-lazy-prewarm.js";
+import { ensureDevelopmentSandboxesPrepared } from "#platform/development-sandboxes.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
 import { contextStorage } from "#context/container.js";
@@ -41,8 +38,12 @@ import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import { ToolSessionSandboxUnsupportedError } from "#shared/sandbox-tool-session-error.js";
 import type { AgentSandbox } from "#runtime/sessions/session-agent.js";
-import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
-import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
+import { randomUUID } from "#platform/uuid.js";
+import { hostWorkingDirectory, resolve } from "#platform/host-path.js";
+import {
+  loadSandboxPreparedArtifact,
+  resolveSandboxCacheDirectory,
+} from "#platform/sandbox-cache.js";
 
 /**
  * Where the sandbox's template comes from: a build's artifacts, or prepared on first use, with
@@ -139,7 +140,8 @@ export async function ensureSandboxAccess(
   const appRoot =
     ("appRoot" in input
       ? input.appRoot
-      : getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource)) ?? process.cwd();
+      : getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource)) ??
+    hostWorkingDirectory();
   /** The template the owner's provider starts sessions from, as a build or the agent prepared it. */
   const preparedArtifact = async (providerName: string) =>
     "preparedArtifact" in input

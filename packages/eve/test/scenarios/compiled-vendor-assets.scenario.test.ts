@@ -239,7 +239,11 @@ type Note = 'request from "./not-an-import"';`,
     const vercelOtelUrl = pathToFileURL(
       join(COMPILED_VENDOR_ROOT, "@vercel", "otel", "index.js"),
     ).href;
+    // The vendored bundles import the one shared API as `#compiled/@opentelemetry/api/index.js`,
+    // which eve's imports map resolves into `.generated` under `eve-source`, the tree this script
+    // imports the API from.
     const { stdout } = await execFileAsync(process.execPath, [
+      "--conditions=eve-source",
       "--input-type=module",
       "--eval",
       [

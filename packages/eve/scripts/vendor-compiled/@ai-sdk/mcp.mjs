@@ -143,11 +143,27 @@ const boundedSessionTermination = patchMcpSourcePlugin("bounded-session-terminat
   ],
 ]);
 
+// pkce-challenge's Node entry falls back to `import("node:crypto")` for Node versions without a
+// global `crypto` (before 18), which bundlers follow into a browser build and webpack and esbuild
+// refuse there. Its browser entry reads `globalThis.crypto`, which every Node eve supports has, so
+// every host gets that one.
+const pkceChallengeWebCrypto = {
+  name: "eve-pkce-challenge-web-crypto",
+  async resolveId(source, importer, options) {
+    if (source !== "pkce-challenge") return null;
+    const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+    return resolved === null
+      ? null
+      : resolved.id.replace(/index\.node\.(c?js)$/u, "index.browser.js");
+  },
+};
+
 export default {
   packageName: "@ai-sdk/mcp",
   compiledPath: "@ai-sdk/mcp",
   chunkGroup: "workflow",
   plugins: [
+    pkceChallengeWebCrypto,
     waitForHttpProtocolDiscovery,
     supportedProtocolVersionFallback,
     singleInboundSseStream,

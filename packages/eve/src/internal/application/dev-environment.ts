@@ -1,4 +1,5 @@
-import { join, resolve } from "node:path";
+import { readEnv } from "#platform/env.js";
+import { join, resolve } from "#platform/host-path.js";
 
 /** Environment flag set for processes that belong to an `eve dev` session. */
 export const EVE_DEV_ENV_FLAG = "EVE_DEV";
@@ -17,7 +18,7 @@ export const EVE_DEV_STATE_DIR_ENV = "EVE_DEV_STATE_DIR";
  * its server can run beside an `eve dev` session without touching it.
  */
 export function resolveDevelopmentStateDirectory(appRoot: string): string {
-  const override = process.env[EVE_DEV_STATE_DIR_ENV];
+  const override = readEnv(EVE_DEV_STATE_DIR_ENV);
   // Production servers (`eve start`) also read the local Workflow store
   // through here; a stray override must never move their durable runs away
   // from the mounted `.eve/.workflow-data`.
@@ -31,7 +32,7 @@ type ConversationEnvironment = "development" | "preview" | "production";
 
 /** Reports whether this process belongs to an `eve dev` session. */
 export function isEveDevEnvironment(): boolean {
-  return process.env[EVE_DEV_ENV_FLAG] === "1";
+  return readEnv(EVE_DEV_ENV_FLAG) === "1";
 }
 
 /**
@@ -40,7 +41,7 @@ export function isEveDevEnvironment(): boolean {
  * This is a property of the deployment, never of an inbound request.
  */
 export function isLocalDevelopmentServer(): boolean {
-  if (process.env.VERCEL && process.env.VERCEL_ENV === "development") {
+  if (readEnv("VERCEL") && readEnv("VERCEL_ENV") === "development") {
     return true;
   }
   return isEveDevEnvironment();
@@ -48,8 +49,8 @@ export function isLocalDevelopmentServer(): boolean {
 
 /** Resolves the deployment environment used by setup hooks and trace policies. */
 export function resolveInstrumentationEnvironment(): ConversationEnvironment {
-  if (isEveDevEnvironment() || process.env.VERCEL_ENV === "development") return "development";
-  return process.env.VERCEL_ENV === "preview" ? "preview" : "production";
+  if (isEveDevEnvironment() || readEnv("VERCEL_ENV") === "development") return "development";
+  return readEnv("VERCEL_ENV") === "preview" ? "preview" : "production";
 }
 
 /** Environment flag set for a server `eve eval` started to run against. */
@@ -65,11 +66,11 @@ export const EVE_EVALUATION_RUN_ID_ENV = "EVE_EVALUATION_RUN_ID";
  * started to serve ordinary traffic and cannot know an eval is among it.
  */
 function isEveEvaluationEnvironment(): boolean {
-  return process.env[EVE_EVALUATION_ENV_FLAG] === "1";
+  return readEnv(EVE_EVALUATION_ENV_FLAG) === "1";
 }
 
 export function resolveEveEvaluationRunId(): string | undefined {
   if (!isEveEvaluationEnvironment()) return undefined;
-  const runId = process.env[EVE_EVALUATION_RUN_ID_ENV];
+  const runId = readEnv(EVE_EVALUATION_RUN_ID_ENV);
   return runId === undefined || runId.length === 0 ? undefined : runId;
 }

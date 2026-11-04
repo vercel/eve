@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { createChannelAddress } from "#channel/channel-address.js";
 import type { RunInput, Runtime, SessionAuthContext } from "#channel/types.js";
 import { RunExpiredError } from "#compiled/@workflow/errors/index.js";
@@ -16,6 +15,7 @@ import {
   openInteractions,
 } from "#protocol/session-projection/public-view.js";
 import type { Interaction } from "#protocol/session-projection/reader.js";
+import { randomUUID } from "#platform/uuid.js";
 import { parseAnswers } from "#shared/input.js";
 import type { SessionHandle } from "#shared/session.js";
 import { eveChannelDefinitions, worldHostChannels } from "./channels.js";
