@@ -19,6 +19,7 @@
       "bash",
       "read_file",
       "write_file",
+      "edit_file",
       "web_fetch",
       "agent",
       "eve__task_wait",
@@ -81,6 +82,7 @@
       "bash",
       "read_file",
       "write_file",
+      "edit_file",
       "web_fetch",
       "agent",
       "eve__task_wait",
@@ -107,6 +109,7 @@
       "bash",
       "read_file",
       "write_file",
+      "edit_file",
       "web_fetch"
     ]
   },
@@ -193,6 +196,7 @@
       "bash",
       "read_file",
       "write_file",
+      "edit_file",
       "web_fetch",
       "agent",
       "eve__task_wait",

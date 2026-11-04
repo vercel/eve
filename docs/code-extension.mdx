@@ -3,7 +3,7 @@ title: "Code Extension"
 description: "Mount eve's coding extension, eve-code, and see its latest benchmark results against other coding agent harnesses."
 ---
 
-`eve/extensions/code` (eve-code) turns an eve agent into a coding agent. It ships inside the `eve` package, so you mount it without installing anything else. The extension adds eve's built-in [`edit_file`](/docs/concepts/built-in-tools#edit_file) tool, coding instructions, coding skills, and helpers that install coding tools in the sandbox. GitHub and pull request work lives in the companion [`eve/extensions/git`](#publish-with-the-git-extension) extension.
+`eve/extensions/code` (eve-code) turns an eve agent into a coding agent. It ships inside the `eve` package, so you mount it without installing anything else. The extension adds coding instructions that steer the model toward eve's default [file tools](/docs/concepts/built-in-tools#default-tools), the project's `AGENTS.md`, coding skills, and helpers that install coding tools in the sandbox. GitHub and pull request work lives in the companion [`eve/extensions/git`](#publish-with-the-git-extension) extension.
 
 ## Benchmark results
 
@@ -42,7 +42,7 @@ The workflow skips incomplete runs, single-task runs, and pull request runs. Res
 
 ## Mount the extension
 
-Create an extension file in your agent. The file name sets the prefix of every tool and skill the extension adds, such as `code__edit_file`:
+Create an extension file in your agent. The file name sets the prefix of every skill the extension adds, such as `code__investigate`:
 
 ```ts title="agent/extensions/code.ts"
 import code from "eve/extensions/code";
@@ -157,20 +157,6 @@ export default git({
   },
 });
 ```
-
-## Override bundled tools
-
-The extension mounts the built-in `edit_file` tool, so with the file mount above the model sees `code__edit_file`. To change its approval or other options, override it with the qualified name and spread the exported definition:
-
-```ts title="agent/tools/code__edit_file.ts"
-import { defineTool } from "eve/tools";
-import { always } from "eve/tools/approval";
-import { editFile } from "eve/tools/edit_file";
-
-export default defineTool({ ...editFile, approval: always() });
-```
-
-`agent/extensions/code/tools/edit_file.ts` works only when the mount is a directory, `agent/extensions/code/extension.ts`.
 
 For a custom GitHub command tool, `eve/extensions/git/sandbox` exports `executeGitHubShell(input, config, dependencies)` and `githubShellApproval(input)`. `executeGitHubShell` parses the command, calls `authorize`, and installs the credential rules. `dependencies` supply the session ID and sandbox access. Use `githubShellApproval` as the tool's approval policy so invalid commands are still rejected.
 

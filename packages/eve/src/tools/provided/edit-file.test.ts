@@ -61,6 +61,15 @@ function createSandbox(
 }
 
 describe("edit_file", () => {
+  // Claude rejects a whole request when any advertised tool has a root union, and every agent gets edit_file.
+  it("advertises an object-root input schema", () => {
+    const schema = (editFile.inputSchema as ToolSchema)["~standard"].jsonSchema.input({
+      target: "draft-07",
+    });
+    expect(schema.type).toBe("object");
+    for (const keyword of ["oneOf", "anyOf", "allOf"]) expect(schema).not.toHaveProperty(keyword);
+  });
+
   it("applies every edit against the original file and keeps its BOM and CRLF endings", async () => {
     const sandbox = createSandbox({
       "/workspace/src/app.ts": "\uFEFFconst a = 1;\r\nconst b = 2;\r\nconst c = 3;\r\n",

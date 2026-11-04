@@ -1,6 +1,6 @@
 ---
 title: "Built-in Tools"
-description: "The default and opt-in tools eve provides, including edit_file, glob, grep, and sleep."
+description: "The default and opt-in tools eve provides, including bash, file tools, glob, grep, and sleep."
 ---
 
 Built-in tools are framework tools eve provides: a default set every agent gets, and opt-in tools you add with one file. Each occupies the same `agent/tools/<name>.ts` slot you would author yourself, so an authored definition replaces it and `disableTool()` removes it. For custom tools, see [Tools](../tools).
@@ -163,6 +163,32 @@ Disable it:
 import { disableTool } from "eve/tools";
 
 export default disableTool();
+```
+
+### `edit_file`
+
+`edit_file` edits one sandbox file by exact text replacement. To add it back after `defaultTools: false`:
+
+```sh
+eve add tool/edit_file
+```
+
+```ts title="agent/tools/edit_file.ts"
+export { default } from "eve/tools/edit_file";
+```
+
+The model passes `path` and `edits`, a list of `{ oldText, newText }` replacements. Each `oldText` must match exactly one region of the file as it was before the call, and replacements must not overlap. When no exact match exists, `edit_file` ignores trailing whitespace and treats smart quotes, Unicode dashes, and special spaces as their ASCII forms. The file keeps its byte order mark, and every line gets the file's first line ending, so a CRLF file stays CRLF. `edit_file` rejects files that are not valid UTF-8.
+
+Relative paths resolve against the workspace root, and `~` or `$HOME` resolves to the sandbox's home directory. `edit_file` doesn't require a `read_file` call first. After it changes a file the session already read, `write_file` can overwrite that file without another `read_file` call. A failed edit changes nothing, and its error names the problem, such as a missing or ambiguous `oldText`. The model reads `Successfully replaced N block(s) in <path>.`, and channels and hooks get `{ path, replacements }` on `call.settled`.
+
+Customize it by wrapping the framework definition:
+
+```ts title="agent/tools/edit_file.ts"
+import { defineTool } from "eve/tools";
+import { always } from "eve/tools/approval";
+import { editFile } from "eve/tools/edit_file";
+
+export default defineTool({ ...editFile, approval: always() });
 ```
 
 ### `web_fetch`
@@ -438,32 +464,6 @@ export default askQuestion;
 ```
 
 `ask_question` is a [workflow tool](/docs/tools/workflows) that calls `ctx.ask()`. A steering message that doesn't answer the question withdraws it, and the model reads `{ interrupted: true }` as `Stopped early because a new message arrived.`, then the message. In a session that cannot request input, such as a [markdown schedule](/docs/schedules#markdown-form-fire-and-forget), the result is `{ status: "unavailable" }` and the model continues on its own judgment.
-
-### `edit_file`
-
-`edit_file` edits one sandbox file by exact text replacement. The [code extension](/docs/code-extension) mounts it as `code__edit_file`. In other agents, add it:
-
-```sh
-eve add tool/edit_file
-```
-
-```ts title="agent/tools/edit_file.ts"
-export { default } from "eve/tools/edit_file";
-```
-
-The model passes `path` and `edits`, a list of `{ oldText, newText }` replacements. Each `oldText` must match exactly one region of the file as it was before the call, and replacements must not overlap. When no exact match exists, `edit_file` ignores trailing whitespace and treats smart quotes, Unicode dashes, and special spaces as their ASCII forms. The file keeps its byte order mark, and every line gets the file's first line ending, so a CRLF file stays CRLF. `edit_file` rejects files that are not valid UTF-8.
-
-Relative paths resolve against the workspace root, and `~` or `$HOME` resolves to the sandbox's home directory. `edit_file` doesn't require a `read_file` call first. After it changes a file the session already read, `write_file` can overwrite that file without another `read_file` call. A failed edit changes nothing, and its error names the problem, such as a missing or ambiguous `oldText`. The model reads `Successfully replaced N block(s) in <path>.`, and channels and hooks get `{ path, replacements }` on `call.settled`.
-
-Customize it by wrapping the framework definition:
-
-```ts title="agent/tools/edit_file.ts"
-import { defineTool } from "eve/tools";
-import { always } from "eve/tools/approval";
-import { editFile } from "eve/tools/edit_file";
-
-export default defineTool({ ...editFile, approval: always() });
-```
 
 ### `glob`
 

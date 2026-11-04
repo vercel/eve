@@ -271,9 +271,8 @@ restates the consumer policies 2a removes.
    - an optional `timeout` input, 1-120 s, default 60 s, before a command
      goes to the background;
    - a truncated stream names a sandbox file with its full output.
-2. **Edit tool.** Decided in #5892: core ships pi's `edit` as the opt-in
-   `edit_file` (`eve/tools/edit_file`), and the code extension mounts it as
-   `code__edit_file` for every model. `apply_patch` and its diagnostics are
+2. **Edit tool.** Decided in #5892: core ships pi's `edit` as `edit_file`
+   (`eve/tools/edit_file`), a default tool beside `write_file` for every model. `apply_patch` and its diagnostics are
    removed, along with the `code__apply_patch` override. In deepswe-lean on
    Sonnet, no harness called its edit tool, so the decision rests on matching
    pi and on less code. Revisit per-model selection only if the weekly GPT row

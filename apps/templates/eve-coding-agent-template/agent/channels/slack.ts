@@ -6,12 +6,12 @@ import { CODE_CHANNELS, syncCodeChannel } from "../lib/code-channel";
 
 // Tools that can change the workspace or what the context bar shows.
 // `code__apply_patch` is the editing tool in the eve release this template's
-// lockfile pins; newer eve mounts `code__edit_file` instead. Drop
-// `code__apply_patch` once the lockfile pins a release with `code__edit_file`.
+// lockfile pins; newer eve has a default `edit_file` instead. Drop
+// `code__apply_patch` once the lockfile pins a release with `edit_file`.
 const SYNC_AFTER = new Set([
   "bash",
   "code__apply_patch",
-  "code__edit_file",
+  "edit_file",
   "git__gh",
   "update_code_channel_status",
 ]);
