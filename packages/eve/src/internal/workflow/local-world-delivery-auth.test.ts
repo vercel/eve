@@ -13,19 +13,30 @@ const QUEUE_HEADERS = {
   "x-vqs-queue-name": "__wkf_workflow_entry",
 };
 
-function createFakeWorld() {
+function createFakeWorld(extra: { releaseOrphanedSteps?: (runId: string) => Promise<void> } = {}) {
   const enqueued: Array<{
     name: string;
     message: unknown;
     headers: Record<string, string> | undefined;
   }> = [];
+  // Releases and enqueues in the order they happened.
+  const order: string[] = [];
   const start = vi.fn(async () => {});
   const world = {
+    ...(extra.releaseOrphanedSteps === undefined
+      ? {}
+      : {
+          releaseOrphanedSteps: async (runId: string) => {
+            order.push(`release ${runId}`);
+            await extra.releaseOrphanedSteps?.(runId);
+          },
+        }),
     queue: async (
       name: string,
       message: unknown,
       options?: { headers?: Record<string, string> },
     ) => {
+      order.push(`enqueue ${(message as { runId: string }).runId}`);
       enqueued.push({ name, message, headers: options?.headers });
       return { messageId: "msg_1" };
     },
@@ -53,7 +64,7 @@ function createFakeWorld() {
     start,
   };
   const secured = authenticateLocalWorkflowDeliveries(world as never, SECRET);
-  return { enqueued, secured, start, listRuns: world.runs.list };
+  return { enqueued, order, secured, start, listRuns: world.runs.list };
 }
 
 describe("authenticateLocalWorkflowDeliveries", () => {
@@ -125,6 +136,34 @@ describe("authenticateLocalWorkflowDeliveries", () => {
       [{ pagination: { cursor: undefined }, resolveData: "none", status: ["pending", "running"] }],
       [{ pagination: { cursor: "page_2" }, resolveData: "none", status: ["pending", "running"] }],
     ]);
+  });
+
+  it("releases each run's orphaned inline steps before re-enqueueing it", async () => {
+    vi.stubEnv("WORKFLOW_QUEUE_NAMESPACE", "evetest");
+    const release = vi.fn(async () => {});
+    const { order, secured } = createFakeWorld({ releaseOrphanedSteps: release });
+    await secured.start?.();
+    expect(order).toEqual(["release wrun_1", "enqueue wrun_1", "release wrun_2", "enqueue wrun_2"]);
+  });
+
+  it("still re-enqueues a run whose orphaned steps could not be released", async () => {
+    vi.stubEnv("WORKFLOW_QUEUE_NAMESPACE", "evetest");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { enqueued, secured } = createFakeWorld({
+      releaseOrphanedSteps: async (runId) => {
+        if (runId === "wrun_1") throw new Error("disk hiccup");
+      },
+    });
+    await secured.start?.();
+    expect(enqueued.map((entry) => entry.message)).toEqual([
+      { runId: "wrun_1" },
+      { runId: "wrun_2" },
+    ]);
+    expect(warn).toHaveBeenCalledWith(
+      "[eve] Failed to release orphaned steps of workflow run wrun_1:",
+      expect.any(Error),
+    );
+    warn.mockRestore();
   });
 
   it("rejects recovery without an installed namespace", async () => {
