@@ -1,3 +1,4 @@
+import { workflowInboxTransport } from "#execution/session-inbox/workflow-transport.js";
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { createSessionInbox } from "#execution/session-inbox/inbox.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
@@ -7,7 +8,7 @@ export async function sessionHookPumpWorkflow(input: {
   readonly releaseToken: string;
 }): Promise<unknown[]> {
   "use workflow";
-  const inbox = createSessionInbox(getWorkflowMetadata().workflowRunId);
+  const inbox = createSessionInbox(workflowInboxTransport(getWorkflowMetadata().workflowRunId));
   using gate = createHook<void>({ token: input.releaseToken });
   try {
     await inbox.claimSessionHook(sessionCommandHookToken(getWorkflowMetadata().workflowRunId));
