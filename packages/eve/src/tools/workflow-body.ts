@@ -1,4 +1,4 @@
-import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { readWorkflowFunctionId } from "#shared/workflow-function-id.js";
 
 /**
  * A workflow tool's body as a plain function, under the id its `"use workflow"` function has.

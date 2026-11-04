@@ -15,10 +15,8 @@ import { type DevHost, DevHostSupervisor } from "#internal/nitro/host/dev-host-s
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { createDevelopmentWorkflowWorld } from "#internal/workflow/development-world-client.js";
 import { createParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-server.js";
-import {
-  DEVELOPMENT_WORKER_APP_ROOT_ENV,
-  DEVELOPMENT_WORKFLOW_SECRET_ENV,
-} from "#internal/workflow/development-world-protocol.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/application/dev-transport.js";
+import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
 
 const ADDRESS = DEVELOPMENT_CLIENT_ADDRESS_HEADER;
 const SIGNATURE = DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER;

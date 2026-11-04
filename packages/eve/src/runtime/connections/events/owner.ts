@@ -11,11 +11,11 @@ import {
   type EventBinding,
 } from "#runtime/connections/events/state.js";
 import type { ConnectionEventWatchMessage } from "#runtime/connections/events/workflow.js";
+import { startWorkflowOnCurrentDeployment } from "#execution/workflow-runtime.js";
 import {
   connectionEventDeliveryWorkflowReference,
   connectionEventWorkflowReference,
-  startWorkflowOnCurrentDeployment,
-} from "#execution/workflow-runtime.js";
+} from "#execution/workflow-references.js";
 import { getHookByToken, getRun, resumeHook } from "#internal/workflow/runtime.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { connectionEventHookToken } from "#runtime/connections/events/path.js";

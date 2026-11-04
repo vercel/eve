@@ -12,7 +12,7 @@ import type { EveToolPart } from "#client/message-types.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { mockModel } from "#evals/mock-model.js";
 import { workflowEntry } from "#execution/session/entry.js";
-import { workflowToolRunWorkflowReference } from "#execution/workflow-runtime.js";
+import { workflowToolRunWorkflowReference } from "#execution/workflow-references.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,

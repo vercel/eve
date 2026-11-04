@@ -4,6 +4,7 @@ import { CHANNEL_SENTINEL, type CompiledChannel } from "#channel/compiled-channe
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import { createToolChannelTo } from "#execution/tools/channel-to.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 
@@ -36,6 +37,7 @@ describe("createToolChannelTo", () => {
       return { id: "session_inbox" } as never;
     });
     const to = createToolChannelTo({
+      createRuntime: createWorkflowRuntime,
       delegated: false,
       loadBundle: () => bundle,
     });

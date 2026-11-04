@@ -7,6 +7,11 @@ import { normalizeLogicalPath } from "#discover/filesystem.js";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import {
+  COMPILE_METADATA_KIND,
+  COMPILE_METADATA_VERSION,
+  type CompileMetadata,
+} from "#compiler/artifact-contract.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import {
   projectDiscoverDiagnostic,
@@ -29,16 +34,6 @@ const COMPILER_DIAGNOSTICS_ARTIFACT_KIND = "eve-compiler-diagnostics";
  * Current diagnostics artifact schema version.
  */
 const COMPILER_DIAGNOSTICS_ARTIFACT_VERSION = 2;
-
-/**
- * Stable compile metadata artifact kind emitted by the compiler.
- */
-export const COMPILE_METADATA_KIND = "eve-compile-metadata";
-
-/**
- * Current compile metadata schema version.
- */
-export const COMPILE_METADATA_VERSION = 6;
 
 /**
  * Structured paths for compiler-owned artifacts under `.eve/`.
@@ -64,37 +59,6 @@ interface CompilerDiagnosticsArtifact {
   kind: typeof COMPILER_DIAGNOSTICS_ARTIFACT_KIND;
   summary: DiscoverDiagnosticsSummary;
   version: typeof COMPILER_DIAGNOSTICS_ARTIFACT_VERSION;
-}
-
-/**
- * One artifact digest recorded in compile metadata.
- */
-interface CompileArtifactDigest {
-  path: string;
-  sha256: string;
-}
-
-/**
- * Minimal compiler metadata artifact with versioning and hashes.
- */
-export interface CompileMetadata {
-  compile: {
-    manifest: CompileArtifactDigest;
-    moduleMap: CompileArtifactDigest;
-  };
-  discovery: {
-    diagnostics: CompileArtifactDigest;
-    manifest: CompileArtifactDigest;
-    sourceGraphHash: string;
-    summary: DiscoverDiagnosticsSummary;
-  };
-  generator: {
-    name: string;
-    version: string;
-  };
-  kind: typeof COMPILE_METADATA_KIND;
-  status: "failed" | "ready";
-  version: typeof COMPILE_METADATA_VERSION;
 }
 
 export interface CompilerArtifactLocations {

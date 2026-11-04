@@ -595,6 +595,7 @@
     "test:watch": "vitest --config vitest.unit.config.ts",
     "typecheck": "pnpm run check:web-template && tsc -p tsconfig.json --noEmit",
     "generate:web-template": "node src/setup/build.ts --write",
+    "guard:browser-reach": "node scripts/browser-reach.mjs --check",
     "check:web-template": "node src/setup/build.ts --check",
     "test:tui": "tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs"
   },

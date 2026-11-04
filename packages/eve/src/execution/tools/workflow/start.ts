@@ -15,35 +15,24 @@ import type {
   WorkflowToolRunInput,
 } from "#execution/tools/workflow/types.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
-import {
-  startWorkflowOnCurrentDeployment,
-  workflowToolRunWorkflowReference,
-} from "#execution/workflow-runtime.js";
 
 const log = createLogger("execution.workflow-tool-run");
 
 /**
  * Starts the durable run of one workflow tool call or task, and returns where it listens. A host
- * without durable runs refuses, and the call fails with its error.
+ * without durable runs refuses, and the call fails with its error. Workflow's is
+ * `workflow-host/start-run.ts`.
  */
 export type StartWorkflowToolRun = (
   input: Omit<WorkflowToolRunInput, "hookToken">,
 ) => Promise<WorkflowToolRunAddress>;
 
-/**
- * Starts a new Workflow run on the current deployment for each dispatch attempt. Call from a
- * `"use step"` body.
- */
-export const startWorkflowToolRun: StartWorkflowToolRun = async (input) => {
-  const hookToken =
-    input.entry.entryPoint === "execute"
-      ? crypto.randomUUID()
-      : taskRunHookToken(input.session.id, input.entry.taskId);
-  const run = await startWorkflowOnCurrentDeployment(workflowToolRunWorkflowReference, [
-    { ...input, hookToken },
-  ]);
-  return { hookToken, runId: run.runId };
-};
+/** The hook a new run takes its session's commands on, on any host. */
+export function workflowToolRunHookToken(input: Omit<WorkflowToolRunInput, "hookToken">): string {
+  return input.entry.entryPoint === "execute"
+    ? crypto.randomUUID()
+    : taskRunHookToken(input.session.id, input.entry.taskId);
+}
 
 /**
  * A task's run takes the session's commands, including later calls to a

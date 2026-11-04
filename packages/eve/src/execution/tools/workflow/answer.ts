@@ -3,7 +3,7 @@ import type {
   WorkflowToolRunControlMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { WorkflowAskRoute } from "#harness/hitl/relays.js";
-import { resumeRoutedHook } from "#execution/hook-routes.js";
+import { resumeRoutedHook } from "#execution/hosts.js";
 import type { Answer } from "#shared/input.js";
 import type { Principal } from "#protocol/session-events/envelope.js";
 
