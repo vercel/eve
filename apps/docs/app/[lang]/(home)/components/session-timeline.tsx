@@ -55,6 +55,8 @@ type Beat =
       time: string;
       body: ReactNode;
       attachment?: ReactNode;
+      /** WhatsApp: the emoji the other side reacted to this message with. */
+      reaction?: { emoji: string; label: string };
       delay: number;
     }
   | {
@@ -334,6 +336,7 @@ const WHATSAPP_BEATS: Beat[] = [
     author: "Concierge",
     time: "9:13 AM",
     body: "Done. It ships today with tracking 1Z 999 AA1 0123 4567. I'll message you when it's out for delivery.",
+    reaction: { emoji: "👍", label: "thumbs up" },
     delay: 1800,
   },
 ];
@@ -539,12 +542,88 @@ function ReplyButtons({ buttons }: { buttons: { label: string; icon: ReactNode }
   ));
 }
 
+/**
+ * A WhatsApp reaction: the emoji in a pill overlapping the bubble's bottom edge. In a demo it
+ * lands a beat after its bubble the way WhatsApp's does: the pill grows in and the emoji
+ * overshoots it before settling. Through the Web Animations API, so it runs while a
+ * conversation has its CSS entrances off.
+ */
+function BubbleReaction({
+  emoji,
+  label,
+  outgoing,
+  demo,
+}: {
+  emoji: string;
+  label: string;
+  outgoing: boolean;
+  demo: boolean;
+}) {
+  const pill = useRef<HTMLSpanElement>(null);
+  const glyph = useRef<HTMLSpanElement>(null);
+
+  // Only on mount: a reaction arriving in a demo, not one re-rendered after.
+  useEffect(() => {
+    if (!demo || !pill.current || !glyph.current) return;
+    const delay = 700;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      pill.current.animate([{ opacity: 0 }, { opacity: 1 }], {
+        delay,
+        duration: 200,
+        easing: "ease-out",
+        fill: "backwards",
+      });
+      return;
+    }
+    const easeOut = "cubic-bezier(0.23, 1, 0.32, 1)";
+    pill.current.animate(
+      [
+        { opacity: 0, transform: "scale(0.2)" },
+        { opacity: 1, transform: "none" },
+      ],
+      { delay, duration: 200, easing: easeOut, fill: "backwards" },
+    );
+    glyph.current.animate(
+      [
+        { transform: "scale(0.3)", easing: easeOut },
+        { transform: "scale(1.4)", offset: 0.55, easing: "ease-in-out" },
+        { transform: "none" },
+      ],
+      { delay, duration: 360, fill: "backwards" },
+    );
+  }, []);
+
+  return (
+    <span
+      aria-label={`Reacted with ${label}`}
+      className={cn(
+        "absolute -bottom-4 flex h-6 min-w-7 items-center justify-center rounded-full border border-gray-alpha-400 bg-background-100 px-1",
+        outgoing ? "right-3 origin-center" : "left-3 origin-center",
+      )}
+      ref={pill}
+      role="img"
+    >
+      {/* A fixed box on its own layer, so the glyph scales smoothly instead of snapping to the
+          pixel grid frame by frame. */}
+      <span
+        aria-hidden
+        className="inline-flex size-4 items-center justify-center text-[14px] leading-none will-change-transform"
+        ref={glyph}
+      >
+        {emoji}
+      </span>
+    </span>
+  );
+}
+
 function Bubble({
   author,
   time,
   continued,
   tail,
   attachment,
+  reaction,
+  demo,
   children,
 }: {
   author: Author;
@@ -553,6 +632,8 @@ function Bubble({
   /** The last bubble in a run of one sender's messages carries the tail. */
   tail: boolean;
   attachment?: ReactNode;
+  reaction?: { emoji: string; label: string };
+  demo: boolean;
   children: ReactNode;
 }) {
   const outgoing = !author.icon;
@@ -564,6 +645,8 @@ function Bubble({
           ? "origin-top-right justify-end pr-2"
           : cn("origin-top-left justify-start pl-2", agentEntrance),
         continued ? "pt-1.5" : "pt-4",
+        // Room below for the reaction hanging off the bubble's bottom edge.
+        reaction && "pb-4",
       )}
     >
       <span className="sr-only">{author.name}</span>
@@ -593,6 +676,7 @@ function Bubble({
           </span>
         </div>
         <Attachment>{attachment}</Attachment>
+        {reaction ? <BubbleReaction demo={demo} outgoing={outgoing} {...reaction} /> : null}
       </div>
     </li>
   );
@@ -783,8 +867,10 @@ export function SessionTimeline(): JSX.Element {
                       attachment={beat.attachment}
                       author={author}
                       continued={beat.author === authorOf(beats[i - 1])}
+                      demo={playing || ended}
                       tail={beat.author !== authorOf(beats.slice(0, shown)[i + 1])}
                       key={i}
+                      reaction={beat.reaction}
                       time={beat.time}
                     >
                       {beat.body}
