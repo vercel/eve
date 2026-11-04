@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import { DynamicSubagentAgentConfigKey } from "#context/keys.js";
 import { agentLimits, agentSettings } from "#execution/effective-agent-config.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const bundle = {
   resolvedAgent: {
@@ -22,19 +23,19 @@ const bundle = {
 describe("the agent's settings", () => {
   it("are agent.ts's", () => {
     const ctx = new ContextContainer();
-    ctx.set(BundleKey, bundle);
+    ctx.set(SessionAgentKey, fromCompiledBundle(bundle));
 
     expect(agentSettings({ ctx })).toEqual({
       compactionModel: { id: "openai/gpt-5.4-mini" },
       reasoning: "low",
       thresholdPercent: 0.9,
     });
-    expect(agentLimits(bundle, ctx)).toEqual({ sessionTimeoutMs: 60_000 });
+    expect(agentLimits(fromCompiledBundle(bundle), ctx)?.sessionTimeoutMs).toBe(60_000);
   });
 
   it("are a dynamic subagent config's, in its session", () => {
     const ctx = new ContextContainer();
-    ctx.set(BundleKey, bundle);
+    ctx.set(SessionAgentKey, fromCompiledBundle(bundle));
     ctx.set(DynamicSubagentAgentConfigKey, {
       compaction: { model: { id: "anthropic/claude-sonnet-4.5" }, thresholdPercent: 0.75 },
       description: "Perform deep research.",
@@ -48,6 +49,6 @@ describe("the agent's settings", () => {
       reasoning: "high",
       thresholdPercent: 0.75,
     });
-    expect(agentLimits(bundle, ctx)).toEqual({ sessionTimeoutMs: 120_000 });
+    expect(agentLimits(fromCompiledBundle(bundle), ctx)).toEqual({ sessionTimeoutMs: 120_000 });
   });
 });

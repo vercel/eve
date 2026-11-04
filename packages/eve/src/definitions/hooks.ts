@@ -19,10 +19,10 @@ import type { SessionView as SessionTables } from "#protocol/session-projection/
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { TurnSettledData } from "#protocol/session-events/families/turn.js";
 import type { ResolvedHookDefinition } from "#runtime/types.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { currentProjection } from "#harness/session-machine/current.js";
 import { activeTurnIdOf, latestTurnIdOf } from "#protocol/session-projection.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
+import { sessionAgent } from "#definitions/agent.js";
 import { continuationKey } from "#definitions/continuation.js";
 import {
   queueCommands,
@@ -231,8 +231,8 @@ function actsFor(ctx: ContextContainer, auth: DeliverHookPayload["auth"]): strin
 }
 
 function agentOf(ctx: ContextContainer): HookContext["agent"] {
-  const bundle = ctx.require(BundleKey);
-  return { name: bundle.turnAgent.id, nodeId: bundle.nodeId };
+  const agent = sessionAgent(ctx);
+  return { name: agent.id, nodeId: agent.nodeId };
 }
 
 /**

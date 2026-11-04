@@ -64,7 +64,8 @@ import type { Cause, ErrorInfo } from "#protocol/session-events/envelope.js";
 import type { ControlSettlement } from "#harness/facts.js";
 import { endSession } from "#harness/session-machine/deliveries.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { sessionAgent } from "#definitions/agent.js";
 
 const log = createLogger("execution.publish-session-events");
 
@@ -258,7 +259,7 @@ async function publishInSessionScope<T>(
       ? hydrated
       : { ...hydrated, history: validateHarnessModelMessages(step.history) };
   const instrumentation = bindSessionInstrumentation({
-    agentName: ctx.require(BundleKey).turnAgent.id,
+    agentName: sessionAgent(ctx).id,
     ctx,
     rootSessionId: session.rootSessionId ?? session.sessionId,
     sessionId: session.sessionId,
@@ -780,7 +781,7 @@ export async function publishTerminalSessionEvent(input: {
   let instrumentation: ReturnType<typeof bindSessionInstrumentation>;
   try {
     instrumentation = bindSessionInstrumentation({
-      agentName: ctx.require(BundleKey).turnAgent.id,
+      agentName: sessionAgent(ctx).id,
       ctx,
       rootSessionId: ctx.get(ParentSessionKey)?.rootSessionId ?? sessionId,
       sessionId,
