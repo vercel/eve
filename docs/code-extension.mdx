@@ -78,7 +78,7 @@ To use a personal access token or another credential provider, omit the connecto
 
 The extension reads `AGENTS.md` from the workspace root, or `CLAUDE.md` when there is no `AGENTS.md`, and adds it to the conversation as project instructions. The content joins the conversation again only when it changes. A file over 64,000 bytes is cut off with a note that tells the model where to read the rest.
 
-The extension reads the file with one sandbox command at the start of the first turn, which starts the session's sandbox. It reads the file again only at the start of a turn that follows tool calls; other turns reuse the earlier result. If the read fails, the turn continues without project instructions. For other directories, the extension's instructions tell the model to read the nearest `AGENTS.md` or `CLAUDE.md` before working there.
+The extension reads the file once per session, with one sandbox command at the start of the first turn, which starts the session's sandbox. Later edits to the file reach the model only when it reads the file itself. If the read fails, the turn continues without project instructions, and the next model call tries again. For other directories, the extension's instructions tell the model to read the nearest `AGENTS.md` or `CLAUDE.md` before working there.
 
 ## Publish with the git extension
 
