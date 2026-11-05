@@ -18,7 +18,11 @@ function stream(events: readonly SessionEvent[]) {
 
 function session() {
   return new ClientSession(
-    { baseUrl: "https://eve.test", resolveHeaders: async () => new Headers() },
+    {
+      baseUrl: "https://eve.test",
+      fetch: (input, init) => globalThis.fetch(input, init),
+      resolveHeaders: async () => new Headers(),
+    },
     { sessionId: "session_1", streamIndex: 0 },
   );
 }

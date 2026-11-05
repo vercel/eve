@@ -146,6 +146,13 @@ describe("promptCommandsFor", () => {
     expect(names).not.toContain("deploy");
   });
 
+  it("offers an embedded agent its session commands and /info, without project setup", () => {
+    const names = promptCommandsFor("embedded").map((command) => command.name);
+    expect(names).toEqual(expect.arrayContaining(["new", "cancel", "info", "help", "exit"]));
+    for (const setup of ["model", "login", "add", "deploy", "traces"])
+      expect(names).not.toContain(setup);
+  });
+
   it("filters discovery and rejects the obsolete remote auth command", () => {
     const remote = promptCommandsFor("remote");
     expect(parsePromptCommand("/vc:auth")).toBeNull();

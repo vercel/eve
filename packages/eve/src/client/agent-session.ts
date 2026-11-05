@@ -61,6 +61,7 @@ export class ClientAgentSession implements SessionReader {
       onCaughtUp,
       onPosition,
       baseUrl: this.#context.baseUrl,
+      fetch: this.#context.fetch,
       path: createEveDescendantStreamRoutePath(this.#rootId),
       searchParams: { children: JSON.stringify(this.#children) },
       redirect: "error",

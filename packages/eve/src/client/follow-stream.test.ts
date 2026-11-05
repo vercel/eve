@@ -41,6 +41,7 @@ async function read(input: { readonly startIndex: number; readonly follow?: bool
   for await (const { position } of followStreamLines({
     follow: input.follow,
     baseUrl: "https://eve.test",
+    fetch: (input, init) => globalThis.fetch(input, init),
     path: "/eve/v1/session/s/stream",
     resolveHeaders: async () => new Headers(),
     startIndex: input.startIndex,

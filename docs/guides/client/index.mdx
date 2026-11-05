@@ -134,6 +134,15 @@ await response.result();
 
 Per-request headers override client-level headers with the same name. For example, a turn can set its application user's `Authorization` header while `vercelOidc` still sends the deployment-protection credential in `x-vercel-trusted-oidc-idp-token`.
 
+Every request the client makes, event streams included, goes through the global `fetch` unless you pass your own as `fetch`, for example to add tracing or to answer requests in the same process:
+
+```ts
+const client = new Client({
+  baseUrl: "https://agent.example.com",
+  fetch: (input, init) => tracedFetch(input, init),
+});
+```
+
 ## Faster sends with `inbox`
 
 `session.state` can include an opaque `inbox` value from the server, so save the complete state and pass it back unchanged. Later messages that carry it skip a server-side session lookup. Don't inspect, edit, or construct it, because its contents can change in any release. A missing, stale, or rejected value only costs a slower lookup.
