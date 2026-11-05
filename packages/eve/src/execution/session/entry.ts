@@ -3,7 +3,7 @@ import {
   type SessionHook,
 } from "#execution/session-inbox/workflow-transport.js";
 import { runPreparedSession } from "#execution/session/program.js";
-import { storedProjection } from "#harness/session-machine/view.js";
+import { bootFromCheckpoint } from "#execution/session/checkpoint-boot.js";
 import { workflowSessionHost } from "#execution/session/workflow-host.js";
 import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 import {
@@ -269,38 +269,26 @@ async function startSuccessor(
   const { checkpoint, serializedContext } = prepared;
   return {
     inbox,
-    session: {
+    session: bootFromCheckpoint(checkpoint, {
       anchor: {
         kind: "successor",
         notify: (result) =>
           signalSessionAnchorStep({ result, token: sessionAnchorToken(sessionId) }),
       },
-      admittedDeliveryKeys: checkpoint.admittedDeliveryKeys,
       caller: input.delivery?.caller,
-      capabilities: checkpoint.capabilities,
       // The earlier build's history follows its own message conventions, such as memory recalls
       // and task notices; this build's model reads it only as a summary.
       compactFirst: prepared.importedTurnCount !== undefined && checkpoint.history.length > 0,
       deploymentId: input.ownerDeploymentId,
-      history: checkpoint.history,
-      start:
-        input.delivery !== undefined
-          ? { input: input.delivery, kind: "turn" }
-          : storedProjection(checkpoint.sessionState.snapshot.session.state).view.session.status ===
-              "new"
-            ? { kind: "first-message" }
-            : { kind: "parked" },
-      retention: checkpoint.retention,
       serializedContext,
       sessionId,
-      sessionState: checkpoint.sessionState,
       sessionTimeoutControl: createSessionTimeoutControl({
         deadline: input.reason === "prewarm" ? input.sessionTimeoutDeadline : undefined,
         sessionId,
         timeoutMs: checkpoint.sessionTimeoutMs,
       }),
-      sessionTimeoutMs: checkpoint.sessionTimeoutMs,
       sessionWritable: input.sessionWritable,
-    },
+      ...(input.delivery !== undefined && { start: { input: input.delivery, kind: "turn" } }),
+    }),
   };
 }

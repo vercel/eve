@@ -1,6 +1,8 @@
 import { sessionView } from "#harness/session-machine/commit.js";
 import { runtimeWait, ownOpenRequestIds } from "#harness/session-machine/view.js";
 import type { TaskToolCall } from "#execution/tasks/calls.js";
+import type { PendingDispatch } from "#harness/session-machine/transitions.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { SessionProjection } from "#protocol/session-projection.js";
 import { openSignIns } from "#protocol/session-projection/reader.js";
@@ -20,13 +22,18 @@ export type TurnPause =
   | { readonly on: "tasks"; readonly taskIds: readonly string[] }
   /**
    * Calls whose results resume the turn, task tool calls included. `dispatch` starts their
-   * workflow tool runs before the wait; the session answers `taskToolCalls` itself.
+   * workflow tool runs before the wait; the session answers `taskToolCalls` itself. Once they
+   * started, `results` holds those that settled at once (a task's receipt, a refused start), and
+   * `publish` what the dispatch left to publish, until it's published: a turn resumed from the
+   * pause waits with both.
    */
   | {
       readonly on: "calls";
       readonly callIds: readonly string[];
       readonly dispatch: boolean;
       readonly taskToolCalls: readonly TaskToolCall[];
+      readonly results?: readonly RuntimeActionResult[];
+      readonly publish?: PendingDispatch;
     };
 
 /** The turn waits on sign-ins and answers to its interactions. */

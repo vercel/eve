@@ -10,6 +10,7 @@ import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.
 import { sleep } from "#compiled/@workflow/core/index.js";
 import { createTurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
+import type { OpenTurn } from "#execution/session/open-turn.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
 import { turnStep } from "#execution/workflow-host/turn-step.js";
 import { publishSessionEvents, type Entered } from "#execution/publish-session-events.js";
@@ -1601,6 +1602,87 @@ describe("SessionExecution checkpoints", () => {
     ]);
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].input?.runtimeResults?.results).toEqual([
       expect.objectContaining({ callId: "hold-call" }),
+    ]);
+  });
+
+  it("records the results a dispatch settled at once, which a turn resumed from its pause keeps", async () => {
+    const sessionState = state("");
+    const receipt = {
+      callId: "task-call",
+      kind: "tool-result" as const,
+      output: { taskId: "task_1" },
+      toolName: "research",
+    };
+    const records: { readonly open: OpenTurn | undefined }[] = [];
+    const recorded = (inbox: SessionInbox) =>
+      new SessionStateCursor({
+        history: [],
+        inbox,
+        record: async (change) => {
+          records.push({ open: change.open });
+        },
+        sessionWritable: new WritableStream<Uint8Array>(),
+        serializedContext: {},
+        sessionState,
+      });
+    const doneStep = turnStepWork(async (input) => ({
+      action: "done",
+      output: "done",
+      serializedContext: input.serializedContext,
+      sessionState,
+    }));
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async () => ({
+          action: "paused",
+          ...callsPause({ callIds: ["task-call"] }),
+          serializedContext: {},
+          sessionState,
+        })),
+      )
+      .mockImplementationOnce(doneStep);
+    vi.mocked(dispatchCoordinationStep)
+      .mockReset()
+      .mockImplementation(
+        dispatchWork(async () => ({ results: [receipt], serializedContext: {}, sessionState })),
+      );
+
+    const first = idleInbox();
+    await expect(
+      createExecution({ cursor: recorded(first), inbox: first, sessionState }).runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Research the rollout." }] },
+      }),
+    ).resolves.toMatchObject({ kind: "done" });
+    // What a restore would resume: the wait once its runs started, with the receipt it got.
+    const pause = records
+      .flatMap(({ open }) =>
+        open?.at === "pause" && open.pause.on === "calls" && !open.pause.dispatch
+          ? [open.pause]
+          : [],
+      )
+      .at(0);
+    expect(pause).toEqual({
+      callIds: ["task-call"],
+      dispatch: false,
+      on: "calls",
+      results: [receipt],
+      taskToolCalls: [],
+    });
+
+    // Resumed from that pause, the turn starts nothing again and goes on with the receipt.
+    vi.mocked(dispatchCoordinationStep).mockClear();
+    vi.mocked(turnStep).mockReset().mockImplementationOnce(doneStep);
+    const second = idleInbox();
+    await expect(
+      createExecution({ cursor: recorded(second), inbox: second, sessionState }).runTurn(
+        undefined,
+        { pause },
+      ),
+    ).resolves.toMatchObject({ kind: "done" });
+    expect(dispatchCoordinationStep).not.toHaveBeenCalled();
+    expect(vi.mocked(turnStep).mock.calls[0]?.[0].input?.runtimeResults?.results).toEqual([
+      expect.objectContaining({ callId: "task-call" }),
     ]);
   });
 
