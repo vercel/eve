@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { eve, sandboxDefinition } from "#definitions/defaults.js";
 import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
-import { codeSandboxWith } from "#runtime/sandbox/code-sandbox.js";
+import { codeSandboxWith } from "#runtime/sandbox/code-sandbox-registry.js";
 import { createSessionAgent, sandboxDefinitionOf } from "#runtime/sessions/code-agent.js";
 import { MemorySandbox } from "#sandbox/providers/memory.js";
+import { createMemorySandboxFileStore } from "#execution/sandbox/memory-files.js";
 
 const sandbox = (revision: string) =>
-  codeSandboxWith(MemorySandbox.environment(), {
+  codeSandboxWith(MemorySandbox.environment({ files: createMemorySandboxFileStore() }), {
     appRoot: "/",
     preparedArtifact: async () => null,
     revision,

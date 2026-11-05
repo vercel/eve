@@ -10,7 +10,7 @@ import type { CatalogSkill } from "#execution/catalog/skills.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
 import type { Announcement } from "#harness/announcements.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { CodeSandbox } from "#runtime/sandbox/code-sandbox.js";
+import type { CodeSandbox } from "#runtime/sandbox/code-sandbox-registry.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import type { SessionView } from "#harness/session-machine/view.js";
