@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createChannelOperations } from "#channel/channel-operations.js";
+import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import type { Runtime } from "#channel/types.js";
 import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
 import {
@@ -92,10 +93,10 @@ describe("dispatchSignInCancel", () => {
     expect(fetchMock).toHaveBeenCalledWith(...deletePost);
   });
 
-  it("keeps the prompt when the session is still starting", async () => {
+  it("keeps the prompt when the cancel throws a retryable SessionNotActiveError", async () => {
     const fetchMock = stubFetch();
     const runtime = createRuntime(
-      vi.fn().mockResolvedValue({ retryable: true, status: "session_not_ready" }),
+      vi.fn().mockRejectedValue(new SessionNotActiveError({ retryable: true })),
     );
 
     await clickCancel(runtime);
