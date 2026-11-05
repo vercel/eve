@@ -41,6 +41,8 @@ export function createAgentApprovalInstrumentation(input: {
     ctx: InstrumentationHandlerContext,
   ): Promise<void> {
     const { call, scope } = event;
+    // The child session that asked records its own span.
+    if (event.relayedFrom !== undefined) return;
     if (scope.turnId === undefined || ctx.state.get() !== undefined) return;
     const request = {
       connectionName: event.signIn?.name,
@@ -48,7 +50,7 @@ export function createAgentApprovalInstrumentation(input: {
       request: event.request,
       requestId: event.interactionId,
     };
-    // A relayed request names its asker's call, which has no span in this session's tree.
+    // A call without an open span here, or no call at all, leaves the wait under the turn.
     const tool =
       call === undefined ? undefined : await toolFor(scope.sessionId, scope.turnId, call.callId);
     const parent: ToolOperation | TurnOperation | undefined =

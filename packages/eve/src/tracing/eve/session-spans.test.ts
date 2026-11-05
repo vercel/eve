@@ -364,6 +364,55 @@ describe("a session's spans, from its committed lines", () => {
     },
   );
 
+  it.each([
+    {
+      asker: "a subagent's approval, which its own session records",
+      capability: { kind: "agent", name: "researcher" },
+      request: { kind: "approval", prompt: "Deploy?" },
+      origin: { call: { callId: "c_deploy", name: "deploy" }, sessionId: "child_s" },
+      expected: undefined,
+    },
+    {
+      asker: "a workflow run's sign-in, which has no session of its own",
+      capability: { kind: "tool", name: "flow" },
+      request: { kind: "sign-in", prompt: "Sign in to Calendar", signIn: { name: "calendar" } },
+      origin: { sessionId: "wrun_0" },
+      expected: "sign-in",
+    },
+  ])(
+    "records a relayed request once: $asker",
+    async ({ capability, request, origin, expected }) => {
+      const { commit, spans } = session();
+      await commit(...opening);
+      await commit({
+        data: { callId: "call_relay", capability, input: {}, owner: run },
+        scope: run,
+        type: "call.requested",
+      } as SessionEvent);
+      await commit({
+        data: {
+          interactionId: "i_relayed",
+          origin: { interactionId: "i_relayed", ...origin },
+          request,
+          subject: { callId: "call_relay" },
+        },
+        scope: turn,
+        type: "interaction.opened",
+      } as SessionEvent);
+      await commit({
+        data: { interactionId: "i_relayed", outcome: "accepted" },
+        scope: turn,
+        type: "interaction.settled",
+      } as SessionEvent);
+      await commit(turnSettled({ outcome: "completed" }));
+
+      const waits = (await spans()).filter((span) => span.name === "agent.approval");
+      expect(waits.map((span) => span.attributes["agent.approval.kind"])).toEqual(
+        expected === undefined ? [] : [expected],
+      );
+    },
+  );
+
   it("records who approved a call on its approval and tool spans, the id only as the turn's principal", async () => {
     for (const { audience, records, id, outcome = "accepted" } of [
       { audience: "public", records: true, id: "slack:T1:U2" },

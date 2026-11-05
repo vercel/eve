@@ -347,6 +347,7 @@ function instrumentationEventsOf(
               }
             : undefined,
           scope,
+          relayedFrom: askingChildSession(line.view!, row),
           signIn: request.signIn === undefined ? undefined : { name: request.signIn.name },
           type: "interaction.opened",
         },
@@ -399,6 +400,22 @@ function runAttempt(line: Line, runId: string | undefined): InstrumentationScope
  * The attempt a person's request came from: its call's, or for a request about the turn or a
  * task, the turn's latest. Sign-ins are connection work, not input.
  */
+/**
+ * The child agent session a relayed request came from. A workflow run relays its own questions
+ * and sign-ins the same way but has no session to report them, so it names none.
+ */
+function askingChildSession(
+  view: SessionView,
+  row: InteractionRow,
+): { sessionId: string } | undefined {
+  const { origin, subject } = row;
+  if (origin === undefined) return undefined;
+  const delegating = "callId" in subject ? view.calls[subject.callId] : undefined;
+  return delegating?.capability.kind === "agent" || origin.sessionId in view.children
+    ? { sessionId: origin.sessionId }
+    : undefined;
+}
+
 function interactionAttempt(line: Line, row: InteractionRow): InstrumentationScope | undefined {
   const view = line.view!;
   const { subject } = row;
