@@ -94,7 +94,7 @@ describe("buildAuthEphemeralBlocks", () => {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: "*Connect Linear*\nTo continue, I need access to your Linear account. Only you can see this message.",
+          text: "*Connect Linear*\nTo continue, I need access to your Linear account.",
         },
       },
       {
@@ -119,7 +119,7 @@ describe("buildAuthEphemeralBlocks", () => {
       url: "https://connect.example.com/authorize/sca_abc",
     });
     expect((blocks[0] as { text: { text: string } }).text.text).toBe(
-      "*Connect Linear*\nI've paused until you connect your Linear account or cancel. Only you can see this message.",
+      "*Connect Linear*\nI've paused until you connect your Linear account or cancel.",
     );
     const cancel = (blocks[1] as { elements: Array<Record<string, unknown>> }).elements[1];
     expect(cancel).toMatchObject({
