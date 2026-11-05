@@ -171,6 +171,13 @@ export class ScheduleDispatcher {
             throw new Error("Scheduled channel receive can only start a fresh session.");
           if (command.idempotencyKey === undefined)
             return { status: "session_not_active" } as SessionCommandResult<TCommand>;
+          // A keyed address is this schedule's own, so only a session a retried callback started
+          // can own it, and every such session was started by an eve that hands off without
+          // releasing its address. When the start claims the address, it finds that session
+          // itself and delivers there, so the send skips the lookups for an owner that is
+          // usually absent.
+          if ((await this.runtime.claimsContinuationAtStart?.()) === true)
+            return { status: "session_not_active" } as SessionCommandResult<TCommand>;
           return await this.runtime.dispatchContinuation({
             command,
             continuationToken: scheduledToken(delivery.continuationToken, command.idempotencyKey),

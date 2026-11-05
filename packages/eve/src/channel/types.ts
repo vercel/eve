@@ -642,6 +642,16 @@ export interface Runtime {
   ): Promise<SessionCommandResult<TCommand>>;
 
   /**
+   * Whether {@link createSession} with a continuation token claims that
+   * address as the run starts. When it does, a start that finds the address
+   * owned creates no run: a send reaches the owner as its
+   * `continuationConflictCommand`, and any other start names the owner. A
+   * caller can then start without first dispatching to the address. Absent
+   * means `false`.
+   */
+  claimsContinuationAtStart?(): Promise<boolean>;
+
+  /**
    * Sends a command to one exact session. A send or `clear` to a stranded
    * session throws `SessionStrandedError`; an `end()` call retires it.
    */

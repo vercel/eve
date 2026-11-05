@@ -390,6 +390,10 @@ export function createWorkflowRuntime(config: {
 
     dispatchContinuation,
 
+    async claimsContinuationAtStart(): Promise<boolean> {
+      return supportsStartClaims(await getWorld());
+    },
+
     async dispatchSession<TCommand extends SessionCommand>(
       input: DispatchSessionInput<TCommand>,
     ): Promise<SessionCommandResult<TCommand>> {

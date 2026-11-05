@@ -79,7 +79,7 @@ describe("ScheduleDispatcher", () => {
       scheduleId: "sch-1",
       scheduledAt: "2026-09-29T19:00:00Z",
     };
-    function setup(auth: typeof creator | null = creator) {
+    function setup(auth: typeof creator | null = creator, idempotencyKey?: string) {
       const runtime = createMockRuntime();
       const targets: string[] = [];
       const channel = defineChannel<undefined, void, { channelId: string }>({
@@ -88,7 +88,7 @@ describe("ScheduleDispatcher", () => {
           targets.push(input.target.channelId);
           return await context
             .from(input.target.channelId)
-            .send(input.message, { auth: input.auth });
+            .send(input.message, { auth: input.auth, idempotencyKey: input.idempotencyKey });
         },
       });
       const run = vi.fn(
@@ -100,7 +100,9 @@ describe("ScheduleDispatcher", () => {
         }) => {
           const channelId =
             args.payload.destination === "my-dm" ? `dm-${args.auth.principalId}` : "team-channel";
-          args.waitUntil(args.to(channel, { channelId }).send(args.payload.task));
+          args.waitUntil(
+            args.to(channel, { channelId }).send(args.payload.task, { idempotencyKey }),
+          );
         },
       );
       const definition = defineDynamicSchedules({
@@ -162,6 +164,23 @@ describe("ScheduleDispatcher", () => {
       expect(started[0]!.continuationToken).not.toBe(started[1]!.continuationToken);
       expect(started[0]!.continuationConflictCommand).toBeUndefined();
       expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+    });
+
+    it("looks up a keyed send's earlier session only when the start cannot claim its address", async () => {
+      const { dispatcher, input, runtime } = setup(creator, "exec-1:digest");
+      await dispatcher.triggerCollection(input);
+      expect(runtime.dispatchContinuation).toHaveBeenCalledTimes(1);
+      runtime.claimsContinuationAtStart = vi.fn().mockResolvedValue(true);
+      await dispatcher.triggerCollection(input);
+      expect(runtime.dispatchContinuation).toHaveBeenCalledTimes(1);
+      const started = vi.mocked(runtime.createSession).mock.calls.map(([value]) => value);
+      expect(started).toHaveLength(2);
+      // A retried callback claims the same address, so its start reaches the first session.
+      expect(started[1]!.continuationToken).toBe(started[0]!.continuationToken);
+      expect(started[1]).toMatchObject({
+        idempotencyKey: "exec-1:digest",
+        continuationConflictCommand: { idempotencyKey: "exec-1:digest", kind: "send" },
+      });
     });
 
     it.each([null, { ...creator, principalId: "bob" }])(
