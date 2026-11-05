@@ -20,12 +20,7 @@ const response = await worker.send("Review the migration plan.");
 
 The option binds to the session, not an individual message. Every turn sent through the returned handle uses the selected model. Omitting it preserves the target agent's configured model behavior.
 
-A root can also opt into a model-facing `agent` variant whose input includes the model:
-
-```ts
-// agent/tools/agent.ts
-export { agentWithModel as default } from "eve/tools/agent";
-```
+A root can also let the model choose from listed models with `agent({ models })`; see [model choice on the `agent` tool](./agent-tool-models.md).
 
 ## Semantics
 
@@ -50,7 +45,7 @@ The override is separate from `DynamicSubagentAgentConfig`. Dynamic subagent con
 
 The child workflow persists the normalized reference in its context before session creation. Workflow replay therefore opens the same child model even if catalog metadata or the target's authored dynamic model changes later.
 
-`agentWithModel` is a separate authored workflow tool; the default agent tool keeps its existing schema. Its model-visible schema is `{ message, model, taskId? }`, and its serve body opens the root-copy session through `ctx.agent("agent", { model })`. It shares the default agent tool's task lifecycle; a continuation must repeat the original model because the child session keeps that model for its lifetime.
+`agent({ models })` replaced the earlier `agentWithModel` tool, which accepted any AI Gateway model ID. See [model choice on the `agent` tool](./agent-tool-models.md).
 
 ## Validation
 

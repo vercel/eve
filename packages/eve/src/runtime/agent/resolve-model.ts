@@ -21,6 +21,8 @@ import {
   shouldMockAuthoredRuntimeModels,
 } from "#runtime/agent/mock-model-adapter.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
+import { selectionModel } from "#models/options.js";
+import { readAgentToolModels } from "#tools/agent-models.js";
 import {
   isDynamicModelDefinition,
   type AgentModelOptionsDefinition,
@@ -103,6 +105,9 @@ async function loadSourceBackedRuntimeModelReference(
     moduleMap: scope.moduleMap,
     nodeId: scope.nodeId,
   });
+  if (reference.sourceModelOption !== undefined) {
+    return agentToolOptionModel(definition, reference.sourceModelOption, reference.source);
+  }
   const normalizedDefinition = normalizeAgentDefinition(
     definition,
     `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to match the public eve shape.`,
@@ -124,6 +129,27 @@ async function loadSourceBackedRuntimeModelReference(
     );
   }
 
+  return toAiSdkLanguageModel(model);
+}
+
+/** The live model of one `agent({ models })` option, which the child's step reads from the tool. */
+function agentToolOptionModel(
+  definition: unknown,
+  key: string,
+  source: NonNullable<RuntimeModelReference["source"]>,
+): LanguageModel {
+  const option = readAgentToolModels(definition)?.get(key);
+  if (option === undefined) {
+    throw new Error(
+      `The model option "${key}" this session chose is no longer one of the agent({ models }) options in "${source.logicalPath}".`,
+    );
+  }
+  const model = selectionModel(option.selection);
+  if (typeof model === "string") {
+    throw new Error(
+      `Expected the agent({ models }) option "${key}" in "${source.logicalPath}" to hold a provider model.`,
+    );
+  }
   return toAiSdkLanguageModel(model);
 }
 

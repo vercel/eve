@@ -5,6 +5,7 @@ import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { defineDynamic, dynamicEvaluate } from "#dynamic/definition.js";
 import { createModelMetadata, type ModelMetadata } from "#internal/model-catalog.js";
+import { agent } from "#public/tools/agent.js";
 import {
   InvalidRuntimeModelSelectionError,
   loadDynamicRuntimeModelDefinition,
@@ -288,6 +289,46 @@ describe("dynamic runtime model resolution", () => {
     ).rejects.toThrow(/durable model selections must be serializable/);
 
     expect(modelMetadata).not.toHaveBeenCalled();
+  });
+});
+
+describe("agent({ models }) option references", () => {
+  const TOOL_SOURCE = {
+    logicalPath: "tools/agent.ts",
+    sourceId: DYNAMIC_MODEL_SOURCE.sourceId,
+    sourceKind: "module" as const,
+  };
+  const haiku = createLanguageModel("anthropic.messages", "claude-haiku-5");
+  const moduleMap = createModuleMap({
+    default: agent({
+      models: { haiku: { description: "Cheap lookups", model: haiku } },
+    }),
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("reads the live model again from the tool's module", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const model = await resolveRuntimeModelReference(
+      { id: "anthropic/claude-haiku-5", source: TOOL_SOURCE, sourceModelOption: "haiku" },
+      { moduleMap, nodeId: undefined },
+    );
+
+    expect(model).toBe(haiku);
+  });
+
+  it("explains an option a later deployment removed", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    await expect(
+      resolveRuntimeModelReference(
+        { id: "anthropic/claude-haiku-5", source: TOOL_SOURCE, sourceModelOption: "sonnet" },
+        { moduleMap, nodeId: undefined },
+      ),
+    ).rejects.toThrow(
+      'The model option "sonnet" this session chose is no longer one of the agent({ models }) options in "tools/agent.ts".',
+    );
   });
 });
 
