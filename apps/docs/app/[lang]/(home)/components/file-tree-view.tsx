@@ -1,5 +1,6 @@
 "use client";
 
+import { Badge } from "@vercel/geistdocs/components/badge";
 import { type ReactNode, useState } from "react";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +34,9 @@ function tagFor(mode: Mode, index: number) {
   return index > 0 ? "optional" : null;
 }
 
+// Vercel's plan badge colors, as in the dashboard's PlanBadge.
+const PLAN_VARIANTS = { Hobby: "gray", Pro: "blue", Enterprise: "purple" } as const;
+
 /** What a dynamic file resolved to for each tenant, under its description. */
 function Tenants({ tenants }: { tenants: NonNullable<FileTreeItem["tenants"]> }) {
   return (
@@ -40,7 +44,16 @@ function Tenants({ tenants }: { tenants: NonNullable<FileTreeItem["tenants"]> })
       {tenants.map((tenant) => (
         <div className="contents" key={tenant.name}>
           <dt className="font-medium text-gray-1000">{tenant.name}</dt>
-          <dd className="m-0 font-mono text-gray-700 text-label-12-mono">{tenant.plan}</dd>
+          <dd className="m-0">
+            <Badge
+              className="h-5 px-2"
+              contrast="low"
+              size="sm"
+              variant={PLAN_VARIANTS[tenant.plan as keyof typeof PLAN_VARIANTS] ?? "gray"}
+            >
+              {tenant.plan}
+            </Badge>
+          </dd>
           <dd className="m-0 truncate text-gray-900">{tenant.result}</dd>
         </div>
       ))}
