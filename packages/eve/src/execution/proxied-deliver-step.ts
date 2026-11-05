@@ -88,12 +88,18 @@ async function routeProxiedDeliver(
   // send one, as only they steer it, and never a hook's continuation. Anyone
   // else's text waits for the turn to end; their button answers still settle a
   // request as its responder.
+  const tables = storedProjection(durableSession.state).view;
+  const currentTurn = activeTurn(tables);
   const resolveMessage =
     !hasDelegatedSessionContext(serializedContext) &&
     !(sourceDelivery.deliveryMetadata ?? []).some((metadata) => metadata.hook !== undefined) &&
     isSteeringDelivery(
       sourceDelivery,
-      { callerCallId: undefined, principal: resolveTurnPrincipal(undefined, serializedContext) },
+      {
+        callerCallId: undefined,
+        principal: resolveTurnPrincipal(undefined, serializedContext),
+        turnId: currentTurn?.turnId,
+      },
       { heldOnPerson: true },
     );
   // Every payload routes against the same state, so a request a `ctx.ask()`
@@ -105,8 +111,6 @@ async function routeProxiedDeliver(
   const answerDeliveryIds: string[] = [];
   let typedAnswer = false;
   // Relayed answers belong to the asking turn's resumed work, even without message text.
-  const tables = storedProjection(durableSession.state).view;
-  const currentTurn = activeTurn(tables);
   const blocked = currentTurn === undefined ? undefined : waiting(tables, currentTurn.turnId);
   const askedTurn = (row: (typeof tables.interactions)[string]): string | undefined => {
     const owned = interactionOwner(tables, row).turnId;

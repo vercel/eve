@@ -1,13 +1,17 @@
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 /**
- * Applies the fetch-native HTTP guards required in front of the MCP SDK.
+ * Applies the fetch-native HTTP guards in front of a protocol endpoint, such as MCP's. `protocol`
+ * names it in error messages.
  *
  * Non-browser clients normally omit `Origin`; browser requests are restricted
  * to the endpoint's exact origin. Plain HTTP is accepted only on loopback.
  */
-export function validateMcpHttpRequest(request: Request): Response | undefined {
-  const baseFailure = validateMcpHttpRequestBase(request);
+export function validateHttpEndpointRequest(
+  request: Request,
+  protocol: string,
+): Response | undefined {
+  const baseFailure = validateTransportAndHost(request, protocol);
   if (baseFailure !== undefined) return baseFailure;
 
   const target = new URL(request.url);
@@ -28,26 +32,29 @@ export function validateMcpHttpRequest(request: Request): Response | undefined {
 }
 
 /**
- * Applies transport and Host validation to the public OAuth discovery route
+ * Applies transport and Host validation to a public metadata route, such as OAuth discovery,
  * without restricting its Origin. The route itself supplies permissive CORS.
  */
-export function validateMcpMetadataRequest(request: Request): Response | undefined {
-  return validateMcpHttpRequestBase(request);
+export function validateHttpMetadataRequest(
+  request: Request,
+  protocol: string,
+): Response | undefined {
+  return validateTransportAndHost(request, protocol);
 }
 
-function validateMcpHttpRequestBase(request: Request): Response | undefined {
+function validateTransportAndHost(request: Request, protocol: string): Response | undefined {
   let target: URL;
   try {
     target = new URL(request.url);
   } catch {
-    return securityError("Invalid MCP request URL.", 400);
+    return securityError(`Invalid ${protocol} request URL.`, 400);
   }
 
   if (
     target.protocol !== "https:" &&
     !(target.protocol === "http:" && isLoopbackHostname(target.hostname))
   ) {
-    return securityError("MCP endpoints require HTTPS except on loopback.");
+    return securityError(`${protocol} endpoints require HTTPS except on loopback.`);
   }
 
   const hostFailure = validateHostHeader(request, target);

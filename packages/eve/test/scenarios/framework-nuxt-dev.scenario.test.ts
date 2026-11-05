@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { createNuxtEveServiceDescriptor } from "../../src/internal/testing/scenario-apps/nuxt-eve-service.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
-import { stopChildProcess, waitForCondition } from "./dev-server-harness.js";
+import { stopChildProcess, waitForCondition } from "#internal/testing/dev-server-harness.js";
 
 const scenarioApp = useScenarioApp();
 

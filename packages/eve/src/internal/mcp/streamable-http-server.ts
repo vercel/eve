@@ -11,6 +11,7 @@ import {
 } from "#compiled/@modelcontextprotocol/server/index.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { readJsonBody } from "#internal/http/json-body.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { withMcpRequestTraceContext } from "#internal/mcp/request-trace-context.js";
 
@@ -249,11 +250,11 @@ export function createMcpStreamableHttpServer(
 
     // Every POST body is read here, bounded, before the SDK sees it. The
     // parsed value is handed to the SDK so the body is never read twice.
-    const inspected = await inspectRequestBody(request);
-    if (inspected.tooLarge) return requestBodyTooLargeResponse();
-    if (inspected.invalidJson) return invalidJsonResponse();
+    const inspected = await readJsonBody(request, MCP_REQUEST_BODY_MAX_BYTES);
+    if (inspected.kind === "too-large") return requestBodyTooLargeResponse();
+    if (inspected.kind === "invalid-json") return invalidJsonResponse();
+    if (inspected.kind === "empty") return await handler.fetch(request);
     const parsedBody = inspected.value;
-    if (parsedBody === undefined) return await handler.fetch(request);
 
     const preflightFailure = await preflightModernRequest(request, parsedBody);
     if (preflightFailure !== undefined) return preflightFailure;
@@ -284,48 +285,6 @@ async function preflightModernRequest(
 
   const earlierFailure = await probeEarlierValidationFailure(request, parsedBody);
   return earlierFailure ?? headerMismatchResponse(parsedBody);
-}
-
-async function inspectRequestBody(request: Request): Promise<{
-  readonly invalidJson?: boolean;
-  readonly tooLarge: boolean;
-  readonly value?: unknown;
-}> {
-  const body = request.body;
-  if (body === null) return { tooLarge: false };
-
-  // Trust a declared length only to fail fast; the streamed count is the guard.
-  const declaredLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MCP_REQUEST_BODY_MAX_BYTES) {
-    await body.cancel().catch(() => {});
-    return { tooLarge: true };
-  }
-
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      size += chunk.value.byteLength;
-      if (size > MCP_REQUEST_BODY_MAX_BYTES) {
-        await reader.cancel();
-        return { tooLarge: true };
-      }
-      chunks.push(chunk.value);
-    }
-
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-    return { tooLarge: false, value: JSON.parse(new TextDecoder().decode(bytes)) };
-  } catch {
-    return { invalidJson: true, tooLarge: false };
-  }
 }
 
 function invalidJsonResponse(): Response {

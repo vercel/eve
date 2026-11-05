@@ -605,6 +605,8 @@ export function oauthResource(
     }
     return null;
   };
+  // The walk ends in none() when the list does, so the composition admits anonymous callers too.
+  if (admitsAnonymousCallers(list)) markAnonymous(composed);
   const declaredChallenges = collectDeclaredChallenges(list);
   const wrapped = withAuthChallenges(
     composed,
@@ -660,6 +662,7 @@ export function withAuthChallenges<TEvent, TResult extends AuthResult = AuthResu
   Object.defineProperty(wrapped, AUTH_CHALLENGES_SYMBOL, {
     value: challenges,
   });
+  if (admitsAnonymousCallers(fn as AuthFn<never>)) markAnonymous(wrapped);
   return wrapped;
 }
 
@@ -801,6 +804,9 @@ export function placeholderAuth(): AuthFn<Request> {
   };
 }
 
+/** Marks functions {@link none} returns so channels can read a policy without calling it. */
+const NONE_AUTH_SYMBOL = Symbol.for("eve.channels.auth.none");
+
 /**
  * Returns an {@link AuthFn} that accepts any request anonymously, producing
  * a synthetic principal with `principalType: "anonymous"`. Use it as the
@@ -817,7 +823,38 @@ export function placeholderAuth(): AuthFn<Request> {
  * argument.
  */
 export function none<TEvent = unknown>(): AuthFn<TEvent> {
-  return () => ANONYMOUS_SESSION_AUTH_CONTEXT;
+  const anonymous: AuthFn<TEvent> = () => ANONYMOUS_SESSION_AUTH_CONTEXT;
+  markAnonymous(anonymous);
+  return anonymous;
+}
+
+/** Marks `fn` as admitting anonymous callers, so {@link admitsAnonymousCallers} sees through it. */
+function markAnonymous(fn: AuthFn<never>): void {
+  Object.defineProperty(fn, NONE_AUTH_SYMBOL, { value: true });
+}
+
+/**
+ * @internal Whether `auth` admits anonymous callers: it includes {@link none}, which ends the walk
+ * for any request the entries before it declined, directly or inside {@link oauthResource} or
+ * {@link withAuthChallenges}. Read from the policy, never from a request.
+ */
+export function admitsAnonymousCallers(auth: AuthFn<never> | readonly AuthFn<never>[]): boolean {
+  const list: readonly AuthFn<never>[] = Array.isArray(auth) ? auth : [auth as AuthFn<never>];
+  return list.some(
+    (fn) => (fn as Partial<Record<typeof NONE_AUTH_SYMBOL, true>>)[NONE_AUTH_SYMBOL] === true,
+  );
+}
+
+/**
+ * @internal The `www-authenticate` challenges `auth` declares, deduped and in walk order; the
+ * schemes a 401 from {@link routeAuth} advertises. Empty when no entry declared one.
+ */
+export function declaredAuthChallenges(
+  auth: AuthFn<Request> | readonly AuthFn<Request>[],
+): readonly UnauthorizedChallenge[] {
+  return collectDeclaredChallenges(
+    Array.isArray(auth) ? (auth as readonly AuthFn<Request>[]) : [auth as AuthFn<Request>],
+  );
 }
 
 /** Marks functions {@link localDev} returns so channels can tell the author configured it. */

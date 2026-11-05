@@ -245,6 +245,8 @@ export class SessionInputQueue {
       const next = this.entries[0];
       if (
         next?.kind !== "delivery" ||
+        first.delivery.turnTarget !== undefined ||
+        next.delivery.turnTarget !== undefined ||
         principal === ANONYMOUS_PRINCIPAL ||
         principalOf(next.delivery.auth) !== principal ||
         (callId !== undefined &&
@@ -271,6 +273,8 @@ export interface SteeringTurn {
   /** The call id of the delegated caller the turn answers, if any. */
   readonly callerCallId: string | undefined;
   readonly principal: string;
+  /** The turn's ID, which a delivery's `turnTarget` must name to steer it. */
+  readonly turnId?: string;
 }
 
 export interface SteeringOptions {
@@ -288,13 +292,17 @@ export interface SteeringOptions {
  * Only the turn's own principal steers it; another principal's message waits
  * for the turn to end. A delivery without auth acts as the session's current
  * identity, which is the turn's. `heldOnPerson` lets a queued message steer a
- * turn that waits on its person.
+ * turn that waits on its person. A delivery with a `turnTarget` steers only
+ * the turn it names, and one targeting `null` never steers.
  */
 export function isSteeringDelivery(
   delivery: DeliverHookPayload,
   turn: SteeringTurn,
   options?: { readonly heldOnPerson?: boolean },
 ): boolean {
+  if (delivery.turnTarget !== undefined) {
+    if (delivery.turnTarget === null || delivery.turnTarget !== turn.turnId) return false;
+  }
   return (
     (options?.heldOnPerson === true || (delivery.turnPolicy ?? "steer") === "steer") &&
     (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
