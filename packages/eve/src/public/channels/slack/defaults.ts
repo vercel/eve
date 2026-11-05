@@ -13,7 +13,7 @@ import {
   waitingOnTasks,
   withMoreCalls,
 } from "#public/channels/slack/action-status.js";
-import { slackSessionTargetOf } from "#public/channels/slack/api.js";
+import { slackSessionTargetOf, type SlackApiResponse } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext, slackUserIdForPrincipal } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
@@ -334,23 +334,36 @@ async function showSlackSignInDirectMessage(
     url: event.url,
     userCode: event.userCode,
   };
+  // Posting to a user ID lands in their DM with the app and needs only `chat:write`, which every
+  // install has. `conversations.open` would also need `im:write`.
+  let response: SlackApiResponse;
   try {
-    const sent = await channel.thread.postDirectMessage(recipientUserId, {
+    response = await channel.slack.request("chat.postMessage", {
       blocks: buildAuthEphemeralBlocks(prompt),
+      channel: recipientUserId,
       text: buildAuthEphemeralText(prompt),
+      unfurl_links: false,
+      unfurl_media: false,
     });
-    const dmChannelId = (sent.raw as { channel?: unknown }).channel;
-    if (sent.id && typeof dmChannelId === "string" && dmChannelId.length > 0) {
-      channel.state.pendingAuthDirectMessages = {
-        ...pending,
-        [event.name]: { channelId: dmChannelId, ts: sent.id },
-      };
-    }
-    return true;
   } catch (error) {
-    log.error("Slack auth direct message delivery failed", { name: event.name, error });
+    log.warn("Slack auth direct message delivery failed", { name: event.name, error });
     return false;
   }
+  if (response.ok !== true) {
+    log.warn("Slack auth direct message delivery failed", {
+      name: event.name,
+      error: response.error ?? "unknown_error",
+    });
+    return false;
+  }
+  const { channel: dmChannelId, ts } = response;
+  if (typeof dmChannelId === "string" && dmChannelId && typeof ts === "string" && ts) {
+    channel.state.pendingAuthDirectMessages = {
+      ...pending,
+      [event.name]: { channelId: dmChannelId, ts },
+    };
+  }
+  return true;
 }
 
 /** A settled sign-in: edits what {@link showSlackSignIn} posted to show the outcome. */
