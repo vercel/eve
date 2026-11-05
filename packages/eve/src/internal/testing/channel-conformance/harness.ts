@@ -78,6 +78,11 @@ export interface ShownMessage {
    * Slack's ephemeral messages.
    */
   readonly onlyPerson?: boolean;
+  /**
+   * The call took the message `id` away, such as Slack deleting an ephemeral
+   * message through its `response_url`. A person no longer sees it at all.
+   */
+  readonly removed?: true;
 }
 
 /** What a client shows a person, and whether anyone else in the conversation sees it too. */
@@ -108,6 +113,8 @@ export type ChannelCapability =
   | "another-person"
   /** A person can press a rendered choice. */
   | "buttons"
+  /** The sign-in prompt offers a Cancel a person can press to give up on the held request. */
+  | "sign-in-cancel"
   /** A person can send a plain-text message to the conversation. */
   | "text-replies";
 
@@ -243,6 +250,12 @@ export interface ChannelConversation {
   shownTexts(): Promise<readonly string[]>;
   /** Every choice the bot's messages let a person press now, newest message first. */
   shownOptions(): Promise<readonly RenderedOption[]>;
+  /**
+   * What a person sees now: each message at its latest edit, without the ones
+   * the bot removed. Unlike {@link shownTexts}, a message that once showed
+   * something but no longer does isn't counted.
+   */
+  visible(): Promise<readonly ShownText[]>;
   /** Waits for the turn to hold for a sign-in, however the channel shows it. */
   waitForSignIn(): Promise<void>;
   /**
@@ -319,6 +332,11 @@ export interface ClientView {
   nextAddress?(): string | undefined;
   /** Everything the client shows now that a person can read or open, one entry per message. */
   shown(): readonly ShownText[] | Promise<readonly ShownText[]>;
+  /**
+   * What the client shows now, each message at its latest edit and without
+   * removed ones; {@link shown} when unset, for clients that render only the present.
+   */
+  visible?(): readonly ShownText[] | Promise<readonly ShownText[]>;
   /** What the client shows now, for timeout errors. */
   describe(): string;
   /** Stops the client and releases anything it holds, such as its event stream. */
@@ -594,12 +612,36 @@ function webhookView(
     shown: () => [
       ...calls.flatMap((call) => {
         const shown = driver.shownMessage?.(call);
+        if (shown?.removed === true) return [];
         if (shown !== undefined) return [shownText(shown)];
         const text = driver.postedText(call);
         return text === undefined ? [] : [{ onlyPerson: false, options: [], text }];
       }),
       ...answered.map(shownText),
     ],
+    visible() {
+      // One slot per message, holding its latest edit; a message with no id can't be edited.
+      const latest = new Map<string, ShownMessage>();
+      const order: (string | ShownText)[] = [];
+      for (const call of calls) {
+        const shown = driver.shownMessage?.(call);
+        if (shown === undefined) {
+          const text = driver.postedText(call);
+          if (text !== undefined) order.push({ onlyPerson: false, options: [], text });
+          continue;
+        }
+        if (!latest.has(shown.id)) order.push(shown.id);
+        latest.set(shown.id, shown);
+      }
+      return [
+        ...order.flatMap((slot) => {
+          if (typeof slot !== "string") return [slot];
+          const shown = latest.get(slot)!;
+          return shown.removed === true ? [] : [shownText(shown)];
+        }),
+        ...answered.map(shownText),
+      ];
+    },
     describe,
     close: async () => {},
   };
@@ -960,6 +1002,7 @@ async function converse(
         ),
       shownOptions: async () => (await view.shown()).toReversed().flatMap(({ options }) => options),
       shownTexts: async () => (await view.shown()).map(({ text }) => text),
+      visible: async () => await (view.visible ?? view.shown).call(view),
       sharedText: async () =>
         (await view.shown())
           .filter((shown) => !shown.onlyPerson)

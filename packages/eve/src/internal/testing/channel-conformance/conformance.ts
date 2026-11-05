@@ -112,6 +112,7 @@ const LINQ_SIGN_IN_NOT_PRIVATE = Object.fromEntries(
     "a sign-in names the service and shows its sign-in link",
     "a sign-in shows its confirmation code",
     "a sign-in without a link shows its instructions",
+    "completing a sign-in stops showing its link and code",
   ].map((rule) => [
     rule,
     {
@@ -121,6 +122,25 @@ const LINQ_SIGN_IN_NOT_PRIVATE = Object.fromEntries(
     },
   ]),
 ) satisfies Partial<Record<ContractRuleName, BrokenCell>>;
+
+/** The challenge a person was shown stays on screen after they finish signing in. */
+function signInLingers(reason: string): Partial<Record<ContractRuleName, BrokenCell>> {
+  return {
+    "completing a sign-in stops showing its link and code": {
+      reason,
+      symptom: /the sign-in prompt is still shown after signing in/u,
+    },
+  };
+}
+
+const SIGN_IN_LINGERS = signInLingers(
+  "the challenge message stays as it was sent after the sign-in completes",
+);
+
+/** Slack's sign-in prompt is ephemeral, which only a press's `response_url` can delete. */
+const SLACK_SIGN_IN_LINGERS = signInLingers(
+  "the private prompt is ephemeral, and nothing deletes it when the sign-in completes; only a press's response_url can",
+);
 
 const UNNAMED_RESPONDER =
   "a resolved prompt doesn't say who answered; input.resolved carries no responder";
@@ -209,24 +229,28 @@ const WEB_CHAT_SINGLE_PERSON =
  */
 const channelConformance = {
   "chat-sdk": [
-    { driver: chatSdkDriver, broken: CHAT_SDK_BROKEN, unsupported: SIGN_IN_SENT_PRIVATELY },
-    { driver: chatSdkTextDriver },
+    {
+      driver: chatSdkDriver,
+      broken: { ...CHAT_SDK_BROKEN, ...SIGN_IN_LINGERS },
+      unsupported: SIGN_IN_SENT_PRIVATELY,
+    },
+    { driver: chatSdkTextDriver, broken: SIGN_IN_LINGERS },
   ],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
   discord: [
     {
       driver: () => discordDriver(),
-      broken: DISCORD_BROKEN,
+      broken: { ...DISCORD_BROKEN, ...SIGN_IN_LINGERS },
       unsupported: { ...DISCORD_UNSUPPORTED, ...DISCORD_SERVER_SIGN_IN },
     },
     {
       driver: () => discordDriver("shared", "gateway"),
-      broken: DISCORD_GATEWAY_BROKEN,
+      broken: { ...DISCORD_GATEWAY_BROKEN, ...SIGN_IN_LINGERS },
       unsupported: DISCORD_SERVER_SIGN_IN,
     },
     {
       driver: () => discordDriver("shared", "gateway-threads"),
-      broken: DISCORD_GATEWAY_BROKEN,
+      broken: { ...DISCORD_GATEWAY_BROKEN, ...SIGN_IN_LINGERS },
       unsupported: DISCORD_SERVER_SIGN_IN,
     },
   ],
@@ -261,25 +285,38 @@ const channelConformance = {
             "the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified",
           symptom: /a message everyone sees carried the sign-in (link|code)/u,
         },
+        ...SIGN_IN_LINGERS,
       },
     },
   ],
   linq: [{ driver: linqDriver, broken: LINQ_SIGN_IN_NOT_PRIVATE }],
-  "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
-  photon: [{ driver: photonDriver }],
-  slack: [{ driver: slackDriver, broken: SLACK_BROKEN, unsupported: SIGN_IN_SENT_PRIVATELY }],
-  "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
+  "linq-dm": [{ dm: true, driver: () => linqDriver("private"), broken: SIGN_IN_LINGERS }],
+  photon: [{ driver: photonDriver, broken: SIGN_IN_LINGERS }],
+  slack: [
+    {
+      driver: slackDriver,
+      broken: { ...SLACK_BROKEN, ...SLACK_SIGN_IN_LINGERS },
+      unsupported: SIGN_IN_SENT_PRIVATELY,
+    },
+  ],
+  "slack-dm": [
+    {
+      dm: true,
+      driver: () => slackDriver("private"),
+      broken: { ...SLACK_BROKEN, ...SLACK_SIGN_IN_LINGERS },
+    },
+  ],
   "slack-code-channel": [
     {
       driver: () => slackDriver("code-channel"),
-      broken: SLACK_BROKEN,
+      broken: { ...SLACK_BROKEN, ...SLACK_SIGN_IN_LINGERS },
       unsupported: SIGN_IN_SENT_PRIVATELY,
     },
   ],
   teams: [
     {
       driver: teamsDriver,
-      broken: TEAMS_BROKEN,
+      broken: { ...TEAMS_BROKEN, ...SIGN_IN_LINGERS },
       unsupported: signInKeptPrivate(
         "a group gets a link-free card whose button reveals the challenge to its person alone; the driver does not press it to show the initial challenge",
         ...SIGN_IN_SHOWN_RULES,
@@ -290,7 +327,7 @@ const channelConformance = {
   telegram: [
     {
       driver: telegramDriver,
-      broken: TELEGRAM_BROKEN,
+      broken: { ...TELEGRAM_BROKEN, ...SIGN_IN_LINGERS },
       unsupported: signInKeptPrivate(
         "a group's status sends the challenge privately once the person presses Authorize, which the driver doesn't press",
         ...SIGN_IN_SHOWN_RULES,
@@ -326,7 +363,7 @@ const channelConformance = {
       },
     },
   ],
-  twilio: [{ driver: twilioDriver }],
+  twilio: [{ driver: twilioDriver, broken: SIGN_IN_LINGERS }],
   "web-chat": [
     {
       driver: webChatDriver,
@@ -363,6 +400,7 @@ const CAPABILITY_NAMES: Record<ChannelCapability, string> = {
   attachments: "files a person can send",
   "another-person": "second person who can act",
   buttons: "buttons a person can press",
+  "sign-in-cancel": "Cancel on its sign-in prompt",
   "text-replies": "plain-text replies",
 };
 
