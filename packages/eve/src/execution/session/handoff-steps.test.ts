@@ -126,7 +126,11 @@ function contextWithAgent(registry?: AgentSandbox["registry"]) {
     sandbox: async () =>
       registry === undefined
         ? undefined
-        : { registry, template: { compiledArtifactsSource: { kind: "bundled" } } },
+        : {
+            registry,
+            sharesParent: true,
+            template: { compiledArtifactsSource: { kind: "bundled" } },
+          },
   };
   const get = vi.fn((key: unknown) => (key === SessionAgentKey ? agent : undefined));
   return { context: { get }, get };

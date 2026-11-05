@@ -9,6 +9,7 @@ import type { CatalogSkill } from "#execution/catalog/skills.js";
 import type { WrittenEvent } from "#execution/publish-session-events.js";
 import type { Announcement } from "#harness/announcements.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { CodeSandbox } from "#runtime/sandbox/code-sandbox.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import type { SessionView } from "#harness/session-machine/view.js";
@@ -47,6 +48,20 @@ export interface Definition {
    * `slotsOf`, and runs once per step start.
    */
   readonly install?: (ctx: ContextContainer) => Promise<void>;
+  /**
+   * Session resources the definition's contributions need, for an agent defined in code: a file
+   * agent's come from its compiled node.
+   */
+  readonly resources?: DefinitionResources;
+}
+
+/** Session resources a code agent's definitions provide. */
+export interface DefinitionResources {
+  /**
+   * The sandbox the session opens, which `ctx.getSandbox()` and the bash and file tools use. The
+   * first definition that names one provides it.
+   */
+  readonly sandbox?: CodeSandbox;
 }
 
 /** What a definition can add, by field. */

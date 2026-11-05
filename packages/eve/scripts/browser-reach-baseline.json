@@ -1,7 +1,7 @@
 {
   "src/execution/session/program.ts": {
     "static.modules": 686,
-    "static.kib": 2656,
+    "static.kib": 2657,
     "static.builtinFiles": 53,
     "static.workflow": 0,
     "total.modules": 865,
@@ -11,7 +11,7 @@
   },
   "src/execution/session/turn-step.ts": {
     "static.modules": 677,
-    "static.kib": 3896,
+    "static.kib": 3897,
     "static.builtinFiles": 61,
     "static.workflow": 0,
     "total.modules": 860,
@@ -37,6 +37,26 @@
     "total.modules": 944,
     "total.kib": 6623,
     "total.builtinFiles": 138,
+    "total.workflow": 0
+  },
+  "src/embed/agent.ts": {
+    "static.modules": 542,
+    "static.kib": 1827,
+    "static.builtinFiles": 49,
+    "static.workflow": 0,
+    "total.modules": 597,
+    "total.kib": 1827,
+    "total.builtinFiles": 63,
+    "total.workflow": 0
+  },
+  "src/embed/session.ts": {
+    "static.modules": 771,
+    "static.kib": 4159,
+    "static.builtinFiles": 62,
+    "static.workflow": 0,
+    "total.modules": 945,
+    "total.kib": 6625,
+    "total.builtinFiles": 139,
     "total.workflow": 0
   }
 }

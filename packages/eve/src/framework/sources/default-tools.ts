@@ -19,6 +19,14 @@ export const DEFAULT_TOOLS = [
 ] as const;
 export type DefaultToolName = (typeof DEFAULT_TOOLS)[number];
 
+/** The default tools that run in the session's sandbox. */
+export const SANDBOX_TOOLS: ReadonlySet<DefaultToolName> = new Set([
+  "bash",
+  "read_file",
+  "write_file",
+  "edit_file",
+]);
+
 /** Each default tool's module, typed by what it exports. */
 export const DEFAULT_TOOL_MODULES = {
   bash: { logicalPath: "tools/bash.ts", loadNamespace: () => import("#tools/provided/bash.js") },

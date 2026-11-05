@@ -10,6 +10,7 @@ import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
+import type { SandboxPreparedArtifact } from "#shared/sandbox-provider.js";
 import type {
   AgentReasoningDefinition,
   AgentWorkflowRetentionDefinition,
@@ -59,8 +60,18 @@ export type SessionAgentReference = BundleReference | HeldReference;
 /** What opens an agent's sandbox: the fields `ensureSandboxAccess` takes about the agent. */
 export interface AgentSandbox {
   readonly registry: RuntimeSandboxRegistry;
-  /** Where its template comes from: a build's artifacts. */
-  readonly template: { readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource };
+  /** Where its template comes from: a build's artifacts, or prepared on first use. */
+  readonly template:
+    | { readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource }
+    | {
+        readonly appRoot: string;
+        readonly preparedArtifact: () => Promise<SandboxPreparedArtifact>;
+      };
+  /**
+   * Whether a child session runs in the sandbox its parent recorded on the child's channel. A
+   * compiled node shares when its graph says so; an agent defined in code owns its sandbox.
+   */
+  readonly sharesParent: boolean;
 }
 
 /** The agent a session runs. */
@@ -147,7 +158,7 @@ export function resolveHeldSessionAgent(id: string): SessionAgent {
   const agent = held.get(id)?.agent;
   if (agent === undefined) {
     throw new Error(
-      `No agent "${id}" is held in this process. A session of a held agent runs only where it is held: hold it (holdSessionAgent) before the session's steps do.`,
+      `No agent "${id}" is held in this process. A session of an agent defined in code runs only where that code runs: hold it (createSession or holdSessionAgent) before the session's steps do.`,
     );
   }
   return agent;
