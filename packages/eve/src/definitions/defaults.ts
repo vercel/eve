@@ -14,12 +14,16 @@ import {
 } from "#tools/provided/web-search.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
 import type { Definition } from "./definition.js";
+import { selfAgentToolDefinition } from "./delegation.js";
 import { toolEntries, toolsDefinition } from "./tools.js";
 
 // eve's defaults for an agent defined in code, from the list the compiler adds to file agents
 // (`#framework/sources/default-tools.js`): the same tools, each under the file it would come from
-// (`tools/bash.ts` -> `tool::bash`), and the sandbox they run in under `sandbox.ts`'s id. The
-// root's `agent` tool comes with child runs for code agents.
+// (`tools/bash.ts` -> `tool::bash`), the sandbox they run in under `sandbox.ts`'s id, and last the
+// root's `agent` tool (`tools/agent.ts` -> `tool::agent`), as the compiler adds them.
+
+/** A default tool a code agent can leave out: one of every node's, or the root's `agent`. */
+export type CodeDefaultToolName = DefaultToolName | "agent";
 
 /** The default tools that run code, so take an approval policy; `web_search` runs at the provider. */
 export type ApprovableDefaultToolName = Exclude<DefaultToolName, "web_search">;
@@ -36,7 +40,7 @@ export type DefaultToolApprovals = {
 
 export interface EveDefaultsOptions {
   /** Default tools to leave out. */
-  readonly without?: readonly DefaultToolName[];
+  readonly without?: readonly CodeDefaultToolName[];
   /**
    * The sandbox the bash and file tools run in: by default just-bash under
    * `<cwd>/.eve/sandbox-cache`, which needs no daemon or account.
@@ -63,9 +67,10 @@ export const eve = {
    * only when a tool that runs in it is kept.
    */
   defaults(options: EveDefaultsOptions = {}): Definition[] {
-    const without = new Set(options.without ?? []);
+    const without = new Set<CodeDefaultToolName>(options.without ?? []);
     const names = DEFAULT_TOOLS.filter((name) => !without.has(name));
     const definitions = names.map((name) => DEFAULT_TOOL_DEFINITIONS[name](options));
+    if (!without.has("agent")) definitions.push(selfAgentToolDefinition);
     if (!names.some((name) => SANDBOX_TOOLS.has(name))) return definitions;
     const sandbox = options.sandbox ?? codeSandbox(JustBashSandbox.environment({}));
     return [sandboxDefinition(sandbox), ...definitions];

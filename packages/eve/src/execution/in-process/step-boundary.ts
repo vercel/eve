@@ -1,7 +1,8 @@
 // What crosses a step in a deployment goes through its host's serializer, which keeps some values
 // and changes or refuses others. An in-process session passes its step data through a boundary
-// too, so its steps receive copies, as a deployment's would; nothing is stored. Services a step is
-// handed, such as its stream or signals, cross as they are.
+// too, so its steps and hooks receive copies, as a deployment's would; nothing is stored. Services
+// a step is handed, such as its stream or signals, cross as they are. A hook's payload crosses
+// too, as Workflow's hook payloads do: sent where it's sent, and received where its hook is.
 
 /** A value on its way across a boundary, as the boundary carries it. */
 export interface Crossing {

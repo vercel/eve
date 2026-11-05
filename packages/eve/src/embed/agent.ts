@@ -3,6 +3,7 @@ import type { LanguageModel } from "ai";
 import { connectionDefinition } from "#definitions/connections.js";
 import type { Definition } from "#definitions/definition.js";
 import { agentDefinitionsOf, type AgentContents } from "#definitions/agent-definitions.js";
+import { subagentDefinitionOf } from "#definitions/delegation.js";
 import { instructionsDefinition, type StaticInstruction } from "#definitions/instructions.js";
 import { codeModelDefinition } from "#definitions/model.js";
 import { skillDefinition } from "#definitions/skills.js";
@@ -17,7 +18,7 @@ import {
 } from "#public/definitions/instructions.js";
 import { defineSkill as brandSkill, type SkillDefinition } from "#public/definitions/skill.js";
 import { createSessionAgent } from "#runtime/sessions/code-agent.js";
-import type { SessionAgent, SessionAgentSettings } from "#runtime/sessions/session-agent.js";
+import type { CodeAgent, SessionAgentSettings } from "#runtime/sessions/session-agent.js";
 import type { ResolvedDynamicDefinition } from "#runtime/types.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { ToolDefinition } from "#tools/definition.js";
@@ -157,6 +158,8 @@ export function defineContext(
 export interface CodeAgentOptions {
   /** The agent's id, `agent` by default. Sessions find the agent by it. */
   readonly name?: string;
+  /** What the agent is for, which a parent's model reads when it's a subagent. */
+  readonly description?: string;
   readonly model: Dynamic<ModelInput>;
   /** The agent's own instructions, as `agent/instructions.md` would hold them. */
   readonly instructions?: Dynamic<string | null>;
@@ -166,6 +169,11 @@ export interface CodeAgentOptions {
   readonly skills?: Readonly<Record<string, Dynamic<SkillDefinition | null>>>;
   /** Connections by name, as `agent/connections/<name>.ts` would export them. */
   readonly connections?: Readonly<Record<string, Dynamic<unknown>>>;
+  /**
+   * Agents it delegates to, by name, as `agent/subagents/<name>/` would declare them: each is a
+   * tool the model calls, and `ctx.agent(name)` in a workflow tool. Each needs a `description`.
+   */
+  readonly subagents?: Readonly<Record<string, CodeAgent>>;
   /** More definitions, after the ones above, such as `defineContext(...)` or `eve.defaults()`. */
   readonly definitions?: readonly Definition[];
   readonly settings?: SessionAgentSettings;
@@ -174,7 +182,7 @@ export interface CodeAgentOptions {
 }
 
 /** The agent `options` declares, with eve's runtime definitions around its own. */
-export function codeAgent(options: CodeAgentOptions): SessionAgent {
+export function codeAgent(options: CodeAgentOptions): CodeAgent {
   const { instructions } = options;
   const contents: AgentContents = {
     connections: Object.entries(options.connections ?? {}).map(([name, connection]) =>
@@ -186,11 +194,14 @@ export function codeAgent(options: CodeAgentOptions): SessionAgent {
     skills: Object.entries(options.skills ?? {}).map(([name, skill]) => defineSkill(name, skill)),
     staticInstructions:
       typeof instructions === "string" ? [staticInstructionOf(instructions)] : undefined,
-    subagents: [],
+    subagents: Object.entries(options.subagents ?? {}).map(([name, subagent]) =>
+      subagentDefinitionOf(name, subagent),
+    ),
     tools: Object.entries(options.tools ?? {}).map(([name, tool]) => toolDefinitionOf(name, tool)),
   };
   return createSessionAgent({
     definitions: agentDefinitionsOf(contents),
+    description: options.description,
     id: options.name ?? "agent",
     settings: options.settings,
     version: options.version,

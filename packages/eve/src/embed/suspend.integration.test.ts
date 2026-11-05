@@ -4,25 +4,24 @@ import { join } from "node:path";
 
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createWorldSessionStore } from "#execution/in-process/world-store.js";
+import type { RuntimeWorld } from "#execution/world/runtime-world.js";
+import { localTestWorld } from "#internal/testing/local-world.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { eve } from "#definitions/defaults.js";
 import { codeAgent } from "#embed/agent.js";
-import { createSession } from "#embed/session.js";
-import { createWorld } from "#compiled/@workflow/world-local/index.js";
-import { createWorldSessionStore } from "#execution/in-process/world-store.js";
-import type { RuntimeWorld } from "#execution/world/runtime-world.js";
-import { asRuntimeWorld } from "#execution/world/world-fit.js";
+import { createSession, type EmbeddedSession } from "#embed/session.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { textStreamResult, toolCallsStreamResult } from "#internal/testing/approval-resume.js";
+import { dataField } from "#internal/testing/in-process-sessions.js";
+import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { memorySandbox } from "#runtime/sandbox/memory-sandbox.js";
-import { always } from "#tools/approval/policies.js";
-import { defineTool } from "#tools/definition.js";
 
-// Suspending a session is not ending it. Alice's lead agent writes a plan in its memory sandbox,
-// then asks to ship it. Suspended while it waits for her approval, kept on Workflow's local
-// World, the session resumes in a fresh runtime with its files: nothing was torn down. Closing it
-// ends it.
+// Suspending a session is not ending it. Alice's lead agent writes a plan in its memory sandbox
+// and asks its reviewer about it. Suspended while the reviewer works, with a store keeping it,
+// the session restores in a fresh runtime with its files and its reviewer's run: neither was
+// torn down. Closing it ends it: the session and the reviewer it opened record their end.
 
 const alice: SessionAuthContext = {
   attributes: {},
@@ -31,11 +30,36 @@ const alice: SessionAuthContext = {
   principalType: "user",
 };
 
+/** The reviewer: it answers once `release()`, or stops when its turn is cancelled. */
+function reviewerGate() {
+  let release: () => void = () => {};
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let reached: () => void = () => {};
+  const started = new Promise<void>((resolve) => (reached = resolve));
+  let calls = 0;
+  const model = markMockModel(
+    new MockLanguageModelV4({
+      doStream: async ({ abortSignal }) => {
+        calls++;
+        reached();
+        await Promise.race([
+          released,
+          new Promise<void>((resolve) => abortSignal?.addEventListener("abort", () => resolve())),
+        ]);
+        return textStreamResult("Plan looks good.");
+      },
+      modelId: "reviewer",
+      provider: "eve-test",
+    }),
+  );
+  return { calls: () => calls, model, release, started };
+}
+
 /**
- * The lead: writes `plan.md`, asks to ship (which needs approval), then reads `plan.md` back and
- * replies with what it read.
+ * The lead: writes `plan.md`, asks its reviewer, says it waits; once the review is in, reads
+ * `plan.md` back and replies with what it read.
  */
-function leadAgent() {
+function leadAgent(reviewer: ReturnType<typeof reviewerGate>) {
   const model = markMockModel(
     new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
@@ -46,20 +70,28 @@ function leadAgent() {
         );
         if (results.length >= 3)
           return textStreamResult(`Read: ${JSON.stringify(results.at(-1)?.output)}`);
-        const steps = [
-          {
-            input: JSON.stringify({ content: "Ship on Friday.\n", filePath: "plan.md" }),
-            toolCallId: "call-write",
-            toolName: "write_file",
-          },
-          { input: JSON.stringify({ env: "prod" }), toolCallId: "call-ship", toolName: "ship" },
-          {
-            input: JSON.stringify({ filePath: "plan.md" }),
-            toolCallId: "call-read",
-            toolName: "read_file",
-          },
-        ];
-        return toolCallsStreamResult([steps[results.length]!]);
+        if (JSON.stringify(prompt).includes("Plan looks good."))
+          return toolCallsStreamResult([
+            {
+              input: JSON.stringify({ filePath: "plan.md" }),
+              toolCallId: "call-read",
+              toolName: "read_file",
+            },
+          ]);
+        if (results.length === 2) return textStreamResult("Waiting on the reviewer.");
+        return toolCallsStreamResult([
+          results.length === 0
+            ? {
+                input: JSON.stringify({ content: "Ship on Friday.\n", filePath: "plan.md" }),
+                toolCallId: "call-write",
+                toolName: "write_file",
+              }
+            : {
+                input: JSON.stringify({ message: "Review plan.md, please." }),
+                toolCallId: "call-review",
+                toolName: "reviewer",
+              },
+        ]);
       },
       modelId: "lead",
       provider: "eve-test",
@@ -68,29 +100,48 @@ function leadAgent() {
   return codeAgent({
     definitions: eve.defaults({
       sandbox: memorySandbox(),
-      without: ["bash", "web_fetch", "web_search"],
+      without: ["agent", "bash", "web_fetch", "web_search"],
     }),
     model: { model, modelContextWindowTokens: 200_000 },
     name: "lead",
-    tools: {
-      ship: defineTool({
-        approval: always(),
-        description: "Ship the plan.",
-        execute: async () => ({ shipped: true }),
-        inputSchema: { properties: { env: { type: "string" } }, type: "object" },
+    subagents: {
+      reviewer: codeAgent({
+        description: "Reviews a plan.",
+        model: { model: reviewer.model, modelContextWindowTokens: 200_000 },
+        name: "reviewer",
       }),
     },
   });
 }
 
+/** Reads `session`'s events until `done` says so. */
+async function until(
+  session: EmbeddedSession,
+  done: (events: readonly SessionStreamEvent[]) => boolean,
+): Promise<SessionStreamEvent[]> {
+  const reader = (await session.events()).getReader();
+  const events: SessionStreamEvent[] = [];
+  try {
+    for (let next = await reader.read(); !next.done; next = await reader.read()) {
+      events.push(next.value);
+      if (done(events)) break;
+    }
+  } finally {
+    await reader.cancel();
+  }
+  return events;
+}
+
+const said = (events: readonly SessionStreamEvent[], text: string) =>
+  events.some(
+    (event) =>
+      event.type === "content.completed" && String(dataField(event, "value")).startsWith(text),
+  );
+
 /** Every line `world` kept of `sessionId`. */
 async function linesOf(world: RuntimeWorld, sessionId: string): Promise<string> {
   return ((await createWorldSessionStore(world).load(sessionId))?.lines ?? []).join("\n");
 }
-
-/** Workflow's local World, in `directory`. */
-const localWorld = (directory: string) =>
-  asRuntimeWorld(createWorld({ dataDir: directory, recoverActiveRuns: false }));
 
 describe("suspending and ending an embedded session", () => {
   let directory: string;
@@ -101,45 +152,65 @@ describe("suspending and ending an embedded session", () => {
     rmSync(directory, { force: true, recursive: true });
   });
 
-  it("suspends a kept session with its sandbox files, which a fresh runtime continues", async () => {
-    const lead = leadAgent();
-    const world = localWorld(directory);
+  it("suspends a kept session with its sandbox files and its reviewer's run, which a fresh runtime continues", async () => {
+    const reviewer = reviewerGate();
+    const lead = leadAgent(reviewer);
+    const world = localTestWorld(directory);
     const first = createSession(lead, { identity: alice, world });
-    const asked = await (await first.send("Write the plan, then ship it.")).result();
-    expect(asked.interactions.map((interaction) => interaction.call?.name)).toEqual(["ship"]);
-    // Once the loop recorded its pause, the process quits while Alice decides: nothing of the
-    // session is torn down.
-    expect((await first.snapshot()).open).toMatchObject({ at: "pause" });
-    await first.suspend();
-    const saved = await createWorldSessionStore(localWorld(directory)).load(asked.sessionId);
-    expect(saved?.open).toMatchObject({ at: "pause", pause: { on: "interaction" } });
-    expect(await linesOf(world, asked.sessionId)).not.toContain('"session.ended"');
+    await first.send("Write the plan, and ask the reviewer.");
+    await reviewer.started;
+    await until(first, (seen) => said(seen, "Waiting on the reviewer."));
+    const sessionId = first.id!;
+    // The process quits while the reviewer works: nothing of the session is torn down.
+    const suspending = first.suspend();
+    reviewer.release();
+    await suspending;
+    const saved = await createWorldSessionStore(world).load(sessionId);
+    expect(saved?.runs).toMatchObject([{ input: { callId: "call-review" } }]);
+    const [reviewerId] = saved?.runs?.[0]?.children ?? [];
+    expect(reviewerId).toBeDefined();
+    expect(await linesOf(world, sessionId)).not.toContain('"session.ended"');
+    expect(await linesOf(world, reviewerId!)).not.toContain('"session.ended"');
 
-    // Another process's World on the same directory.
-    const second = createSession(lead, {
-      identity: alice,
-      resume: asked.sessionId,
-      world: localWorld(directory),
-    });
+    const second = createSession(lead, { identity: alice, resume: sessionId, world });
     try {
-      const [pending] = await second.pending();
-      const answered = await (
-        await second.respond([{ interactionId: pending!.interactionId, optionId: "approve" }])
-      ).result();
+      const events = await until(second, (seen) => said(seen, "Read: "));
+      // The reviewer's run went on and reached the reviewer the store kept; its cut-off step
+      // ran once more.
+      expect(
+        events.filter((event) => event.type === "call.settled").map((event) => event.data),
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ callId: "call-review", outcome: "completed" }),
+        ]),
+      );
+      expect(reviewer.calls()).toBe(2);
       // The plan the first runtime wrote is still in the sandbox.
-      expect(answered.reply).toContain("Ship on Friday.");
+      const read = events.find(
+        (event) => event.type === "call.settled" && dataField(event, "callId") === "call-read",
+      );
+      expect(read === undefined ? undefined : dataField(read, "outcome")).toBe("completed");
+      expect(JSON.stringify(read?.data)).toContain("Ship on Friday.");
     } finally {
       await second.close();
     }
-  }, 60_000);
+  }, 90_000);
 
-  it("ends a session on close", async () => {
-    const world = localWorld(directory);
-    const session = createSession(leadAgent(), { identity: alice, world });
-    const asked = await (await session.send("Write the plan, then ship it.")).result();
-    expect(await linesOf(world, asked.sessionId)).not.toContain('"session.ended"');
+  it("ends a session on close, and the reviewer it opened with it", async () => {
+    const reviewer = reviewerGate();
+    const world = localTestWorld(directory);
+    const session = createSession(leadAgent(reviewer), { identity: alice, world });
+    await session.send("Write the plan, and ask the reviewer.");
+    await reviewer.started;
+    await until(session, (seen) => said(seen, "Waiting on the reviewer."));
+    const sessionId = session.id!;
+    const [reviewerId] =
+      (await createWorldSessionStore(world).load(sessionId))?.runs?.[0]?.children ?? [];
+    expect(reviewerId).toBeDefined();
 
     await session.close();
-    expect(await linesOf(world, asked.sessionId)).toContain('"session.ended"');
-  }, 60_000);
+    expect(await linesOf(world, sessionId)).toContain('"session.ended"');
+    expect(await linesOf(world, reviewerId!)).toContain('"session.ended"');
+    expect(reviewer.calls()).toBe(1);
+  }, 90_000);
 });
