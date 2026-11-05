@@ -95,6 +95,16 @@ describe("a kept line store", () => {
     expect(store.recorded("s")).toEqual([]);
   });
 
+  it("ends a failed stream for its readers with the error, after the lines they hadn't read", async () => {
+    const store = createMemoryLineStore();
+    const writer = store.open("s").getWriter();
+    await writer.write(line("a"));
+    const reader = store.readable("s").getReader();
+    store.fail("s", new Error("continued by another process"));
+    expect(texts([(await reader.read()).value!])).toEqual(["a"]);
+    await expect(reader.read()).rejects.toThrow("continued by another process");
+  });
+
   it("writes straight through without a store to keep lines", async () => {
     const store = createMemoryLineStore();
     const writer = store.open("s").getWriter();

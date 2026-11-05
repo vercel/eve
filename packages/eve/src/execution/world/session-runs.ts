@@ -1,4 +1,4 @@
-import { isEntityConflict, isRunNotFound } from "#shared/run-errors.js";
+import { isEntityConflict, isInBandSuperseded, isRunNotFound } from "#shared/run-errors.js";
 import { createUlid } from "#shared/ulid.js";
 import type { RuntimeWorld, WorldEvent } from "./runtime-world.js";
 
@@ -8,6 +8,13 @@ import type { RuntimeWorld, WorldEvent } from "./runtime-world.js";
 //     each carrying one JSON value (`appendSessionEntry`).
 // A session id is `session_` and a ULID; its run id is `wrun_` and the same ULID, as Workflow
 // names runs, so any World accepts it.
+//
+// One process writes a session at a time. On a World with the in-band fence
+// (`capabilities.inBandFence`), a session's run is created at spec 9 and every write to it is
+// fenced (`SessionWriter`): a process that continues a session claims it first
+// (`claimSessionRun`), and the World refuses the writes of any process that wrote it before
+// (`SessionTakenOverError`), writing nothing for them. Runs created before, or on a World
+// without the fence, are written as they were.
 
 /** The workflow name a session's run carries, so a list of runs finds sessions. */
 export const SESSION_RUN_WORKFLOW_NAME = "eve/in-process-session";
@@ -40,37 +47,161 @@ export function sessionLinesStream(sessionId: string): string {
   return `${sessionRunId(sessionId).replace(/^wrun_/, "strm_")}_user_${LINES_STREAM_NAMESPACE}`;
 }
 
-/** Creates `sessionId`'s run, unless the World holds it already (a session continued). */
-export async function ensureSessionRun(world: RuntimeWorld, sessionId: string): Promise<void> {
+/** The spec version a fenced session run is created at. */
+const FENCED_SPEC = 9;
+
+/**
+ * How one process writes one session's log: on a fenced run, each write is in-band at the run's
+ * in-band count as this writer knows it (`seqInBand`), naming the highest position it knows of
+ * (`eventCount`). Each accepted write moves both on.
+ */
+export interface SessionWriter {
+  readonly fenced: boolean;
+  seqInBand: number;
+  eventCount: number;
+}
+
+/** Another process continued the session: this one's writes to it are refused. */
+export class SessionTakenOverError extends Error {
+  override readonly name = "SessionTakenOverError";
+  readonly sessionId: string;
+  constructor(sessionId: string, options?: { readonly cause?: unknown }) {
+    super(
+      `Session "${sessionId}" was continued by another process, so this one no longer writes it.`,
+      options,
+    );
+    this.sessionId = sessionId;
+  }
+}
+
+/** Whether `error`, or one of its causes, is a `SessionTakenOverError`. */
+export function isSessionTakenOver(error: unknown): boolean {
+  for (let cause = error, depth = 0; cause instanceof Error && depth < 10; depth += 1) {
+    if (cause instanceof SessionTakenOverError) return true;
+    cause = cause.cause;
+  }
+  return false;
+}
+
+/**
+ * Creates `sessionId`'s run and returns its writer, fenced on a World with the fence; `undefined`
+ * when the World holds the run already (a session continued), which `claimSessionRun` writes.
+ */
+export async function ensureSessionRun(
+  world: RuntimeWorld,
+  sessionId: string,
+): Promise<SessionWriter | undefined> {
   const runId = sessionRunId(sessionId);
+  // First, as it loads a World that loads lazily, whose capabilities are known from then on.
+  const deploymentId = await world.getDeploymentId();
+  const fenced = world.capabilities?.inBandFence === true;
+  const specVersion = fenced ? FENCED_SPEC : world.specVersion;
   try {
     await world.events.create(runId, {
       eventData: {
-        deploymentId: await world.getDeploymentId(),
+        deploymentId,
         input: encoder.encode("{}"),
         workflowName: SESSION_RUN_WORKFLOW_NAME,
       },
       eventType: "run_created",
-      ...(world.specVersion !== undefined && { specVersion: world.specVersion }),
+      ...(specVersion !== undefined && { specVersion }),
     });
-    await world.events.create(runId, { eventType: "run_started" });
   } catch (error) {
-    if (!isEntityConflict(error)) throw error;
+    if (isEntityConflict(error)) return undefined;
+    throw error;
+  }
+  if (!fenced) {
+    await world.events.create(runId, { eventType: "run_started" });
+    return { eventCount: 0, fenced: false, seqInBand: 0 };
+  }
+  // `run_created` took the run's first position, in-band.
+  const writer: SessionWriter = { eventCount: 1, fenced: true, seqInBand: 1 };
+  await fencedCreate(world, sessionId, writer, { eventType: "run_started", specVersion });
+  return writer;
+}
+
+/** How many times a claim reads the run again when another writer moved it on meanwhile. */
+const CLAIM_ATTEMPTS = 5;
+
+/**
+ * Takes `sessionId`'s run over for this process: reads the run's counters and writes a claim at
+ * them, so a process that wrote the session before is refused from its next write. A process
+ * still writing the session moves the run on under a claim: the claim reads it again, so the
+ * newest claim wins. On a run without the fence, writes as before.
+ */
+export async function claimSessionRun(
+  world: RuntimeWorld,
+  sessionId: string,
+): Promise<SessionWriter> {
+  for (let attempt = 1; ; attempt += 1) {
+    const page = await world.events.list({
+      pagination: { limit: 1 },
+      resolveData: "none",
+      runId: sessionRunId(sessionId),
+      specVersion: FENCED_SPEC,
+    });
+    if (page.snapshot === undefined) return { eventCount: 0, fenced: false, seqInBand: 0 };
+    const writer: SessionWriter = {
+      eventCount: page.snapshot.seq,
+      fenced: true,
+      seqInBand: page.snapshot.seqInBand,
+    };
+    try {
+      await appendSessionEntry(
+        world,
+        sessionId,
+        "eve.claim",
+        { at: new Date().toISOString() },
+        writer,
+      );
+      return writer;
+    } catch (error) {
+      if (!(error instanceof SessionTakenOverError) || attempt >= CLAIM_ATTEMPTS) throw error;
+    }
   }
 }
 
-/** Appends one entry, `value` under the step name `kind`, to `sessionId`'s log. */
+async function fencedCreate(
+  world: RuntimeWorld,
+  sessionId: string,
+  writer: SessionWriter,
+  data: Parameters<RuntimeWorld["events"]["create"]>[1],
+): Promise<void> {
+  try {
+    await world.events.create(sessionRunId(sessionId), data, {
+      eventCount: writer.eventCount,
+      expectedSeqInBand: writer.seqInBand,
+      inBand: true,
+    });
+  } catch (error) {
+    if (isInBandSuperseded(error)) throw new SessionTakenOverError(sessionId, { cause: error });
+    throw error;
+  }
+  writer.seqInBand += 1;
+  writer.eventCount += 1;
+}
+
+/**
+ * Appends one entry, `value` under the step name `kind`, to `sessionId`'s log: fenced by
+ * `writer` when it's fenced, throwing `SessionTakenOverError` when another process took over.
+ */
 export async function appendSessionEntry(
   world: RuntimeWorld,
   sessionId: string,
   kind: string,
   value: unknown,
+  writer?: SessionWriter,
 ): Promise<void> {
-  await world.events.create(sessionRunId(sessionId), {
+  const data = {
     correlationId: `step_${createUlid()}`,
     eventData: { input: encoder.encode(JSON.stringify(value)), stepName: kind },
-    eventType: "step_created",
-  });
+    eventType: "step_created" as const,
+  };
+  if (writer?.fenced === true) {
+    await fencedCreate(world, sessionId, writer, { ...data, specVersion: FENCED_SPEC });
+    return;
+  }
+  await world.events.create(sessionRunId(sessionId), data);
 }
 
 /** One entry of a session's log. */

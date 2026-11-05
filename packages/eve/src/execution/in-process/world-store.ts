@@ -2,12 +2,15 @@ import type { RuntimeWorld } from "#execution/world/runtime-world.js";
 import {
   appendSessionEntry,
   appendSessionLines,
+  claimSessionRun,
   ensureSessionRun,
   listSessionRuns,
   readSessionEntriesBackwards,
   readSessionLines,
   sessionLinesStream,
   sessionRunId,
+  SessionTakenOverError,
+  type SessionWriter,
 } from "#execution/world/session-runs.js";
 import { serialPerKey } from "#shared/serial-per-key.js";
 import {
@@ -29,10 +32,16 @@ import type { SessionSnapshot } from "./snapshot.js";
 //     `FULL_STATE_EVERY`th save write a whole `eve.state` instead.
 // Loading a session reads back to its newest whole state, applies the changes after it, and adds
 // the inputs after those.
-// One writer per session.
+//
+// One process writes a session (`session-runs.ts`): this store creates a session's run, or claims
+// a run it finds (a session continued) before its first write. On a fenced run, a batch of
+// stream lines is announced first by a fenced `eve.lines` entry, so the lines of a process that
+// lost the session never reach its stream. Once the World refuses a write, every later write
+// of that session fails here (`SessionTakenOverError`), before it reaches the World.
 
 const STATE_ENTRY = "eve.state";
 const INPUT_ENTRY = "eve.input";
+const LINES_ENTRY = "eve.lines";
 const DELTA_ENTRY = "eve.delta";
 
 /** How many saves in a row may be changes before a save writes the whole state again. */
@@ -66,23 +75,52 @@ function applied(state: SessionState, delta: StateDelta): SessionState {
   return { ...delta.state, checkpoint: { ...delta.state.checkpoint, history } };
 }
 
-export function createWorldSessionStore(world: RuntimeWorld): SessionStore {
-  // Sessions whose run exists, and how many lines each run's stream holds.
-  const created = new Set<string>();
+export interface WorldSessionStoreOptions {
+  /** Once, when the World refuses a session's write because another process took it over. */
+  readonly onTakenOver?: (sessionId: string, error: SessionTakenOverError) => void;
+}
+
+export function createWorldSessionStore(
+  world: RuntimeWorld,
+  options: WorldSessionStoreOptions = {},
+): SessionStore {
+  // How this process writes each session it wrote, and how many lines each run's stream holds.
+  const writers = new Map<string, SessionWriter>();
   const lineCounts = new Map<string, number>();
   // What this store last saved of each session, which its next save is a change from.
   const saved = new Map<string, Saved>();
+  // Sessions another process took over: this one writes them no more.
+  const lost = new Map<string, SessionTakenOverError>();
   // A session's writes land in the order they were made.
   const writes = serialPerKey();
 
-  const ensureRun = async (sessionId: string): Promise<void> => {
-    if (created.has(sessionId)) return;
-    await ensureSessionRun(world, sessionId);
-    created.add(sessionId);
+  const writerOf = async (sessionId: string): Promise<SessionWriter> => {
+    const known = writers.get(sessionId);
+    if (known !== undefined) return known;
+    const writer =
+      (await ensureSessionRun(world, sessionId)) ?? (await claimSessionRun(world, sessionId));
+    writers.set(sessionId, writer);
+    return writer;
+  };
+  /** Runs one of `sessionId`'s writes, in order, unless another process took the session over. */
+  const write = async (sessionId: string, run: () => Promise<void>): Promise<void> => {
+    await writes.run(sessionId, async () => {
+      const taken = lost.get(sessionId);
+      if (taken !== undefined) throw taken;
+      try {
+        await run();
+      } catch (error) {
+        if (error instanceof SessionTakenOverError && !lost.has(sessionId)) {
+          lost.set(sessionId, error);
+          options.onTakenOver?.(sessionId, error);
+        }
+        throw error;
+      }
+    });
   };
   const append = async (sessionId: string, kind: string, value: unknown): Promise<void> => {
-    await ensureRun(sessionId);
-    await appendSessionEntry(world, sessionId, kind, value);
+    const writer = await writerOf(sessionId);
+    await appendSessionEntry(world, sessionId, kind, value, writer);
   };
   /**
    * The session's state as its log holds it: its newest whole state with the changes after it
@@ -135,8 +173,8 @@ export function createWorldSessionStore(world: RuntimeWorld): SessionStore {
 
   return {
     async appendLines(sessionId, position, lines) {
-      await writes.run(sessionId, async () => {
-        await ensureRun(sessionId);
+      await write(sessionId, async () => {
+        const writer = await writerOf(sessionId);
         const count =
           lineCounts.get(sessionId) ??
           (await world.streams.getInfo(sessionRunId(sessionId), sessionLinesStream(sessionId)))
@@ -144,6 +182,16 @@ export function createWorldSessionStore(world: RuntimeWorld): SessionStore {
         if (position !== count)
           throw new Error(
             `Session "${sessionId}" has ${String(count)} lines stored, not ${String(position)}.`,
+          );
+        // Announced first on a fenced run: if another process took the session, this is refused
+        // and the lines never land.
+        if (writer.fenced && lines.length > 0)
+          await appendSessionEntry(
+            world,
+            sessionId,
+            LINES_ENTRY,
+            { count: lines.length, from: position },
+            writer,
           );
         const encoder = new TextEncoder();
         await appendSessionLines(
@@ -155,10 +203,10 @@ export function createWorldSessionStore(world: RuntimeWorld): SessionStore {
       });
     },
     async appendInput(sessionId, input) {
-      await writes.run(sessionId, () => append(sessionId, INPUT_ENTRY, input));
+      await write(sessionId, () => append(sessionId, INPUT_ENTRY, input));
     },
     async saveState(state) {
-      await writes.run(state.sessionId, () => saveOf(state));
+      await write(state.sessionId, () => saveOf(state));
     },
     async load(sessionId): Promise<SessionSnapshot | undefined> {
       await writes.settled(sessionId);
