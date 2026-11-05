@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 /**
  * Tier 2 — Scenario tests.
  *
- * End-to-end behaviour checks that require real subprocesses, real HTTP
+ * End-to-end behavior checks that require real subprocesses, real HTTP
  * listeners, real compile/bundle pipelines, or real workflow on-disk state.
  * Scenario tests take seconds to run and frequently mutate
  * `process.cwd`/`process.env`, so each file runs in its own forked worker
