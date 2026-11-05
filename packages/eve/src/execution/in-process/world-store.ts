@@ -33,7 +33,10 @@ import type { SessionSnapshot } from "./snapshot.js";
 // (`TakenOverError`), before it reaches the World.
 //
 // An input taken from the session's mailbox (a World host's arrivals) consumes its message in the
-// same write (`receive`), so a crash either keeps both or neither.
+// same write (`receive`), so a crash either keeps both or neither. A message the session takes
+// without keeping it as an input (a sign-in callback, which only its memory holds) is consumed by
+// the next save of its state instead, or by `flush` when the session stops; until then, later
+// inputs don't consume past it.
 
 const STATE_RECORD = "eve.state";
 const INPUT_RECORD = "eve.input";
@@ -100,8 +103,13 @@ export interface WorldSessionStore extends SessionStore {
    * the message in the same write.
    */
   receive(sessionId: string, messageId: string): void;
-  /** Consumes the message `receive` named, if no input kept it (the session dropped it). */
-  received(sessionId: string): Promise<void>;
+  /**
+   * The message `receive` named was handed over. If no input kept it, it's consumed by the next
+   * save of the session's state, or by `flush`.
+   */
+  received(sessionId: string): void;
+  /** Consumes what `received` left for a save, now: the session stopped. */
+  flush(sessionId: string): Promise<void>;
 }
 
 export function createWorldSessionStore(
@@ -116,6 +124,8 @@ export function createWorldSessionStore(
   const lost = new Map<string, TakenOverError>();
   // The message each session's next kept input consumes.
   const receiving = new Map<string, string>();
+  // The newest message each session took without keeping it, which its next save consumes.
+  const unsaved = new Map<string, string>();
   // A session's writes land in the order they were made.
   const writes = serialPerKey();
 
@@ -147,10 +157,18 @@ export function createWorldSessionStore(
     });
   };
 
+  /** Forgets what a write consumed, unless the session took something newer meanwhile. */
+  const consumed = (sessionId: string, through: string | undefined) => {
+    if (through !== undefined && unsaved.get(sessionId) === through) unsaved.delete(sessionId);
+  };
+
   /** Saves `state` whole, or as a change from what this store saved of it last. */
   const saveOf = async (state: SessionState): Promise<void> => {
     const { sessionId } = state;
     const handle = await handleOf(sessionId);
+    // What the session took without keeping it: this save keeps it, so consumes it.
+    const through = unsaved.get(sessionId);
+    const consumes = through === undefined ? {} : { consumedThrough: through };
     const messages = state.checkpoint.history.map((message) => JSON.stringify(message));
     const before = saved.get(sessionId);
     const grew =
@@ -164,11 +182,13 @@ export function createWorldSessionStore(
         from: before.messages.length,
         state: withoutHistory(state),
       };
-      await handle.append([{ kind: DELTA_RECORD, value: delta }]);
+      await handle.append([{ kind: DELTA_RECORD, value: delta }], consumes);
+      consumed(sessionId, through);
       saved.set(sessionId, { changes: before.changes + 1, messages });
       return;
     }
-    await handle.append([{ kind: STATE_RECORD, value: state }], { snapshot: true });
+    await handle.append([{ kind: STATE_RECORD, value: state }], { snapshot: true, ...consumes });
+    consumed(sessionId, through);
     saved.set(sessionId, { changes: 0, messages });
   };
 
@@ -193,11 +213,16 @@ export function createWorldSessionStore(
       await write(sessionId, async () => {
         const message = receiving.get(sessionId);
         receiving.delete(sessionId);
+        // Behind a message only memory holds, the input is kept but consumes nothing: the save
+        // that keeps the earlier one consumes both. (A crash in between delivers it again; its
+        // delivery id drops the repeat.)
+        const behind = unsaved.has(sessionId);
+        if (message !== undefined && behind) unsaved.set(sessionId, message);
         await (
           await handleOf(sessionId)
         ).append(
           [{ kind: INPUT_RECORD, value: input }],
-          message === undefined ? {} : { consumedThrough: message },
+          message === undefined || behind ? {} : { consumedThrough: message },
         );
       });
     },
@@ -207,12 +232,17 @@ export function createWorldSessionStore(
     receive(sessionId, messageId) {
       receiving.set(sessionId, messageId);
     },
-    async received(sessionId) {
+    received(sessionId) {
+      const message = receiving.get(sessionId);
+      receiving.delete(sessionId);
+      if (message !== undefined) unsaved.set(sessionId, message);
+    },
+    async flush(sessionId) {
       await write(sessionId, async () => {
-        const message = receiving.get(sessionId);
-        receiving.delete(sessionId);
-        if (message !== undefined)
-          await (await handleOf(sessionId)).append([], { consumedThrough: message });
+        const through = unsaved.get(sessionId);
+        if (through === undefined) return;
+        await (await handleOf(sessionId)).append([], { consumedThrough: through });
+        consumed(sessionId, through);
       });
     },
     async load(sessionId, loadOptions = {}): Promise<SessionSnapshot | undefined> {

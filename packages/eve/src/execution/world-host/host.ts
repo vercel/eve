@@ -3,7 +3,8 @@ import { ScheduleDispatcher } from "#channel/schedule.js";
 import type { Runtime, SessionAuthContext } from "#channel/types.js";
 import { codeAgentOf } from "#embed/agent.js";
 import type { ActivationOutcome, Entities } from "#execution/entity/entities.js";
-import { registerFallbackLineStore } from "#execution/hosts.js";
+import { registerFallbackLineStore, registerHost } from "#execution/hosts.js";
+import { logicalSessionInboxToken } from "#execution/session-inbox/address.js";
 import type { SessionLineStore } from "#execution/session-line-store.js";
 import type { QueueWorld, WorldQueueDelivery } from "#execution/world/runtime-world.js";
 import { sessionEntities } from "#execution/world/session-entities.js";
@@ -57,6 +58,11 @@ export interface WorldHostOptions {
    * below the time the function serving `queueHandler()` may run. Default 4 minutes.
    */
   readonly deliveryBudgetMs?: number;
+  /**
+   * Where the server routes eve's callbacks (`/.well-known/eve/...`), which sign-in links name:
+   * its origin, such as a deployment's URL. Without one, a tool that needs a sign-in can't ask.
+   */
+  readonly callbackBaseUrl?: string;
   /** Told how each delivery that ran a session ended, and how long it ran. */
   readonly observe?: (delivery: {
     readonly sessionId: string;
@@ -130,6 +136,20 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
     return front;
   };
   const releaseLines = registerFallbackLineStore(entityLineStore(entities));
+  // A sign-in callback (`/.well-known/eve/connections/.../callback/...`) resumes the session's
+  // address in whichever process the route runs: sent to its entity, so it reaches the session
+  // wherever it runs next. Anything else delivered in this process (a run's message to the session
+  // it runs for) stays with the routes after this one: the session's activation holds it.
+  const releaseRoute = registerHost({
+    async deliver(token, payload) {
+      if ((payload as { readonly kind?: unknown } | undefined)?.kind !== "authorization-callback")
+        return undefined;
+      const alias = logicalSessionInboxToken(token) ?? token;
+      return (await entities.send({ alias }, payload)) === undefined ? undefined : "delivered";
+    },
+    runEnded: () => undefined,
+    cancelRun: () => undefined,
+  });
   let ticker: ReturnType<typeof setTimeout> | undefined;
 
   const consumer = activation.consumer(
@@ -140,6 +160,7 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
           ? undefined
           : { config: { agent }, release: holdSessionAgent(agent) };
       },
+      ...(options.callbackBaseUrl !== undefined && { callbackBaseUrl: options.callbackBaseUrl }),
       entities,
       world,
     }),
@@ -197,6 +218,7 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
     async close() {
       if (ticker !== undefined) clearTimeout(ticker);
       releaseLines();
+      releaseRoute();
     },
   };
 }
