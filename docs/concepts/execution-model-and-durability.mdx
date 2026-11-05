@@ -48,16 +48,16 @@ Both kinds of handoff need a Workflow world that supports `hookForceClaim` and `
 
 ### Stranded sessions
 
-A session is stranded when a different eve version built the workflow run that holds it. Only the eve version that started a run can replay it. The conversation stays stored, but the current deployment can't process a new message. On worlds without per-deployment routing, eve checks the run's eve version first, so channel messages and input responses never reach a session that can't answer.
+A session is stranded when the workflow run that holds it can't execute again: a different eve version built it, or, on Vercel Workflow, the deployment that started it was deleted. Only the eve version that started a run can replay it. The conversation stays stored, but the current deployment can't process a new message. On worlds without per-deployment routing, eve checks the run's eve version first, so channel messages and input responses never reach a session that can't answer.
 
 eve treats every world other than Vercel Workflow as running one eve version at a time, so a stranded session there never runs again:
 
-| World                        | When a session is stranded                                                                                                                                                            |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel Workflow              | eve does not check. Each run keeps executing on the deployment that started it, and handoff moves idle sessions to newer deployments.                                                 |
-| Local world with `eve start` | After any upgrade that changes the eve version.                                                                                                                                       |
-| Postgres and other worlds    | Same as the local world. Serve one world from one eve version at a time, because eve doesn't route runs between deployments.                                                          |
-| `eve dev`                    | After an eve version change. A session from an earlier `eve dev` run on the same version stays dormant until you restart with [`--resume`](../reference/cli#local-workflow-recovery). |
+| World                        | When a session is stranded                                                                                                                                                                                                                                                                |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vercel Workflow              | When the deployment that started the run was deleted, for example by a deployment retention policy. Each run executes only on that deployment, and handoff moves idle sessions to newer deployments. eve finds a deleted deployment when a channel message or lookup reaches the session. |
+| Local world with `eve start` | After any upgrade that changes the eve version.                                                                                                                                                                                                                                           |
+| Postgres and other worlds    | Same as the local world. Serve one world from one eve version at a time, because eve doesn't route runs between deployments.                                                                                                                                                              |
+| `eve dev`                    | After an eve version change. A session from an earlier `eve dev` run on the same version stays dormant until you restart with [`--resume`](../reference/cli#local-workflow-recovery).                                                                                                     |
 
 eve ends a stranded session without running any of its code. When it ends depends on the kind of run:
 

@@ -68,7 +68,10 @@ import {
   sessionInboxHookToken,
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
-import { endStrandedSession } from "#execution/session-inbox/end-stranded-session.js";
+import {
+  endStrandedSession,
+  resolveStrandedSessionId,
+} from "#execution/session-inbox/end-stranded-session.js";
 import {
   SESSION_HOOK_HANDOVER_TIMEOUT_MS,
   waitForSessionHooksRelease,
@@ -565,6 +568,12 @@ export async function resolveContinuation(
   } catch (error) {
     if (HookNotFoundError.is(error)) {
       return undefined;
+    }
+    // An owner whose deployment was deleted is stranded like any other: its session still
+    // holds the address until a message replaces it or `end()` ends it.
+    if (error instanceof StrandedSessionOwnerError) {
+      if (options?.runnable === true) throw sessionStrandedError(error);
+      return { sessionId: await resolveStrandedSessionId(error) };
     }
     log.error("failed to resolve session by continuation token", {
       error: formatCapabilityError(error, [continuationToken]),

@@ -22,9 +22,12 @@ import {
 } from "#execution/session-inbox/address.js";
 import {
   assertRunnableSessionOwner,
+  deletedDeploymentOwnerError,
+  findSessionHookHolder,
   lookupSessionOwnerHook,
   resumeRunnableHook,
 } from "#execution/session-inbox/owner.js";
+import { isOwnerDeploymentDeletedError } from "#internal/workflow/owner-deployment-deleted.js";
 import { withPreV27Answers } from "#execution/session-inbox/pre-v27.js";
 import { getHookByToken, type Hook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
@@ -71,6 +74,11 @@ export async function resumeSessionInbox(
         typeof address === "string" ? undefined : address.inbox,
       );
     } catch (error) {
+      // A run without a public key needs its deleted deployment's key to accept anything.
+      if (isOwnerDeploymentDeletedError(error)) {
+        const holder = await findSessionHookHolder(sessionInboxHookToken(token));
+        if (holder !== undefined) throw await deletedDeploymentOwnerError(holder);
+      }
       if (!HookNotFoundError.is(error)) throw error;
       if (await waitWhileHandoffInProgress(token, deadline)) continue;
       if (command.kind === "session-failure" || command.kind === "session-prewarm") throw error;
@@ -85,8 +93,15 @@ export async function resumeSessionInbox(
           try {
             return knownSessionId ?? requireSessionId(await hook.metadata);
           } catch (cause) {
-            // A failed identity read must never cause a second delivery.
-            throw new AcceptedSessionIdentityError(cause);
+            // A failed identity read must never cause a second delivery. An owner whose
+            // deployment was deleted can never replay what it accepted, so replacing it
+            // delivers the command once.
+            const stranded = isOwnerDeploymentDeletedError(cause)
+              ? await deletedDeploymentOwnerError({ hook, runId: hook.runId }).catch(
+                  () => undefined,
+                )
+              : undefined;
+            throw stranded ?? new AcceptedSessionIdentityError(cause);
           }
         })());
       },
@@ -122,11 +137,19 @@ export function requireSessionId(metadata: unknown): string {
   return value;
 }
 
+/**
+ * The session holding a logical token. Throws `StrandedSessionOwnerError` when
+ * its owner's deployment was deleted, which hides the session ID.
+ */
 export async function resolveSessionInbox(token: string): Promise<{ sessionId: string }> {
+  let hook: Hook | undefined;
   try {
-    const hook = await getHookByToken(sessionInboxHookToken(token));
+    hook = await getHookByToken(sessionInboxHookToken(token));
     return { sessionId: requireSessionId(await hook.metadata) };
   } catch (error) {
+    if (hook !== undefined && isOwnerDeploymentDeletedError(error)) {
+      throw await deletedDeploymentOwnerError({ hook, runId: hook.runId });
+    }
     if (!HookNotFoundError.is(error)) throw error;
     const target = await resolveLegacyInbox(token);
     return { sessionId: target.sessionId };
