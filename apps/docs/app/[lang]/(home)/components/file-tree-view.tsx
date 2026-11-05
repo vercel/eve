@@ -124,24 +124,20 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
     <div className="mx-auto mb-6 flex w-fit flex-wrap items-center justify-center gap-3">
       <span className="text-label-14 text-gray-900">When the support agent serves</span>
       {/* The size sits here, outside cn(): tailwind-merge reads text-label-14 as a color and
-          drops it next to the buttons' text-gray-* classes. The buttons are equal grid
-          columns, so the selected pill can slide between them with a CSS transform alone. */}
+          drops it next to the buttons' text-gray-* classes. */}
       <div
         aria-label="Customer"
-        className="relative grid grid-cols-2 rounded-full bg-gray-100 p-1 text-label-14"
-        data-customer={customer.id}
+        className="flex w-fit rounded-full bg-gray-100 p-1 text-label-14"
         role="tablist"
       >
-        <span
-          aria-hidden
-          className="absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-full bg-background-100 shadow-(--ds-shadow-border-small) transition-transform duration-300 ease-out motion-reduce:transition-none in-data-[customer=pro]:translate-x-full"
-        />
         {CUSTOMERS.map((option) => (
           <button
             aria-selected={customer.id === option.id}
             className={cn(
-              "relative flex cursor-pointer items-center justify-center gap-2 rounded-full py-1 pr-1.5 pl-3 transition-colors",
-              customer.id === option.id ? "text-gray-1000" : "text-gray-900 hover:text-gray-1000",
+              "flex w-fit cursor-pointer items-center justify-center gap-2 rounded-full py-1 pr-1.5 pl-3",
+              customer.id === option.id
+                ? "bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small)"
+                : "text-gray-900 hover:text-gray-1000",
             )}
             key={option.id}
             onClick={() => setCustomer(option)}
