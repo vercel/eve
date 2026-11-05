@@ -18,7 +18,10 @@ import {
   nextLinePosition,
   recordPublishedLine,
 } from "#harness/session-machine/current.js";
-import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
+import {
+  createInstrumentationHooks,
+  type InstrumentationProviderDefinition,
+} from "#instrumentation/lifecycle.js";
 import {
   createInstrumentationHandleEvent,
   type CreateInstrumentationHandleEventInput,
@@ -42,6 +45,7 @@ function session(
     "parentLineage" | "parentTraceContext" | "rootSessionId"
   >,
   audience: ChannelAudience = "public",
+  authored: readonly InstrumentationProviderDefinition[] = [],
 ) {
   const exporter = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
@@ -65,7 +69,7 @@ function session(
     }),
     tracePolicy,
   });
-  const hooks = createInstrumentationHooks([otel.hook]).forTrace!({
+  const hooks = createInstrumentationHooks([otel.hook, ...authored]).forTrace!({
     agentName: "weather",
     audience,
     channel: { kind: "http" },
@@ -361,6 +365,44 @@ describe("a session's spans, from its committed lines", () => {
       expect(span?.attributes["agent.approval.kind"]).toBe(kind);
       expect(span?.attributes["eve.connection.name"]).toBe(connection);
       expect(JSON.stringify(span?.attributes)).not.toContain("oauth");
+    },
+  );
+
+  it.each([
+    ["a budget prompt", { kind: "budget", prompt: "Keep going?" }],
+    ["a sign-in", { kind: "sign-in", prompt: "Sign in to Calendar", signIn: { name: "calendar" } }],
+  ])(
+    "records %s the turn holds before its first model run, without showing it to other providers",
+    async (_, request) => {
+      const heard: string[] = [];
+      const { commit, spans } = session(undefined, undefined, undefined, undefined, [
+        {
+          name: "authored",
+          events: {
+            "interaction.opened": (event) => void heard.push(event.type),
+            "interaction.settled": (event) => void heard.push(event.type),
+          },
+        },
+      ]);
+      await commit(...opening.slice(0, 2));
+      await commit({
+        data: { interactionId: "i_held", request, subject: turn },
+        scope: turn,
+        type: "interaction.opened",
+      } as SessionEvent);
+      await commit({
+        data: { interactionId: "i_held", outcome: "accepted" },
+        scope: turn,
+        type: "interaction.settled",
+      } as SessionEvent);
+      await commit(turnSettled({ outcome: "completed" }));
+
+      expect(tree(await spans())).toEqual([
+        "invoke_agent weather completed",
+        "  agent.approval approved",
+      ]);
+      // Public scopes name a model run, and none has started.
+      expect(heard).toEqual([]);
     },
   );
 

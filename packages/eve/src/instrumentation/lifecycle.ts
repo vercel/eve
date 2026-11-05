@@ -501,6 +501,11 @@ export interface InstrumentationProviderDefinition {
   ) => InstrumentationEvent | PromiseLike<InstrumentationEvent>;
   /** Provider-specific event admission and directional content policy. */
   readonly tracePolicy?: TraceCapturePolicy;
+  /**
+   * Also receive waits a turn holds before its first model run. Their scope names no run, which
+   * the public scope promises, so authored providers never receive them.
+   */
+  readonly receivesTurnScopes?: boolean;
   readonly events?: {
     readonly [K in InstrumentationEvent["type"]]?: InstrumentationEventHandler<
       InstrumentationEvent<K>

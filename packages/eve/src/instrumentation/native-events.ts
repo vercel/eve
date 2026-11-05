@@ -1,5 +1,5 @@
 import type { DeliverHookPayload } from "#channel/types.js";
-import { instrumentationScope } from "#instrumentation/scope.js";
+import { instrumentationScope, turnScope } from "#instrumentation/scope.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { contextStorage } from "#context/container.js";
 import { deliveryEvent } from "#instrumentation/channel-delivery.js";
@@ -88,6 +88,7 @@ export function attemptScopeOf(
 /** What one committed line means to instrumentation, besides the line itself. */
 interface Line {
   readonly attemptScope: (place: AttemptPlace) => InstrumentationScope;
+  readonly turnScope: (turnId: string) => InstrumentationScope;
   readonly capturesInputs: boolean;
   readonly capturesOutputs: boolean;
   /** Principal ids follow the turn principal's rule: content both ways, and a public or dev audience. */
@@ -140,6 +141,15 @@ export function createInstrumentationHandleEvent(
     const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent ?? false;
     const line: Line = {
       attemptScope: (place) => attemptScopeOf(input, place),
+      turnScope: (turnId) =>
+        turnScope({
+          channelAudience: input.channelAudience,
+          functionId: input.functionId,
+          rootSessionId: input.rootSessionId,
+          sessionId: input.sessionId,
+          traceSessionId: input.traceSessionId,
+          turnId,
+        }),
       capturesInputs,
       capturesOutputs,
       capturesPrincipalIds:
@@ -397,10 +407,6 @@ function runAttempt(line: Line, runId: string | undefined): InstrumentationScope
 }
 
 /**
- * The attempt a person's request came from: its call's, or for a request about the turn or a
- * task, the turn's latest. Sign-ins are connection work, not input.
- */
-/**
  * The child agent session a relayed request came from. A workflow run relays its own questions
  * and sign-ins the same way but has no session to report them, so it names none.
  */
@@ -416,6 +422,11 @@ function askingChildSession(
     : undefined;
 }
 
+/**
+ * The attempt a person's request came from: its call's, or for a request about the turn or a
+ * task, the turn's latest. A request the turn holds before its first model run, such as a budget
+ * prompt or a sign-in, gets the turn's scope.
+ */
 function interactionAttempt(line: Line, row: InteractionRow): InstrumentationScope | undefined {
   const view = line.view!;
   const { subject } = row;
@@ -432,7 +443,7 @@ function interactionAttempt(line: Line, row: InteractionRow): InstrumentationSco
   const runs = Object.values(view.runs).filter(
     (run) => run.attempt !== undefined && runTurn(view, run.runId) === subject.turnId,
   );
-  return runAttempt(line, runs.at(-1)?.runId);
+  return runs.length === 0 ? line.turnScope(subject.turnId) : runAttempt(line, runs.at(-1)?.runId);
 }
 
 function latestTurnId(view: SessionView | undefined): string | undefined {

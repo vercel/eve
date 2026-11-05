@@ -252,6 +252,7 @@ export function createAgentOtelInstrumentation(
       },
       name: "eve.otel",
       projectEvent: capturePolicy.projectEvent,
+      receivesTurnScopes: true,
       tracePolicy: () => ({ emit: true, recordInputs, recordOutputs }),
     },
     prepareSessionTrace,
