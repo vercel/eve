@@ -4,101 +4,120 @@ import { Badge } from "@vercel/geistdocs/components/badge";
 import { type ReactNode, useState } from "react";
 import { cn } from "@/lib/utils";
 
+/** What a dynamic file gives each plan, or null where the plan doesn't get it. */
+export interface PlanResults {
+  enterprise: string;
+  pro: string | null;
+}
+
 interface FileTreeItem {
-  /** Category name (unused by this layout). */
-  label: string;
-  /** File/folder name shown in the IDE file tree. */
+  /** File or folder name shown in the file tree. */
   name: string;
   /** Full path shown in the code panel header. */
   fileName: string;
   /** Short, what-this-file-does line shown above the code. */
   description: string;
-  /** Category icon (unused by this layout). */
-  navIcon: ReactNode;
   /** Pre-highlighted code, rendered on the server through the geistdocs CodeBlock. */
   code: ReactNode;
-  /** For a dynamic file: what it resolves to for each example tenant. */
-  tenants?: { name: string; plan: string; result: string }[];
+  /** Set on dynamic files only. */
+  results?: PlanResults;
 }
 
-const MODES = [
-  { id: "folder", label: "Simple agent (static)" },
-  { id: "tenants", label: "Multi-tenant agent (dynamic)" },
+// The customers the board can be viewed as, with the dashboard's plan badge colors.
+const CUSTOMERS = [
+  { id: "enterprise", name: "Acme", plan: "Enterprise", badge: "purple" },
+  { id: "pro", name: "Jamie", plan: "Pro", badge: "blue" },
 ] as const;
 
-type Mode = (typeof MODES)[number]["id"];
+type Customer = (typeof CUSTOMERS)[number];
 
-/** The tag beside a file: authored files past the first are optional, dynamic ones say so. */
-function tagFor(mode: Mode, index: number) {
-  if (mode === "tenants") return "dynamic";
-  return index > 0 ? "optional" : null;
-}
-
-// Vercel's plan badge colors, as in the dashboard's PlanBadge.
-const PLAN_VARIANTS = { Hobby: "gray", Pro: "blue", Enterprise: "purple" } as const;
-
-/** What a dynamic file resolved to for each tenant, under its description. */
-function Tenants({ tenants }: { tenants: NonNullable<FileTreeItem["tenants"]> }) {
+function PlanBadge({ customer }: { customer: Customer }) {
   return (
-    <dl className="m-0 grid grid-cols-[auto_auto_1fr] items-center gap-x-4 gap-y-2 border-b px-4 py-3 text-copy-14">
-      {tenants.map((tenant) => (
-        <div className="contents" key={tenant.name}>
-          <dt className="font-medium text-gray-1000">{tenant.name}</dt>
-          <dd className="m-0">
-            <Badge
-              className="h-5 px-2"
-              contrast="low"
-              size="sm"
-              variant={PLAN_VARIANTS[tenant.plan as keyof typeof PLAN_VARIANTS] ?? "gray"}
-            >
-              {tenant.plan}
-            </Badge>
-          </dd>
-          <dd className="m-0 truncate text-gray-900">{tenant.result}</dd>
-        </div>
-      ))}
-    </dl>
+    <Badge className="h-5 px-2" contrast="low" size="sm" variant={customer.badge}>
+      {customer.plan}
+    </Badge>
   );
 }
 
-export function FileTreeView({
-  folderItems,
-  tenantItems,
-}: {
-  folderItems: FileTreeItem[];
-  tenantItems: FileTreeItem[];
-}) {
-  const [mode, setMode] = useState<Mode>("folder");
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const items = mode === "folder" ? folderItems : tenantItems;
-  const selected = items[selectedIndex] ?? items[0];
+/** The selected customer's branch is highlighted like a Geist highlighted line; the other dims. */
+const branchHighlight = cn(
+  "data-[customer=enterprise]:[&_.line[data-plan=enterprise]]:bg-purple-100 data-[customer=enterprise]:[&_.line[data-plan=enterprise]]:shadow-[inset_2px_0_0_0_var(--ds-purple-800)] data-[customer=enterprise]:[&_.line[data-plan=pro]]:opacity-40",
+  "data-[customer=pro]:[&_.line[data-plan=pro]]:bg-blue-100 data-[customer=pro]:[&_.line[data-plan=pro]]:shadow-[inset_2px_0_0_0_var(--ds-blue-800)] data-[customer=pro]:[&_.line[data-plan=enterprise]]:opacity-40",
+);
 
-  const tabs = (
-    <div
-      aria-label="Agent type"
-      className="mx-auto mb-6 flex w-fit gap-1 rounded-full bg-gray-100 p-1"
-      role="tablist"
+/** Under the description: what this customer gets from the file, or that it's the same for all. */
+function Resolution({ item, customer }: { item: FileTreeItem; customer: Customer }) {
+  if (!item.results) {
+    return (
+      <p className="border-b px-4 py-3 text-copy-14 text-gray-700">
+        Static. The same for every customer.
+      </p>
+    );
+  }
+  const result = item.results[customer.id];
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3 text-copy-14">
+      <span className="font-medium text-gray-1000">{customer.name}</span>
+      <PlanBadge customer={customer} />
+      <span className={result ? "text-gray-900" : "text-gray-700"}>
+        {result ?? `Not on ${customer.plan}`}
+      </span>
+    </div>
+  );
+}
+
+/** The tag beside a dynamic file in the tree. */
+function Tag({
+  item,
+  customer,
+  active,
+}: {
+  item: FileTreeItem;
+  customer: Customer;
+  active: boolean;
+}) {
+  if (!item.results) return null;
+  const missing = item.results[customer.id] === null;
+  return (
+    <span
+      className={cn(
+        "ml-auto shrink-0 font-mono text-label-12-mono!",
+        active ? "text-gray-1000" : "text-gray-900",
+      )}
     >
-      {MODES.map(({ id, label }) => (
-        <button
-          aria-selected={mode === id}
-          className={cn(
-            "cursor-pointer rounded-full px-4 py-1.5 text-label-14 transition-colors",
-            mode === id
-              ? "bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small)"
-              : "text-gray-900 hover:text-gray-1000",
-          )}
-          key={id}
-          onClick={() => {
-            setMode(id);
-            setSelectedIndex(0);
-          }}
-          role="tab"
-          type="button"
-        >
-          {label}
-        </button>
-      ))}
+      {missing ? `not on ${customer.plan}` : "dynamic"}
+    </span>
+  );
+}
+
+export function FileTreeView({ items }: { items: FileTreeItem[] }) {
+  const [customer, setCustomer] = useState<Customer>(CUSTOMERS[0]);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const selected = items[selectedIndex];
+
+  const switcher = (
+    <div className="mx-auto mb-6 flex w-fit flex-wrap items-center justify-center gap-3">
+      <span className="text-label-14 text-gray-900">View as</span>
+      <div aria-label="Customer" className="flex gap-1 rounded-full bg-gray-100 p-1" role="tablist">
+        {CUSTOMERS.map((option) => (
+          <button
+            aria-selected={customer.id === option.id}
+            className={cn(
+              "flex cursor-pointer items-center gap-2 rounded-full py-1 pr-1.5 pl-3 text-label-14 transition-colors",
+              customer.id === option.id
+                ? "bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small)"
+                : "text-gray-900 hover:text-gray-1000",
+            )}
+            key={option.id}
+            onClick={() => setCustomer(option)}
+            role="tab"
+            type="button"
+          >
+            {option.name}
+            <PlanBadge customer={option} />
+          </button>
+        ))}
+      </div>
     </div>
   );
 
@@ -115,46 +134,40 @@ export function FileTreeView({
       />
       <div className="mx-auto max-w-5xl">
         <div className="relative overflow-hidden rounded-t-xl border bg-background-100">
-          <div className="grid grid-cols-[260px_1fr]">
-            {/* Sidebar — the files in this agent; click any to view it. */}
+          <div className="grid grid-cols-[270px_1fr]">
+            {/* Sidebar: the files in this agent; click any to view it. */}
             <div className="border-r">
               <div className="flex h-12 items-center border-b px-4">
                 <span className="font-medium text-gray-1000 text-sm">agent/</span>
               </div>
               <div className="space-y-0.5 p-2">
                 {items.map((item, i) => {
-                  const tag = tagFor(mode, i);
+                  const missing = item.results?.[customer.id] === null;
                   return (
                     <button
-                      key={item.name}
-                      type="button"
-                      onClick={() => setSelectedIndex(i)}
                       className={cn(
                         "group flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
                         selectedIndex === i
                           ? "bg-gray-100 text-gray-1000"
                           : "text-gray-700 hover:bg-gray-100/60 hover:text-gray-1000",
+                        missing && "opacity-50",
                       )}
+                      key={item.name}
+                      onClick={() => setSelectedIndex(i)}
+                      type="button"
                     >
-                      <span className="min-w-0 truncate">{item.name}</span>
-                      {tag ? (
-                        <span
-                          className={cn(
-                            "ml-auto shrink-0 font-mono text-label-12-mono!",
-                            selectedIndex === i ? "text-gray-900" : "text-gray-500",
-                          )}
-                        >
-                          {tag}
-                        </span>
-                      ) : null}
+                      <span className={cn("min-w-0 truncate", missing && "line-through")}>
+                        {item.name}
+                      </span>
+                      <Tag active={selectedIndex === i} customer={customer} item={item} />
                     </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* Code panel — fixed height so the card never reflows; the code
-                area flexes to fill whatever the (content-hugging) description leaves. */}
+            {/* Code panel: fixed height so the card never reflows; the code
+                area flexes to fill whatever the description leaves. */}
             <div className="flex min-h-[564px] min-w-0 flex-col">
               <div className="flex h-12 items-center border-b px-4">
                 <span className="font-medium text-gray-1000 text-sm">{selected.fileName}</span>
@@ -162,8 +175,13 @@ export function FileTreeView({
               <p className="border-b px-4 py-3 text-copy-14 text-gray-900">
                 {selected.description}
               </p>
-              {selected.tenants ? <Tenants tenants={selected.tenants} /> : null}
-              <div className="grow pb-6 [&>div]:mb-0">{selected.code}</div>
+              <Resolution customer={customer} item={selected} />
+              <div
+                className={cn("grow pb-6 [&>div]:mb-0", branchHighlight)}
+                data-customer={customer.id}
+              >
+                {selected.code}
+              </div>
             </div>
           </div>
         </div>
@@ -179,21 +197,19 @@ export function FileTreeView({
   // simply shows its code block right beneath it in a stacked list.
   const mobile = (
     <div className="space-y-4">
-      {items.map((item, i) => (
-        <div key={item.name} className="overflow-hidden rounded-xl border bg-background-100">
-          <div className="flex h-12 items-center border-b px-4">
+      {items.map((item) => (
+        <div className="overflow-hidden rounded-xl border bg-background-100" key={item.name}>
+          <div className="flex h-12 items-center gap-2 border-b px-4">
             <span className="min-w-0 truncate font-medium text-gray-1000 text-sm">
               {item.fileName}
             </span>
-            {tagFor(mode, i) ? (
-              <span className="ml-auto shrink-0 font-mono text-gray-500 text-label-12-mono">
-                {tagFor(mode, i)}
-              </span>
-            ) : null}
+            <Tag active={false} customer={customer} item={item} />
           </div>
           <p className="border-b px-4 py-3 text-copy-14 text-gray-900">{item.description}</p>
-          {item.tenants ? <Tenants tenants={item.tenants} /> : null}
-          <div className="pb-2 [&>div]:mb-0">{item.code}</div>
+          <Resolution customer={customer} item={item} />
+          <div className={cn("pb-2 [&>div]:mb-0", branchHighlight)} data-customer={customer.id}>
+            {item.code}
+          </div>
         </div>
       ))}
     </div>
@@ -201,7 +217,7 @@ export function FileTreeView({
 
   return (
     <>
-      {tabs}
+      {switcher}
       <div className="md:hidden">{mobile}</div>
       <div className="hidden md:block">{board}</div>
     </>
