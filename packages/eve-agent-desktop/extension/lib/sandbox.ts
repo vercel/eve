@@ -10,7 +10,7 @@
 import { runCommand, type CommandSandbox } from "./process.js";
 
 /** The agent-desktop CLI version this package's tools are written against. */
-export const AGENT_DESKTOP_VERSION = "1.0.2";
+export const AGENT_DESKTOP_VERSION = "1.2.0";
 
 export const DEFAULT_AGENT_DESKTOP_INSTALL_SPEC = `agent-desktop@${AGENT_DESKTOP_VERSION}`;
 

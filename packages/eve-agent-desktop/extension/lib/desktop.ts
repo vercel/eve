@@ -23,6 +23,7 @@ interface Envelope {
     readonly message: string;
     readonly suggestion?: string;
     readonly disposition?: { readonly delivery?: string; readonly retry?: string };
+    readonly details?: { readonly kind?: string; readonly retryable?: boolean };
   };
 }
 
@@ -97,10 +98,16 @@ function parseEnvelope<TData>(stdout: string, stderr: string, name: string): TDa
   if (error === undefined) throw new Error(`agent-desktop ${name} failed without an error.`);
   const retry = error.disposition?.retry ?? "unknown";
   const delivery = error.disposition?.delivery ?? "unknown";
+  const kind = typeof error.details?.kind === "string" ? error.details.kind : undefined;
   throw new Error(
     [
       `agent-desktop ${name} failed: ${error.code}: ${error.message}`,
+      kind ? `Kind: ${kind}.` : undefined,
       error.suggestion ? `Suggestion: ${error.suggestion}` : undefined,
+      // A refusal such as `identity_not_unique` sends nothing, so retry stays safe, but the same call is refused again.
+      error.details?.retryable === false
+        ? "Repeating the same call returns the same refusal; change the target or take a new snapshot first."
+        : undefined,
       `Delivery: ${delivery}; retry: ${retry}.${retry === "safe" ? "" : " Do not repeat this action blindly: read the live state first."}`,
     ]
       .filter(Boolean)

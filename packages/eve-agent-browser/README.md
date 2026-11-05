@@ -2,7 +2,7 @@
 
 An [eve](https://eve.dev) extension that gives your agent 42 browser automation tools backed by [agent-browser](https://agent-browser.dev), running inside the agent's sandbox. Tools cover navigation, accessibility snapshots with element refs, form interaction, screenshots, JavaScript evaluation, tabs, and network and console inspection.
 
-This package ports [`@agent-browser/eve`](https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve) into the eve workspace. It targets agent-browser 0.41.1 and requires eve 1.0.0-rc.1 or later.
+This package ports [`@agent-browser/eve`](https://github.com/vercel-labs/agent-browser/tree/main/packages/%40agent-browser/eve) into the eve workspace. It targets agent-browser 0.41.2 and requires eve 1.0.0-rc.1 or later.
 
 ## Install and mount
 
@@ -63,7 +63,7 @@ export default browser({
 
   // Installation
   autoInstall: true,
-  installSpec: undefined, // defaults to agent-browser@0.41.1; must match its minor
+  installSpec: undefined, // defaults to agent-browser@0.41.2; must match its minor
   installBrowser: true,
   installSystemDependencies: true,
 
@@ -145,7 +145,7 @@ pnpm --filter @eve/agent-browser typecheck
 
 Tests exercise the built extension against in-memory sandbox doubles. They don't launch Chromium or verify a live sandbox provider.
 
-The MCP catalog and sandbox command helpers in `extension/lib/mcp-tools.json`, `shared.ts`, and `version.ts` are copied from `vercel-labs/agent-browser` at commit `2d1271baefa026161de333a0da55c0f9e118a07f` (agent-browser 0.41.1), under Apache-2.0. When upgrading the CLI target, refresh those files together, review the exposed tools against the catalog, and run the package tests. The published sandbox helpers use these local copies, so consumers don't need `@agent-browser/sandbox`.
+The MCP catalog and sandbox command helpers in `extension/lib/mcp-tools.json`, `shared.ts`, and `version.ts` are copied from `vercel-labs/agent-browser` at commit `d52a5e90c372ec4710c69adc3837ac14bbd852aa` (agent-browser 0.41.2), under Apache-2.0. When upgrading the CLI target, refresh those files together, review the exposed tools against the catalog, and run the package tests. The published sandbox helpers use these local copies, so consumers don't need `@agent-browser/sandbox`.
 
 ## License
 
