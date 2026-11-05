@@ -7,6 +7,7 @@ import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import
 import { RESOLVE_EXTENSIONS } from "#internal/authored-package-boundary.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
 import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
+import { createInstalledPackageScope } from "#internal/installed-packages.js";
 
 export interface AuthoredPluginsInput {
   /** The authored package: asset imports stay inside it, and its tsconfig resolves aliases. */
@@ -17,6 +18,12 @@ export interface AuthoredPluginsInput {
    * leaves dependency imports to the bundler.
    */
   readonly authoredSourceOnly?: boolean;
+  /**
+   * With `authoredSourceOnly`, installed packages that generated bundles imported and left for
+   * this build. They and the packages they load keep the asset and extension resolution that
+   * inlining them into those bundles would have applied.
+   */
+  readonly hostBundledPackageRoots?: readonly string[];
   readonly extensions?: readonly string[];
 }
 
@@ -28,10 +35,19 @@ export interface AuthoredPluginsInput {
 export function createAuthoredPlugins(input: AuthoredPluginsInput): Plugin[] {
   const authoredSourceOnly = input.authoredSourceOnly ?? false;
   const extensions = input.extensions ?? RESOLVE_EXTENSIONS;
+  const handlesInstalledModule = createInstalledPackageScope(input.hostBundledPackageRoots ?? []);
   return [
     // First, so no other resolver claims an asset import before its package-root check.
-    createAuthoredAssetImportPlugin({ authoredSourceOnly, packageRoot: input.packageRoot }),
-    createAuthoredRelativeExtensionResolverPlugin({ authoredSourceOnly, extensions }),
+    createAuthoredAssetImportPlugin({
+      authoredSourceOnly,
+      handlesInstalledModule,
+      packageRoot: input.packageRoot,
+    }),
+    createAuthoredRelativeExtensionResolverPlugin({
+      authoredSourceOnly,
+      extensions,
+      handlesInstalledModule,
+    }),
     createAuthoredPackageTsConfigPathsPlugin({
       appPackageRoot: input.packageRoot,
       authoredSourceOnly,

@@ -79,7 +79,7 @@ describe("createGenerationPackageBoundaryPlugin", () => {
     const plugin = createGenerationPackageBoundaryPlugin({
       externalDependencies: [],
       packageRoot: PACKAGE_ROOT,
-      hostBundle: { tracedDependencies: [] },
+      hostBundle: { tracedDependencies: [], externalPackageRoots: new Set() },
     });
     const installedEntry = join(PACKAGE_ROOT, "node_modules/zod/index.js");
     const resolve: PluginContext["resolve"] = async (source) =>
@@ -111,7 +111,7 @@ describe("createGenerationPackageBoundaryPlugin", () => {
     const plugin = createGenerationPackageBoundaryPlugin({
       externalDependencies: [],
       packageRoot: PACKAGE_ROOT,
-      hostBundle: { tracedDependencies: [] },
+      hostBundle: { tracedDependencies: [], externalPackageRoots: new Set() },
     });
     const resolved: Record<string, string> = {
       "@acme/shared": join(PACKAGE_ROOT, "../shared/src/index.ts"),

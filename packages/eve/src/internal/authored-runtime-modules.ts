@@ -17,6 +17,8 @@ export interface PreparedAuthoredRuntimeModules {
   readonly authoredWorkflowModules: AuthoredWorkflowModules;
   readonly instrumentation: PreparedAuthoredRuntimeInstrumentation;
   readonly moduleMapCode: string;
+  /** Installed packages the generated modules import and the host bundles. */
+  readonly hostBundledPackageRoots: readonly string[];
   readonly sourceModules: readonly string[];
   /** Identity of authored sources shared by the workflow driver and step registrations. */
   readonly workflowSourceFingerprint: string | undefined;
@@ -32,7 +34,10 @@ export async function prepareAuthoredRuntimeModules(input: {
 }): Promise<PreparedAuthoredRuntimeModules> {
   const hostBundle =
     input.hostBundled === true
-      ? { tracedDependencies: collectHostTracedDependencies(input.manifest) }
+      ? {
+          tracedDependencies: collectHostTracedDependencies(input.manifest),
+          externalPackageRoots: new Set<string>(),
+        }
       : undefined;
   const {
     authoredWorkflowModules,
@@ -59,6 +64,7 @@ export async function prepareAuthoredRuntimeModules(input: {
 
   return {
     authoredWorkflowModules,
+    hostBundledPackageRoots: [...(hostBundle?.externalPackageRoots ?? [])].sort(),
     instrumentation,
     moduleMapCode,
     sourceModules,

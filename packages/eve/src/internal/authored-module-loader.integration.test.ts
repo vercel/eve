@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -1044,19 +1044,79 @@ export const result = true;
       const entry = join(app.appRoot, "agent", "tools", "use_echo.ts");
 
       const traced = await bundleAuthoredModuleForGeneration(entry, {
-        hostBundle: { tracedDependencies: ["store-sibling*"] },
+        hostBundle: {
+          tracedDependencies: ["store-sibling*"],
+          externalPackageRoots: new Set<string>(),
+        },
       });
       expect(traced).toContain("store-sibling-value");
       expect(traced).not.toContain("node_modules/gadget-extension");
 
       const untraced = await bundleAuthoredModuleForGeneration(entry, {
-        hostBundle: { tracedDependencies: ["unrelated-package"] },
+        hostBundle: {
+          tracedDependencies: ["unrelated-package"],
+          externalPackageRoots: new Set<string>(),
+        },
       });
       expect(untraced).not.toContain("store-sibling-value");
       expect(untraced).toContain("node_modules/gadget-extension");
     } finally {
       await rm(storeRoot, { force: true, recursive: true });
     }
+  });
+
+  it("records installed packages it leaves to the host, including ones with assets", async () => {
+    const app = await createApp({
+      files: {
+        "agent/tools/use_packages.ts": [
+          'import prompt from "prompt-pack";',
+          'import { label } from "ts-entry-pack";',
+          'import { plain } from "plain-pack";',
+          "",
+          "export const values = [prompt, label, plain];",
+          "",
+        ].join("\n"),
+      },
+      name: "host-bundle-authored-transforms",
+    });
+    const packages: Record<string, Record<string, string>> = {
+      "plain-pack": {
+        "index.js": 'export const plain = "plain-value";\n',
+        "package.json": JSON.stringify({ name: "plain-pack", type: "module", main: "index.js" }),
+      },
+      "prompt-pack": {
+        "index.js": 'import text from "./prompt.txt?raw";\nexport default text;\n',
+        "package.json": JSON.stringify({ name: "prompt-pack", type: "module", main: "index.js" }),
+        "prompt.txt": "prompt-pack-text\n",
+      },
+      "ts-entry-pack": {
+        "index.ts": 'export { label } from "./label";\n',
+        "label.ts": 'export const label: string = "ts-entry-value";\n',
+        "package.json": JSON.stringify({ name: "ts-entry-pack", type: "module", main: "index.ts" }),
+      },
+    };
+    for (const [name, files] of Object.entries(packages)) {
+      const root = join(app.appRoot, "node_modules", name);
+      await mkdir(root, { recursive: true });
+      for (const [file, content] of Object.entries(files)) {
+        await writeFile(join(root, file), content);
+      }
+    }
+
+    const externalPackageRoots = new Set<string>();
+    const code = await bundleAuthoredModuleForGeneration(
+      join(app.appRoot, "agent", "tools", "use_packages.ts"),
+      { hostBundle: { tracedDependencies: [], externalPackageRoots } },
+    );
+
+    for (const name of Object.keys(packages)) {
+      expect(code).toContain(`node_modules/${name}/`);
+    }
+    expect(code).not.toContain("prompt-pack-text");
+    const appNodeModules = join(await realpath(app.appRoot), "node_modules");
+    expect([...externalPackageRoots].sort()).toEqual(
+      Object.keys(packages).map((name) => join(appNodeModules, name)),
+    );
   });
 
   it("resolves store siblings for generation bundles entered at node_modules paths", async () => {
