@@ -246,6 +246,18 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
   const recipientUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
   const challengeUrl = event.url;
 
+  // Without a thread, a public status would post top-level in the channel. The person who must
+  // sign in gets the prompt in a DM instead, and the channel sees nothing.
+  if (
+    recipientUserId &&
+    (challengeUrl || event.instructions) &&
+    !channel.slack.codeChannel &&
+    channel.slack.threadTs === "" &&
+    (await showSlackSignInDirectMessage(event, recipientUserId, channel))
+  ) {
+    return;
+  }
+
   // Post a public, link-free status so everyone in the thread can see
   // the session is blocked and later see it complete. The challenge
   // itself remains private.
@@ -303,7 +315,46 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
   }
 }
 
-async function settleSlackSignIn(
+/**
+ * Sends a sign-in prompt to `recipientUserId`'s DM and records it so the settled handler can edit
+ * it. Returns whether it was sent; a failure leaves the caller to post in the channel as before.
+ */
+async function showSlackSignInDirectMessage(
+  event: SignIn,
+  recipientUserId: string,
+  channel: SlackEventContext,
+): Promise<boolean> {
+  const pending = channel.state.pendingAuthDirectMessages ?? {};
+  // A repeat of a prompt already sent adds no second DM.
+  if (pending[event.name] !== undefined) return true;
+  const prompt = {
+    displayName: event.displayName,
+    instructions: event.instructions,
+    requestedInChannelId: channel.slack.channelId || undefined,
+    url: event.url,
+    userCode: event.userCode,
+  };
+  try {
+    const sent = await channel.thread.postDirectMessage(recipientUserId, {
+      blocks: buildAuthEphemeralBlocks(prompt),
+      text: buildAuthEphemeralText(prompt),
+    });
+    const dmChannelId = (sent.raw as { channel?: unknown }).channel;
+    if (sent.id && typeof dmChannelId === "string" && dmChannelId.length > 0) {
+      channel.state.pendingAuthDirectMessages = {
+        ...pending,
+        [event.name]: { channelId: dmChannelId, ts: sent.id },
+      };
+    }
+    return true;
+  } catch (error) {
+    log.error("Slack auth direct message delivery failed", { name: event.name, error });
+    return false;
+  }
+}
+
+/** A settled sign-in: edits what {@link showSlackSignIn} posted to show the outcome. */
+export async function settleSlackSignIn(
   event: SignIn,
   settled: InteractionSettledData,
   channel: SlackEventContext,
@@ -313,15 +364,34 @@ async function settleSlackSignIn(
     await showStatus(channel, `Connected to ${displayName}. Resuming...`, { force: true });
   }
 
-  const pending = channel.state.pendingAuthMessageTs ?? {};
-  const ts = pending[event.name];
-  if (ts === undefined) return;
-
   const text = buildAuthCompletedText({
     displayName,
     outcome: settled.outcome,
     reason: settled.reason,
   });
+
+  const directMessages = channel.state.pendingAuthDirectMessages ?? {};
+  const directMessage = directMessages[event.name];
+  if (directMessage !== undefined) {
+    try {
+      // Replacing the blocks removes the Connect button along with the prompt.
+      await channel.slack.request("chat.update", {
+        blocks: [{ type: "section", text: { type: "mrkdwn", text } }],
+        channel: directMessage.channelId,
+        text,
+        ts: directMessage.ts,
+      });
+    } catch (error) {
+      log.error("Slack auth direct message edit failed", { name: event.name, error });
+    }
+    const next = { ...directMessages };
+    delete next[event.name];
+    channel.state.pendingAuthDirectMessages = next;
+  }
+
+  const pending = channel.state.pendingAuthMessageTs ?? {};
+  const ts = pending[event.name];
+  if (ts === undefined) return;
 
   try {
     await channel.slack.request("chat.update", {

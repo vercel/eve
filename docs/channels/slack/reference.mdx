@@ -680,7 +680,7 @@ Each approval, question, and budget prompt card updates as its request changes:
 
 To change how these cards look, use [`interactionCard`](#restyle-approval-and-question-cards).
 
-A sign-in link or device code is a credential: whoever completes it connects their account to the session. So eve posts a status without the link in the thread. It sends the sign-in ephemerally to the Slack user it's for, and updates the status when the sign-in ends. The private prompt pairs a **Connect** button, labeled with the service name, with **Cancel**, which ends the waiting turn and updates the public status. To deliver a sign-in another way, see [Render and decode HITL controls yourself](#render-and-decode-hitl-controls-yourself).
+A sign-in link or device code is a credential: whoever completes it connects their account to the session. So eve posts a status without the link in the thread. It sends the sign-in ephemerally to the Slack user it's for, and updates the status when the sign-in ends. The private prompt pairs a **Connect** button, labeled with the service name, with **Cancel**, which ends the waiting turn and updates the public status. When the session has no thread, a public status would post top-level in the channel, so eve sends the prompt to the person's DM instead, names the channel it's for, and edits the DM when the sign-in ends. That needs the `im:write` scope; without it, eve posts in the channel as usual. To deliver a sign-in another way, see [Render and decode HITL controls yourself](#render-and-decode-hitl-controls-yourself).
 
 ## Audience
 
