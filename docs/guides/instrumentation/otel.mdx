@@ -175,16 +175,6 @@ invoke_agent <agent>
   └── agent.approval
 ```
 
-An `agent.approval` span covers each wait on a person. It sits under the tool call it's about, or under the turn when no call owns it, such as a budget prompt or a sign-in the turn needs. The span ends when the request settles, so its duration is how long the agent waited.
-
-| Attribute                 | Value                                                                |
-| ------------------------- | -------------------------------------------------------------------- |
-| `agent.approval.kind`     | `tool-approval`, `question`, `budget`, or `sign-in`                  |
-| `agent.approval.outcome`  | `approved`, `denied`, `cancelled`, `ignored`, or `invalid`           |
-| `eve.connection.name`     | For a sign-in, the connection or tool that needs it                  |
-| `agent.approval.request`  | The prompt and options, when the trace content policy records inputs |
-| `agent.approval.response` | The answer, when the trace content policy records outputs            |
-
 Each root agent turn starts a new trace. A local subagent's first turn joins the caller's trace, as a child of the dispatch span, when eve receives the caller's trace context. Otherwise it starts a new trace. Later turns in the child session start new traces without the dispatch span as parent.
 
 A remote child starts a separate trace with a root `invoke_agent` span. Its first turn links to the caller with `eve.link.type=agent.dispatch`, and the receiving deployment applies its own sampler. Local dispatches have no dispatch link, so query them by `parentSpanId`, or by `agent.parent_run.id` and `agent.parent_call.id`.
