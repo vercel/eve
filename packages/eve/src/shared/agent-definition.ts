@@ -85,6 +85,11 @@ export type InternalAgentModelDefinition = {
   source?: ModuleSourceRef;
   /** Field of the `source` agent config export that holds this model; absent means `model`. */
   sourceField?: "compaction.model";
+  /**
+   * Key of the `agent({ models })` option that holds this model, when `source` is that tool's
+   * export rather than an agent config.
+   */
+  sourceModelOption?: string;
   providerOptions?: Record<string, JsonObject>;
   promptCache?: AgentPromptCacheDefinition;
 };

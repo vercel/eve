@@ -298,6 +298,7 @@ class RunAgentSession implements AgentSession {
         key: this.#key,
         model: this.#options.model,
         name: this.#name,
+        toolName: from.toolName,
       });
       opened = { address, context, key: this.#key };
       this.#sessions.push(opened);

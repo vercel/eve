@@ -59,6 +59,10 @@ import { resolveConversationId } from "#shared/conversation-identity.js";
 import { stubToolPath } from "#tool-stubs/target.js";
 import { agentDelegation } from "#tracing/eve/delegation.js";
 import type { AgentSessionModelSelection } from "#tools/workflow-definition.js";
+import { readAgentToolModels } from "#tools/agent-models.js";
+import { selectionModel } from "#models/options.js";
+import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 
 const log = createLogger("execution.agent-sessions");
 
@@ -135,6 +139,8 @@ export async function openAgentSessionStep(
     readonly key: string;
     readonly model?: AgentSessionModelSelection;
     readonly name: string;
+    /** The workflow tool whose run opens the session. */
+    readonly toolName?: string;
   },
 ): Promise<{ readonly address: AgentSessionAddress; readonly deliveryId?: string }> {
   "use step";
@@ -161,7 +167,12 @@ export async function openAgentSessionStep(
   const runtimeOverrides =
     input.model === undefined
       ? undefined
-      : await normalizeRuntimeOverrides({ bundle, model: input.model, name: input.name });
+      : await normalizeRuntimeOverrides({
+          bundle,
+          model: input.model,
+          name: input.name,
+          toolName: input.toolName,
+        });
   const start = {
     auth: input.auth,
     bundle,
@@ -181,11 +192,17 @@ async function normalizeRuntimeOverrides({
   bundle,
   model,
   name,
+  toolName,
 }: {
   readonly bundle: CompiledBundle;
   readonly model: AgentSessionModelSelection;
   readonly name: string;
+  readonly toolName: string | undefined;
 }): Promise<AgentSessionRuntimeOverrides> {
+  const tool = await loadAgentModelsTool(bundle, toolName);
+  if (tool !== undefined) {
+    return { model: await resolveAgentToolModel(bundle, tool, model) };
+  }
   try {
     const selection = await resolveRuntimeModelSelection({
       durability: "durable",
@@ -201,6 +218,77 @@ async function normalizeRuntimeOverrides({
     }
     throw error;
   }
+}
+
+interface AgentModelsTool {
+  readonly definition: CompiledBundle["resolvedAgent"]["tools"][number];
+  readonly models: NonNullable<ReturnType<typeof readAgentToolModels>>;
+}
+
+/** The `agent({ models })` tool whose run opens the session, if that is what opens it. */
+async function loadAgentModelsTool(
+  bundle: CompiledBundle,
+  toolName: string | undefined,
+): Promise<AgentModelsTool | undefined> {
+  const definition =
+    toolName === undefined
+      ? undefined
+      : bundle.resolvedAgent.tools.find((candidate) => candidate.name === toolName);
+  // Only a workflow tool's run opens sessions, and only `agent({ models })` carries models.
+  if (definition?.behavior?.handling?.kind !== "workflow-tool") return undefined;
+  const models = readAgentToolModels(
+    await loadResolvedModuleExport({
+      definition,
+      kindLabel: "tool",
+      moduleMap: bundle.moduleMap,
+      nodeId: bundle.nodeId,
+    }),
+  );
+  return models === undefined ? undefined : { definition, models };
+}
+
+/**
+ * An `agent({ models })` tool names its model by option key. A live model's reference points
+ * back at the tool and key, so the child reads the model again from its own module map, and
+ * replay opens the same option.
+ */
+async function resolveAgentToolModel(
+  bundle: CompiledBundle,
+  { definition, models }: AgentModelsTool,
+  model: AgentSessionModelSelection,
+): Promise<RuntimeModelReference> {
+  const option = typeof model === "string" ? models.get(model) : undefined;
+  if (option === undefined) {
+    throw new FatalError(
+      `The "${definition.name}" tool has no model ${JSON.stringify(model)}. Use one of its agent({ models }) keys, or omit model to use the current model.`,
+    );
+  }
+  let reference: RuntimeModelReference;
+  try {
+    ({ reference } = await resolveRuntimeModelSelection({
+      durability: "live",
+      modelMetadata: bundle.modelMetadata,
+      selection: option.selection,
+    }));
+  } catch (error) {
+    if (error instanceof InvalidRuntimeModelSelectionError) {
+      throw new FatalError(
+        `The "${definition.name}" tool could not resolve its model "${option.key}": ${toErrorMessage(error)}`,
+      );
+    }
+    throw error;
+  }
+  if (typeof selectionModel(option.selection) === "string") return reference;
+  return {
+    ...reference,
+    source: {
+      exportName: definition.exportName,
+      logicalPath: definition.logicalPath,
+      sourceId: definition.sourceId,
+      sourceKind: "module",
+    },
+    sourceModelOption: option.key,
+  };
 }
 
 /**
