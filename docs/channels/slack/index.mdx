@@ -235,7 +235,7 @@ This adds the `users:read` scope, plus `users:read.email` with `email: true`, so
 
 ## Human-in-the-loop interactions
 
-By default, [tool approvals](/docs/human-in-the-loop) and questions from `ctx.ask()` appear in the thread as buttons and selects. Once someone answers, the card shows the answer and who gave it. When a tool needs a connection the person hasn't authorized, the sign-in link goes to them in an ephemeral message, and the thread shows a status without the link. A session with no thread sends the sign-in to their DM instead.
+By default, [tool approvals](/docs/human-in-the-loop) and questions from `ctx.ask()` appear in the thread as buttons and selects. Once someone answers, the card shows the answer and who gave it. When a tool needs a connection the person hasn't authorized, the sign-in link goes to them in an ephemeral message, and the thread shows a status without the link.
 
 To send a request only to the person who started the turn, return `"direct-message"` from `approvalChannel`:
 
