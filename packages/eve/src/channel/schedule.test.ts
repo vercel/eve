@@ -355,6 +355,45 @@ describe("ScheduleDispatcher", () => {
         vi.unstubAllEnvs();
       }
     });
+    // the turn a scheduled send starts in a conversation must know a schedule sent it.
+    it("marks to() sends into an existing conversation with the schedule", async () => {
+      const runtime = createMockRuntime();
+      runtime.dispatchContinuation = vi
+        .fn()
+        .mockResolvedValue({ sessionId: "existing-session", status: "accepted" });
+      const thread: CompiledChannel = {
+        __kind: CHANNEL_SENTINEL,
+        routes: [],
+        adapter: { kind: "channel:thread" },
+        receive: async ({ auth, message, target }, { from }) =>
+          await from(String(target.address)).send(message, { auth }),
+      };
+      const resolved: ResolvedChannelDefinition = {
+        name: "thread",
+        method: "POST",
+        urlPath: "/thread",
+        logicalPath: "channels/thread.ts",
+        sourceId: "channel-thread",
+        sourceKind: "module",
+        adapter: thread.adapter,
+        definition: thread,
+        receive: thread.receive,
+        fetch: async () => new Response("ok"),
+      };
+      await new ScheduleDispatcher({ runtime, channels: [resolved] }).trigger({
+        scheduleId: "daily",
+        async run({ to }) {
+          await to(thread, { address: "C1:1761400000.000100" }).send("daily check", {
+            auth: null,
+          });
+        },
+      });
+      expect(runtime.dispatchContinuation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: expect.objectContaining({ schedule: { definition: "daily" } }),
+        }),
+      );
+    });
     it("rejects unregistered channels", async () => {
       const stranger = {
         __kind: CHANNEL_SENTINEL,

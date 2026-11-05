@@ -43,10 +43,9 @@ export function supersededChallenges(
 }
 
 /**
- * The sign-in this turn already ended for the same grant and principal as `challenge`, either
- * failed terminally (`retryable: false`) or withdrawn (a new message or the person cancelled it):
- * asking again would post another card for one the person already passed on. Calls before the
- * turn's first such sign-in have nothing to find.
+ * The sign-in that rules out asking again for the same grant and principal as `challenge`. In
+ * this turn, that is one that ended without being completed, other than a retryable failure or an
+ * invalid callback (see `rulesOutReasking`), such as one a new message withdrew.
  */
 export function terminalSignInFailure(
   projection: SessionProjection,
@@ -57,11 +56,10 @@ export function terminalSignInFailure(
   const view = projection.view;
   return Object.values(view.interactions).find((row) => {
     const signIn = row.request.signIn;
+    if (signIn === undefined) return false;
     return (
-      signIn !== undefined &&
-      (row.outcome === "withdrawn" ||
-        (row.outcome === "failed" && row.response?.retryable === false)) &&
       interactionOwner(view, row).turnId === turnId &&
+      rulesOutReasking(row) &&
       sameSignIn(
         {
           // A responder's sign-in is about their answer: the approval candidate it settles.
@@ -74,6 +72,33 @@ export function terminalSignInFailure(
       )
     );
   });
+}
+
+/**
+ * Whether a settled sign-in rules out asking for it again in its turn. Only a completed sign-in,
+ * a failure the provider says is worth retrying, and an invalid callback (not the person's
+ * answer) leave the turn free to ask again.
+ */
+function rulesOutReasking(row: InteractionRow): boolean {
+  const { outcome } = row;
+  switch (outcome) {
+    case undefined:
+    case "accepted":
+    case "invalid":
+      return false;
+    case "failed":
+      return row.response?.retryable === false;
+    case "declined":
+    case "withdrawn":
+    case "interrupted":
+    case "abandoned":
+    case "expired":
+      return true;
+    default: {
+      const _exhaustive: never = outcome;
+      return _exhaustive;
+    }
+  }
 }
 
 /**

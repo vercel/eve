@@ -53,7 +53,7 @@ const scriptedModel = markMockModel(
 );
 
 describe("workflowEntry cancelled sign-in", () => {
-  // INC-8535: a message that cancels an open sign-in does not lead to a second sign-in card.
+  // a message that cancels an open sign-in does not lead to a second sign-in card.
   it("does not ask again in the turn for a sign-in a new message cancelled", async () => {
     scriptIndex = 0;
     let starts = 0;
@@ -155,7 +155,7 @@ describe("workflowEntry cancelled sign-in", () => {
           (event) => event.data.callId === retried,
         );
         expect(refused?.data.outcome).toBe("failed");
-        expect(JSON.stringify(refused?.data)).toContain("was cancelled in this turn");
+        expect(JSON.stringify(refused?.data)).toContain("ended without being completed in this turn");
 
         // The next turn may ask once, because the user's follow-up can still need it.
         await send(run.runId, "Try again, I'll sign in.");
