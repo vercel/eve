@@ -26,7 +26,7 @@ interface FileTreeItem {
 // The customers the same agent can be helping, with the dashboard's plan badge colors. The
 // switch shows how one agent behaves per customer, not separate versions of it.
 const CUSTOMERS = [
-  { id: "enterprise", name: "Acme, Inc.", plan: "Enterprise", badge: "purple" },
+  { id: "enterprise", name: "Acme Org", plan: "Enterprise", badge: "purple" },
   { id: "pro", name: "Jamie", plan: "Pro", badge: "blue" },
 ] as const;
 
