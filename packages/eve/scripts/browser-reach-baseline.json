@@ -1,11 +1,11 @@
 {
   "src/execution/session/program.ts": {
     "static.modules": 684,
-    "static.kib": 2648,
+    "static.kib": 2650,
     "static.builtinFiles": 53,
     "static.workflow": 0,
-    "total.modules": 861,
-    "total.kib": 4478,
+    "total.modules": 863,
+    "total.kib": 4487,
     "total.builtinFiles": 132,
     "total.workflow": 0
   },
@@ -14,28 +14,28 @@
     "static.kib": 3896,
     "static.builtinFiles": 61,
     "static.workflow": 0,
-    "total.modules": 855,
-    "total.kib": 6368,
+    "total.modules": 860,
+    "total.kib": 6377,
     "total.builtinFiles": 138,
     "total.workflow": 0
   },
   "src/execution/session/owner-boot.ts": {
     "static.modules": 690,
-    "static.kib": 2504,
+    "static.kib": 2506,
     "static.builtinFiles": 53,
     "static.workflow": 0,
-    "total.modules": 867,
-    "total.kib": 4334,
+    "total.modules": 869,
+    "total.kib": 4343,
     "total.builtinFiles": 132,
     "total.workflow": 0
   },
   "src/execution/in-process/runtime.ts": {
     "static.modules": 768,
-    "static.kib": 4148,
+    "static.kib": 4150,
     "static.builtinFiles": 61,
     "static.workflow": 0,
-    "total.modules": 940,
-    "total.kib": 6608,
+    "total.modules": 942,
+    "total.kib": 6616,
     "total.builtinFiles": 138,
     "total.workflow": 0
   }
