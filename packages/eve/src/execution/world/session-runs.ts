@@ -90,6 +90,10 @@ export function isSessionTakenOver(error: unknown): boolean {
 export async function ensureSessionRun(
   world: RuntimeWorld,
   sessionId: string,
+  options: {
+    /** Where a World's recovery re-enqueues the run (`queueNamespace`), and the like. */
+    readonly executionContext?: Readonly<Record<string, unknown>>;
+  } = {},
 ): Promise<SessionWriter | undefined> {
   const runId = sessionRunId(sessionId);
   // First, as it loads a World that loads lazily, whose capabilities are known from then on.
@@ -102,6 +106,9 @@ export async function ensureSessionRun(
         deploymentId,
         input: encoder.encode("{}"),
         workflowName: SESSION_RUN_WORKFLOW_NAME,
+        ...(options.executionContext !== undefined && {
+          executionContext: options.executionContext,
+        }),
       },
       eventType: "run_created",
       ...(specVersion !== undefined && { specVersion }),
@@ -202,6 +209,25 @@ export async function appendSessionEntry(
     return;
   }
   await world.events.create(sessionRunId(sessionId), data);
+}
+
+/**
+ * Opens an address on `sessionId`'s run: what any process sends to `token` arrives on the run's
+ * log as `hook_received` (`hooks.getByToken`). Written by the session's writer, fenced like its
+ * other writes. Returns the hook's id, which its arrivals name.
+ */
+export async function createSessionHook(
+  world: RuntimeWorld,
+  sessionId: string,
+  token: string,
+  writer?: SessionWriter,
+): Promise<string> {
+  const hookId = `hook_${createUlid()}`;
+  const data = { correlationId: hookId, eventData: { token }, eventType: "hook_created" as const };
+  if (writer?.fenced === true)
+    await fencedCreate(world, sessionId, writer, { ...data, specVersion: FENCED_SPEC });
+  else await world.events.create(sessionRunId(sessionId), data);
+  return hookId;
 }
 
 /** One entry of a session's log. */

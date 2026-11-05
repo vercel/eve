@@ -13,20 +13,40 @@ const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 export interface InProcessTimers {
   /** Resolves at `deadline` (epoch milliseconds), or never once the timers are disposed. */
   until(deadline: number): Promise<void>;
+  /**
+   * The earliest deadline still waited for, if any: when a host that stops before it must be
+   * woken again.
+   */
+  next(): number | undefined;
   /** Clears every pending timer. */
   dispose(): void;
 }
 
 export function createInProcessTimers(now: () => number = Date.now): InProcessTimers {
   const pending = new Set<ReturnType<typeof setTimeout>>();
+  /** Each wait's deadline, by how many wait for it. */
+  const deadlines = new Map<number, number>();
   let disposed = false;
   return {
+    next() {
+      let earliest: number | undefined;
+      for (const deadline of deadlines.keys())
+        if (earliest === undefined || deadline < earliest) earliest = deadline;
+      return earliest;
+    },
     until(deadline) {
+      deadlines.set(deadline, (deadlines.get(deadline) ?? 0) + 1);
+      const settle = (): void => {
+        const left = (deadlines.get(deadline) ?? 1) - 1;
+        if (left === 0) deadlines.delete(deadline);
+        else deadlines.set(deadline, left);
+      };
       return new Promise<void>((resolve) => {
         const arm = (): void => {
           if (disposed) return;
           const remaining = deadline - now();
           if (remaining <= 0) {
+            settle();
             resolve();
             return;
           }

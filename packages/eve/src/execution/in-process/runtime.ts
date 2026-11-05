@@ -88,6 +88,20 @@ export interface InProcessRuntime extends Runtime {
   /** Makes an authored workflow tool's body, its `"use workflow"` function's twin, run here. */
   registerWorkflow(workflowId: string, body: WorkflowFunction): void;
   /**
+   * Starts a session under `sessionId`, whose run its World may hold already (one another
+   * process created, with the session's addresses), as `createSession` starts a new one.
+   */
+  startSession(sessionId: string, input: RunInput): Promise<RunHandle>;
+  /**
+   * Whether every session and run of this runtime's host waits on what arrives next or on a
+   * timer: stopped now (`dispose`), each continues from its World as it is.
+   */
+  quiescent(): Promise<boolean>;
+  /** The earliest timer any session or run of this runtime's host waits on, epoch milliseconds. */
+  nextTimer(): number | undefined;
+  /** Lets running steps finish and starts no other, so `dispose` stops at a step boundary. */
+  drain(): Promise<void>;
+  /**
    * Ends `sessionId` here deliberately: its turn is cancelled, the sessions its runs opened end
    * with it, its sandbox is released, and its stream records the end, in the store too. Resolves
    * once it ended; at once for a session that isn't running here.
@@ -166,7 +180,7 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
         ),
       isBarrierLine,
     );
-    host.onDispose(registerSessionLineStore(sessionId, lines));
+    if (host.servesLines) host.onDispose(registerSessionLineStore(sessionId, lines));
     return writable;
   };
 
@@ -216,46 +230,55 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
     });
   };
 
+  const startSession = async (sessionId: string, input: RunInput): Promise<RunHandle> => {
+    const prepared = await prepareInitialEntry(config, input);
+    const sessionWritable = openStream(sessionId);
+    const boot = await bootInitialOwner(
+      { ...prepared.entry, ownerDeploymentId: host.deploymentId },
+      sessionId,
+      {
+        inboxTransport: inboxes.transportFor(sessionId, { keep: keeperOf(sessionId) }),
+        sessionWritable,
+        async settleContinuationConflict({ command, continuationToken }) {
+          if (inboxes.holder(continuationToken) === undefined)
+            throw new Error(`No session here holds continuation "${continuationToken}".`);
+          await host.deliverCommand(continuationToken, command);
+        },
+        timeouts: timeoutsFor(sessionId),
+      },
+    );
+    if (boot === undefined) {
+      // Another session holds the continuation token, and the message went to it.
+      const holder = inboxes.holder(input.continuationToken ?? "");
+      if (holder === undefined) throw new Error("The session's address is held elsewhere.");
+      return { events: readSessionEventStream(holder), sessionId: holder };
+    }
+    // Saved before the session accepts its first message: as the step it starts with.
+    const record = hostedSession(boot.session);
+    await record.save();
+    run(record, boot.session, boot.inbox);
+    let events: ReadableStream | undefined;
+    return {
+      get events() {
+        return (events ??= readSessionEventStream(sessionId));
+      },
+      sessionId,
+      ...(prepared.input.delivery !== undefined && {
+        deliveryId: prepared.input.delivery.deliveryId,
+      }),
+    };
+  };
+
   return {
-    async createSession(input: RunInput): Promise<RunHandle> {
-      const prepared = await prepareInitialEntry(config, input);
-      const sessionId = `session_${createUlid()}`;
-      const sessionWritable = openStream(sessionId);
-      const boot = await bootInitialOwner(
-        { ...prepared.entry, ownerDeploymentId: host.deploymentId },
-        sessionId,
-        {
-          inboxTransport: inboxes.transportFor(sessionId, { keep: keeperOf(sessionId) }),
-          sessionWritable,
-          async settleContinuationConflict({ command, continuationToken }) {
-            if (inboxes.holder(continuationToken) === undefined)
-              throw new Error(`No session here holds continuation "${continuationToken}".`);
-            await host.deliverCommand(continuationToken, command);
-          },
-          timeouts: timeoutsFor(sessionId),
-        },
-      );
-      if (boot === undefined) {
-        // Another session holds the continuation token, and the message went to it.
-        const holder = inboxes.holder(input.continuationToken ?? "");
-        if (holder === undefined) throw new Error("The session's address is held elsewhere.");
-        return { events: readSessionEventStream(holder), sessionId: holder };
-      }
-      // Saved before the session accepts its first message: as the step it starts with.
-      const record = hostedSession(boot.session);
-      await record.save();
-      run(record, boot.session, boot.inbox);
-      let events: ReadableStream | undefined;
-      return {
-        get events() {
-          return (events ??= readSessionEventStream(sessionId));
-        },
-        sessionId,
-        ...(prepared.input.delivery !== undefined && {
-          deliveryId: prepared.input.delivery.deliveryId,
-        }),
-      };
-    },
+    createSession: async (input: RunInput) => await startSession(`session_${createUlid()}`, input),
+
+    startSession,
+
+    quiescent: () => host.quiescent(),
+
+    nextTimer: () => timers.next(),
+
+    drain: () => host.drain(),
 
     async dispatchContinuation<TCommand extends SessionCommand>(
       input: DispatchContinuationInput<TCommand>,

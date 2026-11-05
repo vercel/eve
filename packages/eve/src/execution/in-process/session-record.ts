@@ -72,6 +72,11 @@ export class HostedSession implements SessionRecorder {
     this.nextSeq = input.inputs?.next ?? 0;
   }
 
+  /** The session this records. */
+  get sessionId(): string {
+    return this.input.boot.sessionId;
+  }
+
   suspended(): boolean {
     return this.input.suspended();
   }

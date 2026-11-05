@@ -136,6 +136,8 @@ export interface InProcessRuns {
   finished(sessionId: string): Promise<readonly string[]>;
   /** Makes a workflow tool's body available to runs here, under its `workflowId`. */
   registerWorkflow(workflowId: string, body: WorkflowFunction): void;
+  /** The runs here whose bodies haven't returned, with what each is to its session. */
+  active(): readonly { readonly runId: string; readonly kind: InProcessRunRecord["kind"] }[];
   /**
    * Runs once more, under its id, a subagent's run an earlier process left. Its session heard
    * `heard` messages from it already, which it doesn't send again.
@@ -307,6 +309,11 @@ export function createInProcessRuns(host: InProcessRunsHost): InProcessRuns {
     registerWorkflow(workflowId, body) {
       bodies.set(workflowId, body);
     },
+
+    active: () =>
+      [...runs.values()]
+        .filter((run) => !run.ended)
+        .map(({ record }) => ({ kind: record.kind, runId: record.runId })),
   };
 }
 
