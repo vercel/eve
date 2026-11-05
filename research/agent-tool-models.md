@@ -46,6 +46,11 @@ export default agent({
 today's default tool. The model-facing schema has no `model` property, and the
 child inherits the current model. The parent model never sees a model option.
 
+"Inherits the current model" means the child opens with no model override, so
+it resolves the root agent's own model configuration. For a static model, that
+is the parent's model. For a dynamic model such as `auto()`, the child runs the
+same resolver on its own turns, so `auto()` routes on the delegated message.
+
 ### With `models`
 
 - The model-facing input is `{ message, model?, taskId? }`. `model` is an enum
@@ -175,8 +180,16 @@ with `const` and `description` where providers accept them).
 - Integration: a `LanguageModel` instance option survives workflow replay.
 - Subagent sessions never receive the configured tool.
 
-## Open questions
+## Deferred: pin the parent's resolved model
 
-- "Inherits the current model": should the child pin the parent's resolved
-  model for the current turn, or resolve the shared root configuration again?
-  The two differ only when the root model is dynamic, such as `auto()`.
+Pinning the child to the exact model the parent resolved for the current turn
+differs from the above only when the root model is dynamic. It is deferred
+because it needs two things that do not exist today:
+
+- The serve workflow cannot see the parent's resolved model. Workflow tool
+  context exposes no current-model value.
+- A dynamic resolver can return a live `LanguageModel`, and durable model
+  selections reject provider objects. Pinning it would need a source-backed
+  reference to the resolver's choice, such as the memoized `auto()` option key.
+
+Reconsider it if routing the child again with `auto()` proves wrong in practice.
