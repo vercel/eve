@@ -121,7 +121,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
             role="tab"
             type="button"
           >
-            {option.name}
+            <span className="font-medium">{option.name}</span>
             <PlanBadge customer={option} />
           </button>
         ))}
