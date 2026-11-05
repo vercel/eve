@@ -153,10 +153,11 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
 
   const board = (
     <div className="relative">
-      {/* Grid line aligned with the card header's border-b, fading out at the edges. */}
+      {/* Grid line on the card header's border-b (47px: the card's edge is a shadow, not a
+          border, so the divider sits 1px higher than h-12), fading out at the edges. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute top-12 -right-4 -left-4 h-px sm:-right-14 sm:-left-14"
+        className="pointer-events-none absolute top-[47px] -right-4 -left-4 h-px sm:-right-14 sm:-left-14"
         style={{
           background:
             "linear-gradient(to right, transparent, var(--ds-gray-400) 7.5%, var(--ds-gray-400) 92.5%, transparent)",
