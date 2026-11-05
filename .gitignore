@@ -27,6 +27,7 @@ packages/eve/.workflow-vitest/
 packages/eve/.generated/
 packages/eve/src/extensions/code/extension/
 packages/eve/src/extensions/git/extension/
+packages/eve/src/extensions/board/extension/
 packages/eve/src/computer-use/extension/
 playwright-report/
 test-results/

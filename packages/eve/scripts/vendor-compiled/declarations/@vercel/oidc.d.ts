@@ -12,6 +12,11 @@ export interface GetVercelOidcTokenOptions {
   project?: string;
   /** Buffer in milliseconds before token expiry that triggers a refresh. */
   expirationBufferMs?: number;
+  /**
+   * Exchanges the token for one whose `aud` is this value, through
+   * `https://oidc.vercel.com/~token`. The exchanged token is cached until it expires.
+   */
+  audience?: string;
 }
 
 /**

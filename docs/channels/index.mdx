@@ -99,22 +99,23 @@ eve's first-class channels handle webhooks, verification, event parsing, and thr
 
 ## Which channel?
 
-| You want…                                   | Use                                                              |
-| ------------------------------------------- | ---------------------------------------------------------------- |
-| A web app / browser chat UI                 | eve channel + [`useEveAgent`](/docs/guides/frontend)             |
-| Local tooling, SDK clients, `curl`          | [eve HTTP channel](/docs/channels/eve) (default)                 |
-| MCP clients handing off long-running work   | [MCP](/docs/channels/mcp)                                        |
-| Slack mentions, DMs, buttons                | [Slack](/docs/channels/slack)                                    |
-| iMessage and SMS                            | [Linq](/docs/channels/linq)                                      |
-| iMessage                                    | [Photon](/docs/channels/photon)                                  |
-| Discord messages, DMs, slash commands       | [Discord](/docs/channels/discord)                                |
-| Microsoft Teams messages + Adaptive Cards   | [Teams](/docs/channels/teams)                                    |
-| Telegram bot messages                       | [Telegram](/docs/channels/telegram)                              |
-| SMS or speech-transcribed phone calls       | [Twilio](/docs/channels/twilio)                                  |
-| GitHub @mentions, PR review with checkout   | [GitHub](/docs/channels/github)                                  |
-| Linear issue delegation and Agent Sessions  | [Linear](/docs/channels/linear)                                  |
-| Another Chat SDK-supported service          | [Chat SDK adapters](/docs/channels/chat-sdk)                     |
-| Anything else (internal webhook, WebSocket) | [Custom channel](/docs/channels/custom) (`defineChannel`, above) |
+| You want…                                       | Use                                                              |
+| ----------------------------------------------- | ---------------------------------------------------------------- |
+| A web app / browser chat UI                     | eve channel + [`useEveAgent`](/docs/guides/frontend)             |
+| Local tooling, SDK clients, `curl`              | [eve HTTP channel](/docs/channels/eve) (default)                 |
+| MCP clients handing off long-running work       | [MCP](/docs/channels/mcp)                                        |
+| Slack mentions, DMs, buttons                    | [Slack](/docs/channels/slack)                                    |
+| iMessage and SMS                                | [Linq](/docs/channels/linq)                                      |
+| iMessage                                        | [Photon](/docs/channels/photon)                                  |
+| Discord messages, DMs, slash commands           | [Discord](/docs/channels/discord)                                |
+| Microsoft Teams messages + Adaptive Cards       | [Teams](/docs/channels/teams)                                    |
+| Telegram bot messages                           | [Telegram](/docs/channels/telegram)                              |
+| SMS or speech-transcribed phone calls           | [Twilio](/docs/channels/twilio)                                  |
+| GitHub @mentions, PR review with checkout       | [GitHub](/docs/channels/github)                                  |
+| Linear issue delegation and Agent Sessions      | [Linear](/docs/channels/linear)                                  |
+| A team's `@vercel/board` and its synced threads | [Board](/docs/channels/board)                                    |
+| Another Chat SDK-supported service              | [Chat SDK adapters](/docs/channels/chat-sdk)                     |
+| Anything else (internal webhook, WebSocket)     | [Custom channel](/docs/channels/custom) (`defineChannel`, above) |
 
 ## Disclaimer
 
@@ -127,7 +128,7 @@ Where an eve agent communicates with people, the law may require you to disclose
 - [eve HTTP channel](/docs/channels/eve): the default session API behind the TUI, SDK clients, and browser UIs
 - [Slack](/docs/channels/slack): the most common platform channel, end to end
 - [MCP](/docs/channels/mcp): let MCP clients hand long-running work to the agent
-- [Linq](/docs/channels/linq), [Photon](/docs/channels/photon), [Discord](/docs/channels/discord), [Teams](/docs/channels/teams), [Telegram](/docs/channels/telegram), [Twilio](/docs/channels/twilio), [GitHub](/docs/channels/github), and [Linear](/docs/channels/linear): the other first-class platform channels
+- [Linq](/docs/channels/linq), [Photon](/docs/channels/photon), [Discord](/docs/channels/discord), [Teams](/docs/channels/teams), [Telegram](/docs/channels/telegram), [Twilio](/docs/channels/twilio), [GitHub](/docs/channels/github), [Linear](/docs/channels/linear), and [Board](/docs/channels/board): the other first-class platform channels
 - [Chat SDK adapters](/docs/channels/chat-sdk): reach services eve has no first-class channel for
 - [Custom channels](/docs/channels/custom): build a channel for any surface with `defineChannel`
 - [Durable cross-channel notifications](/docs/patterns/durable-cross-channel-notifications): post to another platform without starting an agent turn

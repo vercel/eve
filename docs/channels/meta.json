@@ -12,6 +12,7 @@
     "linear",
     "teams",
     "twilio",
+    "board",
     "chat-sdk",
     "mcp",
     "custom"

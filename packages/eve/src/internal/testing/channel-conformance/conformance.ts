@@ -16,6 +16,7 @@ import {
   chatSdkDriver,
   chatSdkTextDriver,
 } from "#internal/testing/channel-conformance/chat-sdk-driver.js";
+import { boardDriver } from "#internal/testing/channel-conformance/board-driver.js";
 import { discordDriver } from "#internal/testing/channel-conformance/discord-driver.js";
 import { githubDriver } from "#internal/testing/channel-conformance/github-driver.js";
 import { linearDriver } from "#internal/testing/channel-conformance/linear-driver.js";
@@ -241,6 +242,15 @@ const channelConformance = {
       dm: true,
       driver: () => discordDriver("private", "gateway"),
       broken: DISCORD_GATEWAY_BROKEN,
+    },
+  ],
+  board: [
+    {
+      driver: boardDriver,
+      unsupported: signInKeptPrivate(
+        "a shared board thread gets a status saying where to connect, since nothing on a board is private to one person",
+        ...SIGN_IN_SHOWN_RULES,
+      ),
     },
   ],
   github: [

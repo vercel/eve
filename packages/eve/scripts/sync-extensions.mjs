@@ -1,7 +1,8 @@
 /**
  * Copies the private extension packages into eve's `src/`
  * so eve compiles and ships them as built-in extensions: `@eve/code` becomes
- * `eve/extensions/code`, `@eve/git` becomes `eve/extensions/git`, and
+ * `eve/extensions/code`, `@eve/git` becomes `eve/extensions/git`, `@eve/board` becomes
+ * `eve/extensions/board`, and
  * `@eve/computer-use` becomes `eve/extensions/computer-use`. The
  * packages stay the source of truth; the copies are gitignored. eve cannot
  * depend on them (they depend on eve), so the sibling workspace paths are read
@@ -25,6 +26,11 @@ export const builtInExtensions = [
     name: "git",
     source: join(packageRoot, "..", "eve-git", "extension"),
     target: join(packageRoot, "src", "extensions", "git", "extension"),
+  },
+  {
+    name: "board",
+    source: join(packageRoot, "..", "eve-board", "extension"),
+    target: join(packageRoot, "src", "extensions", "board", "extension"),
   },
   {
     name: "computer-use",

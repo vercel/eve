@@ -7,7 +7,11 @@ import {
   type SpanContext,
 } from "#compiled/@opentelemetry/api/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
-import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
+import {
+  getChannelInstrumentationKind,
+  getChannelStartHook,
+  type ChannelStartContext,
+} from "#channel/compiled-channel.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
@@ -104,6 +108,7 @@ export async function dispatchChannelRequest(
 
     try {
       return await withDevelopmentVercelOidcContext(config, event.req, async () => {
+        startChannels(bundle, { request: event.req, waitUntil: args.waitUntil });
         if (matchedChannel.handler) {
           // Authored CompiledChannel route — build RouteHandlerArgs.
           return await matchedChannel.handler(event.req, args);
@@ -184,6 +189,28 @@ export async function dispatchChannelWebSocketRequest(
       { error: "Channel websocket handler failed.", errorId, ok: false },
       500,
     );
+  }
+}
+
+// Keyed by channel definition: a reloaded runtime brings new definitions, which start again.
+const startedChannels = new WeakSet<object>();
+
+/** Runs each channel's start hook once per loaded runtime, on its first request. */
+function startChannels(
+  bundle: Awaited<ReturnType<typeof resolveNitroChannelRuntimeBundle>>,
+  ctx: ChannelStartContext,
+): void {
+  for (const channel of bundle.channels) {
+    const definition = channel.definition;
+    if (definition === undefined || startedChannels.has(definition)) continue;
+    startedChannels.add(definition);
+    const hook = getChannelStartHook(definition);
+    if (hook === undefined) continue;
+    try {
+      hook(ctx);
+    } catch (error) {
+      logError(log, "channel start hook threw", error, { channel: channel.name });
+    }
   }
 }
 
