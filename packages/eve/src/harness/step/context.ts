@@ -23,6 +23,7 @@ import {
   type Transition,
 } from "#harness/session-machine/commit.js";
 import { recordAppliedSession, type StepProjection } from "#harness/session-machine/current.js";
+import { changeHistory } from "#harness/session-machine/history.js";
 import { fail, receive } from "#harness/session-machine/transitions.js";
 import { withClientContext, type Prompt } from "#harness/step/prompt.js";
 import {
@@ -165,7 +166,8 @@ export async function openTurn(
 
 /**
  * Before a model call: the session's dynamic values are evaluated with the conversation the call
- * reads. A value that fails fails the turn; returns the step's result then.
+ * reads. A value that fails fails the turn; returns the step's result then. The turn's input joins
+ * history first, as it does before a model call that fails, so the session's next turn reads it.
  */
 export async function prepareModelCall(
   step: Step,
@@ -177,6 +179,7 @@ export async function prepareModelCall(
     await evaluateStepValues(step, { abortSignal: step.config.abortSignal, conversation });
   } catch (error) {
     if (!(error instanceof DefinitionFailedError)) throw error;
+    step.session = changeHistory(step.session, { extend: preview.messages });
     return failTurn(step, error, "REACTION_FAILED");
   }
   return undefined;
