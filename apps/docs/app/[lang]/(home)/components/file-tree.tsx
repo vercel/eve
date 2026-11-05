@@ -33,7 +33,7 @@ interface Snippet {
   /** For a dynamic file: what it resolves to for each example tenant. */
   tenants?: Tenant[];
   /** For a dynamic file: the 1-based lines of each plan's branch, tinted in its badge color. */
-  planLines?: { enterprise: number[]; hobby: number[] };
+  planLines?: { enterprise: number[]; pro: number[] };
 }
 
 interface Tenant {
@@ -224,10 +224,10 @@ export default defineEval({
 ];
 
 // The same agent made multi-tenant: a support agent whose files are defineDynamic functions,
-// so enterprise customers get faster, escalated support and hobby customers get the basics.
+// so enterprise customers get faster, escalated support and pro customers get the basics.
 // Each file shows what it resolves to for one customer on each plan.
 const ACME = { name: "Acme", plan: "Enterprise" };
-const JAMIE = { name: "Jamie", plan: "Hobby" };
+const JAMIE = { name: "Jamie", plan: "Pro" };
 
 const tenantSnippets: Snippet[] = [
   {
@@ -237,7 +237,7 @@ const tenantSnippets: Snippet[] = [
     lang: "typescript",
     NavIcon: IconFileText,
     description:
-      "Tell the agent how to support each customer. Enterprise customers get a one-hour SLA; hobby customers start with the docs.",
+      "Tell the agent how to support each customer. Enterprise customers get a one-hour SLA; Pro customers start with the docs.",
     code: `import { defineDynamic, defineInstructions }
   from "eve/instructions";
 
@@ -250,7 +250,7 @@ export default defineDynamic((ctx) => {
       : "Point to the docs and community forum first.",
   });
 });`,
-    planLines: { enterprise: [9], hobby: [10] },
+    planLines: { enterprise: [9], pro: [10] },
     tenants: [
       { ...ACME, result: "1-hour SLA, escalate when stuck" },
       { ...JAMIE, result: "Docs and community first" },
@@ -273,7 +273,7 @@ export default defineAgent({
       : "zai/glm-5.2",
   ),
 });`,
-    planLines: { enterprise: [7], hobby: [8] },
+    planLines: { enterprise: [7], pro: [8] },
     tenants: [
       { ...ACME, result: "Larger model" },
       { ...JAMIE, result: "Default model" },
@@ -298,7 +298,7 @@ export default defineDynamic((ctx) =>
       })
     : null,
 );`,
-    planLines: { enterprise: [6, 7, 8, 9], hobby: [10] },
+    planLines: { enterprise: [6, 7, 8, 9], pro: [10] },
     tenants: [
       { ...ACME, result: "Second-level support engineer" },
       { ...JAMIE, result: "None" },
@@ -326,7 +326,7 @@ export default defineDynamic((ctx) =>
       })
     : null,
 );`,
-    planLines: { enterprise: [9, 10, 11, 12, 13], hobby: [14] },
+    planLines: { enterprise: [9, 10, 11, 12, 13], pro: [14] },
     tenants: [
       { ...ACME, result: "Can page on-call" },
       { ...JAMIE, result: "None" },
@@ -347,9 +347,9 @@ export async function FileTree() {
           transformers: [
             {
               line(node, line) {
-                const { enterprise = [], hobby = [] } = snippet.planLines ?? {};
+                const { enterprise = [], pro = [] } = snippet.planLines ?? {};
                 if (enterprise.includes(line)) node.properties["data-plan"] = "enterprise";
-                else if (hobby.includes(line)) node.properties["data-plan"] = "hobby";
+                else if (pro.includes(line)) node.properties["data-plan"] = "pro";
               },
             },
           ],
@@ -369,7 +369,7 @@ export async function FileTree() {
                   "[&_pre]:overflow-x-hidden! [&_code]:w-full! [&_code]:min-w-0! [&_code]:[grid-template-columns:minmax(0,1fr)]! [&_.line]:whitespace-pre-wrap [&_.line]:[overflow-wrap:anywhere]",
                   // Each plan's branch in a multi-tenant file, tinted like its plan badge and marked on
                   // the left the way Geist code blocks mark a highlighted line.
-                  "[&_.line[data-plan=enterprise]]:bg-purple-100 [&_.line[data-plan=enterprise]]:shadow-[inset_2px_0_0_0_var(--ds-purple-800)] [&_.line[data-plan=hobby]]:bg-gray-100 [&_.line[data-plan=hobby]]:shadow-[inset_2px_0_0_0_var(--ds-gray-800)]",
+                  "[&_.line[data-plan=enterprise]]:bg-purple-100 [&_.line[data-plan=enterprise]]:shadow-[inset_2px_0_0_0_var(--ds-purple-800)] [&_.line[data-plan=pro]]:bg-blue-100 [&_.line[data-plan=pro]]:shadow-[inset_2px_0_0_0_var(--ds-blue-800)]",
                 )}
               >
                 {children}
