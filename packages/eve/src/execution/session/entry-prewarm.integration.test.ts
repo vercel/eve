@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AnyEventRequest } from "@workflow/world";
 import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";
-import { startSessionOwner, waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import {
+  startSessionOwner,
+  waitForHook,
+  waitForHookOwner,
+} from "#internal/testing/workflow-test-helpers.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
@@ -15,7 +19,7 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
 import { defineHook } from "#public/definitions/hook.js";
@@ -193,7 +197,7 @@ describe("prewarm handoff while the prewarm step runs", () => {
         // Without the hold, the session moves within a few hundred milliseconds.
         const until = Date.now() + 2_000;
         while (Date.now() < until) {
-          expect((await waitForCommandHookOwner(token)).runId).toBe(run.runId);
+          expect((await waitForHookOwner(token)).runId).toBe(run.runId);
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
 
@@ -258,7 +262,7 @@ describe("idle session prewarm handoff", () => {
         return await createEvent(...args);
       });
       try {
-        await waitForCommandHookOwner(token);
+        await waitForHookOwner(token);
         // A session moves only once its prewarm step has started the sandbox.
         await waitForPrewarmStep(anchor.runId);
         await resumeHook(token, {
@@ -284,7 +288,7 @@ describe("idle session prewarm handoff", () => {
             data: expect.objectContaining({ value: expect.stringContaining("Alice writes") }),
           }),
         );
-        expect((await waitForCommandHookOwner(token)).runId).not.toBe(anchor.runId);
+        expect((await waitForHookOwner(token)).runId).not.toBe(anchor.runId);
         await workflowRuntime.dispatchSession({
           sessionId: anchor.runId,
           command: { deliveryId: "reset-delivery", kind: "reset" },
@@ -325,7 +329,7 @@ describe("idle session prewarm handoff", () => {
         const token = sessionInboxHookToken(sessionCommandHookToken(anchor.runId));
         let successorId: string | undefined;
         try {
-          await waitForCommandHookOwner(token);
+          await waitForHookOwner(token);
           if (conversation) {
             await stream.nextTurn();
             await waitForParkedTurnStep(anchor.runId);
@@ -344,7 +348,7 @@ describe("idle session prewarm handoff", () => {
           });
           await vi.waitFor(
             async () => {
-              successorId = (await waitForCommandHookOwner(token)).runId;
+              successorId = (await waitForHookOwner(token)).runId;
               expect(successorId).not.toBe(anchor.runId);
             },
             { timeout: 10_000 },
@@ -408,7 +412,7 @@ describe("idle session prewarm handoff", () => {
               : []),
             expect.stringContaining("Alice confirms the research milestone."),
           ]);
-          expect((await waitForCommandHookOwner(token)).runId).toBe(successorId);
+          expect((await waitForHookOwner(token)).runId).toBe(successorId);
           expect(await deadline(successorId!)).toEqual(preparedDeadline);
           await workflowRuntime.dispatchSession({
             sessionId: anchor.runId,

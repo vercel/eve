@@ -17,7 +17,7 @@ On the local and Postgres worlds, a new build on the same eve version resumes ex
 
 All three support compaction handoff, which moves a session to a fresh run while keeping its ID, event stream, and addresses; the Postgres world needs `@workflow/world-postgres` 5.0.4 or later. Vercel Workflow also supports moving eligible idle sessions between deployments. See [Execution model and durability](../../concepts/execution-model-and-durability#compaction-handoff).
 
-A new session takes its channel address as it starts on all three worlds; the Postgres world needs 5.1.1 or later. Racing first messages to an address then reach one session, and [`create()`](../../channels/eve#start-from-prior-history) doesn't wait for the session to boot.
+eve needs a world with atomic start hooks, so a new session takes its channel address as it starts. All three worlds provide them; the Postgres world needs `@workflow/world-postgres` 5.1.1 or later. On a world without them, starting a session fails with an error that names this requirement.
 
 ## Use the local world
 

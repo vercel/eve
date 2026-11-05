@@ -142,7 +142,7 @@ A direct call doesn't go through the AI SDK. AI SDK telemetry integrations regis
 
 ## Channel operations and session handles
 
-Channel operations reach whichever session currently uses the address. `create()` and `send()` create a session when no session uses it. When two sends to a new address race, one session takes the address, eve forwards the other message to it, and both handles name that session. On a [Workflow world](../guides/deployment/workflow-worlds) where a session can't take its address as it starts, an unkeyed send's handle can name the session that lost. Call `resolveSession(address)` after startup to get the session that won.
+Channel operations reach whichever session currently uses the address. `create()` and `send()` create a session when no session uses it. When two sends to a new address race, one session takes the address, eve forwards the other message to it, and both handles name that session.
 
 ```ts
 const source = from(threadId);

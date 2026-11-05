@@ -1,11 +1,14 @@
 import type { World } from "#compiled/@workflow/world/index.js";
 
 /**
- * Whether `start()` can claim a hook token atomically with admitting the run,
- * so a duplicate start is refused instead of becoming a run.
+ * Every session start claims its address atomically with admitting the run,
+ * so a duplicate start is refused instead of becoming a second session.
  */
-export function supportsStartClaims(world: World): boolean {
-  return world.capabilities?.atomicStartHook?.active === true;
+export function assertStartClaims(world: World): void {
+  if (world.capabilities?.atomicStartHook?.active === true) return;
+  throw new Error(
+    "The configured Workflow world does not support atomic start hooks, which eve needs to start a session. Use the local world, Vercel Workflow, or @workflow/world-postgres 5.1.1 or later.",
+  );
 }
 
 /**

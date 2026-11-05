@@ -613,7 +613,7 @@ export interface RunHandle {
   /**
    * For a start with a continuation token: `true` when this start's run took
    * the address, `false` when a session already held it and `sessionId` names
-   * that session. Absent when the owner is only known once the run boots.
+   * that session. Absent for a start without one.
    */
   readonly claimedContinuation?: boolean;
 }
@@ -640,16 +640,6 @@ export interface Runtime {
   dispatchContinuation<TCommand extends SessionCommand>(
     input: DispatchContinuationInput<TCommand>,
   ): Promise<SessionCommandResult<TCommand>>;
-
-  /**
-   * Whether {@link createSession} with a continuation token claims that
-   * address as the run starts. When it does, a start that finds the address
-   * owned creates no run: a send reaches the owner as its
-   * `continuationConflictCommand`, and any other start names the owner. A
-   * caller can then start without first dispatching to the address. Absent
-   * means `false`.
-   */
-  claimsContinuationAtStart?(): Promise<boolean>;
 
   /**
    * Sends a command to one exact session. A send or `clear` to a stranded

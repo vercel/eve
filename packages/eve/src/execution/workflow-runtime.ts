@@ -35,7 +35,6 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import { formatCapabilityError } from "#internal/capability-error.js";
 import {
-  getHookByToken,
   getRun,
   getWorld,
   start,
@@ -44,7 +43,7 @@ import {
   type WorkflowFunction,
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
-import { pinRunId, supportsStartClaims } from "#internal/workflow/start-claim.js";
+import { assertStartClaims, pinRunId } from "#internal/workflow/start-claim.js";
 import type { SessionPredecessor } from "#protocol/session-events/families/session.js";
 import { SessionPredecessorKey } from "#context/keys.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -73,16 +72,12 @@ import {
 } from "#execution/session-inbox/address.js";
 import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import { endStrandedSession } from "#execution/session-inbox/end-stranded-session.js";
-import {
-  SESSION_HOOK_HANDOVER_TIMEOUT_MS,
-  waitForSessionHooksRelease,
-} from "#execution/session-inbox/hook-release.js";
+import { waitForSessionHooksRelease } from "#execution/session-inbox/hook-release.js";
 import {
   AcceptedSessionIdentityError,
   resolveSessionInbox,
   logicalSessionToken,
   resumeSessionInbox,
-  SessionHandoffPendingError,
 } from "#execution/session-inbox/resume.js";
 import {
   assertRunnableSessionInbox,
@@ -271,10 +266,9 @@ export function createWorkflowRuntime(config: {
     // The run claims one address as it is admitted. A continuation address
     // tells the caller at once whether this run or an earlier one owns it.
     // Without one, the session's own inbox takes commands before the run boots.
+    assertStartClaims(await getWorld());
     const hasContinuation = continuationToken !== undefined && continuationToken !== "";
-    const claimsAtStart = supportsStartClaims(await getWorld());
-    const claimsContinuation = claimsAtStart && hasContinuation;
-    if (claimsAtStart) workflowInput.startClaim = hasContinuation ? "continuation" : "inbox";
+    workflowInput.startClaim = hasContinuation ? "continuation" : "inbox";
 
     let run: Awaited<ReturnType<typeof startWorkflowOnCurrentDeployment>>;
     try {
@@ -288,17 +282,15 @@ export function createWorkflowRuntime(config: {
         [workflowInput],
         workflowInput.ownerDeploymentId,
         startOptions,
-        claimsAtStart
-          ? (runId) => ({
-              token: sessionInboxHookToken(
-                hasContinuation ? continuationToken : sessionCommandHookToken(runId),
-              ),
-              metadata: { [SESSION_INBOX_SESSION_ID_METADATA_KEY]: runId },
-            })
-          : undefined,
+        (runId) => ({
+          token: sessionInboxHookToken(
+            hasContinuation ? continuationToken : sessionCommandHookToken(runId),
+          ),
+          metadata: { [SESSION_INBOX_SESSION_ID_METADATA_KEY]: runId },
+        }),
       );
     } catch (error) {
-      if (claimsContinuation && HookConflictError.is(error)) {
+      if (hasContinuation && HookConflictError.is(error)) {
         return await joinContinuationOwner(input, predecessor, attempt);
       }
       log.error("failed to start workflow run", {
@@ -307,22 +299,7 @@ export function createWorkflowRuntime(config: {
       throw error;
     }
 
-    if (claimsContinuation) return sessionHandle(run.runId, input.delivery?.deliveryId, true);
-    let sessionId = run.runId;
-    if (input.idempotencyKey !== undefined && continuationToken !== undefined) {
-      // Without start claims, keyed contenders must wait to learn the winning session.
-      const owner = await pollUntil(
-        () => resolveContinuation(continuationToken),
-        SESSION_HOOK_HANDOVER_TIMEOUT_MS,
-      );
-      if (owner === undefined) {
-        throw new Error(
-          "Delivery accepted, but its session identity is not ready. Retry with the same idempotencyKey.",
-        );
-      }
-      sessionId = owner.sessionId;
-    }
-    return sessionHandle(sessionId, input.delivery?.deliveryId);
+    return sessionHandle(run.runId, input.delivery?.deliveryId, hasContinuation ? true : undefined);
   };
 
   /**
@@ -389,10 +366,6 @@ export function createWorkflowRuntime(config: {
     },
 
     dispatchContinuation,
-
-    async claimsContinuationAtStart(): Promise<boolean> {
-      return supportsStartClaims(await getWorld());
-    },
 
     async dispatchSession<TCommand extends SessionCommand>(
       input: DispatchSessionInput<TCommand>,
@@ -467,18 +440,15 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   } catch (error) {
     // Each entry point decides what a stranded owner means for its caller.
     if (error instanceof StrandedSessionOwnerError) throw error;
-    // A send by session id to a session that still exists asks the caller to
-    // retry rather than reporting the session gone.
-    const sendBySessionId = command.kind === "send" && typeof token !== "string";
-    const retryLater = { status: "session_not_active", retryable: true };
-    // The address is owned, so it must never read as absent to a channel.
-    if (error instanceof SessionHandoffPendingError) {
-      if (sendBySessionId) return retryLater as SessionCommandResult<TCommand>;
-      throw error;
-    }
     if (isInactiveCommandTarget(error)) {
-      if (sendBySessionId && (await isRunActive(token.sessionId))) {
-        return retryLater as SessionCommandResult<TCommand>;
+      // A send by session id to a session that still exists asks the caller to
+      // retry rather than reporting the session gone.
+      if (
+        command.kind === "send" &&
+        typeof token !== "string" &&
+        (await isRunActive(token.sessionId))
+      ) {
+        return { status: "session_not_active", retryable: true } as SessionCommandResult<TCommand>;
       }
       return inactiveCommandResult(command);
     }
@@ -657,43 +627,6 @@ export async function resolveContinuation(
 }
 
 /**
- * Resolves hook ownership for replay-idempotent work already running inside a
- * durable step. Request handlers must return from start/resume acceptance and
- * leave ownership arbitration to the workflow.
- */
-export async function waitForCommandHookOwner(token: string): Promise<WorkflowHookRecord> {
-  const owner = await pollUntil(async () => {
-    try {
-      return normalizeWorkflowHook(await getHookByToken(token));
-    } catch (error) {
-      if (!HookNotFoundError.is(error)) throw error;
-      return undefined;
-    }
-  }, SESSION_HOOK_HANDOVER_TIMEOUT_MS);
-  if (owner === undefined) throw new HookNotFoundError(token);
-  return owner;
-}
-
-/**
- * Waits until a started session claims its inbox, which it does when its run
- * first suspends. Resolves `false` when the run ended without an inbox, so
- * there is nothing left to command.
- */
-export async function waitForSessionInbox(sessionId: string): Promise<boolean> {
-  const token = sessionInboxHookToken(sessionCommandHookToken(sessionId));
-  const opened = await pollUntil(async () => {
-    if ((await findSessionHookHolder(token)) !== undefined) return true;
-    return (await hasRunEnded(sessionId)) ? false : undefined;
-  }, SESSION_HOOK_HANDOVER_TIMEOUT_MS);
-  if (opened === undefined) {
-    throw new Error(
-      `Session "${sessionId}" did not start taking commands within ${SESSION_HOOK_HANDOVER_TIMEOUT_MS / 1000} seconds.`,
-    );
-  }
-  return opened;
-}
-
-/**
  * Calls `check` until it returns a value, backing off from 20 ms to 200 ms
  * between calls, and resolves `undefined` once `timeoutMs` passes without one.
  */
@@ -741,7 +674,7 @@ export async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], 
  * The hook the run holds from its admission, given the id of the run the
  * start creates. A run that already holds the token refuses the start with
  * `HookConflictError` naming that run, and no run is created. Requires a
- * World where {@link supportsStartClaims} holds.
+ * World that passes {@link assertStartClaims}.
  */
 type StartClaim = (runId: string) => { readonly token: string; readonly metadata?: unknown };
 
@@ -803,21 +736,6 @@ async function withWorkflowStartContext<TResult>(callback: () => Promise<TResult
     ? trace.deleteSpan(activeContext)
     : activeContext;
   return await context.with(workflowContext, callback);
-}
-
-function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {
-  if (value === null || typeof value !== "object" || !("runId" in value)) {
-    throw new Error("Workflow hook did not include a run id.");
-  }
-
-  const runId = (value as { runId?: unknown }).runId;
-  if (typeof runId !== "string" || runId.length === 0) {
-    throw new Error("Workflow hook did not include a run id.");
-  }
-
-  return {
-    runId,
-  };
 }
 
 /** Assign the delivery before accepting it, so replay and the sender name the same facts. */

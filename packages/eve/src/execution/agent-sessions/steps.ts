@@ -28,9 +28,7 @@ import {
 import {
   createWorkflowRuntime,
   dispatchWorkflowSessionCommand,
-  waitForCommandHookOwner,
   resolveContinuation,
-  waitForSessionInbox,
 } from "#execution/workflow-runtime.js";
 import type { SessionCommand, SessionCommandResult } from "#channel/types.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -356,10 +354,10 @@ type LocalAgentSession = OpenedAgentSession & {
 };
 
 /**
- * Sends a command to a local session. A session opens without waiting for its
- * run to claim its inbox, so a command it refuses before then waits for it.
- * A duplicate start of the session can claim it instead of the run the open
- * recorded, and the command then goes to the session holding its continuation.
+ * Sends a command to a local session. Its start claimed its address, so it
+ * takes commands before it boots and a refusal means it ended. A session
+ * opened by an earlier eve may have lost its address to a duplicate start,
+ * and the command then goes to the session holding its continuation.
  */
 async function commandLocalSession<TCommand extends SessionCommand>(
   opened: LocalAgentSession,
@@ -368,10 +366,8 @@ async function commandLocalSession<TCommand extends SessionCommand>(
   const { continuationToken, sessionId } = opened.address;
   const result = await dispatchWorkflowSessionCommand({ command, sessionId });
   if (result.status === "accepted" || result.status === "reset") return result;
-  const current = (await waitForSessionInbox(sessionId))
-    ? sessionId
-    : (await resolveContinuation(continuationToken))?.sessionId;
-  if (current === undefined) return result;
+  const current = (await resolveContinuation(continuationToken))?.sessionId;
+  if (current === undefined || current === sessionId) return result;
   return await dispatchWorkflowSessionCommand({ command, sessionId: current });
 }
 
@@ -433,23 +429,15 @@ async function startLocalSession(
         toolStubs: childToolStubs,
       }),
   );
-  // Waiting for the run to claim the session would hold the caller for the
-  // child's boot. A claimed start already names the owner; otherwise a retried
-  // attempt may have started a second run, so it waits to learn which run
-  // claimed the session, and later commands resolve it again.
-  let sessionId = started.sessionId;
-  if (started.claimedContinuation === undefined && getStepMetadata().attempt > 1) {
-    ({ runId: sessionId } = await waitForCommandHookOwner(
-      sessionInboxHookToken(childContinuationToken),
-    ));
-  }
+  // The start claims the child's address, so a retried attempt is refused and
+  // names the run an earlier attempt started.
   return {
     address: {
       continuationToken: childContinuationToken,
       kind: "local",
       name: action.name,
       nodeId: action.nodeId,
-      sessionId,
+      sessionId: started.sessionId,
     },
     deliveryId,
   };

@@ -210,20 +210,11 @@ export function createChannelAddress<TState = undefined>(input: {
         requestId: metadata.requestId,
         title: options.title,
       });
-      if (started.claimedContinuation !== undefined) {
-        return { created: started.claimedContinuation, session: toSession(started.sessionId) };
-      }
-      // The new run claims the address once it boots, and a concurrent `create()` or `send()`
-      // may claim it first. Waiting for the owner lets an immediate `send()` find it, and tells
-      // the caller whether its history landed: a losing run exits without forwarding anything.
-      const claimed = await waitForContinuationOwner(
-        input.runtime,
-        namespacedToken,
-        started.sessionId,
-      );
+      // The start claims the address, so a concurrent `create()` or `send()` that took it first
+      // comes back as the owner, without this call's history.
       return {
-        created: claimed.sessionId === started.sessionId,
-        session: toSession(claimed.sessionId),
+        created: started.claimedContinuation !== false,
+        session: toSession(started.sessionId),
       };
     },
     async send(message, options) {
@@ -294,26 +285,4 @@ function withValidatedHistory(payload: SendPayload): SendPayload {
   const { history, ...rest } = payload;
   const validated = validateSessionHistory(history);
   return validated === undefined ? rest : { ...rest, history: validated };
-}
-
-const CREATE_CLAIM_TIMEOUT_MS = 15_000;
-
-async function waitForContinuationOwner(
-  runtime: Runtime,
-  continuationToken: string,
-  startedSessionId: string,
-): Promise<{ readonly sessionId: string }> {
-  const deadline = Date.now() + CREATE_CLAIM_TIMEOUT_MS;
-  for (let delayMs = 25; ; delayMs = Math.min(delayMs * 2, 500)) {
-    const owner = await runtime.resolveContinuation(continuationToken);
-    if (owner !== undefined) return owner;
-    if (Date.now() + delayMs > deadline) {
-      // Unclaimed, the address may still go to this run or to a concurrent one, so neither
-      // `created` value would be true yet.
-      throw new Error(
-        `create() started session "${startedSessionId}" for "${continuationToken}", but no session claimed the address within ${CREATE_CLAIM_TIMEOUT_MS / 1000}s. Call resolveSession() on the address to find its owner once one does.`,
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
 }

@@ -20,7 +20,6 @@ import {
   type SessionInboxHandle,
   type SessionInboxPayload,
 } from "#execution/session-inbox/inbox.js";
-import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import {
   createSessionTimeoutControl,
@@ -79,9 +78,7 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
   const boot =
     input.kind === "initial"
       ? await bootInitialOwner(input, getWorkflowMetadata().workflowRunId)
-      : (input.handoffVersion ?? 0) >= 3
-        ? await bootForcedHandoffOwner(input)
-        : await bootReleasedHandoffOwner(input);
+      : await bootHandoffOwner(input);
   if (boot === undefined) return { output: "" };
   const result = await runPreparedSession(boot.session, boot.inbox);
   return { output: result.output };
@@ -267,7 +264,7 @@ interface PreparedSuccessor {
 /** Migrates and validates the checkpoint; tells the source and returns `undefined` when it is unreadable here. */
 async function prepareSuccessor(
   input: HandoffWorkflowEntryInput,
-  source?: { readonly runId: string; readonly hookTokens: readonly string[] },
+  source: { readonly runId: string; readonly hookTokens: readonly string[] },
 ): Promise<PreparedSuccessor | undefined> {
   const { sessionId } = input;
   // The previous owner may run an older eve build; read its checkpoint in this build's shape.
@@ -279,10 +276,9 @@ async function prepareSuccessor(
     return undefined;
   }
   const validation = await prepareSuccessorStep({
-    handoffVersion: input.handoffVersion,
     migration,
     sessionId,
-    ...(source !== undefined && { source }),
+    source,
   });
   if (migration.kind === "incompatible" || validation.kind === "incompatible") {
     await signalSessionOwnerActivationStep({
@@ -348,17 +344,18 @@ async function signalFailedActivation(
 }
 
 /**
- * Version 3: the source still holds every hook. Fences duplicate candidates,
- * prepares, then force-claims the source's hook set and runs right away; the
- * source's handover is placed ahead of everything this run accepts itself.
+ * The source still holds every hook. Fences duplicate candidates, prepares,
+ * then force-claims the source's hook set and runs right away; the source's
+ * handover is placed ahead of everything this run accepts itself.
  */
-async function bootForcedHandoffOwner(
+async function bootHandoffOwner(
   input: HandoffWorkflowEntryInput,
 ): Promise<BootOutcome | undefined> {
   const { attemptKey, hookTokens, sessionId, sourceRunId } = input;
   if (attemptKey === undefined || hookTokens === undefined || sourceRunId === undefined) {
+    // Sources before handoff version 3 released their hooks first and sent none of these.
     const error = new Error(
-      "Session handoff version 3 input is missing attemptKey, hookTokens, or sourceRunId.",
+      "Session handoff input is missing attemptKey, hookTokens, or sourceRunId; sources before handoff version 3 are no longer supported.",
     );
     await signalFailedActivation(input, error, { payloads: [] });
     return undefined;
@@ -425,36 +422,6 @@ async function handBack(
     payloads: inbox.drain(),
     sessionId: input.sessionId,
   });
-}
-
-/**
- * A source older than version 3 already released its hooks: claim them
- * ordinarily and tell the source it may exit.
- */
-async function bootReleasedHandoffOwner(
-  input: HandoffWorkflowEntryInput,
-): Promise<BootOutcome | undefined> {
-  const inbox = createSessionInbox(input.sessionId);
-  let prepared: PreparedSuccessor | undefined;
-  try {
-    prepared = await prepareSuccessor(input);
-    if (prepared === undefined) return undefined;
-    await inbox.claimSessionHooks(
-      sessionHookTokens({
-        serializedContext: prepared.serializedContext,
-        sessionState: prepared.checkpoint.sessionState,
-      }),
-    );
-    prepared = await placeImportedSession(input.sessionId, prepared);
-    await signalSessionOwnerActivationStep({
-      activation: { kind: "active" },
-      token: input.activationToken,
-    });
-  } catch (error) {
-    await signalFailedActivation(input, error, { payloads: await inbox.release() });
-    return undefined;
-  }
-  return await startSuccessor(input, inbox, prepared);
 }
 
 async function startSuccessor(

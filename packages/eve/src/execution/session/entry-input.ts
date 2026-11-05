@@ -4,9 +4,10 @@ import type { SessionCheckpoint } from "#execution/session/handoff.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 
 /**
- * Version 3 sources keep their hooks while the successor starts: it takes
- * them over with forced claims and the source hands over what it accepted
- * meanwhile. Earlier sources released their hooks before starting it.
+ * Sources keep their hooks while the successor starts: it takes them over
+ * with forced claims and the source hands over what it accepted meanwhile.
+ * Successors no longer boot from earlier sources, which released their hooks
+ * first.
  */
 export const SESSION_HANDOFF_VERSION = 3;
 
@@ -45,12 +46,8 @@ export type SessionHandoffStart =
        * it on the deployment accepting the next interaction.
        */
       readonly reason: "compaction" | "prewarm";
-      /**
-       * Only sources older than version 3 send one: the lone delivery that
-       * arrived before they could move, processed first. Without one, the
-       * successor parks until the next input arrives.
-       */
-      readonly delivery?: DeliverHookPayload;
+      /** The successor parks until the next input arrives. */
+      readonly delivery?: undefined;
       /** Proactive preparation preserves the current idle deadline. */
       readonly sessionTimeoutDeadline?: Date;
     };
@@ -59,16 +56,16 @@ export type SessionHandoffStart =
 export type HandoffWorkflowEntryInput = SessionHandoffStart & {
   readonly activationToken: string;
   /**
-   * Version 3: names this attempt, so a duplicate candidate fences itself out
-   * and the source's handover reaches the successor that expects it.
+   * Names this attempt, so a duplicate candidate fences itself out and the
+   * source's handover reaches the successor that expects it. Absent, like
+   * `hookTokens` and `sourceRunId`, only from sources before version 3.
    */
   readonly attemptKey?: string;
   readonly checkpoint: SessionCheckpoint;
-  /** Omitted by version 1 sources. */
   readonly handoffVersion?: number;
-  /** Version 3: the source's logical hook set, which the successor takes over. */
+  /** The source's logical hook set, which the successor takes over. */
   readonly hookTokens?: readonly string[];
-  /** Version 3: the source run, whose handover the successor waits for while it lives. */
+  /** The source run, whose handover the successor waits for while it lives. */
   readonly sourceRunId?: string;
   readonly kind: "handoff";
   readonly ownerDeploymentId: string;

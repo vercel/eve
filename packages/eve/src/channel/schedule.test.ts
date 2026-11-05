@@ -166,13 +166,11 @@ describe("ScheduleDispatcher", () => {
       expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
     });
 
-    it("looks up a keyed send's earlier session only when the start cannot claim its address", async () => {
+    it("starts a keyed send without looking up an earlier session", async () => {
       const { dispatcher, input, runtime } = setup(creator, "exec-1:digest");
       await dispatcher.triggerCollection(input);
-      expect(runtime.dispatchContinuation).toHaveBeenCalledTimes(1);
-      runtime.claimsContinuationAtStart = vi.fn().mockResolvedValue(true);
       await dispatcher.triggerCollection(input);
-      expect(runtime.dispatchContinuation).toHaveBeenCalledTimes(1);
+      expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
       const started = vi.mocked(runtime.createSession).mock.calls.map(([value]) => value);
       expect(started).toHaveLength(2);
       // A retried callback claims the same address, so its start reaches the first session.

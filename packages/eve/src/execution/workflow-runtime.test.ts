@@ -14,18 +14,13 @@ import { ChannelRequestIdKey, SessionTitleKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
-  waitForCommandHookOwner,
-  waitForSessionInbox,
   sessionTimeoutWorkflowReference,
   startWorkflowOnDeployment,
   startWorkflowOnCurrentDeployment,
   workflowEntryReference,
   workflowToolRunWorkflowReference,
 } from "#execution/workflow-runtime.js";
-import {
-  sessionCommandHookToken,
-  sessionHandoffMarkerToken,
-} from "#execution/session-inbox/address.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#compiled/@vercel/agent-runs/index.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -35,11 +30,14 @@ import type { TraceCaptureContext, TraceCapturePolicy } from "#shared/trace-poli
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
+const OWNER_RUN_ID = "wrun_owner-run";
 const getHookByTokenMock = vi.fn();
 const getRunRecordMock = vi.fn();
 const world = {
   // Vercel-shaped: owners run on their own deployment, so ingress resumes by token.
-  capabilities: { deploymentAffinity: true },
+  capabilities: { atomicStartHook: { active: true }, deploymentAffinity: true },
+  // A session start pins the run id, so `start()` names the run `wrun_owner-run`.
+  createRunId: () => "owner-run",
   getDeploymentId: vi.fn(async () => "dpl_current"),
   runs: { get: getRunRecordMock },
 };
@@ -64,10 +62,7 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
 
 beforeEach(() => {
   cancelRunMock.mockResolvedValue(undefined);
-  getHookByTokenMock.mockImplementation(async (token: string) => {
-    if (token.startsWith(sessionHandoffMarkerToken(""))) throw new HookNotFoundError(token);
-    return currentSessionHook(token);
-  });
+  getHookByTokenMock.mockImplementation(async (token: string) => currentSessionHook(token));
   getWorldMock.mockResolvedValue(world);
   getRunRecordMock.mockResolvedValue({ status: "running" });
   getRunMock.mockReturnValue({ status: Promise.resolve("completed") });
@@ -472,71 +467,6 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
   });
 });
 
-describe("waitForCommandHookOwner", () => {
-  it("resolves the winning run without hydrating hook metadata", async () => {
-    getHookByTokenMock.mockResolvedValue({
-      get metadata() {
-        throw new Error("Ownership must not read encrypted metadata.");
-      },
-      runId: "winning-run",
-    });
-
-    await expect(waitForCommandHookOwner("task:token")).resolves.toEqual({ runId: "winning-run" });
-    expect(getHookByTokenMock).toHaveBeenCalledExactlyOnceWith("task:token");
-  });
-
-  it("does not turn storage failures into missing ownership", async () => {
-    const failure = new Error("backing store unavailable");
-    getHookByTokenMock.mockRejectedValue(failure);
-
-    await expect(waitForCommandHookOwner("task:token")).rejects.toBe(failure);
-    expect(getHookByTokenMock).toHaveBeenCalledOnce();
-  });
-});
-
-describe("waitForSessionInbox", () => {
-  const inboxToken = sessionInboxHookToken(sessionCommandHookToken("child-session"));
-
-  it("waits for a started session to claim its inbox", async () => {
-    getHookByTokenMock
-      .mockRejectedValueOnce(new HookNotFoundError(inboxToken))
-      .mockResolvedValueOnce({ runId: "child-session" });
-    // `start()` may accept a run before it can be read.
-    getRunMock.mockReturnValue({
-      get status() {
-        return Promise.reject(new WorkflowRunNotFoundError("child-session"));
-      },
-    });
-
-    await expect(waitForSessionInbox("child-session")).resolves.toBe(true);
-    expect(getHookByTokenMock).toHaveBeenLastCalledWith(inboxToken);
-  });
-
-  it("stops waiting once the session's run ended without an inbox", async () => {
-    getHookByTokenMock.mockRejectedValue(new HookNotFoundError(inboxToken));
-    getRunMock.mockReturnValue({ status: Promise.resolve("completed") });
-
-    await expect(waitForSessionInbox("child-session")).resolves.toBe(false);
-  });
-
-  it("gives up on a running session that never claims its inbox", async () => {
-    vi.useFakeTimers();
-    try {
-      getHookByTokenMock.mockRejectedValue(new HookNotFoundError(inboxToken));
-      getRunMock.mockReturnValue({ status: Promise.resolve("running") });
-
-      const waiting = waitForSessionInbox("child-session");
-      const settled = expect(waiting).rejects.toThrow(
-        'Session "child-session" did not start taking commands within 30 seconds.',
-      );
-      await vi.advanceTimersByTimeAsync(31_000);
-      await settled;
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-});
-
 describe("createWorkflowRuntime#createSession", () => {
   const adapter: ChannelAdapter = { kind: "http" };
 
@@ -604,7 +534,7 @@ describe("createWorkflowRuntime#createSession", () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
     await buildRuntime(compiledArtifactsSource).createSession({
       adapter,
@@ -620,6 +550,7 @@ describe("createWorkflowRuntime#createSession", () => {
           ownerDeploymentId: "dpl_current",
           input: { message: "hello" },
           retention: 0,
+          startClaim: "inbox",
           serializedContext: expect.objectContaining({
             "eve.bundle": { source: compiledArtifactsSource },
             "eve.stateLayout": 1,
@@ -641,14 +572,19 @@ describe("createWorkflowRuntime#createSession", () => {
         },
         deploymentId: "dpl_current",
         experimental_retention: 0,
+        experimental_hook: {
+          metadata: { sessionId: OWNER_RUN_ID },
+          token: sessionInboxHookToken(sessionCommandHookToken(OWNER_RUN_ID)),
+        },
+        world: expect.any(Object),
       },
     );
   });
 
-  it("returns without waiting for the stable command inbox", async () => {
+  it("refuses to start a session on a world without atomic start hooks", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    getWorldMock.mockResolvedValue({ ...world, capabilities: { deploymentAffinity: true } });
 
     await expect(
       buildRuntime(compiledArtifactsSource).createSession({
@@ -656,7 +592,22 @@ describe("createWorkflowRuntime#createSession", () => {
         auth: null,
         input: { message: "hello" },
       }),
-    ).resolves.toMatchObject({ sessionId: "owner-run" });
+    ).rejects.toThrow("@workflow/world-postgres 5.1.1 or later");
+    expect(startMock).not.toHaveBeenCalled();
+  });
+
+  it("returns without waiting for the stable command inbox", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter,
+        auth: null,
+        input: { message: "hello" },
+      }),
+    ).resolves.toMatchObject({ sessionId: OWNER_RUN_ID });
 
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
@@ -664,7 +615,7 @@ describe("createWorkflowRuntime#createSession", () => {
   it("returns an MCP invocation without checking continuation ownership", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
     await expect(
       buildRuntime(compiledArtifactsSource).createSession({
@@ -677,7 +628,7 @@ describe("createWorkflowRuntime#createSession", () => {
         },
         input: { message: "hello" },
       }),
-    ).resolves.toMatchObject({ sessionId: "owner-run" });
+    ).resolves.toMatchObject({ sessionId: OWNER_RUN_ID });
 
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
@@ -685,7 +636,7 @@ describe("createWorkflowRuntime#createSession", () => {
   it("passes a channel's losing-candidate delivery to the workflow", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
     const continuationConflictCommand = {
       auth: null,
       kind: "send" as const,
@@ -708,7 +659,7 @@ describe("createWorkflowRuntime#createSession", () => {
   it("stores an explicit title alongside the trace-content policy", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
     const message = "<slack_message>\n<content>ship it</content>\n</slack_message>";
 
     await buildRuntime(compiledArtifactsSource).createSession({
@@ -729,7 +680,7 @@ describe("createWorkflowRuntime#createSession", () => {
   it("passes the configured session timeout to the durable workflow", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource, 86_400_000);
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
     await buildRuntime(compiledArtifactsSource).createSession({
       adapter,
@@ -747,7 +698,7 @@ describe("createWorkflowRuntime#createSession", () => {
   it("serializes the selected dynamic subagent config for the child workflow", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource, 86_400_000);
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
     await createWorkflowRuntime({
       compiledArtifactsSource,
@@ -779,7 +730,7 @@ describe("createWorkflowRuntime#createSession", () => {
   it("serializes a ctx.agent model override for the child workflow", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource, 86_400_000);
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
     await createWorkflowRuntime({
       agentSessionRuntimeOverrides: {
@@ -807,7 +758,7 @@ describe("createWorkflowRuntime#createSession", () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
     await buildRuntime(compiledArtifactsSource).createSession({
       adapter,
@@ -824,6 +775,7 @@ describe("createWorkflowRuntime#createSession", () => {
           ownerDeploymentId: "dpl_current",
           input: { message: "hello" },
           retention: 0,
+          startClaim: "inbox",
           serializedContext: expect.objectContaining({
             [ChannelRequestIdKey.name]: "req_run",
           }),
@@ -843,6 +795,11 @@ describe("createWorkflowRuntime#createSession", () => {
         },
         deploymentId: "dpl_current",
         experimental_retention: 0,
+        experimental_hook: {
+          metadata: { sessionId: OWNER_RUN_ID },
+          token: sessionInboxHookToken(sessionCommandHookToken(OWNER_RUN_ID)),
+        },
+        world: expect.any(Object),
       },
     );
   });
@@ -855,7 +812,7 @@ describe("createWorkflowRuntime#createSession", () => {
       resolvedAgent: { config: {} },
       turnAgent: createTestTurnAgent(),
     } as never);
-    startMock.mockResolvedValue({ runId: "subagent-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
     getHookByTokenMock.mockResolvedValue({ runId: "subagent-run" });
 
     await createWorkflowRuntime({
@@ -891,13 +848,18 @@ describe("createWorkflowRuntime#createSession", () => {
       },
       deploymentId: "dpl_current",
       experimental_retention: 0,
+      experimental_hook: {
+        metadata: { sessionId: OWNER_RUN_ID },
+        token: sessionInboxHookToken("subagent:parent-session:call-1"),
+      },
+      world: expect.any(Object),
     });
   });
 
   it("lets the Workflow world provide its current deployment when Vercel has no id", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
     await buildRuntime(compiledArtifactsSource).createSession({
       adapter,
@@ -919,6 +881,11 @@ describe("createWorkflowRuntime#createSession", () => {
       },
       deploymentId: "dpl_current",
       experimental_retention: 0,
+      experimental_hook: {
+        metadata: { sessionId: OWNER_RUN_ID },
+        token: sessionInboxHookToken(sessionCommandHookToken(OWNER_RUN_ID)),
+      },
+      world: expect.any(Object),
     });
   });
 
@@ -942,7 +909,7 @@ describe("createWorkflowRuntime#createSession", () => {
         }),
     );
     getRunMock.mockReturnValue({ getReadable });
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
     getHookByTokenMock.mockResolvedValue({ runId: "owner-run" });
 
     const handle = await buildRuntime(compiledArtifactsSource).createSession({
@@ -962,7 +929,7 @@ describe("createWorkflowRuntime#createSession", () => {
       meta: { position: { index: 0, line: 0 } },
       type: "session.started",
     });
-    expect(getRunMock).toHaveBeenCalledWith("owner-run");
+    expect(getRunMock).toHaveBeenCalledWith(OWNER_RUN_ID);
     expect(getReadable).toHaveBeenCalledTimes(1);
   });
 
@@ -1071,7 +1038,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       const tracePolicy = vi.fn(policy);
       installAgentOtelRuntime(new AgentSpanIdGenerator(), tracePolicy);
       mockBundleAndRun();
-      startMock.mockResolvedValue({ runId: "owner-run" });
+      startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
       await buildRuntime().createSession({ adapter, auth: null, input: { message: "hello" } });
 
@@ -1090,7 +1057,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     async ({ authored, capture }) => {
       installAgentOtelRuntime(new AgentSpanIdGenerator(), () => capture);
       mockBundleAndRun(authored);
-      startMock.mockResolvedValue({ runId: "owner-run" });
+      startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
       await buildRuntime().createSession({ adapter, auth: null, input: { message: "hello" } });
 
@@ -1111,7 +1078,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       vi.stubEnv("EVE_DEV", development ? "1" : "");
       vi.stubEnv("VERCEL_ENV", "production");
       mockBundleAndRun();
-      startMock.mockResolvedValue({ runId: "owner-run" });
+      startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
       await buildRuntime().createSession({
         adapter: { kind: "http", instrumentation: { audience: () => audience } },
@@ -1131,7 +1098,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     const tracePolicy = vi.fn(() => true);
     installAgentOtelRuntime(idGenerator, tracePolicy);
     mockBundleAndRun();
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
     await buildRuntime().createSession({
       adapter,
@@ -1179,7 +1146,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       shutdown: async () => undefined,
     } as never);
     mockBundleAndRun();
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
     await buildRuntime().createSession({
       adapter: { kind: "slack" },
@@ -1194,7 +1161,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
   it("allocates an unsampled trace seed when the policy is unsampled", async () => {
     installAgentOtelRuntime(new AgentSpanIdGenerator(), () => false);
     mockBundleAndRun();
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
     await buildRuntime().createSession({
       adapter,
@@ -1224,7 +1191,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       traceFlags: 1,
       traceId: "d".repeat(32),
     };
-    startMock.mockResolvedValue({ runId: "child-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
     getHookByTokenMock.mockResolvedValue({ runId: "child-run" });
     await buildRuntime().createSession({
       adapter: { kind: "subagent" },
@@ -1260,7 +1227,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
 
   it("does not allocate a seed when no instrumentation runtime is installed", async () => {
     mockBundleAndRun();
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
     await buildRuntime().createSession({
       adapter,
@@ -1289,7 +1256,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       shutdown: async () => undefined,
     } as never);
     mockBundleAndRun();
-    startMock.mockResolvedValue({ runId: "owner-run" });
+    startMock.mockResolvedValue({ runId: OWNER_RUN_ID });
 
     await buildRuntime().createSession({
       adapter,
