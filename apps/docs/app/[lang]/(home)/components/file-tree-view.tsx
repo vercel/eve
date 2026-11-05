@@ -3,6 +3,7 @@
 import { Badge } from "@vercel/geistdocs/components/badge";
 import { type ReactNode, useState } from "react";
 import { cn } from "@/lib/utils";
+import { PrefetchLink } from "./section";
 
 /** What a dynamic file gives each plan, or null where the plan doesn't get it. */
 export interface PlanResults {
@@ -51,7 +52,7 @@ function Resolution({ item, customer }: { item: FileTreeItem; customer: Customer
   if (!item.results) {
     return (
       <p className="border-b px-4 py-3 text-copy-14 text-gray-700">
-        Static. The same for every customer.
+        Static in this example. Any file can be dynamic.
       </p>
     );
   }
@@ -140,6 +141,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
             <div className="border-r">
               <div className="flex h-12 items-center border-b px-4">
                 <span className="font-medium text-gray-1000 text-sm">agent/</span>
+                <span className="ml-2 truncate text-gray-700 text-sm">example support agent</span>
               </div>
               <div className="space-y-0.5 p-2">
                 {items.map((item, i) => {
@@ -216,11 +218,30 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
     </div>
   );
 
+  // Every kind of file can be dynamic, not only the ones this example makes dynamic.
+  const footnote = (
+    <p className="mt-6 text-center text-copy-14 text-gray-900">
+      Instructions, skills, tools, subagents, connections, and models can all be dynamic.{" "}
+      <PrefetchLink
+        className="text-gray-1000 underline decoration-gray-alpha-400 underline-offset-4 hover:decoration-gray-1000"
+        href="/docs/guides/dynamic-capabilities"
+      >
+        Dynamic Capabilities
+      </PrefetchLink>
+    </p>
+  );
+
   return (
     <>
       {switcher}
-      <div className="md:hidden">{mobile}</div>
+      <div className="md:hidden">
+        <p className="mb-3 text-copy-14 text-gray-700">
+          <span className="font-medium text-gray-1000">agent/</span> example support agent
+        </p>
+        {mobile}
+      </div>
       <div className="hidden md:block">{board}</div>
+      {footnote}
     </>
   );
 }
