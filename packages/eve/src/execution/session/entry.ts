@@ -114,6 +114,7 @@ type InitialOwnerPreparation = OwnedInitialSession | { readonly kind: "alias-con
 async function prepareInitialOwner(
   inbox: SessionInboxHandle,
   input: {
+    readonly continuationClaimed: boolean;
     readonly continuationToken: string;
     /** The claims confirm after it, so it runs inline while their hooks commit. */
     readonly sessionCreation: Promise<unknown>;
@@ -138,7 +139,10 @@ async function prepareInitialOwner(
     inbox.claimSessionHook(sessionCommandHookToken(input.sessionId), claim),
     input.continuationToken === ""
       ? Promise.resolve()
-      : inbox.claimSessionHook(input.continuationToken, claim),
+      : inbox.claimSessionHook(input.continuationToken, {
+          ...claim,
+          claimedAtStart: input.continuationClaimed,
+        }),
   ]);
   if (stableClaim.status === "rejected") throw stableClaim.reason;
   if (aliasClaim.status === "rejected") {
@@ -185,6 +189,7 @@ export async function bootInitialOwner(
       sessionId,
     });
     const ownerPreparationPromise = prepareInitialOwner(inbox, {
+      continuationClaimed: input.continuationClaimed === true,
       continuationToken,
       sessionCreation: sessionCreationPromise,
       sessionId,

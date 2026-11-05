@@ -100,6 +100,64 @@ describe("delivery idempotency", () => {
     });
   }, 60_000);
 
+  it("gives both of two racing first sends to an address the session that takes them", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", await (await getWorld()).getDeploymentId());
+    let turns = 0;
+    const app = await createTestRuntime({
+      agent: { name: "racing-first-sends", limits: { sessionTimeoutMs: false } },
+      modules: [
+        {
+          logicalPath: "hooks/record.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "turn.started"() {
+                  turns += 1;
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+    await app.run(async () => {
+      const runtime = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      const address = createChannelOperations({
+        adapter: { kind: "http" },
+        channelName: "test",
+        runtime,
+      }).from(crypto.randomUUID());
+      // Alice and Bob write into a new thread at the same moment.
+      const [alice, bob] = await Promise.all([
+        address.send("Alice asks for the report.", { auth: null, turnPolicy: "queue" }),
+        address.send("Bob asks for the summary.", { auth: null, turnPolicy: "queue" }),
+      ]);
+      let completed = false;
+      try {
+        expect(bob.sessionId).toBe(alice.sessionId);
+        const outcomes = await Promise.all(
+          [alice, bob].map(
+            async (receipt) =>
+              (await receipt.result({ signal: AbortSignal.timeout(10_000) })).outcome,
+          ),
+        );
+        expect(outcomes).toEqual(["handled", "handled"]);
+        await waitForParkedTurnStep(alice.sessionId, 2);
+        expect(turns).toBe(2);
+        await createSession(alice.sessionId, runtime).end();
+        completed = true;
+      } finally {
+        for (const sessionId of new Set([alice.sessionId, bob.sessionId])) {
+          if (!completed && ["pending", "running"].includes(await getRun(sessionId).status)) {
+            await getRun(sessionId).cancel();
+          }
+        }
+      }
+    });
+  }, 60_000);
+
   it("gives a keyed request's repeat the original receipt, as the session route does", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", await (await getWorld()).getDeploymentId());
     let turns = 0;

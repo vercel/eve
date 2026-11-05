@@ -126,6 +126,11 @@ export interface SessionHookClaimOptions {
    * step confirms after that step; the hook still commits alongside it.
    */
   readonly confirmAfter?: Promise<unknown>;
+  /**
+   * `start()` already created this address's hook with the run, metadata
+   * included; claiming it opens that hook and never conflicts.
+   */
+  readonly claimedAtStart?: boolean;
 }
 
 export interface SessionHookBatchClaimOptions extends SessionHookClaimOptions {
@@ -353,11 +358,15 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       throw new Error("A session may claim at most 256 addresses.");
     const source: Source = {
       token,
-      hook: createHook<SessionInboxPayload | WorkflowToolRunMessageBatch>({
-        token: sessionInboxHookToken(token),
-        metadata: { [SESSION_INBOX_SESSION_ID_METADATA_KEY]: sessionId },
-        ...(force && { experimental_force: true }),
-      }),
+      hook: createHook<SessionInboxPayload | WorkflowToolRunMessageBatch>(
+        options.claimedAtStart === true
+          ? { token: sessionInboxHookToken(token) }
+          : {
+              token: sessionInboxHookToken(token),
+              metadata: { [SESSION_INBOX_SESSION_ID_METADATA_KEY]: sessionId },
+              ...(force && { experimental_force: true }),
+            },
+      ),
       stopping: false,
       closed: false,
       replaced: false,

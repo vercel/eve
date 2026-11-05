@@ -19,6 +19,8 @@ import {
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { resumeSessionStartHook } from "#execution/session-inbox/resume.js";
 import {
   createWorkflowCallbackUrl,
   resolveWorkflowCallbackBaseUrl,
@@ -302,13 +304,20 @@ export async function stopLateAgentSessionStep(opened: OpenedAgentSession): Prom
     return;
   }
   const { sessionId } = opened.address;
+  const reset = {
+    kind: "reset",
+    reason: RUN_FINISHED_REASON,
+    deliveryId: agentDeliveryId("reset", sessionId),
+  } as const;
   try {
-    // Waiting for a booting inbox would hold the parent's next turn.
-    await resumeHook(sessionInboxHookToken(sessionCommandHookToken(sessionId)), {
-      kind: "reset",
-      reason: RUN_FINISHED_REASON,
-      deliveryId: agentDeliveryId("reset", sessionId),
-    });
+    // Waiting for a booting inbox would hold the parent's next turn. A child
+    // whose start claimed its address takes the reset there before it boots.
+    try {
+      await resumeHook(sessionInboxHookToken(sessionCommandHookToken(sessionId)), reset);
+    } catch (error) {
+      if (!HookNotFoundError.is(error)) throw error;
+      if ((await resumeSessionStartHook(sessionId, reset)) === undefined) throw error;
+    }
   } catch (error) {
     logError(log, "could not stop late child; cleanup is best effort", error, { sessionId });
   }
@@ -425,10 +434,11 @@ async function startLocalSession(
       }),
   );
   // Waiting for the run to claim the session would hold the caller for the
-  // child's boot. A retried attempt may have started a second run, so it waits
-  // to learn which run claimed the session; later commands resolve it again.
+  // child's boot. A claimed start already names the owner; otherwise a retried
+  // attempt may have started a second run, so it waits to learn which run
+  // claimed the session, and later commands resolve it again.
   let sessionId = started.sessionId;
-  if (getStepMetadata().attempt > 1) {
+  if (started.claimedContinuation === undefined && getStepMetadata().attempt > 1) {
     ({ runId: sessionId } = await waitForCommandHookOwner(
       sessionInboxHookToken(childContinuationToken),
     ));

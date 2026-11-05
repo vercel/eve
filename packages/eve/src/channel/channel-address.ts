@@ -210,7 +210,10 @@ export function createChannelAddress<TState = undefined>(input: {
         requestId: metadata.requestId,
         title: options.title,
       });
-      // The new run claims the address asynchronously, and a concurrent `create()` or `send()`
+      if (started.claimedContinuation !== undefined) {
+        return { created: started.claimedContinuation, session: toSession(started.sessionId) };
+      }
+      // The new run claims the address once it boots, and a concurrent `create()` or `send()`
       // may claim it first. Waiting for the owner lets an immediate `send()` find it, and tells
       // the caller whether its history landed: a losing run exits without forwarding anything.
       const claimed = await waitForContinuationOwner(

@@ -610,6 +610,12 @@ export interface RunHandle {
    * key on it: workflow-backed runs expose the workflow run id.
    */
   readonly sessionId: string;
+  /**
+   * For a start with a continuation token: `true` when this start's run took
+   * the address, `false` when a session already held it and `sessionId` names
+   * that session. Absent when the owner is only known once the run boots.
+   */
+  readonly claimedContinuation?: boolean;
 }
 
 /**

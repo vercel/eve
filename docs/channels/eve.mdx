@@ -368,7 +368,7 @@ export default defineChannel({
 
 The client then resumes the session by id, for example with `useEveAgent({ initialSession: { sessionId, streamIndex: 0 }, resume: true })`. `created` is `false` when another session already owned the address or another `create()` or `send()` claimed it first. That session comes back unchanged, without your `history`. Use a new address for each new conversation or branch.
 
-`create()` returns once the new session claims its address, so an immediate `send()` reaches it. It throws if no session claims the address within 15 seconds. On a [stranded](../guides/deployment/self-hosted-operations#recover-a-stranded-session) session, `create()` throws `SessionStrandedError` instead of replacing a conversation you may mean to import; call `end()` on the address, then `create()` again.
+`create()` returns once a session owns the address, so an immediate `send()` reaches it. On the local world, Vercel Workflow, and `@workflow/world-postgres` 5.1.1 or later, the new session takes the address as it starts. On a [Workflow world](../guides/deployment/workflow-worlds) without that support, `create()` waits for the session to boot and throws if none claims the address within 15 seconds. On a [stranded](../guides/deployment/self-hosted-operations#recover-a-stranded-session) session, `create()` throws `SessionStrandedError` instead of replacing a conversation you may mean to import; call `end()` on the address, then `create()` again.
 
 `send()` accepts the same `history` option and adds the entries right before that message and its `context`, whether it creates or continues the session. The eve channel's `onMessage` can return `history` too, which applies to every message it's returned for.
 

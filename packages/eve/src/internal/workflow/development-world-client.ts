@@ -104,9 +104,11 @@ export function createDevelopmentWorkflowWorld(): World {
   const world = {
     specVersion: EVE_WORKFLOW_SPEC_VERSION as SpecVersion,
     // Every operation runs on the dev parent's local world, which supports
-    // all of these. Session handoffs across reloads depend on the hook
-    // capabilities, and spec 9 runs depend on the in-band writer fence.
+    // all of these. Session starts claim their address with the run, session
+    // handoffs across reloads depend on the hook capabilities, and spec 9 runs
+    // depend on the in-band writer fence.
     capabilities: {
+      atomicStartHook: { active: true },
       hookForceClaim: true,
       hookRetention: { active: true },
       inBandFence: true,

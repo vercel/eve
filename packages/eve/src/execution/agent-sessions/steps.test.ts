@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   dispatch: vi.fn(),
   resolveSessionInbox: vi.fn(),
+  resumeSessionStartHook: vi.fn(),
   resumeHook: vi.fn(),
   startWorkflow: vi.fn(),
   logError: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock("#internal/logging.js", async (importOriginal) => ({
 vi.mock("#execution/session-inbox/resume.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/session-inbox/resume.js")>()),
   resolveSessionInbox: mocks.resolveSessionInbox,
+  resumeSessionStartHook: mocks.resumeSessionStartHook,
 }));
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: async () => ({ graph: {} }),
