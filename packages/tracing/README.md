@@ -238,8 +238,8 @@ and MCP enrichment. Agent tracing itself needs only the package root.
 ## Privacy and failures
 
 Declined content does not enter checkpoints. Failure classes survive redaction;
-exception content does not. Serialized content is capped at 32 KiB, each checkpointed
-operation at 64 KiB, and unfinished children at 10,000. `onError(error, context)` is the only
+exception content does not. Serialized content is capped at 250 KiB, each checkpointed
+operation at 512 KiB, and unfinished children at 10,000. `onError(error, context)` is the only
 tracing error channel. Trace output retains schema version 4.
 
 Local tests cover output and recovery. They do not prove live Agent Runs ingestion.
