@@ -21,7 +21,7 @@ const DEFAULT_TWILIO_API_BASE_URL = "https://api.twilio.com";
 
 /**
  * Builds the Twilio channel-local continuation token (`<from>:<to>`).
- * Eve namespaces this with the channel name before handing it to the runtime.
+ * eve namespaces this with the channel name before handing it to the runtime.
  */
 export function twilioContinuationToken({
   from,
@@ -77,7 +77,7 @@ export async function resolveTwilioAccountSid(accountSid?: TwilioAccountSid): Pr
 /**
  * Calls Twilio's REST API with Basic auth and form-encoded body fields.
  *
- * The return shape intentionally preserves Eve's previous non-throwing HTTP
+ * The return shape intentionally preserves eve's previous non-throwing HTTP
  * behavior: non-2xx Twilio responses become `{ ok: false, status, body }`.
  */
 export async function callTwilioApi(input: {

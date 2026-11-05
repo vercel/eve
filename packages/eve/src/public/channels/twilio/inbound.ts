@@ -55,7 +55,7 @@ export interface TwilioInboundContext {
   readonly channel: "text" | "voice";
 }
 
-/** Parses Twilio's incoming-message webhook fields into Eve's text payload. */
+/** Parses Twilio's incoming-message webhook fields into eve's text payload. */
 export function parseTwilioTextMessage(params: URLSearchParams): TwilioTextMessage | null {
   const payload = parseTwilioWebhookBody(params);
   if (payload.kind !== "text") {
@@ -91,7 +91,7 @@ export function twilioMessageContent(message: TwilioTextMessage): MessageContent
     : files;
 }
 
-/** Parses Twilio's incoming-call webhook fields into Eve's voice payload. */
+/** Parses Twilio's incoming-call webhook fields into eve's voice payload. */
 export function parseTwilioVoiceCall(params: URLSearchParams): TwilioVoiceCall | null {
   const call = parsePrimitiveVoiceCall(params);
   if (!call) {

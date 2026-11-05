@@ -40,7 +40,7 @@ export async function resolveTwilioAuthToken(authToken?: TwilioAuthToken): Promi
 /**
  * Verifies an inbound Twilio webhook and returns the raw body plus parsed params.
  *
- * This preserves Eve's existing error messages while delegating signature
+ * This preserves eve's existing error messages while delegating signature
  * semantics to the Chat SDK Twilio primitive.
  */
 export async function verifyTwilioRequest(
