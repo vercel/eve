@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    // steps/* each have a package.json of their own, which takes them out of eve's package scope,
+    // so `eve/...` can't resolve to eve itself there. These are the files the entries' `eve-source`
+    // condition names.
+    "paths": {
+      "eve/experimental/embed": ["../src/public/experimental/embed/index.ts"],
+      "eve/experimental/embed/terminal": ["../src/public/experimental/embed/terminal.ts"],
+      "eve/tools/approval": ["../src/public/tools/approval/index.ts"]
+    }
+  },
+  "include": ["steps/*/*.ts"]
+}

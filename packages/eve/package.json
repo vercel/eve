@@ -424,6 +424,18 @@
       "import": "./dist/src/public/experimental/schedules/testing.js",
       "default": "./dist/src/public/experimental/schedules/testing.js"
     },
+    "./experimental/embed": {
+      "eve-source": "./src/public/experimental/embed/index.ts",
+      "types": "./dist/src/public/experimental/embed/index.d.ts",
+      "import": "./dist/src/public/experimental/embed/index.js",
+      "default": "./dist/src/public/experimental/embed/index.js"
+    },
+    "./experimental/embed/terminal": {
+      "eve-source": "./src/public/experimental/embed/terminal.ts",
+      "types": "./dist/src/public/experimental/embed/terminal.d.ts",
+      "import": "./dist/src/public/experimental/embed/terminal.js",
+      "default": "./dist/src/public/experimental/embed/terminal.js"
+    },
     "./experimental/schedules": {
       "eve-source": "./src/public/experimental/schedules/index.ts",
       "types": "./dist/src/public/experimental/schedules/index.d.ts",
@@ -593,7 +605,7 @@
     "test:scenario": "vitest run --config vitest.scenario.config.ts",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:watch": "vitest --config vitest.unit.config.ts",
-    "typecheck": "pnpm run check:web-template && tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm run check:web-template && tsc -p tsconfig.json --noEmit && tsc -p demo/tsconfig.json",
     "generate:web-template": "node src/setup/build.ts --write",
     "guard:browser-reach": "node scripts/browser-reach.mjs --check",
     "check:web-template": "node src/setup/build.ts --check",
