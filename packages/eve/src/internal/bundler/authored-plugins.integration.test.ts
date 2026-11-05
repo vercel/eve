@@ -56,6 +56,30 @@ function createHostBundledPackageApp(): { entry: string; packageRoot: string; ap
   return { appRoot, entry, packageRoot };
 }
 
+/**
+ * An app whose generated entry imports a store-installed TypeScript source package by its
+ * resolved path, outside the app package as in a workspace's pnpm store. The package resolves
+ * `~/*` through its own tsconfig `paths`.
+ */
+function createHostBundledAliasApp(): { entry: string; packageRoot: string; appRoot: string } {
+  const appRoot = realpathSync(mkdtempSync(join(tmpdir(), "eve-host-bundled-aliases-")));
+  const storeRoot = realpathSync(mkdtempSync(join(tmpdir(), "eve-host-bundled-alias-store-")));
+  scratchRoots.push(appRoot, storeRoot);
+  writeFileSync(join(appRoot, "package.json"), JSON.stringify({ name: "app", type: "module" }));
+  const packageRoot = join(storeRoot, "node_modules", "alias-pack");
+  writePackage(packageRoot, {
+    "index.ts": 'export { value } from "~/value";\n',
+    "package.json": JSON.stringify({ main: "index.ts", name: "alias-pack", type: "module" }),
+    "tsconfig.json": JSON.stringify({ compilerOptions: { paths: { "~/*": ["./src/*"] } } }),
+  });
+  writePackage(join(packageRoot, "src"), {
+    "value.ts": 'export const value: string = "alias-pack-value";\n',
+  });
+  const entry = join(appRoot, "generated.mjs");
+  writeFileSync(entry, `export { value } from ${JSON.stringify(join(packageRoot, "index.ts"))};\n`);
+  return { appRoot, entry, packageRoot };
+}
+
 describe("createAuthoredPlugins for builds that bundle installed dependencies", () => {
   it("loads assets of host-bundled packages and the packages they load", async () => {
     const { appRoot, entry, packageRoot } = createHostBundledPackageApp();
@@ -84,5 +108,26 @@ describe("createAuthoredPlugins for builds that bundle installed dependencies", 
         plugins: createAuthoredPlugins({ authoredSourceOnly: true, packageRoot: appRoot }),
       }),
     ).rejects.toThrow(/prompt\.txt\?raw/);
+  });
+
+  it("resolves host-bundled source packages' own tsconfig paths", async () => {
+    const { appRoot, entry, packageRoot } = createHostBundledAliasApp();
+    const build = (hostBundledPackageRoots?: readonly string[]) =>
+      buildSingleRolldownChunk("host-bundled tsconfig paths", {
+        input: entry,
+        output: { format: "esm" },
+        plugins: createAuthoredPlugins({
+          authoredSourceOnly: true,
+          hostBundledPackageRoots,
+          packageRoot: appRoot,
+        }),
+      });
+
+    expect((await build([packageRoot])).code).toContain("alias-pack-value");
+    const withoutScope = await build().then(
+      (chunk) => chunk.code,
+      (error: unknown) => String(error),
+    );
+    expect(withoutScope).not.toContain("alias-pack-value");
   });
 });

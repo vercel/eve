@@ -20,8 +20,8 @@ export interface AuthoredPluginsInput {
   readonly authoredSourceOnly?: boolean;
   /**
    * With `authoredSourceOnly`, installed packages that generated bundles imported and left for
-   * this build. They and the packages they load keep the asset and extension resolution that
-   * inlining them into those bundles would have applied.
+   * this build. They and the packages they load keep the asset, extension, and package-local
+   * tsconfig `paths` resolution that inlining them into those bundles would have applied.
    */
   readonly hostBundledPackageRoots?: readonly string[];
   readonly extensions?: readonly string[];
@@ -52,6 +52,7 @@ export function createAuthoredPlugins(input: AuthoredPluginsInput): Plugin[] {
       appPackageRoot: input.packageRoot,
       authoredSourceOnly,
       extensions,
+      handlesInstalledModule,
     }),
   ];
 }
