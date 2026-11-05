@@ -87,6 +87,11 @@ export interface SessionStepInput {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  /**
+   * The host runs this step again after the process that ran it stopped: what that attempt wrote
+   * past the checkpoint is folded, as on a Workflow retry, which Workflow's step metadata names.
+   */
+  readonly rerun?: true;
 }
 
 /** A {@link SessionStepInput} with the conversation history, for a step that reads or changes it. */
@@ -107,11 +112,13 @@ export type SessionStepState = Entered<SessionStepInput>;
 export type SessionHistoryStepState = Entered<SessionHistoryStepInput>;
 
 /**
- * Enters a session step: decides, once, whether this attempt runs it again, which it does when
- * the durable host retried it.
+ * Enters a session step: decides, once, whether this attempt runs it again. The host says so
+ * (`rerun`, as an in-process host does after a crash), or the durable host retried it.
  */
-export function enterSessionStep<I extends object>(input: I): Entered<I> {
-  return { ...input, rerun: isRetriedStep() };
+export function enterSessionStep<I extends object>(
+  input: I & { readonly rerun?: true },
+): Entered<I> {
+  return { ...input, rerun: input.rerun === true || isRetriedStep() };
 }
 
 /** The context and session state a publication leaves behind. */
