@@ -347,6 +347,7 @@ function instrumentationEventsOf(
               }
             : undefined,
           scope,
+          signIn: request.signIn === undefined ? undefined : { name: request.signIn.name },
           type: "interaction.opened",
         },
       ];
@@ -400,7 +401,6 @@ function runAttempt(line: Line, runId: string | undefined): InstrumentationScope
  */
 function interactionAttempt(line: Line, row: InteractionRow): InstrumentationScope | undefined {
   const view = line.view!;
-  if (row.request.kind === "sign-in") return undefined;
   const { subject } = row;
   if ("callId" in subject) {
     const call = view.calls[subject.callId];

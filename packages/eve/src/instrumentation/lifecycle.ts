@@ -184,7 +184,7 @@ export interface InstrumentationDeliverySettledEvent extends DeliverySettledData
   readonly sessionId: string;
 }
 
-/** What a person is asked for: an approval, a question, or the budget prompt (never a sign-in). */
+/** What a person is asked for: an approval, a question, the budget prompt, or a sign-in. */
 export type InstrumentationInteractionKind = InteractionRequest["kind"];
 
 export type InstrumentationInteractionOption = InteractionOption;
@@ -201,14 +201,19 @@ export type InstrumentationAnswer = ResponseValue;
 /** How the request settled, as its `interaction.settled` says. */
 export type InstrumentationInteractionOutcome = InteractionOutcome;
 
-/** A person was asked: the session's `interaction.opened`, never a sign-in. */
+/** A person was asked: the session's `interaction.opened`. */
 export interface InstrumentationInteractionOpenedEvent {
   readonly type: "interaction.opened";
-  /** The call the request is about: the call an approval gates, or the call that asked. */
+  /**
+   * The call the request is about: the call an approval gates, the call that asked, or the call
+   * that needs a sign-in. Absent for a budget prompt or a sign-in the turn needs before it runs.
+   */
   readonly call?: {
     readonly callId: string;
     readonly name: string;
   };
+  /** For a sign-in, the connection or tool that needs it. Never its URL, code, or credential. */
+  readonly signIn?: { readonly name: string };
   readonly idempotencyKey: string;
   readonly interactionId: string;
   readonly kind: InstrumentationInteractionKind;

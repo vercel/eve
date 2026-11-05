@@ -202,20 +202,26 @@ export interface ToolOptions {
   readonly kind?: ToolKind;
   readonly arguments?: unknown;
 }
+/**
+ * A wait on a person. Under a tool call it names that call; under a turn it has no call, such
+ * as a budget prompt or a sign-in the turn needs before it can run.
+ */
+export interface ApprovalOptions {
+  readonly requestId: string;
+  readonly request?: unknown;
+  /** What the person is asked, recorded as `agent.approval.kind`. Defaults to `tool-approval`. */
+  readonly kind?: string;
+  /** The connection a sign-in is for, recorded as `agent.connection.name`. */
+  readonly connectionName?: string;
+  readonly callId?: string;
+  readonly toolName?: string;
+}
 export type ScopeData =
   | { readonly type: "activation"; readonly options: TurnMetadata }
   | { readonly type: "step"; readonly options: StepOptions }
   | { readonly type: "model"; readonly options: ModelOptions }
   | { readonly type: "tool"; readonly options: ToolOptions }
-  | {
-      readonly type: "approval";
-      readonly options: {
-        requestId: string;
-        request?: unknown;
-        callId: string;
-        toolName: string;
-      };
-    }
+  | { readonly type: "approval"; readonly options: ApprovalOptions }
   | {
       readonly type: "memory";
       readonly options: {

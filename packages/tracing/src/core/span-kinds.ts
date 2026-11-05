@@ -238,7 +238,7 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
     },
   },
   approval: {
-    parents: ["tool"],
+    parents: ["tool", "activation"],
     prepare({ options }, context) {
       return {
         name: SPAN_NAMES.approval,
@@ -250,7 +250,8 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
           "gen_ai.operation.name": "workflow",
           "gen_ai.tool.call.id": options.callId,
           "agent.action.name": options.toolName,
-          "agent.approval.kind": "tool-approval",
+          "agent.approval.kind": options.kind ?? "tool-approval",
+          "agent.connection.name": options.connectionName,
           "agent.approval.request_id": options.requestId,
           [CONTENT_FIELDS.approvalRequest]: context.capture.recordInputs
             ? context.serializer.json(options.request)

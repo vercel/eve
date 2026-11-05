@@ -289,6 +289,81 @@ describe("a session's spans, from its committed lines", () => {
     },
   );
 
+  it.each([
+    {
+      ask: "a question a call asks",
+      request: { kind: "question", prompt: "Which region?" },
+      subject: { callId: "call_ask" },
+      kind: "question",
+      expected: [
+        "invoke_agent weather completed",
+        "  agent.step",
+        "    execute_tool ask_question completed",
+        "      agent.approval approved",
+      ],
+    },
+    {
+      ask: "a budget prompt",
+      request: { kind: "budget", prompt: "Keep going?" },
+      subject: turn,
+      kind: "budget",
+      expected: [
+        "invoke_agent weather completed",
+        "  agent.approval approved",
+        "  agent.step",
+        "    execute_tool ask_question completed",
+      ],
+    },
+    {
+      ask: "a sign-in the turn needs",
+      request: {
+        kind: "sign-in",
+        prompt: "Sign in to Calendar",
+        signIn: { name: "calendar", url: "https://example.com/oauth" },
+      },
+      subject: turn,
+      kind: "sign-in",
+      connection: "calendar",
+      expected: [
+        "invoke_agent weather completed",
+        "  agent.approval approved",
+        "  agent.step",
+        "    execute_tool ask_question completed",
+      ],
+    },
+  ])(
+    "records the wait on $ask as an approval span",
+    async ({ request, subject, kind, connection, expected }) => {
+      const { commit, spans } = session();
+      await commit(...opening);
+      await commit(requested("call_ask", "ask_question"));
+      await commit({
+        data: { interactionId: "i_wait", request, subject },
+        scope: turn,
+        type: "interaction.opened",
+      } as SessionEvent);
+      await commit({
+        data: { interactionId: "i_wait", outcome: "accepted" },
+        scope: turn,
+        type: "interaction.settled",
+      } as SessionEvent);
+      await commit(settled("call_ask", { outcome: "completed", output: "eu" }));
+      await commit({
+        data: { outcome: "completed", runId: "run_0" },
+        scope: run,
+        type: "model.settled",
+      } as SessionEvent);
+      await commit(turnSettled({ outcome: "completed" }));
+
+      const exported = await spans();
+      expect(tree(exported)).toEqual(expected);
+      const span = exported.find((each) => each.name === "agent.approval");
+      expect(span?.attributes["agent.approval.kind"]).toBe(kind);
+      expect(span?.attributes["eve.connection.name"]).toBe(connection);
+      expect(JSON.stringify(span?.attributes)).not.toContain("oauth");
+    },
+  );
+
   it("records who approved a call on its approval and tool spans, the id only as the turn's principal", async () => {
     for (const { audience, records, id, outcome = "accepted" } of [
       { audience: "public", records: true, id: "slack:T1:U2" },
