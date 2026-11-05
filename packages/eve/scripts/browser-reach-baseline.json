@@ -25,13 +25,13 @@
     "static.builtinFiles": 53,
     "static.workflow": 0,
     "total.modules": 871,
-    "total.kib": 4345,
+    "total.kib": 4346,
     "total.builtinFiles": 132,
     "total.workflow": 0
   },
   "src/execution/in-process/runtime.ts": {
     "static.modules": 812,
-    "static.kib": 4325,
+    "static.kib": 4326,
     "static.builtinFiles": 61,
     "static.workflow": 0,
     "total.modules": 984,
@@ -41,17 +41,17 @@
   },
   "src/embed/agent.ts": {
     "static.modules": 549,
-    "static.kib": 1855,
+    "static.kib": 1856,
     "static.builtinFiles": 49,
     "static.workflow": 0,
     "total.modules": 599,
-    "total.kib": 1855,
+    "total.kib": 1856,
     "total.builtinFiles": 63,
     "total.workflow": 0
   },
   "src/embed/session.ts": {
     "static.modules": 831,
-    "static.kib": 4387,
+    "static.kib": 4388,
     "static.builtinFiles": 64,
     "static.workflow": 0,
     "total.modules": 992,

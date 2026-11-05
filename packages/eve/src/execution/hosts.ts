@@ -37,6 +37,12 @@ export interface HostedRoute {
 export interface DurableHost {
   /** Names the host: each module copy that installs it builds an equal one. */
   readonly name: string;
+  /**
+   * The host this one goes on to for what it doesn't hold, by name: installing this one replaces
+   * that one, and installing that one after it changes nothing. A World host's wraps Workflow's,
+   * in a build whose authored workflow tools run on Workflow.
+   */
+  readonly wraps?: string;
   /** Throws a hook-not-found error for a hook that doesn't exist. */
   resumeHook(token: string, payload: unknown): Promise<void>;
   /** Delivers through the session's inbox protocol, which waits out a handoff. */
@@ -88,8 +94,8 @@ export function registerHost(route: HostedRoute): () => void {
  */
 export function installDurableHost(host: DurableHost): void {
   const state = hosts();
-  if (state.durable === undefined) state.durable = host;
-  else if (state.durable.name !== host.name)
+  if (state.durable === undefined || host.wraps === state.durable.name) state.durable = host;
+  else if (state.durable.name !== host.name && state.durable.wraps !== host.name)
     throw new Error(
       `This realm's durable host is "${state.durable.name}"; "${host.name}" can't replace it.`,
     );

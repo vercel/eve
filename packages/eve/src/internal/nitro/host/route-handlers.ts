@@ -153,6 +153,24 @@ export function renderHostHandler(input: {
 }
 
 /**
+ * Workflow's route in a build for a World host: the World host first, as the function's durable
+ * host (`prepareWorldHostRealm`), then Workflow's handler.
+ */
+export function renderWorldHostWorkflowHandler(input: {
+  readonly workflowHandlerPath: string;
+}): string {
+  return [
+    `import workflowRoute from ${JSON.stringify(input.workflowHandlerPath)};`,
+    `import { prepareWorldHostRealm } from ${importSourceModule("src/internal/nitro/routes/world-host.ts")};`,
+    importRouteConfig,
+    "export default async (event) => {",
+    "  await prepareWorldHostRealm(config);",
+    "  return await workflowRoute(event);",
+    "};",
+  ].join("\n");
+}
+
+/**
  * Nitro task modules default-export an object with `run`. Importing
  * `defineTask` from `"nitro/task"` would fail on Vercel, where `nitro` is a
  * build-only dependency outside the function trace.

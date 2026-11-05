@@ -46,6 +46,12 @@ export interface InProcessRunsHost {
   /** Sends a command to a session this host runs. */
   readonly dispatchSession: Runtime["dispatchSession"];
   /**
+   * Starts a run whose body isn't here (an authored workflow tool's) where it is: Workflow, on a
+   * deployment. That run is Workflow's, durable as there: its messages reach its session's inbox
+   * wherever the session runs, and its status and cancelling are Workflow's.
+   */
+  readonly startDurableRun?: StartWorkflowToolRun;
+  /**
    * Continues `sessionId` on the runtime for `config`, from the store an earlier process kept it
    * in, unless it runs here already. `false` when the store holds no such session, or, unless
    * `idle`, when it was between turns, so the reply its caller waits for is lost.
@@ -279,6 +285,12 @@ export function createInProcessRuns(host: InProcessRunsHost): InProcessRuns {
 
   return {
     async startRun(input) {
+      if (
+        host.startDurableRun !== undefined &&
+        !bodies.has(input.workflowId) &&
+        !FRAMEWORK_BODIES.has(input.workflowId)
+      )
+        return await host.startDurableRun(input);
       const hookToken = workflowToolRunHookToken(input);
       const runId = `wrun_in_process_${createUlid()}`;
       // The run's input crosses the host's step boundary, as a started run's does.
