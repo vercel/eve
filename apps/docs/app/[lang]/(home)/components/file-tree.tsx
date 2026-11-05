@@ -367,8 +367,9 @@ export async function FileTree() {
                   // Wrap long lines instead of scrolling horizontally (keep the
                   // line-number grid, just constrain its column so lines wrap).
                   "[&_pre]:overflow-x-hidden! [&_code]:w-full! [&_code]:min-w-0! [&_code]:[grid-template-columns:minmax(0,1fr)]! [&_.line]:whitespace-pre-wrap [&_.line]:[overflow-wrap:anywhere]",
-                  // Each plan's branch in a multi-tenant file, tinted like its plan badge.
-                  "[&_.line[data-plan=enterprise]]:bg-purple-100 [&_.line[data-plan=hobby]]:bg-gray-100",
+                  // Each plan's branch in a multi-tenant file, tinted like its plan badge and marked on
+                  // the left the way Geist code blocks mark a highlighted line.
+                  "[&_.line[data-plan=enterprise]]:bg-purple-100 [&_.line[data-plan=enterprise]]:shadow-[inset_2px_0_0_0_var(--ds-purple-900)] [&_.line[data-plan=hobby]]:bg-gray-100 [&_.line[data-plan=hobby]]:shadow-[inset_2px_0_0_0_var(--ds-gray-900)]",
                 )}
               >
                 {children}
