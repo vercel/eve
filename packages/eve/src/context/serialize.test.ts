@@ -14,6 +14,8 @@ import {
 import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import * as manifestLoader from "#runtime/loaders/manifest.js";
+import * as runtimeContextKeys from "#runtime/sessions/runtime-context-keys.js";
+import { holdSessionAgent, type SessionAgent } from "#runtime/sessions/session-agent.js";
 
 const BaseKey = new ContextKey<string>("test.deserialize.base");
 const DerivedKey = new ContextKey<string>("test.deserialize.derived", {
@@ -43,7 +45,7 @@ describe("state layout admission", () => {
   it("rejects reserved mount names in an unmarked legacy context", async () => {
     const bundle = { compiledArtifactsSource: { kind: "bundled" } } as CompiledBundle;
     const deserialize = vi
-      .spyOn(SessionAgentKey.codec!, "deserialize")
+      .spyOn(runtimeContextKeys, "resolveSessionAgent")
       .mockResolvedValue(fromCompiledBundle(bundle));
     try {
       // Registration in a previous graph must not turn a reserved legacy authored name
@@ -67,7 +69,7 @@ describe("state layout admission", () => {
       ({ mountId, packageName: "@acme/crm" }) as (typeof manifest.extensionMounts)[number];
     let mounts = [mount("extensions/crm")];
     const deserialize = vi
-      .spyOn(SessionAgentKey.codec!, "deserialize")
+      .spyOn(runtimeContextKeys, "resolveSessionAgent")
       .mockImplementation(async () => {
         for (const { mountId } of mounts) defineMountedState(mountId, "requests", () => 0);
         return fromCompiledBundle(bundle);
@@ -84,7 +86,7 @@ describe("state layout admission", () => {
       });
       // The extension no longer defines `history`, so that value is dropped.
       expect([...restored.entries()].map(([key, value]) => [key.name, value])).toEqual([
-        ["eve.bundle", fromCompiledBundle(bundle)],
+        ["eve.sessionAgent", fromCompiledBundle(bundle)],
         ["eve:mount.v1:extensions%2Fcrm:requests", 4],
       ]);
       expect(warn).toHaveBeenCalledWith(
@@ -108,7 +110,7 @@ describe("state layout admission", () => {
     const bundle = { compiledArtifactsSource: { kind: "bundled" } } as CompiledBundle;
     const name = "test.legacy.app-owned";
     const deserialize = vi
-      .spyOn(SessionAgentKey.codec!, "deserialize")
+      .spyOn(runtimeContextKeys, "resolveSessionAgent")
       .mockImplementation(async () => {
         defineState(name, () => 0);
         return fromCompiledBundle(bundle);
@@ -124,7 +126,7 @@ describe("state layout admission", () => {
         "test.legacy.removed": { phase: "none" },
       });
       expect(compiledBundleOf(restored)).toBe(bundle);
-      expect([...restored.entries()].map(([key]) => key.name)).toEqual(["eve.bundle", name]);
+      expect([...restored.entries()].map(([key]) => key.name)).toEqual(["eve.sessionAgent", name]);
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining("dropping unknown context key"),
         expect.objectContaining({ key: "test.legacy.removed" }),
@@ -142,7 +144,7 @@ describe("state layout admission", () => {
   it("drops an unknown application key in a current-layout checkpoint", async () => {
     const bundle = { compiledArtifactsSource: { kind: "bundled" } } as CompiledBundle;
     const deserialize = vi
-      .spyOn(SessionAgentKey.codec!, "deserialize")
+      .spyOn(runtimeContextKeys, "resolveSessionAgent")
       .mockResolvedValue(fromCompiledBundle(bundle));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -213,6 +215,32 @@ describe("state layout admission", () => {
     );
     expect(JSON.stringify(serializeContext(root))).toBe(
       '{"eve.bundle":{"source":{"kind":"bundled"}},"eve.stateLayout":1}',
+    );
+  });
+});
+
+describe("a held agent's reference", () => {
+  it("is stored under eve.sessionAgent by its id, and read back as the agent this process holds", async () => {
+    // Only what the codec reads: an agent this process holds, by id.
+    const agent = {
+      id: "serialize-held",
+      reference: { id: "serialize-held", kind: "runtime" as const },
+    } as SessionAgent;
+    const ctx = new ContextContainer();
+    ctx.set(SessionAgentKey, agent);
+    const saved = serializeContext(ctx);
+    expect(saved).toEqual({
+      "eve.sessionAgent": { id: "serialize-held", kind: "runtime" },
+      "eve.stateLayout": 1,
+    });
+    const release = holdSessionAgent(agent);
+    try {
+      expect((await deserializeContext(saved)).get(SessionAgentKey)).toBe(agent);
+    } finally {
+      release();
+    }
+    await expect(deserializeContext(saved)).rejects.toThrow(
+      'No agent "serialize-held" is held in this process.',
     );
   });
 });

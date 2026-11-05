@@ -7,7 +7,11 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import type { ContextReader } from "#context/key.js";
 import { ContextKey } from "#context/key.js";
-import { BUNDLE_CONTEXT_KEY_NAME, CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import {
+  BUNDLE_CONTEXT_KEY_NAME,
+  CHANNEL_CONTEXT_KEY_NAME,
+  SESSION_AGENT_CONTEXT_KEY_NAME,
+} from "#context/key-names.js";
 import { deserializeRuntimeAdapter } from "#runtime/channels/registry.js";
 import {
   type DurableCompiledArtifactsSource,
@@ -15,7 +19,12 @@ import {
 } from "#runtime/durable-compiled-artifacts-source.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { loadCompiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
-import type { SessionAgent, SessionAgentReference } from "#runtime/sessions/session-agent.js";
+import {
+  type BundleReference,
+  resolveHeldSessionAgent,
+  type SessionAgent,
+  type SessionAgentReference,
+} from "#runtime/sessions/session-agent.js";
 
 /** Wire format for a serialized channel adapter. */
 interface SerializedAdapter {
@@ -26,8 +35,8 @@ interface SerializedAdapter {
 /** A compiled agent's node, as `SessionAgent.compiled` holds it. */
 export type CompiledBundle = CompiledRuntimeAgentBundle;
 
-/** How a session stores its agent's reference: `eve.bundle`, as compiled sessions always have. */
-interface SerializedAgentReference {
+/** How a session stores a compiled agent's reference: `eve.bundle`, as it always has. */
+interface SerializedBundleReference {
   readonly nodeId?: string;
   readonly source: DurableCompiledArtifactsSource;
 }
@@ -53,15 +62,11 @@ export const ChannelKey = new ContextKey<ChannelAdapter>(CHANNEL_CONTEXT_KEY_NAM
 });
 
 /**
- * The session's agent. A step boundary carries its `reference`, which the codec writes and reads
- * back as the agent: `#context/serialize.js` reads it first, since the channel rehydrates from it.
+ * The session's agent. A step boundary carries its `reference`, which `#context/serialize.js`
+ * writes and reads back first, since the channel rehydrates from it, with `writeAgentReference`
+ * and `readAgentReference` below.
  */
-export const SessionAgentKey = new ContextKey<SessionAgent>(BUNDLE_CONTEXT_KEY_NAME, {
-  codec: {
-    serialize: (agent): SerializedAgentReference => writeAgentReference(agent.reference),
-    deserialize: async (data) => await resolveSessionAgent(readAgentReference(data)),
-  },
-});
+export const SessionAgentKey = new ContextKey<SessionAgent>(SESSION_AGENT_CONTEXT_KEY_NAME);
 
 /** The compiled node of the session's agent, when the agent was compiled from files. */
 export function compiledBundleOf(ctx: Pick<ContextReader, "get">): CompiledBundle | undefined {
@@ -79,19 +84,48 @@ export function requireCompiledBundle(ctx: Pick<ContextReader, "get">): Compiled
   return bundle;
 }
 
-/** The agent `reference` names, loaded in this process. */
+// A session's agent across a step boundary: one reference, resolved here into the port. A compiled
+// agent's is `eve.bundle` with `{ nodeId, source }`, the field and bytes compiled sessions have
+// always stored; a held agent's is `eve.sessionAgent` with its kind and id.
+
+/** The agent `reference` names, loaded or held in this process. */
 export async function resolveSessionAgent(reference: SessionAgentReference): Promise<SessionAgent> {
-  return await loadCompiledSessionAgent({
-    compiledArtifactsSource: resolveDurableCompiledArtifactsSource(reference.source),
-    nodeId: reference.nodeId,
-  });
+  switch (reference.kind) {
+    case "bundle":
+      return await loadCompiledSessionAgent({
+        compiledArtifactsSource: resolveDurableCompiledArtifactsSource(reference.source),
+        nodeId: reference.nodeId,
+      });
+    case "runtime":
+      return resolveHeldSessionAgent(reference.id);
+  }
 }
 
-function writeAgentReference(reference: SessionAgentReference): SerializedAgentReference {
-  return { nodeId: reference.nodeId, source: reference.source };
+/** The context field `reference` is stored under, and what it holds. */
+export function writeAgentReference(reference: SessionAgentReference): readonly [string, unknown] {
+  switch (reference.kind) {
+    case "bundle": {
+      const stored: SerializedBundleReference = {
+        nodeId: reference.nodeId,
+        source: reference.source,
+      };
+      return [BUNDLE_CONTEXT_KEY_NAME, stored];
+    }
+    case "runtime":
+      return [SESSION_AGENT_CONTEXT_KEY_NAME, reference];
+  }
 }
 
-function readAgentReference(data: unknown): SessionAgentReference {
-  const { nodeId, source } = data as SerializedAgentReference;
-  return { kind: "bundle", nodeId, source };
+/** The reference a serialized context's agent field holds, if it has one. */
+export function readAgentReference(
+  data: Readonly<Record<string, unknown>>,
+): SessionAgentReference | undefined {
+  const bundle = data[BUNDLE_CONTEXT_KEY_NAME] as SerializedBundleReference | undefined;
+  if (bundle !== undefined) return compiledReference(bundle);
+  return data[SESSION_AGENT_CONTEXT_KEY_NAME] as SessionAgentReference | undefined;
+}
+
+/** A compiled agent's reference, from the `{ nodeId, source }` a session stores. */
+function compiledReference(stored: SerializedBundleReference): BundleReference {
+  return { kind: "bundle", nodeId: stored.nodeId, source: stored.source };
 }

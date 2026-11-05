@@ -3,22 +3,45 @@ import { resolveKey } from "#context/key.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { mountedStateKeyName } from "#public/definitions/state.js";
-import { type CompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import { BUNDLE_CONTEXT_KEY_NAME, SESSION_AGENT_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import {
+  type CompiledBundle,
+  readAgentReference,
+  resolveSessionAgent,
+  SessionAgentKey,
+  writeAgentReference,
+} from "#runtime/sessions/runtime-context-keys.js";
+import type { SessionAgent } from "#runtime/sessions/session-agent.js";
 
 const log = createLogger("context.serialize");
 const STATE_LAYOUT_KEY = "eve.stateLayout";
 const STATE_LAYOUT_VERSION = 1;
+/** The fields a session's agent reference is stored under, one per kind. */
+const AGENT_FIELDS: ReadonlySet<string> = new Set([
+  BUNDLE_CONTEXT_KEY_NAME,
+  SESSION_AGENT_CONTEXT_KEY_NAME,
+]);
 
 /**
  * Serializes every value in the context to a plain JSON record.
  *
  * Keys with a codec are run through `codec.serialize`; keys without one
- * are stored as-is (they must already be JSON-safe).
+ * are stored as-is (they must already be JSON-safe). The session's agent is
+ * stored as its reference, under the field its kind names (`eve.bundle` for a
+ * compiled agent), where its key stands.
  */
 export function serializeContext(ctx: AlsContext): Record<string, unknown> {
   const data: Record<string, unknown> = {};
+  let holdsAgent = false;
   for (const [key, value] of ctx.entries()) {
     try {
+      // By name: each Nitro chunk can construct its own copy of the key.
+      if (key.name === SessionAgentKey.name) {
+        const [name, reference] = writeAgentReference((value as SessionAgent).reference);
+        data[name] = reference;
+        holdsAgent = true;
+        continue;
+      }
       data[key.name] = key.codec ? key.codec.serialize(value) : value;
     } catch (error) {
       // Name the offending key before it surfaces as an opaque failure inside the workflow SDK.
@@ -26,10 +49,7 @@ export function serializeContext(ctx: AlsContext): Record<string, unknown> {
       throw error;
     }
   }
-  if (
-    data[SessionAgentKey.name] !== undefined ||
-    Object.keys(data).some((name) => name.startsWith("eve:mount."))
-  ) {
+  if (holdsAgent || Object.keys(data).some((name) => name.startsWith("eve:mount."))) {
     data[STATE_LAYOUT_KEY] = STATE_LAYOUT_VERSION;
   }
   return data;
@@ -47,7 +67,6 @@ export async function deserializeContext(
   let data = serialized;
   const ctx = new ContextContainer();
 
-  const serializedAgent = data[SessionAgentKey.name];
   if (data[STATE_LAYOUT_KEY] !== undefined && data[STATE_LAYOUT_KEY] !== STATE_LAYOUT_VERSION) {
     throw new IncompatibleStateLayoutError();
   }
@@ -58,12 +77,9 @@ export async function deserializeContext(
     throw new IncompatibleStateLayoutError();
   }
   // The agent first: the channel rehydrates from it.
-  if (serializedAgent !== undefined) {
-    const codec = SessionAgentKey.codec;
-    if (codec === undefined) {
-      throw new Error(`Context key "${SessionAgentKey.name}" is missing a codec.`);
-    }
-    const agent = await codec.deserialize(serializedAgent, ctx);
+  const reference = readAgentReference(data);
+  if (reference !== undefined) {
+    const agent = await resolveSessionAgent(reference);
     if (agent.compiled !== undefined && data[STATE_LAYOUT_KEY] === undefined) {
       data = await adoptLegacyStateLayout(data, agent.compiled);
     }
@@ -72,7 +88,7 @@ export async function deserializeContext(
 
   for (const [name, raw] of Object.entries(data)) {
     if (raw === undefined) continue;
-    if (name === SessionAgentKey.name || name === STATE_LAYOUT_KEY) continue;
+    if (AGENT_FIELDS.has(name) || name === STATE_LAYOUT_KEY) continue;
     const key = resolveKey(name);
     if (key === undefined) {
       // Unregistered key (e.g. renamed): dropping it silently loses data, so warn.
@@ -108,7 +124,7 @@ async function adoptLegacyStateLayout(
   const adopted: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(data)) {
     if (value === undefined) continue;
-    if (name === SessionAgentKey.name || resolveKey(name) !== undefined) {
+    if (AGENT_FIELDS.has(name) || resolveKey(name) !== undefined) {
       adopted[name] = value;
       continue;
     }
