@@ -6,7 +6,7 @@ export function HowItWorks(): JSX.Element {
   return (
     <HomeSection
       id="how-it-works"
-      lede="Create an agent from a folder of files: an instructions.md file is all you need. Make it multi-tenant by defining any part of it dynamically, per caller."
+      lede="Create an agent from a folder of files: an instructions.md file is all you need. Make it multi-tenant by defining any part of it dynamically, per customer."
       title="How it works"
     >
       <FileTree />

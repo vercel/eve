@@ -217,118 +217,109 @@ export default defineEval({
   },
 ];
 
-// The same agent made multi-tenant: each file is a defineDynamic function from the Dynamic
-// Capabilities guide, shown with what it resolves to for two example tenants.
+// The same agent made multi-tenant: a support agent whose files are defineDynamic functions,
+// so enterprise customers get faster, escalated support and hobby customers get the basics.
+// Each file shows what it resolves to for one customer on each plan.
 const ACME = { name: "Acme", plan: "Enterprise" };
-const GLOBEX = { name: "Globex", plan: "Pro" };
+const JAMIE = { name: "Jamie", plan: "Hobby" };
 
 const tenantSnippets: Snippet[] = [
   {
-    label: "Subagents",
-    name: "subagents/finance/",
-    fileName: "subagents/finance/agent.ts",
+    label: "Instructions",
+    name: "instructions/support.ts",
+    fileName: "instructions/support.ts",
+    lang: "typescript",
+    NavIcon: IconFileText,
+    description:
+      "Tell the agent how to support each customer. Enterprise customers get a one-hour SLA; hobby customers start with the docs.",
+    code: `import { defineDynamic, defineInstructions }
+  from "eve/instructions";
+
+export default defineDynamic((ctx) => {
+  const plan =
+    ctx.session.auth.current?.attributes.plan;
+  return defineInstructions({
+    content: plan === "enterprise"
+      ? "Reply within the 1-hour SLA. Escalate anything you can't resolve."
+      : "Point to the docs and community forum first.",
+  });
+});`,
+    tenants: [
+      { ...ACME, result: "1-hour SLA, escalate when stuck" },
+      { ...JAMIE, result: "Docs and community first" },
+    ],
+  },
+  {
+    label: "Agent",
+    name: "agent.ts",
+    fileName: "agent.ts",
+    lang: "typescript",
+    NavIcon: IconSparkles,
+    description: "Choose the model per customer: a larger model for enterprise conversations.",
+    code: `import { defineAgent, defineDynamic } from "eve";
+
+export default defineAgent({
+  model: defineDynamic((ctx) =>
+    ctx.session.auth.current?.attributes
+      .plan === "enterprise"
+      ? "openai/gpt-6-luna-fast"
+      : "zai/glm-5.2",
+  ),
+});`,
+    tenants: [
+      { ...ACME, result: "Larger model" },
+      { ...JAMIE, result: "Default model" },
+    ],
+  },
+  {
+    label: "Sub Agents",
+    name: "subagents/escalation/",
+    fileName: "subagents/escalation/agent.ts",
     lang: "typescript",
     NavIcon: IconAgents,
     description:
-      "Offer a subagent only to the tenants that should have it. Here, only enterprise plans get the finance analyst.",
-    code: `import { defineAgent, defineDynamic }
-  from "eve";
+      "Give enterprise customers second-level support: a specialist the agent hands hard cases to.",
+    code: `import { defineAgent, defineDynamic } from "eve";
 
 export default defineDynamic((ctx) =>
   ctx.session.auth.current?.attributes
     .plan === "enterprise"
     ? defineAgent({
-        description: "Analyze financial data.",
+        description: "Second-level support engineer.",
         model: ctx.model.id,
       })
     : null,
 );`,
     tenants: [
-      { ...ACME, result: "Finance subagent" },
-      { ...GLOBEX, result: "None" },
-    ],
-  },
-  {
-    label: "Skills",
-    name: "skills/team_playbook.ts",
-    fileName: "skills/team_playbook.ts",
-    lang: "typescript",
-    NavIcon: IconWrench,
-    description:
-      "Load each team's own playbook as a skill, so every tenant's agent follows its own process.",
-    code: `import { defineDynamic, defineSkill }
-  from "eve/skills";
-import { PLAYBOOKS } from "../lib/playbooks";
-
-export default defineDynamic((ctx) => {
-  const team =
-    ctx.session.auth.current?.attributes.team;
-  const content = team
-    ? PLAYBOOKS[team] : undefined;
-  return content
-    ? defineSkill({ content,
-        description: "The team's playbook." })
-    : null;
-});`,
-    tenants: [
-      { ...ACME, result: "Sales playbook" },
-      { ...GLOBEX, result: "Support playbook" },
-    ],
-  },
-  {
-    label: "Connections",
-    name: "connections/accounts.ts",
-    fileName: "connections/accounts.ts",
-    lang: "typescript",
-    NavIcon: IconLinked,
-    description:
-      "Connect each signed-in user to their own accounts, with tokens minted for them when a tool needs one.",
-    code: `import { defineDynamic,
-  defineMcpClientConnection }
-  from "eve/connections";
-
-export default defineDynamic(async (ctx) => {
-  const principal = ctx.session.auth.current;
-  if (principal?.principalType !== "user")
-    return null;
-  const accounts = await ctx.memo(principal,
-    () => listEnabledAccounts(principal));
-  return Object.fromEntries(
-    accounts.map((account) => [
-      account.slug,
-      defineMcpClientConnection({ /* … */ }),
-    ]),
-  );
-});`,
-    tenants: [
-      { ...ACME, result: "acme-prod, acme-staging" },
-      { ...GLOBEX, result: "globex-prod" },
+      { ...ACME, result: "Second-level support engineer" },
+      { ...JAMIE, result: "None" },
     ],
   },
   {
     label: "Tools",
-    name: "tools/query.ts",
-    fileName: "tools/query.ts",
+    name: "tools/page_on_call.ts",
+    fileName: "tools/page_on_call.ts",
     lang: "typescript",
     NavIcon: IconWorkflow,
-    description:
-      "Build one query tool per table in the tenant's warehouse, so each agent sees only its own data.",
+    description: "Let the agent page the on-call engineer, but only for enterprise customers.",
     code: `import { defineDynamic, defineTool }
   from "eve/tools";
+import { z } from "zod";
+import { pageOnCall } from "../lib/pager";
 
-export default defineDynamic(async (ctx) => {
-  const tables = await ctx.memo(
-    ctx.session.id, listTables);
-  return Object.fromEntries(
-    tables.map((table) => [
-      table.name,
-      defineTool({ /* … */ }),
-    ]),
-  );
-});`,
+export default defineDynamic((ctx) =>
+  ctx.session.auth.current?.attributes
+    .plan === "enterprise"
+    ? defineTool({
+        description: "Page the on-call engineer.",
+        inputSchema: z.object({ summary: z.string() }),
+        execute: ({ summary }) => pageOnCall(summary),
+      })
+    : null,
+);`,
     tenants: [
-      { ...ACME, result: "orders, users" },
-      { ...GLOBEX, result: "invoices" },
+      { ...ACME, result: "Can page on-call" },
+      { ...JAMIE, result: "None" },
     ],
   },
 ];
