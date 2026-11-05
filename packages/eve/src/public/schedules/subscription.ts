@@ -339,7 +339,7 @@ type DynamicSchedulesOptions<
  * while eve captures creator identity separately and re-resolves it on every attempt.
  * `run` chooses destinations and starts work; no creation conversation is implicitly captured.
  * Provider defaults to vercelScheduleProvider(); pass provider explicitly to select another backend.
- * The default supports Vercel production and eve dev, not preview or self-hosted scheduling.
+ * The default supports Vercel deployments and eve dev, not self-hosted scheduling.
  */
 export function defineDynamicSchedules<TInput, TPrepared>(
   definition: Omit<
