@@ -18,6 +18,8 @@ export function createAuthoredRelativeExtensionResolverPlugin(input: {
   /** Leaves imports from installed dependencies to the bundler. */
   readonly authoredSourceOnly?: boolean;
   readonly extensions: readonly string[];
+  /** With `authoredSourceOnly`, installed importers to handle anyway. */
+  readonly handlesInstalledModule?: (path: string) => boolean;
 }): Plugin {
   const isFile = createCachedFileProbe();
 
@@ -32,7 +34,9 @@ export function createAuthoredRelativeExtensionResolverPlugin(input: {
           importer === undefined ||
           importer.startsWith("\0") ||
           !isPathImport(source) ||
-          (input.authoredSourceOnly === true && !isAuthoredSourcePath(importer))
+          (input.authoredSourceOnly === true &&
+            !isAuthoredSourcePath(importer) &&
+            input.handlesInstalledModule?.(importer) !== true)
         ) {
           return undefined;
         }

@@ -41,6 +41,8 @@ export function createAuthoredAssetImportPlugin(input: {
    * installed dependency imports stay with the host bundler.
    */
   readonly authoredSourceOnly?: boolean;
+  /** With `authoredSourceOnly`, installed modules to handle anyway. */
+  readonly handlesInstalledModule?: (path: string) => boolean;
 }): Plugin {
   const packageRoot = toCanonicalPath(input.packageRoot);
   // Built here rather than at module scope: runtime modules import this file.
@@ -51,7 +53,9 @@ export function createAuthoredAssetImportPlugin(input: {
     ),
   ];
   const handles = (path: string): boolean =>
-    input.authoredSourceOnly !== true || isAuthoredSourcePath(path);
+    input.authoredSourceOnly !== true ||
+    isAuthoredSourcePath(path) ||
+    input.handlesInstalledModule?.(path) === true;
   return {
     name: "eve-authored-asset-import",
     resolveId: {

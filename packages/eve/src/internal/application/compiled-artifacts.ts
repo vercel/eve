@@ -61,6 +61,11 @@ export interface GeneratedCompiledArtifactsFiles {
    * each module's side effects during packaging.
    */
   instrumentationSourcePaths?: readonly string[];
+  /**
+   * Installed packages the generated modules import and leave for Nitro to bundle. They keep
+   * the authored transforms, such as asset imports, that inlining them would have applied.
+   */
+  hostBundledPackageRoots?: readonly string[];
 }
 
 /** Writes the generated compiled-artifacts modules, which install themselves on import. */
@@ -84,6 +89,7 @@ export async function writeCompiledArtifactsFiles(input: {
     appRoot: input.compileResult.project.appRoot,
     manifest: input.compileResult.manifest,
     moduleMapPath: input.compileResult.paths.moduleMapPath,
+    hostBundled: true,
   });
 
   await mkdir(input.outDir, { recursive: true });
@@ -119,6 +125,7 @@ export async function writeCompiledArtifactsFiles(input: {
   const generatedArtifacts: GeneratedCompiledArtifactsFiles = {
     authoredWorkflowModules: prepared.authoredWorkflowModules,
     bootstrapPath,
+    hostBundledPackageRoots: prepared.hostBundledPackageRoots,
     workflowWorldPluginPath,
   };
 
