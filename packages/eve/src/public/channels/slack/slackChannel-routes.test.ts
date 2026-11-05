@@ -22,7 +22,7 @@ import {
 } from "#public/channels/slack/slackChannel.js";
 
 const SIGNING_SECRET = "test-signing-secret";
-/** Answers the default admit's guest check as a full member, then defers to `respond`. */
+/** Answers the default allowFrom's guest check as a full member, then defers to `respond`. */
 function asMember<A extends unknown[]>(
   respond: (request: string | URL | Request, ...rest: A) => Promise<Response>,
 ) {
@@ -666,7 +666,7 @@ describe("slackChannel message edits", () => {
   });
 });
 
-describe("slackChannel admit", () => {
+describe("slackChannel allowFrom", () => {
   function connectMention(channel: string, extShared: boolean): Request {
     return signed(
       JSON.stringify({
@@ -774,37 +774,6 @@ describe("slackChannel admit", () => {
     expect(onEvent).not.toHaveBeenCalled();
   });
 
-  it("refuses a send into a conversation Slack reports no sharing flags for", async () => {
-    fetchMock.mockImplementation(async (request: string | URL | Request) =>
-      String(request).includes("conversations.info")
-        ? Response.json({ ok: true, channel: {} })
-        : Response.json({ ok: true, ts: "1700000001.000001" }),
-    );
-    let refusal: unknown;
-    const channel = slackChannel({
-      credentials: { botToken: "xoxb-test" },
-      async onEvent(ctx) {
-        refusal = await ctx
-          .send("follow up", { auth: null, target: { channelId: "C_NO_FLAGS" } })
-          .catch((error: unknown) => error);
-      },
-    });
-
-    await firePost(
-      channel,
-      signed(
-        JSON.stringify({
-          event: { type: "team_join" },
-          event_id: "EvNoFlags",
-          team_id: "T01",
-          type: "event_callback",
-        }),
-      ),
-    );
-
-    expect(String(refusal)).toContain("C_NO_FLAGS");
-  });
-
   it("tells the person when a missing scope keeps the agent from answering", async () => {
     fetchMock.mockImplementation(async (request: string | URL | Request) =>
       String(request).includes("users.info")
@@ -845,19 +814,19 @@ describe("slackChannel admit", () => {
     ]);
   });
 
-  it("hands an authored admit the request and dispatches what it admits", async () => {
-    const admit = vi.fn(() => true);
+  it("hands an authored allowFrom the request and dispatches what it allows", async () => {
+    const allowFrom = vi.fn(() => true);
     const send = vi.fn().mockResolvedValue({ id: "s1" });
 
     await firePost(
-      slackChannel({ admit, credentials: { botToken: "xoxb-test" } }),
+      slackChannel({ allowFrom, credentials: { botToken: "xoxb-test" } }),
       connectMention("C_CONNECT_ADMITTED", true),
       send,
     );
 
-    expect(admit).toHaveBeenCalledWith(
+    expect(allowFrom).toHaveBeenCalledWith(
       expect.objectContaining({
-        actor: { teamId: "T_PARTNER", userId: "U_BOB" },
+        user: { id: "U_BOB", teamId: "T_PARTNER" },
         channelId: "C_CONNECT_ADMITTED",
         installationTeamId: undefined,
         kind: "message",
@@ -881,66 +850,76 @@ describe("slackChannel admit", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("still looks up a conversation for a send after a message said it isn't shared", async () => {
-    sharedConversationInfo("C_PENDING_AFTER_MESSAGE", { is_pending_ext_shared: true });
-    const onAppMention = vi.fn(() => null);
-
-    // Slack's envelope flag doesn't report pending shares, so the mention is admitted.
-    await firePost(
-      slackChannel({ credentials: { botToken: "xoxb-test" }, onAppMention }),
-      connectMention("C_PENDING_AFTER_MESSAGE", false),
-    );
-    expect(onAppMention).toHaveBeenCalledOnce();
-
-    let sendRefusal: unknown;
-    await firePost(
-      slackChannel({
-        credentials: { botToken: "xoxb-test" },
-        async onEvent(ctx) {
-          sendRefusal = await ctx
-            .send("follow up", { auth: null, target: { channelId: "C_PENDING_AFTER_MESSAGE" } })
-            .catch((error: unknown) => error);
-        },
-      }),
-      signed(
-        JSON.stringify({
-          event: { type: "team_join" },
-          event_id: "EvPendingAfterMessage",
-          team_id: "T01",
-          type: "event_callback",
-        }),
+  it.each([
+    ["is pending a Slack Connect share", { is_ext_shared: false, is_pending_ext_shared: true }],
+    ["reports no sharing flags", {}],
+  ])("refuses an approval in a conversation that %s", async (_name, flags) => {
+    const channel = `C_APPROVAL_${JSON.stringify(flags)}`;
+    fetchMock.mockImplementation(
+      asMember(async (request: string | URL | Request) =>
+        String(request).includes("conversations.info")
+          ? Response.json({ ok: true, channel: flags })
+          : Response.json({ ok: true, ts: "1700000001.000001" }),
       ),
     );
-    expect(String(sendRefusal)).toContain("C_PENDING_AFTER_MESSAGE");
+    const onAnswers = vi.fn(() => ({ auth: null }));
+
+    await firePost(
+      slackChannel({ credentials: { botToken: "xoxb-test" }, onAnswers }),
+      approvalPress(channel),
+    );
+
+    expect(onAnswers).not.toHaveBeenCalled();
   });
 
-  it("refuses to start a session in a pending Slack Connect conversation", async () => {
-    sharedConversationInfo("C_PENDING", { is_pending_ext_shared: true });
-    let refusal: unknown;
+  it("still looks up an approval's conversation after a message there said it isn't shared", async () => {
+    sharedConversationInfo("C_PENDING_AFTER_MESSAGE", { is_pending_ext_shared: true });
+    const onAppMention = vi.fn(() => null);
+    const onAnswers = vi.fn(() => ({ auth: null }));
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
-      async onEvent(ctx) {
-        refusal = await ctx
-          .send("follow up", { auth: null, target: { channelId: "C_PENDING" } })
-          .catch((error: unknown) => error);
-      },
+      onAnswers,
+      onAppMention,
     });
-    const send = vi.fn().mockResolvedValue({ id: "s1" });
 
-    await firePost(
-      channel,
-      signed(
-        JSON.stringify({
-          event: { type: "team_join", user: "U01" },
-          event_id: "EvTeamJoin",
-          team_id: "T01",
-          type: "event_callback",
-        }),
-      ),
-      send,
-    );
+    // Slack's envelope flag doesn't report pending shares, so the mention gets in.
+    await firePost(channel, connectMention("C_PENDING_AFTER_MESSAGE", false));
+    await firePost(channel, approvalPress("C_PENDING_AFTER_MESSAGE"));
 
-    expect(String(refusal)).toContain("refused to post in Slack conversation C_PENDING");
-    expect(send).not.toHaveBeenCalled();
+    expect(onAppMention).toHaveBeenCalledOnce();
+    expect(onAnswers).not.toHaveBeenCalled();
+  });
+
+  it("admits only listed users on top of the default", async () => {
+    const onAppMention = vi.fn(() => null);
+    const channel = slackChannel({
+      allowFrom: ["U_ALICE"],
+      credentials: { botToken: "xoxb-test" },
+      onAppMention,
+    });
+
+    for (const user of ["U_ALICE", "U_MALLORY"]) {
+      await firePost(
+        channel,
+        signed(
+          JSON.stringify({
+            event: {
+              channel: "C01",
+              event_ts: "1700000000.000001",
+              text: "hello",
+              ts: "1700000000.000001",
+              type: "app_mention",
+              user,
+            },
+            event_id: `EvList${user}`,
+            is_ext_shared_channel: false,
+            team_id: "T01",
+            type: "event_callback",
+          }),
+        ),
+      );
+    }
+
+    expect(onAppMention).toHaveBeenCalledOnce();
   });
 });

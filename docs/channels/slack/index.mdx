@@ -342,26 +342,21 @@ Images, PDFs, audio, and other files attached to a message reach the agent. When
 
 ## Restrict access
 
-A valid Slack signature proves the event came from Slack, not that the sender should reach your agent. By default, the agent ignores Slack Connect conversations, which include people from other organizations, and guest accounts. It doesn't answer them, take their approvals, or start sessions in Slack Connect conversations.
+A valid Slack signature proves the event came from Slack, not that the sender should reach your agent. By default, the agent ignores Slack Connect conversations, which include people from other organizations, and guest accounts. It doesn't answer them or take their approvals.
 
-`admit` is the channel's one access check. It runs before every hook, so a policy written once also covers DMs, edits, approval clicks, and slash commands. To allow only certain people, call the default from your own `admit`:
+`allowFrom` decides who can reach the agent. eve checks it before every hook, so it also covers DMs, edits, approval clicks, and slash commands. To allow only certain people, list their Slack user IDs. The default checks still apply:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
-import { defaultSlackAdmit, slackChannel } from "eve/channels/slack";
-
-const allowedUsers = new Set(["U01234567"]);
+import { slackChannel } from "eve/channels/slack";
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  async admit(request) {
-    if (!(await defaultSlackAdmit(request))) return false;
-    return request.kind === "send" || allowedUsers.has(request.actor?.userId ?? "");
-  },
+  allowFrom: ["U01ALICE", "U02BOB"],
 });
 ```
 
-Pass `admit: () => true` to serve Slack Connect users and guests. Keep authorization checks inside sensitive tools too. The [reference](/docs/channels/slack/reference#restrict-who-can-invoke-the-agent) covers every request kind and the scopes the default needs.
+Pass `allowFrom: () => true` to serve Slack Connect users and guests. `allowFrom` only covers inbound requests, and keep authorization checks inside sensitive tools too. The [reference](/docs/channels/slack/reference#restrict-who-can-invoke-the-agent) covers custom policies, every request kind, and the scopes the default needs.
 
 ## Reference
 

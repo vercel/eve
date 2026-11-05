@@ -20,7 +20,7 @@ import { emptySessionView } from "#protocol/session-projection/fold.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 
 const SIGNING_SECRET = "test-signing-secret";
-/** Answers the default admit's guest check as a full member, then defers to `respond`. */
+/** Answers the default allowFrom's guest check as a full member, then defers to `respond`. */
 function asMember<A extends unknown[]>(
   respond: (request: string | URL | Request, ...rest: A) => Promise<Response>,
 ) {
@@ -437,11 +437,11 @@ describe("slackChannel() code channels", () => {
     expect(events).toEqual(["C_ORDINARY_ON_EVENT"]);
   });
 
-  it("admits the onEvent fallback for an ordinary channel message as an event", async () => {
+  it("checks the onEvent fallback for an ordinary channel message as an event", async () => {
     useCodeChannels([]);
     const onEvent = vi.fn();
     const channel = slackChannel({
-      admit: (request) => request.kind !== "event",
+      allowFrom: (request) => request.kind !== "event",
       codeChannels: true,
       credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
       onAppMention: () => null,
@@ -629,10 +629,10 @@ describe("slackChannel() code channels", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("ignores a stop from someone admit refuses", async () => {
+  it("ignores a stop from someone allowFrom refuses", async () => {
     useCodeChannels([]);
     const channel = slackChannel({
-      admit: (request) => request.actor?.userId !== "U_REFUSED",
+      allowFrom: (request) => request.user?.id !== "U_REFUSED",
       codeChannels: true,
       credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
     });

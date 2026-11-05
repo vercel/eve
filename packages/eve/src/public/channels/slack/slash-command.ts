@@ -1,7 +1,7 @@
 import { type parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import { createLogger } from "#internal/logging.js";
-import { admitSlackInteraction } from "#public/channels/slack/admit.js";
+import { allowSlackInteraction } from "#public/channels/slack/allow-from.js";
 import { buildSlackWorkspaceHandle } from "#public/channels/slack/api.js";
 import type {
   SlackChannelConfig,
@@ -40,8 +40,8 @@ export function dispatchSlashCommand(
     }),
   };
   ctx.waitUntil(
-    admitSlackInteraction({
-      admit: deps.config.admit,
+    allowSlackInteraction({
+      allowFrom: deps.config.allowFrom,
       api: deps.api,
       botToken: deps.config.credentials?.botToken,
       kind: "command",
@@ -51,7 +51,7 @@ export function dispatchSlashCommand(
       userId: command.user.id,
       raw: payload.raw,
     })
-      .then((admitted) => (admitted ? onSlashCommand(command, commandCtx) : undefined))
+      .then((allowed) => (allowed ? onSlashCommand(command, commandCtx) : undefined))
       .catch((error: unknown) => {
         log.error("slash command handler failed", { error });
       }),

@@ -1,8 +1,7 @@
 /**
- * Slack admission: the one check every Slack surface passes before a hook
- * runs or eve posts somewhere new. The default keeps the agent out of Slack
- * Connect conversations, whose members include other organizations, and away
- * from guest accounts.
+ * Slack's `allowFrom`: the one check every inbound Slack request passes before
+ * a hook runs. The default keeps the agent out of Slack Connect conversations,
+ * whose members include other organizations, and away from guest accounts.
  */
 import { createLogger, logError } from "#internal/logging.js";
 import {
@@ -13,40 +12,39 @@ import {
 } from "#public/channels/slack/api.js";
 import type { SlackTransportOptions } from "#public/channels/slack/transport.js";
 
-const log = createLogger("slack.admit");
+const log = createLogger("slack.allow-from");
 
-/** The Slack surface asking to reach the agent. */
-export type SlackAdmitKind =
+/** The Slack surface a request arrived on. */
+export type SlackInboundKind =
   | "message"
   | "edit"
   | "event"
   | "answer"
   | "interaction"
   | "command"
-  | "shortcut"
-  | "send";
+  | "shortcut";
 
 /** The Slack user behind an inbound request. */
-export interface SlackAdmitActor {
-  readonly userId: string;
+export interface SlackInboundUser {
+  readonly id: string;
   /** The user's workspace, when Slack reported one. Slack Connect users carry their own. */
   readonly teamId?: string;
 }
 
-/** What `slackChannel({ admit })` decides on. */
-export interface SlackAdmitRequest {
+/** What `slackChannel({ allowFrom })` decides on. */
+export interface SlackInboundRequest {
   /**
-   * The surface asking: a new message, an edit, an `onEvent` callback, an
-   * approval or question answer, an `onInteraction` action, a slash command,
-   * a shortcut, or an outbound `send` to a new Slack thread.
+   * The surface the request arrived on: a new message, an edit, an `onEvent`
+   * callback, an approval or question answer, an `onInteraction` action, a
+   * slash command, or a shortcut.
    */
-  readonly kind: SlackAdmitKind;
-  /** The conversation the request comes from, or that `send` posts into. */
+  readonly kind: SlackInboundKind;
+  /** The conversation the request comes from, when it has one. */
   readonly channelId: string | undefined;
   /** The workspace whose app installation received the request. */
   readonly installationTeamId: string | undefined;
-  /** The Slack user behind the request. `undefined` for `send` and events without a user. */
-  readonly actor: SlackAdmitActor | undefined;
+  /** The Slack user behind the request. `undefined` for events without a user. */
+  readonly user: SlackInboundUser | undefined;
   /**
    * Whether the conversation is shared with another organization through
    * Slack Connect, or is pending such a share. Returns `true` when Slack
@@ -55,29 +53,44 @@ export interface SlackAdmitRequest {
    */
   isExternalConversation(): Promise<boolean>;
   /**
-   * Whether the actor is a multi-channel or single-channel guest. Returns
-   * `true` when Slack can't say, and `false` without an actor. Needs the
+   * Whether the user is a multi-channel or single-channel guest. Returns
+   * `true` when Slack can't say, and `false` without a user. Needs the
    * `users:read` scope. Memoized per request and cached briefly per user.
    */
   isGuest(): Promise<boolean>;
-  /** The signed Slack payload, or the receive target for `send`. */
+  /** The signed Slack payload. */
   readonly raw: Readonly<Record<string, unknown>>;
   /** Bot-token Slack Web API access. */
   readonly slack: SlackWorkspaceHandle;
 }
 
-/** Decides whether a Slack request may reach the agent. Throwing counts as `false`. */
-export type SlackAdmit = (request: SlackAdmitRequest) => boolean | Promise<boolean>;
+/**
+ * Who may reach the agent. A list of Slack user IDs admits those users on top
+ * of {@link defaultSlackAllowFrom}. A function decides alone, so call
+ * `defaultSlackAllowFrom` from it to keep the default checks. A function that
+ * throws counts as `false`.
+ */
+export type SlackAllowFrom =
+  | readonly string[]
+  | ((request: SlackInboundRequest) => boolean | Promise<boolean>);
 
 /**
- * Default `admit`: refuses requests from, and sends into, Slack Connect
- * conversations, and refuses requests from guest accounts. Conversations and
- * users Slack can't classify are refused too. Requests without a conversation
- * or an actor skip that check.
+ * Default `allowFrom`: refuses requests from Slack Connect conversations and
+ * from guest accounts, and requests whose conversation or user Slack can't
+ * classify. Requests without a conversation or a user skip that check.
  */
-export async function defaultSlackAdmit(request: SlackAdmitRequest): Promise<boolean> {
+export async function defaultSlackAllowFrom(request: SlackInboundRequest): Promise<boolean> {
   if (await request.isExternalConversation()) return false;
   return !(await request.isGuest());
+}
+
+async function decide(
+  allowFrom: SlackAllowFrom | undefined,
+  request: SlackInboundRequest,
+): Promise<boolean> {
+  if (typeof allowFrom === "function") return (await allowFrom(request)) === true;
+  if (!(await defaultSlackAllowFrom(request))) return false;
+  return allowFrom === undefined || allowFrom.includes(request.user?.id ?? "");
 }
 
 /** The sharing flags Slack reports on a conversation object. */
@@ -272,30 +285,30 @@ async function classifyEventConversation(
   }
   if (channelId === undefined) return { flagged: false };
   // The envelope flag doesn't report a pending share, so a `false` is used for this event but never
-  // cached: a later send or answer must still get the lookup that sees one.
+  // cached: a later answer or command must still get the lookup that sees one.
   if (input.extSharedChannel === false) return { flagged: false };
   return await classifyConversation({ ...input, channelId });
 }
 
-const missingScopes = new WeakMap<SlackAdmitRequest, Set<string>>();
+const missingScopes = new WeakMap<SlackInboundRequest, Set<string>>();
 
 /** Scopes a lookup behind this request found missing. */
-export function slackAdmitMissingScopes(request: SlackAdmitRequest): readonly string[] {
+export function slackInboundMissingScopes(request: SlackInboundRequest): readonly string[] {
   return [...(missingScopes.get(request) ?? [])];
 }
 
-/** Builds the request `admit` sees. */
-export function createSlackAdmitRequest(input: {
-  readonly kind: SlackAdmitKind;
+/** Builds the request `allowFrom` sees. */
+export function createSlackInboundRequest(input: {
+  readonly kind: SlackInboundKind;
   readonly channelId: string | undefined;
   readonly installationTeamId: string | undefined;
-  readonly actor: SlackAdmitActor | undefined;
+  readonly user: SlackInboundUser | undefined;
   readonly raw: Readonly<Record<string, unknown>>;
   readonly slack: SlackWorkspaceHandle;
   /** Shares a classifier the hook context also exposes; built from `slack` otherwise. */
   readonly classifyConversation?: () => Promise<SlackClassification>;
-}): SlackAdmitRequest {
-  const { actor } = input;
+}): SlackInboundRequest {
+  const { user } = input;
   const scopes = new Set<string>();
   const conversation =
     input.classifyConversation ??
@@ -310,19 +323,19 @@ export function createSlackAdmitRequest(input: {
     if (missingScope !== undefined) scopes.add(missingScope);
     return flagged;
   };
-  const request: SlackAdmitRequest = {
+  const request: SlackInboundRequest = {
     kind: input.kind,
     channelId: input.channelId,
     installationTeamId: input.installationTeamId,
-    actor,
+    user,
     isExternalConversation: () => flagged(conversation()),
     isGuest: () =>
       flagged(
         (guest ??=
-          actor === undefined
+          user === undefined
             ? Promise.resolve({ flagged: false })
             : classifyGuest({
-                userId: actor.userId,
+                userId: user.id,
                 installationTeamId: input.installationTeamId,
                 request: input.slack.request,
               })),
@@ -335,40 +348,40 @@ export function createSlackAdmitRequest(input: {
 }
 
 /**
- * Runs `admit`, treating a throw as a refusal. Logs refusals without content.
+ * Runs `allowFrom`, treating a throw as a refusal. Logs refusals without content.
  * When a lookup failed for a missing scope, tells the person who asked, so an
  * upgraded app that needs a reinstall doesn't fail silently.
  */
-export async function isSlackRequestAdmitted(
-  admit: SlackAdmit,
-  request: SlackAdmitRequest,
+export async function isSlackRequestAllowed(
+  allowFrom: SlackAllowFrom | undefined,
+  request: SlackInboundRequest,
 ): Promise<boolean> {
-  let admitted = false;
+  let allowed = false;
   try {
-    admitted = (await admit(request)) === true;
+    allowed = await decide(allowFrom, request);
   } catch (error) {
-    logError(log, "Slack admit hook failed; refusing the request", error, {
+    logError(log, "Slack allowFrom failed; refusing the request", error, {
       channelId: request.channelId,
       kind: request.kind,
     });
     return false;
   }
-  if (!admitted) {
-    log.info("Slack request not admitted", { channelId: request.channelId, kind: request.kind });
+  if (!allowed) {
+    log.info("Slack request not allowed", { channelId: request.channelId, kind: request.kind });
     await noticeMissingScopes(request);
   }
-  return admitted;
+  return allowed;
 }
 
-async function noticeMissingScopes(request: SlackAdmitRequest): Promise<void> {
-  const scopes = slackAdmitMissingScopes(request);
-  const { actor, channelId } = request;
-  if (scopes.length === 0 || actor === undefined || channelId === undefined) return;
+async function noticeMissingScopes(request: SlackInboundRequest): Promise<void> {
+  const scopes = slackInboundMissingScopes(request);
+  const { user, channelId } = request;
+  if (scopes.length === 0 || user === undefined || channelId === undefined) return;
   const thread = threadTsOf(request.raw);
   try {
     const response = await request.slack.request("chat.postEphemeral", {
       channel: channelId,
-      user: actor.userId,
+      user: user.id,
       ...(thread !== undefined && { thread_ts: thread }),
       text: `I can't respond yet: this Slack app is missing the ${scopes.join(", ")} scope${scopes.length === 1 ? "" : "s"}. Ask a workspace admin to add ${scopes.length === 1 ? "it" : "them"} and reinstall the app.`,
     });
@@ -391,28 +404,28 @@ function threadTsOf(raw: Readonly<Record<string, unknown>>): string | undefined 
   return undefined;
 }
 
-/** Admits an interactivity payload: an answer, an action, a slash command, or a shortcut. */
-export async function admitSlackInteraction(input: {
-  readonly admit: SlackAdmit | undefined;
+/** Checks an interactivity payload: an answer, an action, a slash command, or a shortcut. */
+export async function allowSlackInteraction(input: {
+  readonly allowFrom: SlackAllowFrom | undefined;
   readonly api: SlackTransportOptions | undefined;
   readonly botToken: SlackBotToken | undefined;
-  readonly kind: Extract<SlackAdmitKind, "answer" | "interaction" | "command" | "shortcut">;
+  readonly kind: Extract<SlackInboundKind, "answer" | "interaction" | "command" | "shortcut">;
   readonly channelId: string | undefined;
   readonly installationTeamId: string | undefined;
   readonly teamId: string | undefined;
   readonly userId: string;
   readonly raw: Readonly<Record<string, unknown>>;
 }): Promise<boolean> {
-  return await isSlackRequestAdmitted(
-    input.admit ?? defaultSlackAdmit,
-    createSlackAdmitRequest({
+  return await isSlackRequestAllowed(
+    input.allowFrom,
+    createSlackInboundRequest({
       kind: input.kind,
       channelId: input.channelId,
       installationTeamId: input.installationTeamId,
-      actor:
+      user:
         input.teamId === undefined
-          ? { userId: input.userId }
-          : { userId: input.userId, teamId: input.teamId },
+          ? { id: input.userId }
+          : { id: input.userId, teamId: input.teamId },
       raw: input.raw,
       slack: buildSlackWorkspaceHandle({
         api: input.api,

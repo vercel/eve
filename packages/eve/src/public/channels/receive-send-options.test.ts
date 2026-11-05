@@ -56,11 +56,7 @@ const channels = [
     { issueNumber: 7, owner: "acme", repo: "app", repositoryId: 1 },
   ],
   ["linear", linearChannel(), { agentSessionId: "agent_session_1" }],
-  [
-    "slack",
-    slackChannel({ admit: () => true, credentials: { botToken: "xoxb-test" } }),
-    { channelId: "C123" },
-  ],
+  ["slack", slackChannel({ credentials: { botToken: "xoxb-test" } }), { channelId: "C123" }],
   [
     "teams",
     teamsChannel({ credentials: { tokenProvider: () => "token" } }),
@@ -99,7 +95,7 @@ describe("built-in receive() hooks", () => {
 
 describe("slackChannel().receive", () => {
   it("derives a keyed threadless send's continuation token from its idempotency key", async () => {
-    const channel = slackChannel({ admit: () => true, credentials: { botToken: "xoxb-test" } });
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
     if (!isCompiledChannel(channel) || channel.receive === undefined) {
       throw new Error("Expected a compiled channel with receive().");
     }

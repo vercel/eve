@@ -141,7 +141,7 @@ export function slackDriver(
         },
       };
     }
-    // The default admit asks whether a person is a guest and, for interactions, whether the
+    // The default allowFrom asks whether a person is a guest and, for interactions, whether the
     // conversation is shared through Slack Connect. Everyone here is an ordinary member.
     if (method === "users.info") {
       return {

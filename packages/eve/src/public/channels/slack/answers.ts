@@ -1,5 +1,5 @@
 import { createLogger } from "#internal/logging.js";
-import { admitSlackInteraction } from "#public/channels/slack/admit.js";
+import { allowSlackInteraction } from "#public/channels/slack/allow-from.js";
 import { buildSlackBinding } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import type {
@@ -27,8 +27,8 @@ export async function authorizeAnswer(input: {
   readonly target: SlackSessionTarget;
   readonly teamId: string | null | undefined;
 }): Promise<SlackAnswerResult> {
-  const admitted = await admitSlackInteraction({
-    admit: input.deps.config.admit,
+  const allowed = await allowSlackInteraction({
+    allowFrom: input.deps.config.allowFrom,
     api: input.deps.api,
     botToken: input.deps.config.credentials?.botToken,
     kind: "answer",
@@ -38,7 +38,7 @@ export async function authorizeAnswer(input: {
     userId: input.submission.user.id,
     raw: input.raw,
   });
-  if (!admitted) return null;
+  if (!allowed) return null;
 
   const { channelId, codeChannel, threadTs = "" } = input.target;
   const defaultAuth = buildSlackAuthContext({

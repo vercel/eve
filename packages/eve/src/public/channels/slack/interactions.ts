@@ -42,7 +42,7 @@ import {
 import { readSlackTextObject } from "#public/channels/slack/inbound-content.js";
 import { settleFreeformCard, settleHitlCard } from "#public/channels/slack/interaction-cards.js";
 import { authorizeAnswer } from "#public/channels/slack/answers.js";
-import { admitSlackInteraction } from "#public/channels/slack/admit.js";
+import { allowSlackInteraction } from "#public/channels/slack/allow-from.js";
 import type {
   SlackChannelConfig,
   SlackChannelState,
@@ -374,8 +374,8 @@ async function dispatchCustomInteractions(input: {
 }): Promise<void> {
   const { ctx, customActions, deps, interaction, onInteraction } = input;
   const actionUser = customActions[0]!.user;
-  const admitted = await admitSlackInteraction({
-    admit: deps.config.admit,
+  const allowed = await allowSlackInteraction({
+    allowFrom: deps.config.allowFrom,
     api: deps.api,
     botToken: deps.config.credentials?.botToken,
     kind: "interaction",
@@ -385,7 +385,7 @@ async function dispatchCustomInteractions(input: {
     userId: actionUser.id,
     raw: input.raw,
   });
-  if (!admitted) return;
+  if (!allowed) return;
   const codeChannel =
     deps.config.codeChannels === true &&
     (await isSlackCodeChannel(
@@ -531,8 +531,8 @@ function dispatchShortcut(
   };
   dispatchInteractionHook(
     async () => {
-      const admitted = await admitSlackInteraction({
-        admit: deps.config.admit,
+      const allowed = await allowSlackInteraction({
+        allowFrom: deps.config.allowFrom,
         api: deps.api,
         botToken: deps.config.credentials?.botToken,
         kind: "shortcut",
@@ -542,7 +542,7 @@ function dispatchShortcut(
         userId: shortcut.user.id,
         raw,
       });
-      if (admitted) await onShortcut(shortcut, shortcutCtx);
+      if (allowed) await onShortcut(shortcut, shortcutCtx);
     },
     ctx,
     "shortcut handler failed",
