@@ -35,8 +35,8 @@ export { vercelWorld, type VercelWorldOptions } from "#execution/world/vercel-wo
 export { memoryWorld } from "#execution/world/memory-world.js";
 // eve's default tools, and the sandboxes they run in.
 export { eve, type EveDefaultsOptions } from "#definitions/defaults.js";
-export { memorySandbox } from "#runtime/sandbox/memory-sandbox.js";
+export { memorySandbox, type MemorySandboxOptions } from "#runtime/sandbox/memory-sandbox.js";
 export { hostSandbox } from "#runtime/sandbox/host-sandbox.js";
 export type { HostSandboxOptions } from "#sandbox/providers/host.js";
 export { codeSandbox, type CodeSandboxOptions } from "#runtime/sandbox/code-sandbox.js";
-export type { CodeSandbox } from "#runtime/sandbox/code-sandbox.js";
+export type { CodeSandbox } from "#runtime/sandbox/code-sandbox-registry.js";

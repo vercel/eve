@@ -616,6 +616,7 @@
     "typecheck": "pnpm run check:web-template && tsc -p tsconfig.json --noEmit && tsc -p demo/tsconfig.json",
     "generate:web-template": "node src/setup/build.ts --write",
     "guard:browser-reach": "node scripts/browser-reach.mjs --check",
+    "test:browser-smoke": "node scripts/browser-smoke.mjs && node scripts/browser-smoke.mjs --worker",
     "check:web-template": "node src/setup/build.ts --check",
     "test:tui": "tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs"
   },
@@ -679,6 +680,7 @@
     "emulate": "0.6.0",
     "env-runner": "0.3.11",
     "eventsource-parser": "3.1.0",
+    "fflate": "0.8.3",
     "jose": "6.2.3",
     "js-yaml": "4.3.2",
     "jsonc-parser": "3.3.1",
