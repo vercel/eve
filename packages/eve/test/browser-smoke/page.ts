@@ -13,9 +13,9 @@ import {
   defineAgent,
   defineTool,
   eve,
-  indexedDbWorld,
+  browserWorld,
   memorySandbox,
-} from "#browser/index.js";
+} from "#public/browser/index.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 
 interface SmokeResult {
@@ -151,7 +151,7 @@ async function run(): Promise<SmokeResult> {
     principalId: "page-user",
     principalType: "user",
   };
-  const world = indexedDbWorld("eve-browser-smoke");
+  const world = browserWorld("eve-browser-smoke");
   const params = new URLSearchParams(pageSearch());
 
   if (params.get("phase") === "resume") {

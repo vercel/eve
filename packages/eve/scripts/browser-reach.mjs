@@ -35,9 +35,11 @@ const option = (name, fallback) => {
  * The entries that promise no Node built-in and no eve file naming a Node global: the session
  * core's host-neutral roots, which every host runs a session through (the session loop, the turn
  * step it runs, and a session's first-owner boot), the in-process host, which runs sessions
- * through them without Workflow, and the internal embed entry's agent builder and sessions.
+ * through them without Workflow, the internal embed entry's agent builder and sessions, and the
+ * browser entry, which promises a page all of it.
  */
 const NODE_FREE_ENTRIES = [
+  "src/public/browser/index.ts",
   "src/execution/session/program.ts",
   "src/execution/session/turn-step.ts",
   "src/execution/session/owner-boot.ts",
@@ -46,7 +48,7 @@ const NODE_FREE_ENTRIES = [
   "src/embed/session.ts",
 ];
 
-/** The Workflow-free entries: the session core's roots, the in-process host and the embed entry. */
+/** The Workflow-free entries: the browser's, the session core's roots, the in-process host and embed. */
 const ENTRIES = option("--entry", undefined)?.split(",") ?? [...NODE_FREE_ENTRIES];
 
 /**
