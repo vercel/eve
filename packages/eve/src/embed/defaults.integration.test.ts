@@ -79,7 +79,7 @@ async function takeNote(name: string, sandbox: CodeSandbox): Promise<Reply> {
     modelContextWindowTokens: 200_000,
     name,
   });
-  const session = createSession(coder, { identity: alice });
+  const session = await createSession(coder, { identity: alice });
   try {
     const result = await (await session.send("Take a note, then shout it.")).result();
     expect(result.status).toBe("completed");
@@ -125,7 +125,7 @@ describe("eve.defaults() for an agent defined in code", () => {
         }),
       },
     });
-    const session = createSession(coder, { identity: alice });
+    const session = await createSession(coder, { identity: alice });
     try {
       const reply = JSON.parse((await (await session.send("Run it.")).result()).reply ?? "{}");
       expect((reply as Reply).results[0]?.value).toEqual({ mine: true });
@@ -152,7 +152,7 @@ describe("eve.defaults() for an agent defined in code", () => {
         modelContextWindowTokens: 200_000,
         name: "docker-coder",
       });
-      const session = createSession(shell, { identity: alice });
+      const session = await createSession(shell, { identity: alice });
       try {
         const result = await (await session.send("Which shell is this?")).result();
         const reply = JSON.parse(result.reply ?? "{}") as Reply;

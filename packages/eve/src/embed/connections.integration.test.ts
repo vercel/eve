@@ -35,7 +35,7 @@ describe("a connection on an agent defined in code", () => {
   it("reaches an MCP server's tool through eve's catalog", async () => {
     const server = createStatefulMcpServer();
     vi.stubGlobal("fetch", server.fetch);
-    const session = createSession(
+    const session = await createSession(
       defineAgent({
         connections: {
           pinger: defineMcpClientConnection({

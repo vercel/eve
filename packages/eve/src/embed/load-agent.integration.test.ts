@@ -122,7 +122,7 @@ describe("loadAgent", () => {
       }
     });
     const loaded = await requestsOf(async () => {
-      const session = createSession(await loadAgent(app.agentRoot), { identity: null });
+      const session = await createSession(await loadAgent(app.agentRoot), { identity: null });
       try {
         await (await session.send("What's in the release?")).result();
       } finally {
@@ -157,7 +157,7 @@ describe("loadAgent", () => {
       },
     });
     const loaded = await requestsOf(async () => {
-      const session = createSession(await loadAgent(app.agentRoot), { identity: null });
+      const session = await createSession(await loadAgent(app.agentRoot), { identity: null });
       try {
         await (await session.send("Roll it back.")).result();
       } finally {
