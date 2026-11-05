@@ -30,8 +30,14 @@ interface Snippet {
   /** Short, what-this-file-does line shown above the code. */
   description: string;
   code: string;
-  /** A file built at runtime with defineDynamic rather than authored statically. */
-  dynamic?: boolean;
+  /** For a dynamic file: what it resolves to for each example tenant. */
+  tenants?: Tenant[];
+}
+
+interface Tenant {
+  name: string;
+  plan: string;
+  result: string;
 }
 
 const snippets: Snippet[] = [
@@ -209,37 +215,121 @@ export default defineEval({
   },
 });`,
   },
+];
+
+// The same agent made multi-tenant: each file is a defineDynamic function from the Dynamic
+// Capabilities guide, shown with what it resolves to for two example tenants.
+const ACME = { name: "Acme", plan: "Enterprise" };
+const GLOBEX = { name: "Globex", plan: "Pro" };
+
+const tenantSnippets: Snippet[] = [
   {
-    label: "Dynamic",
-    name: "tools/query.ts",
-    fileName: "tools/query.ts",
+    label: "Subagents",
+    name: "subagents/finance/",
+    fileName: "subagents/finance/agent.ts",
     lang: "typescript",
-    NavIcon: IconSparkles,
-    dynamic: true,
+    NavIcon: IconAgents,
     description:
-      "Any of these files can be built at runtime instead. defineDynamic runs each session and returns tools, skills, models, or instructions for the caller, the channel, or your data.",
-    code: `import { defineDynamic, defineTool }
-  from "eve/tools";
-import { z } from "zod";
-import { listTables, runReadOnly }
-  from "../lib/warehouse";
+      "Offer a subagent only to the tenants that should have it. Here, only enterprise plans get the finance analyst.",
+    code: `import { defineAgent, defineDynamic }
+  from "eve";
+
+export default defineDynamic((ctx) =>
+  ctx.session.auth.current?.attributes
+    .plan === "enterprise"
+    ? defineAgent({
+        description: "Analyze financial data.",
+        model: ctx.model.id,
+      })
+    : null,
+);`,
+    tenants: [
+      { ...ACME, result: "Finance subagent" },
+      { ...GLOBEX, result: "None" },
+    ],
+  },
+  {
+    label: "Skills",
+    name: "skills/team_playbook.ts",
+    fileName: "skills/team_playbook.ts",
+    lang: "typescript",
+    NavIcon: IconWrench,
+    description:
+      "Load each team's own playbook as a skill, so every tenant's agent follows its own process.",
+    code: `import { defineDynamic, defineSkill }
+  from "eve/skills";
+import { PLAYBOOKS } from "../lib/playbooks";
+
+export default defineDynamic((ctx) => {
+  const team =
+    ctx.session.auth.current?.attributes.team;
+  const content = team
+    ? PLAYBOOKS[team] : undefined;
+  return content
+    ? defineSkill({ content,
+        description: "The team's playbook." })
+    : null;
+});`,
+    tenants: [
+      { ...ACME, result: "Sales playbook" },
+      { ...GLOBEX, result: "Support playbook" },
+    ],
+  },
+  {
+    label: "Connections",
+    name: "connections/accounts.ts",
+    fileName: "connections/accounts.ts",
+    lang: "typescript",
+    NavIcon: IconLinked,
+    description:
+      "Connect each signed-in user to their own accounts, with tokens minted for them when a tool needs one.",
+    code: `import { defineDynamic,
+  defineMcpClientConnection }
+  from "eve/connections";
 
 export default defineDynamic(async (ctx) => {
-  const tables = await ctx.memo(
-    ctx.session.id, listTables,
-  );
+  const principal = ctx.session.auth.current;
+  if (principal?.principalType !== "user")
+    return null;
+  const accounts = await ctx.memo(principal,
+    () => listEnabledAccounts(principal));
   return Object.fromEntries(
-    tables.map((table) => [
-      table.name,
-      defineTool({
-        description: \`Query \${table.name}\`,
-        inputSchema: z.object({ sql: z.string() }),
-        execute: ({ sql }) =>
-          runReadOnly(table.name, sql),
-      }),
+    accounts.map((account) => [
+      account.slug,
+      defineMcpClientConnection({ /* … */ }),
     ]),
   );
 });`,
+    tenants: [
+      { ...ACME, result: "acme-prod, acme-staging" },
+      { ...GLOBEX, result: "globex-prod" },
+    ],
+  },
+  {
+    label: "Tools",
+    name: "tools/query.ts",
+    fileName: "tools/query.ts",
+    lang: "typescript",
+    NavIcon: IconWorkflow,
+    description:
+      "Build one query tool per table in the tenant's warehouse, so each agent sees only its own data.",
+    code: `import { defineDynamic, defineTool }
+  from "eve/tools";
+
+export default defineDynamic(async (ctx) => {
+  const tables = await ctx.memo(
+    ctx.session.id, listTables);
+  return Object.fromEntries(
+    tables.map((table) => [
+      table.name,
+      defineTool({ /* … */ }),
+    ]),
+  );
+});`,
+    tenants: [
+      { ...ACME, result: "orders, users" },
+      { ...GLOBEX, result: "invoices" },
+    ],
   },
 ];
 
@@ -247,44 +337,51 @@ export async function FileTree() {
   "use cache";
   cacheLife("max");
 
-  const rendered = await Promise.all(
-    snippets.map((snippet) =>
-      highlight(snippet.code, {
-        lang: snippet.lang,
-        theme: geistShikiTheme,
-        components: {
-          pre: ({ children, ...props }: ComponentProps<"pre">) => (
-            <CodeBlock
-              {...props}
-              data-line-numbers="true"
-              className={cn(
-                props.className,
-                // Sit flush in the panel: drop the CodeBlock's own margin, padding,
-                // and the border on its inner content section.
-                "my-0 rounded-none border-0 bg-transparent p-0 [&>[data-section=content]]:rounded-none [&>[data-section=content]]:border-0",
-                "[&_.line]:before:!mr-4 [&_.line]:before:!w-5 [&_.line]:before:!text-left",
-                // Wrap long lines instead of scrolling horizontally (keep the
-                // line-number grid, just constrain its column so lines wrap).
-                "[&_pre]:overflow-x-hidden! [&_code]:w-full! [&_code]:min-w-0! [&_code]:[grid-template-columns:minmax(0,1fr)]! [&_.line]:whitespace-pre-wrap [&_.line]:[overflow-wrap:anywhere]",
-              )}
-            >
-              {children}
-            </CodeBlock>
-          ),
-        },
-      }),
-    ),
-  );
+  const toItems = async (list: Snippet[]) => {
+    const rendered = await Promise.all(
+      list.map((snippet) =>
+        highlight(snippet.code, {
+          lang: snippet.lang,
+          theme: geistShikiTheme,
+          components: {
+            pre: ({ children, ...props }: ComponentProps<"pre">) => (
+              <CodeBlock
+                {...props}
+                data-line-numbers="true"
+                className={cn(
+                  props.className,
+                  // Sit flush in the panel: drop the CodeBlock's own margin, padding,
+                  // and the border on its inner content section.
+                  "my-0 rounded-none border-0 bg-transparent p-0 [&>[data-section=content]]:rounded-none [&>[data-section=content]]:border-0",
+                  "[&_.line]:before:!mr-4 [&_.line]:before:!w-5 [&_.line]:before:!text-left",
+                  // Wrap long lines instead of scrolling horizontally (keep the
+                  // line-number grid, just constrain its column so lines wrap).
+                  "[&_pre]:overflow-x-hidden! [&_code]:w-full! [&_code]:min-w-0! [&_code]:[grid-template-columns:minmax(0,1fr)]! [&_.line]:whitespace-pre-wrap [&_.line]:[overflow-wrap:anywhere]",
+                )}
+              >
+                {children}
+              </CodeBlock>
+            ),
+          },
+        }),
+      ),
+    );
 
-  const items = snippets.map((snippet, i) => ({
-    label: snippet.label,
-    name: snippet.name,
-    fileName: snippet.fileName,
-    description: snippet.description,
-    navIcon: <snippet.NavIcon className="shrink-0" size={16} />,
-    code: rendered[i],
-    dynamic: snippet.dynamic ?? false,
-  }));
+    return list.map((snippet, i) => ({
+      label: snippet.label,
+      name: snippet.name,
+      fileName: snippet.fileName,
+      description: snippet.description,
+      navIcon: <snippet.NavIcon className="shrink-0" size={16} />,
+      code: rendered[i],
+      tenants: snippet.tenants,
+    }));
+  };
 
-  return <FileTreeView items={items} />;
+  const [folderItems, tenantItems] = await Promise.all([
+    toItems(snippets),
+    toItems(tenantSnippets),
+  ]);
+
+  return <FileTreeView folderItems={folderItems} tenantItems={tenantItems} />;
 }
