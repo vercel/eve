@@ -103,13 +103,13 @@ inputs. This step does not change behavior.
 
 ### Callable `agent`
 
-`agent` is a stamped tool definition today. Make it a stamped function: the
-bare export still compiles as the default tool, and calling it returns a
-configured tool. Calling it without `models` returns the default tool.
-
-The configured tool is a workflow tool. Its serve body is today's
-`agentWithModelServeWorkflow`, changed to resolve a key into a selection
-instead of taking a free-form string.
+`agent` from `eve/tools/agent` is a function, and the module's default export
+stays the default tool object, so `export { default } from "eve/tools/agent"`
+keeps working. `agent()` without `models` returns that default tool. With
+`models`, it returns a `serve` workflow tool whose body,
+`agentModelsServeWorkflow`, opens the root copy with `ctx.agent("agent")`.
+The parsed options stay on the definition under a private symbol, as
+`workflow()` keeps its program options.
 
 ### Crossing the durable boundary
 
@@ -117,22 +117,27 @@ A live `LanguageModel` cannot be serialized into the child workflow, which is
 why the `ctx.agent` model override accepts only Gateway IDs
 ([ctx-agent-model-override](./ctx-agent-model-override.md)).
 
-The child therefore receives the key, not the model:
+The workflow body therefore passes only the option key, as
+`ctx.agent("agent", { model: key })`, through the public workflow API. The
+step that opens the child knows which workflow tool's run opened the session.
+When that tool is an `agent({ models })` tool, the step loads the tool's
+module from the bundle and reads the option. It accepts only the tool's keys,
+so even a Gateway ID the tool does not list fails:
 
-- A Gateway string option can still travel inline as a normal serializable
-  `AgentSessionModelSelection`.
-- An instance option travels as a source-backed runtime model reference: the
-  tool export's module source plus the option key. The child loads the tool
-  export from its compiled module map and reads the option, the same way
-  `resolveRuntimeModelReference` already loads authored models through
-  `source` and `sourceField`.
+- A Gateway string option becomes a normal inline runtime model reference.
+- A live model option becomes a source-backed runtime model reference: the
+  tool's module source plus `sourceModelOption`, the option key. The child
+  loads the tool export from its compiled module map and reads the option,
+  the same way `resolveRuntimeModelReference` already loads authored models
+  through `source`.
 
 The child persists the reference before session creation, so replay opens the
 same model. If a deployment removes the key, the task fails with a clear
-error, like `auto()` does for a removed option.
+error, like `auto()` does for a removed option. An unknown key or tool fails
+the open step without retrying.
 
-`ctx.agent(name, { model })` keeps its serializable public shape. The key
-reference is an internal path for the agent tool only.
+`ctx.agent(name, { model })` keeps its serializable public shape. Only a run
+of an `agent({ models })` tool reads `model` as an option key.
 
 ### Model-facing schema
 
