@@ -24,6 +24,8 @@ import type {
 import { controlCommand, DEFAULT_TURN_POLICY } from "#channel/types.js";
 import type { SessionControlOptions } from "#channel/types.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
+import { contextStorage } from "#context/container.js";
+import { readSessionSchedule } from "#context/session-schedule.js";
 import { validateSessionHistory } from "#shared/session-history.js";
 
 interface BaseChannelAddressCreateOptions {
@@ -112,7 +114,12 @@ export function createChannelAddress<TState = undefined>(input: {
       });
       const payload = withValidatedHistory(normalizeSendInput(sendInput));
       const caller = sessionCallbackToTurnCaller(options.callback);
+      // A send a schedule makes carries its provenance, so the turn it starts knows no person
+      // asked for it.
+      const store = contextStorage.getStore();
+      const schedule = store === undefined ? undefined : readSessionSchedule(store);
       const commandWithoutCaller = {
+        ...(schedule !== undefined && { schedule }),
         idempotencyKey: options.idempotencyKey,
         auth: options.auth,
         delivery,
