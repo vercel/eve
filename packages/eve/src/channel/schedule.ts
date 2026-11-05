@@ -163,19 +163,15 @@ export class ScheduleDispatcher {
       const runtime: Runtime = {
         ...this.runtime,
         resolveContinuation: async () => undefined,
+        // A keyed address is this schedule's own, so only a session a retried callback started
+        // can own it. The start claims the address, finds that session itself, and delivers
+        // there, so a send never looks up an owner that is usually absent.
         dispatchContinuation: async <TCommand extends SessionCommand>(
           delivery: DispatchContinuationInput<TCommand>,
         ) => {
-          const { command } = delivery;
-          if (command.kind !== "send")
+          if (delivery.command.kind !== "send")
             throw new Error("Scheduled channel receive can only start a fresh session.");
-          if (command.idempotencyKey === undefined)
-            return { status: "session_not_active" } as SessionCommandResult<TCommand>;
-          return await this.runtime.dispatchContinuation({
-            command,
-            continuationToken: scheduledToken(delivery.continuationToken, command.idempotencyKey),
-            successor: delivery.successor && freshRun(delivery.successor),
-          });
+          return { status: "session_not_active" } as SessionCommandResult<TCommand>;
         },
         createSession: async (run) => await this.runtime.createSession(freshRun(run)),
       };

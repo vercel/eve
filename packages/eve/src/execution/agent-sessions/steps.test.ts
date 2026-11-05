@@ -5,31 +5,27 @@ import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { agent } from "#public/tools/agent.js";
 import {
-  cancelAgentSessionTurnStep,
-  endAgentSessionsStep,
   openAgentSessionStep,
   sendAgentSessionMessageStep,
   stopLateAgentSessionStep,
 } from "#execution/agent-sessions/steps.js";
 
 const mocks = vi.hoisted(() => ({
-  attempt: 1,
   bundle: { graph: {} } as Record<string, unknown>,
   createSession: vi.fn(),
   dispatch: vi.fn(),
   resolveSessionInbox: vi.fn(),
+  resumeSessionStartHook: vi.fn(),
   resumeHook: vi.fn(),
   startWorkflow: vi.fn(),
   logError: vi.fn(),
   runtimeConfig: undefined as unknown,
   targetKind: "local" as "local" | "remote",
-  waitForCommandHookOwner: vi.fn(),
-  waitForSessionInbox: vi.fn(),
 }));
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#compiled/@workflow/core/index.js")>()),
-  getStepMetadata: () => ({ attempt: mocks.attempt, stepId: "step_0" }),
+  getStepMetadata: () => ({ stepId: "step_0" }),
   getWorkflowMetadata: () => ({ workflowRunId: "run_0" }),
 }));
 vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
@@ -40,8 +36,6 @@ vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
   },
   dispatchWorkflowSessionCommand: mocks.dispatch,
   startWorkflowOnCurrentDeployment: mocks.startWorkflow,
-  waitForCommandHookOwner: mocks.waitForCommandHookOwner,
-  waitForSessionInbox: mocks.waitForSessionInbox,
 }));
 vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#internal/workflow/runtime.js")>()),
@@ -54,6 +48,7 @@ vi.mock("#internal/logging.js", async (importOriginal) => ({
 vi.mock("#execution/session-inbox/resume.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/session-inbox/resume.js")>()),
   resolveSessionInbox: mocks.resolveSessionInbox,
+  resumeSessionStartHook: mocks.resumeSessionStartHook,
 }));
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: async () => mocks.bundle,
@@ -107,7 +102,6 @@ const message = {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.attempt = 1;
   mocks.bundle = { graph: {} };
   mocks.runtimeConfig = undefined;
   mocks.targetKind = "local";
@@ -129,18 +123,6 @@ describe("openAgentSessionStep", () => {
       },
       deliveryId: "agent-session:run-1:0:initial",
     });
-    expect(mocks.waitForCommandHookOwner).not.toHaveBeenCalled();
-  });
-
-  it("returns the run that claimed the session when a retried attempt may have started two", async () => {
-    mocks.attempt = 2;
-    mocks.createSession.mockResolvedValue({ sessionId: "child-2" });
-    mocks.waitForCommandHookOwner.mockResolvedValue({ runId: "child-1" });
-
-    await expect(open()).resolves.toMatchObject({ address: { sessionId: "child-1" } });
-    expect(mocks.waitForCommandHookOwner).toHaveBeenCalledWith(
-      expect.stringContaining("subagent:run-1:0"),
-    );
   });
 
   it("binds a model override to the local child runtime", async () => {
@@ -306,45 +288,11 @@ describe("openAgentSessionStep with an agent({ models }) option", () => {
 });
 
 describe("commands to a session that opened without waiting", () => {
-  it.each([
-    {
-      command: "send",
-      refused: { status: "session_not_active" },
-      delivered: { sessionId: "child-1", status: "accepted" },
-      run: () => sendAgentSessionMessageStep(message),
-    },
-    {
-      command: "cancel",
-      refused: { status: "no_active_turn" },
-      delivered: { sessionId: "child-1", status: "accepted" },
-      run: () => cancelAgentSessionTurnStep(session),
-    },
-    {
-      command: "reset",
-      refused: { status: "no_active_session" },
-      delivered: { previousSessionId: "child-1", status: "reset" },
-      run: () => endAgentSessionsStep({ sessions: [session] }),
-    },
-  ])("delivers $command once the session claims its inbox", async (step) => {
-    mocks.dispatch.mockResolvedValueOnce(step.refused).mockResolvedValueOnce(step.delivered);
-    mocks.waitForSessionInbox.mockResolvedValue(true);
-
-    await step.run();
-
-    expect(mocks.waitForSessionInbox).toHaveBeenCalledWith("child-1");
-    expect(mocks.dispatch).toHaveBeenCalledTimes(2);
-    expect(mocks.dispatch).toHaveBeenLastCalledWith({
-      command: expect.objectContaining({ kind: step.command }),
-      sessionId: "child-1",
-    });
-  });
-
   it("delivers to the session a duplicate start claimed when the recorded run lost it", async () => {
     mocks.dispatch.mockResolvedValueOnce({ status: "session_not_active" }).mockResolvedValueOnce({
       sessionId: "child-2",
       status: "accepted",
     });
-    mocks.waitForSessionInbox.mockResolvedValue(false);
     mocks.resolveSessionInbox.mockResolvedValue({ sessionId: "child-2" });
 
     await sendAgentSessionMessageStep(message);
@@ -376,7 +324,6 @@ describe("commands to a session that opened without waiting", () => {
 
   it("fails a message to a session that ended", async () => {
     mocks.dispatch.mockResolvedValue({ status: "session_not_active" });
-    mocks.waitForSessionInbox.mockResolvedValue(false);
     mocks.resolveSessionInbox.mockRejectedValue(new HookNotFoundError("child-continuation"));
 
     await expect(sendAgentSessionMessageStep(message)).rejects.toThrow(

@@ -58,13 +58,10 @@ export interface SessionCheckpoint {
 }
 
 export type SessionOwnerActivation =
-  | { readonly kind: "active" }
   | {
-      // Owners running older eve builds read every non-`active` result as a
-      // failure, so this variant carries `payloads` in the same shape.
       readonly kind: "incompatible";
       readonly reason: "checkpoint-version";
-      /** Version 3: the successor run that gave this verdict. */
+      /** The successor run that gave this verdict. */
       readonly runId?: string;
       /** Commands accepted by partial successor claims before it rejected the checkpoint. */
       readonly payloads: readonly SessionInboxPayload[];
@@ -72,12 +69,12 @@ export type SessionOwnerActivation =
   | {
       readonly kind: "failed";
       /**
-       * Version 3: the successor took some of the session's hooks before it
-       * failed. The owner takes them back and waits for their handover.
+       * The successor took some of the session's hooks before it failed. The
+       * owner takes them back and waits for their handover.
        */
       readonly claimedHooks?: boolean;
       readonly error: unknown;
-      /** Version 3: the successor run that gave this verdict. */
+      /** The successor run that gave this verdict. */
       readonly runId?: string;
       /** Commands accepted by partial successor claims before startup failed. */
       readonly payloads: readonly SessionInboxPayload[];
@@ -147,9 +144,7 @@ type AttemptFence =
 
 /** The successor run that gave a verdict, if the outcome is one. */
 function verdictRunId(settled: AttemptSettlement): string | undefined {
-  return settled.kind === "verdict" && settled.verdict.kind !== "active"
-    ? settled.verdict.runId
-    : undefined;
+  return settled.kind === "verdict" ? settled.verdict.runId : undefined;
 }
 
 /**
@@ -486,13 +481,6 @@ export class SessionHandoff {
   ): Promise<RetainedAttempt> {
     const { inbox } = this.input;
     switch (verdict.kind) {
-      case "active":
-        // Only a successor that claims ordinarily signals `active`, and it
-        // cannot while this owner holds the hooks.
-        return {
-          error: new Error("Successor reported active without a takeover."),
-          reason: "activation-failed",
-        };
       case "incompatible":
         this.incompatibleTargetDeploymentIds.add(attempt.targetDeploymentId);
         if (verdict.payloads.length > 0) inbox.restore(verdict.payloads);
@@ -509,10 +497,6 @@ export class SessionHandoff {
             attemptKey: attempt.attemptKey,
             sourceRunId: verdict.runId ?? attempt.candidateRunId,
           });
-        } else if (isHookConflictError(verdict.error)) {
-          // A successor older than this protocol claims ordinarily and so can
-          // never take over from an owner that keeps its hooks.
-          this.incompatibleTargetDeploymentIds.add(attempt.targetDeploymentId);
         }
         if (verdict.payloads.length > 0) inbox.restore(verdict.payloads);
         return { error: verdict.error, reason: "activation-failed" };

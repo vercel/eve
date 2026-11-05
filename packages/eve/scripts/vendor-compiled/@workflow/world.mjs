@@ -12,7 +12,8 @@ async function discoverDeclarationFiles({ distDir }) {
 }
 
 /**
- * Vendor the hook schema used to validate inbox handles and the full upstream
+ * Vendor the hook schema used to validate inbox handles, the start Hook id a
+ * session's claimed address is resumed by, and the full upstream
  * declarations used by core's vendored types. Share runtime chunks with core
  * so descriptor validation uses the same schema without duplicating it.
  *
