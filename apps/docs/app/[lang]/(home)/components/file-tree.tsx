@@ -143,12 +143,9 @@ export default defineDynamic((ctx) =>
     lang: "typescript",
     description:
       "Add channel files to answer customers in Slack, Discord, Teams, or the web with the same agent.",
-    code: `import { slackChannel } from
-  "eve/channels/slack";
+    code: `import { slackChannel } from "eve/channels/slack";
 
-export default slackChannel({
-  botName: "acme-support",
-});`,
+export default slackChannel();`,
   },
   {
     name: "connections/",
@@ -209,23 +206,6 @@ cron: "0 8 * * *"
 
 Post a summary of yesterday's open
 tickets to the support channel.`,
-  },
-  {
-    name: "evals/",
-    fileName: "evals/refunds/order-refund.eval.ts",
-    lang: "typescript",
-    description:
-      "Evals run the agent through real sessions and score the result, so you can catch regressions as it evolves.",
-    code: `import { defineEval } from "eve/evals";
-import { includes } from "eve/evals/expect";
-
-export default defineEval({
-  async test(t) {
-    const turn = await t.send("Can I get a refund for order 1042?");
-    t.succeeded();
-    t.check(turn.message, includes("refund"));
-  },
-});`,
   },
 ];
 
