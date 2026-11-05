@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { readSessionEventStream, streamSessionEvents } from "#execution/session-event-stream.js";
@@ -97,12 +97,7 @@ it("leaves a session whose owner still runs a task with that owner", async () =>
       await successor.returnValue;
       const commandToken = sessionInboxHookToken(sessionCommandHookToken(sessionId));
       expect((await findSessionHookHolder(commandToken))?.runId).toBe(owner.runId);
-      const readable = getRun(sessionId).getReadable();
-      try {
-        expect(await readable.getTailIndex()).toBe(KITCHEN_SINK.length - 1);
-      } finally {
-        await readable.cancel().catch(() => {});
-      }
+      expect(await readTailIndex(sessionId)).toBe(KITCHEN_SINK.length - 1);
     } finally {
       await owner.cancel().catch(() => {});
     }
@@ -157,6 +152,19 @@ async function recordLines(sessionId: string, records: readonly unknown[]): Prom
     }
   } finally {
     writer.releaseLock();
+  }
+  // A write resolves before its line is stored; an owner hands off only after its lines are.
+  await vi.waitFor(async () => expect(await readTailIndex(sessionId)).toBe(records.length - 1), {
+    timeout: 10_000,
+  });
+}
+
+async function readTailIndex(sessionId: string): Promise<number> {
+  const readable = getRun(sessionId).getReadable();
+  try {
+    return await readable.getTailIndex();
+  } finally {
+    await readable.cancel().catch(() => {});
   }
 }
 

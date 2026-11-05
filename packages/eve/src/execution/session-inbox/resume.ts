@@ -123,8 +123,7 @@ export async function resolveSessionInbox(token: string): Promise<{ sessionId: s
  * commands there before it boots and claims its stable inbox, so a command
  * by session id needs no wait for the boot. Resolves `undefined` when the
  * session was started without one or has released it. The hook is resumed by
- * id, which reaches it or a handoff successor's takeover of it, never a later
- * session's claim of the same address.
+ * id, so it never reaches a later session's claim of the same address.
  */
 export async function resumeSessionStartHook(
   sessionId: string,
