@@ -10,7 +10,7 @@ const chat = defineAgent({
 });
 
 const message = process.argv.slice(2).join(" ") || "What's today's date? Check with the shell.";
-const session = createSession(chat, { identity: localUser() });
+const session = await createSession(chat, { identity: localUser() });
 
 const delivery = await session.send(message);
 for await (const event of delivery.stream()) {

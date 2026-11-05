@@ -24,7 +24,7 @@
   // The session is kept in the page's IndexedDB as it runs: a reload resumes it by id.
   const world = browserWorld();
   const resume = localStorage.getItem("session") ?? undefined;
-  const session = createSession(chat, { identity: null, world, resume });
+  const session = await createSession(chat, { identity: null, world, resume });
 
   // The session's stream from its start: after a reload it replays the conversation so far, then
   // goes on with what's new.
@@ -37,9 +37,9 @@
   };
   let following;
   const follow = () =>
-    (following ??= session.events().then(async (events) => {
-      for await (const e of events) show(e);
-    }));
+    (following ??= (async () => {
+      for await (const e of session.stream()) show(e);
+    })());
   if (resume) follow();
 
   form.onsubmit = async (event) => {

@@ -158,7 +158,7 @@ async function run(): Promise<SmokeResult> {
     // A reloaded page: the session comes back from the page's World and goes on, in a new
     // sandbox interpreter over the files the first load left in IndexedDB.
     const sessionId = params.get("session") ?? "";
-    const restored = createSession(release, { identity, resume: sessionId, world });
+    const restored = await createSession(release, { identity, resume: sessionId, world });
     try {
       step(`restored as ${String(restored.id)}; pending: ${(await restored.pending()).length}`);
       const again = await (await restored.send(RESUME_PROMPT)).result();
@@ -179,7 +179,7 @@ async function run(): Promise<SmokeResult> {
 
   // The first load never closes its session: a reload ends a page without asking it, and closing
   // a session ends it, sandbox files and all (the host's dispose finalizes what it serves).
-  const session = createSession(release, { identity, world });
+  const session = await createSession(release, { identity, world });
   {
     const asked = await (await session.send("Ship it.")).result();
     step(`asked: ${asked.interactions.map((interaction) => interaction.call?.name).join(",")}`);
@@ -193,7 +193,7 @@ async function run(): Promise<SmokeResult> {
     step(`reply: ${answered.reply}`);
     step(`deployed: ${JSON.stringify(deployed)}`);
     // Kept on the page's World as it ran: nothing to save.
-    await session.snapshot();
+    await session.checkpoint();
     step(`${String(session.id)} is on the page's World`);
     return {
       ok:

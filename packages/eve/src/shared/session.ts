@@ -1,5 +1,10 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import type { ReconnectOptions } from "#client/types.js";
+import type { TurnPolicy } from "#channel/types.js";
+import type { Delivery } from "#shared/delivery.js";
+import type { Answer } from "#shared/input.js";
+import type { JsonObject } from "#shared/json.js";
+import type { MessageContent } from "#shared/message-content.js";
 
 /** Options common to session readers on the client and server. */
 export interface SessionStreamOptions {
@@ -21,4 +26,38 @@ export interface SessionStreamOptions {
 export interface SessionReader {
   readonly id: string;
   stream(options?: SessionStreamOptions): AsyncIterable<SessionStreamEvent>;
+}
+
+/** Options every session handle's `send()` accepts, whatever carries it. */
+export interface SessionSendTurnOptions {
+  /** How the message treats a running turn. */
+  readonly turnPolicy?: TurnPolicy;
+  /** JSON Schema for a structured final answer. */
+  readonly outputSchema?: JsonObject;
+}
+
+/** Options every session handle's `respond()` accepts, whatever carries it. */
+export interface SessionRespondTurnOptions {
+  /** JSON Schema for a structured final answer. */
+  readonly outputSchema?: JsonObject;
+}
+
+/**
+ * A session to talk to and control, whatever carries it: `eve/client`'s `ClientSession` over HTTP,
+ * or a session running in this process (`eve/experimental/embed`, `eve/browser`). Each adds what
+ * only its transport has.
+ */
+export interface SessionHandle extends SessionReader {
+  /** Sends a message; the delivery streams the turn it starts or joins. */
+  send(message: MessageContent, options?: SessionSendTurnOptions): Promise<Delivery>;
+  /** Answers the session's open requests, such as approvals. */
+  respond(answers: readonly Answer[], options?: SessionRespondTurnOptions): Promise<Delivery>;
+  /** Cancels the running turn. */
+  cancel(): Promise<Delivery>;
+  /** Cancels a running turn and every working task, then removes the session's model history. */
+  clear(): Promise<Delivery>;
+  /** Queues context compaction without sending model input. */
+  compact(): Promise<Delivery>;
+  /** Ends the session for good. */
+  end(): Promise<Delivery>;
 }

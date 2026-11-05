@@ -1,7 +1,7 @@
 {
   "src/public/browser/index.ts": {
     "static.modules": 782,
-    "static.kib": 3708,
+    "static.kib": 3707,
     "static.builtinFiles": 0,
     "static.globalFiles": 0,
     "static.vendorGlobalFiles": 6,

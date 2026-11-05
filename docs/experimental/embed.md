@@ -28,7 +28,7 @@ const release = defineAgent({
 });
 
 // Who the session acts as: here the person at this machine. A server passes the caller it authenticated.
-const session = createSession(release, { identity: localUser() });
+const session = await createSession(release, { identity: localUser() });
 const delivery = await session.send("Ship it to staging.");
 for await (const event of delivery.stream()) {
   if (event.type === "content.delta") process.stdout.write(event.data.delta);
@@ -42,18 +42,27 @@ await session.close();
 
 `identity` has no default. `localUser()` is the user this process runs as, for a script or CLI on that user's machine. `null` is no one in particular.
 
-A session has:
+A session is a `SessionHandle` (from `eve/sessions`), the same handle `eve/client`'s `ClientSession` is, so code written against one works with the other:
 
-| Member                     | What it does                                                                                   |
-| -------------------------- | ---------------------------------------------------------------------------------------------- |
-| `send(message)`            | Sends a message. The delivery streams the turn it starts or joins.                             |
-| `respond(answers)`         | Answers open requests, such as approvals.                                                      |
-| `cancel()`                 | Cancels the running turn.                                                                      |
-| `pending()`                | What the session waits on a person for.                                                        |
-| `events({ from, signal })` | The session's events from line `from`, as they're written.                                     |
-| `snapshot()`               | The session as JSON-safe data that `createSession(agent, { restore })` continues.              |
-| `suspend()`                | Stops the session here without ending it. Its World keeps it, with its sandbox files and runs. |
-| `close()`                  | Ends the session: its turn and subagents end, and its sandbox is released.                     |
+| Member                           | What it does                                                                    |
+| -------------------------------- | ------------------------------------------------------------------------------- |
+| `id`                             | The session's id, from the start.                                               |
+| `send(message)`                  | Sends a message. The delivery streams the turn it starts or joins.              |
+| `respond(answers)`               | Answers open requests, such as approvals.                                       |
+| `cancel()`                       | Cancels the running turn.                                                       |
+| `clear()`                        | Cancels a running turn and its tasks, then removes the session's model history. |
+| `compact()`                      | Compacts the session's context without sending model input.                     |
+| `end()`                          | Ends the session for good.                                                      |
+| `stream({ startIndex, follow })` | The session's events from line `startIndex`, as they're written.                |
+
+An embedded session also has what only a session run in this process has:
+
+| Member         | What it does                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------------- |
+| `pending()`    | What the session waits on a person for.                                                            |
+| `checkpoint()` | The session as JSON-safe data that `createSession(agent, { restore })` continues.                  |
+| `suspend()`    | Stops the session here without ending it. Its World keeps it, with its sandbox files and runs.     |
+| `close()`      | Ends the session, then stops its runtime: its turn and subagents end, and its sandbox is released. |
 
 ## Default tools and sandboxes
 
@@ -87,10 +96,10 @@ import { createSession, listSessions, localUser, localWorld } from "eve/experime
 
 const world = localWorld({ dataDir: ".sessions" });
 const [latest] = await listSessions(world);
-const session = createSession(coder, { identity: localUser(), world, resume: latest?.id });
+const session = await createSession(coder, { identity: localUser(), world, resume: latest?.id });
 ```
 
-Resumed, a turn a crash cut off goes on from its last step, and the model reads which of its calls may have run. `suspend()` leaves a session to resume; `close()` ends it. `snapshot()` returns the session as data, which `createSession(agent, { restore })` continues on any World.
+Resumed, a turn a crash cut off goes on from its last step, and the model reads which of its calls may have run. `suspend()` leaves a session to resume; `close()` ends it. `checkpoint()` returns the session as data, which `createSession(agent, { restore })` continues on any World.
 
 ## Terminal UI
 
@@ -142,7 +151,7 @@ const chat = defineAgent({
 // The session is kept in the page's IndexedDB as it runs, so a reload continues it.
 const world = browserWorld();
 const resume = localStorage.getItem("session") ?? undefined;
-const session = createSession(chat, { identity: null, world, resume });
+const session = await createSession(chat, { identity: null, world, resume });
 
 const delivery = await session.send("Tell me when you've written notes.txt.");
 const { interactions } = await delivery.result();
@@ -153,7 +162,7 @@ for (const interaction of interactions) {
 ```
 
 - A model id string takes its AI Gateway key from the environment, which a page doesn't have, so a page passes a model instance, such as the one `createGateway` makes. Its key is in the page, readable by anyone who loads it: run such a page on your own machine only, or call a model through your own proxy.
-- In a page, `memorySandbox()` keeps the shell's files in IndexedDB, per session, so they're there after a reload. `session.events()` replays the conversation from its start.
+- In a page, `memorySandbox()` keeps the shell's files in IndexedDB, per session, so they're there after a reload. `session.stream()` replays the conversation from its start.
 - A browser has no `AsyncLocalStorage`, so a step's tool calls run one at a time, and the agent's prompt says so.
 
 ## Limits

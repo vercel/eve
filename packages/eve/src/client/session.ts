@@ -1,3 +1,4 @@
+import type { SessionHandle } from "#shared/session.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { throwIfAborted } from "#client/abort-signal.js";
 import { deliveryEvents } from "#client/delivery-events.js";
@@ -55,7 +56,7 @@ export interface ClientSessionContext {
 }
 
 /** One fixed, ID-addressed conversation with an eve agent. */
-export class ClientSession {
+export class ClientSession implements SessionHandle {
   readonly #context: ClientSessionContext;
   #state: ClientSessionState;
 
