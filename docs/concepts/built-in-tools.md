@@ -1,6 +1,6 @@
 ---
 title: "Built-in Tools"
-description: "The default and opt-in tools eve provides, including glob, grep, and sleep."
+description: "The default and opt-in tools eve provides, including bash, file tools, glob, grep, and sleep."
 ---
 
 Built-in tools are framework tools eve provides: a default set every agent gets, and opt-in tools you add with one file. Each occupies the same `agent/tools/<name>.ts` slot you would author yourself, so an authored definition replaces it and `disableTool()` removes it. For custom tools, see [Tools](../tools).
@@ -36,14 +36,14 @@ eve add tool/bash
 export { default } from "eve/tools/bash";
 ```
 
-`bash` waits up to 30 seconds for a command. The model can pass `timeout` to wait longer for a build or test suite, up to 120 seconds. Values above 120 wait 120, and values below 1 wait 1. The cap leaves room for the model call within the Vercel Functions time limit. A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A command that is still running keeps running in the sandbox as its own process group and returns `status: "running"` with:
+`bash` waits up to 60 seconds for a command. The model can pass `timeout` to wait longer for a build or test suite, up to 120 seconds. Values above 120 wait 120, and values below 1 wait 1. The cap leaves room for the model call within the Vercel Functions time limit. A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A command that is still running keeps running in the sandbox as its own process group and returns `status: "running"` with:
 
 - `pid`: the process group id
 - `outputDirectory`: a directory under `/tmp/.eve/jobs/`
 - `stdout`, `stderr`, and `truncated`: the output so far
 - `message`: instructions for the model
 
-The model reads the result as plain text: `stdout`, then any `stderr` after a `[stderr]` line, then `[exit code: N]`. For a running command, `message` replaces the exit code line. Channels and hooks get the fields above on `call.settled`.
+The model reads the result as plain text: `stdout`, then any `stderr` after a `[stderr]` line, or `(no output)` when the command printed nothing. Each stream keeps its last 2,000 lines or 50 KB. A longer stream starts with a note, which names a file in the sandbox holding the full output when the sandbox runs `bash` with its job files (`just-bash` does not). A command that exits non-zero ends with `[exit code: N]` and reaches the model as an error result. For a running command, `message` follows the output instead. Channels and hooks get the fields above on `call.settled`.
 
 The command writes to `stdout` and `stderr` files in `outputDirectory`, and its exit code to an `exit` file when it finishes. The model checks on or stops it with shell commands in later `bash` calls, so the tool's approval policy applies to them:
 
@@ -165,6 +165,42 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
+`edit_file` also changes existing files. If you disable or wrap `write_file` to limit writes, do the same for `edit_file`.
+
+### `edit_file`
+
+`edit_file` edits one sandbox file by exact text replacement. To add it back after `defaultTools: false`:
+
+```sh
+eve add tool/edit_file
+```
+
+```ts title="agent/tools/edit_file.ts"
+export { default } from "eve/tools/edit_file";
+```
+
+The model passes `path` and `edits`, a list of `{ oldText, newText }` replacements. Each `oldText` must match exactly one region of the file as it was before the call, and replacements must not overlap. When no exact match exists, `edit_file` ignores trailing whitespace and treats smart quotes, Unicode dashes, and special spaces as their ASCII forms. The file keeps its byte order mark, and every line gets the file's first line ending, so a CRLF file stays CRLF. `edit_file` rejects files that are not valid UTF-8.
+
+Relative paths resolve against the workspace root, and `~` or `$HOME` resolves to the sandbox's home directory. `edit_file` doesn't require a `read_file` call first. After it changes a file the session already read, `write_file` can overwrite that file without another `read_file` call. A failed edit changes nothing, and its error names the problem, such as a missing or ambiguous `oldText`. The model reads `Successfully replaced N block(s) in <path>.`, and channels and hooks get `{ path, replacements }` on `call.settled`.
+
+Customize it by wrapping the framework definition:
+
+```ts title="agent/tools/edit_file.ts"
+import { defineTool } from "eve/tools";
+import { always } from "eve/tools/approval";
+import { editFile } from "eve/tools/edit_file";
+
+export default defineTool({ ...editFile, approval: always() });
+```
+
+Disable it:
+
+```ts title="agent/tools/edit_file.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
+```
+
 ### `web_fetch`
 
 `web_fetch` fetches URLs from the app runtime. It follows up to ten redirects and checks every destination for SSRF safety. Non-success responses return plain text with the response body when available.
@@ -236,6 +272,16 @@ export default webSearch({ provider: "browserbase" });
 
 Browserbase Search requires a [Gateway model ID](../agent-config#set-the-model). AI Gateway runs the search with `AI_GATEWAY_API_KEY` or Vercel project OIDC credentials, so no `BROWSERBASE_API_KEY` is needed. See [Browserbase Search on AI Gateway](https://vercel.com/docs/ai-gateway/models-and-providers/web-search#using-browserbase-search).
 
+Select Tako Search to search the web and Tako's knowledge graph of structured data in one call:
+
+```ts title="agent/tools/web_search.ts"
+import { webSearch } from "eve/tools/web_search";
+
+export default webSearch({ provider: "tako" });
+```
+
+Results include web pages and Tako data cards. Each card names its sources and links an embeddable chart. The model chooses the search effort and whether to return a card's rows in the result. Deep searches and card rows cost more than a fast search, so say in your agent instructions when to use them. Tako Search requires a [Gateway model ID](../agent-config#set-the-model). AI Gateway runs the search with its usual credentials, so no Tako API key is needed. See [Tako Search on AI Gateway](https://vercel.com/docs/ai-gateway/models-and-providers/web-search#using-tako-search).
+
 Select the model vendor's own hosted search for a model routed through AI Gateway:
 
 ```ts title="agent/tools/web_search.ts"
@@ -258,7 +304,7 @@ eve picks the search tool from the requested model. A call that AI Gateway's `mo
 
 Anthropic web search runs only on Anthropic's own API. AI Gateway tries another host when Amazon Bedrock or Google Vertex AI rejects the tool. If no host accepts it, eve retries the step without `web_search`.
 
-Set `fallback` to give models without native search a provider that works with any Gateway model (`"exa"`, `"parallel"`, or `"browserbase"`):
+Set `fallback` to give models without native search a provider that works with any Gateway model (`"exa"`, `"parallel"`, `"browserbase"`, or `"tako"`):
 
 ```ts title="agent/tools/web_search.ts"
 import { webSearch } from "eve/tools/web_search";

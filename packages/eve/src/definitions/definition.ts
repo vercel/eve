@@ -209,7 +209,6 @@ export interface Section {
 export const SECTION_ORDER = {
   instructions: 10,
   workspace: 20,
-  tools: 30,
   skills: 40,
   dynamicInstructions: 100,
   tasks: 200,

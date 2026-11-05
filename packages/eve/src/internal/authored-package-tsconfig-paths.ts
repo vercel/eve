@@ -34,6 +34,8 @@ export function createAuthoredPackageTsConfigPathsPlugin(input: {
   /** Leaves imports from installed dependencies to the bundler. */
   authoredSourceOnly?: boolean;
   extensions: readonly string[];
+  /** With `authoredSourceOnly`, installed importers to handle anyway. */
+  handlesInstalledModule?: (path: string) => boolean;
 }): Plugin {
   const probeStat = createCachedStatProbe();
 
@@ -49,7 +51,9 @@ export function createAuthoredPackageTsConfigPathsPlugin(input: {
         if (
           importer === undefined ||
           !isPackageImport(source) ||
-          (input.authoredSourceOnly === true && isNodeModulesPath(importer))
+          (input.authoredSourceOnly === true &&
+            isNodeModulesPath(importer) &&
+            input.handlesInstalledModule?.(importer) !== true)
         ) {
           return undefined;
         }

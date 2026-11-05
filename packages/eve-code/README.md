@@ -1,12 +1,11 @@
 # eve/extensions/code
 
-`eve/extensions/code` is an eve extension for coding work. It contributes `apply_patch`, investigation and review skills, and sandbox tooling. Vercel credentials are brokered before each turn. GitHub instructions, the `pr` skill, and the authenticated `gh` tool live in [`eve/extensions/git`](../eve-git/README.md).
+`eve/extensions/code` is an eve extension for coding work. It contributes coding instructions for eve's default file tools, the workspace root's `AGENTS.md` or `CLAUDE.md` as project instructions, investigation and review skills, and sandbox tooling. Vercel credentials are brokered before each turn. GitHub instructions, the `pr` skill, and the authenticated `gh` tool live in [`eve/extensions/git`](../eve-git/README.md).
 
 It ships inside the `eve` package. This private `@eve/code` workspace package is its source of truth: eve's build copies `extension/` into `packages/eve/src/extensions/code/extension` and publishes it with these entry points:
 
 - `eve/extensions/code`: the extension
 - `eve/extensions/code/sandbox`: sandbox bootstrap and credential helpers
-- `eve/extensions/code/tools`: `apply_patch` and `grep`; the extension mounts only `apply_patch`
 
 ## Mount
 
@@ -49,7 +48,7 @@ eve derives the prepared environment generation from the sandbox file and enviro
 
 Computer use lives in its own extension. Import its tools and sandbox helpers directly; the deprecated code re-exports are removed.
 
-Preparation ensures `gh`, installs wrappers for `gh`, `vc`, and `gh-signed-commit`, and installs TypeScript diagnostics. With `eve/extensions/git` configured for `github`, repositories requiring verified signatures use `gh-signed-commit` through its `gh` tool.
+Preparation ensures `gh` and installs wrappers for `gh`, `vc`, and `gh-signed-commit`. With `eve/extensions/git` configured for `github`, repositories requiring verified signatures use `gh-signed-commit` through its `gh` tool.
 
 ## Non-Connect escape hatch
 
@@ -71,7 +70,7 @@ pnpm exec oxfmt --check packages/eve-code
 
 Tests live under `test/`, outside the extension distribution. Unit and integration tests run through the workspace's matching test tasks. Turbo builds eve once before the integration tasks that import its runtime files. Scenario tests exercise temporary files, local Git repositories, and subprocesses; they need Node.js 24 or newer, Git, and Bash, but no model or service credentials.
 
-The `typescript-compiler` development alias supplies the JavaScript compiler API used by the diagnostics worker test. The workspace's TypeScript 7 CLI remains the package typechecker. `prepack` builds the extension; installation does not run the extension CLI before the local framework has been built.
+`prepack` builds the extension; installation does not run the extension CLI before the local framework has been built.
 
 ## Benchmarks
 

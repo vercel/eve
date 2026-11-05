@@ -11,6 +11,12 @@ import {
   resolvePackageRoot,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
+import { matchesHostTracedDependency } from "#internal/host-traced-dependencies.js";
+import {
+  type InstalledPackage,
+  installedDependencyClosure,
+  installedPackageRoot,
+} from "#internal/installed-packages.js";
 import { isPathInsideOrEqual } from "#shared/path-inside.js";
 
 export const RESOLVE_EXTENSIONS = [
@@ -30,12 +36,29 @@ interface ResolvedAuthoredExternalModule {
   readonly resolvedId: string;
 }
 
+/** How the host treats a generated bundle it bundles again. */
+export interface GenerationHostBundle {
+  /** The host's traced dependencies; see `collectHostTracedDependencies`. */
+  readonly tracedDependencies: readonly string[];
+  /**
+   * Collects the roots of the installed packages left external, so the host can give them the
+   * authored transforms this bundle would have applied, such as asset imports.
+   */
+  readonly externalPackageRoots: Set<string>;
+}
+
 export function createGenerationPackageBoundaryPlugin(input: {
   readonly externalDependencies: readonly string[];
   readonly packageRoot: string;
   readonly extensionSpecifiers?: ReadonlySet<string>;
   readonly resolveExternalPaths?: boolean;
+  /**
+   * Set when the host bundles this output again. Node loads other generations directly, and
+   * leaving a CommonJS package external there would lose the bundler's interop for its imports.
+   */
+  readonly hostBundle?: GenerationHostBundle;
 }): Plugin {
+  const dependencyClosures = new Map<string, readonly InstalledPackage[]>();
   return {
     name: "eve-generation-package-boundary",
     async resolveId(source, importer, options) {
@@ -68,16 +91,54 @@ export function createGenerationPackageBoundaryPlugin(input: {
         packageRoot: input.packageRoot,
         source,
       });
-      if (externalModule === undefined) {
-        return undefined;
+      if (externalModule !== undefined) {
+        return {
+          external: true,
+          id: input.resolveExternalPaths
+            ? toExternalModuleId(
+                normalizeEsmImportSpecifier(externalModule.resolvedId),
+                options.kind,
+              )
+            : source,
+        };
       }
 
-      return {
-        external: true,
-        id: input.resolveExternalPaths
-          ? toExternalModuleId(normalizeEsmImportSpecifier(externalModule.resolvedId), options.kind)
-          : source,
-      };
+      // Each generated bundle (the module map and every instrumentation slot) is built on its own
+      // and then bundled again by the host. Inlining installed packages here gives each generated
+      // bundle a private copy that the host can't recognize, so a package that several bundles
+      // import ships, parses, and evaluates once per bundle. Leaving them external lets the host
+      // include each package once. The resolved path, not the bare specifier, keeps the import
+      // resolvable from the generated file, which may sit outside the importer's package scope.
+      // eve's own modules that reach here, such as the self-modification mounts, stay bundled.
+      // So does any package that reaches a host-traced dependency: the host externalizes those by
+      // name wherever it sees them, so handing it such a package would trace a second copy, such
+      // as an extension-owned dependency beside the version another package resolves.
+      if (input.hostBundle === undefined) return undefined;
+      const resolved = await this.resolve(source, importer, {
+        kind: options.kind,
+        skipSelf: true,
+      });
+      if (
+        resolved !== null &&
+        typeof resolved.id === "string" &&
+        !resolved.id.startsWith("\0") &&
+        isNodeModulesPath(resolved.id) &&
+        !isFrameworkPackagePath(resolved.id) &&
+        canHostBundleInstalledPackage(
+          resolved.id,
+          input.hostBundle.tracedDependencies,
+          dependencyClosures,
+        )
+      ) {
+        const packageRoot = installedPackageRoot(resolved.id);
+        if (packageRoot !== undefined) input.hostBundle.externalPackageRoots.add(packageRoot);
+        return {
+          external: true,
+          id: toExternalModuleId(normalizeEsmImportSpecifier(resolved.id), options.kind),
+        };
+      }
+
+      return undefined;
     },
   };
 }
@@ -327,6 +388,26 @@ function nearestPackageName(filePath: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function canHostBundleInstalledPackage(
+  resolvedId: string,
+  tracedDependencies: readonly string[],
+  dependencyClosures: Map<string, readonly InstalledPackage[]>,
+): boolean {
+  const packageRoot = installedPackageRoot(resolvedId);
+  if (packageRoot === undefined) return false;
+  if (tracedDependencies.length === 0) return true;
+  let closure = dependencyClosures.get(packageRoot);
+  if (closure === undefined) {
+    closure = installedDependencyClosure([packageRoot]);
+    dependencyClosures.set(packageRoot, closure);
+  }
+  return closure.every(
+    (installed) =>
+      installed.name === undefined ||
+      !matchesHostTracedDependency(installed.name, tracedDependencies),
+  );
 }
 
 function nearestPackageRoot(filePath: string): string | undefined {

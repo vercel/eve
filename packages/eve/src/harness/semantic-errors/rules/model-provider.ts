@@ -1,4 +1,4 @@
-import { anyOf, messageMatches, nameIs, type SemanticErrorRule } from "../rule.js";
+import { anyOf, codeIs, messageMatches, nameIs, type SemanticErrorRule } from "../rule.js";
 
 /**
  * Discriminators verified against the vendored `@ai-sdk/provider` /
@@ -39,6 +39,23 @@ export const MODEL_PROVIDER_RULES: readonly SemanticErrorRule[] = [
     when: nameIs("ContentFilteredModelResponseError"),
     message: "The model provider filtered this response.",
     hint: "Review the request and its context against your model provider's content policy.",
+  },
+  {
+    // A 400 that would otherwise end the session; only the refused prompt fails.
+    id: "model-request-cyber-policy-refused",
+    name: "Model request refused",
+    tags: ["model-provider", "recoverable", "refused"],
+    when: codeIs("cyber_policy"),
+    message: "The model provider refused this request for possible cybersecurity risk.",
+    hint: "Review the request against your model provider's usage policies.",
+  },
+  {
+    id: "model-request-bio-policy-refused",
+    name: "Model request refused",
+    tags: ["model-provider", "recoverable", "refused"],
+    when: codeIs("bio_policy"),
+    message: "The model provider refused this request for possible biological risk.",
+    hint: "Review the request against your model provider's usage policies.",
   },
   {
     id: "model-capability-unsupported",

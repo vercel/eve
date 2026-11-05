@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
-import { executeBashOnSandbox } from "./bash.js";
+import { BASH_YIELD_SECONDS, executeBashOnSandbox } from "./bash.js";
 import { createConnectionSession } from "./session.js";
 
 const createScratchDirectory = useTemporaryDirectories();
@@ -36,6 +36,27 @@ describe("executeBashOnSandbox with a real shell", () => {
     });
   });
 
+  it("names a file with the full output of a truncated stream", async () => {
+    const { sandbox } = await createHostSandbox();
+
+    const large = await executeBashOnSandbox(sandbox, { command: "seq 1 5000" });
+    const small = await executeBashOnSandbox(sandbox, { command: "echo small" });
+
+    if (large.status !== "completed") throw new Error(`expected completed: ${large.status}`);
+    const path = /^\[stdout truncated: showing last \d+ of \d+ lines; full output: (\S+)\]\n/u.exec(
+      large.stdout,
+    )?.[1];
+    expect(path).toBeDefined();
+    try {
+      expect(readFileSync(path!, "utf8").split("\n")).toHaveLength(5001);
+      expect(large.stdout.endsWith("4999\n5000\n")).toBe(true);
+    } finally {
+      await rm(join(path!, ".."), { force: true, recursive: true });
+    }
+    expect(small).toMatchObject({ exitCode: 0, truncated: false });
+    expect(small.stdout).not.toContain("full output");
+  });
+
   it("leaves a slow command running, and kill stops its whole process group", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { home, launches, sandbox } = await createHostSandbox();
@@ -49,14 +70,14 @@ describe("executeBashOnSandbox with a real shell", () => {
       returned = true;
     });
     const childPid = await readPid(pidFile);
-    await vi.advanceTimersByTimeAsync(29_999);
+    await vi.advanceTimersByTimeAsync(BASH_YIELD_SECONDS * 1000 - 1);
     expect(returned).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     const result = await call;
 
     if (result.status !== "running") throw new Error(`expected running: ${JSON.stringify(result)}`);
     expect(result).toMatchObject({ stderr: "", stdout: "first\n", truncated: false });
-    expect(result.message).toContain("still running after 30 seconds");
+    expect(result.message).toContain(`still running after ${BASH_YIELD_SECONDS} seconds`);
     expect(result.message).toContain(`kill -- -${result.pid}`);
     // The call's stream ends at the yield; only the command keeps running.
     await launches[0];
@@ -99,7 +120,7 @@ describe("executeBashOnSandbox with a real shell", () => {
     { timeout: 120, waitSeconds: 120 },
     { timeout: 3_600, waitSeconds: 120 },
     { timeout: 0, waitSeconds: 1 },
-    { timeout: Number.NaN, waitSeconds: 30 },
+    { timeout: Number.NaN, waitSeconds: BASH_YIELD_SECONDS },
   ])(
     "waits $waitSeconds seconds for timeout $timeout before leaving the command running",
     async ({ timeout, waitSeconds }) => {

@@ -3,8 +3,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { createContext, runInContext } from "node:vm";
 
 import { describe, expect, it } from "vitest";
+import { FatalError, RetryableError } from "#compiled/@workflow/errors/index.js";
+import { dehydrateStepError, hydrateStepError } from "#compiled/@workflow/core/serialization.js";
 import {
   resolvePackageRoot,
   resolvePackageSourceDirectoryPath,
@@ -577,6 +580,95 @@ describe("WorkflowBundleBuilder", () => {
       expect(decodedWorkflowCode).toContain("getConflict");
       expect(decodedWorkflowCode).toContain("WORKFLOW_CREATE_HOOK");
       expect(decodedWorkflowCode).not.toContain("runtime/run.js");
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("preserves step error identity in authored workflows across driver layers", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-error-identity-"));
+    const appRoot = join(tempRoot, "app");
+    const outDir = join(tempRoot, "workflow-build");
+    const frameworkPath = join(tempRoot, "framework.ts");
+    const appPath = join(appRoot, "errors.ts");
+    const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+
+    try {
+      await mkdir(appRoot, { recursive: true });
+      await Promise.all([
+        writeFile(compiledArtifactsBootstrapPath, "export {};\n"),
+        writeFile(
+          join(appRoot, "package.json"),
+          JSON.stringify({ name: "authored-errors", version: "0.0.0", dependencies: { eve: "*" } }),
+        ),
+        writeFile(
+          frameworkPath,
+          [
+            'import { FatalError } from "eve/workflow";',
+            'export async function framework() { "use workflow"; throw new FatalError("stop"); }',
+          ].join("\n"),
+        ),
+        writeFile(
+          appPath,
+          [
+            'import { FatalError, RetryableError } from "eve/workflow";',
+            "export async function classifyError(error: unknown) {",
+            '  "use workflow";',
+            "  return {",
+            "    fatal: error instanceof FatalError,",
+            "    retryable: error instanceof RetryableError,",
+            "    retryAfter: error instanceof RetryableError ? error.retryAfter.toISOString() : null,",
+            "  };",
+            "}",
+          ].join("\n"),
+        ),
+      ]);
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          authoredWorkflowModules: { directiveModules: [appPath], workflowModules: [appPath] },
+          agentName: "test-agent",
+          appRoot,
+          compiledArtifactsBootstrapPath,
+          outDir,
+          rootDir: resolvePackageRoot(),
+        },
+        [frameworkPath],
+      );
+      await builder.build();
+
+      const source = await readFile(join(outDir, "workflows.mjs"), "utf8");
+      const encodedChunksMatch = source.match(
+        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
+      );
+      const chunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
+      const context = createContext();
+      runInContext(Buffer.from(chunks.join(""), "base64").toString("utf8"), context);
+      const workflowGlobal = runInContext("globalThis", context);
+      const classifyError = workflowGlobal.__private_workflows.get(
+        "workflow//./errors//classifyError",
+      );
+      expect(classifyError).toBeTypeOf("function");
+
+      for (const [kind, error] of [
+        ["fatal", new FatalError("stop")],
+        [
+          "retryable",
+          new RetryableError("later", { retryAfter: new Date("2026-01-01T00:00:00Z") }),
+        ],
+      ] as const) {
+        const serialized = await dehydrateStepError(error, "wrun_error_identity", undefined);
+        const hydrated = await hydrateStepError(
+          serialized,
+          "wrun_error_identity",
+          undefined,
+          workflowGlobal,
+        );
+        await expect(classifyError(hydrated)).resolves.toEqual({
+          fatal: kind === "fatal",
+          retryable: kind === "retryable",
+          retryAfter: kind === "retryable" ? "2026-01-01T00:00:00.000Z" : null,
+        });
+      }
     } finally {
       await rm(tempRoot, { force: true, recursive: true });
     }

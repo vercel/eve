@@ -206,6 +206,11 @@
  *             `nitro/package.json` lookups in `packages/eve/src` outside test
  *             helpers. eve declares what it builds with, such as `rolldown`,
  *             and hands it to Nitro through `deps.paths`.
+ *   rule 65 — Entries that browser bundles import (`eve/client`, `eve/react`,
+ *             `eve/vue`, `eve/svelte`, `eve/events`, `eve/internal/legacy-events`)
+ *             never reach a Node builtin through their value imports. One
+ *             import of a server module from a shared one breaks every client
+ *             bundle that loads the entry.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -975,6 +980,89 @@ function checkRule64(posix, lines, violations) {
         "Package resolved through Nitro's directory. Nitro installs its builder and storage packages on demand, so a consumer install may not have them: declare the package in eve's own dependencies, resolve it from eve, and hand it to Nitro through `deps.paths`.",
     });
   });
+}
+
+// ---------- Rule 65: browser entries reach no Node builtin ----------
+
+const BROWSER_ENTRIES = [
+  "packages/eve/src/client/index.ts",
+  "packages/eve/src/react/index.ts",
+  "packages/eve/src/vue/index.ts",
+  "packages/eve/src/svelte/index.ts",
+  "packages/eve/src/public/events/index.ts",
+  "packages/eve/src/internal/legacy-events.ts",
+];
+const NODE_BUILTINS = new Set(require("node:module").builtinModules);
+
+/** @param {import("typescript").SourceFile} source */
+function valueImportSpecifiers(source) {
+  /** @type {string[]} */
+  const specifiers = [];
+  /** @param {import("typescript").Node} node */
+  const visit = (node) => {
+    if (
+      (ts.isImportDeclaration(node) && !node.importClause?.isTypeOnly) ||
+      (ts.isExportDeclaration(node) && !node.isTypeOnly)
+    ) {
+      if (node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier))
+        specifiers.push(node.moduleSpecifier.text);
+    } else if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments[0] !== undefined &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      specifiers.push(node.arguments[0].text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return specifiers;
+}
+
+/**
+ * The eve source file a specifier names, or undefined for external packages and
+ * the vendored `#compiled/*` tree, which this rule doesn't follow.
+ * @param {string} specifier
+ * @param {string} from
+ */
+function resolveEveSource(specifier, from) {
+  if (specifier.startsWith("#compiled/")) return undefined;
+  if (specifier.startsWith("#"))
+    return `packages/eve/src/${specifier.slice(1).replace(/\.js$/, ".ts")}`;
+  if (specifier.startsWith("."))
+    return toPosix(join(dirname(from), specifier)).replace(/\.js$/, ".ts");
+  return undefined;
+}
+
+async function checkRule65() {
+  /** @type {Violation[]} */
+  const violations = [];
+  /** @type {Map<string, string | undefined>} file → the file that first imported it */
+  const parents = new Map(BROWSER_ENTRIES.map((entry) => [entry, undefined]));
+  const queue = [...BROWSER_ENTRIES];
+  while (queue.length > 0) {
+    const file = /** @type {string} */ (queue.shift());
+    const content = await readFile(join(REPO_ROOT, file), "utf8");
+    const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
+    for (const specifier of valueImportSpecifiers(source)) {
+      if (NODE_BUILTINS.has(specifier) || specifier.startsWith("node:")) {
+        const chain = [file];
+        for (let at = parents.get(file); at !== undefined; at = parents.get(at)) chain.push(at);
+        violations.push({
+          rule: 65,
+          file,
+          message: `imports "${specifier}", which browser bundles of ${chain.at(-1)} can't load. Import chain: ${chain.reverse().join(" -> ")}. Keep server-only modules out of what browser entries import.`,
+        });
+        continue;
+      }
+      const next = resolveEveSource(specifier, file);
+      if (next === undefined || parents.has(next)) continue;
+      parents.set(next, file);
+      queue.push(next);
+    }
+  }
+  return violations;
 }
 
 /**
@@ -2313,6 +2401,7 @@ async function main() {
   violations.push(...state.rule62);
   violations.push(...state.rule63);
   violations.push(...state.rule64);
+  violations.push(...(await checkRule65()));
 
   for (const issue of await checkPublicExports()) {
     violations.push({ rule: 55, ...issue });

@@ -1559,6 +1559,56 @@ describe("models that fail", () => {
     expect(ofType(events, "session.ended")).toEqual([]);
   });
 
+  it("fails the turn when OpenAI refuses the prompt for cybersecurity risk, and the session takes the next message", async () => {
+    const message = "This content was flagged for possible cybersecurity risk.";
+    const refusal = {
+      code: "cyber_policy",
+      data: { error: { code: "cyber_policy", message, type: "invalid_request" }, type: "error" },
+      isRetryable: false,
+      message,
+      statusCode: 400,
+      type: "invalid_request",
+    };
+    let nextPrompt = "";
+    const { events } = await withSession(
+      "edge-model-cyber-policy",
+      {
+        message: "What is a sandbox?",
+        model: scriptedModel(({ said }, raw) => {
+          if (said("sandbox")) return "An isolated VM.";
+          if (said("pricing")) {
+            nextPrompt = JSON.stringify(raw);
+            return "Usage-based.";
+          }
+          return {
+            stream: simulateReadableStream({
+              chunks: [
+                { type: "stream-start", warnings: [] },
+                { error: refusal, type: "error" },
+              ],
+            }) as StreamResult["stream"],
+          };
+        }),
+        tools: [],
+      },
+      async (session) => {
+        await session.next("answered");
+        await session.send("How do I scan my own server for open ports?");
+        await session.next("refused");
+        await session.send("How does pricing work?");
+        await session.next("recovered");
+      },
+    );
+
+    expect(turnOutcomes(events)).toEqual(["turn_0:completed", "turn_1:failed", "turn_2:completed"]);
+    expect(ofType(events, "session.ended")).toEqual([]);
+    // The refused prompt stays out of the history, so it can't fail the next turn too.
+    expect(nextPrompt).toContain("What is a sandbox?");
+    expect(nextPrompt).toContain("An isolated VM.");
+    expect(nextPrompt).toContain("How does pricing work?");
+    expect(nextPrompt).not.toContain("scan my own server");
+  });
+
   it("ends the session when the provider rejects the key, naming the turn it failed in", async () => {
     const { events } = await withSession(
       "edge-model-unauthorized",
