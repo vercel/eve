@@ -32,6 +32,8 @@ interface Snippet {
   code: string;
   /** For a dynamic file: what it resolves to for each example tenant. */
   tenants?: Tenant[];
+  /** For a dynamic file: the 1-based lines of each plan's branch, tinted in its badge color. */
+  planLines?: { enterprise: number[]; hobby: number[] };
 }
 
 interface Tenant {
@@ -53,7 +55,7 @@ const snippets: Snippet[] = [
       "An instructions.md file is a complete agent. Describe its role in Markdown, then run eve.",
     code: `# Identity
 
-You are Acme's support agent.
+You are a support agent.
 Answer customer questions, look up
 their orders, and escalate anything
 you can't resolve.`,
@@ -248,6 +250,7 @@ export default defineDynamic((ctx) => {
       : "Point to the docs and community forum first.",
   });
 });`,
+    planLines: { enterprise: [9], hobby: [10] },
     tenants: [
       { ...ACME, result: "1-hour SLA, escalate when stuck" },
       { ...JAMIE, result: "Docs and community first" },
@@ -270,6 +273,7 @@ export default defineAgent({
       : "zai/glm-5.2",
   ),
 });`,
+    planLines: { enterprise: [7], hobby: [8] },
     tenants: [
       { ...ACME, result: "Larger model" },
       { ...JAMIE, result: "Default model" },
@@ -294,6 +298,7 @@ export default defineDynamic((ctx) =>
       })
     : null,
 );`,
+    planLines: { enterprise: [6, 7, 8, 9], hobby: [10] },
     tenants: [
       { ...ACME, result: "Second-level support engineer" },
       { ...JAMIE, result: "None" },
@@ -321,6 +326,7 @@ export default defineDynamic((ctx) =>
       })
     : null,
 );`,
+    planLines: { enterprise: [9, 10, 11, 12, 13], hobby: [14] },
     tenants: [
       { ...ACME, result: "Can page on-call" },
       { ...JAMIE, result: "None" },
@@ -338,6 +344,15 @@ export async function FileTree() {
         highlight(snippet.code, {
           lang: snippet.lang,
           theme: geistShikiTheme,
+          transformers: [
+            {
+              line(node, line) {
+                const { enterprise = [], hobby = [] } = snippet.planLines ?? {};
+                if (enterprise.includes(line)) node.properties["data-plan"] = "enterprise";
+                else if (hobby.includes(line)) node.properties["data-plan"] = "hobby";
+              },
+            },
+          ],
           components: {
             pre: ({ children, ...props }: ComponentProps<"pre">) => (
               <CodeBlock
@@ -352,6 +367,8 @@ export async function FileTree() {
                   // Wrap long lines instead of scrolling horizontally (keep the
                   // line-number grid, just constrain its column so lines wrap).
                   "[&_pre]:overflow-x-hidden! [&_code]:w-full! [&_code]:min-w-0! [&_code]:[grid-template-columns:minmax(0,1fr)]! [&_.line]:whitespace-pre-wrap [&_.line]:[overflow-wrap:anywhere]",
+                  // Each plan's branch in a multi-tenant file, tinted like its plan badge.
+                  "[&_.line[data-plan=enterprise]]:bg-purple-100 [&_.line[data-plan=hobby]]:bg-gray-100",
                 )}
               >
                 {children}
