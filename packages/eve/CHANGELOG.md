@@ -1,5 +1,37 @@
 # eve
 
+## 1.0.0-rc.6
+
+Released 2026-11-05 · [Compare with 1.0.0-rc.5](https://github.com/vercel/eve/compare/eve%401.0.0-rc.5...eve%401.0.0-rc.6)
+
+### Breaking Changes
+
+- Replace `agentWithModel` with `agent({ models })` from `eve/tools/agent`, which lists the models a root-copy task may run on.
+  `agentWithModel` let the model pass any AI Gateway model ID and did not tell it which models exist. `agent({ models })` takes the same entries as `auto()` from `eve/models`: a string entry is the description, and its key is the AI Gateway model ID; an object entry holds an AI Gateway model ID or an AI SDK model, with its description and optional `reasoning`, `modelContextWindowTokens`, and `modelOptions`. The model sees each key with its description and can choose only those keys. A call without `model` runs on the current model, and `agent()` with no `models` is the default tool, with no `model` input. A task keeps the model it started with, so a continuation can omit `model`. Copies and declared subagents never get this tool.
+  To migrate, replace `export { agentWithModel as default } from "eve/tools/agent"` with `export default agent({ models: { "<gateway-model-id>": "<when to use it>" } })`. `agent` is now this function; re-export `default` from `eve/tools/agent` to keep the default tool object. ([#5959](https://github.com/vercel/eve/pull/5959))
+- New sessions now claim an address as they start, so racing first messages to a channel address reach one session, keyed sends and `create()` respond without waiting for the session to boot, and a session accepts commands as soon as it is created.
+  Previously, two unkeyed first messages to the same new address could each get a receipt naming a different session: the losing run forwarded its message and exited, but its caller kept the dead session's ID. A cancel or `end()` sent by session ID before the session finished booting was answered with "no active turn" or "no active session" while the session kept running, and an early send had to retry `409 session_not_ready`. A send by session ID to a session that is shutting down now gets `409 session_not_active` at once instead of `session_not_ready` retries.
+  eve now requires a Workflow world with atomic start hooks: the local world, Vercel Workflow, or `@workflow/world-postgres` 5.1.1 or later. On another world, starting a session fails with an error that names the requirement. Upgrade `@workflow/world-postgres` and run its `bootstrap` command before deploying this release.
+  A session can no longer move to this release from an owner on eve before 0.83, which released its addresses before handing off. Finish or end those sessions before upgrading.
+  `useEveAgent` and the other framework bindings now send `end()`, `clear()`, and `compact()` called while the store is still creating its session to that session, instead of throwing `SessionNotActiveError`. ([#5948](https://github.com/vercel/eve/pull/5948))
+
+### Features
+
+- Record an `agent.approval` span for every wait on a person, including questions, budget prompts, and connection sign-ins, not just tool approvals.
+  `agent.approval.kind` is `tool-approval`, `question`, `budget`, or `sign-in`. A wait sits under the tool call it's about, or under the turn when no call owns it, and a sign-in names its connection in `eve.connection.name`. Instrumentation providers now receive sign-ins on `interaction.opened` and `interaction.settled`, with `signIn.name` naming the connection or tool; the sign-in URL and code stay out of the event. Questions and sign-ins from workflow tools such as `ask_question` now reach providers too, reported by the session that owns the tool call; a request a subagent asks is still reported once, by that session. `@vercel/agent-runs` adds `TurnOperation.approval` and `findApproval`, and an optional `kind` and `connectionName` on approvals. ([#6004](https://github.com/vercel/eve/pull/6004))
+
+### Bug Fixes
+
+- A cancelled sign-in is no longer asked for again in the same turn, and a scheduled run never asks for a sign-in.
+  When a new message cancels an open sign-in, later calls in that turn that need the same grant fail with `reason: "sign_in_cancelled"` instead of posting another sign-in prompt. A turn a schedule started, including a scheduled send into an existing conversation, fails calls that need a sign-in with `reason: "sign_in_unavailable"`. In both cases the model is told to say the action needs that access. A later message from the person asks again. ([#6003](https://github.com/vercel/eve/pull/6003))
+- Reword the GitHub sign-in failure message so it says plainly that the person does not have access yet and how to get it. ([#5998](https://github.com/vercel/eve/pull/5998))
+- Allow dynamic schedules on Vercel preview and custom-environment deployments instead of rejecting operations outside production.
+  The default Vercel provider uses the deployment's OIDC credentials to access its own schedule track. Preview schedules remain separate from production schedules. ([#5946](https://github.com/vercel/eve/pull/5946))
+- Report a sign-in the runtime cancelled (withdrawn, interrupted, or abandoned) as "sign-in cancelled" in Slack and other channels, instead of a red error with the internal reason code, such as `(turn-cancelled)`.
+  The GitHub sign-in's failure message now tells the person how to retry. ([#5994](https://github.com/vercel/eve/pull/5994))
+- Remove a Slack sign-in prompt when its Cancel button is clicked after the held turn has already ended, and log when Slack refuses to delete the prompt. ([#5995](https://github.com/vercel/eve/pull/5995))
+- Drop the redundant "Only you can see this message" from the Slack sign-in card; Slack already labels ephemeral messages "Only visible to you". ([#6002](https://github.com/vercel/eve/pull/6002))
+
 ## 1.0.0-rc.5
 
 Released 2026-11-05 · [Compare with 1.0.0-rc.4](https://github.com/vercel/eve/compare/eve%401.0.0-rc.4...eve%401.0.0-rc.5)
