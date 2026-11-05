@@ -3,11 +3,6 @@ title: "Dynamic Schedules"
 description: "Create and manage creator-owned recurring or one-time schedules at runtime."
 ---
 
-<Callout type="info" title="Feature flag required">
-  Dynamic schedules on Vercel are gated by an organization-level feature flag. Contact your Vercel
-  representative to have the feature enabled for your organization.
-</Callout>
-
 `defineDynamicSchedules` lets users and agents create recurring or one-time schedules while the agent runs. Export the definition from a file in `agent/schedules/`; the file path names it. Use it when a user or the model picks the timing. For fixed cron jobs written in code, use [`defineSchedule`](../schedules) instead.
 
 The definition gives the model tools to manage schedules, and gives you a `run` callback that runs each time a schedule fires. Each firing is an occurrence. This API is experimental and may change. Import it from `eve/experimental/schedules`.
@@ -169,7 +164,7 @@ The default `vercelScheduleProvider()` supports these environments:
 
 | Environment                                      | Storage and delivery                                                                                                                               |
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel deployments                               | Requires feature-flag enablement for your organization. Hosted Vercel Schedules delivers occurrences through Vercel Queues.                        |
+| Vercel deployments                               | Hosted Vercel Schedules delivers occurrences through Vercel Queues.                                                                                |
 | `eve dev` without local Vercel Schedules         | Process-local storage, with no background clock. Call `invoke` through the client to dispatch an occurrence.                                       |
 | `vc dev` with local Schedules and Queues support | Local Vercel Schedules stores timing, and eve delivers due occurrences automatically through local Queues.                                         |
 | Self-hosted production                           | The default provider rejects operations. Use a different provider or the [application-managed scheduling pattern](../patterns/dynamic-scheduling). |
