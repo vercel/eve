@@ -6,8 +6,8 @@ export function HowItWorks(): JSX.Element {
   return (
     <HomeSection
       id="how-it-works"
-      lede="Create an agent from a folder of files: an instructions.md file is all you need. Define any file dynamically, and the same agent adapts to each customer it serves."
-      title="How it works"
+      lede="Write your agent as plain files. When it needs to behave differently for each customer, make any file dynamic."
+      title="Static by default, dynamic where you need it"
     >
       <FileTree />
     </HomeSection>
