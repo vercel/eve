@@ -14,7 +14,7 @@ export function installedDependencyClosure(
 ): readonly InstalledPackage[] {
   const closure: InstalledPackage[] = [];
   const visitedRoots = new Set<string>();
-  const pendingRoots = [...packageRoots];
+  const pendingRoots = packageRoots.map(toCanonicalPath);
   for (let root = pendingRoots.pop(); root !== undefined; root = pendingRoots.pop()) {
     if (visitedRoots.has(root)) continue;
     visitedRoots.add(root);
@@ -102,9 +102,11 @@ function findInstalledDependencyRoot(dependency: string, fromRoot: string): stri
   return packageJsonPath === undefined ? undefined : toCanonicalPath(dirname(packageJsonPath));
 }
 
+// The native realpath also expands Windows 8.3 names, such as a temp directory's `RUNNER~1`, so
+// package roots recorded here match the long-form module ids bundlers hand to plugins.
 function toCanonicalPath(path: string): string {
   try {
-    return realpathSync(path);
+    return realpathSync.native(path);
   } catch {
     return resolve(path);
   }
