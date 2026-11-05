@@ -232,7 +232,7 @@ For an existing idle session, `prewarm()` can move it to the deployment that acc
 | `newSession()` | Clears the local conversation and reuses the hook. The old session keeps running on the server |
 | `end()`        | Retires the server-side session and returns its delivery                                       |
 
-After `end()`, call `newSession()` to clear the retired conversation. With `prewarm` on, that prepares the next session; otherwise the next send creates it. A `session` you passed in stays yours: prewarming and `newSession()` never replace it.
+After `end()`, call `newSession()` to clear the retired conversation. With `prewarm` on, that prepares the next session; otherwise the next send creates it. While a send or `prewarm()` is still creating the session, `end()`, `clear()`, and `compact()` wait for it and then act on that session. A `session` you passed in stays yours: prewarming and `newSession()` never replace it.
 
 ## Resume a saved session
 
