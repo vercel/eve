@@ -2,6 +2,7 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { emptySessionView } from "#protocol/session-projection/fold.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
@@ -16,6 +17,8 @@ export interface SlackRenderingHarness {
   event(fact: SessionEvent): Promise<void>;
   /** Runs the channel's `deliver` hook, as the runtime does when it admits a message. */
   deliver(payload: unknown): Promise<void>;
+  /** Sets who the session runs as for the events that follow, and who started it. */
+  runAs(auth: SessionAuthContext | null, initiator?: SessionAuthContext | null): void;
   /**
    * Fires one turn event: `turn` starts turn `t1`, `model` starts the next model run, `tool` and
    * `no_reply` call a tool from the current run and settle it, and `end` settles the turn.
@@ -31,11 +34,17 @@ export function slackRenderingHarness(
   if (!isCompiledChannel(definition)) throw new Error("Expected a compiled channel.");
   const adapter = { ...definition.adapter, state: { ...definition.adapter.state, ...state } };
   const store = new ContextContainer();
-  store.setVirtualContext(SessionKey, {
-    sessionId: "s1",
-    auth: { current: null, initiator: null },
-    turn: { id: "t1", sequence: 0 },
-  });
+  const runAs = (
+    auth: SessionAuthContext | null,
+    initiator: SessionAuthContext | null = auth,
+  ): void => {
+    store.setVirtualContext(SessionKey, {
+      sessionId: "s1",
+      auth: { current: auth, initiator },
+      turn: { id: "t1", sequence: 0 },
+    });
+  };
+  runAs(null);
   const channel = {
     ...buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as never),
     view: emptySessionView(),
@@ -66,6 +75,7 @@ export function slackRenderingHarness(
     async deliver(payload) {
       await adapter.deliver?.(payload as never, channel as never);
     },
+    runAs,
     async step(step) {
       if (step === "turn") {
         await event({

@@ -239,6 +239,8 @@ describe("slackChannel() code channels", () => {
       audience: "public",
       channelId: "C_CODE_OPENED",
       codeChannel: true,
+      // The channel is opened for Alice, so her answers are the ones its cards take.
+      codeChannelOwnerId: "U_ALICE",
       threadTs: null,
       triggeringUserId: "U_ALICE",
     });
@@ -605,6 +607,78 @@ describe("slackChannel() code channels", () => {
     expect(send.mock.calls[0]![0]).toBe("code:C_CODE_HITL");
     expect(codeChannel).toBe(true);
     expect(send.mock.calls[0]![1].auth.attributes).not.toHaveProperty("thread_ts");
+  });
+
+  // A code channel admits the origin conversation's members, and they all see a question's buttons.
+  it("takes a code channel question's answer only from the channel's owner", async () => {
+    useCodeChannels(["C_CODE_OWNER"]);
+    const answered: string[] = [];
+    const channel = slackChannel({
+      codeChannels: true,
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onAnswers(ctx, submission) {
+        answered.push(submission.user.id);
+        return { auth: ctx.defaultAuth };
+      },
+    });
+    const click = async (user: string) =>
+      await firePost(
+        channel,
+        buildSignedInteractionRequest({
+          type: "block_actions",
+          team: { id: "T01" },
+          user: { id: user, username: user, team_id: "T01" },
+          channel: { id: "C_CODE_OWNER" },
+          message: { ts: "1700000000.000010", blocks: [] },
+          actions: [
+            {
+              action_id: `${ANSWER_ACTION_PREFIX}codeowner:C_CODE_OWNER:U_ALICE:confirm_1:button:0`,
+              text: { type: "plain_text", text: "Confirm" },
+              value: "confirm",
+            },
+          ],
+        }),
+      );
+
+    const bob = await click("U_BOB");
+    await vi.waitFor(() => expect(slackCalls("chat.postEphemeral")).toHaveLength(1));
+
+    expect(bob.send).not.toHaveBeenCalled();
+    expect(answered).toEqual([]);
+    expect(decodeBody(slackCalls("chat.postEphemeral")[0]![1])).toMatchObject({
+      channel: "C_CODE_OWNER",
+      markdown_text: "Only <@U_ALICE> can answer this — it's their request to decide.",
+      user: "U_BOB",
+    });
+
+    const alice = await click("U_ALICE");
+    await vi.waitFor(() => expect(alice.send).toHaveBeenCalled());
+
+    expect(alice.send.mock.calls[0]![0]).toBe("code:C_CODE_OWNER");
+    expect(answered).toEqual(["U_ALICE"]);
+    expect(slackCalls("chat.postEphemeral")).toHaveLength(1);
+  });
+
+  // eve didn't open this channel, so it learns the owner from whoever started the session.
+  it("names an adopted code channel's owner from the session's initiator", async () => {
+    useCodeChannels([]);
+    const { channel, event, runAs } = renderingHarness();
+    const turnStarted = (turnId: string) =>
+      event({
+        type: "turn.started",
+        data: { cause: { deliveryId: `d_${turnId}` }, follows: null, turnId },
+      });
+    const auth = (userId: string) =>
+      buildSlackAuthContext({ channelId: "C01", teamId: "T01", threadTs: "", userId });
+
+    // Bob writes first, in a channel Alice started: the session's initiator names the owner.
+    runAs(auth("U_BOB"), auth("U_ALICE"));
+    await turnStarted("t1");
+    runAs(auth("U_CAROL"));
+    await turnStarted("t2");
+
+    expect(channel.state.codeChannelOwnerId).toBe("U_ALICE");
+    expect(channel.state.triggeringUserId).toBe("U_CAROL");
   });
 
   it("cancels the session's turn when Slack stops the code channel session", async () => {

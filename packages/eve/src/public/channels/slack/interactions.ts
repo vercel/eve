@@ -29,6 +29,7 @@ import { isSlackCodeChannel } from "#public/channels/slack/code-channel.js";
 import { dispatchSignInCancel } from "#public/channels/slack/sign-in-cancel.js";
 import {
   buildFreeformModalView,
+  codeChannelOwnerRefusing,
   decodeFreeformHitlActionId,
   decodeHitlResponse,
   HITL_FREEFORM_MODAL_ACTION_ID,
@@ -307,6 +308,16 @@ export async function handleInteractionPost(
 
   const freeformAction = interaction.actions.find((a) => isFreeformAction(a.actionId));
   if (freeformAction) {
+    const owner = codeChannelOwnerRefusing(
+      decodeFreeformHitlActionId(freeformAction.actionId)?.route,
+      freeformAction.user.id,
+    );
+    if (owner !== undefined) {
+      ctx.waitUntil(
+        tellNotTheCodeChannelOwner({ deps, interaction, owner, userId: freeformAction.user.id }),
+      );
+      return ack;
+    }
     await openFreeformModal({ payload: payload.raw, interaction, freeformAction, deps });
     return ack;
   }
@@ -319,20 +330,23 @@ export async function handleInteractionPost(
   if (hitlActions.length > 0) {
     const user = hitlActions[0]!.action.user;
     const route = hitlActions[0]!.derived.route;
+    const owner = codeChannelOwnerRefusing(route, user.id);
     ctx.waitUntil(
-      dispatchBlockAnswers({
-        ctx,
-        deps,
-        interaction,
-        route,
-        submission: {
-          type: "block_actions",
-          actions: hitlActions.map(({ action }) => action),
-          answers: hitlActions.map(({ derived }) => derived.response),
-          messageTs: hitlActions[0]!.action.messageTs,
-          user,
-        },
-      }),
+      owner !== undefined
+        ? tellNotTheCodeChannelOwner({ deps, interaction, owner, userId: user.id })
+        : dispatchBlockAnswers({
+            ctx,
+            deps,
+            interaction,
+            route,
+            submission: {
+              type: "block_actions",
+              actions: hitlActions.map(({ action }) => action),
+              answers: hitlActions.map(({ derived }) => derived.response),
+              messageTs: hitlActions[0]!.action.messageTs,
+              user,
+            },
+          }),
     );
   }
 
@@ -572,11 +586,12 @@ async function dispatchBlockAnswers(input: {
   }
 }
 
-/** Tells only `userId` that the card they answered is no longer active. */
+/** Tells only `userId` something about the card they just acted on. */
 async function postEphemeralNotice(input: {
   readonly channelId: string;
   readonly deps: InteractionHandlerDeps;
   readonly installationTeamId: string | undefined;
+  readonly notice?: string;
   readonly teamId: string | undefined;
   readonly threadTs: string;
   readonly userId: string;
@@ -590,10 +605,35 @@ async function postEphemeralNotice(input: {
     threadTs: input.threadTs,
   });
   try {
-    await thread.postEphemeral(input.userId, INACTIVE_REQUEST_NOTICE);
+    await thread.postEphemeral(input.userId, input.notice ?? INACTIVE_REQUEST_NOTICE);
   } catch (error) {
     log.error("inactive prompt notice failed", { error });
   }
+}
+
+/**
+ * Leaves a code channel's card untouched and tells the member who clicked it that it is the
+ * channel owner's to answer. Everyone in a code channel sees the card, so this is the common
+ * case of a bystander clicking, not an attack worth a louder reply.
+ */
+async function tellNotTheCodeChannelOwner(input: {
+  readonly deps: InteractionHandlerDeps;
+  readonly interaction: ParsedBlockActionsPayload;
+  readonly owner: string;
+  readonly userId: string;
+}): Promise<void> {
+  log.warn("ignored an input response from someone other than the code channel's owner", {
+    channelId: input.interaction.channelId,
+  });
+  await postEphemeralNotice({
+    channelId: input.interaction.channelId,
+    deps: input.deps,
+    installationTeamId: input.interaction.installationTeamId,
+    notice: `Only <@${input.owner}> can answer this — it's their request to decide.`,
+    teamId: input.interaction.teamId,
+    threadTs: input.interaction.threadTs,
+    userId: input.userId,
+  });
 }
 
 async function openFreeformModal(input: {
@@ -704,6 +744,13 @@ async function handleViewSubmission(
   const triggeringUserId = payload.userId;
   const teamId = user?.teamId ?? payload.teamId ?? null;
   const installationTeamId = metadata.installationTeamId ?? readInstallationTeamId(payload.raw);
+  // The modal only opens for the owner, so this is a stale one, submitted after the owner changed.
+  if (codeChannelOwnerRefusing(metadata, triggeringUserId) !== undefined) {
+    log.warn("ignored a modal answer from someone other than the code channel's owner", {
+      channelId: metadata.channelId,
+    });
+    return ack;
+  }
   const submission: SlackAnswerSubmission = {
     type: "view_submission",
     answers: [parseAnswer({ interactionId: metadata.requestId, text })],

@@ -4,6 +4,7 @@ import type { Interaction } from "#protocol/session-projection/reader.js";
 import {
   buildAnsweredBlocks,
   buildFreeformModalView,
+  codeChannelOwnerRefusing,
   decodeFreeformHitlActionId,
   decodeHitlActionId,
   formatInteractionFallbackText,
@@ -82,6 +83,46 @@ describe("private HITL routes", () => {
 
     expect(decodeHitlActionId(actionId)?.route).toEqual(route);
     expect(decodeHitlActionId(actionId.replace("code:C123:", "route:C123::"))).toBeNull();
+  });
+
+  // Every member of a code channel sees its cards, so the route names the one member eve answers.
+  it("round-trips a code channel route naming the channel's owner", () => {
+    const route = { channelId: "C123", codeChannel: true, ownerId: "U_ALICE" } as const;
+    const blocks = renderInteractionBlocks(
+      makeRequest({ options: [{ id: "yes", label: "Confirm" }], interactionId: "q_1" }),
+      route,
+    );
+    const actionId = (blocks[0] as { actions: Array<{ action_id: string }> }).actions[0]!.action_id;
+
+    expect(actionId).toBe(`${ANSWER_ACTION_PREFIX}codeowner:C123:U_ALICE:q_1:button:0`);
+    expect(decodeHitlActionId(actionId)?.route).toEqual(route);
+    expect(codeChannelOwnerRefusing(route, "U_ALICE")).toBeUndefined();
+    expect(codeChannelOwnerRefusing(route, "U_BOB")).toBe("U_ALICE");
+  });
+
+  // A card eve rendered before it knew the owner keeps taking answers from whoever sees it.
+  it("names no owner for a code channel route without one", () => {
+    const route = { channelId: "C123", codeChannel: true } as const;
+
+    expect(codeChannelOwnerRefusing(route, "U_BOB")).toBeUndefined();
+    expect(codeChannelOwnerRefusing(undefined, "U_BOB")).toBeUndefined();
+  });
+
+  it("carries the code channel's owner onto the freeform answer modal", () => {
+    const blocks = renderInteractionBlocks(makeRequest({ interactionId: "q_1" }), {
+      channelId: "C123",
+      codeChannel: true,
+      ownerId: "U_ALICE",
+    });
+    const actionId = (blocks.at(-1) as { elements: Array<{ action_id: string }> }).elements[0]!
+      .action_id;
+
+    expect(isFreeformAction(actionId)).toBe(true);
+    expect(decodeFreeformHitlActionId(actionId)?.route).toEqual({
+      channelId: "C123",
+      codeChannel: true,
+      ownerId: "U_ALICE",
+    });
   });
 });
 

@@ -658,6 +658,19 @@ Each approval, question, and budget prompt card updates as its request changes:
 
 To change how these cards look, use [`interactionCard`](#restyle-approval-and-question-cards).
 
+### Who answers in a code channel
+
+Slack admits the origin conversation's members to a [code channel](#serve-slack-code-channels), so more people can write in one than asked for the work, and all of them see the buttons on a card eve posts there. A question or a budget prompt there is the channel owner's to settle: the person eve opened the channel for, or whoever started the first turn in a channel eve didn't open. eve takes only that person's answer and tells anyone else, in an ephemeral message only they see, whose request it is. The card stays up and the turn keeps waiting.
+
+This matters for an agent that answers one member's message by asking another to confirm it. Without it, the member who asked could press the button meant for the channel's owner.
+
+Two cases keep their own rule:
+
+- **Tool approvals.** Who may approve is the tool's to decide: its requester by default, or whoever its [response policy](/docs/human-in-the-loop#authorizing-approval-responses) allows. eve never narrows that to the owner, so a call raised by a non-owner's message needs a response policy naming who may decide.
+- **Direct messages.** A card [`approvalChannel`](#human-in-the-loop-hitl) sends to a DM is answered by the person it was sent to, who need not be the owner.
+
+A card eve rendered before it knew the owner, such as one posted by a session that was already running when the channel was upgraded to eve's current release, keeps taking any member's answer.
+
 A sign-in link or device code is a credential: whoever completes it connects their account to the session. So eve posts a status without the link in the thread. It sends the sign-in ephemerally to the Slack user it's for, and updates the status when the sign-in ends. The private prompt pairs a **Connect** button, labeled with the service name, with **Cancel**, which ends the waiting turn and updates the public status. To deliver a sign-in another way, see [Render and decode HITL controls yourself](#render-and-decode-hitl-controls-yourself).
 
 ## Audience
@@ -791,6 +804,7 @@ export default slackChannel({
 #### How eve serves code channels
 
 - **Replies.** The agent replies top-level, or in a thread when someone writes in one. Any member can message it.
+- **Owner.** The channel belongs to the person eve opened it for, or to whoever starts the first turn in a channel eve didn't open. A later message never moves it, and eve takes only the owner's answer to a [question or budget prompt](#who-answers-in-a-code-channel) it posts there.
 - **Status.** Slack shows `processing` while the agent works, `suspended` while it waits on a person, and `active` otherwise. Stopping the session in Slack cancels the running turn.
 - **Hooks.** Messages without a mention go to `onMessage`, else `onAppMention`, else the default handler, so mention filters apply in code channels too. Check `ctx.slack.codeChannel`, or `channel.state.codeChannel` in [renderers](#customize-rendering), to tell code channel messages apart.
 - **Proactive sends.** Target a code channel's session with `{ channelId, codeChannel: true }` or `slackCodeChannelContinuationToken(channelId)`.

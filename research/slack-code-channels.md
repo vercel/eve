@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: in-progress
-last_updated: "2026-10-26"
+last_updated: "2026-11-05"
 ---
 
 # Slack code channels
@@ -11,8 +11,10 @@ last_updated: "2026-10-26"
 > **Implementation status:** Phase 1 is partly in. Shipped: detection, `code:C123` keying, top-level
 > replies, session status, stop, and `codeChannels: true` for un-mentioned messages and the manifest.
 > Every member can start turns; the `participants` policy (`"owner"`, `"confirm"`) is deferred,
-> since eve can't read a forked channel's owner before dispatch. Replies follow the thread the user
-> wrote in. Not yet: the membership check, and phase 3.
+> since eve can't read a forked channel's owner before dispatch. eve does record the owner and
+> takes only their answer to a question or budget prompt it posts in the channel (see
+> [Participants](#participants)). Replies follow the thread the user wrote in. Not yet: the
+> membership check, and phase 3.
 >
 > Phase 2 is in, without `ctx.startInChannel()`: `openCodeChannel(ctx, slack, { message, name })`
 > from `eve/channels/slack`, which apps wrap in a tool, over a public `codeChannel` target on the
@@ -154,8 +156,27 @@ a turn. The forked session already has the origin conversation as history.
 
 ### Participants
 
-Deferred. Phase 1 lets every member start turns, as in an ordinary thread, because eve can't read
-a forked channel's owner before dispatch. The design below stays as the plan if it lands.
+Deferred for who may _start_ turns. Phase 1 lets every member start them, as in an ordinary
+thread, because eve can't read a forked channel's owner before dispatch. The design below stays
+as the plan if it lands.
+
+Who may _answer a question_ is in. eve records the channel's owner in
+`SlackChannelState.codeChannelOwnerId` — the person a channel was opened for, or whoever started
+the session in a channel eve adopted — and a later message never moves it. A question or budget
+card eve posts in the channel mints its action ids with that owner
+(`eve_input:codeowner:<channelId>:<ownerId>:…`), so the interactivity route checks the click
+against the owner before the session hears it, and tells anyone else, ephemerally, whose request
+it is. This closes the hole an app's own confirm prompt otherwise leaves: an app that answers a
+non-owner's message by asking the owner to confirm it posts a card every member of the channel
+can click.
+
+Tool approvals stay out of it. Who may approve belongs to the tool's approval policy — its
+requester by default, or whoever its `response` policy allows — and a channel must not narrow a
+decision the app already assigned. So an approval that a non-owner's message raises is still
+theirs to approve unless the tool carries a response policy. Closing that needs the
+`participants` policy below, or an approval asked as the channel's owner rather than the turn's
+requester. A card eve rendered with no owner recorded stays ungated, and a direct-message card is
+answered by its recipient.
 
 Code channels admit members of the origin channel, so more people can talk in one than asked for
 it. The session's auth comes from whoever started it, so an unrestricted channel lets any member

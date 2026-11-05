@@ -263,6 +263,14 @@ export interface SlackChannelState extends UndeliveredReplyState {
   /** Whether this session serves a Slack code channel. */
   codeChannel?: boolean;
   /**
+   * Slack user who owns this code channel: the person eve opened it for, or the one who started
+   * the session in a channel eve didn't open. A code channel admits the origin conversation's
+   * members, so more people can write in it than asked for the work; unlike `triggeringUserId`,
+   * a later message never moves this, and eve takes only this user's answer to a question or
+   * budget prompt it posts there.
+   */
+  codeChannelOwnerId?: string | null;
+  /**
    * In a code channel, the thread of the message the current turn answers;
    * `null` posts top-level.
    * @internal
@@ -1122,6 +1130,13 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         if (triggeringUserId !== undefined) {
           channel.state.triggeringUserId = triggeringUserId;
         }
+        // A code channel eve didn't open names its owner here: whoever started the session, so a
+        // channel served since before eve recorded owners keeps the person whose channel it is.
+        if (channel.state.codeChannel === true && !channel.state.codeChannelOwnerId) {
+          const ownerId =
+            slackUserIdFromAuthContext(ctx.session.auth.initiator) ?? triggeringUserId;
+          if (ownerId !== undefined) channel.state.codeChannelOwnerId = ownerId;
+        }
         // A message folded into a running turn doesn't move that turn's replies.
         if (channel.state.pendingReplyThreadTs !== undefined) {
           channel.state.replyThreadTs = channel.state.pendingReplyThreadTs;
@@ -1162,6 +1177,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       threadTs: null as string | null,
       teamId: null as string | null,
       installationTeamId: null as string | null,
+      codeChannelOwnerId: null,
       triggeringUserId: null,
       triggeringMessageTs: null,
       pendingToolCallMessage: null,
@@ -1455,6 +1471,7 @@ async function openSlackCodeChannel(input: {
       audience: isPrivate ? "private" : "public",
       channelId,
       codeChannel: true,
+      codeChannelOwnerId: input.triggeringUserId ?? null,
       installationTeamId: input.installationTeamId ?? null,
       replyThreadTs: null,
       teamId: input.teamId ?? null,

@@ -62,9 +62,34 @@ export const HITL_FREEFORM_MODAL_ACTION_ID = "eve_freeform_text";
 
 const HITL_ROUTE_PREFIX = `${ANSWER_ACTION_PREFIX}route:`;
 const HITL_CODE_CHANNEL_ROUTE_PREFIX = `${ANSWER_ACTION_PREFIX}code:`;
+const HITL_CODE_CHANNEL_OWNER_ROUTE_PREFIX = `${ANSWER_ACTION_PREFIX}codeowner:`;
 
-/** Slack session a routed HITL widget answers back to. */
-export type SlackHitlRoute = SlackSessionTarget;
+/**
+ * Slack session a routed HITL widget answers back to. A route can also name the one Slack user
+ * whose click the widget takes, which a code channel's question and budget cards carry: every
+ * member of the channel sees those buttons, and only its owner settles them.
+ */
+export type SlackHitlRoute = SlackSessionTarget & {
+  /**
+   * The Slack user whose answers the card takes. Absent when anyone who can see the card may
+   * answer it, including on a card eve rendered before it knew a code channel's owner.
+   */
+  readonly ownerId?: string;
+};
+
+/**
+ * The code channel owner who has to answer this card, when `userId` isn't them, and `undefined`
+ * when the answer stands: the route names no owner, or names this user. A question card posted
+ * in a code channel shows its buttons to every member, so its clicks are checked here before
+ * the session hears them.
+ */
+export function codeChannelOwnerRefusing(
+  route: SlackHitlRoute | undefined,
+  userId: string,
+): string | undefined {
+  const ownerId = route?.ownerId;
+  return ownerId === undefined || ownerId === userId ? undefined : ownerId;
+}
 
 /**
  * Maximum radio-button option count before the renderer falls back to
@@ -173,6 +198,17 @@ export function decodeHitlActionId(actionId: string): DecodedHitlActionId | null
     if (first <= 0 || second <= first + 1) return null;
     route = { channelId: encoded.slice(0, first), threadTs: encoded.slice(first + 1, second) };
     encoded = encoded.slice(second + 1);
+  } else if (encoded.startsWith("codeowner:")) {
+    encoded = encoded.slice("codeowner:".length);
+    const first = encoded.indexOf(":");
+    const second = encoded.indexOf(":", first + 1);
+    if (first <= 0 || second <= first + 1) return null;
+    route = {
+      channelId: encoded.slice(0, first),
+      codeChannel: true,
+      ownerId: encoded.slice(first + 1, second),
+    };
+    encoded = encoded.slice(second + 1);
   } else if (encoded.startsWith("code:")) {
     encoded = encoded.slice("code:".length);
     const end = encoded.indexOf(":");
@@ -196,9 +232,12 @@ export function decodeHitlActionId(actionId: string): DecodedHitlActionId | null
 function encodeHitlActionId(request: Interaction, route?: SlackHitlRoute): string {
   const requestIdentity = `${request.request.kind === "approval" ? "tool-approval:" : ""}${request.interactionId}`;
   if (route === undefined) return `${ANSWER_ACTION_PREFIX}${requestIdentity}`;
-  return route.codeChannel === true
+  if (route.codeChannel !== true) {
+    return `${HITL_ROUTE_PREFIX}${route.channelId}:${route.threadTs}:${requestIdentity}`;
+  }
+  return route.ownerId === undefined
     ? `${HITL_CODE_CHANNEL_ROUTE_PREFIX}${route.channelId}:${requestIdentity}`
-    : `${HITL_ROUTE_PREFIX}${route.channelId}:${route.threadTs}:${requestIdentity}`;
+    : `${HITL_CODE_CHANNEL_OWNER_ROUTE_PREFIX}${route.channelId}:${route.ownerId}:${requestIdentity}`;
 }
 
 /**
@@ -322,7 +361,7 @@ export function formatInteractionFallbackText(request: Interaction): string {
  * the modal to the `view_submission` that closes it so the route can
  * deliver the answer back to the right session.
  */
-export type HitlFreeformModalMetadata = SlackSessionTarget & {
+export type HitlFreeformModalMetadata = SlackHitlRoute & {
   readonly continuationToken: string;
   /** Workspace whose app installation supplies credentials for modal follow-up API calls. */
   readonly installationTeamId?: string;
