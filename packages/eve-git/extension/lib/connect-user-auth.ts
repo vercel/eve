@@ -102,7 +102,7 @@ function translate(error: unknown, phase: Phase): Error {
       // The person reads this on the sign-in card, so it says what to do next.
       return new ConnectionAuthorizationFailedError("connect", {
         message:
-          "The sign-in didn't finish, so there is no GitHub access for you yet. Ask again for a new sign-in link and complete every step.",
+          "The sign-in didn't finish, so you do not have access yet. Ask again for a new sign-in link and complete all steps to gain access.",
       });
     }
     return new ConnectionAuthorizationRequiredError("connect", { message: error.message });
