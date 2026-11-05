@@ -153,6 +153,15 @@ export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): Chan
       throw new Error("Linq has no pressable HITL controls.");
     },
     postedText,
+    shownMessage(call) {
+      const text = postedText(call);
+      if (text === undefined) return undefined;
+      // A send's id comes back from Linq; an edit names the message it rewrites in its path.
+      const id = call.method.startsWith("PATCH ")
+        ? call.method.split("/").at(-1)!
+        : (call.response as { readonly id: string }).id;
+      return { id, onlyPerson: false, options: [], text };
+    },
   };
 }
 

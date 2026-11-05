@@ -139,15 +139,6 @@ const SIGN_IN_LINGERS = signInLingers(
   "the challenge message stays as it was sent after the sign-in completes",
 );
 
-/**
- * Without `shownMessage`, the driver reads each edit as a new message, so the challenge stays in
- * what a person sees even after the channel edits it away, and a fix couldn't flip the cell.
- */
-const EDITS_UNREADABLE = {
-  [SIGN_IN_COMPLETED_RULE]:
-    "the driver reads an edit as a new message, so it can't see the challenge edited away",
-} satisfies Partial<Record<ContractRuleName, string>>;
-
 /** Slack's sign-in prompt is ephemeral, which only a press's `response_url` can delete. */
 const SLACK_SIGN_IN_LINGERS = signInLingers(
   "the private prompt is ephemeral, and nothing deletes it when the sign-in completes; only a press's response_url can",
@@ -245,7 +236,7 @@ const channelConformance = {
       broken: { ...CHAT_SDK_BROKEN, ...SIGN_IN_LINGERS },
       unsupported: SIGN_IN_SENT_PRIVATELY,
     },
-    { driver: chatSdkTextDriver, unsupported: EDITS_UNREADABLE },
+    { driver: chatSdkTextDriver },
   ],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
   discord: [
@@ -301,8 +292,8 @@ const channelConformance = {
     },
   ],
   linq: [{ driver: linqDriver, broken: LINQ_SIGN_IN_NOT_PRIVATE }],
-  "linq-dm": [{ dm: true, driver: () => linqDriver("private"), unsupported: EDITS_UNREADABLE }],
-  photon: [{ driver: photonDriver, unsupported: EDITS_UNREADABLE }],
+  "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
+  photon: [{ driver: photonDriver }],
   slack: [
     {
       driver: slackDriver,
