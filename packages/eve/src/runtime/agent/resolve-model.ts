@@ -101,7 +101,7 @@ async function loadSourceBackedRuntimeModelReference(
     definition: reference.source,
     kindLabel: `runtime model "${reference.id}"`,
     moduleMap: scope.moduleMap,
-    nodeId: scope.nodeId,
+    nodeId: reference.sourceNodeId ?? scope.nodeId,
   });
   const normalizedDefinition = normalizeAgentDefinition(
     definition,
