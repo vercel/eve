@@ -4,7 +4,6 @@ import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
 import { createInProcessRuntime } from "#execution/in-process/runtime.js";
 import { createWorldSessionStore } from "#execution/in-process/world-store.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
-import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import type { RuntimeWorld } from "#execution/world/runtime-world.js";
 import { createLogger } from "#internal/logging.js";
 
@@ -27,6 +26,12 @@ import { createLogger } from "#internal/logging.js";
 //      continues: the next one goes on with it.
 
 const log = createLogger("execution.world-host.driver");
+
+/**
+ * What a World host's session is sent: a command, as a channel sends one, or a payload for one of
+ * its addresses, as a callback route or another session resumes it (`via` names the address).
+ */
+export type SessionMessage = { readonly command: SessionCommand } | { readonly deliver: unknown };
 
 /** What a World host's session is created with: its entity's meta. */
 export interface SessionStart {
@@ -81,12 +86,13 @@ export function sessionActivation(options: SessionActivationOptions): Activation
       else await runtime.restore(saved, { stored: true });
       for (const message of await entity.inbox()) {
         store.receive(sessionId, message.id);
-        const body = message.body as SessionCommand | AuthorizationCallbackPayload;
+        const body = message.body as SessionMessage;
         const token = message.via ?? sessionCommandHookToken(sessionId);
-        if (body.kind === "authorization-callback") await runtime.deliver(token, body);
+        if ("deliver" in body) await runtime.deliver(token, body.deliver);
         else if (message.via === undefined)
-          await runtime.dispatchSession({ command: body, sessionId });
-        else await runtime.dispatchContinuation({ command: body, continuationToken: token });
+          await runtime.dispatchSession({ command: body.command, sessionId });
+        else
+          await runtime.dispatchContinuation({ command: body.command, continuationToken: token });
         store.received(sessionId);
       }
       outcome = await runUntilWaiting(runtime, { deadline, holdForTimerMs, settleMs });

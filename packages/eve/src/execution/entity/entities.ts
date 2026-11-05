@@ -61,6 +61,16 @@ export class TakenOverError extends Error {
   }
 }
 
+/** An alias another entity has already: `create` refuses it. */
+export class AliasTakenError extends Error {
+  override readonly name = "AliasTakenError";
+  readonly alias: string;
+  constructor(alias: string) {
+    super(`Another entity is reached by "${alias}" already.`);
+    this.alias = alias;
+  }
+}
+
 /** Whether `error`, or one of its causes, is a `TakenOverError`. */
 export function isTakenOver(error: unknown): boolean {
   for (let cause = error, depth = 0; cause instanceof Error && depth < 10; depth += 1) {
@@ -76,7 +86,9 @@ export interface Entities {
   newKey(): string;
   /**
    * Creates `key` with what it starts from (`meta`, which never changes) and the aliases it's
-   * also reached by. Refused if it exists. It doesn't run until something activates it.
+   * also reached by. Refused if it exists, and with `AliasTakenError` if another entity has one
+   * of the aliases (which then reaches that entity still). It doesn't run until something
+   * activates it.
    */
   create(
     key: string,

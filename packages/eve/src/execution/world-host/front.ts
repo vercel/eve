@@ -22,7 +22,7 @@ import {
 } from "#execution/session-commands.js";
 import type { Entities } from "#execution/entity/entities.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
-import type { SessionStart } from "./driver.js";
+import type { SessionMessage, SessionStart } from "./driver.js";
 
 // The runtime a World host's callers use: it runs nothing. Starting a session creates its entity,
 // reached by its addresses, and activates it; a command to a session is sent to the address it
@@ -42,7 +42,9 @@ export function createFrontRuntime(input: {
     command: TCommand,
   ): Promise<SessionCommandResult<TCommand>> => {
     const identified = identifyCommand(command);
-    const reached = await entities.send({ alias: token }, identified);
+    const reached = await entities.send({ alias: token }, {
+      command: identified,
+    } satisfies SessionMessage);
     return reached === undefined
       ? inactiveCommandResult(identified)
       : activeCommandResult(identified, reached.key);

@@ -100,6 +100,12 @@ export function installDurableHost(host: DurableHost): void {
     );
 }
 
+/** Gives up `host` as this realm's durable host, if it is: a World host that closed. */
+export function uninstallDurableHost(host: DurableHost): void {
+  const state = hosts();
+  if (state.durable === host) state.durable = undefined;
+}
+
 /** The durable host, for a hook token or run id no route holds; without one, it's gone. */
 function durableHostFor(target: { readonly hook: string } | { readonly run: string }): DurableHost {
   const { durable } = hosts();
