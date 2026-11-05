@@ -100,12 +100,18 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
   const switcher = (
     <div className="mx-auto mb-6 flex w-fit flex-wrap items-center justify-center gap-3">
       <span className="text-label-14 text-gray-900">When the support agent serves</span>
-      <div aria-label="Customer" className="flex gap-1 rounded-full bg-gray-100 p-1" role="tablist">
+      {/* The size sits here, outside cn(): tailwind-merge reads text-label-14 as a color and
+          drops it next to the buttons' text-gray-* classes. */}
+      <div
+        aria-label="Customer"
+        className="flex gap-1 rounded-full bg-gray-100 p-1 text-label-14"
+        role="tablist"
+      >
         {CUSTOMERS.map((option) => (
           <button
             aria-selected={customer.id === option.id}
             className={cn(
-              "flex cursor-pointer items-center gap-2 rounded-full py-1 pr-1.5 pl-3 text-label-14 transition-colors",
+              "flex cursor-pointer items-center gap-2 rounded-full py-1 pr-1.5 pl-3 transition-colors",
               customer.id === option.id
                 ? "bg-background-100 text-gray-1000 shadow-(--ds-shadow-border-small)"
                 : "text-gray-900 hover:text-gray-1000",
