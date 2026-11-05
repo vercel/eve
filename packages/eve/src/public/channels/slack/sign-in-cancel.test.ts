@@ -9,6 +9,19 @@ import {
   SIGN_IN_CANCEL_ACTION_ID,
 } from "#public/channels/slack/sign-in-cancel.js";
 
+const logger = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn() }));
+
+vi.mock("#internal/logging.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#internal/logging.js")>();
+  return {
+    ...actual,
+    createLogger: (namespace: string) =>
+      namespace === "slack.interactions"
+        ? { ...actual.createLogger(namespace), ...logger }
+        : actual.createLogger(namespace),
+  };
+});
+
 const RESPONSE_URL = "https://hooks.slack.com/actions/T1/1/abc";
 
 function createRuntime(dispatchContinuation: Runtime["dispatchContinuation"]): Runtime {
@@ -66,6 +79,7 @@ const deletePost = [
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.clearAllMocks();
 });
 
 describe("dispatchSignInCancel", () => {
@@ -113,11 +127,16 @@ describe("dispatchSignInCancel", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("settles when Slack refuses the delete", async () => {
+  it("logs when Slack refuses the delete", async () => {
     const fetchMock = stubFetch(new Response("expired_url", { status: 404 }));
     const runtime = createRuntime(vi.fn().mockResolvedValue({ status: "no_active_turn" }));
 
-    await expect(clickCancel(runtime)).resolves.toBeUndefined();
+    await clickCancel(runtime);
+
     expect(fetchMock).toHaveBeenCalledWith(...deletePost);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Slack refused to remove the cancelled sign-in prompt",
+      { body: "expired_url", status: 404 },
+    );
   });
 });
