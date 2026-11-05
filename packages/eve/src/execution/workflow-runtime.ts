@@ -268,13 +268,13 @@ export function createWorkflowRuntime(config: {
     };
 
     const { continuationToken } = input;
-    // The run claims its continuation address as it is admitted, so the caller
-    // learns at once whether this run or an earlier one owns the address.
-    const claimsContinuation =
-      continuationToken !== undefined &&
-      continuationToken !== "" &&
-      supportsStartClaims(await getWorld());
-    if (claimsContinuation) workflowInput.continuationClaimed = true;
+    // The run claims one address as it is admitted. A continuation address
+    // tells the caller at once whether this run or an earlier one owns it.
+    // Without one, the session's own inbox takes commands before the run boots.
+    const hasContinuation = continuationToken !== undefined && continuationToken !== "";
+    const claimsAtStart = supportsStartClaims(await getWorld());
+    const claimsContinuation = claimsAtStart && hasContinuation;
+    if (claimsAtStart) workflowInput.startClaim = hasContinuation ? "continuation" : "inbox";
 
     let run: Awaited<ReturnType<typeof startWorkflowOnCurrentDeployment>>;
     try {
@@ -288,11 +288,13 @@ export function createWorkflowRuntime(config: {
         [workflowInput],
         workflowInput.ownerDeploymentId,
         startOptions,
-        claimsContinuation
-          ? {
-              token: sessionInboxHookToken(continuationToken),
-              metadata: (runId) => ({ [SESSION_INBOX_SESSION_ID_METADATA_KEY]: runId }),
-            }
+        claimsAtStart
+          ? (runId) => ({
+              token: sessionInboxHookToken(
+                hasContinuation ? continuationToken : sessionCommandHookToken(runId),
+              ),
+              metadata: { [SESSION_INBOX_SESSION_ID_METADATA_KEY]: runId },
+            })
           : undefined,
       );
     } catch (error) {
@@ -732,15 +734,12 @@ export async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], 
 }
 
 /**
- * A hook token the run holds from its admission. A run that already holds it
- * refuses the start with `HookConflictError` naming that run, and no run is
- * created. Requires a World where {@link supportsStartClaims} holds.
+ * The hook the run holds from its admission, given the id of the run the
+ * start creates. A run that already holds the token refuses the start with
+ * `HookConflictError` naming that run, and no run is created. Requires a
+ * World where {@link supportsStartClaims} holds.
  */
-interface StartClaim {
-  readonly token: string;
-  /** The hook's metadata, given the id of the run the start creates. */
-  readonly metadata?: (runId: string) => unknown;
-}
+type StartClaim = (runId: string) => { readonly token: string; readonly metadata?: unknown };
 
 /**
  * Starts a run on an exact deployment. Every run eve starts records the eve
@@ -768,7 +767,7 @@ export async function startWorkflowOnDeployment<TArgs extends unknown[], TResult
     const pinned = pinRunId(await getWorld(), startOptions);
     const run = await start(workflow, args, {
       ...startOptions,
-      experimental_hook: { token: claim.token, metadata: claim.metadata?.(pinned.runId) },
+      experimental_hook: claim(pinned.runId),
       world: pinned.world,
     });
     if (run.runId !== pinned.runId) {

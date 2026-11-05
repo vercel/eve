@@ -158,6 +158,42 @@ describe("delivery idempotency", () => {
     });
   }, 60_000);
 
+  it("delivers a cancel sent as soon as a session is created", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", await (await getWorld()).getDeploymentId());
+    const app = await createTestRuntime({
+      agent: { name: "cancel-on-create", limits: { sessionTimeoutMs: false } },
+    });
+    await app.run(async () => {
+      const runtime = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      // Alice starts a chat and presses stop before the session has booted.
+      const started = await runtime.createSession({
+        adapter: { kind: "http" },
+        auth: null,
+        input: { message: "Alice asks for a long report." },
+      });
+      const stream = captureTurnEvents(getRun(started.sessionId));
+      try {
+        await expect(
+          runtime.dispatchSession({
+            command: { deliveryId: "alice-stop", kind: "cancel" },
+            sessionId: started.sessionId,
+          }),
+        ).resolves.toMatchObject({ sessionId: started.sessionId, status: "accepted" });
+        // Whether it stops the turn depends on whether the turn is still running when it is read.
+        await stream.nextUntil(
+          (event) =>
+            event.type === "delivery.admitted" &&
+            (event.data as { deliveryId?: string }).deliveryId === "alice-stop",
+        );
+      } finally {
+        stream.dispose();
+        await getRun(started.sessionId).cancel();
+      }
+    });
+  }, 60_000);
+
   it("gives a keyed request's repeat the original receipt, as the session route does", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", await (await getWorld()).getDeploymentId());
     let turns = 0;

@@ -35,7 +35,7 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session \
   -d '{"message":"Summarize the latest forecast."}'
 ```
 
-Both forms return `202` with the `sessionId` in the JSON body and the `x-eve-session-id` header as soon as the run is accepted. The session may not accept input yet, so an immediate follow-up can return `409 session_not_ready`. Retry that code with bounded backoff. The TypeScript client retries sends for up to 20 seconds and respects the caller's abort signal.
+Both forms return `202` with the `sessionId` in the JSON body and the `x-eve-session-id` header as soon as the run is accepted. On the local world, Vercel Workflow, and `@workflow/world-postgres` 5.1.1 or later, the session accepts messages, cancels, and `end()` from then on. On other [Workflow worlds](../guides/deployment/workflow-worlds), an immediate follow-up can return `409 session_not_ready`. Retry that code with bounded backoff. The TypeScript client retries sends for up to 20 seconds and respects the caller's abort signal.
 
 ## Stream a session
 

@@ -18,10 +18,11 @@ export const SESSION_HANDOFF_VERSION = 3;
 export interface InitialWorkflowEntryInput {
   readonly idempotencyKey?: string;
   /**
-   * `start()` claimed the continuation address with the run's admission, so
-   * the run opens that hook rather than registering it, and cannot conflict.
+   * The address `start()` claimed with the run's admission: the continuation
+   * address, or the session's own inbox when it has none. The run opens that
+   * hook rather than registering it, and the claim cannot conflict.
    */
-  readonly continuationClaimed?: true;
+  readonly startClaim?: "continuation" | "inbox";
   readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
   readonly input: RunInput["input"];
   readonly kind: "initial";
