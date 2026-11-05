@@ -392,7 +392,7 @@ export default agent({
 }
 ```
 
-The model sees each key with its description and can choose only those keys. A call without `model` runs on the current model, the same as the default tool, and `agent()` with no `models` is the default tool, with no `model` input. The selected model applies to every turn of the task's session. A continuation can omit `model` or repeat the original one; start a new task to use another. Copies and declared subagents never get this tool.
+The model sees each key with its description and can choose only those keys. A call without `model` runs on the root agent's model, the same as the default tool; with a dynamic model such as `auto()`, the copy chooses again. `agent()` with no `models` is the default tool, with no `model` input. The selected model applies to every turn of the task's session. A continuation can omit `model` or repeat the original one; start a new task to use another. Copies and declared subagents never get this tool.
 
 An authored `agent/tools/agent.ts` replaces the framework tool. Re-export the default definition, export `agent({ models })`, export another tool such as `agentRouter()`, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `eve__task_wait` and `eve__task_cancel`:
 

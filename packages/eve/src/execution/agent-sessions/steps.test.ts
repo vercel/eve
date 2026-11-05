@@ -225,13 +225,26 @@ describe("openAgentSessionStep with an agent({ models }) option", () => {
     mocks.bundle = {
       graph: {},
       modelMetadata: async () => ({ fetchedAt: null, models: [] }),
-      moduleMap: { nodes: { __root__: { modules: { "tools-agent": { default: tool } } } } },
+      moduleMap: {
+        nodes: {
+          __root__: {
+            modules: { "tools-agent": { default: tool }, "tools-reviewer": { default: {} } },
+          },
+        },
+      },
       resolvedAgent: {
         tools: [
           {
             ...toolSource,
             behavior: { handling: { kind: "workflow-tool" } },
             name: "agent",
+          },
+          {
+            behavior: { handling: { kind: "workflow-tool" } },
+            logicalPath: "tools/invoke-reviewer.ts",
+            name: "invoke-reviewer",
+            sourceId: "tools-reviewer",
+            sourceKind: "module",
           },
         ],
       },
@@ -278,7 +291,7 @@ describe("openAgentSessionStep with an agent({ models }) option", () => {
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
-  it("resolves a model from any other tool's run as a model selection", async () => {
+  it("resolves a model from any other workflow tool's run as a model selection", async () => {
     await openAgentSessionStep({
       ...message,
       model: { model: "openai/gpt-6-sol", modelContextWindowTokens: 400_000 },

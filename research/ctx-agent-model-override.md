@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: implemented
-last_updated: "2026-10-20"
+last_updated: "2026-11-05"
 ---
 
 # `ctx.agent` model override

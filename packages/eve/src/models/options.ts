@@ -59,7 +59,7 @@ export function isModelOption(option: unknown): option is ModelOption {
         isModelSelection({ ...option, description: undefined });
 }
 
-/** Whether the value is a non-empty record of valid {@link ModelOption}s. */
+/** Whether the value is a record of valid {@link ModelOption}s. */
 export function isModelOptions(value: unknown): value is ModelOptions {
   return isRecord(value) && Object.values(value).every(isModelOption);
 }
