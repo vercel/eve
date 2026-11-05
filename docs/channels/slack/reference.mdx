@@ -262,19 +262,24 @@ Events API callbacks say whether their conversation is externally shared. Intera
 
 A Slack object without the flags the check reads, such as a conversation without `is_ext_shared` or a user without `is_restricted`, counts as unclassified.
 
-Pass a list of Slack user IDs to allow only those users. The default checks still apply:
+Your own `allowFrom` replaces the default, so call `defaultSlackAllowFrom` from it to keep the default checks. This one allows only certain people:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
-import { slackChannel } from "eve/channels/slack";
+import { defaultSlackAllowFrom, slackChannel } from "eve/channels/slack";
+
+const allowedUsers = new Set(["U01ALICE", "U02BOB"]);
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  allowFrom: ["U01ALICE", "U02BOB"],
+  async allowFrom(request) {
+    if (!(await defaultSlackAllowFrom(request))) return false;
+    return allowedUsers.has(request.user?.id ?? "");
+  },
 });
 ```
 
-Pass a function for anything else. A function decides alone, so call `defaultSlackAllowFrom` from it to keep the default checks. It receives:
+The request carries:
 
 - `kind`, from the table above
 - `channelId`, the conversation the request comes from, when it has one

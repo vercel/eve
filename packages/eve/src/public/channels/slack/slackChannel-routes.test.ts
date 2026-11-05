@@ -889,37 +889,4 @@ describe("slackChannel allowFrom", () => {
     expect(onAppMention).toHaveBeenCalledOnce();
     expect(onAnswers).not.toHaveBeenCalled();
   });
-
-  it("admits only listed users on top of the default", async () => {
-    const onAppMention = vi.fn(() => null);
-    const channel = slackChannel({
-      allowFrom: ["U_ALICE"],
-      credentials: { botToken: "xoxb-test" },
-      onAppMention,
-    });
-
-    for (const user of ["U_ALICE", "U_MALLORY"]) {
-      await firePost(
-        channel,
-        signed(
-          JSON.stringify({
-            event: {
-              channel: "C01",
-              event_ts: "1700000000.000001",
-              text: "hello",
-              ts: "1700000000.000001",
-              type: "app_mention",
-              user,
-            },
-            event_id: `EvList${user}`,
-            is_ext_shared_channel: false,
-            team_id: "T01",
-            type: "event_callback",
-          }),
-        ),
-      );
-    }
-
-    expect(onAppMention).toHaveBeenCalledOnce();
-  });
 });

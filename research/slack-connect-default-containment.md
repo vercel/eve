@@ -52,9 +52,6 @@ import { defaultSlackAllowFrom, slackChannel } from "eve/channels/slack";
 // Default: refuse Slack Connect conversations and guests.
 export default slackChannel({ credentials });
 
-// Only these users, on top of the default.
-export default slackChannel({ credentials, allowFrom: ["U01ALICE", "U02BOB"] });
-
 // A custom policy: serve one Slack Connect partner channel too.
 export default slackChannel({
   credentials,
@@ -67,9 +64,7 @@ export default slackChannel({ credentials, allowFrom: () => true });
 ```
 
 ```ts
-type SlackAllowFrom =
-  | readonly string[]
-  | ((request: SlackInboundRequest) => boolean | Promise<boolean>);
+type SlackAllowFrom = (request: SlackInboundRequest) => boolean | Promise<boolean>;
 
 interface SlackInboundRequest {
   readonly kind: "message" | "edit" | "event" | "answer" | "interaction" | "command" | "shortcut";
@@ -88,10 +83,9 @@ interface SlackInboundRequest {
 }
 ```
 
-- A list admits only those user IDs and keeps the default checks. A function
-  decides alone; call `defaultSlackAllowFrom` from it to keep the default.
-  Twilio's `allowFrom` takes a list or a no-argument resolver today and could
-  gain the predicate form later.
+- A function replaces the default; call `defaultSlackAllowFrom` from it to keep
+  the default checks. Twilio's `allowFrom` takes a list or a no-argument
+  resolver today and could gain the predicate form later.
 - `defaultSlackAllowFrom(request)` returns `false` when
   `isExternalConversation()` or `isGuest()` resolves `true`. It checks the
   conversation first, so a Slack Connect request costs no `users.info` call.

@@ -344,15 +344,20 @@ Images, PDFs, audio, and other files attached to a message reach the agent. When
 
 A valid Slack signature proves the event came from Slack, not that the sender should reach your agent. By default, the agent ignores Slack Connect conversations, which include people from other organizations, and guest accounts. It doesn't answer them or take their approvals.
 
-`allowFrom` decides who can reach the agent. eve checks it before every hook, so it also covers DMs, edits, approval clicks, and slash commands. To allow only certain people, list their Slack user IDs. The default checks still apply:
+`allowFrom` decides who can reach the agent. eve checks it before every hook, so it also covers DMs, edits, approval clicks, and slash commands. Your own `allowFrom` replaces the default, so call `defaultSlackAllowFrom` from it to keep the default checks. To allow only certain people:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
-import { slackChannel } from "eve/channels/slack";
+import { defaultSlackAllowFrom, slackChannel } from "eve/channels/slack";
+
+const allowedUsers = new Set(["U01ALICE", "U02BOB"]);
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  allowFrom: ["U01ALICE", "U02BOB"],
+  async allowFrom(request) {
+    if (!(await defaultSlackAllowFrom(request))) return false;
+    return allowedUsers.has(request.user?.id ?? "");
+  },
 });
 ```
 

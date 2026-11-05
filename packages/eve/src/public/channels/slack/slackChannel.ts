@@ -801,9 +801,8 @@ export interface SlackChannelConfig {
    * open.
    *
    * Defaults to `defaultSlackAllowFrom`, which refuses Slack Connect
-   * conversations, guest accounts, and anything Slack can't classify. A list
-   * of Slack user IDs admits only those users, on top of the default. A
-   * function decides alone: call `defaultSlackAllowFrom` from it to keep the
+   * conversations, guest accounts, and anything Slack can't classify. Your
+   * own function replaces it: call `defaultSlackAllowFrom` from it to keep the
    * default checks, or pass `() => true` to allow every request.
    */
   readonly allowFrom?: SlackAllowFrom;

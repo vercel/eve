@@ -65,14 +65,10 @@ export interface SlackInboundRequest {
 }
 
 /**
- * Who may reach the agent. A list of Slack user IDs admits those users on top
- * of {@link defaultSlackAllowFrom}. A function decides alone, so call
- * `defaultSlackAllowFrom` from it to keep the default checks. A function that
- * throws counts as `false`.
+ * Decides who may reach the agent. It replaces {@link defaultSlackAllowFrom},
+ * so call that from it to keep the default checks. Throwing counts as `false`.
  */
-export type SlackAllowFrom =
-  | readonly string[]
-  | ((request: SlackInboundRequest) => boolean | Promise<boolean>);
+export type SlackAllowFrom = (request: SlackInboundRequest) => boolean | Promise<boolean>;
 
 /**
  * Default `allowFrom`: refuses requests from Slack Connect conversations and
@@ -82,15 +78,6 @@ export type SlackAllowFrom =
 export async function defaultSlackAllowFrom(request: SlackInboundRequest): Promise<boolean> {
   if (await request.isExternalConversation()) return false;
   return !(await request.isGuest());
-}
-
-async function decide(
-  allowFrom: SlackAllowFrom | undefined,
-  request: SlackInboundRequest,
-): Promise<boolean> {
-  if (typeof allowFrom === "function") return (await allowFrom(request)) === true;
-  if (!(await defaultSlackAllowFrom(request))) return false;
-  return allowFrom === undefined || allowFrom.includes(request.user?.id ?? "");
 }
 
 /** The sharing flags Slack reports on a conversation object. */
@@ -293,7 +280,7 @@ async function classifyEventConversation(
 const missingScopes = new WeakMap<SlackInboundRequest, Set<string>>();
 
 /** Scopes a lookup behind this request found missing. */
-export function slackInboundMissingScopes(request: SlackInboundRequest): readonly string[] {
+function slackInboundMissingScopes(request: SlackInboundRequest): readonly string[] {
   return [...(missingScopes.get(request) ?? [])];
 }
 
@@ -358,7 +345,7 @@ export async function isSlackRequestAllowed(
 ): Promise<boolean> {
   let allowed = false;
   try {
-    allowed = await decide(allowFrom, request);
+    allowed = (await (allowFrom ?? defaultSlackAllowFrom)(request)) === true;
   } catch (error) {
     logError(log, "Slack allowFrom failed; refusing the request", error, {
       channelId: request.channelId,
