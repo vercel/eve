@@ -430,6 +430,14 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
   return stampToolDefinition(definition, "defineTool");
 }
 
+/** `tool` under another approval policy, as `defineTool({ ...tool, approval })` would make it. */
+export function withToolApproval<T extends Parameters<typeof stampToolDefinition>[0]>(
+  tool: T,
+  approval: T["approval"],
+): T {
+  return stampToolDefinition({ ...tool, approval }, "defineTool");
+}
+
 export function stampToolDefinition<
   T extends {
     readonly description: string;

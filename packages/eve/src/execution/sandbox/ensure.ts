@@ -12,10 +12,7 @@ import {
 } from "#execution/sandbox/active-connections.js";
 import { createConnectionSession } from "#execution/sandbox/session.js";
 import { isToolSessionId } from "#execution/tool-session/id.js";
-import {
-  getRuntimeCompiledArtifactsSandboxAppRoot,
-  type RuntimeCompiledArtifactsSource,
-} from "#runtime/compiled-artifacts-source.js";
+import { getRuntimeCompiledArtifactsSandboxAppRoot } from "#runtime/compiled-artifacts-source.js";
 import { owningSandboxDefinition, type RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import type {
   SandboxConnection,
@@ -40,6 +37,7 @@ import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-sess
 import { SandboxSessionGoneError } from "#shared/sandbox-session-gone-error.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import { ToolSessionSandboxUnsupportedError } from "#shared/sandbox-tool-session-error.js";
+import type { AgentSandbox } from "#runtime/sessions/session-agent.js";
 import { randomUUID } from "#platform/uuid.js";
 import { hostWorkingDirectory, resolve } from "#platform/host-path.js";
 import {
@@ -47,8 +45,15 @@ import {
   resolveSandboxCacheDirectory,
 } from "#platform/sandbox-cache.js";
 
-interface EnsureSandboxAccessInput {
-  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
+/**
+ * Where the sandbox's template comes from: a build's artifacts, or prepared on first use, with
+ * the app root its project paths resolve against (an agent defined in code's).
+ */
+type EnsureSandboxTemplate = AgentSandbox["template"];
+
+type EnsureSandboxAccessInput = EnsureSandboxTemplate & EnsureSandboxAccessOptions;
+
+interface EnsureSandboxAccessOptions {
   readonly nodeId: string;
   /** `false` when the sandbox outlives this access: it may neither delete nor end it. */
   readonly ownsSandbox?: boolean;
@@ -130,9 +135,22 @@ export async function ensureSandboxAccess(
   let opening: Promise<OpenedSandbox> | undefined;
   let requiring: Promise<OpenedSandbox> | undefined;
   const tracking = input.shutdownTracking ?? "session";
+  const compiledArtifactsSource =
+    "compiledArtifactsSource" in input ? input.compiledArtifactsSource : undefined;
   const appRoot =
-    getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource) ??
+    ("appRoot" in input
+      ? input.appRoot
+      : getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource)) ??
     hostWorkingDirectory();
+  /** The template the owner's provider starts sessions from, as a build or the agent prepared it. */
+  const preparedArtifact = async (providerName: string) =>
+    "preparedArtifact" in input
+      ? await input.preparedArtifact()
+      : await loadSandboxPreparedArtifact({
+          compiledArtifactsSource: input.compiledArtifactsSource,
+          nodeId: ownerNodeId,
+          providerName,
+        });
   const captured = (): SandboxState => ({ session: persisted });
   if (registered === null) {
     return {
@@ -183,11 +201,7 @@ export async function ensureSandboxAccess(
   }
 
   async function loadArtifact(provider: SandboxProviderRuntime) {
-    const artifact = await loadSandboxPreparedArtifact({
-      compiledArtifactsSource: input.compiledArtifactsSource,
-      nodeId: ownerNodeId,
-      providerName: provider.providerName,
-    });
+    const artifact = await preparedArtifact(provider.providerName);
     if (artifact === undefined) {
       throw new SandboxTemplateNotProvisionedError({
         nodeId: ownerNodeId,
@@ -284,9 +298,9 @@ export async function ensureSandboxAccess(
     if (context.kind === "tool-session" && provider.implementation.toolSessions !== true) {
       throw new ToolSessionSandboxUnsupportedError(provider.providerName);
     }
-    if (isEveDevEnvironment() && input.compiledArtifactsSource.kind === "disk") {
+    if (isEveDevEnvironment() && compiledArtifactsSource?.kind === "disk") {
       await ensureDevelopmentSandboxesPrepared({
-        compiledArtifactsSource: input.compiledArtifactsSource,
+        compiledArtifactsSource,
         nodeId: ownerNodeId,
         providerName: provider.providerName,
       });
@@ -472,11 +486,7 @@ export async function ensureSandboxAccess(
       if (endWithArtifact === undefined) {
         await provider.implementation.onSessionEnd(context, state, { reason });
       } else {
-        const artifact = await loadSandboxPreparedArtifact({
-          compiledArtifactsSource: input.compiledArtifactsSource,
-          nodeId: ownerNodeId,
-          providerName: provider.providerName,
-        });
+        const artifact = await preparedArtifact(provider.providerName);
         await endWithArtifact(context, state, { artifact, reason });
       }
       forgetSandbox(provider.providerName);

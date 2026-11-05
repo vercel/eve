@@ -35,7 +35,7 @@ export function createToolChannelTo(input: {
         const bundle = (await input.loadAgent()).compiled;
         if (bundle === undefined) {
           throw new Error(
-            "ctx.to() reaches the channels of an agent compiled from files; an agent this process holds has none.",
+            "ctx.to() reaches the channels of an agent compiled from files; an agent defined in code has none.",
           );
         }
         const to = createCrossChannelToFn(

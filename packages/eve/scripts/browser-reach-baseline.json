@@ -1,7 +1,7 @@
 {
   "src/execution/session/program.ts": {
     "static.modules": 602,
-    "static.kib": 1801,
+    "static.kib": 1802,
     "static.builtinFiles": 0,
     "static.globalFiles": 0,
     "static.vendorGlobalFiles": 6,
@@ -50,6 +50,34 @@
     "static.workflow": 0,
     "total.modules": 712,
     "total.kib": 4045,
+    "total.builtinFiles": 0,
+    "total.globalFiles": 0,
+    "total.vendorGlobalFiles": 6,
+    "total.workflow": 0
+  },
+  "src/embed/agent.ts": {
+    "static.modules": 457,
+    "static.kib": 1472,
+    "static.builtinFiles": 0,
+    "static.globalFiles": 0,
+    "static.vendorGlobalFiles": 6,
+    "static.workflow": 0,
+    "total.modules": 462,
+    "total.kib": 1472,
+    "total.builtinFiles": 0,
+    "total.globalFiles": 0,
+    "total.vendorGlobalFiles": 6,
+    "total.workflow": 0
+  },
+  "src/embed/session.ts": {
+    "static.modules": 696,
+    "static.kib": 3394,
+    "static.builtinFiles": 0,
+    "static.globalFiles": 0,
+    "static.vendorGlobalFiles": 6,
+    "static.workflow": 0,
+    "total.modules": 713,
+    "total.kib": 4048,
     "total.builtinFiles": 0,
     "total.globalFiles": 0,
     "total.vendorGlobalFiles": 6,
