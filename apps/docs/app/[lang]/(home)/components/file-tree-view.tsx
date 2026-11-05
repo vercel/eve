@@ -134,7 +134,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
         }}
       />
       <div className="mx-auto max-w-5xl">
-        <div className="relative overflow-hidden rounded-t-xl border bg-background-100">
+        <div className="relative overflow-hidden material-large">
           <div className="grid grid-cols-[270px_1fr]">
             {/* Sidebar: the files in this agent; click any to view it. */}
             <div className="border-r">
@@ -199,7 +199,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
   const mobile = (
     <div className="space-y-4">
       {items.map((item) => (
-        <div className="overflow-hidden rounded-xl border bg-background-100" key={item.name}>
+        <div className="overflow-hidden material-large" key={item.name}>
           <div className="flex h-12 items-center gap-2 border-b px-4">
             <span className="min-w-0 truncate font-medium text-gray-1000 text-sm">
               {item.fileName}
