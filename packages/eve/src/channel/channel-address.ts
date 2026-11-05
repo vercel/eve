@@ -162,7 +162,6 @@ export function createChannelAddress<TState = undefined>(input: {
       });
       if (result.status === "accepted")
         return commandDelivery(input.runtime, result, delivery.deliveryId);
-      if (result.retryable === true) throw new SessionNotActiveError({ retryable: true });
       if (payload.answers && payload.answers.length > 0) {
         throw new SessionNotActiveError();
       }

@@ -35,7 +35,7 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session \
   -d '{"message":"Summarize the latest forecast."}'
 ```
 
-Both forms return `202` with the `sessionId` in the JSON body and the `x-eve-session-id` header as soon as the run is accepted. The session accepts messages, cancels, and `end()` from then on. A send can still return `409 session_not_ready` while the session changes state. Retry that code with bounded backoff. The TypeScript client retries sends for up to 20 seconds and respects the caller's abort signal.
+Both forms return `202` with the `sessionId` in the JSON body and the `x-eve-session-id` header as soon as the run is accepted. The session accepts messages, cancels, and `end()` from then on.
 
 ## Stream a session
 

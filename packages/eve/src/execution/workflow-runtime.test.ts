@@ -191,24 +191,17 @@ describe("createWorkflowRuntime command dispatch", () => {
     });
   });
 
-  it.each(["pending", "running", "completed", "failed", "cancelled"])(
-    "distinguishes an unclaimed inbox for a %s workflow",
-    async (status) => {
-      resumeHookMock.mockRejectedValue(new HookNotFoundError("missing"));
-      getRunMock.mockReturnValue({ status: Promise.resolve(status) });
-      await expect(
-        buildRuntime().dispatchSession({
-          sessionId: "session-1",
-          command: { kind: "send", payload: { message: "Hello" } },
-        }),
-      ).resolves.toEqual(
-        status === "pending" || status === "running"
-          ? { status: "session_not_active", retryable: true }
-          : { status: "session_not_active" },
-      );
-      expect(startMock).not.toHaveBeenCalled();
-    },
-  );
+  it("reports a send by session id with no inbox as not active without reading its run", async () => {
+    resumeHookMock.mockRejectedValue(new HookNotFoundError("missing"));
+    await expect(
+      buildRuntime().dispatchSession({
+        sessionId: "session-1",
+        command: { kind: "send", payload: { message: "Hello" } },
+      }),
+    ).resolves.toEqual({ status: "session_not_active" });
+    expect(getRunMock).not.toHaveBeenCalled();
+    expect(startMock).not.toHaveBeenCalled();
+  });
 
   it("dispatches commands through the stable session inbox", async () => {
     resumeHookMock.mockResolvedValue({ runId: "session-1" });

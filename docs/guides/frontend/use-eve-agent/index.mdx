@@ -204,7 +204,7 @@ Prewarming creates the session before the first message so the first reply start
 - The first message passes through the channel's `onMessage` hook and supplies identity and context for initialization and the first turn.
 - The session timeout starts at creation, so an unused prewarmed session can expire. eve deletes its sandbox when it ends.
 - `prewarm()` resolves when the server accepts creation, without waiting for initialization. The composer stays `"idle"`, and `prepareSend` doesn't run.
-- A concurrent `send()` waits for creation to be accepted. While the inbox starts, the client retries `409 session_not_ready` with backoff for up to 20 seconds, and your abort signal cancels the wait.
+- A concurrent `send()` waits for creation to be accepted, and your abort signal cancels the wait.
 
 ### Existing sessions on Vercel
 

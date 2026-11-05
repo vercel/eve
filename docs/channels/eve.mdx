@@ -97,11 +97,10 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
 
 A follow-up message joins the running turn by default; see [Overlapping messages](/docs/channels#overlapping-messages). Set `turnPolicy: "queue"` on `eveChannel(...)` to make follow-ups wait for running turns to finish. `answers` only answer the requests they name.
 
-| Session state                         | Response                                                                                         |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Unknown or terminal                   | `409` with `{"code":"session_not_active","error":"The session is no longer active.","ok":false}` |
-| Workflow exists but inbox isn't ready | `409 session_not_ready`                                                                          |
-| Built by another eve version          | `409 session_stranded` with the `eveVersion` that built it                                       |
+| Session state                | Response                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------ |
+| Unknown or terminal          | `409` with `{"code":"session_not_active","error":"The session is no longer active.","ok":false}` |
+| Built by another eve version | `409 session_stranded` with the `eveVersion` that built it                                       |
 
 ### Send files
 

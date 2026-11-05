@@ -440,18 +440,8 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
   } catch (error) {
     // Each entry point decides what a stranded owner means for its caller.
     if (error instanceof StrandedSessionOwnerError) throw error;
-    if (isInactiveCommandTarget(error)) {
-      // A send by session id to a session that still exists asks the caller to
-      // retry rather than reporting the session gone.
-      if (
-        command.kind === "send" &&
-        typeof token !== "string" &&
-        (await isRunActive(token.sessionId))
-      ) {
-        return { status: "session_not_active", retryable: true } as SessionCommandResult<TCommand>;
-      }
-      return inactiveCommandResult(command);
-    }
+    // A session's start claims its address, so a missing hook means it ended.
+    if (isInactiveCommandTarget(error)) return inactiveCommandResult(command);
     const logicalToken = logicalSessionToken(token);
     log.error("failed to dispatch session command", {
       command: command.kind,
@@ -569,16 +559,6 @@ export async function dispatchWorkflowSessionCommand<TCommand extends SessionCom
   } catch (error) {
     if (!(error instanceof StrandedSessionOwnerError)) throw error;
     return await settleStrandedCommand(address, command, error);
-  }
-}
-
-async function isRunActive(runId: string): Promise<boolean> {
-  try {
-    const status = await getRun(runId).status;
-    return status === "pending" || status === "running";
-  } catch (error) {
-    if (isInactiveCommandTarget(error)) return false;
-    throw error;
   }
 }
 
