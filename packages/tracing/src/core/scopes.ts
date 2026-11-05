@@ -427,14 +427,6 @@ export function createScopes(input: {
         if (finished) return;
         const attributes = (withoutDeclinedContent(update.attributes ?? {}, current()) ??
           update.attributes) as Attributes;
-        if (actualData.type === "activation")
-          actualData = {
-            ...actualData,
-            options: {
-              ...actualData.options,
-              attributes: { ...actualData.options.attributes, ...attributes },
-            },
-          };
         prepared = {
           ...prepared,
           attributes: { ...prepared.attributes, ...attributes },

@@ -577,4 +577,51 @@ describe("turn content", () => {
       /Alice|Bob/,
     );
   });
+
+  it("stores the turn's copy of the model input once and keeps it across a restore", async () => {
+    const { checkpointer, entries } = memoryCheckpointer();
+    const exporter = new InMemorySpanExporter();
+    const all = { emit: true, recordInputs: true, recordOutputs: true };
+    const prompt = "Alice's long email thread. ".repeat(3000);
+
+    const first = worker(checkpointer, exporter);
+    const turn = await first.turn({ agentName: "support", identity, sequence: 0, capture: all });
+    const attempt = await turn.attempt({ stepIndex: 0, attempt: 0 });
+    await attempt.modelCall(
+      { provider: "test", modelId: "model", messages: [{ role: "user", content: prompt }] },
+      () => ({
+        result: "call lookup",
+        finishReason: "tool-calls",
+        usage: { inputTokens: 1, outputTokens: 1 },
+      }),
+    );
+    await attempt.tool({ callId: "lookup", name: "lookup" });
+    // The turn's copy of the model input lives in its attributes only, so it
+    // does not double the checkpoint or push it into the oversized fallback.
+    const saved = JSON.parse([...entries.values()][0]!);
+    expect(saved.attributes["gen_ai.input.messages"]).toContain("Alice's long email thread.");
+    expect(saved.data.options.attributes?.["gen_ai.input.messages"]).toBeUndefined();
+
+    // Another worker finishes the turn from the checkpoint.
+    const second = worker(checkpointer, exporter);
+    const resumedTurn = await second.turn({
+      agentName: "support",
+      identity,
+      sequence: 0,
+      capture: all,
+    });
+    const resumedAttempt = await resumedTurn.attempt({ stepIndex: 0, attempt: 0 });
+    const tool = await resumedAttempt.tool({ callId: "lookup", name: "lookup" });
+    await tool.complete({ outcome: "completed", output: "found" });
+    await resumedAttempt.complete();
+    await resumedTurn.complete();
+    await second.forceFlush();
+
+    const invocation = exporter
+      .getFinishedSpans()
+      .find((span) => span.name === "invoke_agent support")!;
+    expect(invocation.attributes["agent.trace.content.input"]).toBe(true);
+    expect(invocation.attributes["agent.trace.content.output"]).toBe(true);
+    expect(invocation.attributes["gen_ai.input.messages"]).toContain("Alice's long email thread.");
+  });
 });
