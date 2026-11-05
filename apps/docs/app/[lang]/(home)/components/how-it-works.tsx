@@ -7,7 +7,7 @@ export function HowItWorks(): JSX.Element {
     <HomeSection
       id="how-it-works"
       lede="Write your agent as plain files. When it needs to behave differently for each customer, make any file dynamic."
-      title="Static by default, dynamic where you need it"
+      title="Dynamic where you need it"
     >
       <FileTree />
     </HomeSection>
