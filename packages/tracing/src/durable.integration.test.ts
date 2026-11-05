@@ -154,6 +154,8 @@ describe("durable agent tracing", () => {
     expect(approval!.attributes["agent.approval.outcome"]).toBe("approved");
     expect(approval!.attributes["agent.connection.name"]).toBe("calendar");
     expect(approval!.attributes["gen_ai.tool.call.id"]).toBeUndefined();
+    expect(approval!.attributes["agent.turn.id"]).toBe("turn");
+    expect(approval!.attributes["agent.step.index"]).toBeUndefined();
     expect(entries.size).toBe(0);
   });
 

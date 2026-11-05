@@ -245,7 +245,10 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
         attributes: {
           ...context.attributes,
           ...frameworkAttributes(context.identity.framework),
-          ...attemptAttributes(context),
+          // A wait the turn holds belongs to no step.
+          ...(options.callId === undefined
+            ? { "agent.turn.id": context.attempt.turnId }
+            : attemptAttributes(context)),
           ...namingAttributes(SPAN_NAMES.approval, "workflow"),
           "gen_ai.operation.name": "workflow",
           "gen_ai.tool.call.id": options.callId,
