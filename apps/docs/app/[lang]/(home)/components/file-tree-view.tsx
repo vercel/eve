@@ -226,7 +226,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
         className="text-gray-1000 underline decoration-gray-alpha-400 underline-offset-4 hover:decoration-gray-1000"
         href="/docs/guides/dynamic-capabilities"
       >
-        Dynamic Capabilities
+        Learn more about Dynamic Capabilities
       </PrefetchLink>
     </p>
   );
