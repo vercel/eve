@@ -124,7 +124,8 @@ test("maps Connect errors to eve authorization errors", async () => {
       callbackUrl: "https://agent.example/callback",
       callback: { params: {}, method: "GET" },
     }),
-    { name: "ConnectionAuthorizationFailedError" },
+    // The sign-in card shows this message, so it tells the person what to do next.
+    { name: "ConnectionAuthorizationFailedError", message: /Ask again for a new sign-in link/ },
   );
 
   const notInstalled = connectUserAuthorization(

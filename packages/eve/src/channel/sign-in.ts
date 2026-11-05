@@ -70,9 +70,13 @@ export function signInEndedText(input: {
   readonly reason?: string;
 }): string {
   if (input.outcome === "accepted") return `${input.displayName} connected.`;
-  if (input.outcome === "declined") return `${input.displayName} sign-in cancelled.`;
+  const ending = signInEnding(input.outcome);
+  // A cancellation's reason is the runtime's (`turn-cancelled`, `asker-ended`), not the person's.
+  if (input.outcome === "declined" || ending === "cancelled") {
+    return `${input.displayName} sign-in cancelled.`;
+  }
   const reason = input.reason === undefined ? "" : ` (${input.reason})`;
-  return `${input.displayName} sign-in ${signInEnding(input.outcome)}${reason}.`;
+  return `${input.displayName} sign-in ${ending}${reason}.`;
 }
 
 /** What a channel can do for a sign-in. */
