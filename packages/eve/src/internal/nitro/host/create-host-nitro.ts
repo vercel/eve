@@ -139,6 +139,7 @@ function toNitroConfig(
       extensionOverridePaths: spec.extensionOverridePaths,
       instrumentationEntryPlugin: instrumentationEntry?.plugin,
       instrumentationSourcePaths: compiledArtifacts.instrumentationSourcePaths,
+      hostBundledPackageRoots: compiledArtifacts.hostBundledPackageRoots,
       runtimeModules: [compiledArtifacts.bootstrapPath, compiledArtifacts.workflowWorldPluginPath],
       workflowArtifacts: built.workflowArtifacts,
     }),

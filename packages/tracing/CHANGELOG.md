@@ -1,5 +1,14 @@
 # @vercel/agent-runs
 
+## 1.0.0-rc.2
+
+Released 2026-11-05 · [Compare with 1.0.0-rc.1](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.1...%40vercel%2Fagent-runs%401.0.0-rc.2)
+
+### Bug Fixes
+
+- Keep oversized checkpoints honest by preserving the real `agent.trace.content.input`/`output` capture flags and keeping the turn's copied input/output as a truncated copy (or omitting it) instead of rewriting the flags to `false` when a turn node exceeds the checkpoint size budget. ([#5945](https://github.com/vercel/eve/pull/5945))
+- Raise the tracing content caps from 32 KiB per attribute and 64 KiB per checkpointed operation to 250 KiB and 512 KiB, so prompts up to 250 KiB are captured in full instead of truncated. ([#5945](https://github.com/vercel/eve/pull/5945))
+
 ## 1.0.0-rc.1
 
 Released 2026-11-03 · [Compare with 1.0.0-rc.0](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.0...%40vercel%2Fagent-runs%401.0.0-rc.1)

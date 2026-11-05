@@ -29,6 +29,8 @@ export interface HostPluginsInput {
   readonly extensionOverridePaths: ReadonlyMap<string, string>;
   readonly instrumentationEntryPlugin?: NitroBuildPlugin;
   readonly instrumentationSourcePaths?: readonly string[];
+  /** Installed packages that generated modules left for the host; see `createAuthoredPlugins`. */
+  readonly hostBundledPackageRoots?: readonly string[];
   /** Generated modules eve's runtime plugin imports only for their side effects. */
   readonly runtimeModules: readonly string[];
   readonly workflowArtifacts: WorkflowArtifacts;
@@ -65,7 +67,11 @@ export function createHostPlugins(input: HostPluginsInput): NitroBuildPlugin[] {
       })),
     ),
     // Workflow step modules reach Nitro as authored source, not prebundled.
-    ...createAuthoredPlugins({ authoredSourceOnly: true, packageRoot: input.authoredPackageRoot }),
+    ...createAuthoredPlugins({
+      authoredSourceOnly: true,
+      hostBundledPackageRoots: input.hostBundledPackageRoots,
+      packageRoot: input.authoredPackageRoot,
+    }),
   ];
   return plugins
     .filter((plugin) => plugin !== null)

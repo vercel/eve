@@ -33,15 +33,15 @@ afterEach(() => {
 });
 
 describe("vercelScheduleProvider", () => {
-  it.each(["production", "local"] as const)(
+  it.each(["production", "preview", "staging", "local"] as const)(
     "creates a queue-target schedule with an eve dispatch envelope in %s",
     async (environment) => {
       const local = environment === "local";
       vi.stubEnv("VERCEL", local ? undefined : "1");
-      vi.stubEnv("VERCEL_ENV", local ? "development" : "production");
+      vi.stubEnv("VERCEL_ENV", local ? "development" : environment);
       vi.stubEnv("EVE_DEV", local ? "1" : undefined);
       vi.stubEnv("NODE_ENV", local ? "development" : "test");
-      vi.stubEnv("VERCEL_DEPLOYMENT_ID", undefined);
+      vi.stubEnv("VERCEL_DEPLOYMENT_ID", local ? undefined : `dpl_${environment}`);
       vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
       vi.stubEnv("VERCEL_SCHEDULE_DEV_API_VERSION", local ? "1" : undefined);
       vi.stubEnv("VERCEL_SCHEDULE_BASE_URL", local ? "http://127.0.0.1:4784" : undefined);
@@ -126,16 +126,39 @@ describe("vercelScheduleProvider", () => {
     );
   });
 
-  it("rejects preview deployments before calling the API", async () => {
+  it("lists hosted preview schedules with OIDC even when local API markers are present", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_ENV", "preview");
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_preview");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", oidcToken);
     vi.stubEnv("VERCEL_SCHEDULE_DEV_API_VERSION", "1");
+    vi.stubEnv("VERCEL_SCHEDULE_BASE_URL", undefined);
+    vi.stubEnv("VERCEL_SCHEDULE_TOKEN", "local-token");
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      Response.json({ data: [schedule()], cursor: null }),
+    );
+    const provider = vercelScheduleProvider({ fetch: fetchImpl });
+
+    await expect(provider.list(context, {})).resolves.toMatchObject({
+      data: [{ name: "review-prs-daily", scheduleId: "sch_1" }],
+      cursor: null,
+    });
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(String(url)).toBe("https://vercel-schedules.com/v1/schedules?namespace=eve-namespace");
+    expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${oidcToken}`);
+  });
+
+  it("rejects unsupported hosts before calling the API", async () => {
+    vi.stubEnv("VERCEL", undefined);
+    vi.stubEnv("EVE_DEV", undefined);
+    vi.stubEnv("VERCEL_SCHEDULE_DEV_API_VERSION", undefined);
     const fetchImpl = vi.fn<typeof fetch>();
     const provider = vercelScheduleProvider({ fetch: fetchImpl });
 
-    await expect(provider.list(context, {})).rejects.toThrow("production deployments only");
+    await expect(provider.list(context, {})).rejects.toThrow(
+      "requires a Vercel deployment or eve dev",
+    );
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
