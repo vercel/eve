@@ -16,6 +16,7 @@ export type {
   ToolInput,
   ModelOperation,
   ToolOperation,
+  ApprovalInput,
   ApprovalOperation,
   MemoryOperation,
   ModelCallReturn,

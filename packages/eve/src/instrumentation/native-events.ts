@@ -1,5 +1,5 @@
 import type { DeliverHookPayload } from "#channel/types.js";
-import { instrumentationScope } from "#instrumentation/scope.js";
+import { instrumentationScope, turnScope } from "#instrumentation/scope.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import { contextStorage } from "#context/container.js";
 import { deliveryEvent } from "#instrumentation/channel-delivery.js";
@@ -52,6 +52,11 @@ export interface CreateInstrumentationHandleEventInput {
   readonly scheduleId?: string;
   readonly sessionId: string;
   readonly title?: string;
+  /**
+   * The commit relays an exchange this session carries for a child session or a workflow run.
+   * Only its requests reach instrumentation, and only those no child session reports itself.
+   */
+  readonly relayed?: boolean;
 }
 
 /** Where an attempt is in its session: its turn, its step, and which try at the step it is. */
@@ -88,6 +93,7 @@ export function attemptScopeOf(
 /** What one committed line means to instrumentation, besides the line itself. */
 interface Line {
   readonly attemptScope: (place: AttemptPlace) => InstrumentationScope;
+  readonly turnScope: (turnId: string) => InstrumentationScope;
   readonly capturesInputs: boolean;
   readonly capturesOutputs: boolean;
   /** Principal ids follow the turn principal's rule: content both ways, and a public or dev audience. */
@@ -140,6 +146,15 @@ export function createInstrumentationHandleEvent(
     const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent ?? false;
     const line: Line = {
       attemptScope: (place) => attemptScopeOf(input, place),
+      turnScope: (turnId) =>
+        turnScope({
+          channelAudience: input.channelAudience,
+          functionId: input.functionId,
+          rootSessionId: input.rootSessionId,
+          sessionId: input.sessionId,
+          traceSessionId: input.traceSessionId,
+          turnId,
+        }),
       capturesInputs,
       capturesOutputs,
       capturesPrincipalIds:
@@ -154,6 +169,7 @@ export function createInstrumentationHandleEvent(
       view: view ?? (ctx === undefined ? undefined : currentView(ctx)),
     };
     for (const event of committed) {
+      if (input.relayed === true && !event.type.startsWith("interaction.")) continue;
       const delivery = deliveryEvent(event, ctx, input);
       if (delivery !== undefined) await hooks.publish(Object.freeze(delivery));
       for (const derived of instrumentationEventsOf(event, line, input)) {
@@ -328,7 +344,8 @@ function instrumentationEventsOf(
     case "interaction.opened": {
       const row = line.view?.interactions[event.data.interactionId];
       const scope = row === undefined ? undefined : interactionAttempt(line, row);
-      if (row === undefined || scope === undefined) return [];
+      if (row === undefined || scope === undefined || askedByChildSession(line.view!, row))
+        return [];
       const { request } = row;
       const call = askedCall(line.view!, row);
       return [
@@ -347,6 +364,7 @@ function instrumentationEventsOf(
               }
             : undefined,
           scope,
+          signIn: request.signIn === undefined ? undefined : { name: request.signIn.name },
           type: "interaction.opened",
         },
       ];
@@ -354,7 +372,8 @@ function instrumentationEventsOf(
     case "interaction.settled": {
       const row = line.view?.interactions[event.data.interactionId];
       const scope = row === undefined ? undefined : interactionAttempt(line, row);
-      if (row === undefined || scope === undefined) return [];
+      if (row === undefined || scope === undefined || askedByChildSession(line.view!, row))
+        return [];
       const answer = decidingAnswer(row);
       return [
         {
@@ -395,12 +414,23 @@ function runAttempt(line: Line, runId: string | undefined): InstrumentationScope
 }
 
 /**
+ * Whether a child agent session asked, and so reports the request itself. A workflow run relays
+ * its own questions and sign-ins the same way but has no session to report them.
+ */
+function askedByChildSession(view: SessionView, row: InteractionRow): boolean {
+  const { origin, subject } = row;
+  if (origin === undefined) return false;
+  const delegating = "callId" in subject ? view.calls[subject.callId] : undefined;
+  return delegating?.capability.kind === "agent" || origin.sessionId in view.children;
+}
+
+/**
  * The attempt a person's request came from: its call's, or for a request about the turn or a
- * task, the turn's latest. Sign-ins are connection work, not input.
+ * task, the turn's latest. A request the turn holds before its first model run, such as a budget
+ * prompt or a sign-in, gets the turn's scope.
  */
 function interactionAttempt(line: Line, row: InteractionRow): InstrumentationScope | undefined {
   const view = line.view!;
-  if (row.request.kind === "sign-in") return undefined;
   const { subject } = row;
   if ("callId" in subject) {
     const call = view.calls[subject.callId];
@@ -415,7 +445,7 @@ function interactionAttempt(line: Line, row: InteractionRow): InstrumentationSco
   const runs = Object.values(view.runs).filter(
     (run) => run.attempt !== undefined && runTurn(view, run.runId) === subject.turnId,
   );
-  return runAttempt(line, runs.at(-1)?.runId);
+  return runs.length === 0 ? line.turnScope(subject.turnId) : runAttempt(line, runs.at(-1)?.runId);
 }
 
 function latestTurnId(view: SessionView | undefined): string | undefined {

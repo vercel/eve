@@ -1,14 +1,24 @@
 import type {
   InstrumentationHandlerContext,
+  InstrumentationInteractionKind,
   InstrumentationInteractionOpenedEvent,
   InstrumentationInteractionSettledEvent,
   InstrumentationProviderDefinition,
 } from "#instrumentation/lifecycle.js";
 import { resumeTool } from "#tracing/eve/agent-tool-instrumentation.js";
 import type { AgentActionTraceState } from "#tracing/eve/agent-trace-state.js";
-import type { AgentRun } from "#compiled/@vercel/agent-runs/index.js";
+import type {
+  AgentRun,
+  ApprovalOperation,
+  ToolOperation,
+  TurnOperation,
+} from "#compiled/@vercel/agent-runs/index.js";
 
-/** Approval spans live under their tool call; hook state keeps only the locator. */
+/**
+ * One `agent.approval` span for every wait on a person: an approval, a question, a budget
+ * prompt, or a sign-in. It lives under the call it is about while that call is open, and under
+ * the turn otherwise. Hook state keeps only the locator.
+ */
 export function createAgentApprovalInstrumentation(input: {
   readonly tracing: AgentRun;
   readonly actionStateFor: (
@@ -16,6 +26,7 @@ export function createAgentApprovalInstrumentation(input: {
     turnId: string,
     callId: string,
   ) => Promise<AgentActionTraceState | undefined>;
+  readonly turnFor: (sessionId: string, turnId: string) => Promise<TurnOperation | undefined>;
 }): Pick<
   NonNullable<InstrumentationProviderDefinition["events"]>,
   "interaction.opened" | "interaction.settled"
@@ -25,46 +36,53 @@ export function createAgentApprovalInstrumentation(input: {
     return state === undefined ? undefined : resumeTool(input.tracing, state);
   }
 
-  async function onRequested(
+  async function onOpened(
     event: InstrumentationInteractionOpenedEvent,
     ctx: InstrumentationHandlerContext,
   ): Promise<void> {
-    const { call } = event;
-    if (event.scope.turnId === undefined) return;
-    if (event.kind !== "approval" || call === undefined || ctx.state.get() !== undefined) return;
-    const tool = await toolFor(event.scope.sessionId, event.scope.turnId, call.callId);
-    const approval = await tool?.approval({
-      requestId: event.interactionId,
+    const { call, scope } = event;
+    if (scope.turnId === undefined || ctx.state.get() !== undefined) return;
+    const request = {
+      connectionName: event.signIn?.name,
+      kind: APPROVAL_KINDS[event.kind] ?? event.kind,
       request: event.request,
-    });
+      requestId: event.interactionId,
+    };
+    // A call without an open span here, or no call at all, leaves the wait under the turn.
+    const tool =
+      call === undefined ? undefined : await toolFor(scope.sessionId, scope.turnId, call.callId);
+    const parent: ToolOperation | TurnOperation | undefined =
+      tool ?? (await input.turnFor(scope.sessionId, scope.turnId));
+    const approval = await parent?.approval(request);
     if (approval === undefined) return;
-    ctx.state.set({
-      callId: call.callId,
-      sessionId: event.scope.sessionId,
-      turnId: event.scope.turnId,
-    });
+    const locator = { sessionId: scope.sessionId, turnId: scope.turnId };
+    ctx.state.set(
+      tool === undefined || call === undefined ? locator : { ...locator, callId: call.callId },
+    );
   }
 
-  async function onResolved(
+  async function onSettled(
     event: InstrumentationInteractionSettledEvent,
     ctx: InstrumentationHandlerContext,
   ): Promise<void> {
     const stored = ctx.state.get();
     if (stored === null || typeof stored !== "object" || Array.isArray(stored)) return;
     const { callId, sessionId, turnId } = stored as Record<string, unknown>;
-    if (typeof callId !== "string" || typeof sessionId !== "string" || typeof turnId !== "string")
-      return;
-    const tool = await toolFor(sessionId, turnId, callId);
-    const approval = tool?.findApproval(event.interactionId);
-    if (tool === undefined || approval === undefined) return;
+    if (typeof sessionId !== "string" || typeof turnId !== "string") return;
+    const tool = typeof callId === "string" ? await toolFor(sessionId, turnId, callId) : undefined;
+    const approval: ApprovalOperation | undefined =
+      typeof callId === "string"
+        ? tool?.findApproval(event.interactionId)
+        : (await input.turnFor(sessionId, turnId))?.findApproval(event.interactionId);
+    if (approval === undefined) return;
     if (event.responder !== undefined) {
       approval.attributes({
         "agent.approval.responder.type": event.responder.type,
         "agent.approval.responder.id": event.responder.id,
       });
       // The call still runs as the requester, but the tool can act for its approver.
-      if (event.outcome === "accepted")
-        tool.attributes({
+      if (event.kind === "approval" && event.outcome === "accepted")
+        tool?.attributes({
           "agent.tool.approver.type": event.responder.type,
           "agent.tool.approver.id": event.responder.id,
         });
@@ -77,8 +95,13 @@ export function createAgentApprovalInstrumentation(input: {
       });
   }
 
-  return { "interaction.opened": onRequested, "interaction.settled": onResolved };
+  return { "interaction.opened": onOpened, "interaction.settled": onSettled };
 }
+
+/** `agent.approval.kind` values. A tool approval keeps the value dashboards already query. */
+const APPROVAL_KINDS: Partial<Record<InstrumentationInteractionKind, string>> = {
+  approval: "tool-approval",
+};
 
 /**
  * Trace schema 4's approval outcomes. The instrumentation event carries the interaction's

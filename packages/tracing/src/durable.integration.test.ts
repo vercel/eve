@@ -129,6 +129,36 @@ describe("durable agent tracing", () => {
     expect(entries.size).toBe(0);
   });
 
+  it("records a wait no tool call owns under its turn, across workers", async () => {
+    const { checkpointer, entries } = memoryCheckpointer();
+    const exporter = new InMemorySpanExporter();
+    const first = worker(checkpointer, exporter);
+    const turn = await first.turn({ agentName: "support", identity, sequence: 0 });
+    await turn.approval({ requestId: "sign-in", kind: "sign-in", connectionName: "calendar" });
+    await turn.complete();
+    expect(entries.size).toBe(1);
+
+    // Alice signs in after the turn has parked and its worker is gone.
+    const second = worker(checkpointer, exporter);
+    const resumed = (await second.resume({ identity }))!;
+    expect(resumed.findApproval("missing")).toBeUndefined();
+    await resumed.findApproval("sign-in")!.complete({ outcome: "approved" });
+    expect(resumed.findApproval("sign-in")).toBeUndefined();
+    await second.forceFlush();
+
+    const spans = exporter.getFinishedSpans();
+    expect(spans.map((span) => span.name)).toEqual(["invoke_agent support", "agent.approval"]);
+    const approval = spans[1];
+    expect(approval!.parentSpanContext?.spanId).toBe(turn.reference.spanId);
+    expect(approval!.attributes["agent.approval.kind"]).toBe("sign-in");
+    expect(approval!.attributes["agent.approval.outcome"]).toBe("approved");
+    expect(approval!.attributes["agent.connection.name"]).toBe("calendar");
+    expect(approval!.attributes["gen_ai.tool.call.id"]).toBeUndefined();
+    expect(approval!.attributes["agent.turn.id"]).toBe("turn");
+    expect(approval!.attributes["agent.step.index"]).toBeUndefined();
+    expect(entries.size).toBe(0);
+  });
+
   it("keeps one tree when a resume reads a checkpoint this process wrote earlier", async () => {
     // Eve stores checkpoints in the current context, so a parallel tool call's
     // context can still hold an older checkpoint this same process wrote.

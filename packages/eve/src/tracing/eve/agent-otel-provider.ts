@@ -115,6 +115,7 @@ export function createAgentOtelInstrumentation(
   const approvals = createAgentApprovalInstrumentation({
     tracing,
     actionStateFor: tools.stateFor,
+    turnFor: (sessionId, turnId) => sessionTracing.turnFor(sessionId, turnId),
   });
   const memory = createAgentMemoryInstrumentation({ ...input, environment, tracing });
 
@@ -251,6 +252,7 @@ export function createAgentOtelInstrumentation(
       },
       name: "eve.otel",
       projectEvent: capturePolicy.projectEvent,
+      receivesTurnScopes: true,
       tracePolicy: () => ({ emit: true, recordInputs, recordOutputs }),
     },
     prepareSessionTrace,

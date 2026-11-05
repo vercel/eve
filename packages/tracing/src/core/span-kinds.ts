@@ -238,19 +238,23 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
     },
   },
   approval: {
-    parents: ["tool"],
+    parents: ["tool", "activation"],
     prepare({ options }, context) {
       return {
         name: SPAN_NAMES.approval,
         attributes: {
           ...context.attributes,
           ...frameworkAttributes(context.identity.framework),
-          ...attemptAttributes(context),
+          // A wait the turn holds belongs to no step.
+          ...(options.callId === undefined
+            ? { "agent.turn.id": context.attempt.turnId }
+            : attemptAttributes(context)),
           ...namingAttributes(SPAN_NAMES.approval, "workflow"),
           "gen_ai.operation.name": "workflow",
           "gen_ai.tool.call.id": options.callId,
           "agent.action.name": options.toolName,
-          "agent.approval.kind": "tool-approval",
+          "agent.approval.kind": options.kind ?? "tool-approval",
+          "agent.connection.name": options.connectionName,
           "agent.approval.request_id": options.requestId,
           [CONTENT_FIELDS.approvalRequest]: context.capture.recordInputs
             ? context.serializer.json(options.request)
