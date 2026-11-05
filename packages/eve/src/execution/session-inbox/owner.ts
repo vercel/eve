@@ -8,6 +8,7 @@ import {
   type OwnerRun,
 } from "#execution/session-inbox/runnable-owner.js";
 import { DevelopmentRunUnavailableError } from "#internal/workflow/development-run-unavailable-error.js";
+import { isOwnerDeploymentDeletedError } from "#internal/workflow/owner-deployment-deleted.js";
 import { getHookByToken, getWorld, resumeHook, type Hook } from "#internal/workflow/runtime.js";
 
 /**
@@ -81,7 +82,7 @@ export async function resumeRunnableHook(
  * session inbox token cannot execute. An unheld token passes: resuming it
  * reports the absence. Where the World replays each run on its own
  * deployment, nothing is looked up: an owner whose deployment was deleted
- * shows only through `isOwnerDeploymentDeletedError` on a failed read,
+ * shows only through {@link isOwnerDeploymentDeletedError} on a failed read,
  * so a healthy owner pays nothing for the check.
  */
 export async function assertRunnableSessionInbox(token: string): Promise<void> {
@@ -135,14 +136,21 @@ export async function lookupSessionOwnerHook(token: string): Promise<Hook> {
   }
 }
 
-/** An owner whose deployment was deleted, as {@link StrandedSessionOwnerError}. */
-export async function deletedDeploymentOwnerError(holder: {
-  readonly runId: string;
-  readonly hook?: Hook;
-}): Promise<StrandedSessionOwnerError> {
-  const world = await getWorld();
-  const ownerRun = await world.runs.get(holder.runId, { resolveData: "none" });
-  return new StrandedSessionOwnerError(ownerRun, holder.hook);
+/**
+ * `hook`'s owner as {@link StrandedSessionOwnerError} when `error` shows its
+ * deployment was deleted; otherwise, or when the run cannot be read, `error`.
+ * `error` must come from reading or resuming this exact hook: a token may have
+ * moved to a live owner since.
+ */
+export async function strandedIfDeploymentDeleted(error: unknown, hook: Hook): Promise<unknown> {
+  if (!isOwnerDeploymentDeletedError(error)) return error;
+  try {
+    const world = await getWorld();
+    const ownerRun = await world.runs.get(hook.runId, { resolveData: "none" });
+    return new StrandedSessionOwnerError(ownerRun, hook);
+  } catch {
+    return error;
+  }
 }
 
 async function assertRunnableOwner(
