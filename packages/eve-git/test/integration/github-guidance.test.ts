@@ -72,6 +72,8 @@ test("with github config, GitHub goes through the brokered gh tool and signed co
   assert.match(content, /gh repo list <owner>/u);
   assert.match(content, /Do not ask the requester for an exact `owner\/name`/u);
   assert.match(skill.content, /gh-signed-commit/u);
+  // GitHub picks the author email, so the agent follows gh-signed-commit's sign-off report.
+  assert.match(skill.content, /never build the sign-off email yourself/u);
   assert.match(skill.description, /signed commit/u);
   assert.match(skill.content, /gh pr create --draft/u);
 });

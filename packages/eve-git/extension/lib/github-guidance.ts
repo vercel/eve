@@ -52,7 +52,11 @@ const SIGNED_COMMIT = `Stage only the intended changes. Repositories that requir
 gh-signed-commit --repo owner/name --branch <branch> --base <base> -m "<headline>" [-b "<body>"]
 \`\`\`
 
-The command commits only staged changes and synchronizes the checkout to the signed remote commit. Then write the PR body to a file and create one draft:`;
+The command commits only staged changes and synchronizes the checkout to the signed remote commit.
+
+When the repository requires a DCO \`Signed-off-by\`, never build the sign-off email yourself: GitHub, not the message, picks the commit's author email. \`gh-signed-commit\` compares each sign-off with the author email GitHub recorded and reports a mismatch on stderr, with the exact sign-off to use and the remediation. Follow it, and never report DCO as passing while a mismatch stands.
+
+Then write the PR body to a file and create one draft:`;
 
 const PLAIN_COMMIT = `Stage only the intended changes, commit them, and push the branch. Then write the PR body to a file and create one draft:`;
 
