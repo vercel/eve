@@ -78,23 +78,30 @@ function session(
   });
   const ctx = new ContextContainer();
   enterSessionProjectionAt(ctx, undefined);
-  const handle = createInstrumentationHandleEvent({
-    deliveryInput,
-    agentName: "weather",
-    channelAudience: audience,
-    channelKind: "http",
-    environment: "production",
-    functionId: "weather",
-    handleEvent: async (publication) => {
-      const facts = cascade(currentView(ctx), eventsOf(publication));
-      recordPublishedLine(ctx, { at, facts }, nextLinePosition(ctx), facts);
-    },
-    hooks,
-    sessionId: "s",
-    ...child,
-  })!;
+  const handleFor = (relayed: boolean) =>
+    createInstrumentationHandleEvent({
+      deliveryInput,
+      agentName: "weather",
+      channelAudience: audience,
+      channelKind: "http",
+      environment: "production",
+      functionId: "weather",
+      handleEvent: async (publication) => {
+        const facts = cascade(currentView(ctx), eventsOf(publication));
+        recordPublishedLine(ctx, { at, facts }, nextLinePosition(ctx), facts);
+      },
+      hooks,
+      relayed,
+      sessionId: "s",
+      ...child,
+    })!;
+  const handle = handleFor(false);
+  const relayHandle = handleFor(true);
   return {
     commit: (...facts: SessionEvent[]) => contextStorage.run(ctx, () => handle(commitOf(facts))),
+    /** Commits as a step that relays an exchange for a child session or a workflow run. */
+    relay: (...facts: SessionEvent[]) =>
+      contextStorage.run(ctx, () => relayHandle(commitOf(facts))),
     async spans(): Promise<readonly ReadableSpan[]> {
       await provider.forceFlush();
       return exporter.getFinishedSpans();
@@ -412,26 +419,46 @@ describe("a session's spans, from its committed lines", () => {
       capability: { kind: "agent", name: "researcher" },
       request: { kind: "approval", prompt: "Deploy?" },
       origin: { call: { callId: "c_deploy", name: "deploy" }, sessionId: "child_s" },
-      expected: undefined,
+      expected: [],
     },
     {
-      asker: "a workflow run's sign-in, which has no session of its own",
+      asker: "a session a workflow run opened, which records its own",
+      capability: { kind: "tool", name: "flow" },
+      child: "child_w",
+      request: { kind: "question", prompt: "Which region?" },
+      origin: { sessionId: "child_w" },
+      expected: [],
+    },
+    {
+      asker: "a workflow tool's question, such as ask_question",
+      capability: { kind: "tool", name: "ask_question" },
+      request: { kind: "question", prompt: "Pick a color." },
+      origin: { call: { callId: "call_relay", name: "ask_question" }, sessionId: "wrun_0" },
+      expected: [["question", "execute_tool ask_question"]],
+    },
+    {
+      asker: "a workflow run's sign-in",
       capability: { kind: "tool", name: "flow" },
       request: { kind: "sign-in", prompt: "Sign in to Calendar", signIn: { name: "calendar" } },
       origin: { sessionId: "wrun_0" },
-      expected: "sign-in",
+      expected: [["sign-in", "invoke_agent weather"]],
     },
   ])(
-    "records a relayed request once: $asker",
-    async ({ capability, request, origin, expected }) => {
-      const { commit, spans } = session();
+    "records a relayed request once, where it waits: $asker",
+    async ({ capability, child, request, origin, expected }) => {
+      const { commit, relay, spans } = session();
       await commit(...opening);
       await commit({
         data: { callId: "call_relay", capability, input: {}, owner: run },
         scope: run,
         type: "call.requested",
       } as SessionEvent);
-      await commit({
+      if (child !== undefined)
+        await commit({
+          data: { name: "agent", owner: { callId: "call_relay" }, sessionId: child, stream: "s" },
+          type: "child.opened",
+        } as SessionEvent);
+      await relay({
         data: {
           interactionId: "i_relayed",
           origin: { interactionId: "i_relayed", ...origin },
@@ -441,17 +468,25 @@ describe("a session's spans, from its committed lines", () => {
         scope: turn,
         type: "interaction.opened",
       } as SessionEvent);
-      await commit({
+      await relay({
         data: { interactionId: "i_relayed", outcome: "accepted" },
         scope: turn,
         type: "interaction.settled",
       } as SessionEvent);
+      await commit(settled("call_relay", { outcome: "completed", output: "done" }));
       await commit(turnSettled({ outcome: "completed" }));
 
-      const waits = (await spans()).filter((span) => span.name === "agent.approval");
-      expect(waits.map((span) => span.attributes["agent.approval.kind"])).toEqual(
-        expected === undefined ? [] : [expected],
-      );
+      const exported = await spans();
+      const parentName = (id: string | undefined) =>
+        exported.find((span) => span.spanContext().spanId === id)?.name;
+      expect(
+        exported
+          .filter((span) => span.name === "agent.approval")
+          .map((span) => [
+            span.attributes["agent.approval.kind"],
+            parentName(span.parentSpanContext?.spanId),
+          ]),
+      ).toEqual(expected);
     },
   );
 

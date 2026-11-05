@@ -214,11 +214,6 @@ export interface InstrumentationInteractionOpenedEvent {
   };
   /** For a sign-in, the connection or tool that needs it. Never its URL, code, or credential. */
   readonly signIn?: { readonly name: string };
-  /**
-   * Set when a child agent session asked and this session relays the request for an answer.
-   * The child session reports the same request, so skip it to count each request once.
-   */
-  readonly relayedFrom?: { readonly sessionId: string };
   readonly idempotencyKey: string;
   readonly interactionId: string;
   readonly kind: InstrumentationInteractionKind;

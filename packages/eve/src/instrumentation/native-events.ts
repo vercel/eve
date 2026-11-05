@@ -52,6 +52,11 @@ export interface CreateInstrumentationHandleEventInput {
   readonly scheduleId?: string;
   readonly sessionId: string;
   readonly title?: string;
+  /**
+   * The commit relays an exchange this session carries for a child session or a workflow run.
+   * Only its requests reach instrumentation, and only those no child session reports itself.
+   */
+  readonly relayed?: boolean;
 }
 
 /** Where an attempt is in its session: its turn, its step, and which try at the step it is. */
@@ -164,6 +169,7 @@ export function createInstrumentationHandleEvent(
       view: view ?? (ctx === undefined ? undefined : currentView(ctx)),
     };
     for (const event of committed) {
+      if (input.relayed === true && !event.type.startsWith("interaction.")) continue;
       const delivery = deliveryEvent(event, ctx, input);
       if (delivery !== undefined) await hooks.publish(Object.freeze(delivery));
       for (const derived of instrumentationEventsOf(event, line, input)) {
@@ -338,7 +344,8 @@ function instrumentationEventsOf(
     case "interaction.opened": {
       const row = line.view?.interactions[event.data.interactionId];
       const scope = row === undefined ? undefined : interactionAttempt(line, row);
-      if (row === undefined || scope === undefined) return [];
+      if (row === undefined || scope === undefined || askedByChildSession(line.view!, row))
+        return [];
       const { request } = row;
       const call = askedCall(line.view!, row);
       return [
@@ -357,7 +364,6 @@ function instrumentationEventsOf(
               }
             : undefined,
           scope,
-          relayedFrom: askingChildSession(line.view!, row),
           signIn: request.signIn === undefined ? undefined : { name: request.signIn.name },
           type: "interaction.opened",
         },
@@ -366,7 +372,8 @@ function instrumentationEventsOf(
     case "interaction.settled": {
       const row = line.view?.interactions[event.data.interactionId];
       const scope = row === undefined ? undefined : interactionAttempt(line, row);
-      if (row === undefined || scope === undefined) return [];
+      if (row === undefined || scope === undefined || askedByChildSession(line.view!, row))
+        return [];
       const answer = decidingAnswer(row);
       return [
         {
@@ -407,19 +414,14 @@ function runAttempt(line: Line, runId: string | undefined): InstrumentationScope
 }
 
 /**
- * The child agent session a relayed request came from. A workflow run relays its own questions
- * and sign-ins the same way but has no session to report them, so it names none.
+ * Whether a child agent session asked, and so reports the request itself. A workflow run relays
+ * its own questions and sign-ins the same way but has no session to report them.
  */
-function askingChildSession(
-  view: SessionView,
-  row: InteractionRow,
-): { sessionId: string } | undefined {
+function askedByChildSession(view: SessionView, row: InteractionRow): boolean {
   const { origin, subject } = row;
-  if (origin === undefined) return undefined;
+  if (origin === undefined) return false;
   const delegating = "callId" in subject ? view.calls[subject.callId] : undefined;
-  return delegating?.capability.kind === "agent" || origin.sessionId in view.children
-    ? { sessionId: origin.sessionId }
-    : undefined;
+  return delegating?.capability.kind === "agent" || origin.sessionId in view.children;
 }
 
 /**

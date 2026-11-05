@@ -76,9 +76,8 @@ const log = createLogger("execution.publish-session-events");
  * A relayed event belongs to an exchange this session carries for a child
  * session or a workflow run: the question or sign-in it raised, the turn
  * boundary that question causes here, and the `interaction.settled` for the answer
- * this session routes back. This session's instrumentation never tracks that
- * pending input, so no event of the exchange reaches it; the child records its
- * side as its own.
+ * this session routes back. Only the exchange's requests reach this session's
+ * instrumentation, and only a workflow run's: a child session records its own.
  */
 export type SessionEventOrigin = "own" | "relayed";
 
@@ -258,15 +257,12 @@ async function publishInSessionScope<T>(
     step.history === undefined
       ? hydrated
       : { ...hydrated, history: validateHarnessModelMessages(step.history) };
-  const instrumentation =
-    publication.origin === "own"
-      ? bindSessionInstrumentation({
-          agentName: ctx.require(BundleKey).turnAgent.id,
-          ctx,
-          rootSessionId: session.rootSessionId ?? session.sessionId,
-          sessionId: session.sessionId,
-        })
-      : undefined;
+  const instrumentation = bindSessionInstrumentation({
+    agentName: ctx.require(BundleKey).turnAgent.id,
+    ctx,
+    rootSessionId: session.rootSessionId ?? session.sessionId,
+    sessionId: session.sessionId,
+  });
 
   const publisher = openSessionEventPublisher({
     cancelTurn: publication.cancelTurn,
@@ -279,7 +275,10 @@ async function publishInSessionScope<T>(
   try {
     return await withContextScope(ctx, session, async (enrichedSession) => {
       const emit =
-        instrumentation?.createHandleEvent({ handleEvent: publisher.publish }) ?? publisher.publish;
+        instrumentation?.createHandleEvent({
+          handleEvent: publisher.publish,
+          relayed: publication.origin === "relayed",
+        }) ?? publisher.publish;
       const result = await publication.publish(emit, enrichedSession);
       await publisher.finish();
       return { result, session: enrichedSession };

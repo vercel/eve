@@ -166,6 +166,7 @@ export interface ExecutionInstrumentation {
   readonly prepareDelivery: (delivery: DeliverHookPayload) => void;
   readonly createHandleEvent: (input: {
     readonly handleEvent?: HandleEventFn;
+    readonly relayed?: boolean;
   }) => HandleEventFn | undefined;
   readonly flush: () => Promise<void>;
   readonly memory?: MemoryInstrumentation;
@@ -483,6 +484,7 @@ export function bindInstrumentationRuntime(
         handleEvent: input.handleEvent,
         deliveryInput,
         hooks: bindHooks(sessionContext),
+        relayed: input.relayed,
         rootSessionId: sessionContext.rootSessionId,
         traceSessionId: sessionContext.traceSessionId,
         parentLineage: sessionContext.parentLineage,

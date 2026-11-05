@@ -41,8 +41,6 @@ export function createAgentApprovalInstrumentation(input: {
     ctx: InstrumentationHandlerContext,
   ): Promise<void> {
     const { call, scope } = event;
-    // The child session that asked records its own span.
-    if (event.relayedFrom !== undefined) return;
     if (scope.turnId === undefined || ctx.state.get() !== undefined) return;
     const request = {
       connectionName: event.signIn?.name,
