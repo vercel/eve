@@ -1,5 +1,19 @@
 # @vercel/agent-runs
 
+## 1.0.0-rc.3
+
+Released 2026-11-05 · [Compare with 1.0.0-rc.2](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.2...%40vercel%2Fagent-runs%401.0.0-rc.3)
+
+### Features
+
+- Record an `agent.approval` span for every wait on a person, including questions, budget prompts, and connection sign-ins, not just tool approvals.
+  `agent.approval.kind` is `tool-approval`, `question`, `budget`, or `sign-in`. A wait sits under the tool call it's about, or under the turn when no call owns it, and a sign-in names its connection in `eve.connection.name`. Instrumentation providers now receive sign-ins on `interaction.opened` and `interaction.settled`, with `signIn.name` naming the connection or tool; the sign-in URL and code stay out of the event. Questions and sign-ins from workflow tools such as `ask_question` now reach providers too, reported by the session that owns the tool call; a request a subagent asks is still reported once, by that session. `@vercel/agent-runs` adds `TurnOperation.approval` and `findApproval`, and an optional `kind` and `connectionName` on approvals. ([#6004](https://github.com/vercel/eve/pull/6004))
+
+### Bug Fixes
+
+- Store a turn's attributes once in its checkpoint.
+  The turn's copy of the model input and output was also saved in the turn's data, which doubled that content in every checkpoint write and sent large prompts into the oversized-checkpoint fallback. Exported spans are unchanged. ([#5949](https://github.com/vercel/eve/pull/5949))
+
 ## 1.0.0-rc.2
 
 Released 2026-11-05 · [Compare with 1.0.0-rc.1](https://github.com/vercel/eve/compare/%40vercel%2Fagent-runs%401.0.0-rc.1...%40vercel%2Fagent-runs%401.0.0-rc.2)
