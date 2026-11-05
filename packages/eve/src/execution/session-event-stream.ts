@@ -1,7 +1,6 @@
 import type { SessionStreamEvent } from "#protocol/session-event.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
-import { RunExpiredError } from "#compiled/@workflow/errors/index.js";
-import { getRun, getWorld } from "#internal/workflow/runtime.js";
+import { sessionLineStore } from "#execution/session-line-store.js";
 import { createEventReader } from "#protocol/session-lines.js";
 import { createV26HistoryReader, type V26HistoryReader } from "#execution/v26-history.js";
 import { isV26Line } from "#protocol/v26-lines.js";
@@ -40,7 +39,9 @@ export function readSessionRecords(
   sessionId: string,
   startIndex?: number,
 ): ReadableStream<unknown> {
-  return parseNdjsonStream<unknown>(() => getRun(sessionId).getReadable({ startIndex }));
+  return parseNdjsonStream<unknown>(() =>
+    sessionLineStore(sessionId).readable(sessionId, startIndex),
+  );
 }
 
 /**
@@ -144,36 +145,15 @@ export function readSessionRecordHistory(
 
 /** Returns the position of the last durably recorded line, or `-1` before the first. */
 export async function readSessionStreamTailIndex(sessionId: string): Promise<number> {
-  // The readable is never consumed; cancel it so the unread source does not linger.
-  const readable = getRun(sessionId).getReadable();
-  try {
-    const [, tailIndex] = await Promise.all([
-      assertSessionHistoryReadable(sessionId),
-      readable.getTailIndex(),
-    ]);
-    return tailIndex;
-  } finally {
-    await readable.cancel().catch(() => {});
-  }
+  return await sessionLineStore(sessionId).tail(sessionId);
 }
 
 /**
- * Throws when the session's run does not exist or its recorded history has
- * passed retention. Cheaper than {@link readSessionStreamTailIndex}, whose
- * lookup on the local world opens every chunk file.
+ * Throws when the session's stream does not exist or its recorded history has passed retention.
+ * Cheaper than {@link readSessionStreamTailIndex}.
  */
 export async function assertSessionHistoryReadable(sessionId: string): Promise<void> {
-  const world = await getWorld();
-  const run = await world.runs.get(sessionId, { resolveData: "none" });
-  // Purging can leave chunk records behind; their count does not imply readable data.
-  if (run.expiredAt !== undefined && run.expiredAt.getTime() <= Date.now()) {
-    throw new RunExpiredError(
-      "Session history is no longer available.",
-      sessionId,
-      run.status,
-      run.expiredAt,
-    );
-  }
+  await sessionLineStore(sessionId).assertReadable(sessionId);
 }
 
 /**

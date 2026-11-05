@@ -9,10 +9,11 @@ import { expectScheduleRun, SCHEDULE_ADAPTER_KIND, ScheduleDispatcher } from "#c
 import type { RunHandle, Runtime } from "#channel/types.js";
 import { compileAgent } from "#compiler/compile-agent.js";
 import { ContextContainer } from "#context/container.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import {
-  BundleKey,
   ChannelKey,
   type CompiledBundle,
+  SessionAgentKey,
 } from "#runtime/sessions/runtime-context-keys.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
@@ -103,7 +104,7 @@ async function simulateStepBoundary(
   // workflow runtime would at the first `"use step"` boundary.
   const serialized = codec.serialize(adapter);
   const ctx = new ContextContainer();
-  ctx.set(BundleKey, bundle);
+  ctx.set(SessionAgentKey, fromCompiledBundle(bundle));
 
   return await codec.deserialize(serialized, ctx);
 }

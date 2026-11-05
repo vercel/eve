@@ -1,3 +1,4 @@
+import { workflowRunHost } from "#execution/tools/workflow/workflow-run-host.js";
 import { expect, it, vi } from "vitest";
 import type { ToolContext } from "#tools/definition.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
@@ -22,6 +23,7 @@ const agentContext = {
 
 const input = {
   agentContext,
+  host: workflowRunHost,
   callId: "call",
   entry: { entryPoint: "execute" },
   hookToken: "control",

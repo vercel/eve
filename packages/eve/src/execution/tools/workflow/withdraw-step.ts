@@ -8,7 +8,7 @@ import { type SessionStateTransition } from "#execution/session/state-delta.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeRoutedHook } from "#execution/hook-routes.js";
 import { readHitlState } from "#harness/hitl/index.js";
 import type { Relay } from "#harness/hitl/relays.js";
 import { finishRun } from "#harness/session-machine/transitions.js";
@@ -40,7 +40,7 @@ async function withdrawWorkflowToolRunQuestion(
     kind: "withdrawn",
     requestId: input.requestId,
   };
-  await ignoreGoneTarget(resumeHook(input.control, decision));
+  await ignoreGoneTarget(resumeRoutedHook(input.control, decision));
   return await relayWithdrawnRequests(
     input,
     (requestId, route) =>

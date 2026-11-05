@@ -12,8 +12,8 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { defineDynamicSchedules } from "#public/schedules/subscription.js";
 import { schedules } from "#public/experimental/schedules/client.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
+import { loadCompiledSessionAgent } from "#runtime/sessions/compiled-session-agent.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { once } from "#tools/approval/policies.js";
 import { evaluateApproval } from "#approval/evaluation.js";
@@ -30,8 +30,8 @@ const alice = {
 async function bindCaller() {
   loadContext().set(AuthKey, alice);
   loadContext().set(
-    BundleKey,
-    await getCompiledRuntimeAgentBundle({
+    SessionAgentKey,
+    await loadCompiledSessionAgent({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     }),
   );

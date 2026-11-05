@@ -1,3 +1,4 @@
+import { workflowInboxTransport } from "#execution/session-inbox/workflow-transport.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -41,7 +42,7 @@ describe("createSessionInbox", () => {
   it("notifies delivery observers promptly and replays unread deliveries on subscription", async () => {
     const delivery = createDeferred<IteratorResult<SessionInboxPayload>>();
     installHooks(createMockHook({ token: "stable", reads: [delivery.promise] }));
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     const observed = vi.fn();
     const unsubscribe = inbox.onDelivery(observed);
     await inbox.claimSessionHook("stable");
@@ -67,7 +68,7 @@ describe("createSessionInbox", () => {
         token: "channel",
       }),
     );
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
 
     await inbox.claimSessionHook("stable");
     await inbox.claimSessionHook("channel");
@@ -91,7 +92,7 @@ describe("createSessionInbox", () => {
         ],
       }),
     );
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     const interrupt = nextInterrupt(inbox);
     await inbox.claimSessionHook("stable");
     await expect(interrupt).resolves.toEqual({
@@ -130,7 +131,7 @@ describe("createSessionInbox", () => {
         ],
       }),
     );
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     await inbox.claimSessionHook("stable");
     await expect(readResult(inbox)).resolves.toEqual(resolved(authCallback("weather")));
     await expect(readResult(inbox)).resolves.toEqual(resolved(report));
@@ -182,7 +183,7 @@ describe("createSessionInbox", () => {
         ],
       }),
     );
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     await inbox.claimSessionHook("stable");
     await vi.waitFor(() => expect(inbox.hasPending()).toBe(true));
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -198,7 +199,7 @@ describe("createSessionInbox", () => {
   it("keeps a pushed cancellation queued for the consumer", async () => {
     const input = createDeferred<IteratorResult<SessionInboxPayload>>();
     installHooks(createMockHook({ token: "stable", reads: [input.promise] }));
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     await inbox.claimSessionHook("stable");
     const interrupt = nextInterrupt(inbox);
     input.resolve(resolved({ deliveryId: "cancel-delivery", kind: "cancel" }));
@@ -210,7 +211,7 @@ describe("createSessionInbox", () => {
   it("pushes a clear to interrupt handlers, so it stops the running turn", async () => {
     const input = createDeferred<IteratorResult<SessionInboxPayload>>();
     installHooks(createMockHook({ token: "stable", reads: [input.promise] }));
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     await inbox.claimSessionHook("stable");
     const interrupt = nextInterrupt(inbox);
     input.resolve(resolved({ deliveryId: "clear-delivery", kind: "clear" }));
@@ -223,7 +224,7 @@ describe("createSessionInbox", () => {
     const first = createDeferred<IteratorResult<SessionInboxPayload>>();
     const second = createDeferred<IteratorResult<SessionInboxPayload>>();
     installHooks(createMockHook({ token: "stable", reads: [first.promise, second.promise] }));
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     await inbox.claimSessionHook("stable");
     const handler = vi.fn();
     const unsubscribe = inbox.onInterrupt(handler);
@@ -252,7 +253,7 @@ describe("createSessionInbox", () => {
       createMockHook({ token: "stable", reads: [first.promise, third.promise] }),
       createMockHook({ token: "alias", reads: [second.promise] }),
     );
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     await inbox.claimSessionHook("stable");
     await inbox.claimSessionHook("alias");
     first.resolve(resolved(send("first")));
@@ -279,7 +280,7 @@ describe("createSessionInbox", () => {
         ],
       }),
     );
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     const interrupt = nextInterrupt(inbox);
     await inbox.claimSessionHook("stable");
 
@@ -291,7 +292,7 @@ describe("createSessionInbox", () => {
   it("surfaces a failed reader instead of silently leaving the owner asleep", async () => {
     const read = createDeferred<IteratorResult<SessionInboxPayload>>();
     installHooks(createMockHook({ token: "stable", reads: [read.promise] }));
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     await inbox.claimSessionHook("stable");
     const pending = expect(readResult(inbox)).rejects.toThrow("reader failed");
     read.reject(new Error("reader failed"));
@@ -306,7 +307,7 @@ describe("createSessionInbox", () => {
         token: "stable",
       }),
     );
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     await inbox.claimSessionHook("stable");
     await vi.waitFor(() => expect(inbox.hasPending()).toBe(true));
     inbox.restore([send("handed back"), send("second handed back")]);
@@ -335,7 +336,7 @@ describe("createSessionInbox", () => {
         token: "channel",
       }),
     );
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     const delivered = vi.fn();
     inbox.onDelivery(delivered);
     const interrupted = nextInterrupt(inbox);
@@ -372,7 +373,7 @@ describe("createSessionInbox", () => {
         token: "stable",
       }),
     );
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     await inbox.claimSessionHooks(["stable"], { handover: "owner-a:1" });
 
     await expect(readResult(inbox)).resolves.toEqual(resolved(send("accepted by a")));
@@ -397,7 +398,7 @@ describe("createSessionInbox", () => {
         token: "stable",
       }),
     );
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     const pumped = nextInterrupt(inbox);
     await inbox.claimSessionHooks(["stable"], { handover: "owner-a:1" });
     await pumped;
@@ -425,7 +426,7 @@ describe("createSessionInbox", () => {
         token: "stable",
       }),
     );
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     const pumped = nextInterrupt(inbox);
     await inbox.claimSessionHooks(["stable"], { handover: "owner-a:1" });
     await pumped;
@@ -458,7 +459,7 @@ describe("createSessionInbox", () => {
         token: "stable",
       }),
     );
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     await inbox.claimSessionHook("stable");
     await vi.waitFor(() => expect(inbox.hasPending()).toBe(true));
 
@@ -497,7 +498,7 @@ describe("createSessionInbox", () => {
       }),
       createMockHook({ reads: [outcomes[1]!.promise], token: "channel" }),
     );
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     await inbox.claimSessionHooks(["stable", "channel"], { handover: "owner-a:1" });
     const settled = inbox.whenTakenOver().then(
       () => "resolved",
@@ -532,7 +533,7 @@ describe("createSessionInbox", () => {
       token: "replacement",
     });
     installHooks(stable, oldAlias, replacement);
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
 
     await inbox.claimSessionHook("stable");
     await inbox.claimSessionHook("old");
@@ -559,7 +560,7 @@ describe("createSessionInbox", () => {
         token: "channel",
       }),
     );
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
 
     await inbox.claimSessionHook("stable");
     const pending = readResult(inbox);
@@ -577,7 +578,7 @@ describe("createSessionInbox", () => {
       token: "candidate",
     });
     installHooks(stable, current, candidate);
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
 
     await inbox.claimSessionHook("stable");
     await inbox.claimSessionHook("current");
@@ -597,7 +598,7 @@ describe("createSessionInbox", () => {
     const stable = createMockHook({ token: "stable" });
     const channel = createMockHook({ token: "channel" });
     installHooks(stable, channel);
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
 
     await inbox.claimSessionHook("stable");
     await inbox.claimSessionHook("stable");
@@ -614,7 +615,7 @@ describe("createSessionInbox", () => {
   it("waits for registration when two callers claim the same address", async () => {
     const registration = Promise.withResolvers<null>();
     installHooks(createMockHook({ token: "stable", registration: registration.promise }));
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     const first = inbox.claimSessionHook("stable");
     let secondSettled = false;
     const second = inbox.claimSessionHook("stable").then(() => {
@@ -634,7 +635,7 @@ describe("createSessionInbox", () => {
       token: "stable",
     });
     installHooks(stable);
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     const sessionCreation = Promise.withResolvers<never>();
 
     const claim = inbox.claimSessionHook("stable", { confirmAfter: sessionCreation.promise });
@@ -651,7 +652,7 @@ describe("createSessionInbox", () => {
 
   it("rejects empty tokens", async () => {
     installHooks(createMockHook({ token: "stable" }), createMockHook({ token: "auth" }));
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     await expect(inbox.claimSessionHook("")).rejects.toThrow("nonempty");
     await inbox.claimSessionHook("stable");
     await inbox.dispose();
@@ -660,7 +661,7 @@ describe("createSessionInbox", () => {
   it("bounds the address set without charging repeated claims", async () => {
     const tokens = Array.from({ length: 256 }, (_, index) => `token-${index}`);
     installHooks(...tokens.map((token) => createMockHook({ token })));
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
     for (const token of tokens) await inbox.claimSessionHook(token);
     await inbox.claimSessionHook(tokens[0]!);
     await expect(inbox.claimSessionHook("one-too-many")).rejects.toThrow("at most 256");
@@ -672,7 +673,7 @@ describe("createSessionInbox", () => {
     const stable = createMockHook({ token: "stable" });
     const alias = createMockHook({ token: "channel" });
     installHooks(stable, alias);
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
 
     await inbox.claimSessionHook("stable");
     await inbox.claimSessionHook("channel");
@@ -689,7 +690,7 @@ describe("createSessionInbox", () => {
   it("disposes every alias with the inbox", async () => {
     const auth = createMockHook({ token: "alias" });
     installHooks(createMockHook({ token: "stable" }), auth);
-    const inbox = createSessionInbox("session-1");
+    const inbox = createSessionInbox(workflowInboxTransport("session-1"));
 
     await inbox.claimSessionHook("stable");
     await inbox.claimSessionHook("alias");

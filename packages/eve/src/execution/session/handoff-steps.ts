@@ -33,13 +33,12 @@ import {
   EVE_VERSION_ATTRIBUTE,
   EVE_PREWARM_ATTRIBUTE,
 } from "#execution/eve-workflow-attributes.js";
-import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { owningSandboxDefinition } from "#runtime/sandbox/registry.js";
 import {
   isRetiredSandboxSessionState,
   resolvePersistedSandboxSessionState,
 } from "#sandbox/state.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { sessionAgent } from "#definitions/agent.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { traceSessionHandover } from "#execution/session/handover-tracing.js";
 import { readSessionStreamTailIndex } from "#execution/session-event-stream.js";
@@ -127,8 +126,8 @@ export type SessionCheckpointValidation =
   | { readonly kind: "source-gone" };
 
 /**
- * Validates an upgraded checkpoint, resolves the target deployment's compiled
- * bundle, and records this owner's identity before it claims any hook.
+ * Validates an upgraded checkpoint, resolves the session's agent on the target
+ * deployment, and records this owner's identity before it claims any hook.
  *
  * A checkpoint this deployment cannot read is a settled answer, not a fault,
  * so it returns rather than throws: retrying the step can never change it.
@@ -171,7 +170,8 @@ export async function prepareSuccessorStep(input: {
     if (error instanceof IncompatibleStateLayoutError) return unreadable(error.message);
     throw error;
   }
-  const bundle = context.require(BundleKey);
+  // The target must have the session's agent: loading it from its reference proves it does.
+  const agent = sessionAgent(context);
   const session = readDurableSession(checkpoint.sessionState);
   const sandboxState = session.sandboxState?.session;
   // The runtime ignores a retired record, so it must not block the handoff.
@@ -180,9 +180,11 @@ export async function prepareSuccessorStep(input: {
     sandboxState !== undefined &&
     !isRetiredSandboxSessionState(sandboxState)
   ) {
-    const definition = owningSandboxDefinition(
-      getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId).sandboxRegistry.sandbox,
-    );
+    const registered = (await agent.sandbox())?.registry.sandbox;
+    if (registered === undefined) {
+      return refuse("Session checkpoint sandbox has no agent sandbox to resolve its provider.");
+    }
+    const definition = owningSandboxDefinition(registered);
     if (definition.kind !== "independent") {
       return refuse("Session checkpoint sandbox has no resolved provider.");
     }

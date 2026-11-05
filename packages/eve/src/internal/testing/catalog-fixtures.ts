@@ -16,7 +16,8 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ApprovalPolicy } from "#approval/definition.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
-import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { type CompiledBundle, SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import {
   type ConnectionClient,
@@ -280,13 +281,15 @@ export async function catalogContext(
   ctx.set(SessionIdKey, "catalog-session");
   ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
   ctx.set(
-    BundleKey,
-    catalogBundle({
-      approval: input.approval,
-      connections: input.connections?.map((connection) => connection.definition),
-      dynamicSubagents: input.dynamicSubagents,
-      skills: input.skills,
-    }),
+    SessionAgentKey,
+    fromCompiledBundle(
+      catalogBundle({
+        approval: input.approval,
+        connections: input.connections?.map((connection) => connection.definition),
+        dynamicSubagents: input.dynamicSubagents,
+        skills: input.skills,
+      }),
+    ),
   );
   if (input.connections !== undefined) {
     ctx.set(ConnectionRegistryKey, connectionRegistry(input.connections));

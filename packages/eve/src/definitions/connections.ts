@@ -6,7 +6,7 @@ import { CONNECTION_SLUG_PATTERN } from "#discover/grammar.js";
 import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 import { resolveDynamicConnectionValue } from "#runtime/resolve-connection.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { compiledBundleOf } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition, ResolvedDynamicDefinition } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
 import { entryVersions, slotsOf } from "#definitions/state.js";
@@ -144,7 +144,7 @@ function assertOwnsNoEntries(
   connections: readonly ResolvedConnectionDefinition[],
   resolver: ResolvedDynamicDefinition<"connection">,
 ): void {
-  const bundle = ctx.get(BundleKey);
+  const bundle = compiledBundleOf(ctx);
   const entryNames = [
     ...(bundle?.toolRegistry.toolsByName.keys() ?? []),
     ...(bundle?.subagentRegistry.subagentsByName.keys() ?? []),
