@@ -1,5 +1,7 @@
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
+import { createWorldSessionStore } from "#execution/in-process/world-store.js";
+import { memoryWorld } from "#execution/world/memory-world.js";
 
 import { defineDynamic } from "#dynamic/definition.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
@@ -8,48 +10,21 @@ import { defineAgent } from "#public/definitions/agent.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 
-import { createChannelAddress } from "#channel/channel-address.js";
 import type { Runtime } from "#channel/types.js";
-import { memoryWorld } from "#execution/world/memory-world.js";
-import { dyingAfter } from "#internal/testing/world-faults.js";
 import { createInProcessRuntime } from "#execution/in-process/runtime.js";
-import { checkpointPosition, type SessionSnapshot } from "#execution/in-process/snapshot.js";
+import { checkpointPosition } from "#execution/in-process/snapshot.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
+import {
+  address,
+  dyingAfter,
+  recorded,
+  shape,
+  throughJson,
+  violations,
+} from "#internal/testing/in-process-sessions.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
-import { createStreamChecker, type Violation } from "#protocol/session-events/checker.js";
-import { isStoredLine } from "#protocol/session-events/envelope.js";
-import { schemaViolation } from "#protocol/session-events/schemas.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-
-const address = (runtime: Runtime, continuationToken: string) =>
-  createChannelAddress({
-    adapter: { kind: "http" },
-    channelName: "http",
-    continuationToken,
-    runtime,
-  });
-
-/** What the protocol checker finds in a session's whole stream, read from its first line. */
-async function violations(runtime: Runtime, sessionId: string): Promise<Violation[]> {
-  const checker = createStreamChecker({ validate: schemaViolation });
-  const found: Violation[] = [];
-  let position = 0;
-  for await (const record of await runtime.getLineStream(sessionId, { follow: false })) {
-    if (!isStoredLine(record)) throw new Error(`Line ${position} isn't a stored line.`);
-    found.push(...checker.check(record, position++));
-  }
-  return found;
-}
-
-/** Every event a session recorded so far. */
-async function recorded(runtime: Runtime, sessionId: string): Promise<SessionStreamEvent[]> {
-  const reader = (await runtime.getEventStream(sessionId, { follow: false })).getReader();
-  const events: SessionStreamEvent[] = [];
-  for (let next = await reader.read(); !next.done; next = await reader.read())
-    events.push(next.value);
-  return events;
-}
 
 /** A session's events up to its first `delivery.settled` per delivery sent, with ids numbered. */
 async function conversation(runtime: Runtime, token: string, messages: readonly string[]) {
@@ -65,34 +40,6 @@ async function conversation(runtime: Runtime, token: string, messages: readonly 
     results,
     violations: await violations(runtime, sessionId!),
   };
-}
-
-/** `snapshot` as it reads back after a store or another process held it as JSON. */
-function throughJson(snapshot: SessionSnapshot): SessionSnapshot {
-  return JSON.parse(JSON.stringify(snapshot));
-}
-
-/** Types and data with ids, times, and positions taken out: what two hosts must agree on. */
-function shape(events: readonly SessionStreamEvent[]) {
-  const ids = new Map<string, string>();
-  const rename = (value: unknown, key = ""): unknown => {
-    if (typeof value === "string") {
-      if (/(?:Id|Token)$/.test(key) || key === "id") {
-        if (!ids.has(value)) ids.set(value, `<${ids.size}>`);
-        return ids.get(value);
-      }
-      return /^\d{4}-\d{2}-\d{2}T/.test(value) ? "<time>" : value;
-    }
-    if (Array.isArray(value)) return value.map((entry) => rename(entry, key));
-    if (value !== null && typeof value === "object")
-      return Object.fromEntries(
-        Object.entries(value)
-          .filter(([field]) => field !== "meta" && field !== "runtime")
-          .map(([field, entry]) => [field, rename(entry, field)]),
-      );
-    return value;
-  };
-  return events.map((event) => rename({ data: event.data, type: event.type }));
 }
 
 // Calls both tools in one step, then replies with how each came out.
@@ -357,62 +304,6 @@ describe("the in-process runtime", () => {
     });
   });
 
-  it("fails a call that needs a durable run, saying what it needs", async () => {
-    const delegating = markMockModel(
-      new MockLanguageModelV4({
-        doStream: async ({ prompt }) =>
-          prompt.some((message) => message.role === "tool")
-            ? textStreamResult("Alice, I couldn't start that.")
-            : toolCallsStreamResult([
-                {
-                  input: JSON.stringify({ message: "Summarize Bob's notes." }),
-                  toolCallId: "call-agent",
-                  toolName: "agent",
-                },
-              ]),
-        modelId: "in-process-delegating",
-        provider: "eve-test",
-      }),
-    );
-    const test = await createTestRuntime({
-      agent: {
-        definition: defineAgent({
-          model: defineDynamic(() => ({ model: delegating, modelContextWindowTokens: 200_000 })),
-        }),
-        name: "in-process-durable-runs",
-      },
-    });
-    await test.run(async () => {
-      const runtime = createInProcessRuntime({
-        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      });
-      try {
-        const result = await (
-          await address(runtime, "alice-durable-runs").send("Ask a helper.", { auth: null })
-        ).result();
-        expect(result).toMatchObject({
-          reply: "Alice, I couldn't start that.",
-          status: "completed",
-        });
-        const events = await recorded(runtime, result.sessionId);
-        expect(events.filter(({ type }) => type === "call.settled")).toMatchObject([
-          {
-            data: {
-              callId: "call-agent",
-              outcome: "failed",
-              output:
-                "The `agent` tool needs a durable run, which an in-process session doesn't have. Run the agent with `eve dev` or deploy it.",
-            },
-          },
-        ]);
-        expect(events.map(({ type }) => type)).not.toContain("task.started");
-        await expect(violations(runtime, result.sessionId)).resolves.toEqual([]);
-      } finally {
-        await runtime.dispose();
-      }
-    });
-  });
-
   it("ends its sessions when disposed", async () => {
     const test = await createTestRuntime({ agent: { name: "in-process-dispose" } });
     await test.run(async () => {
@@ -561,14 +452,15 @@ describe("snapshots of in-process sessions", () => {
     await test.run(async () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
       const token = "alice-interrupted";
-      const first = createInProcessRuntime({ compiledArtifactsSource }, { world: memoryWorld() });
+      const world = memoryWorld();
+      const first = createInProcessRuntime({ compiledArtifactsSource }, { world });
       const sent = await address(first, token).send("Run the build.", { auth: null });
       const reader = (await first.getEventStream(sent.sessionId)).getReader();
       for (let next = await reader.read(); !next.done; next = await reader.read())
         if (next.value.type === "call.started") break;
       await reader.cancel();
-      // The World holds the session mid-step: the step that's running, to run again.
-      const snapshot = (await first.load(sent.sessionId))!;
+      // The store holds the session mid-step: the step that's running, to run again.
+      const snapshot = (await createWorldSessionStore(world).load(sent.sessionId))!;
       expect(snapshot.open).toMatchObject({ at: "step" });
       // This process carries on; what was loaded doesn't see it.
       release();
@@ -650,7 +542,8 @@ describe("snapshots of in-process sessions", () => {
     await test.run(async () => {
       const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
       const token = "alice-queued";
-      const first = createInProcessRuntime({ compiledArtifactsSource }, { world: memoryWorld() });
+      const world = memoryWorld();
+      const first = createInProcessRuntime({ compiledArtifactsSource }, { world });
       const sent = await address(first, token).send("Run the build.", { auth: null });
       const reader = (await first.getEventStream(sent.sessionId)).getReader();
       for (let next = await reader.read(); !next.done; next = await reader.read())
@@ -658,7 +551,7 @@ describe("snapshots of in-process sessions", () => {
       await reader.cancel();
       // Bob's question arrives while the build runs: kept by the time the send returns.
       await address(first, token).send("And the docs?", { auth: null });
-      const snapshot = (await first.load(sent.sessionId))!;
+      const snapshot = (await createWorldSessionStore(world).load(sent.sessionId))!;
       expect(JSON.stringify(snapshot.inputs?.unread)).toContain("And the docs?");
       release();
       await sent.result();
@@ -730,13 +623,13 @@ describe("snapshots of in-process sessions", () => {
       await dying.death;
       await first.dispose();
 
-      const second = createInProcessRuntime({ compiledArtifactsSource }, { world: kept });
-      const saved = (await second.load(sessionId))!;
+      const saved = (await createWorldSessionStore(kept).load(sessionId))!;
       // The settle's lines are past the last step the store kept, which names the settle as
       // where the turn goes on.
       expect(saved.lines.length).toBeGreaterThan(checkpointPosition(saved.checkpoint));
       expect(saved.open).toMatchObject({ at: "cancel", control: { deliveryId: "alice-cancel" } });
 
+      const second = createInProcessRuntime({ compiledArtifactsSource }, { world: kept });
       try {
         await second.restore(saved);
         await second.idle(sessionId);

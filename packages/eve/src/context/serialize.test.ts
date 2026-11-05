@@ -15,7 +15,11 @@ import { fromCompiledBundle } from "#definitions/compiled-agent.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import * as manifestLoader from "#runtime/loaders/manifest.js";
 import * as runtimeContextKeys from "#runtime/sessions/runtime-context-keys.js";
-import { holdSessionAgent, type SessionAgent } from "#runtime/sessions/session-agent.js";
+import {
+  type CodeAgent,
+  holdSessionAgent,
+  type SessionSubagent,
+} from "#runtime/sessions/session-agent.js";
 
 const BaseKey = new ContextKey<string>("test.deserialize.base");
 const DerivedKey = new ContextKey<string>("test.deserialize.derived", {
@@ -221,11 +225,13 @@ describe("state layout admission", () => {
 
 describe("a held agent's reference", () => {
   it("is stored under eve.sessionAgent by its id, and read back as the agent this process holds", async () => {
-    // Only what the codec reads: an agent this process holds, by id.
-    const agent = {
+    // Only what the codec and the hold read: an agent this process holds, by id.
+    const held: Partial<CodeAgent> = {
       id: "serialize-held",
-      reference: { id: "serialize-held", kind: "runtime" as const },
-    } as SessionAgent;
+      reference: { id: "serialize-held", kind: "runtime" },
+      subagents: new Map<string, SessionSubagent>(),
+    };
+    const agent = held as CodeAgent;
     const ctx = new ContextContainer();
     ctx.set(SessionAgentKey, agent);
     const saved = serializeContext(ctx);

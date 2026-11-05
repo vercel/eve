@@ -9,7 +9,7 @@ import type {
   SessionCommand,
   SessionCommandResult,
 } from "#channel/types.js";
-import { registerSessionLineStore } from "#execution/hosts.js";
+import { registerSessionLineStore, resumeRoutedHook } from "#execution/hosts.js";
 import { prepareInitialEntry, type SessionRuntimeConfig } from "#execution/initial-entry.js";
 import {
   readSessionEventHistory,
@@ -27,7 +27,9 @@ import { startPreparedSession, type SessionBoot } from "#execution/session/progr
 import type { SessionTimeouts } from "#execution/session/timeout-control.js";
 import { createUlid } from "#shared/ulid.js";
 import { createInProcessHost, type InProcessHost, type InProcessHostOptions } from "./host.js";
+import type { Keep, Arrival } from "./inbox-transport.js";
 import { planRestore } from "./restore.js";
+import { interruptedRunOutcome, type RunSnapshot, type WorkflowFunction } from "./runs.js";
 import { HostedSession } from "./session-record.js";
 import { saveSnapshot, type StoredSession } from "./session-store.js";
 import type { SessionSnapshot } from "./snapshot.js";
@@ -52,8 +54,9 @@ function isBarrierLine(line: Uint8Array): boolean {
 // deployment runs, with their addresses, steps, and timers held here (`host.ts`). Each session is
 // a run on the runtime's World, which keeps it as it runs (`session-record.ts`, `world-store.ts`),
 // so another runtime on that World continues it, a turn a crash cut off going on from its last
-// step. A session never moves between owners. What needs a
-// durable run of its own (a task, a workflow tool, or a subagent) is refused, saying what it needs.
+// step. A session never moves between owners. Workflow tool runs (subagents, the `agent` tool,
+// tasks, workflow tools) run here too (`runs.ts`), and the sessions they open run on this
+// runtime's siblings, which share its host.
 
 export type InProcessRuntimeOptions = InProcessHostOptions;
 
@@ -66,32 +69,36 @@ export interface InProcessRuntime extends Runtime {
    */
   idle(sessionId: string): Promise<void>;
   /**
-   * A session as another process can restore it. It waits for a running step to return (a model
-   * call, or a long tool call); a session waiting for its next message or on a person restores as
-   * it was, its turn going on from there. For a session mid-step, read `store.load(id)`, which
-   * holds it at any moment.
+   * A session as another process can restore it, with the runs it hadn't heard the end of. It
+   * waits for a running step to return (a model call, or a long tool call); a session waiting
+   * for its next message, on a person, or on its runs restores as it was, its turn going on from
+   * there. For a session mid-step, read `store.load(id)`, which holds it at any moment.
    */
   snapshot(sessionId: string): Promise<SessionSnapshot>;
   /**
-   * Continues a session from its snapshot, under the snapshot's session id. A snapshot this build
-   * can't read is refused, with why.
+   * Continues a session from its snapshot, under the snapshot's session id. With the store that
+   * kept the sessions its subagents opened, their runs go on; any other run it had reports as
+   * interrupted. A snapshot this build can't read is refused, with why.
    */
   restore(snapshot: SessionSnapshot): Promise<{ readonly sessionId: string }>;
   /** The session the runtime's World holds under `sessionId`, as `restore` continues it. */
   load(sessionId: string): Promise<SessionSnapshot | undefined>;
   /** The sessions the runtime's World holds, most recently saved first. */
   sessions(): Promise<readonly StoredSession[]>;
+  /** Makes an authored workflow tool's body, its `"use workflow"` function's twin, run here. */
+  registerWorkflow(workflowId: string, body: WorkflowFunction): void;
   /**
-   * Ends `sessionId` here deliberately: its turn is cancelled, its sandbox is released, and its
-   * stream records the end, in the store too. Resolves once it ended; at once for a session that
-   * isn't running here.
+   * Ends `sessionId` here deliberately: its turn is cancelled, the sessions its runs opened end
+   * with it, its sandbox is released, and its stream records the end, in the store too. Resolves
+   * once it ended; at once for a session that isn't running here.
    */
   end(sessionId: string): Promise<void>;
   /**
-   * Stops serving, and waits for each session's loop to stop. With a store, its sessions are
-   * suspended, not ended: the store keeps each as it was, and nothing it holds (its sandbox, its
-   * files) is torn down, so `restore` continues it as after a crash. Without one, they end. To end
-   * a session on purpose, use `end`.
+   * Stops serving, for this runtime and every runtime its host made, and waits for each session's
+   * loop to stop. With a store, its sessions are suspended, not ended: the store keeps each as it
+   * was, and nothing it holds (its sandbox, its files, the runs and sessions it started) is torn
+   * down, so `restore` continues it as after a crash. Without one, they end. To end a session on
+   * purpose, use `end`.
    */
   dispose(): Promise<void>;
 }
@@ -104,7 +111,16 @@ export function createInProcessRuntime(
   config: SessionRuntimeConfig,
   options: InProcessRuntimeOptions = {},
 ): InProcessRuntime {
-  return runtimeOn(createInProcessHost(options), config);
+  const runtimes = new Map<string, InProcessRuntime>();
+  const runtimeFor = (child: SessionRuntimeConfig): InProcessRuntime => {
+    // An agent defined in code is a held record of functions, which its id names.
+    const key = child.agent === undefined ? JSON.stringify(child) : `agent:${child.agent.id}`;
+    let runtime = runtimes.get(key);
+    if (runtime === undefined) runtimes.set(key, (runtime = runtimeOn(host, child)));
+    return runtime;
+  };
+  const host = createInProcessHost(options, runtimeFor);
+  return runtimeFor(config);
 }
 
 /** The runtime for sessions of `config`'s agent on `host`. */
@@ -125,6 +141,12 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
         },
         timers,
       });
+
+  /** What `sessionId`'s addresses keep, through its record once it has one. */
+  const keeperOf =
+    (sessionId: string): Keep<Arrival> =>
+    async (token, arrival) =>
+      await records.get(sessionId)?.keep(token, arrival);
 
   /**
    * Opens `sessionId`'s stream: lines are kept on the World in batches, each before a reader sees
@@ -149,14 +171,22 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
   };
 
   /** The record of the session `boot` starts, which keeps its addresses' inputs from now on. */
-  const hostedSession = (boot: SessionBoot, inputs?: SessionSnapshot["inputs"]): HostedSession => {
+  const hostedSession = (
+    boot: SessionBoot,
+    saved?: {
+      readonly inputs?: SessionSnapshot["inputs"];
+      readonly lostRuns: readonly RunSnapshot[];
+    },
+  ): HostedSession => {
     const decoder = new TextDecoder();
     const record = new HostedSession({
       boot,
       lines: () => lines.recorded(boot.sessionId).map((line) => decoder.decode(line)),
       flushLines: () => lines.flush(boot.sessionId),
+      runs: (heard) => host.runs.unheard(boot.sessionId, heard),
       suspended: host.suspended,
-      ...(inputs !== undefined && { inputs }),
+      ...(saved?.inputs !== undefined && { inputs: saved.inputs }),
+      ...(saved !== undefined && { lostRuns: saved.lostRuns }),
       store,
     });
     records.set(boot.sessionId, record);
@@ -195,7 +225,7 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
         { ...prepared.entry, ownerDeploymentId: host.deploymentId },
         sessionId,
         {
-          inboxTransport: inboxes.transportFor(sessionId),
+          inboxTransport: inboxes.transportFor(sessionId, { keep: keeperOf(sessionId) }),
           sessionWritable,
           async settleContinuationConflict({ command, continuationToken }) {
             if (inboxes.holder(continuationToken) === undefined)
@@ -277,7 +307,7 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
 
     async restore(snapshot) {
       const { sessionId } = snapshot;
-      const plan = planRestore(snapshot);
+      const plan = planRestore(snapshot, { hasStore: host.keeps });
       if (sessions.has(sessionId)) throw new Error(`Session "${sessionId}" already runs here.`);
       await saveSnapshot(store, snapshot);
       const sessionWritable = openStream(sessionId, snapshot.lines);
@@ -295,16 +325,26 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
         sessionWritable,
         ...(timeout !== undefined && { sessionTimeoutControl: timeout }),
       });
-      const record = hostedSession(boot, snapshot.inputs);
-      const inbox = createSessionInbox(inboxes.transportFor(sessionId));
+      const record = hostedSession(boot, { inputs: snapshot.inputs, lostRuns: plan.lostRuns });
+      const inbox = createSessionInbox(
+        inboxes.transportFor(sessionId, { keep: keeperOf(sessionId) }),
+      );
       await inbox.claimSessionHooks(
         sessionHookTokens({
           serializedContext: plan.boot.serializedContext,
           sessionState: checkpoint.sessionState,
         }),
       );
-      // Queued before the loop starts, so the turn reads them first, in the order they arrived.
-      for (const { command, token } of plan.redeliver) inboxes.deliver(token, command);
+      // Queued before the loop starts, so the turn reads them first, in the order they arrived;
+      // then each lost run's report, which the session keeps as it does any run's. The runs that
+      // go on start before the session is saved, which keeps them as its own.
+      for (const input of plan.redeliver)
+        inboxes.requeue(input.token, "command" in input ? input.command : input.runMessage);
+      for (const lost of plan.lostRuns) {
+        const { inbox: ownerInbox, outcome } = interruptedRunOutcome(lost);
+        await resumeRoutedHook(ownerInbox, outcome);
+      }
+      for (const { heard, run: resumed } of plan.resumedRuns) host.runs.resume(resumed, heard);
       await record.save();
       run(record, boot, inbox);
       return { sessionId };
@@ -315,14 +355,23 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
     sessions: () => store.list(),
 
     async end(sessionId) {
-      const session = running.get(sessionId);
-      if (session === undefined) return;
-      // A reset ends a session.
+      if (!running.has(sessionId)) return;
+      // A reset ends a session, as it ends the session a parent's run opened.
       await host.deliverCommand(sessionCommandHookToken(sessionId), {
         deliveryId: `end-${createUlid()}`,
         kind: "reset",
       });
-      await session;
+      // Its end stops its runs, and each run ends the sessions it opened, after it: the session
+      // has ended once all of them have.
+      const ended = async (id: string): Promise<void> => {
+        await running.get(id);
+        await Promise.all((await host.runs.finished(id)).map(ended));
+      };
+      await ended(sessionId);
+    },
+
+    registerWorkflow(workflowId, body) {
+      host.runs.registerWorkflow(workflowId, body);
     },
 
     dispose: () => host.dispose(),
