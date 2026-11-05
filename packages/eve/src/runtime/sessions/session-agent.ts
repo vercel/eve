@@ -17,7 +17,9 @@ import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
 // The agent a session runs, as a port: what the session loop, its steps and its tools ask of
 // an agent, whatever produced it. Its implementation is a compiled bundle's
-// (`#definitions/compiled-agent.js`). A step boundary carries only its `reference`.
+// (`#definitions/compiled-agent.js`); an agent a process holds instead, rather than one it loads
+// from compiled artifacts, is named by a `HeldReference`. A step boundary carries only its
+// `reference`.
 
 /** What an agent sets for its sessions, beside its definitions. */
 export interface SessionAgentSettings {
@@ -43,8 +45,14 @@ export interface BundleReference {
   readonly nodeId?: string;
 }
 
+/** An agent held by this process only, not compiled from files: its sessions run where it is held. */
+export interface HeldReference {
+  readonly kind: "runtime";
+  readonly id: string;
+}
+
 /** How a step boundary carries a session's agent. */
-export type SessionAgentReference = BundleReference;
+export type SessionAgentReference = BundleReference | HeldReference;
 
 /** What opens an agent's sandbox: the fields `ensureSandboxAccess` takes about the agent. */
 export interface AgentSandbox {
@@ -94,4 +102,53 @@ export interface SessionAgent {
 /** `agent`'s node, the root's id included: what a host names a session's agent node by. */
 export function runtimeNodeId(agent: Pick<SessionAgent, "nodeId">): string {
   return agent.nodeId ?? ROOT_RUNTIME_AGENT_NODE_ID;
+}
+
+// Agents this process holds, by id, rooted on `globalThis` as the runtime session store is: a
+// Workflow step can load its own copy of eve's modules, and must still find what the app held.
+interface HeldAgent {
+  readonly agent: SessionAgent;
+  count: number;
+}
+
+const HELD_AGENTS_GLOBAL_KEY = Symbol.for("eve.held-session-agents");
+const held = ((globalThis as { [HELD_AGENTS_GLOBAL_KEY]?: Map<string, HeldAgent> })[
+  HELD_AGENTS_GLOBAL_KEY
+] ??= new Map());
+
+/**
+ * Holds `agent` in this process so a step can resolve it by its reference's id, which is what a
+ * step boundary carries, until every hold of it is released. A later agent under the same id
+ * replaces it, as a program that builds its agent again does. Only an agent this process holds
+ * (`kind: "runtime"`) can be: a compiled one is loaded from its build.
+ */
+export function holdSessionAgent(agent: SessionAgent): () => void {
+  if (agent.reference.kind !== "runtime")
+    throw new Error(`Agent "${agent.id}" is compiled from files; only a held agent can be held.`);
+  const { id } = agent.reference;
+  let hold = held.get(id);
+  if (hold?.agent !== agent) {
+    hold = { agent, count: 0 };
+    held.set(id, hold);
+  }
+  const thisHold = hold;
+  thisHold.count += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    thisHold.count -= 1;
+    if (thisHold.count === 0 && held.get(id) === thisHold) held.delete(id);
+  };
+}
+
+/** The agent this process holds under `id`. */
+export function resolveHeldSessionAgent(id: string): SessionAgent {
+  const agent = held.get(id)?.agent;
+  if (agent === undefined) {
+    throw new Error(
+      `No agent "${id}" is held in this process. A session of a held agent runs only where it is held: hold it (holdSessionAgent) before the session's steps do.`,
+    );
+  }
+  return agent;
 }
