@@ -25,6 +25,7 @@ import {
   type InternalContext,
   type Kept,
 } from "./definition.js";
+import type { ModelMetadata } from "#internal/model-catalog.js";
 
 const MODEL_REACTION_ID = "model:agent";
 const DYNAMIC_MODEL_SELECTION_ERROR_CODE = "EVE_DYNAMIC_MODEL_SELECTION_FAILED";
@@ -69,7 +70,7 @@ export async function loadModelDefinition(bundle: CompiledBundle): Promise<Defin
     dynamicModel,
     scope: { moduleMap: bundle.moduleMap, nodeId: bundle.nodeId },
   });
-  return modelDefinition(bundle, {
+  return modelDefinition(bundle.modelMetadata, {
     choose: authoredEvaluate(dynamicEvaluate(definition)),
     id: MODEL_REACTION_ID,
     label: `${dynamicModel.logicalPath}#model`,
@@ -78,7 +79,7 @@ export async function loadModelDefinition(bundle: CompiledBundle): Promise<Defin
 
 /** A definition that chooses the model. */
 function modelDefinition(
-  bundle: CompiledBundle,
+  modelMetadata: () => Promise<ModelMetadata>,
   input: {
     readonly id: string;
     readonly label: string;
@@ -92,7 +93,7 @@ function modelDefinition(
           async (evaluation) => {
             const result = await input.choose(evaluation);
             try {
-              return await keptModel(result, bundle);
+              return await keptModel(result, modelMetadata);
             } catch (error) {
               throw new DynamicModelSelectionError(error);
             }
@@ -110,10 +111,13 @@ function modelDefinition(
 }
 
 /** Resolves a model result to what the slot records, and the provider the process holds. */
-async function keptModel(result: unknown, bundle: CompiledBundle): Promise<Kept> {
+async function keptModel(
+  result: unknown,
+  modelMetadata: () => Promise<ModelMetadata>,
+): Promise<Kept> {
   const selection = await resolveRuntimeModelSelection({
     durability: "live",
-    modelMetadata: bundle.modelMetadata,
+    modelMetadata,
     selection: result as PublicAgentDynamicModelResult,
   });
   // Mock runs replace real providers, but keep explicitly scripted responders.

@@ -2,15 +2,14 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { pathExists } from "#execution/sandbox/bindings/local-provider-utils.js";
-import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
-import { shellQuote } from "#execution/sandbox/shell-quote.js";
+import { connectJustBash } from "#execution/sandbox/just-bash-connection.js";
 import { importOptionalEnginePackage } from "#internal/application/optional-package-import.js";
 import { loadOptionalEnginePackage } from "#internal/application/optional-package-install.js";
 import type {
   JustBashFilesystem,
   JustBashSandboxCreateOptions,
 } from "#public/sandbox/just-bash-sandbox.js";
-import { SANDBOX_AGENT_ENV, type SandboxConnection } from "#public/sandbox/provider.js";
+import type { SandboxConnection } from "#public/sandbox/provider.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import { isObject } from "#shared/guards.js";
 
@@ -101,97 +100,20 @@ export async function createBashSandbox(input: {
 
   await filesystem.mkdir(WORKSPACE_ROOT, { recursive: true });
 
-  const sandbox = await justBash.Sandbox.create({
-    cwd: WORKSPACE_ROOT,
-    customCommands: [
-      // just-bash has no realpath command. Workspace tools need the filesystem's
-      // symlink-aware result, not lexical path normalization, for containment.
-      justBash.defineCommand("realpath", async (args, context) => {
-        const path = args.at(-1);
-        if (
-          args.length !== 4 ||
-          args[0] !== "-e" ||
-          args[1] !== "-z" ||
-          args[2] !== "--" ||
-          !path
-        ) {
-          return { stdout: "", stderr: "realpath: expected -e -z -- path", exitCode: 2 };
-        }
-        try {
-          const real = await context.fs.realpath(path);
-          await context.fs.stat(real);
-          return { stdout: real + "\0", stderr: "", exitCode: 0 };
-        } catch (error) {
-          return { stdout: "", stderr: `realpath: ${String(error)}`, exitCode: 1 };
-        }
-      }),
-      ...(input.experimental?.customCommands ?? []),
-    ],
+  const { connection, environment } = await connectJustBash({
+    customCommands: input.experimental?.customCommands,
     env: metadata === null ? undefined : { ...metadata.env },
-    fs: filesystem,
-    network: {
-      dangerouslyAllowFullInternetAccess: true,
-    },
+    filesystem,
+    justBash,
   });
 
   return {
+    ...connection,
     async captureState() {
       await writeLocalMetadata(metadataPath, {
-        env: { ...sandbox.bashEnvInstance.getEnv() },
+        env: environment(),
         version: LOCAL_SANDBOX_METADATA_VERSION,
       });
-    },
-    async readFile({ path }) {
-      try {
-        return await filesystem.readFileBuffer(path);
-      } catch (error) {
-        if (!(await filesystem.exists(path))) return null;
-        throw error;
-      }
-    },
-    async removePath(options) {
-      await filesystem.rm(options.path, {
-        force: options.force,
-        recursive: options.recursive,
-      });
-    },
-    async spawn(options) {
-      if (options.signal?.aborted) {
-        throw new DOMException("The operation was aborted.", "AbortError");
-      }
-      if (options.stdin === true) {
-        throw new Error("The just-bash sandbox does not support `stdin` on spawn yet.");
-      }
-      // The command sits on its own lines so a trailing `# comment` cannot
-      // swallow the closing brace. `cd X || exit` would lose cd's error in
-      // just-bash, so the braces keep `&&` applying to the whole command.
-      const wrapped = `( cd ${shellQuote(options.workingDirectory)} && {\n${options.command}\n} )`;
-      // just-bash has no separate `bash` executable — it IS the bash
-      // interpreter. The `eval` builtin re-parses its single string
-      // argument as a shell line, which is the only way to feed an
-      // arbitrary shell command into the object-form `runCommand`
-      // (the only form that supports `detached`).
-      const command = await sandbox.runCommand({
-        args: [wrapped],
-        cmd: "eval",
-        detached: true,
-        // just-bash has no sandbox-level environment for `SANDBOX_AGENT_ENV`, so each command gets it.
-        env: { ...SANDBOX_AGENT_ENV, ...options.env },
-        signal: options.signal,
-      });
-      return adaptMultiplexedCommandToSandboxProcess({
-        command,
-        getOutput: (log) => log.type,
-      });
-    },
-    async stop() {
-      await sandbox.stop();
-    },
-    async writeFiles({ files }) {
-      for (const file of files) {
-        await filesystem.mkdir(dirname(file.path), { recursive: true });
-        await filesystem.writeFile(file.path, file.content);
-      }
     },
   };
 }
