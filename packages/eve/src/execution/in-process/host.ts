@@ -1,3 +1,4 @@
+import type { StartWorkflowToolRun } from "#execution/tools/workflow/start.js";
 import type { Runtime, SessionCommand, SessionCommandResult } from "#channel/types.js";
 import { agentSessionsOver } from "#execution/agent-sessions/sessions-over.js";
 import { dispatchCoordinationOn } from "#execution/coordination-dispatch-step.js";
@@ -115,6 +116,11 @@ export interface InProcessHostOptions {
    * a World host's, whose sessions run wherever their activations do. Without one, a step can't.
    */
   readonly stepRuntime?: () => Runtime;
+  /**
+   * Starts a durable run (Workflow's) of a workflow tool whose body this host doesn't hold: an
+   * authored one, on a deployment that also runs Workflow. Without one, its run fails.
+   */
+  readonly startDurableRun?: StartWorkflowToolRun;
 }
 
 /** A session running here: what the host records of it, and its loop. */
@@ -229,6 +235,7 @@ export function createInProcessHost(
     await deliverCommand(sessionCommandHookToken(sessionId), command);
 
   const runs = createInProcessRuns({
+    ...(options.startDurableRun !== undefined && { startDurableRun: options.startDurableRun }),
     dispatchSession,
     inboxes,
     stepBoundary,

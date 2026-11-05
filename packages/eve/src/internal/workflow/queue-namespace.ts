@@ -35,6 +35,23 @@ export function createEveWorkflowQueueTrigger(agentName: string) {
   };
 }
 
+/**
+ * The namespace a World host's activations travel in: the agent's own, apart from Workflow's,
+ * which a deployment of it also runs (its authored workflow tools). Not a hex digit, `w` can't
+ * make another agent's namespace.
+ */
+export function deriveEveWorldHostQueueNamespace(agentName: string): string {
+  return `${deriveEveWorkflowQueueNamespace(agentName)}w`;
+}
+
+/** Builds the Vercel queue trigger that invokes an eve agent's World host queue function. */
+export function createEveWorldHostQueueTrigger(agentName: string) {
+  return {
+    ...createEveWorkflowQueueTrigger(agentName),
+    topic: `${workflowQueuePrefix(deriveEveWorldHostQueueNamespace(agentName))}*`,
+  };
+}
+
 /** Installs the agent-scoped namespace used by Workflow runtime operations. */
 export function installEveWorkflowQueueNamespace(agentName: string): string {
   const namespace = deriveEveWorkflowQueueNamespace(agentName);

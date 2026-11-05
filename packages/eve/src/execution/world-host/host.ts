@@ -1,3 +1,4 @@
+import type { StartWorkflowToolRun } from "#execution/tools/workflow/start.js";
 import { createChannelAddress } from "#channel/channel-address.js";
 import { RunExpiredError } from "#compiled/@workflow/errors/index.js";
 import { ScheduleDispatcher } from "#channel/schedule.js";
@@ -10,6 +11,7 @@ import {
   registerFallbackLineStore,
   registerHost,
   uninstallDurableHost,
+  type DurableHost,
 } from "#execution/hosts.js";
 import { logicalSessionInboxToken } from "#execution/session-inbox/address.js";
 import type { SessionLineStore } from "#execution/session-line-store.js";
@@ -83,6 +85,15 @@ export interface WorldHostOptions {
    * its origin, such as a deployment's URL. Without one, a tool that needs a sign-in can't ask.
    */
   readonly callbackBaseUrl?: string;
+  /**
+   * Workflow, for what a World host doesn't run itself: a deployment's authored workflow tools,
+   * whose runs it starts there (`startRun`); their hooks, status and cancelling, and connection
+   * event watches, are Workflow's (`host`, which this host's durable host goes on to).
+   */
+  readonly workflow?: {
+    readonly host: DurableHost;
+    readonly startRun: StartWorkflowToolRun;
+  };
   /**
    * The queue namespace its activations travel in: a deployed agent's own (its queue function's
    * trigger names it). A default shared by World hosts otherwise.
@@ -219,8 +230,11 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
       const name = same?.[0] ?? (compiled.length === 1 ? compiled[0]![0] : undefined);
       return name === undefined ? undefined : runtime(name);
     },
+    ...(options.workflow !== undefined && { fallback: options.workflow.host }),
   });
-  if (installedDurableHost() === undefined) installDurableHost(durable);
+  // It replaces Workflow's, which it goes on to; a later install of Workflow's keeps it.
+  const holder = installedDurableHost();
+  if (holder === undefined || holder.name === durable.wraps) installDurableHost(durable);
   // Dynamic schedules (`worldScheduleProvider`) are kept on this World, and fired on `tick`.
   const scheduleStore = worldScheduleStore(world);
   const releaseSchedules = registerWorldScheduleStore(scheduleStore);
@@ -257,6 +271,7 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
       ...(options.callbackBaseUrl !== undefined && { callbackBaseUrl: options.callbackBaseUrl }),
       entities,
       runtime: (name) => runtime(name),
+      ...(options.workflow !== undefined && { startDurableRun: options.workflow.startRun }),
       world,
     }),
     {
