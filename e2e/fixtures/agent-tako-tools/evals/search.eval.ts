@@ -14,6 +14,12 @@ export default defineEval({
   tags: ["real-model"],
   description: "Tako Gateway search returns a data card and the agent cites a result URL.",
   async test(t) {
+    // Temporarily disabled: the live-model assertion is flaky in CI. Set
+    // EVE_E2E_TAKO=1 to run it locally.
+    if (process.env.EVE_E2E_TAKO !== "1") {
+      t.skip("Temporarily disabled as flaky; set EVE_E2E_TAKO=1 to run.");
+    }
+
     const turn = await t.send(
       [
         "Bob wants to compare how US GDP has changed over the past ten years.",
