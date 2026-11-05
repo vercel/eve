@@ -1,7 +1,7 @@
 {
   "src/execution/session/program.ts": {
     "static.modules": 686,
-    "static.kib": 2658,
+    "static.kib": 2659,
     "static.builtinFiles": 53,
     "static.workflow": 0,
     "total.modules": 865,
@@ -35,7 +35,7 @@
     "static.builtinFiles": 61,
     "static.workflow": 0,
     "total.modules": 984,
-    "total.kib": 6783,
+    "total.kib": 6784,
     "total.builtinFiles": 138,
     "total.workflow": 0
   },
@@ -55,7 +55,7 @@
     "static.builtinFiles": 64,
     "static.workflow": 0,
     "total.modules": 992,
-    "total.kib": 6803,
+    "total.kib": 6804,
     "total.builtinFiles": 140,
     "total.workflow": 0
   }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AliasTakenError,
   type ActivationOutcome,
   type Entities,
   type EntityHandle,
@@ -147,6 +148,12 @@ export function describeEntities(name: string, make: () => Promise<EntitiesUnder
           expect(await entities.lookup("conformance-alias")).toBe(key);
           expect(await entities.lookup("nobody")).toBeUndefined();
           await expect(entities.create(key, { meta: {} })).rejects.toThrow();
+          // An alias reaches one entity: another created with it is refused, and it still
+          // reaches the first.
+          await expect(
+            entities.create(entities.newKey(), { aliases: ["conformance-alias"], meta: {} }),
+          ).rejects.toThrow(AliasTakenError);
+          expect(await entities.lookup("conformance-alias")).toBe(key);
           expect((await entities.list()).map((entity) => entity.key)).toContain(key);
         }),
       );
