@@ -21,8 +21,8 @@ interface FileTreeItem {
 }
 
 const MODES = [
-  { id: "folder", label: "Simple agent" },
-  { id: "tenants", label: "Multi-tenant agent" },
+  { id: "folder", label: "Simple agent (files)" },
+  { id: "tenants", label: "Multi-tenant agent (dynamic)" },
 ] as const;
 
 type Mode = (typeof MODES)[number]["id"];
