@@ -405,6 +405,11 @@ export function createParentContext(
 export async function loadAgentSessionBundle(
   context: AgentSessionContext,
 ): Promise<CompiledBundle> {
+  if (context.bundle === undefined) {
+    throw new NonRetryableError(
+      `ctx.agent() opens the subagents of an agent compiled from files; "${context.agent.id}" is held by this process, not compiled.`,
+    );
+  }
   return await getCompiledRuntimeAgentBundle({
     compiledArtifactsSource: resolveDurableCompiledArtifactsSource(context.bundle.source),
     nodeId: context.bundle.nodeId,

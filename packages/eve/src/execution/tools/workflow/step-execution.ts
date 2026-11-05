@@ -4,11 +4,10 @@ import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from 
 import type { SessionContext } from "#context/session-context.js";
 import { ensureSandboxAccess, type EnsuredSandboxAccess } from "#execution/sandbox/ensure.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
-import {
-  type CompiledRuntimeAgentBundle,
-  getCompiledRuntimeAgentBundle,
-} from "#runtime/sessions/compiled-agent-cache.js";
+import { ownerReference } from "#execution/agent-sessions/owner.js";
+import { resolveSessionAgent } from "#runtime/sessions/runtime-context-keys.js";
+import { runtimeNodeId, type SessionAgent } from "#runtime/sessions/session-agent.js";
+import {} from "#runtime/sessions/compiled-agent-cache.js";
 import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
@@ -85,7 +84,7 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
         to: createToolChannelTo({
           createRuntime: createWorkflowRuntime,
           delegated: input.delegated,
-          loadBundle: loadAgent,
+          loadAgent,
         }),
       };
       Object.defineProperty(ctx, "agents", {
@@ -129,19 +128,16 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
   return wrapped;
 }
 
-/** Loads the compiled agent that owns the tool, the first time a step needs it. */
-function stepAgentLoader(input: WorkflowStepContext): () => Promise<CompiledRuntimeAgentBundle> {
-  const { bundle } = input.sandbox;
+/** Loads the agent that owns the tool, the first time a step needs it. */
+function stepAgentLoader(input: WorkflowStepContext): () => Promise<SessionAgent> {
+  const reference = ownerReference(input.sandbox);
   // The step's own context replaces the delivery's, which carries the
   // development generation a development source resolves to.
   const delivery = contextStorage.getStore();
-  const resolveSource = () => resolveDurableCompiledArtifactsSource(bundle.source);
   return async () =>
-    await getCompiledRuntimeAgentBundle({
-      compiledArtifactsSource:
-        delivery === undefined ? resolveSource() : contextStorage.run(delivery, resolveSource),
-      nodeId: bundle.nodeId,
-    });
+    delivery === undefined
+      ? await resolveSessionAgent(reference)
+      : await contextStorage.run(delivery, () => resolveSessionAgent(reference));
 }
 
 /**
@@ -155,21 +151,23 @@ function stepAgentLoader(input: WorkflowStepContext): () => Promise<CompiledRunt
  * nor delete it.
  * A step that never asks for it loads nothing.
  */
-function openStepSandbox(
-  input: WorkflowStepContext,
-  loadAgent: () => Promise<CompiledRuntimeAgentBundle>,
-) {
+function openStepSandbox(input: WorkflowStepContext, loadAgent: () => Promise<SessionAgent>) {
   const { sessionId, state } = input.sandbox;
   let opening: Promise<EnsuredSandboxAccess> | undefined;
   let released = false;
   const open = async (): Promise<EnsuredSandboxAccess> => {
-    const compiled = await loadAgent();
-    const node = compiled.graph.root;
+    const agent = await loadAgent();
+    const sandbox = await agent.sandbox();
+    if (sandbox === undefined) {
+      throw new Error(
+        `ctx.getSandbox() in tool "${input.toolName}": the session's agent has no sandbox.`,
+      );
+    }
     return await ensureSandboxAccess({
-      compiledArtifactsSource: compiled.compiledArtifactsSource,
-      nodeId: node.nodeId,
+      ...sandbox.template,
+      nodeId: runtimeNodeId(agent),
       ownsSandbox: false,
-      registry: node.sandboxRegistry,
+      registry: sandbox.registry,
       sessionId,
       state: state ?? null,
       shutdownTracking: "none",
