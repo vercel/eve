@@ -620,7 +620,8 @@ function webhookView(
       ...answered.map(shownText),
     ],
     visible() {
-      // One slot per message, holding its latest edit; a message with no id can't be edited.
+      // One slot per message, holding its latest edit. Without `shownMessage` a driver can't tie
+      // an edit to the message it rewrites, so each of its posts and edits is its own message.
       const latest = new Map<string, ShownMessage>();
       const order: (string | ShownText)[] = [];
       for (const call of calls) {

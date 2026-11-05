@@ -123,10 +123,12 @@ const LINQ_SIGN_IN_NOT_PRIVATE = Object.fromEntries(
   ]),
 ) satisfies Partial<Record<ContractRuleName, BrokenCell>>;
 
+const SIGN_IN_COMPLETED_RULE = "completing a sign-in stops showing its link and code";
+
 /** The challenge a person was shown stays on screen after they finish signing in. */
 function signInLingers(reason: string): Partial<Record<ContractRuleName, BrokenCell>> {
   return {
-    "completing a sign-in stops showing its link and code": {
+    [SIGN_IN_COMPLETED_RULE]: {
       reason,
       symptom: /the sign-in prompt is still shown after signing in/u,
     },
@@ -136,6 +138,15 @@ function signInLingers(reason: string): Partial<Record<ContractRuleName, BrokenC
 const SIGN_IN_LINGERS = signInLingers(
   "the challenge message stays as it was sent after the sign-in completes",
 );
+
+/**
+ * Without `shownMessage`, the driver reads each edit as a new message, so the challenge stays in
+ * what a person sees even after the channel edits it away, and a fix couldn't flip the cell.
+ */
+const EDITS_UNREADABLE = {
+  [SIGN_IN_COMPLETED_RULE]:
+    "the driver reads an edit as a new message, so it can't see the challenge edited away",
+} satisfies Partial<Record<ContractRuleName, string>>;
 
 /** Slack's sign-in prompt is ephemeral, which only a press's `response_url` can delete. */
 const SLACK_SIGN_IN_LINGERS = signInLingers(
@@ -290,8 +301,8 @@ const channelConformance = {
     },
   ],
   linq: [{ driver: linqDriver, broken: LINQ_SIGN_IN_NOT_PRIVATE }],
-  "linq-dm": [{ dm: true, driver: () => linqDriver("private"), broken: SIGN_IN_LINGERS }],
-  photon: [{ driver: photonDriver, broken: SIGN_IN_LINGERS }],
+  "linq-dm": [{ dm: true, driver: () => linqDriver("private"), unsupported: EDITS_UNREADABLE }],
+  photon: [{ driver: photonDriver, unsupported: EDITS_UNREADABLE }],
   slack: [
     {
       driver: slackDriver,
@@ -363,7 +374,12 @@ const channelConformance = {
       },
     },
   ],
-  twilio: [{ driver: twilioDriver, broken: SIGN_IN_LINGERS }],
+  twilio: [
+    {
+      driver: twilioDriver,
+      unsupported: { [SIGN_IN_COMPLETED_RULE]: "a sent SMS can't be edited or taken back" },
+    },
+  ],
   "web-chat": [
     {
       driver: webChatDriver,
