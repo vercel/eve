@@ -1,5 +1,6 @@
 "use client";
 
+import { IconChevronRightSmall } from "@vercel/geistdocs/assets/icons";
 import { Badge } from "@vercel/geistdocs/components/badge";
 import { type ReactNode, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -228,25 +229,49 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
     </div>
   );
 
-  // Mobile: the sidebar/code-panel split is cramped on a phone, so each file
-  // simply shows its code block right beneath it in a stacked list.
+  // Mobile: the sidebar/code-panel split is cramped on a phone, so the folder becomes one
+  // window of collapsible files. Only the first dynamic file starts open, and opening a file
+  // closes the last one (native <details name> grouping, no script).
+  const firstDynamic = items.findIndex((item) => item.results);
   const mobile = (
-    <div className="space-y-4">
-      {items.map((item, i) => (
-        <div className="overflow-hidden material-large" key={item.name}>
-          <div className="flex h-12 items-center gap-2 border-b px-4">
-            <span className="min-w-0 truncate font-medium text-gray-1000 text-sm">
-              {item.fileName}
-            </span>
-            <Tag active={false} customer={customer} item={item} required={i === 0} />
-          </div>
-          <p className="border-b px-4 py-3 text-copy-14 text-gray-900">{item.description}</p>
-          <Resolution customer={customer} item={item} />
-          <div className={cn("pb-2 [&>div]:mb-0", branchHighlight)} data-customer={customer.id}>
-            {item.code}
-          </div>
-        </div>
-      ))}
+    <div className="overflow-hidden material-large">
+      <div className="flex h-12 items-center border-b px-4">
+        <span className="font-medium text-gray-1000 text-sm">agent/</span>
+        <span className="ml-2 truncate text-gray-700 text-sm">example</span>
+      </div>
+      {items.map((item, i) => {
+        const missing = item.results?.[customer.id] === null;
+        return (
+          <details
+            className="group border-b last:border-b-0"
+            key={item.name}
+            name="agent-file"
+            open={i === firstDynamic}
+          >
+            <summary className="flex h-12 cursor-pointer list-none items-center gap-2 px-4 text-sm [&::-webkit-details-marker]:hidden">
+              <IconChevronRightSmall
+                aria-hidden
+                className="shrink-0 text-gray-700 transition-transform group-open:rotate-90 motion-reduce:transition-none"
+                size={16}
+              />
+              <span
+                className={cn(
+                  "min-w-0 truncate group-open:font-medium",
+                  missing ? "text-gray-500 line-through" : "text-gray-1000",
+                )}
+              >
+                {item.fileName}
+              </span>
+              <Tag active={false} customer={customer} item={item} required={i === 0} />
+            </summary>
+            <p className="border-t px-4 py-3 text-copy-14 text-gray-900">{item.description}</p>
+            <Resolution customer={customer} item={item} />
+            <div className={cn("pb-2 [&>div]:mb-0", branchHighlight)} data-customer={customer.id}>
+              {item.code}
+            </div>
+          </details>
+        );
+      })}
     </div>
   );
 
@@ -267,12 +292,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
   return (
     <>
       {switcher}
-      <div className="md:hidden">
-        <p className="mb-3 text-copy-14 text-gray-700">
-          <span className="font-medium text-gray-1000">agent/</span> example
-        </p>
-        {mobile}
-      </div>
+      <div className="md:hidden">{mobile}</div>
       <div className="hidden md:block">{board}</div>
       {footnote}
     </>
