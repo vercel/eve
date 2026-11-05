@@ -141,7 +141,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
             <div className="border-r">
               <div className="flex h-12 items-center border-b px-4">
                 <span className="font-medium text-gray-1000 text-sm">agent/</span>
-                <span className="ml-2 truncate text-gray-700 text-sm">example support agent</span>
+                <span className="ml-2 truncate text-gray-700 text-sm">example</span>
               </div>
               <div className="space-y-0.5 p-2">
                 {items.map((item, i) => {
@@ -236,7 +236,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
       {switcher}
       <div className="md:hidden">
         <p className="mb-3 text-copy-14 text-gray-700">
-          <span className="font-medium text-gray-1000">agent/</span> example support agent
+          <span className="font-medium text-gray-1000">agent/</span> example
         </p>
         {mobile}
       </div>
