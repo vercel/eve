@@ -112,7 +112,12 @@ function Tag({
 
 export function FileTreeView({ items }: { items: FileTreeItem[] }) {
   const [customer, setCustomer] = useState<Customer>(CUSTOMERS[0]);
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  // Both layouts open on the first dynamic file, the one that changes with the switch.
+  const firstDynamic = Math.max(
+    items.findIndex((item) => item.results),
+    0,
+  );
+  const [selectedIndex, setSelectedIndex] = useState(firstDynamic);
   const selected = items[selectedIndex];
 
   const switcher = (
@@ -229,7 +234,6 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
   // Mobile: the sidebar/code-panel split is cramped on a phone, so the folder becomes one
   // window of collapsible files. Only the first dynamic file starts open, and opening a file
   // closes the last one (native <details name> grouping, no script).
-  const firstDynamic = items.findIndex((item) => item.results);
   const mobile = (
     <div className="overflow-hidden material-large">
       <div className="flex h-12 items-center border-b px-4">
