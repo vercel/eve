@@ -71,6 +71,15 @@ describe("buildAuthCompletedText", () => {
       }),
     ).toBe("Linear sign-in cancelled");
   });
+
+  it.each(["withdrawn", "interrupted", "abandoned"] as const)(
+    "reports a %s sign-in as cancelled, without the runtime's reason code",
+    (outcome) => {
+      expect(
+        buildAuthCompletedText({ displayName: "GitHub", outcome, reason: "turn-cancelled" }),
+      ).toBe("GitHub sign-in cancelled");
+    },
+  );
 });
 
 describe("buildAuthEphemeralBlocks", () => {

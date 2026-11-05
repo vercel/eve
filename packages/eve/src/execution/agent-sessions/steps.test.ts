@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FatalError } from "#compiled/@workflow/core/index.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
+import { agent } from "#public/tools/agent.js";
 import {
   openAgentSessionStep,
   sendAgentSessionMessageStep,
@@ -10,6 +11,7 @@ import {
 } from "#execution/agent-sessions/steps.js";
 
 const mocks = vi.hoisted(() => ({
+  bundle: { graph: {} } as Record<string, unknown>,
   createSession: vi.fn(),
   dispatch: vi.fn(),
   resolveSessionInbox: vi.fn(),
@@ -49,7 +51,7 @@ vi.mock("#execution/session-inbox/resume.js", async (importOriginal) => ({
   resumeSessionStartHook: mocks.resumeSessionStartHook,
 }));
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
-  getCompiledRuntimeAgentBundle: async () => ({ graph: {} }),
+  getCompiledRuntimeAgentBundle: async () => mocks.bundle,
 }));
 vi.mock("#runtime/durable-compiled-artifacts-source.js", () => ({
   resolveDurableCompiledArtifactsSource: (source: unknown) => source,
@@ -100,6 +102,7 @@ const message = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.bundle = { graph: {} };
   mocks.runtimeConfig = undefined;
   mocks.targetKind = "local";
 });
@@ -168,6 +171,119 @@ describe("openAgentSessionStep", () => {
       }),
     ).rejects.toBeInstanceOf(FatalError);
     expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("openAgentSessionStep with an agent({ models }) option", () => {
+  const haiku = {
+    doGenerate: async () => ({}),
+    doStream: async () => ({}),
+    modelId: "claude-haiku-5",
+    provider: "anthropic.messages",
+    specificationVersion: "v3",
+  } as const;
+  const tool = agent({
+    models: {
+      haiku: {
+        description: "Cheap lookups",
+        model: haiku,
+        modelContextWindowTokens: 200_000,
+        reasoning: "low",
+      },
+      luna: {
+        description: "Routine tasks",
+        model: "openai/gpt-6-luna",
+        modelContextWindowTokens: 400_000,
+      },
+    },
+  });
+  const toolSource = {
+    logicalPath: "tools/agent.ts",
+    sourceId: "tools-agent",
+    sourceKind: "module",
+  };
+
+  beforeEach(() => {
+    mocks.bundle = {
+      graph: {},
+      modelMetadata: async () => ({ fetchedAt: null, models: [] }),
+      moduleMap: {
+        nodes: {
+          __root__: {
+            modules: { "tools-agent": { default: tool }, "tools-reviewer": { default: {} } },
+          },
+        },
+      },
+      resolvedAgent: {
+        tools: [
+          {
+            ...toolSource,
+            behavior: { handling: { kind: "workflow-tool" } },
+            name: "agent",
+          },
+          {
+            behavior: { handling: { kind: "workflow-tool" } },
+            logicalPath: "tools/invoke-reviewer.ts",
+            name: "invoke-reviewer",
+            sourceId: "tools-reviewer",
+            sourceKind: "module",
+          },
+        ],
+      },
+    };
+    mocks.createSession.mockResolvedValue({ sessionId: "child-1" });
+  });
+
+  const open = (key: string) =>
+    openAgentSessionStep({ ...message, model: key, name: "agent", toolName: "agent" });
+
+  it("binds a Gateway option inline", async () => {
+    await open("luna");
+
+    expect(mocks.runtimeConfig).toMatchObject({
+      agentSessionRuntimeOverrides: {
+        model: { contextWindowTokens: 400_000, id: "openai/gpt-6-luna" },
+      },
+    });
+    expect(mocks.runtimeConfig).not.toHaveProperty("agentSessionRuntimeOverrides.model.source");
+  });
+
+  it("binds a live model option as a reference to the tool and key", async () => {
+    await open("haiku");
+
+    expect(mocks.runtimeConfig).toEqual(
+      expect.objectContaining({
+        agentSessionRuntimeOverrides: {
+          model: expect.objectContaining({
+            contextWindowTokens: 200_000,
+            reasoning: "low",
+            source: toolSource,
+            sourceModelOption: "haiku",
+          }),
+        },
+      }),
+    );
+    expect(JSON.parse(JSON.stringify(mocks.runtimeConfig))).toMatchObject({
+      agentSessionRuntimeOverrides: { model: { sourceModelOption: "haiku" } },
+    });
+  });
+
+  it("rejects a model the tool doesn't list, even a Gateway ID, without retrying", async () => {
+    await expect(open("openai/gpt-6-sol")).rejects.toBeInstanceOf(FatalError);
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("resolves a model from any other workflow tool's run as a model selection", async () => {
+    await openAgentSessionStep({
+      ...message,
+      model: { model: "openai/gpt-6-sol", modelContextWindowTokens: 400_000 },
+      name: "agent",
+      toolName: "invoke-reviewer",
+    });
+
+    expect(mocks.runtimeConfig).toMatchObject({
+      agentSessionRuntimeOverrides: { model: { id: "openai/gpt-6-sol" } },
+    });
   });
 });
 
