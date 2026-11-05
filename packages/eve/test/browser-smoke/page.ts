@@ -9,8 +9,8 @@ import { MockLanguageModelV4 } from "ai/test";
 
 import {
   always,
-  codeAgent,
   createSession,
+  defineAgent,
   defineTool,
   eve,
   indexedDbWorld,
@@ -125,7 +125,7 @@ async function run(): Promise<SmokeResult> {
     }),
   );
   const deployed: unknown[] = [];
-  const release = codeAgent({
+  const release = defineAgent({
     // eve's own default tools (bash, read_file, write_file) in a just-bash sandbox whose files
     // live in IndexedDB, the browser's default.
     definitions: eve.defaults({ sandbox: memorySandbox(), without: ["web_fetch", "web_search"] }),

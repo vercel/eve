@@ -1,3 +1,4 @@
+import type { AgentContentsDefinition } from "#public/definitions/agent.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ApprovalPolicy } from "#approval/definition.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -466,3 +467,20 @@ export type PublicAgentDefinition = PublicAgentDefinitionBase &
         readonly modelOptions?: never;
       }
   );
+
+/**
+ * The fields of `defineAgent` that only an agent defined in code takes: what an `agent/`
+ * directory holds as files. Each says where an agent built from files puts it instead, for the
+ * build's error when `agent.ts` sets one.
+ */
+export const AGENT_CODE_ONLY_FIELDS = {
+  bare: "eve's runtime definitions always apply to an agent built from files; remove it",
+  connections: "put each connection in agent/connections/<name>.ts",
+  definitions: "an agent built from files declares its definitions as files under agent/",
+  instructions: "write them in agent/instructions.md",
+  name: "an agent built from files takes its name from its package name or app folder; remove it",
+  skills: "put each skill in agent/skills/<name>.md or agent/skills/<name>/SKILL.md",
+  subagents: "put each subagent in agent/subagents/<name>/agent.ts",
+  tools: "put each tool in agent/tools/<name>.ts",
+  version: "a deployment names the version of an agent built from files; remove it",
+} as const satisfies Record<keyof AgentContentsDefinition, string>;

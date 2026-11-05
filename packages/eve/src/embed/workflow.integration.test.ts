@@ -2,7 +2,8 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
-import { codeAgent } from "#embed/agent.js";
+import { codeAgentOf } from "#embed/agent.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -43,18 +44,19 @@ const model = markMockModel(
 
 describe("an agent defined in code, on Workflow", () => {
   it("hands a compacted session to a successor run, which goes on from the summary", async () => {
-    const notes = codeAgent({
-      model: { model, modelContextWindowTokens: 200_000 },
+    const notes = defineAgent({
+      model,
+      modelContextWindowTokens: 200_000,
       name: "handoff-notes",
     });
     const test = await createTestRuntime({ agent: { name: "workflow-code-agent-host" } });
     await test.run(async () => {
-      const release = holdSessionAgent(notes);
+      const release = holdSessionAgent(codeAgentOf(notes));
       const alice = createChannelAddress({
         adapter: { kind: "http" },
         channelName: "http",
         continuationToken: "alice-code-agent-handoff",
-        runtime: createWorkflowRuntime({ agent: notes }),
+        runtime: createWorkflowRuntime({ agent: codeAgentOf(notes) }),
       });
       try {
         const first = await (

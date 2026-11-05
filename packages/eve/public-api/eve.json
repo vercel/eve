@@ -1,6 +1,7 @@
 [
   "AgentBuildDefinition",
   "AgentCompactionDefinition",
+  "AgentContentsDefinition",
   "AgentDefinition",
   "AgentExperimentalDefinition",
   "AgentLimitsDefinition",

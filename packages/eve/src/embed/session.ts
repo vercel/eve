@@ -12,7 +12,9 @@ import {
   openInteractions,
 } from "#protocol/session-projection/public-view.js";
 import type { Interaction } from "#protocol/session-projection/reader.js";
-import { holdSessionAgent, type CodeAgent } from "#runtime/sessions/session-agent.js";
+import { codeAgentOf } from "#embed/agent.js";
+import type { DefinedAgent } from "#public/definitions/agent.js";
+import { holdSessionAgent } from "#runtime/sessions/session-agent.js";
 import type { Delivery } from "#shared/delivery.js";
 import type { Answer } from "#shared/input.js";
 
@@ -87,8 +89,12 @@ export interface EmbeddedSession {
 
 const CHANNEL_NAME = "embedded";
 
-/** Starts a conversation with `agent` in this process. */
-export function createSession(agent: CodeAgent, options: EmbeddedSessionOptions): EmbeddedSession {
+/** Starts a conversation in this process with the agent `defineAgent({ ... })` returned. */
+export function createSession(
+  defined: DefinedAgent,
+  options: EmbeddedSessionOptions,
+): EmbeddedSession {
+  const agent = codeAgentOf(defined);
   const auth = options.identity;
   // Its steps resolve the agent by id; the session holds it until it closes.
   const release = holdSessionAgent(agent);

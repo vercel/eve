@@ -10,7 +10,7 @@ import { localTestWorld } from "#internal/testing/local-world.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { eve } from "#definitions/defaults.js";
-import { codeAgent } from "#embed/agent.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import { createSession, type EmbeddedSession } from "#embed/session.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { textStreamResult, toolCallsStreamResult } from "#internal/testing/approval-resume.js";
@@ -97,18 +97,19 @@ function leadAgent(reviewer: ReturnType<typeof reviewerGate>) {
       provider: "eve-test",
     }),
   );
-  return codeAgent({
+  return defineAgent({
     definitions: eve.defaults({
       sandbox: memorySandbox(),
       without: ["agent", "bash", "web_fetch", "web_search"],
     }),
-    model: { model, modelContextWindowTokens: 200_000 },
+    model,
+    modelContextWindowTokens: 200_000,
     name: "lead",
     subagents: {
-      reviewer: codeAgent({
+      reviewer: defineAgent({
         description: "Reviews a plan.",
-        model: { model: reviewer.model, modelContextWindowTokens: 200_000 },
-        name: "reviewer",
+        model: reviewer.model,
+        modelContextWindowTokens: 200_000,
       }),
     },
   });

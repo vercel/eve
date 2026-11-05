@@ -3,15 +3,18 @@
 // reach guard (`scripts/browser-reach.mjs`) holds both at 0. `#platform/*` picks the browser's
 // twins by the `node` condition.
 export {
-  codeAgent,
   defineConnection,
   defineContext,
   defineInstructions,
-  defineModel,
   defineSkill,
-  type CodeAgentOptions,
   type Dynamic,
 } from "#embed/agent.js";
+export {
+  defineAgent,
+  type AgentContentsDefinition,
+  type AgentDefinition,
+  type DefinedAgent,
+} from "#public/definitions/agent.js";
 export {
   createSession,
   type EmbeddedSession,

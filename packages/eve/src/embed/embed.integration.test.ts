@@ -2,7 +2,8 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { codeAgent, defineContext } from "#embed/agent.js";
+import { defineContext } from "#embed/agent.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import { createSession } from "#embed/session.js";
 import { createWorldSessionStore } from "#execution/in-process/world-store.js";
 import { memoryWorld } from "#execution/world/memory-world.js";
@@ -43,10 +44,11 @@ const model = markMockModel(
 
 /** The release agent, whose `deploy` asks first and records each run and who ran it. */
 function releaseAgent(deployed: unknown[], callers: (string | undefined)[]) {
-  return codeAgent({
+  return defineAgent({
     definitions: [defineContext("branch", () => "branch: feature/x")],
     instructions: "You are a careful release manager.",
-    model: { model, modelContextWindowTokens: 200_000 },
+    model,
+    modelContextWindowTokens: 200_000,
     name: "release",
     skills: {
       "release-notes": { content: "Write notes per change.", description: "Release notes." },

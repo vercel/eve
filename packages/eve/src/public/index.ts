@@ -4,6 +4,7 @@
 
 export {
   type AgentCompactionDefinition,
+  type AgentContentsDefinition,
   type AgentDefinition,
   type AgentExperimentalDefinition,
   type AgentLimitsDefinition,

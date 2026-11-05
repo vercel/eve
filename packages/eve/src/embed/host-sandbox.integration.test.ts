@@ -8,8 +8,8 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { eve } from "#definitions/defaults.js";
-import { codeAgent } from "#embed/agent.js";
 import { createSession } from "#embed/session.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { textStreamResult, toolCallsStreamResult } from "#internal/testing/approval-resume.js";
 import { hostSandbox } from "#runtime/sandbox/host-sandbox.js";
@@ -66,15 +66,13 @@ describe("a code agent on the host directory", () => {
     await writeFile(join(root, "inside.txt"), "in the root");
     await writeFile(join(elsewhere, "outside.txt"), "in another tree");
     const session = createSession(
-      codeAgent({
+      defineAgent({
         definitions: eve.defaults({
           sandbox: hostSandbox({ confine: true, root: () => root }),
           without: ["web_search", "web_fetch"],
         }),
-        model: {
-          model: relay("read_file", "filePath", "READ"),
-          modelContextWindowTokens: 200_000,
-        },
+        model: relay("read_file", "filePath", "READ"),
+        modelContextWindowTokens: 200_000,
         name: "host-confined",
       }),
       { identity: alice },
@@ -96,13 +94,14 @@ describe("a code agent on the host directory", () => {
 
   it("runs approved bash in the directory the host is in", async () => {
     const session = createSession(
-      codeAgent({
+      defineAgent({
         definitions: eve.defaults({
           approval: { bash: always() },
           sandbox: hostSandbox({ root: () => root }),
           without: ["web_search", "web_fetch"],
         }),
-        model: { model: relay("bash", "command", "RUN"), modelContextWindowTokens: 200_000 },
+        model: relay("bash", "command", "RUN"),
+        modelContextWindowTokens: 200_000,
         name: "host-coder",
       }),
       { identity: alice },

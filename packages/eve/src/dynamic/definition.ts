@@ -129,6 +129,13 @@ export interface DynamicSentinel<TResult = unknown, TContext = DynamicContext> {
   readonly [DYNAMIC_SENTINEL]: (ctx: TContext) => TResult | Promise<TResult>;
 }
 
+/**
+ * A value, or a function of the call's dynamic context: how an agent defined in code gives a
+ * folder's content (`tools`, `instructions`, ...) that a file would make dynamic with
+ * `defineDynamic()`.
+ */
+export type Dynamic<T> = T | ((ctx: DynamicContext) => T | Promise<T>);
+
 /** `defineDynamic()` typed for the folder it's authored in. */
 export type DefineDynamic<TResult, TContext = DynamicContext> = (
   fn: (ctx: TContext) => TResult | Promise<TResult>,

@@ -88,6 +88,17 @@ describe("compileFromMemory", () => {
     expect(manifest.bindings[skill!.sourceId]?.owner).toEqual({ kind: "application" });
   });
 
+  it("refuses an agent.ts that sets a field of an agent defined in code", async () => {
+    await expect(
+      compileFromMemory({
+        agent: { instructions: "Be brief.", model: "openai/gpt-5.4" },
+        model: "openai/gpt-5.4",
+      }),
+    ).rejects.toThrow(
+      '"instructions" is a field of an agent defined in code; in an agent/ directory, write them in agent/instructions.md.',
+    );
+  });
+
   it("preserves roots and passes the current serialized manifest schema", async () => {
     const { manifest } = await compileFromMemory({
       agentRoot: "/app/agent",

@@ -1,8 +1,8 @@
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { codeAgent } from "#embed/agent.js";
 import { createSession } from "#embed/session.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { textStreamResult, toolCallsStreamResult } from "#internal/testing/approval-resume.js";
 import { createStatefulMcpServer } from "#internal/testing/stateful-mcp-server.js";
@@ -36,14 +36,15 @@ describe("a connection on an agent defined in code", () => {
     const server = createStatefulMcpServer();
     vi.stubGlobal("fetch", server.fetch);
     const session = createSession(
-      codeAgent({
+      defineAgent({
         connections: {
           pinger: defineMcpClientConnection({
             description: "A server that answers pings.",
             url: "https://mcp.example.test/mcp",
           }),
         },
-        model: { model, modelContextWindowTokens: 200_000 },
+        model,
+        modelContextWindowTokens: 200_000,
         name: "pinger",
       }),
       { identity: null },
