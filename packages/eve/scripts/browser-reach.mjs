@@ -39,7 +39,7 @@ const option = (name, fallback) => {
  * browser entry, which promises a page all of it.
  */
 const NODE_FREE_ENTRIES = [
-  "src/browser/index.ts",
+  "src/public/browser/index.ts",
   "src/execution/session/program.ts",
   "src/execution/session/turn-step.ts",
   "src/execution/session/owner-boot.ts",

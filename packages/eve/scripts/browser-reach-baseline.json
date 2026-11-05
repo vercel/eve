@@ -1,12 +1,12 @@
 {
-  "src/browser/index.ts": {
-    "static.modules": 775,
+  "src/public/browser/index.ts": {
+    "static.modules": 777,
     "static.kib": 3681,
     "static.builtinFiles": 0,
     "static.globalFiles": 0,
     "static.vendorGlobalFiles": 6,
     "static.workflow": 0,
-    "total.modules": 807,
+    "total.modules": 809,
     "total.kib": 6976,
     "total.builtinFiles": 0,
     "total.globalFiles": 0,

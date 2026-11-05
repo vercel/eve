@@ -11,31 +11,14 @@
  * `never` (`eve/tools/approval`), skills and instructions (`eve/skills`, `eve/instructions`), and
  * sandbox environments such as `DockerSandbox` (`eve/sandbox/docker`).
  */
-export {
-  defineAgent,
-  type AgentContentsDefinition,
-  type AgentDefinition,
-  type DefinedAgent,
-} from "#public/definitions/agent.js";
-export type { Definition } from "#definitions/definition.js";
-export { defineContext } from "#embed/agent.js";
-export {
-  createSession,
-  type EmbeddedSession,
-  type EmbeddedSessionOptions,
-} from "#embed/session.js";
+export * from "#public/experimental/embed/shared.js";
+// What a Node host adds: its user, sessions kept on disk, and sandboxes on the host or in any
+// other environment.
 export { localUser } from "#embed/local-user.js";
-export { listSessions, type SavedSession } from "#embed/sessions.js";
-export type { SessionSnapshot } from "#execution/in-process/snapshot.js";
-// Where sessions are kept: Workflow's local World in a directory, a Vercel project's World, so
-// sessions continue on any machine, or this process's memory.
-export type { RuntimeWorld as World } from "#execution/world/runtime-world.js";
+// Where a Node process keeps sessions: Workflow's local World in a directory, or a Vercel
+// project's World, so sessions continue on any machine.
 export { localWorld, type LocalWorldOptions } from "#execution/world/local-world.js";
 export { vercelWorld, type VercelWorldOptions } from "#execution/world/vercel-world.js";
-export { memoryWorld } from "#execution/world/memory-world.js";
-// eve's default tools, and the sandboxes they run in.
-export { eve, type EveDefaultsOptions } from "#definitions/defaults.js";
-export { memorySandbox, type MemorySandboxOptions } from "#runtime/sandbox/memory-sandbox.js";
 export { hostSandbox } from "#runtime/sandbox/host-sandbox.js";
 export type { HostSandboxOptions } from "#sandbox/providers/host.js";
 export { codeSandbox, type CodeSandboxOptions } from "#runtime/sandbox/code-sandbox.js";
