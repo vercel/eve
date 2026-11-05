@@ -55,7 +55,7 @@ describe("a session's saves on its World", () => {
       history.push(`message ${step}`);
       await store.saveState(stateWith(history, step));
     }
-    expect((await kinds(world)).filter((kind) => kind !== "eve.claim")).toEqual([
+    expect((await kinds(world)).filter((kind) => !kind.startsWith("entity."))).toEqual([
       "eve.state",
       "eve.delta",
       "eve.delta",

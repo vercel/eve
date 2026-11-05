@@ -118,7 +118,11 @@ export function createInProcessHost(options: InProcessHostOptions): InProcessHos
   const inboxes = createMemoryInboxRegistry();
   const timers = createInProcessTimers();
   const world = options.world ?? memoryWorld();
-  const onWorld = createWorldSessionStore(world);
+  const onWorld = createWorldSessionStore(world, {
+    // Another process continued a session: what this one writes of it is refused from now on,
+    // and its readers here hear why after the lines it kept.
+    onTakenOver: (sessionId, error) => lines.fail(sessionId, error),
+  });
   const kept = options.world === undefined ? undefined : stoppableStore(onWorld);
   const store = kept?.store ?? onWorld;
   const records = new Map<string, HostedSession>();

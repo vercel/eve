@@ -3,17 +3,21 @@ import type { RuntimeWorld } from "#execution/world/runtime-world.js";
 import { createUlid } from "#shared/ulid.js";
 import {
   appendRecord,
+  claimRun,
   createRun,
   type EntityKind,
   listRuns,
   readJournal,
   readMeta,
   runIdOf,
+  STREAM_RECORD,
   streamNameOf,
 } from "./runs.js";
 import { polledRead } from "./stream-read.js";
 
-// Entities on today's Worlds (`runs.ts` has the run underneath). The stream is the run's stream.
+// Entities on today's Worlds (`runs.ts` has the run underneath). The stream is the run's stream;
+// a write is announced first by a fenced record, so a writer another one took over never writes
+// it.
 
 export type WorldEntitiesOptions = EntityKind;
 
@@ -27,8 +31,9 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
   /** A handle on `key`, whose run exists (`meta` read) or is created here. */
   const openHandle = async (key: string, knownMeta?: unknown): Promise<EntityHandle> => {
     const id = runId(key);
-    const created = knownMeta === undefined && (await createRun(world, kind, key, {}));
-    const meta = created ? {} : (knownMeta ?? (await readMeta(world, id)));
+    const created = knownMeta === undefined ? await createRun(world, kind, key, {}) : undefined;
+    const writer = created ?? (await claimRun(world, key, id));
+    const meta = created !== undefined ? {} : (knownMeta ?? (await readMeta(world, id)));
     let length: number | undefined;
     return {
       key,
@@ -40,7 +45,7 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
       async append(records, appendOptions = {}) {
         for (const [index, record] of records.entries()) {
           const last = index === records.length - 1;
-          await appendRecord(world, id, record, {
+          await appendRecord(world, key, id, writer, record, {
             ...(last && appendOptions.snapshot === true && { s: true }),
           });
         }
@@ -57,6 +62,13 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
               `"${key}"'s stream holds ${String(count)} chunks, not ${String(position)}.`,
             );
           if (chunks.length === 0) return;
+          // Announced first on a fenced run: a writer taken over is refused here, and the chunks
+          // never land.
+          if (writer.fenced)
+            await appendRecord(world, key, id, writer, {
+              kind: STREAM_RECORD,
+              value: { count: chunks.length, from: position },
+            });
           const name = streamNameOf(kind, key);
           if (chunks.length > 1 && world.streams.writeMulti !== undefined)
             await world.streams.writeMulti(id, name, [...chunks]);
@@ -70,7 +82,7 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
   return {
     newKey: () => `${kind.kind}_${createUlid()}`,
     async create(key, createOptions) {
-      if (!(await createRun(world, kind, key, createOptions.meta)))
+      if ((await createRun(world, kind, key, createOptions.meta)) === undefined)
         throw new Error(`The World holds "${key}" already.`);
     },
     meta: async (key) => await readMeta(world, runId(key)),

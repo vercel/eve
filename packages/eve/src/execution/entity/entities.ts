@@ -5,12 +5,15 @@
 //
 // An entity has a key and what it was created with (`meta`). It has:
 //   - a journal: records appended in order, from its latest snapshot on (its state);
-//   - a stream: append-only output, readable by anyone, from any position.
+//   - a stream: append-only output, readable by anyone, from any position;
+//   - one writer at a time: opening it fences out whoever wrote it before.
 //
 // Guarantees an implementation keeps (and the conformance suite checks):
-//   1. A record is durable when `append` resolves; `load` returns the latest snapshot and every
+//   1. One writer: opening a handle fences out earlier handles; their writes (journal, stream)
+//      fail with `TakenOverError` from then on, and write nothing.
+//   2. A record is durable when `append` resolves; `load` returns the latest snapshot and every
 //      record after it, in order, and costs what it returns.
-//   2. A stream chunk is readable everywhere once `append` resolves; a reader starts at any
+//   3. A stream chunk is readable everywhere once `append` resolves; a reader starts at any
 //      position, follows live, and costs what it reads.
 
 /** One record of an entity's journal. */
@@ -25,6 +28,25 @@ export interface LoadedJournal {
   readonly snapshot: JournalRecord | undefined;
   /** The records after it, oldest first. */
   readonly after: readonly JournalRecord[];
+}
+
+/** Another writer opened the entity: this one's writes are refused. */
+export class TakenOverError extends Error {
+  override readonly name = "TakenOverError";
+  readonly key: string;
+  constructor(key: string, options?: { readonly cause?: unknown }) {
+    super(`"${key}" was continued by another process, so this one no longer writes it.`, options);
+    this.key = key;
+  }
+}
+
+/** Whether `error`, or one of its causes, is a `TakenOverError`. */
+export function isTakenOver(error: unknown): boolean {
+  for (let cause = error, depth = 0; cause instanceof Error && depth < 10; depth += 1) {
+    if (cause instanceof TakenOverError) return true;
+    cause = cause.cause;
+  }
+  return false;
 }
 
 /** Entities of one kind on one World. Keys are `<kind>_` and a ULID (`newKey`). */
@@ -49,7 +71,7 @@ export interface Entities {
   list(): Promise<readonly { readonly key: string; readonly createdAt: Date }[]>;
 }
 
-/** One writer's hold on an entity. */
+/** One writer's hold on an entity. Every write fails with `TakenOverError` once fenced out. */
 export interface EntityHandle {
   readonly key: string;
   /** What it was created with (`Entities.create`'s `meta`). */

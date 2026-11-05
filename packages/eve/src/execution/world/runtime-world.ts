@@ -39,12 +39,33 @@ export type WorldEventRequest =
       };
       readonly specVersion?: number;
     }
-  | { readonly eventType: "run_started" }
+  | { readonly eventType: "run_started"; readonly specVersion?: number }
   | {
       readonly eventType: "step_created";
       readonly correlationId: string;
       readonly eventData: { readonly stepName: string; readonly input: Uint8Array };
+      readonly specVersion?: number;
     };
+
+/**
+ * How a write is fenced, on a run created at spec 9 on a World with `capabilities.inBandFence`:
+ * the World accepts an in-band write only while the run's in-band count is `expectedSeqInBand`,
+ * and refuses it otherwise (`InBandSupersededError`) writing nothing. `eventCount` is the highest
+ * position the writer knows of (Vercel's World requires it on an in-band write).
+ */
+export interface WorldCreateParams {
+  readonly inBand?: boolean;
+  readonly expectedSeqInBand?: number;
+  readonly eventCount?: number;
+}
+
+/** A run's counters as a World read them before listing its log (spec 9 runs). */
+export interface WorldLogSnapshot {
+  /** The highest position written. */
+  readonly seq: number;
+  /** How many positions in-band writes took. */
+  readonly seqInBand: number;
+}
 
 /** A run, as a list of runs names it. */
 export interface WorldRun {
@@ -61,16 +82,22 @@ export interface WorldStreamChunk {
 
 export interface RuntimeWorld {
   readonly specVersion?: number;
+  /** What the World supports; eve reads only the in-band fence. */
+  readonly capabilities?: { readonly inBandFence?: boolean };
   getDeploymentId(): Promise<string>;
   readonly events: {
     /** Appends an event to `runId`'s log. A second `run_created` for one run is a conflict. */
-    create(runId: string, data: WorldEventRequest): Promise<unknown>;
-    /** A page of `runId`'s log. Throws a run-not-found error for a run the World never held. */
+    create(runId: string, data: WorldEventRequest, params?: WorldCreateParams): Promise<unknown>;
+    /**
+     * A page of `runId`'s log, with the run's counters on a spec 9 run (`specVersion: 9` asks for
+     * them). Throws a run-not-found error for a run the World never held.
+     */
     list(params: {
       readonly runId: string;
       readonly pagination?: WorldPagination;
       readonly resolveData?: "none" | "all";
-    }): Promise<WorldPage<WorldEvent>>;
+      readonly specVersion?: number;
+    }): Promise<WorldPage<WorldEvent> & { readonly snapshot?: WorldLogSnapshot }>;
   };
   readonly runs: {
     list(params: {
