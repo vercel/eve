@@ -98,7 +98,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
 
   const switcher = (
     <div className="mx-auto mb-6 flex w-fit flex-wrap items-center justify-center gap-3">
-      <span className="text-label-14 text-gray-900">When the agent helps</span>
+      <span className="text-label-14 text-gray-900">When the agent serves</span>
       <div aria-label="Customer" className="flex gap-1 rounded-full bg-gray-100 p-1" role="tablist">
         {CUSTOMERS.map((option) => (
           <button
