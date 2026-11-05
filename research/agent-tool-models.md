@@ -1,6 +1,6 @@
 ---
 issue: TBD
-status: implemented
+status: proposed
 last_updated: "2026-11-05"
 ---
 
