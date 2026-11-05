@@ -22,9 +22,12 @@ import {
 } from "#execution/session-inbox/address.js";
 import {
   assertRunnableSessionOwner,
+  findSessionHookHolder,
   lookupSessionOwnerHook,
   resumeRunnableHook,
+  strandedIfDeploymentDeleted,
 } from "#execution/session-inbox/owner.js";
+import { isOwnerDeploymentDeletedError } from "#internal/workflow/owner-deployment-deleted.js";
 import { withPreV27Answers } from "#execution/session-inbox/pre-v27.js";
 import { getHookByToken, type Hook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
@@ -71,6 +74,21 @@ export async function resumeSessionInbox(
         typeof address === "string" ? undefined : address.inbox,
       );
     } catch (error) {
+      // A run without a public key needs its deleted deployment's key to accept anything.
+      // A concurrent delivery may have replaced that owner since, so the current holder is
+      // stranded only when its own key lookup fails too; a live one gets the command.
+      if (isOwnerDeploymentDeletedError(error)) {
+        const holder = await findSessionHookHolder(sessionInboxHookToken(token));
+        if (holder?.hook !== undefined) {
+          const readFailure = await holder.hook.metadata.then(
+            () => undefined,
+            (cause: unknown) => cause ?? error,
+          );
+          if (readFailure === undefined && Date.now() < deadline) continue;
+          const stranded = await strandedIfDeploymentDeleted(readFailure, holder.hook);
+          if (stranded !== readFailure) throw stranded;
+        }
+      }
       if (!HookNotFoundError.is(error)) throw error;
       if (await waitWhileHandoffInProgress(token, deadline)) continue;
       if (command.kind === "session-failure" || command.kind === "session-prewarm") throw error;
@@ -85,8 +103,11 @@ export async function resumeSessionInbox(
           try {
             return knownSessionId ?? requireSessionId(await hook.metadata);
           } catch (cause) {
-            // A failed identity read must never cause a second delivery.
-            throw new AcceptedSessionIdentityError(cause);
+            // A failed identity read must never cause a second delivery. An owner whose
+            // deployment was deleted can never replay what it accepted, so replacing it
+            // delivers the command once.
+            const stranded = await strandedIfDeploymentDeleted(cause, hook);
+            throw stranded === cause ? new AcceptedSessionIdentityError(cause) : stranded;
           }
         })());
       },
@@ -122,11 +143,20 @@ export function requireSessionId(metadata: unknown): string {
   return value;
 }
 
+/**
+ * The session holding a logical token. Throws `StrandedSessionOwnerError` when
+ * its owner's deployment was deleted, which hides the session ID.
+ */
 export async function resolveSessionInbox(token: string): Promise<{ sessionId: string }> {
+  let hook: Hook | undefined;
   try {
-    const hook = await getHookByToken(sessionInboxHookToken(token));
+    hook = await getHookByToken(sessionInboxHookToken(token));
     return { sessionId: requireSessionId(await hook.metadata) };
   } catch (error) {
+    if (hook !== undefined) {
+      const stranded = await strandedIfDeploymentDeleted(error, hook);
+      if (stranded !== error) throw stranded;
+    }
     if (!HookNotFoundError.is(error)) throw error;
     const target = await resolveLegacyInbox(token);
     return { sessionId: target.sessionId };

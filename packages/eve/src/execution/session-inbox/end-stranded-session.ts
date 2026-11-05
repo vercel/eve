@@ -226,7 +226,9 @@ async function cancelRuns(
  * their encrypted hook metadata. Guessing would cancel the wrong anchor, so an
  * unknown session fails.
  */
-async function resolveStrandedSessionId(stranded: StrandedSessionOwnerError): Promise<string> {
+export async function resolveStrandedSessionId(
+  stranded: StrandedSessionOwnerError,
+): Promise<string> {
   const { attributes, runId } = stranded.ownerRun;
   const recorded = attributes[EVE_SESSION_ATTRIBUTE];
   if (recorded !== undefined) return recorded;
