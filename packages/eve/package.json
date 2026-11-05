@@ -456,6 +456,11 @@
       "import": "./dist/src/public/channels/mcp.js",
       "default": "./dist/src/public/channels/mcp.js"
     },
+    "./channels/a2a": {
+      "types": "./dist/src/public/channels/a2a.d.ts",
+      "import": "./dist/src/public/channels/a2a.js",
+      "default": "./dist/src/public/channels/a2a.js"
+    },
     "./channels/slack": {
       "types": "./dist/src/public/channels/slack/index.d.ts",
       "import": "./dist/src/public/channels/slack/index.js",
