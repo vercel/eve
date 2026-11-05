@@ -89,7 +89,7 @@ description: Handle refund requests
 ---
 
 Check the order date first. Refund
-within 30 days; otherwise offer
+within 30 days. After that, offer
 store credit.`,
   },
   {
@@ -237,7 +237,7 @@ const tenantSnippets: Snippet[] = [
     lang: "typescript",
     NavIcon: IconFileText,
     description:
-      "Tell the agent how to support each customer. Enterprise customers get a one-hour SLA; Pro customers start with the docs.",
+      "Tell the agent how to support each customer. Enterprise customers get a one-hour SLA, and Pro customers start with the docs.",
     code: `import { defineDynamic, defineInstructions }
   from "eve/instructions";
 
