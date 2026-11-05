@@ -73,6 +73,11 @@ export function isHookConflict(error: unknown): boolean {
 }
 
 /** The run doesn't exist (yet: one `start()` accepted may not be readable). */
+/** A World refused to create what it already holds, such as a second `run_created` for one run. */
+export function isEntityConflict(error: unknown): boolean {
+  return anyCause(error, ["EntityConflictError"]);
+}
+
 export function isRunNotFound(error: unknown): boolean {
   return anyCause(error, ["WorkflowRunNotFoundError"]);
 }
