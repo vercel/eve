@@ -40,6 +40,8 @@ interface Tenant {
   result: string;
 }
 
+// A support agent authored as a folder: every file is static, and each one is optional
+// except instructions.md.
 const snippets: Snippet[] = [
   {
     label: "Instructions",
@@ -51,9 +53,10 @@ const snippets: Snippet[] = [
       "An instructions.md file is a complete agent. Describe its role in Markdown, then run eve.",
     code: `# Identity
 
-You are an expert weather assistant.
-You can fetch the weather for any
-city in the world.`,
+You are Acme's support agent.
+Answer customer questions, look up
+their orders, and escalate anything
+you can't resolve.`,
   },
   {
     label: "Agent",
@@ -73,23 +76,24 @@ export default defineAgent({
   {
     label: "Skills",
     name: "skills/",
-    fileName: "skills/research.md",
+    fileName: "skills/refunds.md",
     lang: "markdown",
     NavIcon: IconWrench,
     description:
       "Skills are Markdown playbooks loaded only when relevant, so the agent gets focused guidance without carrying it in every prompt.",
     code: `---
-name: research
-description: Research unfamiliar topics
+name: refunds
+description: Handle refund requests
 ---
 
-When the task is novel or ambiguous,
-gather evidence first, then answer.`,
+Check the order date first. Refund
+within 30 days; otherwise offer
+store credit.`,
   },
   {
     label: "Tools",
     name: "tools/",
-    fileName: "tools/get_weather.ts",
+    fileName: "tools/lookup_order.ts",
     lang: "typescript",
     NavIcon: IconWorkflow,
     description:
@@ -98,16 +102,15 @@ gather evidence first, then answer.`,
 import z from "zod";
 
 export default defineTool({
-  description: "Get the weather for a city",
+  description: "Look up an order by ID",
   inputSchema: z.object({
-    cityName: z.string(),
+    orderId: z.string(),
   }),
   async execute(input) {
     const res = await fetch(
-      \`\${process.env.WEATHER_API_URL}/current?city=\${input.cityName}\`
+      \`\${process.env.ORDERS_API_URL}/orders/\${input.orderId}\`
     );
-    const data = await res.json();
-    return data.current_condition[0];
+    return res.json();
   },
 });`,
   },
@@ -126,7 +129,7 @@ export const environment =
   DefaultSandbox.environment({
     prepare: async (sandbox) => {
       await sandbox.run({
-        command: "git clone repo /workspace"
+        command: "git clone support-runbooks /workspace"
       });
     }
   });
@@ -141,12 +144,13 @@ export default defineSandbox(() =>
     fileName: "channels/slack.ts",
     lang: "typescript",
     NavIcon: IconMessage,
-    description: "Add channel files to use the same agent in Slack, Discord, Teams, or the web.",
+    description:
+      "Add channel files to answer customers in Slack, Discord, Teams, or the web with the same agent.",
     code: `import { slackChannel } from
   "eve/channels/slack";
 
 export default slackChannel({
-  botName: "my-agent",
+  botName: "acme-support",
 });`,
   },
   {
@@ -156,7 +160,7 @@ export default slackChannel({
     lang: "typescript",
     NavIcon: IconLinked,
     description:
-      "Connections handle auth for services like GitHub, Stripe, and Linear, so tools can call them without managing tokens.",
+      "Connections handle auth for services like Linear, GitHub, and Stripe, so the agent can file a bug for a support issue without managing tokens.",
     code: `import { defineMcpClientConnection }
   from "eve/connections";
 
@@ -167,16 +171,16 @@ export default defineMcpClientConnection({
   {
     label: "Sub Agents",
     name: "subagents/",
-    fileName: "subagents/researcher/agent.ts",
+    fileName: "subagents/billing/agent.ts",
     lang: "typescript",
     NavIcon: IconAgents,
     description:
-      "Add subagents for specialized work. The main agent delegates tasks and combines the results.",
+      "Add subagents for specialized work. The support agent hands billing questions to a billing specialist and uses its answer.",
     code: `import { defineAgent } from
   "eve";
 
 export default defineAgent({
-  description: "Investigate questions",
+  description: "Answer billing questions",
   model: "openai/gpt-6-luna-fast",
   reasoning: "high",
 });`,
@@ -184,22 +188,22 @@ export default defineAgent({
   {
     label: "Schedules",
     name: "schedules/",
-    fileName: "schedules/daily-report.md",
+    fileName: "schedules/daily-digest.md",
     lang: "markdown",
     NavIcon: IconClock,
     description:
-      "Schedules run agents automatically for jobs like daily reports and weekly digests, continuing durably without an active session.",
+      "Schedules run agents automatically for jobs like daily digests, continuing durably without an active session.",
     code: `---
 cron: "0 8 * * *"
 ---
 
-Send the user a daily weather
-digest for their saved cities.`,
+Post a summary of yesterday's open
+tickets to the support channel.`,
   },
   {
     label: "Evals",
     name: "evals/",
-    fileName: "evals/weather/brooklyn-forecast.eval.ts",
+    fileName: "evals/refunds/order-refund.eval.ts",
     lang: "typescript",
     NavIcon: IconFileText,
     description:
@@ -209,9 +213,9 @@ import { includes } from "eve/evals/expect";
 
 export default defineEval({
   async test(t) {
-    const turn = await t.send("What is the weather in Brooklyn?");
+    const turn = await t.send("Can I get a refund for order 1042?");
     t.succeeded();
-    t.check(turn.message, includes("Sunny"));
+    t.check(turn.message, includes("refund"));
   },
 });`,
   },
