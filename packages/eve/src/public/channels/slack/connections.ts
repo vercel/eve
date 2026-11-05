@@ -94,8 +94,8 @@ export function buildAuthEphemeralBlocks(
 ): unknown[] {
   const intro =
     input.cancel === undefined
-      ? `*Connect ${input.displayName}*\nTo continue, I need access to your ${input.displayName} account. Only you can see this message.`
-      : `*Connect ${input.displayName}*\nI've paused until you connect your ${input.displayName} account or cancel. Only you can see this message.`;
+      ? `*Connect ${input.displayName}*\nTo continue, I need access to your ${input.displayName} account.`
+      : `*Connect ${input.displayName}*\nI've paused until you connect your ${input.displayName} account or cancel.`;
   const blocks: unknown[] = [
     {
       type: "section",
