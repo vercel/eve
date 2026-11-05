@@ -106,7 +106,8 @@ For a new scaffold, start the agent again:
 npm run dev
 ```
 
-That's a working agent. Add human-in-the-loop prompts, subagents, and schedules as needed.
+That's a working agent. Add human-in-the-loop prompts, subagents, and schedules as needed; the
+[documentation](https://eve.dev/docs) covers each one.
 
 ### Add Web Chat
 
