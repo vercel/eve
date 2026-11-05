@@ -245,7 +245,7 @@ const channelConformance = {
       broken: { ...CHAT_SDK_BROKEN, ...SIGN_IN_LINGERS },
       unsupported: SIGN_IN_SENT_PRIVATELY,
     },
-    { driver: chatSdkTextDriver, broken: SIGN_IN_LINGERS },
+    { driver: chatSdkTextDriver, unsupported: EDITS_UNREADABLE },
   ],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
   discord: [
