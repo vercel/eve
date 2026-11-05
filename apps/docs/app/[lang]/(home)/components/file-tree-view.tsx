@@ -222,10 +222,6 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
           </div>
         </div>
       </div>
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 -bottom-1 -mx-2 h-12 bg-linear-to-t from-background-200 to-transparent"
-      />
     </div>
   );
 
