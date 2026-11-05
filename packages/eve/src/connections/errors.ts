@@ -80,6 +80,8 @@ export interface ConnectionAuthorizationFailedErrorOptions {
    * - `"app_not_installed"`: an authored `getToken` for a
    *   `principalType: "app"` connection signalled the agent's own
    *   credentials are missing. Terminal.
+   * - `"sign_in_cancelled"`: the same sign-in was already cancelled in
+   *   this turn, by a new message or by the user. Terminal for the turn.
    */
   readonly reason?: string;
 

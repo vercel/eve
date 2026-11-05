@@ -324,6 +324,8 @@ Throw these error classes from `eve/connections` in `getToken` or `completeAutho
 
 Omit `retryable` to allow retries. Set it to `false` when retrying can't help, such as when the user denies access. `interaction.settled` then carries `response.retryable: false`. Later calls in the same turn that need the same grant for the same user fail without asking again. The next turn asks again.
 
+A sign-in that is cancelled, because the user sent a new message while it was open or cancelled it, works the same way. Later calls in that turn that need the same grant fail with `reason: "sign_in_cancelled"` and tell the model to say the action needs that access. The next turn asks again.
+
 ```ts
 import { ConnectionAuthorizationFailedError } from "eve/connections";
 

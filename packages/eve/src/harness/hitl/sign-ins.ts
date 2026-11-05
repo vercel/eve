@@ -43,9 +43,10 @@ export function supersededChallenges(
 }
 
 /**
- * The sign-in this turn already tried and failed terminally (`retryable: false`) for the same
- * grant and principal as `challenge`: asking again would send the person through the same
- * failure. Calls before the turn's first sign-in failure have nothing to find.
+ * The sign-in this turn already ended for the same grant and principal as `challenge`, either
+ * failed terminally (`retryable: false`) or withdrawn (a new message or the person cancelled it):
+ * asking again would post another card for one the person already passed on. Calls before the
+ * turn's first such sign-in have nothing to find.
  */
 export function terminalSignInFailure(
   projection: SessionProjection,
@@ -58,8 +59,8 @@ export function terminalSignInFailure(
     const signIn = row.request.signIn;
     return (
       signIn !== undefined &&
-      row.outcome === "failed" &&
-      row.response?.retryable === false &&
+      (row.outcome === "withdrawn" ||
+        (row.outcome === "failed" && row.response?.retryable === false)) &&
       interactionOwner(view, row).turnId === turnId &&
       sameSignIn(
         {

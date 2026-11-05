@@ -181,7 +181,7 @@ export async function handleAuthorizationError(
     });
   }
 
-  // A sign-in this turn already failed terminally is reported, not started again.
+  // A sign-in this turn already failed terminally or withdrew is reported, not started again.
   const projection = liveProjection();
   const refused =
     projection === undefined
@@ -191,6 +191,13 @@ export async function handleAuthorizationError(
           name: scoped.scope,
           principal: resolveScopedPrincipal(scoped),
         });
+  if (refused?.outcome === "withdrawn") {
+    throw new ConnectionAuthorizationFailedError(scoped.scope, {
+      message: `Sign-in to "${scoped.scope}" was cancelled in this turn${refused.reason === undefined ? "" : ` (${refused.reason})`}, so it won't be asked for again. Tell the user this action needs ${scoped.scope} access, and that they can ask for it again to sign in.`,
+      reason: "sign_in_cancelled",
+      retryable: false,
+    });
+  }
   if (refused !== undefined) {
     throw new ConnectionAuthorizationFailedError(scoped.scope, {
       message: `Authorization for "${scoped.scope}" already failed in this turn and can't be retried${refused.reason === undefined ? "." : `: ${refused.reason}`}`,
