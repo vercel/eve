@@ -329,6 +329,13 @@ export interface SlackChannelState extends UndeliveredReplyState {
    */
   pendingAuthMessageTs?: Record<string, string>;
   /**
+   * Connection name to the sign-in prompt the default sign-in `interaction.opened` handler sent
+   * as a direct message, because the session had no thread to hold a public status. The matching
+   * sign-in `interaction.settled` handler edits it in place to surface the resolution outcome.
+   * @internal
+   */
+  pendingAuthDirectMessages?: Record<string, { readonly channelId: string; readonly ts: string }>;
+  /**
    * @internal The messages holding open or recently answered approvals, questions, and budget prompts.
    * Each is updated as its requests change and forgotten once all of them settle. eve ignores
    * the `pendingApprovalCards` field that earlier versions wrote, so cards posted before an
