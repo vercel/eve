@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { loadContext } from "#context/container.js";
 import { createScheduleProviderContext } from "#runtime/schedules/dispatch-occurrence.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type {
   ScheduleClient,
   ScheduleClientCreate,
@@ -101,7 +101,7 @@ export function createScheduleCollectionClient<TPayload, TPrepared = TPayload>(
     const provider = createScheduleProviderContext({
       abortSignal: callContext.abortSignal,
       application: callContext.application,
-      bundle: () => loadContext().require(BundleKey),
+      bundle: () => requireCompiledBundle(loadContext()),
       collection: callContext.collection,
       definition,
       operationId: nextOperationId(),

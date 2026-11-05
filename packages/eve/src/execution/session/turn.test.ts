@@ -6,7 +6,8 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionView } from "#harness/session-machine/view.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
-import { SessionExecution } from "#execution/session/turn.js";
+import { SessionExecution, type SessionTurnHost } from "#execution/session/turn.js";
+import { sleep } from "#compiled/@workflow/core/index.js";
 import { createTurnControl } from "#execution/session/turn-control.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelTasksStep } from "#execution/tasks/steps.js";
@@ -38,6 +39,7 @@ import {
   type TaskTable,
 } from "#execution/tasks/table.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import { startTaskToolCallsStep } from "#execution/session/task-tool-tracing-step.js";
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
 import { applyRunMessagesStep } from "#execution/tools/workflow/apply-run-messages-step.js";
 import type {
@@ -45,6 +47,14 @@ import type {
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+
+/** Turn steps and dispatches as Workflow runs them, and its clock. */
+const WORKFLOW_TURN_HOST: SessionTurnHost = {
+  applyRunMessages: (input) => applyRunMessagesStep(input),
+  dispatchRuns: (input) => dispatchCoordinationStep(input),
+  runTurnStep: (input) => turnStep(input),
+  until: (at) => sleep(new Date(at)),
+};
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -1377,6 +1387,7 @@ describe("SessionExecution checkpoints", () => {
       sessionWritable: new WritableStream<Uint8Array>(),
     });
     const execution = new SessionExecution({
+      host: WORKFLOW_TURN_HOST,
       cursor,
       inbox,
       queue: new SessionInputQueue([]),
@@ -1793,6 +1804,77 @@ describe("SessionExecution checkpoints", () => {
     );
   });
 
+  it("times a task wait out at the deadline it gives the host, then hands the timeout to the model", async () => {
+    const base = state("");
+    const working = createTask(readTaskTable(undefined), {
+      callId: "task-call",
+      kind: "tool",
+      name: "research",
+      resumable: false,
+      turnId: "turn_0",
+    });
+    const sessionState: DurableSessionState = {
+      ...base,
+      snapshot: { session: writeTaskTable(base.snapshot.session, working.table) },
+    };
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      takeLeading: () => [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: vi.fn(() => []),
+      hasPending: vi.fn(() => false),
+      whenPending: () => new Promise<void>(() => {}),
+      next: vi.fn(() => new Promise<SessionInboxPayload>(() => {})),
+      onDelivery: vi.fn(() => () => {}),
+      onInterrupt: vi.fn(() => () => {}),
+      restore: vi.fn(),
+    };
+    // The research task keeps working, so only the timeout can end the wait.
+    vi.mocked(startTaskToolCallsStep).mockResolvedValueOnce(1_000_000);
+    const deadlines: number[] = [];
+    let pass: () => void = () => {};
+    const host: SessionTurnHost = {
+      ...WORKFLOW_TURN_HOST,
+      until: (at) => {
+        deadlines.push(at);
+        return new Promise<void>((resolve) => {
+          pass = resolve;
+        });
+      },
+    };
+    let continued: unknown;
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async () => ({
+          action: "paused",
+          ...callsPause({
+            callIds: ["wait-call"],
+            dispatch: false,
+            taskToolCalls: [{ callId: "wait-call", kind: "eve__task_wait", timeoutMs: 30_000 }],
+          }),
+          serializedContext: {},
+          sessionState,
+        })),
+      )
+      .mockImplementationOnce(
+        turnStepWork(async (input) => {
+          continued = input;
+          return { action: "done", output: "done", serializedContext: {}, sessionState };
+        }),
+      );
+
+    const running = createExecution({ host, inbox, sessionState }).runTurn({
+      delivery: { kind: "deliver", payloads: [{ message: "Wait for the research." }] },
+    });
+    await vi.waitFor(() => expect(deadlines).toEqual([1_030_000]));
+    pass();
+
+    await expect(running).resolves.toMatchObject({ kind: "done" });
+    expect(JSON.stringify(continued)).toContain("Stopped waiting after");
+  });
+
   it("does not let steering that woke a wait interrupt the step that reads it", async () => {
     const base = state("");
     const working = createTask(readTaskTable(undefined), {
@@ -2079,6 +2161,7 @@ function idleInbox(): SessionInbox {
 function createExecution(input: {
   readonly capabilities?: SessionCapabilities;
   readonly cursor?: SessionStateCursor;
+  readonly host?: SessionTurnHost;
   readonly inbox: SessionInbox;
   readonly queue?: SessionInputQueue;
   readonly serializedContext?: Record<string, unknown>;
@@ -2086,6 +2169,7 @@ function createExecution(input: {
 }): SessionExecution {
   const cursor = input.cursor ?? createCursor(input);
   return new SessionExecution({
+    host: input.host ?? WORKFLOW_TURN_HOST,
     capabilities: input.capabilities,
     cursor,
     inbox: input.inbox,

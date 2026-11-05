@@ -22,7 +22,8 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { type ConnectionClient, defineInteractiveAuthorization } from "#shared/connection-types.js";
 
 import { catalogBundle, nativeCatalog } from "#internal/testing/catalog-fixtures.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const URL = "https://kennel.example.com/mcp";
 const TOKEN = "signed-in-token";
@@ -155,7 +156,7 @@ async function setup(mode: ServerMode, approval?: ApprovalPolicy) {
   ctx.set(SessionIdKey, "mcp-sign-in");
   ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
   ctx.set(ConnectionRegistryKey, registry);
-  ctx.set(BundleKey, catalogBundle({ connections: [connection] }));
+  ctx.set(SessionAgentKey, fromCompiledBundle(catalogBundle({ connections: [connection] })));
   const catalog = await nativeCatalog({ agentTools: new Map(), ctx, endsTurn: true, session: {} });
   const options = { messages: [], toolCallId: "call-1" };
   const resolve = (tool: string, input: object) => {

@@ -14,7 +14,8 @@ import {
   type ScheduleBoundCallContext,
 } from "#runtime/schedules/collection-client.js";
 import { dispatchScheduledOccurrence } from "#runtime/schedules/dispatch-occurrence.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const bundle = { compiledArtifactsSource: {}, graph: { root: { channels: [] } } } as never;
 const callContext: ScheduleBoundCallContext = {
@@ -71,7 +72,7 @@ describe("the schedule handle an occurrence callback receives", () => {
       const fired = await client.create({ name: "fired", expression, payload: { task: "a" } });
       const other = await client.create({ name: "other", expression, payload: { task: "b" } });
       const context = new ContextContainer();
-      context.set(BundleKey, bundle);
+      context.set(SessionAgentKey, fromCompiledBundle(bundle));
       scope.mockClear();
 
       await contextStorage.run(context, () => client.invoke(fired.name));

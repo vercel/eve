@@ -20,7 +20,12 @@ import { initialSessionProjection } from "#protocol/session-projection.js";
 import { foldLine } from "#protocol/session-projection/fold.js";
 import type { HookContext } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import {
+  ChannelKey,
+  compiledBundleOf,
+  SessionAgentKey,
+} from "#runtime/sessions/runtime-context-keys.js";
 import { defineTool } from "#tools/definition.js";
 import { runApprovedCalls } from "#harness/hitl/approved-calls.js";
 import { takeTurnFailure } from "#definitions/intents.js";
@@ -61,32 +66,35 @@ function session(
 ) {
   const ctx = new ContextContainer();
   ctx.set(SessionIdKey, `session-${Math.random()}`);
-  ctx.set(BundleKey, {
-    graph: { nodesByNodeId: new Map() },
-    nodeId: "root",
-    resolvedAgent: {
-      definitions: [
-        ...hooks.map((hook) => ({ ...hook, kind: "hook", logicalPath: `hooks/${hook.slug}.ts` })),
-        ...instructions.map((fn, index) => ({
-          evaluate: fn,
-          kind: "instructions",
-          logicalPath: `instructions/brief-${index}.ts`,
-          slug: `brief-${index}`,
-          sourceId: `instructions/brief-${index}.ts`,
-        })),
-        {
-          evaluate,
-          kind: "tool",
-          logicalPath: "tools/count.ts",
-          slug: "count",
-          sourceId: "tools/count.ts",
-        },
-      ],
-    },
-    subagentRegistry: { dynamicResolvers: [], preparedTools: [], subagentsByName: new Map() },
-    toolRegistry: { toolsByName: new Map() },
-    turnAgent: { id: "agent" },
-  } as never);
+  ctx.set(
+    SessionAgentKey,
+    fromCompiledBundle({
+      graph: { nodesByNodeId: new Map() },
+      nodeId: "root",
+      resolvedAgent: {
+        definitions: [
+          ...hooks.map((hook) => ({ ...hook, kind: "hook", logicalPath: `hooks/${hook.slug}.ts` })),
+          ...instructions.map((fn, index) => ({
+            evaluate: fn,
+            kind: "instructions",
+            logicalPath: `instructions/brief-${index}.ts`,
+            slug: `brief-${index}`,
+            sourceId: `instructions/brief-${index}.ts`,
+          })),
+          {
+            evaluate,
+            kind: "tool",
+            logicalPath: "tools/count.ts",
+            slug: "count",
+            sourceId: "tools/count.ts",
+          },
+        ],
+      },
+      subagentRegistry: { dynamicResolvers: [], preparedTools: [], subagentsByName: new Map() },
+      toolRegistry: { toolsByName: new Map() },
+      turnAgent: { id: "agent" },
+    } as never),
+  );
   ctx.set(SessionKey, {
     auth: { current: null, initiator: null },
     sessionId: ctx.get(SessionIdKey),
@@ -349,14 +357,19 @@ describe("evaluateValues", () => {
     await beforeCall(ctx, [user("a")]);
     expect(slotsOf(ctx, "instructions")).toHaveLength(1);
 
-    const bundle = ctx.get(BundleKey)!;
-    ctx.set(BundleKey, {
-      ...bundle,
-      resolvedAgent: {
-        ...bundle.resolvedAgent,
-        definitions: bundle.resolvedAgent.definitions.filter(({ kind }) => kind !== "instructions"),
-      },
-    } as never);
+    const bundle = compiledBundleOf(ctx)!;
+    ctx.set(
+      SessionAgentKey,
+      fromCompiledBundle({
+        ...bundle,
+        resolvedAgent: {
+          ...bundle.resolvedAgent,
+          definitions: bundle.resolvedAgent.definitions.filter(
+            ({ kind }) => kind !== "instructions",
+          ),
+        },
+      } as never),
+    );
     await contextStorage.run(ctx, () =>
       restoreDefinitions(ctx, { conversation: [user("a")], revision: "r2" }),
     );

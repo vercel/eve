@@ -1,13 +1,14 @@
 import { EARLIER_REMOTE_CALLER_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import { formatEarlierRemoteCallerInputError } from "#protocol/remote-agent-protocol.js";
 import { controlDeliveryOf } from "#execution/session/control-delivery.js";
-import { sleep } from "#compiled/@workflow/core/index.js";
 
 import type { SessionCapabilities, TurnCaller } from "#channel/types.js";
-import {
-  dispatchCoordinationStep,
-  publishDispatchedCallsStep,
-} from "#execution/coordination-dispatch-step.js";
+import { publishDispatchedCallsStep } from "#execution/coordination-dispatch-step.js";
+import type {
+  CoordinationDispatchInput,
+  CoordinationDispatchResult,
+} from "#execution/coordination-dispatch-shared.js";
+import type { WithSessionStateDelta } from "#execution/session/state-delta.js";
 import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
@@ -31,10 +32,11 @@ import {
   isAppliedRunMessage,
   takeLeadingAppliedRunMessages,
 } from "#execution/session-workflow-tool-run.js";
-import {
-  applyRunMessagesStep,
-  type AppliedRunMessage,
-} from "#execution/tools/workflow/apply-run-messages-step.js";
+import type {
+  AppliedRunMessage,
+  ApplyRunMessagesInput,
+  ApplyRunMessagesResult,
+} from "#execution/tools/workflow/apply-run-messages.js";
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
 import {
   isAgentSessionMessage,
@@ -44,9 +46,10 @@ import type { TurnPause } from "#execution/session/pending-turn-state.js";
 import type {
   RuntimeActionResultStepInput,
   TurnOutcome,
+  TurnStepInput,
   TurnStepPayload,
+  TurnStepResult,
 } from "#execution/session/turn-step-types.js";
-import { turnStep } from "#execution/session/turn-step.js";
 import { exhaustedStepError, normalizeSerializableError } from "#execution/workflow-errors.js";
 import { ActiveTurn } from "#execution/session/active-turn.js";
 import type { TurnControl } from "#execution/session/turn-control.js";
@@ -79,9 +82,36 @@ const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
   "This session cannot request human input, so it cannot wait for a tool approval or question. " +
   "Configure unattended tools with an approval policy that does not require human input.";
 
+/**
+ * How the host runs a session's turns: where each turn step runs, and the clock its parked
+ * waits time out on. Workflow runs each step as a durable `turnStep` and sleeps durably.
+ */
+export interface SessionTurnHost {
+  /** Runs one turn step across the host's step boundary. */
+  runTurnStep(input: TurnStepInput): Promise<TurnStepResult>;
+  /**
+   * Starts the runs of the calls a parked step waits on, and of the tasks it started, as one
+   * step: `dispatchCoordinationStep` on Workflow.
+   */
+  dispatchRuns(
+    input: CoordinationDispatchInput,
+  ): Promise<WithSessionStateDelta<CoordinationDispatchResult>>;
+  /**
+   * Applies the messages the session's runs sent, as one step: `applyRunMessagesStep` on
+   * Workflow.
+   */
+  applyRunMessages(input: ApplyRunMessagesInput): Promise<ApplyRunMessagesResult>;
+  /**
+   * Resolves once the clock reaches `at` (epoch ms), for an `eve__task_wait` timeout: a recorded
+   * deadline, so a host that resumes the turn elsewhere waits for the same moment.
+   */
+  until(at: number): Promise<void>;
+}
+
 export interface SessionExecutionInput {
   readonly capabilities?: SessionCapabilities;
   readonly cursor: SessionStateCursor;
+  readonly host: SessionTurnHost;
   readonly inbox: SessionInboxReader;
   readonly queue: SessionInputQueue;
   readonly sessionId: string;
@@ -89,7 +119,7 @@ export interface SessionExecutionInput {
 
 /**
  * Executes conversational turns inside the owning session workflow: runs
- * `turnStep`, services the inbox at committed boundaries, coordinates waits,
+ * each turn step on its host, services the inbox at committed boundaries, coordinates waits,
  * and settles locally. There is no child run and no transport protocol.
  */
 export class SessionExecution {
@@ -180,7 +210,7 @@ export class SessionExecution {
   ): Promise<void> {
     if (messages.length === 0) return;
     const { cancelled } = await this.input.cursor.advance((state) =>
-      applyRunMessagesStep({ ...state, canCancelTurn: turn !== undefined, messages }),
+      this.input.host.applyRunMessages({ ...state, canCancelTurn: turn !== undefined, messages }),
     );
     if (cancelled) turn?.abort();
   }
@@ -207,7 +237,7 @@ export class SessionExecution {
       // not the step's failure, so it is not recovered.
       const result = await cursor.advanceWithHistory((state) => {
         const run = (recover?: { readonly error: unknown }) =>
-          turnStep({
+          this.input.host.runTurnStep({
             ...state,
             handover,
             abortSignal: turn.signal,
@@ -359,7 +389,7 @@ export class SessionExecution {
     paused: Extract<TurnPause, { readonly on: "calls" }>,
   ): Promise<CallWait> {
     const dispatched = paused.dispatch ? await this.dispatchRuns() : [];
-    const wait = new CallWait(this.input.cursor, paused.callIds, dispatched);
+    const wait = new CallWait(this.input, paused.callIds, dispatched);
     await wait.answerTaskToolCalls(paused.taskToolCalls);
     return wait;
   }
@@ -372,7 +402,7 @@ export class SessionExecution {
   private async dispatchRuns(): Promise<readonly RuntimeActionResult[]> {
     const { cursor } = this.input;
     const dispatched = await cursor.advance(({ serializedContext, sessionState }) =>
-      dispatchCoordinationStep({
+      this.input.host.dispatchRuns({
         serializedContext,
         sessionState,
         workflowToolRunOwner: {
@@ -438,6 +468,7 @@ export class SessionExecution {
  */
 class CallWait {
   private readonly cursor: SessionStateCursor;
+  private readonly until: SessionTurnHost["until"];
   private readonly callIds: readonly string[];
   private readonly results: RuntimeActionResult[] = [];
   private readonly acceptedAtMs = new Map<string, number>();
@@ -446,11 +477,12 @@ class CallWait {
   private taskWaits: TaskWait[] = [];
 
   constructor(
-    cursor: SessionStateCursor,
+    session: Pick<SessionExecutionInput, "cursor" | "host">,
     callIds: readonly string[],
     dispatched: readonly RuntimeActionResult[],
   ) {
-    this.cursor = cursor;
+    this.cursor = session.cursor;
+    this.until = session.host.until;
     this.callIds = callIds;
     const acceptedAtMs = Date.now();
     for (const result of dispatched) this.accept(result, acceptedAtMs);
@@ -477,7 +509,7 @@ class CallWait {
     };
   }
 
-  /** The durable sleeps of the parked `eve__task_wait` calls. */
+  /** The host's sleeps for the parked `eve__task_wait` calls. */
   timers(): readonly Promise<string>[] {
     return this.taskWaits.flatMap((wait) => (wait.timer === undefined ? [] : [wait.timer]));
   }
@@ -533,7 +565,7 @@ class CallWait {
     const startedAtMs = calls.length === 0 ? 0 : await startTaskToolCallsStep();
     for (const call of calls) {
       if (call.kind === TASK_WAIT_TOOL_NAME) {
-        waits.push(startTaskWait(call, startedAtMs));
+        waits.push(startTaskWait(call, startedAtMs, this.until));
         continue;
       }
       this.accept(await answerTaskCancel(this.cursor, call));
@@ -565,8 +597,8 @@ class CallWait {
 }
 
 /**
- * One `eve__task_wait` call the turn is parked on. Its timeout is a durable sleep
- * the turn races against the inbox; nothing polls.
+ * One `eve__task_wait` call the turn is parked on. Its timeout is the host's `until` (durable,
+ * on Workflow), which the turn races against the inbox; nothing polls.
  */
 interface TaskWait {
   readonly callId: string;
@@ -579,9 +611,11 @@ interface TaskWait {
 function startTaskWait(
   call: Extract<TaskToolCall, { readonly kind: typeof TASK_WAIT_TOOL_NAME }>,
   startedAtMs: number,
+  until: SessionTurnHost["until"],
 ): TaskWait {
   const { callId, timeoutMs } = call;
-  const timer = timeoutMs === undefined ? undefined : sleep(timeoutMs).then(() => callId);
+  const timer =
+    timeoutMs === undefined ? undefined : until(startedAtMs + timeoutMs).then(() => callId);
   return {
     callId,
     startedAtMs,

@@ -62,7 +62,7 @@ async function relay(event: SessionEvent, ctx: ChannelAdapterContext): Promise<v
   });
 }
 
-/** Forwards one relayed interaction fact to the parent via the durable `resumeHook` path. */
+/** Forwards one relayed interaction fact to the parent, wherever its hook is held. */
 async function forwardToParentStep(input: {
   readonly hookPayload: SubagentInteractionHookPayload;
   readonly parentContinuationToken: string;
@@ -72,8 +72,8 @@ async function forwardToParentStep(input: {
   try {
     // The workflow runtime loads only when a child forwards, so the channel adapters every
     // session context restores stay free of it.
-    const { resumeHook } = await import("#internal/workflow/runtime.js");
-    await resumeHook(input.parentContinuationToken, input.hookPayload);
+    const { resumeRoutedHook } = await import("#execution/hook-routes.js");
+    await resumeRoutedHook(input.parentContinuationToken, input.hookPayload);
   } catch (error) {
     log.warn("failed to forward a child's interaction to its parent", {
       callId: input.hookPayload.callId,

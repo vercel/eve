@@ -14,7 +14,8 @@ import { evaluateValues, stepDraft, stepMessages } from "#definitions/step.js";
 import type { CatalogSkill } from "#execution/catalog/skills.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { fromCompiledBundle } from "#definitions/compiled-agent.js";
+import { SessionAgentKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 
 type Evaluate = (ctx: DynamicContext) => unknown;
@@ -97,39 +98,42 @@ export function definitionSession(
       return [name, { prepared: { behavior, name } }];
     }),
   );
-  ctx.set(BundleKey, {
-    graph: { nodesByNodeId: new Map() },
-    modelMetadata: async () => MODEL_METADATA,
-    nodeId: "root",
-    resolvedAgent: {
-      definitions: [
-        ...(input.instructions ?? []).map((source) => resolver("instructions", source)),
-        ...(input.tools ?? []).map((source) => resolver("tool", source)),
-        ...(input.skills ?? []).map((source) => resolver("skill", source)),
-        ...(input.connections ?? []).map((source) => resolver("connection", source)),
-      ],
-      instructions: (input.userInstructions ?? []).map((content, index) => ({
-        content,
-        name: `instructions/user-${index}`,
-        role: "user",
-      })),
-      skills: input.authoredSkills ?? [],
-    },
-    subagentRegistry: {
-      dynamicResolvers: (input.subagents ?? []).map((source) => ({
-        ...source,
-        kind: "subagent",
-        logicalPath: `subagents/${source.name}/agent.ts`,
-        nodeId: `subagents/${source.name}`,
-        sourceId: `subagents/${source.name}/agent.ts`,
-        sourceKind: "module",
-      })),
-      preparedTools: [],
-      subagentsByName: new Map(),
-    },
-    toolRegistry: { toolsByName },
-    turnAgent: { id: "agent", model: input.model },
-  } as never);
+  ctx.set(
+    SessionAgentKey,
+    fromCompiledBundle({
+      graph: { nodesByNodeId: new Map() },
+      modelMetadata: async () => MODEL_METADATA,
+      nodeId: "root",
+      resolvedAgent: {
+        definitions: [
+          ...(input.instructions ?? []).map((source) => resolver("instructions", source)),
+          ...(input.tools ?? []).map((source) => resolver("tool", source)),
+          ...(input.skills ?? []).map((source) => resolver("skill", source)),
+          ...(input.connections ?? []).map((source) => resolver("connection", source)),
+        ],
+        instructions: (input.userInstructions ?? []).map((content, index) => ({
+          content,
+          name: `instructions/user-${index}`,
+          role: "user",
+        })),
+        skills: input.authoredSkills ?? [],
+      },
+      subagentRegistry: {
+        dynamicResolvers: (input.subagents ?? []).map((source) => ({
+          ...source,
+          kind: "subagent",
+          logicalPath: `subagents/${source.name}/agent.ts`,
+          nodeId: `subagents/${source.name}`,
+          sourceId: `subagents/${source.name}/agent.ts`,
+          sourceKind: "module",
+        })),
+        preparedTools: [],
+        subagentsByName: new Map(),
+      },
+      toolRegistry: { toolsByName },
+      turnAgent: { id: "agent", model: input.model },
+    } as never),
+  );
   const registry = new ConnectionRegistryImpl(input.staticConnections ?? []);
   ctx.set(ConnectionRegistryKey, registry);
   enterSessionProjection(ctx, undefined);

@@ -15,7 +15,9 @@ import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 import {
   startWorkflowTask,
   startWorkflowToolCallRun,
+  startWorkflowToolRun,
   type StartWorkflowTaskInput,
+  type StartWorkflowToolRun,
 } from "#execution/tools/workflow/start.js";
 import {
   runEntryToStart,
@@ -55,7 +57,20 @@ export async function dispatchCoordinationStep(
   input: CoordinationDispatchInput,
 ): Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
   "use step";
-  return await withSessionStateDelta(input, dispatchCoordination);
+  return await dispatchCoordinationOn(startWorkflowToolRun)(input);
+}
+
+/**
+ * The dispatch {@link dispatchCoordinationStep} runs, starting each run with `startRun`: Workflow
+ * starts its runs on the current deployment, and another host starts them its own way.
+ */
+export function dispatchCoordinationOn(
+  startRun: StartWorkflowToolRun,
+): (
+  input: CoordinationDispatchInput,
+) => Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
+  return async (input) =>
+    await withSessionStateDelta(input, (state) => dispatchCoordination(state, startRun));
 }
 
 /**
@@ -74,6 +89,7 @@ export async function publishDispatchedCallsStep(
 
 async function dispatchCoordination(
   input: CoordinationDispatchInput,
+  startRun: StartWorkflowToolRun,
 ): Promise<CoordinationDispatchResult> {
   const prepared = await prepareCoordinationDispatch({
     serializedContext: input.serializedContext,
@@ -131,6 +147,7 @@ async function dispatchCoordination(
       owner: input.workflowToolRunOwner,
       parentSession: prepared.parentSession,
       session: nextSession,
+      startRun,
       task,
     })),
     readTaskTable(nextSession.state),

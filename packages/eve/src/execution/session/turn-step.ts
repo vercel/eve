@@ -32,7 +32,8 @@ import {
   ToolChannelKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { ChannelKey, requireCompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { sessionAgent } from "#definitions/agent.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
@@ -101,12 +102,14 @@ import {
   createDurableSessionValues,
   readDurableSession,
 } from "#execution/durable-session-store.js";
-import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
+import {
+  buildRuntimeIdentity,
+  createExecutionNodeStep,
+  type CreateRuntime,
+} from "#execution/node-step.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
-import { resolveSessionUsageLimit } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { runModelCallBatch } from "#execution/model-call-batching.js";
 import {
@@ -127,6 +130,34 @@ interface PendingStepAttributes {
   title?: Promise<void>;
 }
 
+/**
+ * What a session step needs from the host that runs it, beyond its input: where its callbacks
+ * reach it, where the session's attributes go, and the runtime its durable calls start in.
+ * Workflow is one host (`turnStep`).
+ */
+export interface SessionStepHost {
+  /** The base URL sign-in and hook callbacks reach this session at, when the host serves them. */
+  readonly callbackBaseUrl?: string;
+  /** Records the session's attributes, such as its title. */
+  setAttributes(attributes: Parameters<typeof setEveAttributes>[0]): Promise<void>;
+  /** The runtime a durable call, such as a workflow tool's, starts in. */
+  readonly createRuntime: CreateRuntime;
+}
+
+/** The Workflow host: its run's metadata, attributes, and runtime. */
+async function workflowStepHost(): Promise<SessionStepHost> {
+  let callbackBaseUrl: string | undefined;
+  try {
+    const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
+    const metadata = getWorkflowMetadata();
+    if (typeof metadata.url === "string")
+      callbackBaseUrl = resolveWorkflowCallbackBaseUrl(metadata.url);
+  } catch {
+    // Outside a workflow context (e.g. tests) — getHookUrl will return undefined.
+  }
+  return { callbackBaseUrl, createRuntime: createWorkflowRuntime, setAttributes: setEveAttributes };
+}
+
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
   "use step";
@@ -142,18 +173,33 @@ export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
       },
     );
   }
-  return await withSessionStateDelta(input, (state) =>
-    runSessionStep({
-      ...state,
-      serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
-    }),
-  );
+  return await turnStepOn(await workflowStepHost())(input);
 }
 
-async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {
+/** A turn step on `host`: the step `turnStep` runs inside Workflow's `"use step"` boundary. */
+export function turnStepOn(
+  host: SessionStepHost,
+): (input: TurnStepInput) => Promise<TurnStepResult> {
+  return async (input) =>
+    await withSessionStateDelta(input, (state) =>
+      runSessionStep(
+        {
+          ...state,
+          serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
+        },
+        host,
+      ),
+    );
+}
+
+/** One session step, on whichever host runs it. */
+async function runSessionStep(
+  input: TurnStepInput,
+  host: SessionStepHost,
+): Promise<DurableStepResult> {
   const pendingAttributes: PendingStepAttributes = {};
   try {
-    return await runSessionStepBody(input, pendingAttributes);
+    return await runSessionStepBody(input, pendingAttributes, host);
   } finally {
     await pendingAttributes.title;
   }
@@ -162,6 +208,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
 async function runSessionStepBody(
   input: TurnStepInput,
   pendingAttributes: PendingStepAttributes,
+  host: SessionStepHost,
 ): Promise<DurableStepResult> {
   // The delivery as accepted, before authorization callbacks are matched out of it.
   const rawDelivery = input.input?.delivery;
@@ -187,19 +234,12 @@ async function runSessionStepBody(
     enterSessionProjectionAt(ctx, foldOrphanedLines(currentProjection(ctx), orphaned));
   }
   const adapter = ctx.require(ChannelKey);
-  const bundle = ctx.require(BundleKey);
+  const agent = sessionAgent(ctx);
+  // The compiled node whose `agent/tools/` and module scope the step runs.
+  const bundle = requireCompiledBundle(ctx);
 
-  // Populate the callback base URL so getHookUrl() works during tool
-  // execution, preferring eve's active local origin over metadata fallback.
-  try {
-    const { getWorkflowMetadata } = await import("#compiled/@workflow/core/index.js");
-    const metadata = getWorkflowMetadata();
-    if (typeof metadata.url === "string") {
-      ctx.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(metadata.url));
-    }
-  } catch {
-    // Outside a workflow context (e.g. tests) — getHookUrl will return undefined.
-  }
+  // Populate the callback base URL so getHookUrl() works during tool execution.
+  if (host.callbackBaseUrl !== undefined) ctx.set(CallbackBaseUrlKey, host.callbackBaseUrl);
 
   const { signIns } = readHitlState(durableSession.state);
   let completedAuths: ReturnType<typeof matchAuthorizationCallbacks>["matches"] | undefined;
@@ -278,7 +318,7 @@ async function runSessionStepBody(
     history: validateHarnessModelMessages(input.history),
   };
   const instrumentation = bindSessionInstrumentation({
-    agentName: bundle.turnAgent.id,
+    agentName: agent.id,
     ctx,
     rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
     sessionId: initialSession.sessionId,
@@ -295,7 +335,7 @@ async function runSessionStepBody(
     const title = deriveSessionTitle(rawDelivery?.title ?? message);
     if (title !== undefined) {
       ctx.set(SessionTitleKey, title);
-      pendingAttributes.title = setEveAttributes({ "$eve.title": title });
+      pendingAttributes.title = host.setAttributes({ "$eve.title": title });
     }
   }
 
@@ -327,7 +367,7 @@ async function runSessionStepBody(
       : AbortSignal.any([input.abortSignal, hookCancellation.signal]);
   try {
     const effectiveNode = { ...bundle.graph.root, turnAgent: bundle.turnAgent };
-    const sessionUsageLimit = resolveSessionUsageLimit(bundle);
+    const sessionUsageLimit = agent.settings.limits?.sessionUsage;
     let compacted = false;
     const emitTurnEvent = createTurnEventHandler({
       abortSignal,
@@ -543,7 +583,7 @@ async function runSessionStepBody(
 
     if (delivery !== undefined && resolved === undefined && startedBetweenTurns) {
       // Nothing here starts a turn, so a cancel has nothing to stop.
-      await publishAdmission(buildRuntimeIdentity(effectiveNode)).catch(ignoreTurnCancellation);
+      await publishAdmission(buildRuntimeIdentity(agent)).catch(ignoreTurnCancellation);
       await instrumentation?.flush();
       const aliased = saveSessionProjection(
         reconcileSessionContinuationToken(ctx, initialSession),
@@ -561,17 +601,12 @@ async function runSessionStepBody(
       });
     }
 
-    const runtimeIdentity = buildRuntimeIdentity(effectiveNode);
+    const runtimeIdentity = buildRuntimeIdentity(agent);
     let restoration: Promise<void> | undefined;
     const prepareDefinitions = (session: HarnessSession): Promise<void> => {
       return (restoration ??= (async () => {
         try {
-          const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-          const revision = deploymentId
-            ? `deployment:${deploymentId}`
-            : await resolveRuntimeCompiledArtifactsVersionedCacheKey(
-                bundle.compiledArtifactsSource,
-              );
+          const revision = await agent.revision();
           await contextStorage.run(ctx, () =>
             restoreDefinitions(ctx, { abortSignal, conversation: session.history, revision }),
           );
@@ -634,8 +669,7 @@ async function runSessionStepBody(
       }
     }
 
-    const modelCallsPerStep =
-      bundle.resolvedAgent.config?.experimental?.workflow?.modelCallsPerStep ?? 1;
+    const modelCallsPerStep = agent.settings.modelCallsPerStep ?? 1;
     const capabilities = ctx.get(CapabilitiesKey);
 
     const runHarnessStep = async (
@@ -650,7 +684,7 @@ async function runSessionStepBody(
         clearOnly: input.input?.control === "clear",
         compactOnly: input.input?.control === "compact",
         controlDelivery: input.input?.controlDelivery,
-        createRuntime: createWorkflowRuntime,
+        createRuntime: host.createRuntime,
         handleEvent,
         signInCompletions,
         typedAnswers: !hasDelegatedSessionContext(input.serializedContext),
@@ -659,12 +693,13 @@ async function runSessionStepBody(
           moduleMap: bundle.moduleMap,
           nodeId: bundle.nodeId,
         },
+        agent,
         node: effectiveNode,
         sessionUsageLimit,
         // The title's write finishes first.
         setAttributes: async (attributes) => {
           await pendingAttributes.title;
-          await setEveAttributes(attributes);
+          await host.setAttributes(attributes);
         },
       });
       return step(lifecycleSession, stepInput);
@@ -694,7 +729,7 @@ async function runSessionStepBody(
               channel: channelOf(ctx),
               to: createToolChannelTo({
                 delegated: hasDelegatedSessionContext(input.serializedContext),
-                loadBundle: () => ctx.require(BundleKey),
+                loadBundle: () => bundle,
               }),
             });
             const schemaSession =

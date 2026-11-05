@@ -12,20 +12,10 @@ import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-ch
 import type { RouteHandlerArgs, WebSocketRouteHooks } from "#channel/routes.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { createAgentDescriptionRouteArgs } from "#channel/agent-description.js";
-import { createChannelOperations } from "#channel/channel-operations.js";
-import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
-import { createAttachSessionFn } from "#channel/session.js";
+import { createChannelRouteArgs } from "#channel/route-args.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
-import {
-  attachAgentInfoRouteResponse,
-  attachHomeRouteMetadata,
-  attachRouteChannelName,
-  attachRemoteAgentStreamHeadersResolver,
-  attachRouteSessionCreator,
-  attachSkillFileSource,
-} from "#internal/nitro/routes/channel-route-context.js";
 import {
   type NitroArtifactsConfig,
   resolveNitroCompiledArtifactsSource,
@@ -256,17 +246,6 @@ async function buildRouteArgs(input: {
             traceId: requestTraceContext.traceId,
           },
   };
-  const channelOperations = createChannelOperations({
-    adapter,
-    channelName,
-    metadata: deliverySource,
-    runtime: bundle.runtime,
-    turnPolicy: channel.turnPolicy,
-  });
-  const attachSession = createAttachSessionFn(bundle.runtime, {
-    ...deliverySource,
-    turnPolicy: channel.turnPolicy,
-  });
   const to = createCrossChannelToFn(
     bundle.runtime,
     toCrossChannelTargets(bundle.channels),
@@ -274,58 +253,32 @@ async function buildRouteArgs(input: {
   );
 
   const agent = createAgentDescriptionRouteArgs(() => resolveNitroCompiledArtifactsSource(config));
-  const args = attachRouteSessionCreator(
-    attachHomeRouteMetadata(
-      attachRouteChannelName(
-        attachAgentInfoRouteResponse(
-          {
-            attachSession,
-            ...channelOperations,
-            ...agent.args,
-            invokeTool: createRouteInvokeTool({
-              agentName: bundle.agentName,
-              config,
-              origin: { adapter, agentName: bundle.agentName, channelName },
-              requestUrl: event.req.url,
-            }),
-            params,
-            requestIp,
-            to,
-            waitUntil,
-          },
-          async () => {
-            const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
-            return await handleAgentInfoRequest(config);
-          },
-        ),
-        channelName,
-      ),
-      { agentName: bundle.agentName },
-    ),
-    async (input) => {
-      const { deliveryId, ...runInput } = input;
-      const generated = createChannelDeliveryMetadata(deliverySource);
-      const delivery = deliveryId === undefined ? generated : { ...generated, deliveryId };
-      const handle = await bundle.runtime.createSession({
-        ...runInput,
-        adapter,
-        channelName,
-        continuationToken:
-          input.continuationToken === undefined
-            ? undefined
-            : `${channelName}:${input.continuationToken}`,
-        delivery,
-        requestId,
-      });
-      return { ...handle, deliveryId: delivery.deliveryId };
+  return createChannelRouteArgs({
+    adapter,
+    agent: {
+      ...agent.args,
+      invokeTool: createRouteInvokeTool({
+        agentName: bundle.agentName,
+        config,
+        origin: { adapter, agentName: bundle.agentName, channelName },
+        requestUrl: event.req.url,
+      }),
     },
-  );
-  attachSkillFileSource(args, agent.skillFiles);
-  if (bundle.resolveRemoteAgentStreamHeaders !== undefined) {
-    attachRemoteAgentStreamHeadersResolver(args, bundle.resolveRemoteAgentStreamHeaders);
-  }
-
-  return args;
+    agentInfo: async () => {
+      const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+      return await handleAgentInfoRequest(config);
+    },
+    agentName: bundle.agentName,
+    deliverySource,
+    params,
+    remoteAgentStreamHeaders: bundle.resolveRemoteAgentStreamHeaders,
+    requestIp,
+    runtime: bundle.runtime,
+    skillFiles: agent.skillFiles,
+    to,
+    turnPolicy: channel.turnPolicy,
+    waitUntil,
+  });
 }
 
 async function resolveAcceptedDeploymentId(
