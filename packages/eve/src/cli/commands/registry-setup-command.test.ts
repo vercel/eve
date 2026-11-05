@@ -4,7 +4,7 @@ import { PassThrough } from "node:stream";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
-import type { Prompter } from "#setup/prompter.js";
+import type { Prompter, PrompterValue, SingleSelectOptions } from "#setup/prompter.js";
 import { REGISTRY_SETUP_PROTOCOL_VERSION } from "#setup/registry-setup-protocol.js";
 import { runRegistrySetupCommand } from "./registry-setup-command.js";
 
@@ -117,6 +117,54 @@ describe("runRegistrySetupCommand", () => {
     await vi.waitFor(() =>
       expect(child.send).toHaveBeenCalledWith({ type: "prompt-result", id: 7, value: "answer" }),
     );
+  });
+
+  it("rebuilds a child search action and answers a picked action with its query", async () => {
+    const searchSelect = (searchAction: unknown) => ({
+      kind: "select",
+      options: {
+        message: "Project to link",
+        search: true,
+        options: [{ value: "prj_1", label: "web" }],
+        searchAction,
+      },
+    });
+    const child = protocolChild(0, null, (running) => {
+      running.emit("message", {
+        type: "prompt",
+        id: 8,
+        prompt: searchSelect({ labelTemplate: "Search for '\0query\0'" }),
+      });
+      // A child that predates labelTemplate: JSON dropped its functions.
+      running.emit("message", { type: "prompt", id: 9, prompt: searchSelect({}) });
+      running.emit("message", { type: "result", outcome: { kind: "completed", facts: [] } });
+    });
+    const received: SingleSelectOptions<PrompterValue>[] = [];
+    const { prompter } = createFakePrompter({
+      single: (opts) => {
+        received.push(opts);
+        return opts.searchAction?.value("$&acme") ?? "prj_1";
+      },
+    });
+    spawn.mockReturnValue(child);
+
+    await runRegistrySetupCommand(
+      "/project",
+      { package: "@acme/slack", bin: "acme-slack", args: ["setup"] },
+      "channel/slack",
+      { prompter },
+    );
+
+    expect(received[0]?.searchAction?.label("$&acme")).toBe("Search for '$&acme'");
+    expect(received[1]).not.toHaveProperty("searchAction");
+    await vi.waitFor(() => {
+      expect(child.send).toHaveBeenCalledWith({
+        type: "prompt-result",
+        id: 8,
+        value: "\0search-action:$&acme",
+      });
+      expect(child.send).toHaveBeenCalledWith({ type: "prompt-result", id: 9, value: "prj_1" });
+    });
   });
 
   it("streams child output through a plain parent prompter", async () => {
