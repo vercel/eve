@@ -19,9 +19,10 @@ import { diffValue, snapshotValue } from "#shared/value-delta.js";
 
 const SESSION_VALUE_KEYS = ["serializedContext", "sessionState", "history"] as const;
 
-/** What a session step is given: its session values, and where it writes. */
+/** What a session step is given: its session values, and where and whether it writes again. */
 type StepValues = Partial<SessionStateValues> & {
   readonly sessionWritable?: WritableStream<Uint8Array>;
+  readonly rerun?: true;
 };
 
 /**
@@ -39,7 +40,7 @@ type StepValues = Partial<SessionStateValues> & {
  * {@link followInterruptedAttempt}.
  */
 export async function withSessionStateDelta<
-  I extends Partial<SessionStateValues>,
+  I extends Partial<SessionStateValues> & { readonly rerun?: true },
   R extends Partial<SessionStateValues>,
 >(input: I, work: (step: Entered<I>) => Promise<R>): Promise<WithSessionStateDelta<R>>;
 export async function withSessionStateDelta(

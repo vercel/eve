@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ContinuationHookTokensKey } from "#context/keys.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { OpenTurn } from "#execution/session/open-turn.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { withSessionStateDelta } from "#execution/session/step-state-delta.js";
 
@@ -196,6 +197,88 @@ describe("SessionStateCursor", () => {
       if (meanwhile === "nothing") expect(claimSessionHooks).not.toHaveBeenCalled();
     },
   );
+
+  it("records where the open turn goes on before a step runs and once it is adopted", async () => {
+    const records: unknown[] = [];
+    const cursor = new SessionStateCursor({
+      history: [],
+      inbox: { claimSessionHooks: vi.fn(async () => {}) },
+      open: { at: "step" },
+      record: async ({ open }) => {
+        records.push({ open, sessionState: cursor.sessionState.hasProxyInputRequests });
+      },
+      sessionWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state(""),
+    });
+    const paused: OpenTurn = { at: "pause", pause: { on: "tasks", taskIds: ["task-1"] } };
+
+    await cursor.advance(
+      (input) =>
+        withSessionStateDelta(input, async () => {
+          // The record before the step is written once it was saved, with the values it reads.
+          expect(records).toEqual([{ open: { at: "step" }, sessionState: false }]);
+          return { sessionState: { ...state(""), hasProxyInputRequests: true } };
+        }),
+      { after: () => paused, before: { at: "step" } },
+    );
+    // A step that declares no change keeps the turn where it was, and still records.
+    await cursor.advance((input) => withSessionStateDelta(input, async () => ({})));
+
+    expect(records).toEqual([
+      { open: { at: "step" }, sessionState: false },
+      { open: paused, sessionState: true },
+      { open: paused, sessionState: true },
+    ]);
+    expect(cursor.open).toEqual(paused);
+  });
+
+  it("settles once no step runs, after the last one is recorded", async () => {
+    let recorded = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const cursor = new SessionStateCursor({
+      history: [],
+      inbox: { claimSessionHooks: vi.fn(async () => {}) },
+      record: async () => {
+        recorded += 1;
+      },
+      sessionWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state(""),
+    });
+    await cursor.settledStep();
+    const step = cursor.advance(async (input) => {
+      await gate;
+      return await withSessionStateDelta(input, async () => ({}));
+    });
+    let settled = false;
+    const waiting = cursor.settledStep().then(() => (settled = true));
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    release();
+    await step;
+    await waiting;
+    expect(recorded).toBe(1);
+  });
+
+  it("marks only the first step a rerun of the one a stopped process left", async () => {
+    const reruns: unknown[] = [];
+    const cursor = new SessionStateCursor({
+      history: [],
+      inbox: { claimSessionHooks: vi.fn(async () => {}) },
+      rerunFirst: true,
+      sessionWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state(""),
+    });
+    for (let index = 0; index < 2; index++)
+      await cursor.advance(async ({ rerun }) => {
+        reruns.push(rerun);
+        return { stateDelta: {} };
+      });
+    expect(reruns).toEqual([true, undefined]);
+  });
 });
 
 function state(continuationToken: string): DurableSessionState {

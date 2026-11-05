@@ -3,8 +3,8 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 
-// The session as an owner hands it on, such as to a successor deployment on Workflow.
-// Host-neutral; Workflow's handoff is `handoff.ts`.
+// The session as an owner hands it on: to a successor deployment on Workflow, or to another host
+// that restores it. Host-neutral; Workflow's handoff is `handoff.ts`.
 
 /**
  * Cross-deployment checkpoint contract. The successor may run a different eve
