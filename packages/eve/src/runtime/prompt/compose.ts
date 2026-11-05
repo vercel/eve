@@ -5,7 +5,9 @@ import type { ResolvedInstructionsDefinition } from "#runtime/types.js";
  * a single name (the file's, when there's only one of the agent's own).
  */
 export function agentInstructionsOf(
-  instructions: readonly ResolvedInstructionsDefinition[] | undefined,
+  instructions:
+    | readonly Pick<ResolvedInstructionsDefinition, "content" | "name" | "owner" | "role">[]
+    | undefined,
 ): { readonly name: string; readonly content: string } | undefined {
   const systemInstructions = (instructions ?? []).filter(
     (entry) => entry.role === "system" && entry.content.trim().length > 0,
