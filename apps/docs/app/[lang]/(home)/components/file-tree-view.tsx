@@ -68,17 +68,34 @@ function Resolution({ item, customer }: { item: FileTreeItem; customer: Customer
   );
 }
 
-/** The tag beside a dynamic file in the tree. */
+/**
+ * The tag beside a file in the tree: dynamic files say so (or that the customer doesn't get
+ * them), and static ones past the required instructions.md are optional, in a lighter gray.
+ */
 function Tag({
   item,
   customer,
   active,
+  required,
 }: {
   item: FileTreeItem;
   customer: Customer;
   active: boolean;
+  required: boolean;
 }) {
-  if (!item.results) return null;
+  if (!item.results) {
+    if (required) return null;
+    return (
+      <span
+        className={cn(
+          "ml-auto shrink-0 font-mono text-label-12-mono!",
+          active ? "text-gray-700" : "text-gray-500",
+        )}
+      >
+        optional
+      </span>
+    );
+  }
   const missing = item.results[customer.id] === null;
   return (
     <span
@@ -168,7 +185,12 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
                       <span className={cn("min-w-0 truncate", missing && "line-through")}>
                         {item.name}
                       </span>
-                      <Tag active={selectedIndex === i} customer={customer} item={item} />
+                      <Tag
+                        active={selectedIndex === i}
+                        customer={customer}
+                        item={item}
+                        required={i === 0}
+                      />
                     </button>
                   );
                 })}
@@ -206,13 +228,13 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
   // simply shows its code block right beneath it in a stacked list.
   const mobile = (
     <div className="space-y-4">
-      {items.map((item) => (
+      {items.map((item, i) => (
         <div className="overflow-hidden material-large" key={item.name}>
           <div className="flex h-12 items-center gap-2 border-b px-4">
             <span className="min-w-0 truncate font-medium text-gray-1000 text-sm">
               {item.fileName}
             </span>
-            <Tag active={false} customer={customer} item={item} />
+            <Tag active={false} customer={customer} item={item} required={i === 0} />
           </div>
           <p className="border-b px-4 py-3 text-copy-14 text-gray-900">{item.description}</p>
           <Resolution customer={customer} item={item} />
