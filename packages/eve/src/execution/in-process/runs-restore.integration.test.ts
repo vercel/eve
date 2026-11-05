@@ -380,4 +380,87 @@ describe("in-process runs across a restore", () => {
       rmSync(directory, { force: true, recursive: true });
     }
   }, 60_000);
+  it("stops while ask_question waits for its answer, and goes on with it after a restore", async () => {
+    const model = markMockModel(
+      new MockLanguageModelV4({
+        doStream: async ({ prompt }) => {
+          const text = textOf(prompt);
+          if (text.includes("answered") && text.includes("Friday"))
+            return textStreamResult("Alice, we ship on Friday.");
+          return toolCallsStreamResult([
+            {
+              input: JSON.stringify({
+                options: [
+                  { description: "Before the weekend.", label: "Friday" },
+                  { description: "After the weekend.", label: "Monday" },
+                ],
+                question: "Which day should we ship?",
+              }),
+              toolCallId: "call-ask",
+              toolName: "ask_question",
+            },
+          ]);
+        },
+        modelId: "in-process-restore-ask",
+        provider: "eve-test",
+      }),
+    );
+    const test = await createTestRuntime({
+      agent: agentWith(model, "in-process-restore-ask"),
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: (await import("#tools/provided/ask-question.js")).askQuestion,
+          }),
+          logicalPath: "tools/ask_question.ts",
+        },
+      ],
+    });
+    const directory = mkdtempSync(join(tmpdir(), "eve-restore-ask-"));
+    try {
+      await test.run(async () => {
+        const compiledArtifactsSource = createBundledRuntimeCompiledArtifactsSource();
+        const world = localTestWorld(directory);
+        const first = createInProcessRuntime({ compiledArtifactsSource }, { world });
+        const sent = await address(first, "alice-restore-ask").send("When do we ship?", {
+          auth: null,
+        });
+        await follow(first, sent.sessionId, (seen) =>
+          seen.some((event) => event.type === "interaction.opened"),
+        );
+        await first.idle(sent.sessionId);
+        // The question's run waits on its hook, and goes on after a restore: nothing here runs.
+        await expect(first.quiescent()).resolves.toBe(true);
+        await first.dispose();
+        const saved = await createWorldSessionStore(world).load(sent.sessionId);
+        expect(saved?.runs).toMatchObject([
+          { input: { callId: "call-ask", toolName: "ask_question" } },
+        ]);
+
+        const second = createInProcessRuntime({ compiledArtifactsSource }, { world });
+        try {
+          await second.restore(saved!);
+          await address(second, "alice-restore-ask").send("Friday", { auth: null });
+          await follow(second, sent.sessionId, (seen) =>
+            replies(seen).includes("Alice, we ship on Friday."),
+          );
+          const events = await recorded(second, sent.sessionId);
+          expect(
+            events.filter((event) => event.type === "call.settled").map((event) => event.data),
+          ).toMatchObject([
+            {
+              callId: "call-ask",
+              outcome: "completed",
+              output: { answer: "Friday", status: "answered" },
+            },
+          ]);
+          await expect(violations(second, sent.sessionId)).resolves.toEqual([]);
+        } finally {
+          await second.dispose();
+        }
+      });
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
+    }
+  }, 90_000);
 });

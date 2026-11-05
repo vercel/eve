@@ -1,6 +1,6 @@
 import type { SessionCommand } from "#channel/types.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import type { SessionSnapshot } from "./snapshot.js";
+import { lineCount, type SessionSnapshot } from "./snapshot.js";
 
 // Where an in-process host keeps each session while it runs, so that another process continues
 // it after this one stops, however it stops. A session's stream lines and the inputs its
@@ -22,7 +22,16 @@ export type AcceptedInput = {
 } & ({ readonly command: SessionCommand } | { readonly runMessage: WorkflowToolRunMessage });
 
 /** What a session continues from besides its stream: a snapshot without its lines. */
-export type SessionState = Omit<SessionSnapshot, "lines">;
+export type SessionState = Omit<SessionSnapshot, "lines" | "linesFrom">;
+
+/** How much of a session's stream a load reads. */
+export interface LoadOptions {
+  /**
+   * `"all"` (the default) reads every line; `"count"` reads none, only how many there are
+   * (`linesFrom`), for a host whose readers read the stream from its World.
+   */
+  readonly lines?: "all" | "count";
+}
 
 export interface SessionStore {
   /**
@@ -38,7 +47,7 @@ export interface SessionStore {
    */
   saveState(state: SessionState): Promise<void>;
   /** The session as stored, with every input it hasn't read; `undefined` when none is stored. */
-  load(sessionId: string): Promise<SessionSnapshot | undefined>;
+  load(sessionId: string, options?: LoadOptions): Promise<SessionSnapshot | undefined>;
   /** The sessions stored, most recently saved first. */
   list(): Promise<readonly StoredSession[]>;
 }
@@ -57,14 +66,20 @@ export interface StoredSession {
  * refuses it, since it holds a later session than this one.
  */
 export async function saveSnapshot(store: SessionStore, snapshot: SessionSnapshot): Promise<void> {
-  const kept = (await store.load(snapshot.sessionId))?.lines.length ?? 0;
-  if (kept > snapshot.lines.length)
+  const stored = await store.load(snapshot.sessionId, { lines: "count" });
+  const kept = stored === undefined ? 0 : lineCount(stored);
+  const from = snapshot.linesFrom ?? 0;
+  if (kept > lineCount(snapshot))
     throw new Error(
       `The store holds more of session "${snapshot.sessionId}" than this snapshot; restore what it holds.`,
     );
-  if (kept < snapshot.lines.length)
-    await store.appendLines(snapshot.sessionId, kept, snapshot.lines.slice(kept));
-  const { lines: _lines, ...state } = snapshot;
+  if (kept < from)
+    throw new Error(
+      `Session "${snapshot.sessionId}"'s snapshot starts at line ${String(from)}, and the store holds ${String(kept)}.`,
+    );
+  if (kept < lineCount(snapshot))
+    await store.appendLines(snapshot.sessionId, kept, snapshot.lines.slice(kept - from));
+  const { lines: _lines, linesFrom: _linesFrom, ...state } = snapshot;
   await store.saveState(state);
 }
 
@@ -124,7 +139,7 @@ export function stoppableStore(store: SessionStore): {
         if (!stopped) await store.appendLines(sessionId, position, lines);
       },
       list: async () => await store.list(),
-      load: async (sessionId) => await store.load(sessionId),
+      load: async (sessionId, options) => await store.load(sessionId, options),
       saveState: async (state) => {
         if (!stopped) await store.saveState(state);
       },

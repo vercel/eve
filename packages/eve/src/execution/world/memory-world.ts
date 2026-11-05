@@ -1,4 +1,5 @@
 import { RunNotFoundError } from "#shared/run-errors.js";
+import { serialPerKey } from "#shared/serial-per-key.js";
 import { createUlid } from "#shared/ulid.js";
 import type {
   RuntimeWorld,
@@ -156,38 +157,44 @@ export function backedWorld(
     return event;
   };
 
+  // A run's writes, one at a time: each checks the run (it exists, the fence's count) and then
+  // waits on its backend, so two at once would both pass the check.
+  const writes = serialPerKey();
+
   return {
     capabilities: { inBandFence: true },
     getDeploymentId: async () => deploymentId,
     events: {
       async create(runId, data, params) {
         await opened;
-        if (data.eventType === "run_created") {
-          if (runs.has(runId)) throw new EntityConflictError(`Run "${runId}" already exists`);
-          const run: BackedRun = {
-            createdAt: new Date(),
-            runId,
-            workflowName: data.eventData.workflowName,
-            ...(data.specVersion !== undefined && { specVersion: data.specVersion }),
-          };
-          await backend?.putRun(run);
-          // `run_created` is the run's first in-band position.
-          const held: MemoryRun = { events: [], run, seqInBand: 0, started: false };
-          runs.set(runId, held);
-          return await append(runId, held, data, true);
-        }
-        const held = runOf(runId);
-        // The in-band fence: a write in-band is accepted only at the run's in-band count.
-        const inBand = params?.inBand === true && fenced(held);
-        if (inBand && params?.expectedSeqInBand !== held.seqInBand)
-          throw new InBandSupersededError(
-            `In-band write on run ${runId} expected seqInBand ${String(params?.expectedSeqInBand)}, but the run is at ${String(held.seqInBand)}.`,
-          );
-        if (data.eventType === "run_started") {
-          if (held.started) throw new EntityConflictError(`Run "${runId}" already started`);
-          held.started = true;
-        }
-        return await append(runId, held, data, inBand);
+        return await writes.run(runId, async () => {
+          if (data.eventType === "run_created") {
+            if (runs.has(runId)) throw new EntityConflictError(`Run "${runId}" already exists`);
+            const run: BackedRun = {
+              createdAt: new Date(),
+              runId,
+              workflowName: data.eventData.workflowName,
+              ...(data.specVersion !== undefined && { specVersion: data.specVersion }),
+            };
+            await backend?.putRun(run);
+            // `run_created` is the run's first in-band position.
+            const held: MemoryRun = { events: [], run, seqInBand: 0, started: false };
+            runs.set(runId, held);
+            return await append(runId, held, data, true);
+          }
+          const held = runOf(runId);
+          // The in-band fence: a write in-band is accepted only at the run's in-band count.
+          const inBand = params?.inBand === true && fenced(held);
+          if (inBand && params?.expectedSeqInBand !== held.seqInBand)
+            throw new InBandSupersededError(
+              `In-band write on run ${runId} expected seqInBand ${String(params?.expectedSeqInBand)}, but the run is at ${String(held.seqInBand)}.`,
+            );
+          if (data.eventType === "run_started") {
+            if (held.started) throw new EntityConflictError(`Run "${runId}" already started`);
+            held.started = true;
+          }
+          return await append(runId, held, data, inBand);
+        });
       },
       async list({ runId, pagination }) {
         await opened;

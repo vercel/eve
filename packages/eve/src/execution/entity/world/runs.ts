@@ -8,8 +8,8 @@ import { createUlid } from "#shared/ulid.js";
 //   - Its key is `<kind>_` and a ULID; its run is `wrun_` and the same ULID, as Workflow names
 //     runs, so any World accepts it. What it was created with is the run's input.
 //   - Its journal is `step_created` events on the run's log, the record's kind as the step's name
-//     and an envelope as its input: the value, and whether it's a snapshot (`Envelope`). Internal
-//     records (`entity.*`) carry the layer's own bookkeeping.
+//     and an envelope as its input: the value, whether it's a snapshot, and how far the mailbox
+//     is consumed (`Envelope`). Internal records (`entity.*`) carry the layer's own bookkeeping.
 //   - One writer at a time: on a World with the in-band fence (`capabilities.inBandFence`), the
 //     run is created at spec 9 and every write is fenced (`Writer`); a writer that opens an
 //     existing entity claims it first, and the World refuses the writes of any earlier writer,
@@ -22,9 +22,10 @@ const decoder = new TextDecoder();
 /** The spec version of a fenced run, whose deliveries the World also serializes. */
 export const FENCED_SPEC = 9;
 
-/** The layer's own records: a claim, and a stream write's announcement. */
+/** The layer's own records: a claim, a stream write's announcement, a consumption. */
 export const CLAIM_RECORD = "entity.claim";
 export const STREAM_RECORD = "entity.stream";
+export const CONSUMED_RECORD = "entity.consumed";
 
 /** How one kind of entity sits on a World. */
 export interface EntityKind {
@@ -34,6 +35,8 @@ export interface EntityKind {
   readonly workflowName: string;
   /** The namespace its stream's name carries (base64url-encoded). */
   readonly streamNamespace: string;
+  /** Recorded on its runs for a World's recovery (`queueNamespace`), when it has a queue. */
+  readonly executionContext?: Readonly<Record<string, unknown>>;
 }
 
 export function runIdOf(kind: EntityKind, key: string): string {
@@ -76,6 +79,11 @@ interface Envelope {
   readonly v: unknown;
   /** It's a snapshot: loads start from it. */
   readonly s?: true;
+  /**
+   * The mailbox is consumed through this message (an `EntityMessage` id); `""` on a snapshot of
+   * an entity that consumed none, so a reader looking for it stops at the snapshot either way.
+   */
+  readonly c?: string;
 }
 
 type EventRequest = Parameters<RuntimeWorld["events"]["create"]>[1];
@@ -127,6 +135,7 @@ export async function createRun(
         deploymentId,
         input: encoder.encode(JSON.stringify(meta ?? {})),
         workflowName: kind.workflowName,
+        ...(kind.executionContext !== undefined && { executionContext: kind.executionContext }),
       },
       eventType: "run_created",
       ...(specVersion !== undefined && { specVersion }),
@@ -200,6 +209,7 @@ export async function appendRecord(
 interface Read {
   readonly record: JournalRecord;
   readonly snapshot: boolean;
+  readonly consumed?: string;
 }
 
 function readOf(event: WorldEvent): Read | undefined {
@@ -207,21 +217,30 @@ function readOf(event: WorldEvent): Read | undefined {
   const data = event.eventData as { readonly stepName?: unknown; readonly input?: unknown };
   if (typeof data?.stepName !== "string" || !(data.input instanceof Uint8Array)) return undefined;
   const envelope = JSON.parse(decoder.decode(data.input)) as Envelope;
-  return { record: { kind: data.stepName, value: envelope.v }, snapshot: envelope.s === true };
+  return {
+    record: { kind: data.stepName, value: envelope.v },
+    snapshot: envelope.s === true,
+    ...(envelope.c !== undefined && { consumed: envelope.c }),
+  };
 }
 
 /** Whether a record is the layer's own, which a journal's reader never sees. */
 const isInternal = (record: JournalRecord) => record.kind.startsWith("entity.");
 
 /**
- * `runId`'s journal from its latest snapshot on; `undefined` for a run the World doesn't hold.
- * Read newest first, so it costs what it returns.
+ * `runId`'s journal from its latest snapshot on, and how far its mailbox is consumed as of
+ * there; `undefined` for a run the World doesn't hold. Read newest first, so it costs what it
+ * returns. With `untilConsumed`, it reads on past the snapshot until it finds a consumption.
  */
 export async function readJournal(
   world: RuntimeWorld,
   runId: string,
-): Promise<LoadedJournal | undefined> {
+  options: { readonly untilConsumed?: boolean } = {},
+): Promise<(LoadedJournal & { readonly consumed: string | undefined }) | undefined> {
   const newestFirst: JournalRecord[] = [];
+  let snapshot: JournalRecord | undefined;
+  let consumed: string | undefined;
+  let found = false;
   let cursor: string | undefined;
   do {
     let page;
@@ -241,12 +260,20 @@ export async function readJournal(
     for (const event of page.data) {
       const read = readOf(event);
       if (read === undefined) continue;
-      if (read.snapshot) return { after: newestFirst.reverse(), snapshot: read.record };
-      if (!isInternal(read.record)) newestFirst.push(read.record);
+      if (!found && read.consumed !== undefined) {
+        found = true;
+        consumed = read.consumed === "" ? undefined : read.consumed;
+      }
+      if (snapshot === undefined) {
+        if (read.snapshot) snapshot = read.record;
+        else if (!isInternal(read.record)) newestFirst.push(read.record);
+      }
+      if (snapshot !== undefined && (found || options.untilConsumed !== true))
+        return { after: newestFirst.reverse(), consumed, snapshot };
     }
     cursor = page.hasMore ? (page.cursor ?? undefined) : undefined;
   } while (cursor !== undefined);
-  return { after: newestFirst.reverse(), snapshot: undefined };
+  return { after: newestFirst.reverse(), consumed, snapshot };
 }
 
 /** What `runId` was created with; `undefined` for a run the World doesn't hold. */
@@ -288,4 +315,51 @@ export async function listRuns(
     cursor = page.hasMore ? (page.cursor ?? undefined) : undefined;
   } while (cursor !== undefined);
   return found;
+}
+
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/**
+ * The run that claims one occurrence of `name`: a ULID with the occurrence as its time and the
+ * name hashed as the rest, so every process names the same run and only the first creates it.
+ * (A World refuses run ids from more than a day ago, so a run per occurrence, not one ledger.)
+ */
+function occurrenceRunId(name: string, occurrence: number): string {
+  let time = "";
+  for (let rest = occurrence, index = 0; index < 10; index += 1) {
+    time = CROCKFORD[rest % 32]! + time;
+    rest = Math.floor(rest / 32);
+  }
+  // 80 bits of FNV-1a over the name, five bits at a time.
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of encoder.encode(name))
+    hash = ((hash ^ BigInt(byte)) * 0x100000001b3n) & ((1n << 80n) - 1n);
+  let random = "";
+  for (let index = 0; index < 16; index += 1) {
+    random = CROCKFORD[Number(hash & 31n)]! + random;
+    hash >>= 5n;
+  }
+  return `wrun_${time}${random}`;
+}
+
+/** Whether this caller is the first to claim `name`'s `occurrence` (epoch milliseconds). */
+export async function claimOnce(
+  world: RuntimeWorld,
+  name: string,
+  occurrence: number,
+): Promise<boolean> {
+  try {
+    await world.events.create(occurrenceRunId(name, occurrence), {
+      eventData: {
+        deploymentId: await world.getDeploymentId(),
+        input: encoder.encode(JSON.stringify({ at: new Date(occurrence).toISOString(), name })),
+        workflowName: "eve/entity-once",
+      },
+      eventType: "run_created",
+    });
+    return true;
+  } catch (error) {
+    if (isEntityConflict(error)) return false;
+    throw error;
+  }
 }

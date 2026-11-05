@@ -73,6 +73,10 @@ export interface MemoryInboxRegistry {
   replay(token: string, payload: unknown): Promise<void>;
   /** The owner of the address `token` names, if one is open. */
   holder(token: string): string | undefined;
+  /** Whether no delivery is on its way and no open address holds what its owner hasn't read. */
+  quiet(): boolean;
+  /** Whether `owner` (a session, or a run) waits on one of its open addresses for what's next. */
+  waiting(owner: string): boolean;
   /** Closes every open address, so each owner reads nothing more. */
   closeAll(): void;
 }
@@ -151,6 +155,18 @@ export function createMemoryInboxRegistry(boundary: StepBoundary): MemoryInboxRe
 
   return {
     holder: (token) => held.get(token)?.owner,
+
+    quiet() {
+      if (lanes.size > 0) return false;
+      for (const open of opened) if (!open.disposed && open.queue.length > 0) return false;
+      return true;
+    },
+
+    waiting(owner) {
+      for (const open of opened)
+        if (open.owner === owner && !open.disposed && open.waiters.size > 0) return true;
+      return false;
+    },
 
     async deliver(token, payload) {
       return await inLane(token, async (): Promise<Delivery> => {
