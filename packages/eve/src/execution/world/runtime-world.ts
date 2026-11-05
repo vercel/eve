@@ -190,5 +190,10 @@ export interface RuntimeWorld {
       runId: string,
       name: string,
     ): Promise<{ readonly tailIndex: number; readonly done: boolean }>;
+    /**
+     * A live read from chunk `startIndex` on, which waits for chunks written later, when the World
+     * has one: a reader far into a long stream starts there rather than paging from its start.
+     */
+    get?(runId: string, name: string, startIndex?: number): Promise<ReadableStream<Uint8Array>>;
   };
 }

@@ -27,7 +27,9 @@ function entryOf(data: {
     readonly input: Uint8Array;
     readonly stepName: string;
   };
-  return { entry: stepName, kind: "entry", value: JSON.parse(decoder.decode(input)) };
+  // A journal record's value, out of the envelope the entity layer keeps it in.
+  const envelope = JSON.parse(decoder.decode(input)) as { readonly v?: unknown };
+  return { entry: stepName, kind: "entry", value: envelope.v };
 }
 
 /** `world`, telling `faults` about each write; writes stop landing once `dead()` is true. */

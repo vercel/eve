@@ -38,6 +38,8 @@ export interface HostedSessionInput {
   readonly inputs?: SessionSnapshot["inputs"];
   /** Its stream as recorded so far, one line each. */
   readonly lines: () => readonly string[];
+  /** The position of `lines`' first line: 0 unless the session restored on its stream's tail. */
+  readonly linesFrom?: () => number;
   /** Resolves once every line its stream wrote so far is kept, which a save waits for. */
   readonly flushLines?: () => Promise<void>;
   /** The runs it started that it hasn't heard the end of, by what `heard` says it read. */
@@ -186,7 +188,12 @@ export class HostedSession implements SessionRecorder {
   }
 
   snapshot(): SessionSnapshot {
-    return { ...this.state(), lines: [...this.input.lines()] };
+    const from = this.input.linesFrom?.() ?? 0;
+    return {
+      ...this.state(),
+      lines: [...this.input.lines()],
+      ...(from > 0 && { linesFrom: from }),
+    };
   }
 
   /** Saves the session, when a store keeps it. */

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { SESSION_CHECKPOINT_VERSION } from "#execution/session/checkpoint.js";
 import { memoryWorld } from "#execution/world/memory-world.js";
-import { readSessionEntriesBackwards } from "#execution/world/session-runs.js";
 import type { SessionState } from "./session-store.js";
 import { createWorldSessionStore } from "./world-store.js";
 
@@ -35,9 +34,17 @@ function stateWith(history: readonly string[], step: number): SessionState {
   };
 }
 
+/** The kinds of every journal record the session's run holds, oldest first. */
 async function kinds(world: ReturnType<typeof memoryWorld>): Promise<string[]> {
-  const entries = await readSessionEntriesBackwards(world, sessionId, () => false);
-  return (entries ?? []).map((entry) => entry.kind).reverse();
+  const page = await world.events.list({
+    pagination: { limit: 1000, sortOrder: "asc" },
+    resolveData: "all",
+    runId: sessionId.replace(/^session_/, "wrun_"),
+  });
+  return page.data.flatMap((event) => {
+    const stepName = (event.eventData as { readonly stepName?: unknown } | undefined)?.stepName;
+    return event.eventType === "step_created" && typeof stepName === "string" ? [stepName] : [];
+  });
 }
 
 describe("a session's saves on its World", () => {
@@ -49,7 +56,7 @@ describe("a session's saves on its World", () => {
       history.push(`message ${step}`);
       await store.saveState(stateWith(history, step));
     }
-    expect((await kinds(world)).filter((kind) => kind !== "eve.claim")).toEqual([
+    expect((await kinds(world)).filter((kind) => !kind.startsWith("entity."))).toEqual([
       "eve.state",
       "eve.delta",
       "eve.delta",

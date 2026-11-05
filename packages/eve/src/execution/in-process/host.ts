@@ -24,7 +24,7 @@ import { memoryWorld } from "#execution/world/memory-world.js";
 import type { RuntimeWorld } from "#execution/world/runtime-world.js";
 import type { InProcessRuntime } from "./runtime.js";
 import { stoppableStore, type SessionStore } from "./session-store.js";
-import { createWorldSessionStore } from "./world-store.js";
+import { createWorldSessionStore, type WorldSessionStore } from "./world-store.js";
 import { acrossStepBoundary, structuredCloneBoundary, type StepBoundary } from "./step-boundary.js";
 import { createInProcessTimers, type InProcessTimers } from "./timers.js";
 
@@ -103,6 +103,13 @@ export interface InProcessHostOptions {
    * follow its World throughout (`registerFallbackLineStore`). Defaults to `true`.
    */
   readonly servesLines?: boolean;
+  /**
+   * The store its sessions are kept in, when its creator holds one already: a World host's
+   * delivery, which writes through its activation's handle and consumes its messages
+   * (`WorldSessionStore.receive`). Its readers read from the World, so a takeover reaches them
+   * there. Without one, a store on `world`.
+   */
+  readonly worldStore?: WorldSessionStore;
 }
 
 /** A session running here: what the host records of it, and its loop. */
@@ -145,10 +152,10 @@ export interface InProcessHost {
   suspended(): boolean;
   /**
    * Whether nothing here runs, or is about to: no delivery is on its way, every session waits on
-   * its addresses or a timer with no step running, and every run is a subagent's, waiting on its
-   * hooks. Stopped now, each would continue from its World as it is, woken by what arrives next
-   * or by its next timer (`timers.next()`). A task's or a workflow tool's run doesn't survive a
-   * stop, so a host running one isn't quiescent.
+   * its addresses or a timer with no step running, and every run is replayable (a subagent's,
+   * `ask_question`'s), waiting on its hooks. Stopped now, each would continue from its World as
+   * it is, woken by what arrives next or by its next timer (`timers.next()`). An authored
+   * workflow tool's run doesn't survive a stop, so a host running one isn't quiescent.
    */
   quiescent(): Promise<boolean>;
   /**
@@ -176,11 +183,13 @@ export function createInProcessHost(
   const inboxes = createMemoryInboxRegistry(stepBoundary);
   const timers = createInProcessTimers();
   const world = options.world ?? memoryWorld();
-  const onWorld = createWorldSessionStore(world, {
-    // Another process continued a session: what this one writes of it is refused from now on,
-    // and its readers here hear why after the lines it kept.
-    onTakenOver: (sessionId, error) => lines.fail(sessionId, error),
-  });
+  const onWorld =
+    options.worldStore ??
+    createWorldSessionStore(world, {
+      // Another process continued a session: what this one writes of it is refused from now on,
+      // and its readers here hear why after the lines it kept.
+      onTakenOver: (sessionId, error) => lines.fail(sessionId, error),
+    });
   const kept = options.world === undefined ? undefined : stoppableStore(onWorld);
   const store = kept?.store ?? onWorld;
   const records = new Map<string, HostedSession>();
@@ -318,8 +327,9 @@ export function createInProcessHost(
         if (!(await settledNow(live.loop.settledStep()))) return false;
         if (!inboxes.waiting(sessionId) && !sleeping.has(sessionId)) return false;
       }
+      // A run waiting on its hooks may stop with the session if it goes on after a restore.
       for (const run of runs.active())
-        if (run.kind !== "subagent" || !inboxes.waiting(run.runId)) return false;
+        if (!run.replayable || !inboxes.waiting(run.runId)) return false;
       // A delivery may have started crossing while this looked.
       return inboxes.quiet();
     },

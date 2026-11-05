@@ -12,10 +12,10 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 
 import { memoryWorld } from "./memory-world.js";
 import type { RuntimeWorld } from "./runtime-world.js";
-import { claimSessionRun, readSessionLines } from "./session-runs.js";
+import { sessionEntities } from "./session-entities.js";
 
 // One process writes a session at a time. A process that continues a session claims it first
-// (`claimSessionRun`, the first write of a restore), and the World refuses the writes of the
+// (opening its entity, the first write of a restore), and the World refuses the writes of the
 // process that ran it before: its next message fails, saying the session continued elsewhere,
 // and nothing of it reaches the stream. (Two runtimes in one process can't hold one session's
 // stream, so the other process here is its claim.)
@@ -37,10 +37,10 @@ async function takenOver(world: RuntimeWorld) {
     const sent = await alice(runtime).send("Alice asks for the weekly summary.", { auth: null });
     await sent.result();
     const { sessionId } = sent;
-    const before = (await readSessionLines(world, sessionId)).length;
+    const before = (await sessionEntities(world).chunks(sessionId)).length;
 
     // Another process continues the session while this runtime still runs it.
-    await claimSessionRun(world, sessionId);
+    await sessionEntities(world).open(sessionId);
 
     const refused = await alice(runtime)
       .send("Alice asks again.", { auth: null })
@@ -48,7 +48,7 @@ async function takenOver(world: RuntimeWorld) {
         () => undefined,
         (error: unknown) => error,
       );
-    const after = (await readSessionLines(world, sessionId)).length;
+    const after = (await sessionEntities(world).chunks(sessionId)).length;
     return { after, before, refused };
   } finally {
     await runtime.dispose();

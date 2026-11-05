@@ -2,8 +2,11 @@ import { createChannelAddress } from "#channel/channel-address.js";
 import { ScheduleDispatcher } from "#channel/schedule.js";
 import type { Runtime, SessionAuthContext } from "#channel/types.js";
 import { codeAgentOf } from "#embed/agent.js";
+import type { ActivationOutcome, Entities } from "#execution/entity/entities.js";
 import { registerFallbackLineStore } from "#execution/hosts.js";
+import type { SessionLineStore } from "#execution/session-line-store.js";
 import type { QueueWorld, WorldQueueDelivery } from "#execution/world/runtime-world.js";
+import { sessionEntities } from "#execution/world/session-entities.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { randomUUID } from "#platform/uuid.js";
 import type { SessionStreamEvent } from "#protocol/session-event.js";
@@ -18,24 +21,21 @@ import type { ScheduleDefinition } from "#public/definitions/schedule.js";
 import { holdSessionAgent, type CodeAgent } from "#runtime/sessions/session-agent.js";
 import type { Delivery } from "#shared/delivery.js";
 import type { Answer } from "#shared/input.js";
-import { isEntityConflict } from "#shared/run-errors.js";
-import { readSessionLog } from "./addresses.js";
 import { cronFiresAt } from "./cron.js";
-import { driveSession, type DriveOutcome } from "./driver.js";
+import { sessionActivation, type SessionStart } from "./driver.js";
 import { createFrontRuntime } from "./front.js";
-import { sessionOfWake, WORLD_HOST_QUEUE_PREFIX } from "./wake.js";
-import { worldLineStore } from "./world-lines.js";
 
 // A World host (experimental): agents defined in code, whose sessions run only when something
-// arrives for them. A World keeps each session, its queue wakes it, and whichever process
-// receives the wake runs it until it waits again (`driver.ts`). No process holds a session
-// between wakes, so a session waits a day on an approval, or on a timer, at no cost.
+// arrives for them. Each session is a durable entity (`#execution/entity`): its entity keeps it,
+// a message or its alarm activates it, and whichever process the activation reaches runs it
+// until it waits again (`driver.ts`). No process holds a session between activations, so a
+// session waits a day on an approval, or on a timer, at no cost.
 //   - Anything that talks to a session (a script, an HTTP route, a schedule) goes through the
-//     host's runtime for its agent, which writes to the World and wakes (`front.ts`).
-//   - Wakes are consumed where the World's queue delivers them: in this process for a local or
-//     Postgres World (`serve`), or at a route that serves `queueHandler()` for Vercel's World.
-//   - Schedules fire on `tick`, once per minute and occurrence across every process: `serve`
-//     ticks each minute, and on Vercel a cron route calls it.
+//     host's runtime for its agent, which creates entities and sends to them (`front.ts`).
+//   - Activations are consumed where the World's queue delivers them: in this process for a
+//     local or Postgres World (`serve`), or at a route that serves `queueHandler()` for Vercel's.
+//   - Schedules fire on `tick`, once per minute and occurrence across every process (`once`):
+//     `serve` ticks each minute, and on Vercel a cron route calls it.
 
 const log = createLogger("execution.world-host");
 
@@ -60,7 +60,7 @@ export interface WorldHostOptions {
   /** Told how each delivery that ran a session ended, and how long it ran. */
   readonly observe?: (delivery: {
     readonly sessionId: string;
-    readonly outcome: DriveOutcome;
+    readonly outcome: ActivationOutcome;
     readonly ms: number;
   }) => void;
 }
@@ -93,9 +93,11 @@ export interface WorldHost {
     agent: string,
     options: { readonly identity: SessionAuthContext | null; readonly resume?: string },
   ): WorldSession;
+  /** The sessions, as the entities they are on the World. */
+  readonly entities: Entities;
   /**
-   * Handles one queue delivery: runs the session it wakes until it waits, or hands off near the
-   * deadline (`{ timeoutSeconds: 0 }`, which the World reads as "deliver again now").
+   * Handles one queue delivery: runs the session it activates until it waits, or continues it
+   * in the next delivery near the deadline.
    */
   deliver(message: unknown, delivery: WorldQueueDelivery): Promise<unknown>;
   /** The route handler of a World that delivers wakes over HTTP, such as Vercel's. */
@@ -108,32 +110,6 @@ export interface WorldHost {
 }
 
 const CHANNEL_NAME = "embedded";
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
-/**
- * The run that claims one occurrence of a schedule: a ULID with the occurrence's minute as its
- * time and the schedule's name hashed as the rest, so every process ticking that minute names the
- * same run, and only the first creates it. (A World refuses run ids from more than a day ago, so
- * a run per occurrence, not one ledger.)
- */
-function occurrenceRunId(name: string, minuteMs: number): string {
-  let time = "";
-  for (let rest = minuteMs, index = 0; index < 10; index += 1) {
-    time = CROCKFORD[rest % 32]! + time;
-    rest = Math.floor(rest / 32);
-  }
-  // 80 bits of FNV-1a over the name, five bits at a time.
-  let hash = 0xcbf29ce484222325n;
-  for (const byte of new TextEncoder().encode(name))
-    hash = ((hash ^ BigInt(byte)) * 0x100000001b3n) & ((1n << 80n) - 1n);
-  let random = "";
-  for (let index = 0; index < 16; index += 1) {
-    random = CROCKFORD[Number(hash & 31n)]! + random;
-    hash >>= 5n;
-  }
-  return `wrun_${time}${random}`;
-}
-
 export function createWorldHost(options: WorldHostOptions): WorldHost {
   const { world } = options;
   const budgetMs = options.deliveryBudgetMs ?? 4 * 60_000;
@@ -143,60 +119,43 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
     if (agents.has(agent.id)) throw new Error(`Two agents of this host are named "${agent.id}".`);
     agents.set(agent.id, agent);
   }
+  const entities = sessionEntities(world);
+  const activation = entities.activation;
+  if (activation === undefined) throw new Error("A World host needs a World with a queue.");
   const fronts = new Map<string, Runtime>();
   const runtime = (agent: string): Runtime => {
     if (!agents.has(agent)) throw new Error(`This host has no agent "${agent}".`);
     let front = fronts.get(agent);
-    if (front === undefined) fronts.set(agent, (front = createFrontRuntime({ agent, world })));
+    if (front === undefined) fronts.set(agent, (front = createFrontRuntime({ agent, entities })));
     return front;
   };
-  const releaseLines = registerFallbackLineStore(worldLineStore(world));
+  const releaseLines = registerFallbackLineStore(entityLineStore(entities));
   let ticker: ReturnType<typeof setTimeout> | undefined;
 
-  const deliver: WorldHost["deliver"] = async (message, delivery) => {
-    const sessionId = sessionOfWake(message);
-    if (sessionId === undefined) return undefined;
-    const startedAt = delivery.invocationStartedAt ?? Date.now();
-    const outcome = await driveSession({
+  const consumer = activation.consumer(
+    sessionActivation({
       agent(name) {
         const agent = agents.get(name);
         return agent === undefined
           ? undefined
           : { config: { agent }, release: holdSessionAgent(agent) };
       },
-      deadline: startedAt + budgetMs,
-      sessionId,
+      entities,
       world,
-    });
-    options.observe?.({ ms: Date.now() - startedAt, outcome, sessionId });
-    return outcome.kind === "handoff" ? { timeoutSeconds: 0 } : undefined;
-  };
-
-  /** Whether this process is the first to fire `name`'s occurrence in the minute at `minuteMs`. */
-  const claimOccurrence = async (name: string, minuteMs: number): Promise<boolean> => {
-    try {
-      await world.events.create(occurrenceRunId(name, minuteMs), {
-        eventData: {
-          deploymentId: await world.getDeploymentId(),
-          input: new TextEncoder().encode(
-            JSON.stringify({ at: new Date(minuteMs).toISOString(), name }),
-          ),
-          workflowName: "eve/world-host-schedule",
-        },
-        eventType: "run_created",
-      });
-      return true;
-    } catch (error) {
-      if (isEntityConflict(error)) return false;
-      throw error;
-    }
-  };
+    }),
+    {
+      budgetMs,
+      ...(options.observe !== undefined && {
+        observe: ({ key, ms, outcome }) => options.observe!({ ms, outcome, sessionId: key }),
+      }),
+    },
+  );
 
   const tick: WorldHost["tick"] = async (at = new Date()) => {
     const minute = Math.floor(at.getTime() / 60_000) * 60_000;
     const fired: string[] = [];
     for (const [name, { agent, schedule }] of Object.entries(options.schedules ?? {})) {
-      if (!cronFiresAt(schedule.cron, at) || !(await claimOccurrence(name, minute))) continue;
+      if (!cronFiresAt(schedule.cron, at) || !(await entities.once(name, minute))) continue;
       const dispatcher = new ScheduleDispatcher({ channels: [], runtime: runtime(agent) });
       try {
         const result = await dispatcher.trigger({
@@ -215,17 +174,14 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
 
   return {
     world,
+    entities,
     runtime,
-    deliver,
+    deliver: consumer.deliver,
     tick,
-    queueHandler: () => world.createQueueHandler(WORLD_HOST_QUEUE_PREFIX, deliver),
-    session: (agent, sessionOptions) => worldSession(runtime(agent), world, sessionOptions),
+    queueHandler: () => consumer.route(),
+    session: (agent, sessionOptions) => worldSession(runtime(agent), entities, sessionOptions),
     async serve() {
-      world.registerHandler?.(
-        WORLD_HOST_QUEUE_PREFIX,
-        world.createQueueHandler(WORLD_HOST_QUEUE_PREFIX, deliver),
-      );
-      await world.start?.();
+      await consumer.serve();
       if (options.schedules === undefined || Object.keys(options.schedules).length === 0) return;
       const arm = (): void => {
         ticker = setTimeout(
@@ -245,9 +201,18 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
   };
 }
 
+/** A session's stream as its entity's, for readers in any process. */
+function entityLineStore(entities: Entities): SessionLineStore {
+  return {
+    async assertReadable() {},
+    readable: (sessionId, startIndex) => entities.read(sessionId, startIndex),
+    tail: async (sessionId) => (await entities.streamLength(sessionId)) - 1,
+  };
+}
+
 function worldSession(
   runtime: Runtime,
-  world: QueueWorld,
+  entities: Entities,
   options: { readonly identity: SessionAuthContext | null; readonly resume?: string },
 ): WorldSession {
   const auth = options.identity;
@@ -257,7 +222,8 @@ function worldSession(
     const recorded =
       options.resume === undefined
         ? undefined
-        : (await readSessionLog(world, options.resume)).start?.input.continuationToken;
+        : ((await entities.meta(options.resume)) as SessionStart | undefined)?.input
+            .continuationToken;
     if (options.resume !== undefined && recorded === undefined)
       throw new Error(`The World holds no session "${options.resume}" to resume.`);
     return createChannelAddress({

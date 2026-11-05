@@ -38,6 +38,11 @@ export function localWorld(options: LocalWorldOptions): QueueWorld {
       getChunks: async (runId, name, chunks) =>
         await (await world()).streams.getChunks(runId, name, chunks),
       getInfo: async (runId, name) => await (await world()).streams.getInfo(runId, name),
+      get: async (runId, name, startIndex) => {
+        const { streams } = await world();
+        if (streams.get === undefined) throw new Error("This World has no live stream read.");
+        return await streams.get(runId, name, startIndex);
+      },
       write: async (runId, name, chunk) => await (await world()).streams.write(runId, name, chunk),
     },
     queue: async (name, message, queueOptions) =>

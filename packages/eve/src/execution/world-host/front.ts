@@ -20,38 +20,37 @@ import {
   identifyCommand,
   inactiveCommandResult,
 } from "#execution/session-commands.js";
+import type { Entities } from "#execution/entity/entities.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
-import type { QueueWorld } from "#execution/world/runtime-world.js";
-import { createUlid } from "#shared/ulid.js";
-import { createWorldSession, sendToAddress, sessionAt } from "./addresses.js";
+import type { SessionStart } from "./driver.js";
 
-// The runtime a World host's callers use: it runs nothing. Starting a session writes it on the
-// World and wakes it; a command to a session is written at its address and wakes it; reading a
-// session follows its stream on the World. Whichever process the wake reaches runs the session
-// (`driver.ts`). So a channel address, an embedded session or a schedule over it reaches sessions
-// the way it reaches a deployment's.
+// The runtime a World host's callers use: it runs nothing. Starting a session creates its entity,
+// reached by its addresses, and activates it; a command to a session is sent to the address it
+// names, which activates it; reading a session follows its stream on the World. Whichever process
+// the activation reaches runs the session (`driver.ts`). So a channel address, an embedded session
+// or a schedule over it reaches sessions the way it reaches a deployment's.
 
 export function createFrontRuntime(input: {
-  readonly world: QueueWorld;
+  readonly entities: Entities;
   /** The agent the sessions it starts run, by the name the host knows it by. */
   readonly agent: string;
 }): Runtime {
-  const { world } = input;
+  const { entities } = input;
 
   const send = async <TCommand extends SessionCommand>(
     token: string,
     command: TCommand,
   ): Promise<SessionCommandResult<TCommand>> => {
     const identified = identifyCommand(command);
-    const reached = await sendToAddress(world, token, identified);
+    const reached = await entities.send({ alias: token }, identified);
     return reached === undefined
       ? inactiveCommandResult(identified)
-      : activeCommandResult(identified, reached.sessionId);
+      : activeCommandResult(identified, reached.key);
   };
 
   return {
     async createSession(runInput: RunInput): Promise<RunHandle> {
-      const sessionId = `session_${createUlid()}`;
+      const sessionId = entities.newKey();
       // Identified here, as the host that starts it would, so the caller holds its delivery id.
       const identified: RunInput =
         runInput.input.message !== undefined && runInput.delivery === undefined
@@ -68,7 +67,9 @@ export function createFrontRuntime(input: {
         sessionCommandHookToken(sessionId),
         ...(identified.continuationToken === undefined ? [] : [identified.continuationToken]),
       ];
-      await createWorldSession(world, sessionId, { agent: input.agent, input: identified }, tokens);
+      const start: SessionStart = { agent: input.agent, input: identified };
+      await entities.create(sessionId, { aliases: tokens, meta: start });
+      await entities.activation?.wake(sessionId);
       let events: ReadableStream | undefined;
       return {
         get events() {
@@ -92,7 +93,7 @@ export function createFrontRuntime(input: {
     },
 
     async resolveContinuation(continuationToken) {
-      const sessionId = await sessionAt(world, continuationToken);
+      const sessionId = await entities.lookup(continuationToken);
       return sessionId === undefined ? undefined : { sessionId };
     },
 

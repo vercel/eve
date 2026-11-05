@@ -1,17 +1,11 @@
-import type { RuntimeWorld } from "#execution/world/runtime-world.js";
 import {
-  appendSessionEntry,
-  appendSessionLines,
-  claimSessionRun,
-  ensureSessionRun,
-  listSessionRuns,
-  readSessionEntriesBackwards,
-  readSessionLines,
-  sessionLinesStream,
-  sessionRunId,
-  SessionTakenOverError,
-  type SessionWriter,
-} from "#execution/world/session-runs.js";
+  type Entities,
+  type EntityHandle,
+  type JournalRecord,
+  TakenOverError,
+} from "#execution/entity/entities.js";
+import type { RuntimeWorld } from "#execution/world/runtime-world.js";
+import { sessionEntities } from "#execution/world/session-entities.js";
 import { serialPerKey } from "#shared/serial-per-key.js";
 import {
   withAppendedInputs,
@@ -22,27 +16,28 @@ import {
 } from "./session-store.js";
 import type { SessionSnapshot } from "./snapshot.js";
 
-// The in-process host's sessions on a World (`session-runs.ts`): each session is one run, whose
-// stream holds its lines and whose log holds what it continues from:
+// The in-process host's sessions as entities on a World (`#execution/entity`): a session is an
+// entity whose stream holds its lines and whose journal holds what it continues from:
 //   - `eve.input`: an input, kept before its address accepts it;
-//   - `eve.state`: the rest, at a step boundary;
+//   - `eve.state`: the rest, at a step boundary, as a snapshot;
 //   - `eve.delta`: the rest at a later step boundary, as a change from the state before it: the
 //     history messages it added, and everything else whole (small beside the history). A step
 //     that rewrote the history (a compaction), a session's first save in a process, and every
 //     `FULL_STATE_EVERY`th save write a whole `eve.state` instead.
-// Loading a session reads back to its newest whole state, applies the changes after it, and adds
-// the inputs after those.
+// Loading a session reads its journal from its newest whole state, applies the changes after it,
+// and adds the inputs after those.
 //
-// One process writes a session (`session-runs.ts`): this store creates a session's run, or claims
-// a run it finds (a session continued) before its first write. On a fenced run, a batch of
-// stream lines is announced first by a fenced `eve.lines` entry, so the lines of a process that
-// lost the session never reach its stream. Once the World refuses a write, every later write
-// of that session fails here (`SessionTakenOverError`), before it reaches the World.
+// One process writes a session: this store opens it (creating it, or fencing out whoever wrote it
+// before) at its first write, or writes through the handle an activation opened (`handles`).
+// Once the entity refuses a write, every later write of that session fails here
+// (`TakenOverError`), before it reaches the World.
+//
+// An input taken from the session's mailbox (a World host's arrivals) consumes its message in the
+// same write (`receive`), so a crash either keeps both or neither.
 
-const STATE_ENTRY = "eve.state";
-const INPUT_ENTRY = "eve.input";
-const LINES_ENTRY = "eve.lines";
-const DELTA_ENTRY = "eve.delta";
+const STATE_RECORD = "eve.state";
+const INPUT_RECORD = "eve.input";
+const DELTA_RECORD = "eve.delta";
 
 /** How many saves in a row may be changes before a save writes the whole state again. */
 const FULL_STATE_EVERY = 25;
@@ -75,32 +70,65 @@ function applied(state: SessionState, delta: StateDelta): SessionState {
   return { ...delta.state, checkpoint: { ...delta.state.checkpoint, history } };
 }
 
+/** The state a journal holds, and the inputs appended after it. */
+function stateOf(journal: {
+  readonly snapshot: JournalRecord | undefined;
+  readonly after: readonly JournalRecord[];
+}) {
+  if (journal.snapshot?.kind !== STATE_RECORD) return undefined;
+  let state = journal.snapshot.value as SessionState;
+  for (const record of journal.after)
+    if (record.kind === DELTA_RECORD) state = applied(state, record.value as StateDelta);
+  const inputs = journal.after
+    .filter((record) => record.kind === INPUT_RECORD)
+    .map((record) => record.value as AcceptedInput);
+  return { inputs, state };
+}
+
 export interface WorldSessionStoreOptions {
   /** Once, when the World refuses a session's write because another process took it over. */
-  readonly onTakenOver?: (sessionId: string, error: SessionTakenOverError) => void;
+  readonly onTakenOver?: (sessionId: string, error: TakenOverError) => void;
+  /** The sessions as entities; `sessionEntities(world)` by default. */
+  readonly entities?: Entities;
+  /** A handle this process holds already, such as an activation's: written through, not reopened. */
+  readonly handles?: (sessionId: string) => EntityHandle | undefined;
+}
+
+export interface WorldSessionStore extends SessionStore {
+  /**
+   * The next input `sessionId` keeps comes from its mailbox's `messageId`: keeping it consumes
+   * the message in the same write.
+   */
+  receive(sessionId: string, messageId: string): void;
+  /** Consumes the message `receive` named, if no input kept it (the session dropped it). */
+  received(sessionId: string): Promise<void>;
 }
 
 export function createWorldSessionStore(
   world: RuntimeWorld,
   options: WorldSessionStoreOptions = {},
-): SessionStore {
-  // How this process writes each session it wrote, and how many lines each run's stream holds.
-  const writers = new Map<string, SessionWriter>();
-  const lineCounts = new Map<string, number>();
+): WorldSessionStore {
+  const entities = options.entities ?? sessionEntities(world);
+  const opened = new Map<string, Promise<EntityHandle>>();
   // What this store last saved of each session, which its next save is a change from.
   const saved = new Map<string, Saved>();
   // Sessions another process took over: this one writes them no more.
-  const lost = new Map<string, SessionTakenOverError>();
+  const lost = new Map<string, TakenOverError>();
+  // The message each session's next kept input consumes.
+  const receiving = new Map<string, string>();
   // A session's writes land in the order they were made.
   const writes = serialPerKey();
 
-  const writerOf = async (sessionId: string): Promise<SessionWriter> => {
-    const known = writers.get(sessionId);
-    if (known !== undefined) return known;
-    const writer =
-      (await ensureSessionRun(world, sessionId)) ?? (await claimSessionRun(world, sessionId));
-    writers.set(sessionId, writer);
-    return writer;
+  const handleOf = async (sessionId: string): Promise<EntityHandle> => {
+    const held = options.handles?.(sessionId);
+    if (held !== undefined) return held;
+    let handle = opened.get(sessionId);
+    if (handle === undefined) {
+      handle = entities.open(sessionId);
+      opened.set(sessionId, handle);
+      handle.catch(() => opened.delete(sessionId));
+    }
+    return await handle;
   };
   /** Runs one of `sessionId`'s writes, in order, unless another process took the session over. */
   const write = async (sessionId: string, run: () => Promise<void>): Promise<void> => {
@@ -110,7 +138,7 @@ export function createWorldSessionStore(
       try {
         await run();
       } catch (error) {
-        if (error instanceof SessionTakenOverError && !lost.has(sessionId)) {
+        if (error instanceof TakenOverError && !lost.has(sessionId)) {
           lost.set(sessionId, error);
           options.onTakenOver?.(sessionId, error);
         }
@@ -118,38 +146,11 @@ export function createWorldSessionStore(
       }
     });
   };
-  const append = async (sessionId: string, kind: string, value: unknown): Promise<void> => {
-    const writer = await writerOf(sessionId);
-    await appendSessionEntry(world, sessionId, kind, value, writer);
-  };
-  /**
-   * The session's state as its log holds it: its newest whole state with the changes after it
-   * applied, and the inputs appended after that whole state.
-   */
-  const readLog = async (sessionId: string) => {
-    const entries = await readSessionEntriesBackwards(
-      world,
-      sessionId,
-      (entry) => entry.kind === STATE_ENTRY,
-    );
-    const whole = entries?.find((entry) => entry.kind === STATE_ENTRY)?.value as
-      | SessionState
-      | undefined;
-    if (entries === undefined || whole === undefined) return undefined;
-    // Entries read newest first: oldest first from here.
-    const later = [...entries].reverse();
-    let state = whole;
-    for (const entry of later)
-      if (entry.kind === DELTA_ENTRY) state = applied(state, entry.value as StateDelta);
-    const inputs = later
-      .filter((entry) => entry.kind === INPUT_ENTRY)
-      .map((entry) => entry.value as AcceptedInput);
-    return { inputs, state };
-  };
 
   /** Saves `state` whole, or as a change from what this store saved of it last. */
   const saveOf = async (state: SessionState): Promise<void> => {
     const { sessionId } = state;
+    const handle = await handleOf(sessionId);
     const messages = state.checkpoint.history.map((message) => JSON.stringify(message));
     const before = saved.get(sessionId);
     const grew =
@@ -163,69 +164,81 @@ export function createWorldSessionStore(
         from: before.messages.length,
         state: withoutHistory(state),
       };
-      await append(sessionId, DELTA_ENTRY, delta);
+      await handle.append([{ kind: DELTA_RECORD, value: delta }]);
       saved.set(sessionId, { changes: before.changes + 1, messages });
       return;
     }
-    await append(sessionId, STATE_ENTRY, state);
+    await handle.append([{ kind: STATE_RECORD, value: state }], { snapshot: true });
     saved.set(sessionId, { changes: 0, messages });
+  };
+
+  const journalOf = async (sessionId: string) => {
+    const held = options.handles?.(sessionId);
+    return held !== undefined ? await held.load() : await entities.load(sessionId);
   };
 
   return {
     async appendLines(sessionId, position, lines) {
       await write(sessionId, async () => {
-        const writer = await writerOf(sessionId);
-        const count =
-          lineCounts.get(sessionId) ??
-          (await world.streams.getInfo(sessionRunId(sessionId), sessionLinesStream(sessionId)))
-            .tailIndex + 1;
-        if (position !== count)
-          throw new Error(
-            `Session "${sessionId}" has ${String(count)} lines stored, not ${String(position)}.`,
-          );
-        // Announced first on a fenced run: if another process took the session, this is refused
-        // and the lines never land.
-        if (writer.fenced && lines.length > 0)
-          await appendSessionEntry(
-            world,
-            sessionId,
-            LINES_ENTRY,
-            { count: lines.length, from: position },
-            writer,
-          );
         const encoder = new TextEncoder();
-        await appendSessionLines(
-          world,
-          sessionId,
+        await (
+          await handleOf(sessionId)
+        ).stream.append(
+          position,
           lines.map((line) => encoder.encode(line)),
         );
-        lineCounts.set(sessionId, count + lines.length);
       });
     },
     async appendInput(sessionId, input) {
-      await write(sessionId, () => append(sessionId, INPUT_ENTRY, input));
+      await write(sessionId, async () => {
+        const message = receiving.get(sessionId);
+        receiving.delete(sessionId);
+        await (
+          await handleOf(sessionId)
+        ).append(
+          [{ kind: INPUT_RECORD, value: input }],
+          message === undefined ? {} : { consumedThrough: message },
+        );
+      });
     },
     async saveState(state) {
       await write(state.sessionId, () => saveOf(state));
     },
-    async load(sessionId): Promise<SessionSnapshot | undefined> {
+    receive(sessionId, messageId) {
+      receiving.set(sessionId, messageId);
+    },
+    async received(sessionId) {
+      await write(sessionId, async () => {
+        const message = receiving.get(sessionId);
+        receiving.delete(sessionId);
+        if (message !== undefined)
+          await (await handleOf(sessionId)).append([], { consumedThrough: message });
+      });
+    },
+    async load(sessionId, loadOptions = {}): Promise<SessionSnapshot | undefined> {
       await writes.settled(sessionId);
-      const log = await readLog(sessionId);
+      const journal = await journalOf(sessionId);
+      const log = journal === undefined ? undefined : stateOf(journal);
       if (log === undefined) return undefined;
+      if (loadOptions.lines === "count")
+        return withAppendedInputs(
+          { ...log.state, lines: [], linesFrom: await entities.streamLength(sessionId) },
+          log.inputs,
+        );
       const decoder = new TextDecoder();
-      const lines = (await readSessionLines(world, sessionId)).map((line) => decoder.decode(line));
-      lineCounts.set(sessionId, lines.length);
+      const lines = (await entities.chunks(sessionId)).map((line) => decoder.decode(line));
       return withAppendedInputs({ ...log.state, lines }, log.inputs);
     },
     async list() {
       const sessions: StoredSession[] = [];
-      for (const { sessionId } of await listSessionRuns(world)) {
-        const log = await readLog(sessionId);
+      for (const { key } of await entities.list()) {
+        const journal = await entities.load(key);
+        const log = journal === undefined ? undefined : stateOf(journal);
         if (log !== undefined)
           sessions.push({
             open: log.state.open !== undefined,
             savedAt: new Date(log.state.takenAt),
-            sessionId,
+            sessionId: key,
           });
       }
       return sessions.sort((a, b) => b.savedAt.getTime() - a.savedAt.getTime());

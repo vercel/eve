@@ -12,7 +12,9 @@ import type { SessionLineStore } from "#execution/session-line-store.js";
 // it and everything before it are kept. `flush` waits for every line written so far.
 
 interface MemoryStream {
-  /** The lines readers see: those kept. */
+  /** The position of `chunks`' first line: a stream opened on its tail holds no line before. */
+  readonly from: number;
+  /** The lines readers see: those kept, from `from` on. */
   readonly chunks: Uint8Array[];
   closed: boolean;
   /** Why readers get no more lines, once the stream's writer can't go on. */
@@ -27,13 +29,15 @@ export interface MemoryLineStore extends SessionLineStore {
    * Opens `sessionId`'s stream and returns the writable its writer writes lines to. A restored
    * session's stream starts with the lines it recorded before. With `persist`, lines are kept in
    * batches, each at the position of its first line, and no reader sees a line a store didn't
-   * keep. A write that fails to be kept fails the writes after it.
+   * keep. A write that fails to be kept fails the writes after it. With `from`, `recorded`'s first
+   * line is at that position, and the stream holds none before it.
    */
   open(
     sessionId: string,
     recorded?: readonly Uint8Array[],
     persist?: (position: number, lines: readonly Uint8Array[]) => Promise<void>,
     isBarrier?: (line: Uint8Array) => boolean,
+    from?: number,
   ): WritableStream<Uint8Array>;
   /** Resolves once every line written to `sessionId`'s stream so far is kept. */
   flush(sessionId: string): Promise<void>;
@@ -44,8 +48,10 @@ export interface MemoryLineStore extends SessionLineStore {
    * its writer will write no more (another process took the session over).
    */
   fail(sessionId: string, error: unknown): void;
-  /** Every line `sessionId`'s stream holds so far. */
+  /** Every line `sessionId`'s stream holds so far, from `heldFrom` on. */
   recorded(sessionId: string): readonly Uint8Array[];
+  /** The position of the first line `recorded` returns: 0 unless the stream opened on its tail. */
+  heldFrom(sessionId: string): number;
   /** The sessions this store holds a stream for. */
   sessions(): readonly string[];
 }
@@ -78,10 +84,12 @@ export function createMemoryLineStore(): MemoryLineStore {
       streamOf(sessionId);
     },
     async tail(sessionId) {
-      return streamOf(sessionId).chunks.length - 1;
+      const stream = streamOf(sessionId);
+      return stream.from + stream.chunks.length - 1;
     },
     recorded: (sessionId) => [...streamOf(sessionId).chunks],
-    open(sessionId, recorded = [], persist, isBarrier) {
+    heldFrom: (sessionId) => streamOf(sessionId).from,
+    open(sessionId, recorded = [], persist, isBarrier, from = 0) {
       if (streams.has(sessionId)) throw new Error(`Session "${sessionId}" already has a stream.`);
       const pending: Uint8Array[] = [];
       let keeping: Promise<void> = Promise.resolve();
@@ -93,7 +101,7 @@ export function createMemoryLineStore(): MemoryLineStore {
         if (failure !== undefined || pending.length === 0) return;
         const batch = pending.splice(0);
         try {
-          await persist!(stream.chunks.length, batch);
+          await persist!(stream.from + stream.chunks.length, batch);
         } catch (error) {
           failure = { error };
           throw error;
@@ -110,6 +118,7 @@ export function createMemoryLineStore(): MemoryLineStore {
       };
       const stream: MemoryStream = {
         chunks: [...recorded],
+        from,
         closed: false,
         waiters: new Set(),
         flush: async () => {
@@ -145,12 +154,17 @@ export function createMemoryLineStore(): MemoryLineStore {
     },
     readable(sessionId, startIndex = 0) {
       const stream = streamOf(sessionId);
-      let next = startIndex < 0 ? Math.max(0, stream.chunks.length + startIndex) : startIndex;
+      const total = stream.from + stream.chunks.length;
+      let next = startIndex < 0 ? Math.max(stream.from, total + startIndex) : startIndex;
+      if (next < stream.from)
+        throw new Error(
+          `Session "${sessionId}"'s stream here holds lines from ${String(stream.from)}, not ${String(next)}.`,
+        );
       let cancelled = false;
       return new ReadableStream<Uint8Array>({
         async pull(controller) {
           while (!cancelled) {
-            const chunk = stream.chunks[next];
+            const chunk = stream.chunks[next - stream.from];
             if (chunk !== undefined) {
               next += 1;
               controller.enqueue(chunk);

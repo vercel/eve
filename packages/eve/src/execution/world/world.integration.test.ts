@@ -11,7 +11,7 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 
 import { memoryWorld } from "./memory-world.js";
 import type { RuntimeWorld } from "./runtime-world.js";
-import { listSessionRuns, readSessionLines } from "./session-runs.js";
+import { sessionEntities } from "./session-entities.js";
 import { asRuntimeWorld } from "./world-fit.js";
 
 // The in-process host keeps each session as a run on its World. The same conversation runs on
@@ -40,10 +40,10 @@ async function linesSeen(world: RuntimeWorld) {
     for await (const record of await runtime.getLineStream(sessionId, { follow: false }))
       read.push(record);
     const decoder = new TextDecoder();
-    const kept = (await readSessionLines(world, sessionId)).map((line) =>
+    const kept = (await sessionEntities(world).chunks(sessionId)).map((line) =>
       JSON.parse(decoder.decode(line)),
     );
-    const sessions = (await listSessionRuns(world)).map((session) => session.sessionId);
+    const sessions = (await sessionEntities(world).list()).map((session) => session.key);
     return { kept, read, sessionId, sessions };
   } finally {
     await runtime.dispose();

@@ -1,5 +1,5 @@
 import { createLogger } from "#internal/logging.js";
-import { isSessionTakenOver } from "#execution/world/session-runs.js";
+import { isTakenOver } from "#execution/entity/entities.js";
 import type {
   DispatchContinuationInput,
   DispatchSessionInput,
@@ -31,7 +31,7 @@ import type { Keep, Arrival } from "./inbox-transport.js";
 import { planRestore } from "./restore.js";
 import { interruptedRunOutcome, type RunSnapshot, type WorkflowFunction } from "./runs.js";
 import { HostedSession } from "./session-record.js";
-import { saveSnapshot, type StoredSession } from "./session-store.js";
+import { type LoadOptions, saveSnapshot, type StoredSession } from "./session-store.js";
 import type { SessionSnapshot } from "./snapshot.js";
 import { createInProcessTimeoutControl } from "./timers.js";
 
@@ -80,9 +80,18 @@ export interface InProcessRuntime extends Runtime {
    * kept the sessions its subagents opened, their runs go on; any other run it had reports as
    * interrupted. A snapshot this build can't read is refused, with why.
    */
-  restore(snapshot: SessionSnapshot): Promise<{ readonly sessionId: string }>;
-  /** The session the runtime's World holds under `sessionId`, as `restore` continues it. */
-  load(sessionId: string): Promise<SessionSnapshot | undefined>;
+  restore(
+    snapshot: SessionSnapshot,
+    options?: {
+      /** The runtime's World holds `snapshot` already (`load` read it): it isn't saved again. */
+      readonly stored?: boolean;
+    },
+  ): Promise<{ readonly sessionId: string }>;
+  /**
+   * The session the runtime's World holds under `sessionId`, as `restore` continues it. With
+   * `{ lines: "count" }`, without its stream's lines, for a runtime that doesn't serve them.
+   */
+  load(sessionId: string, options?: LoadOptions): Promise<SessionSnapshot | undefined>;
   /** The sessions the runtime's World holds, most recently saved first. */
   sessions(): Promise<readonly StoredSession[]>;
   /** Makes an authored workflow tool's body, its `"use workflow"` function's twin, run here. */
@@ -166,7 +175,7 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
    * Opens `sessionId`'s stream: lines are kept on the World in batches, each before a reader sees
    * it, and a call's start is kept before the tool runs (`isBarrierLine`).
    */
-  const openStream = (sessionId: string, recorded: readonly string[] = []) => {
+  const openStream = (sessionId: string, recorded: readonly string[] = [], from = 0) => {
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
     const writable = lines.open(
@@ -179,6 +188,7 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
           batch.map((line) => decoder.decode(line)),
         ),
       isBarrierLine,
+      from,
     );
     if (host.servesLines) host.onDispose(registerSessionLineStore(sessionId, lines));
     return writable;
@@ -196,6 +206,7 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
     const record = new HostedSession({
       boot,
       lines: () => lines.recorded(boot.sessionId).map((line) => decoder.decode(line)),
+      linesFrom: () => lines.heldFrom(boot.sessionId),
       flushLines: () => lines.flush(boot.sessionId),
       runs: (heard) => host.runs.unheard(boot.sessionId, heard),
       suspended: host.suspended,
@@ -215,7 +226,7 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
       () => undefined,
       (error: unknown) => {
         // Another process continued the session: nothing of this one's reached the World after.
-        if (isSessionTakenOver(error))
+        if (isTakenOver(error))
           log.warn("session continued in another process; this one stopped writing it", {
             sessionId,
           });
@@ -328,12 +339,12 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
       return live.record.snapshot();
     },
 
-    async restore(snapshot) {
+    async restore(snapshot, options = {}) {
       const { sessionId } = snapshot;
       const plan = planRestore(snapshot, { hasStore: host.keeps });
       if (sessions.has(sessionId)) throw new Error(`Session "${sessionId}" already runs here.`);
-      await saveSnapshot(store, snapshot);
-      const sessionWritable = openStream(sessionId, snapshot.lines);
+      if (options.stored !== true) await saveSnapshot(store, snapshot);
+      const sessionWritable = openStream(sessionId, snapshot.lines, snapshot.linesFrom);
       const { checkpoint } = plan;
       const timeout = timeoutsFor(sessionId)({
         sessionId,
@@ -348,7 +359,10 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
         sessionWritable,
         ...(timeout !== undefined && { sessionTimeoutControl: timeout }),
       });
-      const record = hostedSession(boot, { inputs: snapshot.inputs, lostRuns: plan.lostRuns });
+      const record = hostedSession(boot, {
+        inputs: snapshot.inputs,
+        lostRuns: plan.lostRuns,
+      });
       const inbox = createSessionInbox(
         inboxes.transportFor(sessionId, { keep: keeperOf(sessionId) }),
       );
@@ -373,7 +387,7 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
       return { sessionId };
     },
 
-    load: (sessionId) => store.load(sessionId),
+    load: (sessionId, options) => store.load(sessionId, options),
 
     sessions: () => store.list(),
 
