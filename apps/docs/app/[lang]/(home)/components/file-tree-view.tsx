@@ -23,9 +23,10 @@ interface FileTreeItem {
   results?: PlanResults;
 }
 
-// The customers the board can be viewed as, with the dashboard's plan badge colors.
+// The customers the same agent can be helping, with the dashboard's plan badge colors. The
+// switch shows how one agent behaves per customer, not separate versions of it.
 const CUSTOMERS = [
-  { id: "enterprise", name: "Acme", plan: "Enterprise", badge: "purple" },
+  { id: "enterprise", name: "Acme, Inc.", plan: "Enterprise", badge: "purple" },
   { id: "pro", name: "Jamie", plan: "Pro", badge: "blue" },
 ] as const;
 
@@ -97,7 +98,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
 
   const switcher = (
     <div className="mx-auto mb-6 flex w-fit flex-wrap items-center justify-center gap-3">
-      <span className="text-label-14 text-gray-900">View as</span>
+      <span className="text-label-14 text-gray-900">When the agent helps</span>
       <div aria-label="Customer" className="flex gap-1 rounded-full bg-gray-100 p-1" role="tablist">
         {CUSTOMERS.map((option) => (
           <button
