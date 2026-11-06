@@ -128,6 +128,8 @@ export async function resolveToolDefinition(
  * export declared the corresponding hook so callers can `...spread` the
  * result without clobbering required fields with `undefined`.
  */
+type LabelCallbacks = Exclude<NonNullable<ResolvedToolDefinition["label"]>, false>;
+
 type OptionalResolvedFields = {
   -readonly [K in "label" | "approval" | "endsTurn" | "toModelOutput"]?: ResolvedToolDefinition[K];
 };
@@ -143,7 +145,9 @@ function extractOptionalHooks(
 ): OptionalResolvedFields {
   const optional: OptionalResolvedFields = {};
 
-  if (record.label !== undefined) {
+  if (record.label === false) {
+    optional.label = false;
+  } else if (record.label !== undefined) {
     const label = expectObjectRecord(
       record.label,
       describe(definition, "to provide a valid label definition"),
@@ -155,18 +159,18 @@ function extractOptionalHooks(
           : (expectFunction(
               label.complete,
               describe(definition, "to provide an label complete function"),
-            ) as NonNullable<ResolvedToolDefinition["label"]>["complete"]),
+            ) as LabelCallbacks["complete"]),
       delta:
         label.delta === undefined
           ? undefined
           : (expectFunction(
               label.delta,
               describe(definition, "to provide an label delta function"),
-            ) as NonNullable<ResolvedToolDefinition["label"]>["delta"]),
+            ) as LabelCallbacks["delta"]),
       start: expectFunction(
         label.start,
         describe(definition, "to provide a label start callback function"),
-      ) as NonNullable<ResolvedToolDefinition["label"]>["start"],
+      ) as LabelCallbacks["start"],
     };
   }
 

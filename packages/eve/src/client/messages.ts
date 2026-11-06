@@ -236,6 +236,7 @@ function toolPart(
     stepIndex,
     type: "tool",
   };
+  if (row.capability.hidden === true) part.hidden = true;
   if (row.input !== undefined) part.input = row.input;
   const output = running
     ? preview?.output

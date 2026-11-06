@@ -1,6 +1,6 @@
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { failureNotice } from "#public/channels/reply.js";
-import { callLabel } from "#protocol/session-projection/selectors.js";
+import { callLabel, showsActivity } from "#protocol/session-projection/selectors.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import { type PromptQueueState, promptQueue } from "#channel/prompt-queue.js";
 import type { MessageContent } from "#shared/message-content.js";
@@ -500,8 +500,8 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         await safeStartTyping(channel.thread, truncate(buffered));
         return;
       }
-      // eve's own task controls stay out of view.
-      if (data.capability.kind === "control") return;
+      // eve's own task controls, and tools that set `label: false`, stay out of view.
+      if (!showsActivity(data.capability)) return;
       const label = callLabel(data);
       await safeStartTyping(channel.thread, truncate(`${label}...`));
     },

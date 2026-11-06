@@ -1,6 +1,6 @@
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { errorHintOf } from "#public/channels/reply.js";
-import { callLabel } from "#protocol/session-projection/selectors.js";
+import { callLabel, showsActivity } from "#protocol/session-projection/selectors.js";
 import type { ErrorInfo } from "#protocol/session-events/envelope.js";
 import { contentPhase } from "#protocol/session-events/catalog.js";
 import { waiting } from "#protocol/session-projection/selectors.js";
@@ -478,7 +478,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const narration = channel.state.pendingToolCallMessage;
     channel.state.pendingToolCallMessage = null;
     const { capability, owner } = data;
-    const counts = !("callId" in owner) && capability.kind !== "control";
+    const counts = !("callId" in owner) && showsActivity(capability);
     if (!narration && !counts) return;
     // A call its turn made has no run to count it with: it shows its own label.
     if ("turnId" in owner) {
