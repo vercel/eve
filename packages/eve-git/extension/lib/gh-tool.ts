@@ -58,6 +58,7 @@ export function defineGhTool(
         requireAuth: (provider, options) => ctx.requireAuth(provider, options),
         getSandbox: () => ctx.getSandbox(),
         sessionId: ctx.session.id,
+        abortSignal: ctx.abortSignal,
       });
     },
   });
