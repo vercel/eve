@@ -290,16 +290,17 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
         {FEATURES.map((feature) => (
           <li className="flex flex-col gap-1" key={feature.title}>
             <span className="font-[450] text-copy-16 text-gray-1000">{feature.title}</span>
-            <span className="text-pretty text-copy-16 text-gray-900">
-              {feature.text} See{" "}
-              <PrefetchLink
-                className="whitespace-nowrap text-gray-1000 underline decoration-gray-alpha-400 underline-offset-4 hover:decoration-gray-1000"
-                href={feature.doc.href}
-              >
-                {feature.doc.label}
-              </PrefetchLink>
-              .
-            </span>
+            <span className="text-pretty text-copy-16 text-gray-900">{feature.text}</span>
+            <PrefetchLink
+              className="mt-1 w-fit text-copy-16 text-gray-1000 underline decoration-gray-alpha-400 underline-offset-4 hover:decoration-gray-1000"
+              href={feature.doc.href}
+            >
+              Learn more<span className="sr-only"> about {feature.doc.label}</span>
+              {/* The font's own ↗, so it matches the text's size and color, and the underline skips it. */}
+              <span aria-hidden className="ml-[0.125em] inline-block no-underline">
+                ↗
+              </span>
+            </PrefetchLink>
           </li>
         ))}
       </ul>
