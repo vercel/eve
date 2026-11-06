@@ -38,7 +38,7 @@ import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
 import { compiledAgentManifestSchema } from "#compiler/manifest.js";
-import { labelCallbacks } from "#tools/definition.js";
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";

@@ -156,3 +156,24 @@ it("leaves a call whose tool set label: false out of activity", () => {
   expect(events.call(shown, "lookup")).not.toHaveProperty("hidden");
   expect(events.activity(shown)).toEqual({ kind: "calling", names: ["Lookup"] });
 });
+
+it.each([
+  { hidden: true as const, activity: { kind: "thinking" } },
+  { hidden: undefined, activity: { kind: "waiting-on-tasks", tasks: [{ name: "react" }] } },
+])("reads a task its call started with hidden=$hidden", ({ hidden, activity }) => {
+  const capability = { kind: "tool", name: "react", ...(hidden && { hidden }) } as const;
+  const view = events.foldEvents(
+    events.emptySessionView(),
+    stampTestEvents([
+      ...opening.slice(0, 3),
+      { type: "call.requested", data: { callId: "c", owner: { runId: "r" }, capability } },
+      {
+        type: "task.started",
+        data: { taskId: "t", kind: "tool", name: "react", startedBy: { callId: "c" } },
+      },
+      { type: "call.started", data: { callId: "c", taskId: "t" } },
+      { type: "model.settled", data: { runId: "r", outcome: "completed" } },
+    ] as SessionEvent[]),
+  );
+  expect(events.activity(view)).toMatchObject(activity);
+});

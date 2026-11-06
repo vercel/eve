@@ -467,7 +467,10 @@ export function activity(view: SessionView, filter: { readonly turnId?: string }
   if (waits?.on === "interaction")
     return { interactions: waits.interactions, kind: "waiting-on-interaction" };
   if (waits?.on === "work") {
-    const working = waits.tasks;
+    const working = waits.tasks.filter((task) => {
+      const starter = view.calls[task.startedBy.callId];
+      return starter === undefined || showsActivity(starter.capability);
+    });
     if (working.length > 0) return { kind: "waiting-on-tasks", tasks: working };
     const shown = waits.calls.filter((entry) => showsActivity(entry.capability));
     if (shown.length === 0 && waits.calls.length > 0) return { kind: "thinking" };

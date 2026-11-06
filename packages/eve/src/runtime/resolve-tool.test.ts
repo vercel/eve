@@ -14,7 +14,7 @@ import {
   isFrameworkTool,
   isInteractionOnly,
 } from "#tools/provided/framework-tool.js";
-import { labelCallbacks } from "#tools/definition.js";
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
 const definition: CompiledToolDefinition = {
   description: "Deploy a project.",

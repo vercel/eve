@@ -13,7 +13,7 @@ import {
   type FakeConnection,
 } from "#internal/testing/catalog-fixtures.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
-import { labelCallbacks } from "#tools/definition.js";
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
 interface SearchOutput {
   readonly remaining: number;

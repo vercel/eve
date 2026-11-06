@@ -27,7 +27,7 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
 import type { StepCatalog } from "./step-catalog.js";
-import { labelCallbacks } from "#tools/definition.js";
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
 const CHILD = { rootSessionId: "root-session" };
 

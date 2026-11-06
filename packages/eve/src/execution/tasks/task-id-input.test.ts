@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { withTaskIdInput } from "#execution/tasks/task-id-input.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { labelCallbacks } from "#tools/definition.js";
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
 function agentTool(name: string): HarnessToolDefinition {
   return {

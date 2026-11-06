@@ -7,7 +7,7 @@ import { readFile } from "#tools/provided/read-file.js";
 import { webFetch } from "#tools/provided/web-fetch.js";
 import { resolveWebSearchActivityLabel } from "#harness/provider-tool-schemas.js";
 import { writeFile } from "#tools/provided/write-file.js";
-import { labelCallbacks } from "#tools/definition.js";
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
 describe("provided tool labels", () => {
   it("labels every tool previously formatted by Slack", () => {

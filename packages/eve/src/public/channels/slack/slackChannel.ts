@@ -1134,7 +1134,8 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       },
       async "call.settled"(event, ctx) {
         // A quiet turn shows its work once a tool call finishes; `no_reply` ends it first. A call
-        // whose tool set `label: false` isn't work to show, so the turn stays quiet.
+        // whose tool set `label: false` isn't work to show, so the turn stays quiet. Task controls
+        // still end the quiet, as they always have, so this reads `hidden`, not `showsActivity`.
         const settled = sessionTables(ctx.view).calls[event.data.callId];
         if (settled === undefined || settled.capability.hidden !== true) {
           ctx.channel.state.quietStatus = null;

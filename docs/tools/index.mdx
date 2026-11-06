@@ -210,7 +210,7 @@ export default defineTool({
 });
 ```
 
-The call's `capability` carries `hidden: true` and no label. Channels show no status for it, the same way they treat `eve__task_wait` and `eve__task_cancel`, and the call doesn't end a quiet turn's silence, such as a Slack message delivered with `status: "deferred"`. Use `showsActivity(call)` from `eve/events` to apply the same rule in your own renderer. The call stays in the session's events and history.
+The call's `capability` carries `hidden: true` and no label. Channels show no status for it, the same way they treat `eve__task_wait` and `eve__task_cancel`, and the call doesn't end a quiet turn's silence, such as a Slack message delivered with `status: "deferred"`. Use `showsActivity(call)` from `eve/events` to apply the same rule in your own renderer. It accepts a call, its `capability`, or a message part from `eve/react`, `eve/vue`, or `eve/svelte`, which also carries `hidden: true`; the web chat template leaves these parts out. The call stays in the session's events and history. If the tool needs [approval](#gate-a-tool-on-human-approval), people are still asked, and the default prompt names the tool in readable form, such as `Approve React?`.
 
 The provided `bash`, `edit_file`, `glob`, `grep`, `read_file`, `web_fetch`, `web_search`, and `write_file` tools define labels. A deferred tool, agent, or connection tool called through [`eve__tool`](/docs/concepts/built-in-tools#eve__search-eve__tool-and-eve__skill) shows its own label. Other built-in labels:
 

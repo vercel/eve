@@ -59,11 +59,6 @@ export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
   complete?(input: Readonly<TInput>, output: Readonly<TOutput>): string;
 }
 
-/** A tool's label callbacks, or `undefined` when it defines none or sets `label: false`. */
-export function labelCallbacks<T extends object>(label: T | false | undefined): T | undefined {
-  return label === false ? undefined : label;
-}
-
 /**
  * Internal/compiled tool definition shape. Carries `name` because the
  * compiler stamps a path-derived identifier onto every tool entry.

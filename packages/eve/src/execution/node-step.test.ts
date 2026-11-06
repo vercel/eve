@@ -11,7 +11,7 @@ import {
   AGENT_TOOL_NAME,
   SUBAGENT_TOOL_INPUT_SCHEMA,
 } from "#tools/framework/agent-contract.js";
-import { labelCallbacks } from "#tools/definition.js";
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
 vi.mock("ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("ai")>()),
