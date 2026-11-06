@@ -231,11 +231,7 @@ const WEB_CHAT_SINGLE_PERSON =
  */
 const channelConformance = {
   "chat-sdk": [
-    {
-      driver: chatSdkDriver,
-      broken: { ...CHAT_SDK_BROKEN, ...SIGN_IN_LINGERS },
-      unsupported: SIGN_IN_SENT_PRIVATELY,
-    },
+    { driver: chatSdkDriver, broken: CHAT_SDK_BROKEN, unsupported: SIGN_IN_SENT_PRIVATELY },
     { driver: chatSdkTextDriver },
   ],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
