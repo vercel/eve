@@ -53,12 +53,30 @@ describe("EveTUIRunner with a stranded session", () => {
       eveVersion: "0.0.1",
       ok: false,
     };
+    const commandRuns: string[] = [];
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
-      if (
-        init?.method === "POST" &&
-        (path === "/eve/v1/session/session_1" || path === "/eve/v1/session/session_1/clear")
-      ) {
+      if (path === "/eve/v1/commands") {
+        return Response.json({
+          ok: true,
+          commands: [
+            {
+              name: "new",
+              description: "New",
+              aliases: ["reset"],
+              session: "required",
+            },
+            { name: "clear", description: "Clear", session: "required" },
+          ],
+        });
+      }
+      if (path.startsWith("/eve/v1/session/session_1/commands/")) {
+        commandRuns.push(path);
+        return path.endsWith("/clear")
+          ? Response.json(stranded, { status: 409 })
+          : Response.json({ ok: true, ended: true });
+      }
+      if (init?.method === "POST" && path === "/eve/v1/session/session_1") {
         await server.fetch(input, init);
         return Response.json(stranded, { status: 409 });
       }
@@ -69,7 +87,7 @@ describe("EveTUIRunner with a stranded session", () => {
     await new EveTUIRunner({
       client: new Client({ baseUrl: "http://localhost:3000" }),
       renderer: turnTaking(
-        ["Hello.", "Still there?", "/clear", "/new", "Fresh start.", undefined],
+        ["Hello.", "Still there?", "/clear", "/reset", "Fresh start.", undefined],
         { finishCommand: (outcome) => outcomes.push(outcome), renderError },
       ).renderer,
     }).run();
@@ -78,11 +96,13 @@ describe("EveTUIRunner with a stranded session", () => {
       "Session session_1 is stranded (built by eve 0.0.1): the deployment that ran it is no longer available. The session cannot continue. Run /new to end it and start a fresh session.";
     expect(renderError).toHaveBeenCalledWith("Session stranded", notice);
     expect(outcomes).toEqual([
-      { kind: "result", message: notice, summary: "Couldn't clear the session" },
+      { kind: "result", message: notice, summary: "/clear failed" },
       { kind: "dismiss" },
     ]);
-    expect(server.requestsTo("POST", "/session_1/clear")).toHaveLength(1);
-    expect(server.requestsTo("POST", "/session_1/end")).toHaveLength(1);
+    expect(commandRuns).toEqual([
+      "/eve/v1/session/session_1/commands/clear",
+      "/eve/v1/session/session_1/commands/new",
+    ]);
     expect(server.sessionId).toBe("session_2");
   });
 });

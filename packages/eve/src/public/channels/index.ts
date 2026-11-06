@@ -59,6 +59,7 @@ export {
 export { attachmentError } from "#public/channels/attachment-error.js";
 export {
   defineCommand,
+  sessionCommands,
   type CommandContext,
   type CommandSession,
   type CommandDefinition,
