@@ -334,6 +334,8 @@ The gates are tuned to let borderline messages through, so the agent's own model
 eve add tool/no_reply
 ```
 
+A deferred turn that ends with `no_reply` posts nothing and shows no status. Calls to tools with [`label: false`](../tools#label-tool-activity), such as a tool that only adds an emoji reaction, don't show a status either, so the agent can react and stay otherwise silent. See [Status and guidance](../channels/slack/reference#status-and-guidance).
+
 Then tell it how ambient messages differ from direct asks. Any text the agent writes is posted to the thread, so the most common failure is an agent that explains its silence instead of calling `no_reply`:
 
 ```md title="agent/instructions.md"
