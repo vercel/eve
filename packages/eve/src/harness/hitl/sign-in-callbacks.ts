@@ -3,7 +3,8 @@ import type { Step } from "#harness/step/context.js";
 import { parseEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import type { InteractionRow } from "#protocol/session-projection/tables.js";
 import { vercelConnectCallbackUrl } from "#runtime/connections/scoped-authorization.js";
-import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
+import { ContextKey } from "#context/key.js";
+import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import type { ModelMessage } from "ai";
 import type { Transition } from "#harness/session-machine/commit.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
@@ -57,6 +58,12 @@ export function callsBackFor(own: OwnCallbacks): CallsBack {
   return (row) => localSignInCallback(row, own) !== undefined;
 }
 
+/** Delivers a sign-in callback to its asker's inbox. */
+export type ResumeSignIn = (token: string, payload: AuthorizationCallbackPayload) => Promise<void>;
+
+/** How this step delivers sign-in callbacks; the workflow step that runs the turn sets it. */
+export const ResumeSignInKey = new ContextKey<ResumeSignIn>("eve.resumeSignIn");
+
 /** `step`'s session's own callbacks, when it runs in a workflow. */
 function stepCallbacks(step: Pick<Step, "ctx" | "session">): OwnCallbacks | undefined {
   const baseUrl = step.ctx.get(CallbackBaseUrlKey);
@@ -82,14 +89,13 @@ export async function applyEndingSignIns(
   const own = stepCallbacks(step);
   if (own !== undefined) {
     const tables = step.view().projection.view;
-    await settleSignIns(
-      change.events.flatMap((event) => {
-        if (event.type !== "interaction.settled") return [];
-        const { interactionId, outcome, reason } = event.data;
-        if (outcome === "accepted" || outcome === "declined") return [];
-        return signInsEnded(tables, { interactionId, reason: reason ?? outcome }, own);
-      }),
-    );
+    const ended = change.events.flatMap((event) => {
+      if (event.type !== "interaction.settled") return [];
+      const { interactionId, outcome, reason } = event.data;
+      if (outcome === "accepted" || outcome === "declined") return [];
+      return signInsEnded(tables, { interactionId, reason: reason ?? outcome }, own);
+    });
+    if (ended.length > 0) await settleSignIns(step.ctx.require(ResumeSignInKey), ended);
   }
   await step.apply(change, messages);
 }
@@ -127,10 +133,13 @@ export function signInsEnded(
  * attempt in its own turn and settles it under its own principal, reading what Connect holds for
  * it after an acceptance. The params carry only the answer, never a code or a credential.
  */
-export async function settleSignIns(answered: readonly AnsweredSignIn[]): Promise<void> {
+export async function settleSignIns(
+  resume: ResumeSignIn,
+  answered: readonly AnsweredSignIn[],
+): Promise<void> {
   await Promise.all(
     answered.map(({ callback, params }) =>
-      resumeSignInCallback(callback.token, {
+      resume(callback.token, {
         kind: "authorization-callback",
         payloads: [
           {

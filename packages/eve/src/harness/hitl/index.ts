@@ -186,10 +186,12 @@ export {
   callsBackFor,
   localSignInCallback,
   ownCallbacks,
+  ResumeSignInKey,
   settleSignIns,
   signInsEnded,
   type AnsweredSignIn,
   type OwnCallbacks,
+  type ResumeSignIn,
   type SignInCallback,
   type SignInEnding,
 } from "./sign-in-callbacks.js";

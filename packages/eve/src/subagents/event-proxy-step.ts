@@ -24,6 +24,7 @@ import type { SignInChallenge } from "#protocol/session-events/families/interact
 import { relay } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
+import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
 
 /** Relays one child interaction fact through its parent channel across a durable step boundary. */
@@ -65,7 +66,7 @@ export async function emitProxiedSubagentEvent(
     baseUrl === undefined ? undefined : ownCallbacks(input.durableSession.sessionId, baseUrl);
   if (own !== undefined) {
     const tables = storedProjection(input.durableSession.state).view;
-    await settleSignIns([
+    await settleSignIns(resumeSignInCallback, [
       ...relayedAnswers(tables, hookPayload).flatMap((answer) =>
         signInsAnswered(tables, answer, own),
       ),

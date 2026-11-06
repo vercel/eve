@@ -6,19 +6,17 @@ import { transition } from "#harness/session-machine/commit.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import { emptySessionView } from "#protocol/session-projection/fold.js";
 import type { InteractionRow } from "#protocol/session-projection/tables.js";
-import { applyEndingSignIns } from "./sign-in-callbacks.js";
+import { applyEndingSignIns, ResumeSignInKey } from "./sign-in-callbacks.js";
 
-const resumed = vi.hoisted(() => [] as { token: string; params: unknown }[]);
-vi.mock("#execution/session-inbox/owner.js", () => ({
-  resumeSignInCallback: vi.fn(
-    async (
-      token: string,
-      payload: { payloads: { authorizationCallback: { callback: { params: unknown } } }[] },
-    ) => {
-      resumed.push({ token, params: payload.payloads[0]!.authorizationCallback.callback.params });
-    },
-  ),
-}));
+const resumed: { token: string; params: unknown }[] = [];
+const resume = vi.fn(
+  async (
+    token: string,
+    payload: { payloads: { authorizationCallback: { callback: { params: unknown } } }[] },
+  ) => {
+    resumed.push({ token, params: payload.payloads[0]!.authorizationCallback.callback.params });
+  },
+);
 
 const OWN = "https://v.example";
 
@@ -58,7 +56,13 @@ function parentStep() {
   const apply = vi.fn(async () => {});
   return {
     apply,
-    ctx: { get: (key: unknown) => (key === CallbackBaseUrlKey ? OWN : undefined) },
+    ctx: {
+      get: (key: unknown) => (key === CallbackBaseUrlKey ? OWN : undefined),
+      require: (key: unknown) => {
+        if (key !== ResumeSignInKey) throw new Error("unexpected key");
+        return resume;
+      },
+    },
     session: { sessionId: "parent" },
     view: () => ({ projection: { view } }),
   };

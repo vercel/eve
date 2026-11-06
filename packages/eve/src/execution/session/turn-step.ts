@@ -88,7 +88,14 @@ import { createTurnEventHandler } from "#execution/session/turn-event-handler.js
 import { installDefinitions, restoreDefinitions } from "#definitions/kernel.js";
 import { bindMemoryInstrumentation } from "#memory/definition.js";
 import { CallbackBaseUrlKey, PendingAuthorizationResultKey } from "#harness/authorization.js";
-import { ownCallbacks, readHitlState, settleSignIns, signInsEnded } from "#harness/hitl/index.js";
+import {
+  ownCallbacks,
+  readHitlState,
+  ResumeSignInKey,
+  settleSignIns,
+  signInsEnded,
+} from "#harness/hitl/index.js";
+import { resumeSignInCallback } from "#execution/session-inbox/owner.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import {
   createDurableSessionValues,
@@ -208,6 +215,7 @@ async function runSessionStepBody(
         const own = ownCallbacks(durableSession.sessionId, baseUrl);
         const tables = storedProjection(durableSession.state).view;
         await settleSignIns(
+          resumeSignInCallback,
           matches.flatMap(({ challenge, result }) => {
             const answer = ownSignInAnswer(tables, challenge, result.callback);
             if (answer !== undefined) return signInsAnswered(tables, answer, own);
@@ -681,6 +689,7 @@ async function runSessionStepBody(
               startSessionPrewarmers(ctx, "turn");
             }
             ctx.setVirtualContext(HandleEventKey, handleEvent);
+            ctx.setVirtualContext(ResumeSignInKey, resumeSignInCallback);
             ctx.setVirtualContext(ToolChannelKey, {
               channel: channelOf(ctx),
               to: createToolChannelTo({
