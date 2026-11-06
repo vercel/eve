@@ -623,8 +623,8 @@ const firecrawlLogo = (props: LogoProps) => (
 );
 
 const klaviyoLogo = (props: LogoProps) => (
-  <svg viewBox="0 0 118 80" xmlns="http://www.w3.org/2000/svg" {...props}>
-    <path d="M0 0h118L94 40l24 40H0z" fill="currentColor" />
+  <svg viewBox="0 0 67.8 45.4" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M67.8 45.4H0V0h67.8L53.6 22.7z" fill="currentColor" />
   </svg>
 );
 
