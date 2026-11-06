@@ -42,6 +42,20 @@ import { liveRead, polledRead } from "./stream-read.js";
 //     carrying its time and the log's newest event when it was armed: one the queue's longest
 //     delay brings early, with nothing newer on the log, is armed again without activating.
 
+/**
+ * The stream a value `name` of `key` is kept in: each value kept is its next chunk. The name is
+ * encoded, as a World's stream names allow only some characters (no `.` on the local World's).
+ */
+const valueStreamName = (kind: EntityKind, key: string, name: string) =>
+  `${streamNameOf(kind, key)}_value_${base64Url(name)}`;
+
+/** `value`'s UTF-8 bytes as base64url, in any realm (a browser has no `Buffer`). */
+const base64Url = (value: string) =>
+  btoa(String.fromCharCode(...new TextEncoder().encode(value)))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
+
 const log = createLogger("execution.entity");
 
 const LOG_PAGE = 100;
@@ -138,6 +152,18 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
     });
   };
 
+  /** Whether `key` ended: its run is in a terminal state. */
+  const ended = async (key: string): Promise<boolean> => {
+    if (world.runs.get === undefined) return false;
+    try {
+      const { status } = await world.runs.get(runId(key), { resolveData: "none" });
+      return status === "completed" || status === "failed" || status === "cancelled";
+    } catch (error) {
+      if (isRunNotFound(error)) return false;
+      throw error;
+    }
+  };
+
   const activation: Activation | undefined =
     queued === undefined || queuePrefix === undefined || wakeQueue === undefined
       ? undefined
@@ -167,12 +193,16 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
               }
               const meta = await readMeta(world, runId(key));
               if (meta === undefined) return undefined;
+              // An entity that ended isn't activated: what reached it late is dropped.
+              if (await ended(key)) return undefined;
               const startedAt = delivery.invocationStartedAt ?? Date.now();
               const handle = await openHandle(key, meta);
               let outcome: ActivationOutcome;
               try {
                 outcome = await run(handle, { deadline: startedAt + consumerOptions.budgetMs });
               } catch (error) {
+                // It ended as this activation ran (the session ended in it): nothing to redo.
+                if (isEndedRunConflict(error) && (await ended(key))) return undefined;
                 logError(log, `activation of "${key}" failed`, error);
                 throw error;
               }
@@ -196,11 +226,16 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
         };
 
   /** A handle on `key`, whose run exists (`meta` read) or is created here. */
-  const openHandle = async (key: string, knownMeta?: unknown): Promise<EntityHandle> => {
+  const openHandle = async (
+    key: string,
+    knownMeta?: unknown,
+    createMeta: unknown = {},
+  ): Promise<EntityHandle> => {
     const id = runId(key);
-    const created = knownMeta === undefined ? await createRun(world, kind, key, {}) : undefined;
+    const created =
+      knownMeta === undefined ? await createRun(world, kind, key, createMeta) : undefined;
     const writer = created ?? (await claimRun(world, key, id));
-    const meta = created !== undefined ? {} : (knownMeta ?? (await readMeta(world, id)));
+    const meta = created !== undefined ? createMeta : (knownMeta ?? (await readMeta(world, id)));
     // How far the mailbox is consumed: read once, when first needed.
     let consumed: string | undefined | null = created !== undefined ? undefined : null;
     const consumedNow = async (): Promise<string | undefined> => {
@@ -253,6 +288,9 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
       async end() {
         // A run that ended: the World disposes its hooks, and applies its retention.
         await write(world, key, id, writer, { eventData: {}, eventType: "run_completed" });
+      },
+      async keep(name, value) {
+        await world.streams.write(id, valueStreamName(kind, key, name), value);
       },
       stream: {
         async length() {
@@ -351,6 +389,20 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
       for (const token of tokens) await createHook(key, writer, token);
     },
     meta: async (key) => await readMeta(world, runId(key)),
+    async info(key) {
+      if (world.runs.get === undefined) return undefined;
+      try {
+        const run = await world.runs.get(runId(key), { resolveData: "none" });
+        return {
+          status: run.status ?? "running",
+          createdAt: new Date(run.createdAt),
+          ...(run.expiredAt !== undefined && { expiredAt: new Date(run.expiredAt) }),
+        };
+      } catch (error) {
+        if (isRunNotFound(error)) return undefined;
+        throw error;
+      }
+    },
     async lookup(alias) {
       const hook = await hookOf(alias);
       return hook === undefined ? undefined : keyOfRun(kind, hook.runId);
@@ -375,7 +427,8 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
       await activation?.wake(key);
       return { key };
     },
-    open: async (key) => await openHandle(key, await readMeta(world, runId(key))),
+    open: async (key, openOptions) =>
+      await openHandle(key, await readMeta(world, runId(key)), openOptions?.meta ?? {}),
     async load(key) {
       const journal = await readJournal(world, runId(key));
       return journal === undefined
@@ -383,6 +436,28 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
         : { after: journal.after, snapshot: journal.snapshot };
     },
     streamLength,
+    async value(key, name) {
+      const id = runId(key);
+      const stream = valueStreamName(kind, key, name);
+      try {
+        const { tailIndex } = await world.streams.getInfo(id, stream);
+        if (tailIndex < 0) return undefined;
+        let last: Uint8Array | undefined;
+        let cursor: string | undefined;
+        do {
+          const page = await world.streams.getChunks(id, stream, {
+            limit: 1000,
+            ...(cursor && { cursor }),
+          });
+          for (const chunk of page.data) last = chunk.data;
+          cursor = page.hasMore ? (page.cursor ?? undefined) : undefined;
+        } while (cursor !== undefined);
+        return last;
+      } catch {
+        // A World that holds no such stream says so by refusing it.
+        return undefined;
+      }
+    },
     async chunks(key) {
       const id = runId(key);
       const name = streamNameOf(kind, key);
@@ -421,4 +496,9 @@ export function worldEntities(world: RuntimeWorld, options: WorldEntitiesOptions
     once: async (name, occurrence) => await claimOnce(world, name, occurrence),
     ...(activation !== undefined && { activation }),
   };
+}
+
+/** A World refusing a write to a run that ended. */
+function isEndedRunConflict(error: unknown): boolean {
+  return error instanceof Error && /terminal state/u.test(error.message);
 }

@@ -3,10 +3,11 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import {
   agentSessionsOver,
   type LocalAgentSessions,
+  type RemoteAgentAccess,
 } from "#execution/agent-sessions/sessions-over.js";
 import { FRAMEWORK_WORKFLOW_BODIES } from "#execution/framework-workflow-bodies.js";
 import type { SessionRuntimeConfig } from "#execution/initial-entry.js";
-import type { RunHost } from "#execution/run-host.js";
+import type { RunAgentSessions, RunHost } from "#execution/run-host.js";
 import type {
   WorkflowToolRunOutcomeMessage,
   WorkflowToolRunRef,
@@ -51,6 +52,23 @@ export interface InProcessRunsHost {
    * wherever the session runs, and its status and cancelling are Workflow's.
    */
   readonly startDurableRun?: StartWorkflowToolRun;
+  /**
+   * How its runs reach remote agents: where eve's callback route is served, which their replies
+   * come back to (at the calling session's address). Without it, a remote agent is refused.
+   */
+  readonly remote?: RemoteAgentAccess;
+  /**
+   * Whether the host is suspending its sessions (`InProcessRuntime.dispose` with a World): what a
+   * run says after that doesn't count. Its hooks closing ends what its body waits on, which it
+   * would report as a failure, and a restore replays it from its journal anyway.
+   */
+  readonly suspending?: () => boolean;
+  /**
+   * The entity whose activation runs these runs (a World host's session), which each run's id
+   * names: what arrives at one of its hooks after the activation stopped (a remote agent's reply)
+   * reaches that entity (`inProcessRunOwner`).
+   */
+  readonly owner?: string;
   /**
    * Continues `sessionId` on the runtime for `config`, from the store an earlier process kept it
    * in, unless it runs here already. `false` when the store holds no such session, or, unless
@@ -186,9 +204,32 @@ interface Run {
 /** The `n`th hook a run's body opens without naming it. */
 const runHookPrefix = (runId: string) => `eve:in-process:${runId}:`;
 
+const OWNED_RUN_HOOK = /^eve:in-process:wrun_in_process_[0-9A-HJKMNP-TV-Z]{26}_(.+):\d+$/u;
+
+/** The entity an in-process run's hook `token` belongs to, when its run's id names one. */
+export function inProcessRunOwner(token: string): string | undefined {
+  return OWNED_RUN_HOOK.exec(token)?.[1];
+}
+
 export function createInProcessRuns(host: InProcessRunsHost): InProcessRuns {
   const runs = new Map<string, Run>();
   const bodies = new Map<string, WorkflowFunction>();
+  /**
+   * The sessions a run reaches, but nothing once the host is suspending: what its body does as
+   * its hooks close (cancelling a remote agent's turn, ending its sessions) isn't its own doing,
+   * and a restore goes on from its journal.
+   */
+  const whileServing = (sessions: RunAgentSessions): RunAgentSessions => {
+    const stopped = () => host.suspending?.() === true;
+    const never = <T>() => new Promise<T>(() => {});
+    return {
+      open: (input) => (stopped() ? never() : sessions.open(input)),
+      send: (input) => (stopped() ? never() : sessions.send(input)),
+      cancelTurn: async (opened) => (stopped() ? undefined : await sessions.cancelTurn(opened)),
+      end: async (input) => (stopped() ? undefined : await sessions.end(input)),
+      stopLate: async (opened) => (stopped() ? undefined : await sessions.stopLate(opened)),
+    };
+  };
 
   /** The sessions `run`'s body opens: new ones, or, going on after a restore, those it opened. */
   const localSessions = (run: Run, earlier: EarlierRun): LocalAgentSessions => {
@@ -240,18 +281,20 @@ export function createInProcessRuns(host: InProcessRunsHost): InProcessRuns {
       },
       sleep: (ms) => host.timers.until(Date.now() + ms),
       async resumeHook(token, payload, options) {
+        if (host.suspending?.() === true) return;
         // What its session heard from it before a restore isn't sent again.
         if (token === run.record.ownerInbox && !replay.send(payload)) return;
         await resumeHookWherever(token, payload, options);
       },
       resolveWorkflow: (workflowId) => bodies.get(workflowId) ?? FRAMEWORK_BODIES.get(workflowId),
-      agentSessions: agentSessionsOver({
-        deliveryId: (kind, sessionId) =>
-          `agent-session:${runId}:${String(deliveries++)}:${sessionId}:${kind}`,
-        local: localSessions(run, earlier),
-        // Remote agents answer over HTTP, which this host doesn't serve them yet.
-        remote: undefined,
-      }),
+      agentSessions: whileServing(
+        agentSessionsOver({
+          deliveryId: (kind, sessionId) =>
+            `agent-session:${runId}:${String(deliveries++)}:${sessionId}:${kind}`,
+          local: localSessions(run, earlier),
+          remote: host.remote,
+        }),
+      ),
     };
   };
 
@@ -292,7 +335,10 @@ export function createInProcessRuns(host: InProcessRunsHost): InProcessRuns {
       )
         return await host.startDurableRun(input);
       const hookToken = workflowToolRunHookToken(input);
-      const runId = `wrun_in_process_${createUlid()}`;
+      const runId =
+        host.owner === undefined
+          ? `wrun_in_process_${createUlid()}`
+          : `wrun_in_process_${createUlid()}_${host.owner}`;
       // The run's input crosses the host's step boundary, as a started run's does.
       const crossed = await acrossStepBoundary<WorkflowToolRunInput>(host.stepBoundary, {
         ...input,

@@ -1,3 +1,7 @@
+import { buildConversationContext } from "#channel/conversation-context.js";
+import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
+import { remoteChildBindingName } from "#execution/child-binding-name.js";
+import type { RemoteChildBinding } from "#execution/child-binding.js";
 import { createChannelDeliveryMetadata } from "#channel/delivery-metadata.js";
 import type {
   DispatchContinuationInput,
@@ -105,7 +109,21 @@ export function createFrontRuntime(input: {
       };
       const before = await existing();
       if (before !== undefined) return before;
-      const start: SessionStart = { agent: input.agent, input: identified };
+      // Who the conversation is with, resolved here: its channel's audience classifier is a
+      // function, which what the session is created with (JSON) doesn't keep.
+      const start: SessionStart = {
+        agent: input.agent,
+        input:
+          identified.inheritedConversation === undefined
+            ? {
+                ...identified,
+                inheritedConversation: buildConversationContext(
+                  identified,
+                  resolveInstrumentationEnvironment(),
+                ),
+              }
+            : identified,
+      };
       try {
         await entities.create(sessionId, {
           aliases: tokens,
@@ -153,6 +171,12 @@ export function createFrontRuntime(input: {
         : readSessionRecords(sessionId, options?.startIndex);
     },
 
+    async readChildBinding(sessionId, childSessionId) {
+      const kept = await entities.value(sessionId, remoteChildBindingName(childSessionId));
+      return kept === undefined
+        ? undefined
+        : (JSON.parse(new TextDecoder().decode(kept)) as RemoteChildBinding);
+    },
     async getStreamTailIndex(sessionId) {
       return await readSessionStreamTailIndex(sessionId);
     },

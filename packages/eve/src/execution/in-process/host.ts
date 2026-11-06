@@ -1,3 +1,4 @@
+import { remoteChildBindingName } from "#execution/child-binding-name.js";
 import type { StartWorkflowToolRun } from "#execution/tools/workflow/start.js";
 import type { Runtime, SessionCommand, SessionCommandResult } from "#channel/types.js";
 import { agentSessionsOver } from "#execution/agent-sessions/sessions-over.js";
@@ -121,6 +122,8 @@ export interface InProcessHostOptions {
    * authored one, on a deployment that also runs Workflow. Without one, its run fails.
    */
   readonly startDurableRun?: StartWorkflowToolRun;
+  /** The entity whose activation this host runs in, which its runs' ids name (`InProcessRunsHost.owner`). */
+  readonly runOwner?: string;
 }
 
 /** A session running here: what the host records of it, and its loop. */
@@ -234,8 +237,14 @@ export function createInProcessHost(
   const dispatchSession: Runtime["dispatchSession"] = async ({ command, sessionId }) =>
     await deliverCommand(sessionCommandHookToken(sessionId), command);
 
+  const { callbackBaseUrl } = options;
   const runs = createInProcessRuns({
+    suspending: () => suspending,
+    ...(options.runOwner !== undefined && { owner: options.runOwner }),
     ...(options.startDurableRun !== undefined && { startDurableRun: options.startDurableRun }),
+    // A remote agent's replies come back through eve's callback route, which a host with a
+    // callback origin serves.
+    ...(callbackBaseUrl !== undefined && { remote: { callbackBaseUrl: () => callbackBaseUrl } }),
     dispatchSession,
     inboxes,
     stepBoundary,
@@ -270,7 +279,15 @@ export function createInProcessHost(
   });
   const applyRunMessages = applyRunMessagesOn({
     // A remote child can't be opened here, so no run reports one.
-    recordRemoteBinding: async () => unavailable("A remote agent"),
+    // Where a remote child streams from, beside the parent's state on its World.
+    recordRemoteBinding: async (parentSessionId, binding) => {
+      if (options.worldStore === undefined) unavailable("A remote agent");
+      await options.worldStore.keep(
+        parentSessionId,
+        remoteChildBindingName(binding.childSessionId),
+        binding,
+      );
+    },
     stopLate,
   });
   const dispatchRuns = dispatchCoordinationOn(runs.startRun);
