@@ -23,7 +23,9 @@ import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extensio
 import { resolveExtensionBuildLockPath } from "#internal/nitro/host/extension-build-lock.js";
 
 const mocks = vi.hoisted(() => ({
-  buildExtensionPackage: vi.fn(async () => undefined),
+  buildExtensionPackage: vi.fn<
+    (packageRoot: string, config: { readonly packageName: string }) => Promise<unknown>
+  >(async () => undefined),
 }));
 
 vi.mock("#internal/nitro/host/build-extension.js", async (importOriginal) => ({
@@ -39,7 +41,7 @@ import {
 const temporaryDirectories: string[] = [];
 
 beforeEach(() => {
-  mocks.buildExtensionPackage.mockClear();
+  mocks.buildExtensionPackage.mockReset();
 });
 
 afterEach(async () => {
@@ -174,6 +176,20 @@ describe("prepareDevelopmentWorkspaceExtensions", () => {
     expect(mocks.buildExtensionPackage).not.toHaveBeenCalled();
   });
 
+  it("builds an extension after the workspace extension it depends on", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha", "zeta"], { alpha: ["zeta"] });
+    const events = recordBuildEvents();
+
+    await prepareDevelopmentWorkspaceExtensions({ appRoot });
+
+    expect(events).toEqual([
+      "start @acme/zeta",
+      "end @acme/zeta",
+      "start @acme/alpha",
+      "end @acme/alpha",
+    ]);
+  });
+
   it("rebuilds every mounted workspace extension for a forced reload", async () => {
     const appRoot = await createWorkspaceAgent(["alpha", "beta"]);
     const initial = await prepareDevelopmentWorkspaceExtensions({ appRoot });
@@ -200,6 +216,38 @@ describe("buildWorkspaceExtensions", () => {
       join(appRoot, "packages", "alpha"),
       expect.objectContaining({ packageName: "@acme/alpha" }),
     );
+  });
+
+  it("builds an extension after the workspace extension it depends on", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha", "beta", "zeta"], { alpha: ["zeta"] });
+    const events = recordBuildEvents();
+
+    await buildWorkspaceExtensions(appRoot);
+
+    // Independent extensions still start together; only the dependent waits.
+    expect(events.slice(0, 2).toSorted()).toEqual(["start @acme/beta", "start @acme/zeta"]);
+    expect(events.indexOf("start @acme/alpha")).toBeGreaterThan(events.indexOf("end @acme/zeta"));
+  });
+
+  it("builds every extension in a workspace dependency cycle", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha", "beta"], {
+      alpha: ["beta"],
+      beta: ["alpha"],
+    });
+
+    await buildWorkspaceExtensions(appRoot);
+
+    expect(mocks.buildExtensionPackage).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not build an extension whose workspace dependency failed to build", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha", "zeta"], { alpha: ["zeta"] });
+    mocks.buildExtensionPackage.mockRejectedValueOnce(new Error("tools/search.ts is invalid"));
+
+    await expect(buildWorkspaceExtensions(appRoot)).rejects.toThrow(
+      'Failed to build workspace extension "@acme/zeta"',
+    );
+    expect(mocks.buildExtensionPackage).toHaveBeenCalledOnce();
   });
 
   it("skips an extension whose distribution is newer than its build inputs", async () => {
@@ -269,6 +317,17 @@ describe("buildWorkspaceExtensions", () => {
   });
 });
 
+/** Makes each mocked build yield before finishing and records when builds start and end. */
+function recordBuildEvents(): string[] {
+  const events: string[] = [];
+  mocks.buildExtensionPackage.mockImplementation(async (_packageRoot, config) => {
+    events.push(`start ${config.packageName}`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    events.push(`end ${config.packageName}`);
+  });
+  return events;
+}
+
 const PAST = new Date("2000-01-01T00:00:00Z");
 const FUTURE = new Date(Date.now() + 60 * 60 * 1000);
 
@@ -288,7 +347,10 @@ async function writeDistributionManifest(
   await utimes(manifestPath, input.builtAt, input.builtAt);
 }
 
-async function createWorkspaceAgent(extensionNames: readonly string[]): Promise<string> {
+async function createWorkspaceAgent(
+  extensionNames: readonly string[],
+  dependencies: Readonly<Record<string, readonly string[]>> = {},
+): Promise<string> {
   const appRoot = await mkdtemp(join(tmpdir(), "eve-workspace-extension-dev-"));
   temporaryDirectories.push(appRoot);
   await writeText(join(appRoot, "package.json"), '{"name":"workspace-agent","type":"module"}\n');
@@ -307,6 +369,9 @@ async function createWorkspaceAgent(extensionNames: readonly string[]): Promise<
         name: `@acme/${name}`,
         type: "module",
         eve: { extension: { source: "extension", dist: "dist/extension" } },
+        dependencies: Object.fromEntries(
+          (dependencies[name] ?? []).map((dependency) => [`@acme/${dependency}`, "workspace:*"]),
+        ),
       })}\n`,
     );
     await writeText(join(packageRoot, "extension", "extension.ts"), "export default {};\n");
