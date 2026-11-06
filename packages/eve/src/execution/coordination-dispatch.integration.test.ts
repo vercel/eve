@@ -19,7 +19,7 @@ import { defineHook } from "#public/definitions/hook.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 
 describe("coordination dispatch", () => {
-  it("refuses legacy and changed workflow requests before any run can be prestarted", async () => {
+  it("refuses unadmitted requests while admitted siblings prestart", async () => {
     const runtime = await createTestRuntime({
       agent: { name: "workflow-admission" },
       modules: [
@@ -58,11 +58,15 @@ describe("coordination dispatch", () => {
         ...admitWorkflowTask({ ...request, callId: "changed" }, mintClearance("changed")),
         input: { service: "other" },
       };
+      const admitted = ["allowed-1", "allowed-2"].map((callId) =>
+        admitWorkflowTask({ ...request, callId }, mintClearance(callId)),
+      );
+      const calls = [request, changed, ...admitted];
       const session = withParkedStep(base, {
         messages: [
           {
             role: "assistant",
-            content: [request, changed].map((task) => ({
+            content: calls.map((task) => ({
               input: task.input,
               toolCallId: task.callId,
               toolName: task.toolName,
@@ -70,7 +74,7 @@ describe("coordination dispatch", () => {
             })),
           },
         ],
-        tasks: [request, changed],
+        tasks: calls,
       });
       const before = await listWorkflowToolRunIds();
       const dispatched = await dispatchCoordinationStep({
@@ -78,13 +82,17 @@ describe("coordination dispatch", () => {
         sessionState: createDurableSessionState({ session }),
         workflowToolRunOwner: { inbox: "eve:test-inbox" },
       });
-      expect(dispatched.pending.executing).toEqual([]);
+      expect(dispatched.pending.executing.map(({ callId }) => callId)).toEqual([
+        "allowed-1",
+        "allowed-2",
+      ]);
       expect(dispatched.pending.started).toEqual([]);
       expect(dispatched.pending.refused).toMatchObject([
         { policy: "approval", result: { callId: "legacy" } },
         { policy: "approval", result: { callId: "changed" } },
       ]);
-      expect(await listWorkflowToolRunIds()).toEqual(before);
+      const after = await listWorkflowToolRunIds();
+      expect([...after].filter((id) => !before.has(id))).toHaveLength(2);
     });
   });
 
