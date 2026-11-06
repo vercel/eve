@@ -110,6 +110,26 @@ function Tag({
   );
 }
 
+/** Beside the board: the three kinds of files it shows, styled like the use case features above. */
+const FEATURES = [
+  {
+    title: "Static",
+    text: "Build agents from files in a directory, and each file's path determines how eve loads it.",
+    href: "/docs/concepts/project-structure",
+  },
+  {
+    title: "Dynamic",
+    // Every kind of file can be dynamic, not only the ones this example makes dynamic.
+    text: "Instructions, skills, tools, subagents, connections, and models can all resolve per session.",
+    href: "/docs/guides/dynamic-capabilities",
+  },
+  {
+    title: "Multi-tenant",
+    text: "One agent serves every customer, each with the plan, data, and access that fits them.",
+    href: "/docs/patterns/multi-tenant-auth",
+  },
+];
+
 export function FileTreeView({ items }: { items: FileTreeItem[] }) {
   const [customer, setCustomer] = useState<Customer>(CUSTOMERS[0]);
   // Both layouts open on the first dynamic file, the one that changes with the switch.
@@ -121,7 +141,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
   const selected = items[selectedIndex];
 
   const switcher = (
-    <div className="mx-auto mb-6 flex w-fit flex-wrap items-center justify-center gap-3">
+    <div className="flex w-fit flex-wrap items-center gap-3">
       <span className="text-label-14 text-gray-900">When the support agent serves</span>
       {/* The size sits here, outside cn(): tailwind-merge reads text-label-14 as a color and
           drops it next to the buttons' text-gray-* classes. */}
@@ -153,74 +173,58 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
   );
 
   const board = (
-    <div className="relative">
-      {/* Grid line on the card header's border-b (47px: the card's edge is a shadow, not a
-          border, so the divider sits 1px higher than h-12), fading out at the edges. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute top-[47px] -right-4 -left-4 h-px sm:-right-14 sm:-left-14"
-        style={{
-          background:
-            "linear-gradient(to right, transparent, var(--ds-gray-400) 7.5%, var(--ds-gray-400) 92.5%, transparent)",
-        }}
-      />
-      <div className="mx-auto max-w-5xl">
-        <div className="relative overflow-hidden material-large">
-          <div className="grid grid-cols-[270px_1fr]">
-            {/* Sidebar: the files in this agent; click any to view it. */}
-            <div className="border-r">
-              <div className="flex h-12 items-center border-b px-4">
-                <span className="font-medium text-gray-1000 text-sm">agent/</span>
-                <span className="ml-2 truncate text-gray-700 text-sm">example</span>
-              </div>
-              <div className="space-y-0.5 p-2">
-                {items.map((item, i) => {
-                  const missing = item.results?.[customer.id] === null;
-                  return (
-                    <button
-                      className={cn(
-                        "group flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
-                        selectedIndex === i
-                          ? "bg-gray-100 text-gray-1000"
-                          : "text-gray-700 hover:bg-gray-100/60 hover:text-gray-1000",
-                        missing && "opacity-50",
-                      )}
-                      key={item.name}
-                      onClick={() => setSelectedIndex(i)}
-                      type="button"
-                    >
-                      <span className={cn("min-w-0 truncate", missing && "line-through")}>
-                        {item.name}
-                      </span>
-                      <Tag
-                        active={selectedIndex === i}
-                        customer={customer}
-                        item={item}
-                        required={i === 0}
-                      />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+    <div className="max-w-5xl overflow-hidden material-large xl:max-w-none">
+      <div className="grid grid-cols-[270px_1fr]">
+        {/* Sidebar: the files in this agent; click any to view it. */}
+        <div className="border-r">
+          <div className="flex h-12 items-center border-b px-4">
+            <span className="font-medium text-gray-1000 text-sm">agent/</span>
+            <span className="ml-2 truncate text-gray-700 text-sm">example</span>
+          </div>
+          <div className="space-y-0.5 p-2">
+            {items.map((item, i) => {
+              const missing = item.results?.[customer.id] === null;
+              return (
+                <button
+                  className={cn(
+                    "group flex w-full cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
+                    selectedIndex === i
+                      ? "bg-gray-100 text-gray-1000"
+                      : "text-gray-700 hover:bg-gray-100/60 hover:text-gray-1000",
+                    missing && "opacity-50",
+                  )}
+                  key={item.name}
+                  onClick={() => setSelectedIndex(i)}
+                  type="button"
+                >
+                  <span className={cn("min-w-0 truncate", missing && "line-through")}>
+                    {item.name}
+                  </span>
+                  <Tag
+                    active={selectedIndex === i}
+                    customer={customer}
+                    item={item}
+                    required={i === 0}
+                  />
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
-            {/* Code panel: fixed height so the card never reflows; the code
+        {/* Code panel: fixed height so the card never reflows; the code
                 area flexes to fill whatever the description leaves. */}
-            <div className="flex min-h-[564px] min-w-0 flex-col">
-              <div className="flex h-12 items-center border-b px-4">
-                <span className="font-medium text-gray-1000 text-sm">{selected.fileName}</span>
-              </div>
-              <p className="border-b px-4 py-3 text-copy-14 text-gray-900">
-                {selected.description}
-              </p>
-              <Resolution customer={customer} item={selected} />
-              <div
-                className={cn("grow pb-6 [&>div]:mb-0", branchHighlight)}
-                data-customer={customer.id}
-              >
-                {selected.code}
-              </div>
-            </div>
+        <div className="flex min-h-[480px] min-w-0 flex-col">
+          <div className="flex h-12 items-center border-b px-4">
+            <span className="font-medium text-gray-1000 text-sm">{selected.fileName}</span>
+          </div>
+          <p className="border-b px-4 py-3 text-copy-14 text-gray-900">{selected.description}</p>
+          <Resolution customer={customer} item={selected} />
+          <div
+            className={cn("grow pb-6 [&>div]:mb-0", branchHighlight)}
+            data-customer={customer.id}
+          >
+            {selected.code}
           </div>
         </div>
       </div>
@@ -272,26 +276,36 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
     </div>
   );
 
-  // Every kind of file can be dynamic, not only the ones this example makes dynamic.
-  const footnote = (
-    <p className="mt-6 text-center text-copy-14 text-gray-900">
-      Instructions, skills, tools, subagents, connections, and models can all be dynamic. Learn more
-      about{" "}
-      <PrefetchLink
-        className="text-gray-1000 underline decoration-gray-alpha-400 underline-offset-4 hover:decoration-gray-1000"
-        href="/docs/guides/dynamic-capabilities"
-      >
-        Dynamic Capabilities
-      </PrefetchLink>
-    </p>
-  );
-
+  // On wide screens the features sit beside the board, from its top, like the use case features
+  // in the section above, with the switcher over the board. Stacked, the features follow the
+  // board in a row.
   return (
-    <>
-      {switcher}
-      <div className="md:hidden">{mobile}</div>
-      <div className="hidden md:block">{board}</div>
-      {footnote}
-    </>
+    <div className="grid gap-8 xl:grid-cols-12 xl:gap-x-6">
+      <div className="-mb-2 xl:col-span-9">{switcher}</div>
+      <div className="min-w-0 xl:col-span-9 xl:row-start-2">
+        <div className="md:hidden">{mobile}</div>
+        <div className="hidden md:block">{board}</div>
+      </div>
+      {/* Each item links to its docs as a whole, like the feature cards further down the page. */}
+      <ul className="m-0 grid list-none gap-5 p-0 md:grid-cols-3 md:gap-x-6 xl:col-span-3 xl:row-start-2 xl:grid-cols-1 xl:content-start xl:pl-12">
+        {FEATURES.map((feature) => (
+          <li key={feature.title}>
+            <PrefetchLink className="group flex flex-col gap-1" href={feature.href}>
+              <span className="flex items-center gap-3 font-[450] text-copy-16 text-gray-1000">
+                {feature.title}
+                <IconChevronRightSmall
+                  aria-hidden
+                  className="-ml-1 -translate-x-px transition-transform group-hover:translate-x-0"
+                  size={14}
+                />
+              </span>
+              <span className="text-pretty text-copy-16 text-gray-900 transition-colors group-hover:text-gray-1000">
+                {feature.text}
+              </span>
+            </PrefetchLink>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
