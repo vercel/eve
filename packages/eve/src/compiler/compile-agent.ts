@@ -25,7 +25,7 @@ interface CompileAgentInput {
   developmentExtensions?: DevelopmentExtensionSelection;
   /**
    * Optional {@link ProjectSource} used for discovery reads. Defaults to a
-   * disk-backed source so production callers keep their current behaviour.
+   * disk-backed source so production callers keep their current behavior.
    */
   source?: ProjectSource;
   startPath?: string;

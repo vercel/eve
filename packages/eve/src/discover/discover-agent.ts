@@ -70,7 +70,7 @@ interface DiscoverAgentInput {
   appRoot: string;
   /**
    * Optional {@link ProjectSource} used for all filesystem reads. Defaults
-   * to a disk-backed source so disk callers keep their current behaviour.
+   * to a disk-backed source so disk callers keep their current behavior.
    * Tests that want to run discovery against an in-memory tree pass a
    * memory-backed source.
    */

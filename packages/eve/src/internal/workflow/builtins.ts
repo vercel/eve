@@ -50,7 +50,7 @@ function formatUnknownError(error: unknown): string {
  *   compiled core from a step file would re-introduce the bundling
  *   chain we want to keep out of step bodies.
  * - Treats missing world support as a silent best-effort no-op with a
- *   single process-wide warning, matching upstream behaviour and the
+ *   single process-wide warning, matching upstream behavior and the
  *   contract on `setEveAttributes`.
  * - On any other error, retries up to `EVE_INTERNAL_ATTRIBUTES_MAX_ATTEMPTS - 1`
  *   times via the runtime's normal step retry path, then degrades to a
