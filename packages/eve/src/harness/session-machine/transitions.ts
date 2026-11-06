@@ -42,6 +42,7 @@ import type { SessionEvent } from "#protocol/session-event.js";
 import type { Cause, Principal, UserPart } from "#protocol/session-events/envelope.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { FactOf } from "#protocol/session-events/facts.js";
+import type { InteractionOutcome } from "#protocol/session-events/families/interaction.js";
 import {
   activeTurnIdOf,
   nextChangeId,
@@ -54,7 +55,7 @@ import type { Answer } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { transition, type Transition } from "./commit.js";
 import type { HistoryChange } from "./history.js";
-import { signInAttemptKey } from "#harness/hitl/sign-ins.js";
+import { sameRelayedSignIn, signInAttemptKey } from "#harness/hitl/sign-ins.js";
 import type { Relay, WorkflowAskRoute } from "#harness/hitl/relays.js";
 import type { StoppedCall } from "#harness/inline-tool-authorization.js";
 import type { ApprovedCall, SuspendedStep, TurnState } from "./state.js";
@@ -519,7 +520,7 @@ export function relay(
     readonly runId?: string;
     readonly workflowAsk?: WorkflowAskRoute;
   },
-): Transition {
+): RelayTransition {
   const { payload } = input;
   const tables = view.projection.view;
   const route: Relay | undefined =
@@ -532,6 +533,7 @@ export function relay(
         };
   const events: SessionEvent[] = [];
   const upsert: Record<string, Relay> = {};
+  const signInWakes: string[] = [];
   // A serving task can keep using a child after replying to the call that opened it, whether the
   // task started with that call or took it later, and after later turns pruned the call.
   const served = tables.calls[payload.callId];
@@ -556,6 +558,12 @@ export function relay(
     switch (event.type) {
       case "interaction.opened": {
         if (mirror !== undefined) break;
+        // Asked after the person signed in for the same grant: it completes from it, unshown.
+        const late = lateSignInWake(view, event.data.request);
+        if (late !== undefined) {
+          signInWakes.push(late);
+          break;
+        }
         events.push({
           data: {
             ...event.data,
@@ -573,6 +581,7 @@ export function relay(
       case "interaction.settled":
         if (mirror?.status !== "open") break;
         events.push(...mirrorSettled(tables, event.data));
+        signInWakes.push(...fannedInSignIns(view, mirror, event.data.outcome));
         break;
       case "response.admitted": {
         // The asker admitted an answer this session forwarded: it stands here too, while the
@@ -593,9 +602,107 @@ export function relay(
     }
   }
   // A route retires once its request closes, with the records of every closed row.
-  return Object.keys(upsert).length > 0
-    ? { ...unchanged(view, events), relays: upsert }
-    : unchanged(view, events);
+  return {
+    ...unchanged(view, events),
+    ...(Object.keys(upsert).length > 0 && { relays: upsert }),
+    signInWakes,
+  };
+}
+
+/** A relay's transition, with the callback URLs of the sign-ins its children complete now. */
+export interface RelayTransition extends Transition {
+  readonly signInWakes: readonly string[];
+}
+
+/**
+ * The outcomes of a sign-in whose callback came back, or that the person answered: each other
+ * open sign-in for the same grant and principal can complete from what Connect now holds.
+ * `withdrawn`, `interrupted`, `abandoned` and `invalid` are its asker's, not the person's, so they
+ * settle only their own row.
+ */
+const FANS_IN: ReadonlySet<InteractionOutcome> = new Set([
+  "accepted",
+  "declined",
+  "expired",
+  "failed",
+]);
+
+/**
+ * The callback URLs of the other open sign-ins one answer settles: the same Connect grant for the
+ * same principal (`sameRelayedSignIn`). Each child completes its own under its own principal, as
+ * Connect's callback would, so the answer carries no principal or credential. Only the first
+ * answer fans in: once a matching sign-in of the same turn or task has settled with one, the
+ * others already heard it.
+ */
+function fannedInSignIns(
+  view: SessionView,
+  row: PublicView["interactions"][string],
+  outcome: InteractionOutcome,
+): readonly string[] {
+  const signIn = row.request.kind === "sign-in" ? row.request.signIn : undefined;
+  if (signIn === undefined || !FANS_IN.has(outcome)) return [];
+  const others = relayedSignIns(view.projection.view).filter(
+    (other) => other.interactionId !== row.interactionId && sameRelayedSignIn(other.signIn, signIn),
+  );
+  const answered = others.some(
+    (other) =>
+      other.outcome !== undefined && FANS_IN.has(other.outcome) && stillCurrent(view, other.owner),
+  );
+  if (answered) return [];
+  return others.flatMap((other) =>
+    other.status === "open" && other.signIn.callbackUrl !== undefined
+      ? [other.signIn.callbackUrl]
+      : [],
+  );
+}
+
+/**
+ * The callback URL of a relayed sign-in asked after the person completed one for the same grant
+ * and principal, still in the same turn or task: it completes from the stored grant.
+ */
+function lateSignInWake(
+  view: SessionView,
+  request: FactOf<"interaction.opened">["data"]["request"],
+): string | undefined {
+  const signIn = request.kind === "sign-in" ? request.signIn : undefined;
+  if (signIn?.callbackUrl === undefined) return undefined;
+  const completed = relayedSignIns(view.projection.view).some(
+    (row) =>
+      row.outcome === "accepted" &&
+      stillCurrent(view, row.owner) &&
+      sameRelayedSignIn(row.signIn, signIn),
+  );
+  return completed ? signIn.callbackUrl : undefined;
+}
+
+/** The sign-ins this session mirrors from its children. */
+function relayedSignIns(tables: PublicView) {
+  return Object.values(tables.interactions).flatMap((row) => {
+    const signIn = row.request.signIn;
+    return row.origin === undefined || row.request.kind !== "sign-in" || signIn === undefined
+      ? []
+      : [
+          {
+            interactionId: row.interactionId,
+            outcome: row.outcome,
+            owner: interactionOwner(tables, row),
+            signIn,
+            status: row.status,
+          },
+        ];
+  });
+}
+
+/** Whether a mirrored row's owner is still at work: the open turn, or a running task. */
+function stillCurrent(
+  view: SessionView,
+  owner: { readonly turnId?: string; readonly taskId?: string },
+): boolean {
+  const tables = view.projection.view;
+  return (
+    (owner.turnId !== undefined && owner.turnId === activeTurnIdOf(view.projection)) ||
+    (owner.taskId !== undefined && tables.tasks[owner.taskId]?.status === "running")
+  );
 }
 
 /** The asker settled what this session mirrors: the mirror settles the same way. */

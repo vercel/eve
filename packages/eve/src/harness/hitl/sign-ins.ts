@@ -114,6 +114,27 @@ function sameSignIn(left: SignInIdentity, right: SignInIdentity): boolean {
   return (left.name === right.name || sameGrant) && samePrincipal(left.principal, right.principal);
 }
 
+/**
+ * Whether one completion serves both relayed sign-ins: the same Vercel Connect grant for the same
+ * principal, minted by the same deployment. Connect stores the grant once, and each asker reads it
+ * for its own principal, so calling either one's callback completes it. A sign-in without a grant
+ * needs the code its own callback carries, so another's answer never completes it.
+ */
+export function sameRelayedSignIn(left: SignInChallenge, right: SignInChallenge): boolean {
+  return (
+    left.grant !== undefined &&
+    left.grant === right.grant &&
+    samePrincipal(left.principal, right.principal) &&
+    callbackOrigin(left.callbackUrl) !== undefined &&
+    callbackOrigin(left.callbackUrl) === callbackOrigin(right.callbackUrl)
+  );
+}
+
+function callbackOrigin(url: string | undefined): string | undefined {
+  if (url === undefined || !URL.canParse(url)) return undefined;
+  return new URL(url).origin;
+}
+
 function samePrincipal(
   left: SignInIdentity["principal"],
   right: SignInIdentity["principal"],
