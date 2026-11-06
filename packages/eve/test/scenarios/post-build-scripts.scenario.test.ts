@@ -50,6 +50,7 @@ async function createPostBuildFixture(
       "catalog:",
       '  ai: "2.0.0"',
       '  better-auth: "1.6.26"',
+      '  "@vercel/oidc": "3.8.0"',
       '  next: "16.2.6"',
       '  react: "19.2.6"',
       '  react-dom: "19.2.6"',
@@ -163,6 +164,7 @@ describe("post-build scripts", () => {
       [
         'export const ai = "__AI_SDK_VERSION__";',
         'export const betterAuth = "__BETTER_AUTH_VERSION__";',
+        'export const vercelOidc = "__VERCEL_OIDC_VERSION__";',
         'export const next = "__NEXT_VERSION__";',
         'export const react = "__REACT_VERSION__";',
         'export const reactDom = "__REACT_DOM_VERSION__";',
@@ -190,6 +192,7 @@ describe("post-build scripts", () => {
       [
         'export const ai = "2.0.0";',
         'export const betterAuth = "1.6.26";',
+        'export const vercelOidc = "3.8.0";',
         'export const next = "16.2.6";',
         'export const react = "19.2.6";',
         'export const reactDom = "19.2.6";',
