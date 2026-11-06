@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
+import { EveError } from "#shared/eve-error.js";
 import {
   createRuntimeToolResultFromToolError,
   createRuntimeToolResultFromValue,
@@ -73,6 +74,35 @@ describe("createRuntimeToolResultFromValue", () => {
       output: "rejected",
       toolName: "gh",
     });
+  });
+});
+
+describe("error codes", () => {
+  it("keeps any eve error's code", () => {
+    class QuotaError extends EveError {
+      static override readonly errorName = "QuotaError";
+    }
+    expect(
+      createRuntimeToolResultFromValue({
+        callId: "call_quota",
+        isError: true,
+        output: new QuotaError("quota_exceeded", "over quota"),
+        toolName: "broken",
+      }),
+    ).toMatchObject({ errorCode: "quota_exceeded", errorName: "QuotaError" });
+  });
+
+  it("reports a free-text authorization reason as authorization_failed", () => {
+    expect(
+      createRuntimeToolResultFromValue({
+        callId: "call_gh",
+        isError: true,
+        output: new ConnectionAuthorizationFailedError("github", {
+          reason: "The account alice@example.com is suspended",
+        }),
+        toolName: "gh",
+      }),
+    ).toMatchObject({ errorCode: "authorization_failed" });
   });
 });
 

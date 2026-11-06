@@ -1,3 +1,5 @@
+import { EveError } from "#shared/eve-error.js";
+
 /**
  * Typed error classes for the connection authorization lifecycle.
  */
@@ -122,14 +124,18 @@ export class ConnectionAuthorizationRequiredError extends Error {
  * Retryable by default; pass `retryable: false` for terminal failures
  * where starting a fresh authorization flow would be wrong.
  */
-export class ConnectionAuthorizationFailedError extends Error {
+export class ConnectionAuthorizationFailedError extends EveError {
+  static override readonly errorName = "ConnectionAuthorizationFailedError";
+
   readonly connectionName: string;
   readonly reason?: string;
   readonly retryable: boolean;
 
   constructor(connectionName: string, options?: ConnectionAuthorizationFailedErrorOptions) {
-    super(options?.message ?? `Connection "${connectionName}" authorization failed.`);
-    this.name = "ConnectionAuthorizationFailedError";
+    super(
+      authorizationFailureCode(options?.reason),
+      options?.message ?? `Connection "${connectionName}" authorization failed.`,
+    );
     this.connectionName = connectionName;
     this.reason = options?.reason;
     this.retryable = options?.retryable ?? true;
@@ -143,6 +149,13 @@ export class ConnectionAuthorizationFailedError extends Error {
  * framework internals can end up with different class identities
  * after bundling (dual-instance hazard in Nitro output).
  */
+// `reason` is authored and documented as a short code; anything else would make `code` unbounded.
+function authorizationFailureCode(reason: string | undefined): string {
+  return reason !== undefined && /^[a-z][a-z0-9_]{0,63}$/u.test(reason)
+    ? reason
+    : "authorization_failed";
+}
+
 export function isConnectionAuthorizationRequiredError(
   err: unknown,
 ): err is ConnectionAuthorizationRequiredError {
