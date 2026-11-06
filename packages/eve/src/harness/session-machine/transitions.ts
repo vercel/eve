@@ -534,6 +534,11 @@ export function relay(
     /** The workflow tool run that relays the request, and the hook its `ctx.ask()` answers reach. */
     readonly runId?: string;
     readonly workflowAsk?: WorkflowAskRoute;
+    /**
+     * Callback URLs of joined sign-ins this relay completes that could not be delivered: each
+     * opens its own card instead, so the person can still complete it.
+     */
+    readonly undeliveredWakes?: ReadonlySet<string>;
   },
 ): RelayTransition {
   const { payload } = input;
@@ -604,7 +609,11 @@ export function relay(
               stillCurrent(view, row.owner) &&
               sameRelayedSignIn(row.signIn, signIn),
           );
-          if (completed && signIn.callbackUrl !== undefined) {
+          if (
+            completed &&
+            signIn.callbackUrl !== undefined &&
+            input.undeliveredWakes?.has(signIn.callbackUrl) !== true
+          ) {
             signInWakes.push(signIn.callbackUrl);
             break;
           }
@@ -622,10 +631,15 @@ export function relay(
         if (waiting.length === 0) break;
         joiners[interactionId] = [];
         if (event.data.outcome === "accepted") {
-          // The grant is stored now: each joined asker completes its own sign-in from it.
-          signInWakes.push(
-            ...waiting.flatMap((joiner) => joiner.opened.request.signIn?.callbackUrl ?? []),
-          );
+          // The grant is stored now: each joined asker completes its own sign-in from it. One
+          // whose callback couldn't be delivered shows its own card.
+          for (const joiner of waiting) {
+            const url = joiner.opened.request.signIn?.callbackUrl;
+            if (url !== undefined && input.undeliveredWakes?.has(url) !== true)
+              signInWakes.push(url);
+            else if (servesCall(tables, joiner.callId))
+              events.push({ data: joiner.opened, type: "interaction.opened" });
+          }
         } else {
           // Its asker gave up on it, not the person: the card stays up for the others.
           const promoted = promoteJoiner(tables, waiting);

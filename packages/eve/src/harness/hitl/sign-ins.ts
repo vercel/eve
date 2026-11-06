@@ -123,7 +123,8 @@ function sameSignIn(left: SignInIdentity, right: SignInIdentity): boolean {
 export function sameRelayedSignIn(left: SignInChallenge, right: SignInChallenge): boolean {
   return (
     left.grant !== undefined &&
-    sameSignIn(left, right) &&
+    left.grant === right.grant &&
+    samePrincipal(left.principal, right.principal) &&
     callbackOrigin(left.callbackUrl) !== undefined &&
     callbackOrigin(left.callbackUrl) === callbackOrigin(right.callbackUrl)
   );

@@ -999,6 +999,7 @@ describe("joined sign-ins", () => {
         readonly issuer?: string;
       };
       readonly grant?: string | null;
+      readonly name?: string;
       readonly origin?: string;
     } = {},
   ): SessionEvent {
@@ -1011,7 +1012,7 @@ describe("joined sign-ins", () => {
           signIn: {
             callbackUrl: callbackUrl(callId, overrides.origin),
             ...(overrides.grant !== null && { grant: overrides.grant ?? "github/vercel-v" }),
-            name: `github-${callId}`,
+            name: overrides.name ?? `github-${callId}`,
             principal: overrides.principal ?? RUI,
             url: "https://connect.example/authorize",
           },
@@ -1130,6 +1131,42 @@ describe("joined sign-ins", () => {
 
     expect(openSignIns(asked)).toEqual(["attempt-a1", "attempt-a2"]);
     expect(relayed(asked, "a1", settledBySigning("a1")).signInWakes).toEqual([]);
+  });
+
+  it("keeps a card per grant for sign-ins of the same connection name", () => {
+    for (const grants of [
+      ["github/vercel-v", "github/other"],
+      ["github/vercel-v", null],
+      [null, "github/vercel-v"],
+      [null, null],
+    ] as const) {
+      const asked = askAll(threeHelpers(), ["a1", "a2"], (callId) =>
+        signInOpened(callId, { grant: grants[callId === "a1" ? 0 : 1], name: "github" }),
+      );
+      expect(openSignIns(asked), `grants ${String(grants)}`).toEqual(["attempt-a1", "attempt-a2"]);
+    }
+  });
+
+  it("shows its own card for a joined sign-in whose callback couldn't be delivered", () => {
+    const asked = askAll(threeHelpers());
+    const accepted = relay(viewOf(asked), {
+      payload: {
+        callId: "a1",
+        childSessionId: "child-a1",
+        events: settledBySigning("a1") as never,
+        kind: "subagent-interaction",
+        subagentName: "helper",
+      },
+      undeliveredWakes: new Set([callbackUrl("a2")]),
+    });
+
+    expect(accepted.signInWakes).toEqual([callbackUrl("a3")]);
+    const recovered = applied(asked, accepted);
+    expect(openSignIns(recovered)).toEqual(["attempt-a2"]);
+    // The person completes that card, and its child settles it as any shown sign-in.
+    expect(relayed(recovered, "a2", settledBySigning("a2")).events).toMatchObject([
+      { data: { interactionId: "attempt-a2", outcome: "accepted" }, type: "interaction.settled" },
+    ]);
   });
 
   it("keeps a card per sign-in without a grant, or minted by another deployment", () => {
