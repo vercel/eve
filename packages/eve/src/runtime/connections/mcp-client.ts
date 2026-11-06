@@ -90,7 +90,7 @@ export class McpConnectionClient implements ConnectionClient {
         connection,
         connection.experimental_events,
         () => resolveHeaders(connection),
-        this.#forwardingFetch(),
+        this.#forwardingFetch() ?? this.#connection.fetch,
       );
       this.eventActions = {
         ownsName: isEventAction,
@@ -168,7 +168,7 @@ export class McpConnectionClient implements ConnectionClient {
 
   /** Keep eve's token provider on the request path instead of capturing one bearer forever. */
   #authorizedFetch(connectionHeaderNames: readonly string[]): typeof fetch {
-    const fetcher = this.#forwardingFetch() ?? globalThis.fetch;
+    const fetcher = this.#forwardingFetch() ?? this.#transportFetch();
     return async (request, init) => {
       const resolve = () =>
         resolveConnectionHeaders(this.#connection, { anonymousWhenAuthorizationRequired: true });
@@ -201,6 +201,12 @@ export class McpConnectionClient implements ConnectionClient {
     };
   }
 
+  /** The authored `fetch`, when the connection sets one: the last hop before the network. */
+  #transportFetch(): typeof fetch {
+    const authored = this.#connection.fetch;
+    return authored ?? (async (request, init) => await globalThis.fetch(request, init));
+  }
+
   /**
    * With `forwardPrincipal`, adds `eve-forwarded-principal` to every request,
    * read per request: one client can serve turns from different people in a
@@ -209,9 +215,10 @@ export class McpConnectionClient implements ConnectionClient {
   #forwardingFetch(): typeof fetch | undefined {
     if (this.#connection.forwardPrincipal !== true) return undefined;
     const connectionName = this.#connection.connectionName;
+    const transport = this.#transportFetch();
     return async (request, init) => {
       const principals = readTurnPrincipals();
-      if (principals === undefined) return await globalThis.fetch(request, init);
+      if (principals === undefined) return await transport(request, init);
       const headers = new Headers(init?.headers);
       headers.set(
         FORWARDED_PRINCIPAL_HEADER,
@@ -220,7 +227,7 @@ export class McpConnectionClient implements ConnectionClient {
       // Fetch keeps custom headers across a cross-origin redirect, unlike
       // `Authorization`, so following one would hand the user's identity to
       // another host.
-      return await globalThis.fetch(request, { ...init, headers, redirect: "error" });
+      return await transport(request, { ...init, headers, redirect: "error" });
     };
   }
 

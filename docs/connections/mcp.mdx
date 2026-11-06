@@ -32,6 +32,7 @@ The [shared connection options](../connections#options) apply, with `tools` as t
 | -------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `protocolVersionDiscovery` | `true`  | Set `false` for a server that needs the `initialize` handshake. See [protocol discovery](#configure-protocol-discovery). |
 | `forwardPrincipal`         | `false` | Send the turn's user to another eve agent. See [Forward the caller](#forward-the-caller-to-an-eve-agent).                |
+| `fetch`                    | `fetch` | Send the server's HTTP requests through your function. See [Customize requests](#customize-requests-to-the-server).      |
 | `experimental.events`      | None    | Run your code when the server sends an event. See [Events](#events-experimental).                                        |
 
 ## Use Vercel Connect for OAuth
@@ -203,6 +204,34 @@ export default defineMcpClientConnection({
 ```
 
 With `protocolVersionDiscovery: false`, eve skips `server/discover` and starts with `initialize`. It proposes `2025-11-25` and agrees on a version the server supports. Dynamic connections can return this option too.
+
+## Customize requests to the server
+
+Set `fetch` to send every HTTP request eve makes to the server through your function instead of the global `fetch`. eve has already added the connection's headers, its bearer token, and `eve-forwarded-principal` when it calls the function. It reads the `Response` you return as the server's reply. Use it to adapt a server that strays from the MCP protocol, to route through a proxy, or to record traffic.
+
+This example fills in `resultType` for a server that leaves it out of its JSON replies:
+
+```ts title="agent/connections/cases.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://mcp.example.com/mcp",
+  description: "Search support cases",
+  async fetch(request, init) {
+    const response = await fetch(request, init);
+    if (!response.headers.get("content-type")?.includes("application/json")) return response;
+    const reply = await response.json();
+    if (reply.result !== undefined && reply.result.resultType === undefined) {
+      reply.result.resultType = "complete";
+    }
+    const headers = new Headers(response.headers);
+    headers.delete("content-length");
+    return Response.json(reply, { headers, status: response.status });
+  },
+});
+```
+
+Pass `init` through when you forward a request: a request that carries `eve-forwarded-principal` sets `redirect: "error"` there. Dynamic connections can return this option too.
 
 ## Forward the caller to an eve agent
 

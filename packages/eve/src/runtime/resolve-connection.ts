@@ -78,6 +78,7 @@ export async function resolveConnectionDefinition(
       protocol: ResolvedConnectionDefinition["protocol"];
       protocolVersionDiscovery?: boolean;
       forwardPrincipal?: boolean;
+      fetch?: typeof globalThis.fetch;
       sourceId: string;
       sourceKind: "module";
       spec?: ResolvedConnectionDefinition["spec"];
@@ -133,6 +134,13 @@ export async function resolveConnectionDefinition(
         throw new Error('"forwardPrincipal" must be a boolean.');
       }
       result.forwardPrincipal = resolvedRecord.forwardPrincipal;
+    }
+
+    if (definition.protocol === "mcp" && resolvedRecord.fetch !== undefined) {
+      if (typeof resolvedRecord.fetch !== "function") {
+        throw new Error('"fetch" must be a function.');
+      }
+      result.fetch = resolvedRecord.fetch as typeof globalThis.fetch;
     }
 
     if (definition.experimental_events === true) {
@@ -271,6 +279,7 @@ export function resolveDynamicConnectionValue(
     toolCall: normalized.toolCall,
     protocolVersionDiscovery: normalized.protocolVersionDiscovery,
     forwardPrincipal: normalized.forwardPrincipal,
+    fetch: normalized.fetch,
     tools: normalized.tools,
     url: normalized.url,
   });
