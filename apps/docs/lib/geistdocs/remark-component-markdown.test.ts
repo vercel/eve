@@ -71,7 +71,7 @@ describe("component Markdown export", () => {
     );
   });
 
-  it("expands the ambient listening flow into an ordered list", async () => {
+  it("expands the ambient listening flow into a nested list", async () => {
     const processor = await configuredProcessor();
     const tree = processor.parse("<AmbientListeningFlow />");
     const markdown = toMarkdown(tree, {
@@ -79,10 +79,12 @@ describe("component Markdown export", () => {
     });
 
     expect(markdown).toContain(
-      "1. **Free checks** (`onMessage`): Is it in a followed thread or a watched channel?",
+      "- Not in a followed thread or watched channel (`onMessage`): ignored",
     );
-    expect(markdown).toContain("  - Maybe, or unsure: continue to agent");
-    expect(markdown).toContain("  - No: `no_reply`");
+    expect(markdown).toContain(
+      "- Decision model: clearly not for the agent? (`decide`): skipped, no turn",
+    );
+    expect(markdown).toContain("  - It isn't: `no_reply`");
     expect(markdown).not.toContain("<AmbientListeningFlow");
   });
 
