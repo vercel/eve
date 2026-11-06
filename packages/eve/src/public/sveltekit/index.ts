@@ -14,6 +14,13 @@ import {
 import { EVE_BASE_URL_ENV, resolveSharedEveDevServer } from "./dev-server.js";
 import { normalizeOrigin } from "./routing.js";
 
+export {
+  createEveHandle,
+  type EveSvelteKitHandleEvent,
+  type EveSvelteKitHandleInput,
+  type EveSvelteKitHandleOptions,
+} from "./handle.js";
+
 /**
  * Options for the eve SvelteKit Vite plugin.
  */
