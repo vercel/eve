@@ -97,6 +97,9 @@ function harness(
           throw Object.assign(new Error("Slack refused the ephemeral"), { response });
         return { id: "" };
       },
+      async startTyping(status: string) {
+        respond("thread.startTyping", { status });
+      },
     },
   };
   const events = defaultInteractionEvents(
@@ -986,3 +989,40 @@ function controls(
 ): SlackInteractionCardParts {
   return { ...parts, controls: { ...parts.controls, blocks } };
 }
+
+describe("Slack sign-ins that wait on a card already shown", () => {
+  const signIn = (interactionId: string, waitsOn?: string): Asked => ({
+    call: { name: "get_weather" },
+    interactionId,
+    request: {
+      kind: "sign-in",
+      prompt: "Sign in to Weather.",
+      signIn: {
+        displayName: "Weather",
+        name: "weather",
+        url: "https://idp.example/authorize",
+        ...(waitsOn !== undefined && { waitsOn }),
+      },
+    },
+  });
+
+  it("posts nothing and leaves the shown card when a waiting sign-in ends", async () => {
+    for (const ending of [
+      { interactionId: "s_waiting", outcome: "accepted" },
+      { interactionId: "s_waiting", outcome: "failed", reason: "access_denied" },
+    ] as const) {
+      const slack = harness();
+      await slack.ask(signIn("s_shown"), signIn("s_waiting", "s_shown"));
+      expect(slack.calls("thread.post"), "the one status the thread shows").toHaveLength(1);
+      const pending = slack.channel.state.pendingAuthMessageTs;
+      const before = slack.sent.length;
+
+      await slack.commit({ data: ending, type: "interaction.settled" });
+      expect(slack.sent.slice(before), ending.outcome).toEqual([]);
+      expect(slack.channel.state.pendingAuthMessageTs).toEqual(pending);
+
+      await slack.settle("s_shown", "accepted");
+      expect(slack.calls("chat.update"), "the shown card's ending").toHaveLength(1);
+    }
+  });
+});
