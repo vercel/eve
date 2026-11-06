@@ -21,10 +21,17 @@ export function hasWorkflowAdmission(task: RuntimeWorkflowTaskRequest): boolean 
   return task.admission?.callId === task.callId && task.admission.fingerprint === fingerprint(task);
 }
 
+/**
+ * A digest of what the gate admitted: the call and everything its run would start with. It isn't
+ * keyed, so it proves a request matches what the gate admitted, not who wrote it; anything that
+ * can write the persisted request could recompute it. That covers what this check is for: stale
+ * requests, input changed after approval, and paths that skip the gate. Fields serialize with
+ * sorted keys, so a serializer that reorders `entry` or `input` keys can't refuse a valid call.
+ */
 function fingerprint(task: RuntimeWorkflowTaskRequest): string {
   return createHash("sha256")
     .update(
-      JSON.stringify([
+      stableJson([
         task.callId,
         task.toolName,
         task.workflowId,
@@ -35,4 +42,17 @@ function fingerprint(task: RuntimeWorkflowTaskRequest): string {
       ]),
     )
     .digest("hex");
+}
+
+/** `JSON.stringify` with every object's keys sorted. */
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, field: unknown) =>
+    field === null || typeof field !== "object" || Array.isArray(field)
+      ? field
+      : Object.fromEntries(
+          Object.keys(field)
+            .sort()
+            .map((key) => [key, (field as Record<string, unknown>)[key]]),
+        ),
+  );
 }
