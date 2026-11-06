@@ -42,9 +42,33 @@ Slack lets a bot token search only on behalf of someone who just messaged the bo
 
 So that:
 
-- Search works only in a turn started by a Slack message. In other turns, such as schedules or HTTP sessions, it returns `reason: "no_slack_message"`, and the model reads specific channels with `read_conversation` instead.
-- The token expires a few minutes after the message. Once it does, search returns `reason: "search_token_expired"` for the rest of the turn, and the model finishes from what it already found.
-- `read_conversation` and `read_user` use the bot token alone, so they work in any turn. In a turn that didn't come from Slack, a function `botToken` receives no `teamId`, so an app installed in several workspaces must return a default workspace's token. `read_conversation` reads only channels the bot is a member of. For other channels it returns `reason: "not_in_channel"` and tells the model a channel member can invite the bot.
+- Without [`userAuth`](#let-people-search-with-their-own-slack-account), search works only in a turn started by a Slack message. In other turns, such as schedules or HTTP sessions, it returns `reason: "no_slack_message"`, and the model reads specific channels with `read_conversation` instead.
+- The token expires a few minutes after the message. Once it does, search without `userAuth` returns `reason: "search_token_expired"` for the rest of the turn, and the model finishes from what it already found.
+- `read_conversation` and `read_user` use the bot token alone, so they work in any turn. In a turn that didn't come from Slack, a function `botToken` receives no `teamId`, so an app installed in several workspaces must return a default workspace's token. Without `userAuth`, `read_conversation` reads only channels the bot is a member of. For other channels it returns `reason: "not_in_channel"` and tells the model a channel member can invite the bot.
+
+## Let people search with their own Slack account
+
+Set `userAuth` to a per-user Slack sign-in so search and reads don't depend on the triggering message or the bot's channel membership:
+
+```ts title="agent/extensions/slack.ts"
+import { connect, connectSlackCredentials } from "@vercel/connect/eve";
+import slackSearch from "eve/extensions/slack-search";
+
+export default slackSearch({
+  credentials: connectSlackCredentials("slack/my-agent"),
+  userAuth: connect("slack/my-agent"),
+});
+```
+
+With `userAuth`, the tools use the caller's own Slack user token when:
+
+- search has no action token, such as in a web or HTTP session;
+- the action token expired partway through the turn;
+- `read_conversation` reaches a public channel the bot isn't in.
+
+The first time, eve asks the person to sign in to Slack, waits, and then runs the tool again. If Slack later rejects the token, eve asks them to sign in again. Only a person can sign in, so schedules and other non-user callers keep the bot-token behavior. In a turn from Slack, the tools use a person's token only when it belongs to that turn's workspace. If they signed in from another workspace, the tools keep the bot-token behavior. A user token still reads public channels only: search sends `channel_types: public_channel`, and reads refuse private channels and DMs, even ones the person belongs to. `authorize` applies to these reads too.
+
+Give the user sign-in these Slack user token scopes: `search:read.public`, `channels:read`, and `channels:history`.
 
 ## Restrict what each caller sees
 
@@ -80,11 +104,12 @@ export default slackSearch({
 
 ## Options
 
-| Option        | Default                                                                              | Effect                                                                                                                                                                           |
-| ------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `credentials` | `SLACK_BOT_TOKEN`                                                                    | The Slack channel's credentials, the same object `slackChannel` takes. Only `botToken` is used. A function `botToken` receives `{ teamId }` for the workspace the turn came from |
-| `api`         | Slack's API                                                                          | Slack API transport overrides, the same as `slackChannel({ api })`                                                                                                               |
-| `authorize`   | [Slack's limits for guests and other organizations](#restrict-what-each-caller-sees) | `({ tool, auth, channelId?, slack? }) => boolean`, called with the turn's caller                                                                                                 |
+| Option        | Default                                                                              | Effect                                                                                                                                                                                          |
+| ------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `credentials` | `SLACK_BOT_TOKEN`                                                                    | The Slack channel's credentials, the same object `slackChannel` takes. Only `botToken` is used. A function `botToken` receives `{ teamId }` for the workspace the turn came from                |
+| `userAuth`    | None                                                                                 | A per-user Slack sign-in, such as `connect("slack/my-agent")` from `@vercel/connect/eve`. See [Let people search with their own Slack account](#let-people-search-with-their-own-slack-account) |
+| `api`         | Slack's API                                                                          | Slack API transport overrides, the same as `slackChannel({ api })`                                                                                                                              |
+| `authorize`   | [Slack's limits for guests and other organizations](#restrict-what-each-caller-sees) | `({ tool, auth, channelId?, slack? }) => boolean`, called with the turn's caller                                                                                                                |
 
 ## Slack app scopes
 

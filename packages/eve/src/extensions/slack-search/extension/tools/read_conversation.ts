@@ -2,7 +2,8 @@ import { defineTool } from "eve/tools";
 
 import { z } from "#compiled/zod/index.js";
 
-import { readSlackConversation, slackTsToIso } from "../lib/slack-api.js";
+import { executeRead } from "../lib/read.js";
+import { slackTsToIso } from "../lib/slack-api.js";
 import extension from "../extension.js";
 import { slackTurn } from "../lib/turn.js";
 
@@ -17,7 +18,7 @@ function emptyWindowNote(channelLatestTs: string | undefined): string {
 
 export default defineTool({
   description:
-    "Read a public Slack channel's recent history, or one thread with threadTs or a message permalink. The bot must be a member of the channel. When a channel can't be read, returns an unavailable result that says why; follow it instead of retrying. Pass nextCursor back as cursor to read the next page. Never reads private channels or direct messages.",
+    "Read a public Slack channel's recent history, or one thread with threadTs or a message permalink. Reads channels the bot is a member of, and others with the caller's own Slack sign-in when the agent offers one. When a channel can't be read, returns an unavailable result that says why; follow it instead of retrying. Pass nextCursor back as cursor to read the next page. Never reads private channels or direct messages.",
   inputSchema: z.object({
     channel: z
       .string()
@@ -55,11 +56,7 @@ export default defineTool({
         : "Reading a Slack channel",
   },
   async execute(input, ctx) {
-    const turn = slackTurn(ctx.session.auth.current, extension.config);
-    const conversation = await readSlackConversation(turn.request, input, {
-      workspace: turn.teamId ?? "default",
-      authorize: (channelId) => turn.authorize({ tool: "read_conversation", channelId }),
-    });
+    const conversation = await executeRead(input, slackTurn(ctx, extension.config));
     if ("unavailable" in conversation) return conversation;
 
     const { emptyWindow, oldest, latest, ...rest } = conversation;

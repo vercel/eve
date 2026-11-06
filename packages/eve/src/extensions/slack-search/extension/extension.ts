@@ -5,6 +5,7 @@ import type {
 } from "eve/channels/slack";
 import type { SessionAuthContext } from "eve/context";
 import { defineExtension } from "eve/extension";
+import type { ToolAuthProvider } from "eve/tools";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import { z } from "#compiled/zod/index.js";
@@ -45,6 +46,12 @@ export interface SlackSearchExtensionConfig {
    * back to `process.env.SLACK_BOT_TOKEN`.
    */
   readonly credentials?: Pick<SlackChannelCredentials, "botToken">;
+  /**
+   * Per-user Slack sign-in, such as `connect("slack/my-agent")` from `@vercel/connect/eve`.
+   * When set, a person can search without a fresh Slack message, and read public channels the
+   * bot isn't in, with their own user token. eve asks them to sign in the first time.
+   */
+  readonly userAuth?: ToolAuthProvider;
   /** Slack API transport overrides, as in `slackChannel({ api })`. */
   readonly api?: SlackTransportOptions;
   /**
@@ -63,6 +70,16 @@ const schema = z.object({
     .object({
       botToken: z.union([z.string().trim().min(1), z.custom<SlackBotToken>(isFunction)]).optional(),
     })
+    .optional(),
+  userAuth: z
+    .custom<ToolAuthProvider>(
+      (value) =>
+        typeof value === "object" &&
+        value !== null &&
+        Reflect.get(value, "principalType") === "user" &&
+        typeof Reflect.get(value, "getToken") === "function",
+      'userAuth must be a user sign-in, such as connect("slack/my-agent") from @vercel/connect/eve.',
+    )
     .optional(),
   api: z
     .custom<SlackTransportOptions>((value) => typeof value === "object" && value !== null)

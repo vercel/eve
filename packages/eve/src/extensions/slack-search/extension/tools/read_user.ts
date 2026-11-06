@@ -14,7 +14,7 @@ export default defineTool({
   }),
   label: { start: () => "Looking up a Slack user" },
   async execute({ userId }, ctx) {
-    const turn = slackTurn(ctx.session.auth.current, extension.config);
+    const turn = slackTurn(ctx, extension.config);
     if (!(await turn.authorize({ tool: "read_user" }))) {
       return {
         unavailable: true,

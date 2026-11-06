@@ -86,8 +86,8 @@ function nextCursor(response: Record<string, unknown>): string | undefined {
 
 export interface SlackSearchInput {
   readonly query: string;
-  /** The `action_token` of the Slack message that started the turn. */
-  readonly actionToken: string;
+  /** The `action_token` of the Slack message that started the turn. Omit with a user token. */
+  readonly actionToken?: string;
   readonly limit?: number;
   /** One calendar day, `YYYY-MM-DD`. */
   readonly onDate?: string;
@@ -126,7 +126,8 @@ export function slackSearchQuery(query: string, onDate: string | undefined): str
 
 /**
  * Relevance-ranked search of public channels through Slack's `assistant.search.context`.
- * A bot token can call it only with the action token of the message that started the turn.
+ * A bot token can call it only with the action token of the message that started the turn; a
+ * user token needs none.
  */
 export async function searchSlack(
   request: SlackRequest,
@@ -156,7 +157,9 @@ export async function searchSlack(
     }));
     return { query, matches, nextCursor: nextCursor(response) };
   } catch (error) {
-    if (slackErrorCode(error) === "invalid_action_token") return { query, tokenExpired: true };
+    if (input.actionToken && slackErrorCode(error) === "invalid_action_token") {
+      return { query, tokenExpired: true };
+    }
     throw error;
   }
 }
@@ -366,6 +369,8 @@ export interface SlackConversationOptions {
   readonly workspace: string;
   /** Checked once the channel is known, before any message is read. */
   readonly authorize: (channelId: string) => Promise<boolean>;
+  /** The request carries the caller's user token, which reads public channels without membership. */
+  readonly userToken?: boolean;
 }
 
 function unavailable(
@@ -413,9 +418,11 @@ async function permalinkFor(request: SlackRequest, channel: string, ts: string) 
   try {
     const response = await call(request, "chat.getPermalink", { channel, message_ts: ts });
     return str(response.permalink);
-  } catch {
+  } catch (error) {
     // A missing permalink must not fail the read; the model can still cite channel and thread.
-    return undefined;
+    // Anything but a Slack error, such as eve asking the caller to sign in again, still throws.
+    if (error instanceof SlackCallError) return undefined;
+    throw error;
   }
 }
 
@@ -430,8 +437,9 @@ async function emptyWindowCheck(
       .map((message) => str(message.ts))
       .find(Boolean);
     return { channelLatestTs };
-  } catch {
-    return undefined;
+  } catch (error) {
+    if (error instanceof SlackCallError) return undefined;
+    throw error;
   }
 }
 
@@ -495,7 +503,7 @@ export async function readSlackConversation(
       "This caller may not read that channel. Do not retry or describe its contents; say it isn't available to them.",
     );
   }
-  if (info.is_member === false) return notInChannel(channel);
+  if (!options.userToken && info.is_member === false) return notInChannel(channel);
 
   const page = {
     channel: channelId,

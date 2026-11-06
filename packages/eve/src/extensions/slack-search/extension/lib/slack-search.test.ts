@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { defineInteractiveAuthorization } from "eve/connections";
+import type { SessionAuthContext } from "eve/context";
+import type { ToolAuthProvider } from "eve/tools";
+
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 
+import { executeRead } from "./read.js";
 import { executeSearch } from "./search.js";
 import { readSlackConversation, readSlackUser, type SlackRequest } from "./slack-api.js";
-import { slackTurn, type SlackTurn } from "./turn.js";
+import { slackTurn, type SlackTurn, type SlackTurnContext } from "./turn.js";
 
 type Calls = { operation: string; body: Record<string, unknown> }[];
 
@@ -56,8 +61,50 @@ function turnWith(request: SlackRequest, overrides: Partial<SlackTurn> = {}): Sl
     auth: null,
     actionToken: "action-1",
     request,
+    userRequest: async () => undefined,
     authorize: async () => true,
     ...overrides,
+  };
+}
+
+const userAuth: ToolAuthProvider = defineInteractiveAuthorization({
+  getToken: async () => ({ token: "unused" }),
+  startAuthorization: async () => ({ challenge: { url: "https://example.com/sign-in" } }),
+  completeAuthorization: async () => ({ token: "unused" }),
+});
+
+class SignInRequired extends Error {}
+
+function toolContext(current: SessionAuthContext | null): SlackTurnContext & {
+  signIns: ToolAuthProvider[];
+} {
+  const signIns: ToolAuthProvider[] = [];
+  return {
+    signIns,
+    session: { auth: { current } },
+    getToken: async (provider) => {
+      expect(provider).toBe(userAuth);
+      return { token: "xoxp-alice" };
+    },
+    requireAuth: (provider) => {
+      signIns.push(provider);
+      throw new SignInRequired();
+    },
+  };
+}
+
+function recordingFetch(response: Record<string, unknown>) {
+  const requests: { url: string; authorization: string | null; body: string }[] = [];
+  return {
+    requests,
+    fetch: async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push({
+        url: String(input),
+        authorization: new Headers(init?.headers).get("authorization"),
+        body: String(init?.body),
+      });
+      return Response.json(response);
+    },
   };
 }
 
@@ -70,25 +117,16 @@ describe("slackTurn", () => {
       teamId: "T0SENDER",
       userId: "U0ALICE",
     });
-    const requests: { url: string; authorization: string | null; body: string }[] = [];
+    const { requests, fetch } = recordingFetch({ ok: true, results: { messages: [] } });
     const tokenTeams: (string | undefined)[] = [];
-    const turn = slackTurn(auth, {
+    const turn = slackTurn(toolContext(auth), {
       credentials: {
         botToken: ({ teamId }) => {
           tokenTeams.push(teamId);
           return "xoxb-install";
         },
       },
-      api: {
-        fetch: async (input, init) => {
-          requests.push({
-            url: String(input),
-            authorization: new Headers(init?.headers).get("authorization"),
-            body: String(init?.body),
-          });
-          return Response.json({ ok: true, results: { messages: [] } });
-        },
-      },
+      api: { fetch },
     });
 
     await executeSearch({ query: "launch plan" }, turn);
@@ -111,7 +149,7 @@ describe("slackTurn", () => {
       userId: "U0ALICE",
     });
     const seen: unknown[] = [];
-    const turn = slackTurn(auth, {
+    const turn = slackTurn(toolContext(auth), {
       ...slackDirectory({
         sharedChannels: ["C0SHARED1"],
         users: { U0ALICE: { team_id: "T0HOST" } },
@@ -134,7 +172,7 @@ describe("slackTurn", () => {
 
   it("tells the model to wait when Slack rate limits a call", async () => {
     const auth = buildSlackAuthContext({ actionToken: "a", channelId: "C0", userId: "U0ALICE" });
-    const turn = slackTurn(auth, {
+    const turn = slackTurn(toolContext(auth), {
       credentials: { botToken: "xoxb" },
       api: {
         fetch: async () => Response.json({ ok: false, error: "ratelimited" }, { status: 429 }),
@@ -144,6 +182,54 @@ describe("slackTurn", () => {
     await expect(executeSearch({ query: "q" }, turn)).rejects.toThrow(
       "Slack rate limited assistant.search.context. Wait before calling it again.",
     );
+  });
+
+  it("calls Slack with the caller's user token and signs them in again when Slack rejects it", async () => {
+    const auth = buildSlackAuthContext({ channelId: "C0CHANNEL1", userId: "U0ALICE" });
+    const ctx = toolContext(auth);
+    const { requests, fetch } = recordingFetch({ ok: false, error: "token_revoked" });
+    const request = await slackTurn(ctx, { userAuth, api: { fetch } }).userRequest();
+
+    await expect(request!("users.info", { user: "U0BOB" })).rejects.toBeInstanceOf(SignInRequired);
+    expect(requests[0]!.authorization).toBe("Bearer xoxp-alice");
+    expect(ctx.signIns).toEqual([userAuth]);
+  });
+
+  it("uses the caller's user token only for the workspace the turn came from", async () => {
+    const turnIn = (teamId: string) =>
+      slackTurn(
+        toolContext(buildSlackAuthContext({ channelId: "C0", teamId, userId: "U0ALICE" })),
+        {
+          userAuth,
+          api: { fetch: async () => Response.json({ ok: true, team_id: "T0HOME" }) },
+        },
+      );
+
+    await expect(turnIn("T0HOME").userRequest()).resolves.toBeTypeOf("function");
+    await expect(turnIn("T0ELSEWHERE").userRequest()).resolves.toBeUndefined();
+  });
+
+  it("names the Slack sign-in, not the bot, when a user token lacks a scope", async () => {
+    const auth = buildSlackAuthContext({ channelId: "C0", userId: "U0ALICE" });
+    const { fetch } = recordingFetch({
+      ok: false,
+      error: "missing_scope",
+      needed: "channels:history",
+    });
+    const request = await slackTurn(toolContext(auth), { userAuth, api: { fetch } }).userRequest();
+
+    await expect(request!("conversations.history", { channel: "C0" })).rejects.toThrow(
+      /user token scope the Slack sign-in doesn't grant \(needed: channels:history\)/,
+    );
+  });
+
+  it("offers no user token without userAuth or to a caller who isn't a person", async () => {
+    const person = buildSlackAuthContext({ channelId: "C0CHANNEL1", userId: "U0ALICE" });
+    const bot = buildSlackAuthContext({ channelId: "C0CHANNEL1", userId: "B0BOT", isBot: true });
+
+    await expect(slackTurn(toolContext(person), {}).userRequest()).resolves.toBeUndefined();
+    await expect(slackTurn(toolContext(bot), { userAuth }).userRequest()).resolves.toBeUndefined();
+    await expect(slackTurn(toolContext(null), { userAuth }).userRequest()).resolves.toBeUndefined();
   });
 });
 
@@ -163,7 +249,7 @@ describe("default access policy", () => {
     request: { tool: "search" | "read_user"; channelId?: string },
   ) =>
     slackTurn(
-      buildSlackAuthContext({ channelId, installationTeamId: "T0HOME", userId }),
+      toolContext(buildSlackAuthContext({ channelId, installationTeamId: "T0HOME", userId })),
       directory,
     ).authorize(request);
 
@@ -212,11 +298,13 @@ describe("default access policy", () => {
 
   it("returns nothing to a Slack caller it can't place, and says which scope is missing", async () => {
     const turn = slackTurn(
-      buildSlackAuthContext({
-        channelId: "C0UNKNOWN",
-        installationTeamId: "T0HOME",
-        userId: "U0NOSCOPE",
-      }),
+      toolContext(
+        buildSlackAuthContext({
+          channelId: "C0UNKNOWN",
+          installationTeamId: "T0HOME",
+          userId: "U0NOSCOPE",
+        }),
+      ),
       {
         credentials: { botToken: "xoxb-test" },
         api: { fetch: async () => Response.json({ ok: false, error: "missing_scope" }) },
@@ -273,7 +361,27 @@ describe("executeSearch", () => {
     });
   });
 
-  it("does not call Slack without an action token", async () => {
+  it("falls back to the caller's user token once the action token expires", async () => {
+    const bot = fakeSlack({
+      "assistant.search.context": { ok: false, error: "invalid_action_token" },
+    });
+    const user = fakeSlack({
+      "assistant.search.context": {
+        ok: true,
+        results: { messages: [{ channel_id: "C0OPEN000", content: "found" }] },
+      },
+    });
+
+    const result = await executeSearch(
+      { query: "q" },
+      turnWith(bot.request, { userRequest: async () => user.request }),
+    );
+
+    expect(result).toMatchObject({ matches: [{ text: "found" }] });
+    expect(user.calls[0]!.body.action_token).toBeUndefined();
+  });
+
+  it("does not call Slack without an action token or a user token", async () => {
     const slack = fakeSlack({});
 
     await expect(
@@ -416,6 +524,69 @@ describe("readSlackConversation", () => {
       ),
     ).rejects.toThrow(/not after the oldest bound/);
     expect(slack.calls).toEqual([]);
+  });
+});
+
+describe("executeRead", () => {
+  const notMember = {
+    "conversations.info": {
+      ok: true,
+      channel: { id: "C0OTHER01", name: "other", is_member: false },
+    },
+  };
+
+  it("reads a channel the bot isn't in with the caller's user token", async () => {
+    const bot = fakeSlack(notMember);
+    const user = fakeSlack({
+      ...notMember,
+      "conversations.history": { ok: true, messages: [{ ts: "1785412800.000100", text: "hi" }] },
+      "chat.getPermalink": { ok: true, permalink: "https://x/p" },
+    });
+
+    const result = await executeRead(
+      { channel: "C0OTHER01" },
+      turnWith(bot.request, { userRequest: async () => user.request }),
+    );
+
+    expect(result).toMatchObject({ channel: { id: "C0OTHER01" }, messages: [{ text: "hi" }] });
+    expect(bot.calls.map((call) => call.operation)).toEqual(["conversations.info"]);
+  });
+
+  it("signs the caller in again when Slack revokes their token partway through a thread read", async () => {
+    const ctx = toolContext(buildSlackAuthContext({ channelId: "C0OTHER01", userId: "U0ALICE" }));
+    const turn = slackTurn(ctx, {
+      credentials: { botToken: "xoxb-bot" },
+      userAuth,
+      api: {
+        fetch: async (input, init) => {
+          const method = new URL(String(input)).pathname.split("/").pop()!;
+          const asUser = new Headers(init?.headers).get("authorization") === "Bearer xoxp-alice";
+          if (method === "conversations.info") {
+            return Response.json({ ok: true, channel: { id: "C0OTHER01", is_member: asUser } });
+          }
+          if (method === "conversations.replies") {
+            return Response.json({ ok: true, messages: [{ ts: "1785412800.000100", text: "hi" }] });
+          }
+          if (method === "chat.getPermalink") {
+            return Response.json({ ok: false, error: "token_revoked" });
+          }
+          return Response.json({ ok: false, error: `unexpected_${method}` });
+        },
+      },
+    });
+
+    await expect(
+      executeRead({ channel: "https://acme.slack.com/archives/C0OTHER01/p1785412800000100" }, turn),
+    ).rejects.toBeInstanceOf(SignInRequired);
+    expect(ctx.signIns).toEqual([userAuth]);
+  });
+
+  it("keeps the bot's answer without a user token", async () => {
+    const bot = fakeSlack(notMember);
+
+    await expect(
+      executeRead({ channel: "C0OTHER01" }, turnWith(bot.request)),
+    ).resolves.toMatchObject({ unavailable: true, reason: "not_in_channel" });
   });
 });
 
