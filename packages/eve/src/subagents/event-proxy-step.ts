@@ -17,6 +17,7 @@ import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeRunnableHook } from "#execution/session-inbox/owner.js";
 import type { AuthorizationCallbackPayload } from "#execution/session-inbox/inbox.js";
 import { parseEveConnectionCallbackRoutePath } from "#protocol/routes.js";
+import { vercelConnectCallbackUrl } from "#runtime/connections/scoped-authorization.js";
 import { authHookToken } from "#harness/authorization.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import type { InteractionRow, SessionView } from "#protocol/session-projection/tables.js";
@@ -98,9 +99,12 @@ export interface OwnCallbacks {
   readonly sessionId: string;
 }
 
-/** This session's own callbacks, at its workflow's callback base URL. */
+/**
+ * This session's own callbacks, at its workflow's callback base URL. Only a Vercel Connect sign-in
+ * has a grant to share, and its callback names a loopback host `localhost`, as `eve dev` mints it.
+ */
 export function ownCallbacks(sessionId: string, callbackBaseUrl: string): OwnCallbacks {
-  return { origin: new URL(callbackBaseUrl).origin, sessionId };
+  return { origin: new URL(vercelConnectCallbackUrl(callbackBaseUrl)).origin, sessionId };
 }
 
 /** This workflow's callback base URL, or `undefined` outside a workflow. */

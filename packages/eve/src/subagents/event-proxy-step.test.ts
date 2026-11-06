@@ -4,7 +4,7 @@ import { authHookToken } from "#harness/authorization.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import type { InteractionRow } from "#protocol/session-projection/tables.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
-import { localSignInCallback, signInsAnswered } from "./event-proxy-step.js";
+import { localSignInCallback, ownCallbacks, signInsAnswered } from "./event-proxy-step.js";
 
 const OWN = "https://v.example";
 const PARENT = { origin: OWN, sessionId: "parent" };
@@ -68,6 +68,18 @@ describe("localSignInCallback for this session's own sign-in", () => {
   it("never resumes another session's hook from a row this session asked", () => {
     const own = { ...row(url(OWN, authHookToken("child-a"))), origin: undefined };
     expect(localSignInCallback(own, PARENT)).toBeUndefined();
+  });
+});
+
+describe("ownCallbacks", () => {
+  it("names a loopback dev server localhost, as Connect's callback URLs do", () => {
+    const own = ownCallbacks("parent", "http://127.0.0.1:3000");
+    const local = row(url("http://localhost:3000", authHookToken("child-a")));
+    expect(localSignInCallback(local, own)?.token).toBe(authHookToken("child-a"));
+  });
+
+  it("keeps a deployment's own origin as it is", () => {
+    expect(ownCallbacks("parent", "https://v.example/agents/v").origin).toBe(OWN);
   });
 });
 

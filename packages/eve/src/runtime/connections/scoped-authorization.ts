@@ -442,16 +442,20 @@ export function resolveAuthorizationCallbackUrl(input: {
   readonly callbackUrl: string;
 }): string {
   if (input.authorization.vercelConnect === undefined) return input.callbackUrl;
+  return vercelConnectCallbackUrl(input.callbackUrl);
+}
 
+/** A callback URL as Vercel Connect accepts it: a loopback HTTP host is named `localhost`. */
+export function vercelConnectCallbackUrl(callbackUrl: string): string {
   let url: URL;
   try {
-    url = new URL(input.callbackUrl);
+    url = new URL(callbackUrl);
   } catch {
-    return input.callbackUrl;
+    return callbackUrl;
   }
 
   if (url.protocol !== "http:" || !LOCAL_HTTP_VERCEL_CONNECT_HOSTNAMES.has(url.hostname)) {
-    return input.callbackUrl;
+    return callbackUrl;
   }
 
   url.hostname = "localhost";
