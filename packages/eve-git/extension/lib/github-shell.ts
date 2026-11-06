@@ -126,7 +126,7 @@ interface GitHubShellDependencies {
   readonly getToken?: ToolContext["getToken"];
   readonly requireAuth?: ToolContext["requireAuth"];
   readonly getSandbox: () => Promise<SandboxSession>;
-  /** Serializes credential leases per eve session; every `ctx.getSandbox()` call returns a new handle. */
+  /** Serializes credential leases for sandboxes without a name; every `ctx.getSandbox()` call returns a new handle. */
   readonly sessionId: string;
 }
 
@@ -229,7 +229,7 @@ export async function executeGitHubShell(
   try {
     result = await withGitHubCredentialLease(
       sandbox,
-      dependencies.sessionId,
+      leaseKey(sandbox, dependencies.sessionId),
       { authorization, placeholder, placeholderAuthorization, token },
       () => {
         const env: Record<string, string> = {
@@ -278,9 +278,18 @@ export async function executeGitHubShell(
   };
 }
 
+/**
+ * Each lease replaces the sandbox's whole network policy, so leases must take turns per
+ * sandbox, not per session: subagents run in their parent's sandbox under their own session.
+ */
+function leaseKey(sandbox: SandboxSession, sessionId: string): string {
+  const { name } = sandbox as { readonly name?: unknown };
+  return typeof name === "string" && name ? `sandbox:${name}` : `session:${sessionId}`;
+}
+
 async function withGitHubCredentialLease<T>(
   sandbox: SandboxSession,
-  sessionId: string,
+  key: string,
   credential: {
     readonly authorization: string;
     readonly placeholder: string;
@@ -290,13 +299,13 @@ async function withGitHubCredentialLease<T>(
   run: () => PromiseLike<T>,
   broker: GitHubConfig["broker"],
 ): Promise<T> {
-  const previous = leaseQueues.get(sessionId) ?? Promise.resolve();
+  const previous = leaseQueues.get(key) ?? Promise.resolve();
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
   const current = previous.then(() => gate);
-  leaseQueues.set(sessionId, current);
+  leaseQueues.set(key, current);
   await previous;
   try {
     const api: GitHubLeaseRule[] = [
@@ -336,7 +345,7 @@ async function withGitHubCredentialLease<T>(
       await broker(sandbox, null);
     } finally {
       release();
-      if (leaseQueues.get(sessionId) === current) leaseQueues.delete(sessionId);
+      if (leaseQueues.get(key) === current) leaseQueues.delete(key);
     }
   }
 }

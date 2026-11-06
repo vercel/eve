@@ -746,3 +746,43 @@ function fakeSandbox(
   };
   return sandbox as NetworkPolicySandboxSession;
 }
+
+test("sessions sharing a named sandbox take turns holding the credential lease", async () => {
+  const policies: NetworkPolicy[] = [];
+  let running = 0;
+  let overlapped = false;
+  const runs: Parameters<SandboxSession["run"]>[0][] = [];
+  const shared = Object.assign(
+    fakeSandbox(runs, { exitCode: 0, stdout: "", stderr: "" }, policies),
+    {
+      name: "parent-sandbox",
+      async run(input: Parameters<SandboxSession["run"]>[0]) {
+        running += 1;
+        overlapped ||= running > 1;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        running -= 1;
+        runs.push(input);
+        return { exitCode: 0, stdout: "", stderr: "" };
+      },
+    },
+  );
+  const execute = (sessionId: string) =>
+    executeGitHubShell(READ, CONFIG, {
+      sessionId,
+      async getConnectToken() {
+        return "secret-token";
+      },
+      async getSandbox() {
+        return shared;
+      },
+    });
+
+  await Promise.all([execute("parent"), execute("subagent")]);
+
+  assert.equal(runs.length, 2);
+  assert.equal(overlapped, false);
+  assert.deepEqual(
+    policies.map((policy) => (policy === "allow-all" ? "cleared" : "leased")),
+    ["leased", "cleared", "leased", "cleared"],
+  );
+});
