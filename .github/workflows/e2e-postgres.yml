@@ -8,6 +8,9 @@ concurrency:
   group: e2e-postgres-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   # The stable aggregate check must report on every PR. This job decides
   # relevance so the matrix can skip at the job level without starting a
