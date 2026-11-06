@@ -250,6 +250,8 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
             ? { "agent.turn.id": context.attempt.turnId }
             : attemptAttributes(context)),
           ...namingAttributes(SPAN_NAMES.approval, "workflow"),
+          "agent.name": context.identity.agentName,
+          "gen_ai.agent.name": context.identity.agentName,
           "gen_ai.operation.name": "workflow",
           "gen_ai.tool.call.id": options.callId,
           "agent.action.name": options.toolName,

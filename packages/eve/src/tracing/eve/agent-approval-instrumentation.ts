@@ -87,6 +87,8 @@ export function createAgentApprovalInstrumentation(input: {
           "agent.tool.approver.id": event.responder.id,
         });
     }
+    if (event.kind === "sign-in" && event.reason !== undefined)
+      approval.attributes({ "agent.connection.authorization.reason": event.reason });
     if (event.outcome === "failed") await approval.fail(event.error);
     else
       await approval.complete({

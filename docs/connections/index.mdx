@@ -320,7 +320,7 @@ The callback URL never carries `VERCEL_AUTOMATION_BYPASS_SECRET`, because the us
 Throw these error classes from `eve/connections` in `getToken` or `completeAuthorization`:
 
 - `ConnectionAuthorizationRequiredError(connectionName)`: the user must sign in. Throw it from `getToken` to send an `interaction.opened` event with `request.kind: "sign-in"`.
-- `ConnectionAuthorizationFailedError(connectionName, { reason?, retryable? })`: sign-in failed. `reason` is a stable code, such as `"access_denied"`. It appears as the reason on the sign-in's `interaction.settled` event and on the failed tool result.
+- `ConnectionAuthorizationFailedError(connectionName, { reason?, retryable? })`: sign-in failed. `reason` is a stable code, such as `"access_denied"`. It appears as the reason on the sign-in's `interaction.settled` event and on the failed tool result. Traces record it as `agent.connection.authorization.reason` on the sign-in's `agent.approval` span and on the failed call's `execute_tool` span, next to `eve.connection.name`. A reason that isn't a code, such as an error message, stays off the span.
 
 Omit `retryable` to allow retries. Set it to `false` when retrying can't help, such as when the user denies access. `interaction.settled` then carries `response.retryable: false`. Later calls in the same turn that need the same grant for the same user fail without asking again. The next turn asks again.
 

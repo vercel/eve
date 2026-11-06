@@ -153,6 +153,8 @@ describe("durable agent tracing", () => {
     expect(approval!.attributes["agent.approval.kind"]).toBe("sign-in");
     expect(approval!.attributes["agent.approval.outcome"]).toBe("approved");
     expect(approval!.attributes["agent.connection.name"]).toBe("calendar");
+    // Queries scoped to one agent find its sign-ins.
+    expect(approval!.attributes["gen_ai.agent.name"]).toBe("support");
     expect(approval!.attributes["gen_ai.tool.call.id"]).toBeUndefined();
     expect(approval!.attributes["agent.turn.id"]).toBe("turn");
     expect(approval!.attributes["agent.step.index"]).toBeUndefined();
