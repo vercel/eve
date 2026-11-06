@@ -13,7 +13,10 @@ import {
 } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
-import { slackRenderingHarness } from "#internal/testing/slack-rendering-harness.js";
+import {
+  slackRenderingHarness,
+  type SlackTurnStep,
+} from "#internal/testing/slack-rendering-harness.js";
 import { ANSWER_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 import {
@@ -604,11 +607,13 @@ describe("slackChannel message status and guidance", () => {
   });
 
   // Each step is followed by the thread statuses it set. Mentions are acknowledged before their
-  // hook runs, so `deferred` can only keep the rest of the turn quiet.
+  // hook runs, so `deferred` can only keep the rest of the turn quiet. A `hidden` tool sets
+  // `label: false`: it shows no status and doesn't end a deferred turn's quiet.
   it.each<{
     name: string;
     request: () => Request;
     status: "immediate" | "deferred";
+    steps?: readonly SlackTurnStep[];
     trace: string;
   }>([
     {
@@ -630,7 +635,28 @@ describe("slackChannel message status and guidance", () => {
       status: "deferred",
       trace: "post:Thinking... turn model tool model:Thinking...",
     },
-  ])("$name", async ({ request, status, trace }) => {
+    {
+      name: "deferred reply with a hidden tool",
+      request: threadReply,
+      status: "deferred",
+      steps: ["turn", "model", "hidden", "model", "no_reply", "end"],
+      trace: "post turn model hidden model no_reply end:",
+    },
+    {
+      name: "deferred reply with a hidden tool, then a real one",
+      request: threadReply,
+      status: "deferred",
+      steps: ["turn", "model", "hidden", "model", "tool", "model"],
+      trace: "post turn model hidden model tool model:Thinking...",
+    },
+    {
+      name: "immediate reply with a hidden tool",
+      request: threadReply,
+      status: "immediate",
+      steps: ["turn", "model", "hidden", "model"],
+      trace: "post:Thinking... turn:Thinking... model:Thinking... hidden model:Thinking...",
+    },
+  ])("$name", async ({ request, status, steps = ["turn", "model", "tool", "model"], trace }) => {
     const edits: unknown[] = [];
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
@@ -652,7 +678,7 @@ describe("slackChannel message status and guidance", () => {
       threadTs: "1700000000.000001",
     });
     await harness.deliver(input);
-    for (const step of ["turn", "model", "tool", "model"] as const) {
+    for (const step of steps) {
       const before = statuses().length;
       await harness.step(step);
       observed.push([step, ...statuses().slice(before)].join(":"));

@@ -29,7 +29,10 @@ import {
   isInvalidToolCall,
   resolveProviderToolCallRequest,
 } from "#harness/tool-call-input-errors.js";
-import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import type {
+  RuntimeToolCallActionRequest,
+  RuntimeToolResultActionResult,
+} from "#shared/action-types.js";
 import {
   createPresentedRuntimeActionRequestFromToolCall,
   type RuntimeActionRequestProjection,
@@ -203,7 +206,14 @@ async function consumeStreamContent(
 
     emittedActionCallIds.add(action.callId);
     actionInputs.set(action.callId, action.input);
-    await emitFn(requestCall({ action, owner: { runId }, label: projection.presentationLabel }));
+    await emitFn(
+      requestCall({
+        action,
+        owner: { runId },
+        label: projection.presentationLabel,
+        hidden: projection.hidden,
+      }),
+    );
   };
 
   const collectProviderToolCall = async (toolCall: {
@@ -259,7 +269,7 @@ async function consumeStreamContent(
 
   /** A call whose input didn't validate is introduced with its error, and fails at once. */
   const emitInvalidCall = async (
-    action: Parameters<typeof requestCall>[0]["action"],
+    action: RuntimeToolCallActionRequest,
     result: RuntimeToolResultActionResult,
   ): Promise<void> => {
     emittedActionCallIds.add(action.callId);
@@ -268,6 +278,7 @@ async function consumeStreamContent(
     await emitFn(
       requestCall({
         action,
+        hidden: options?.tools.get(action.toolName)?.label === false,
         inputError: { code: "INVALID_TOOL_INPUT", message },
         owner: { runId },
       }),
@@ -378,7 +389,9 @@ async function consumeStreamContent(
             part.providerExecuted === true ||
             // AI Gateway streams a provider tool's input unflagged, under an id its call never uses.
             options.tools.get(part.toolName)?.behavior?.handling?.kind === "provider-tool" ||
-            options.excludedActionToolNames.has(part.toolName)
+            options.excludedActionToolNames.has(part.toolName) ||
+            // A preview would show a call its tool keeps out of activity before `hidden` arrives.
+            options.tools.get(part.toolName)?.label === false
           ) {
             streamingActionInputs.delete(part.id);
             break;

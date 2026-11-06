@@ -38,6 +38,7 @@ import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
 import { compiledAgentManifestSchema } from "#compiler/manifest.js";
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
@@ -476,11 +477,17 @@ describe("compileAgentManifest source graph", () => {
     );
     expect(Object.values(entries).every((entry) => entry.deferred)).toBe(true);
     expect(
-      entries["schedule__billing-requests__create"]!.label?.start({ name: "daily-digest" }),
+      labelCallbacks(entries["schedule__billing-requests__create"]!.label)?.start({
+        name: "daily-digest",
+      }),
     ).toBe("Create schedule: daily-digest");
-    expect(entries["schedule__billing-requests__list"]!.label?.start({})).toBe("List schedules");
+    expect(labelCallbacks(entries["schedule__billing-requests__list"]!.label)?.start({})).toBe(
+      "List schedules",
+    );
     expect(
-      entries["schedule__billing-requests__delete"]!.label?.start({ name: "daily-digest" }),
+      labelCallbacks(entries["schedule__billing-requests__delete"]!.label)?.start({
+        name: "daily-digest",
+      }),
     ).toBe("Delete schedule: daily-digest");
   });
 

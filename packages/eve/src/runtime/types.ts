@@ -182,7 +182,7 @@ export type ResolvedToolDefinition = Readonly<
     /** Framework-owned input projected before a workflow tool executor starts. */
     readonly executeInput?: (input: unknown) => JsonValue;
     /** Presentation projected from tool lifecycle values. */
-    readonly label?: import("#tools/definition.js").InternalToolLabelDefinition;
+    readonly label?: import("#tools/definition.js").InternalToolLabelDefinition | false;
     /**
      * Optional validated runtime output schema.
      */

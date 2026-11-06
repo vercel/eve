@@ -27,6 +27,7 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
 import type { StepCatalog } from "./step-catalog.js";
+import { labelCallbacks } from "#internal/testing/tool-labels.js";
 
 const CHILD = { rootSessionId: "root-session" };
 
@@ -346,7 +347,7 @@ describe("buildStepCatalog", () => {
       const resolved = catalog.resolve({ input: { name: "pdf-forms" }, toolName: SKILL_TOOL_NAME });
 
       expect(resolved?.call).toEqual({ input: { name: "pdf-forms" }, toolName: "eve:load-skill" });
-      const label = resolved?.definition.label;
+      const label = labelCallbacks(resolved?.definition.label);
       expect(label?.start?.(resolved?.call.input)).toBe("Load skill pdf-forms");
       expect(label?.complete?.(resolved?.call.input, "# PDF forms")).toBe("Loaded skill pdf-forms");
       expect(
@@ -549,7 +550,7 @@ describe("buildStepCatalog", () => {
       ).toEqual({ value: validated });
       const resolved = catalog.resolve({ input: validated, toolName: CALL_TOOL_NAME });
       expect(resolved?.call.toolName).toBe("linear__list_issues");
-      expect(resolved?.definition.label?.start?.({})).toBe("Linear: List issues");
+      expect(labelCallbacks(resolved?.definition.label)?.start?.({})).toBe("Linear: List issues");
       await run(() =>
         resolved?.definition.execute?.(resolved.call.input, { messages: [], toolCallId: "call-1" }),
       );
@@ -798,7 +799,7 @@ describe("buildStepCatalog", () => {
       const { catalog, connect, finishSignIn, notion, run, signIn } = await notionCatalog();
 
       expect(signIn.call.toolName).toBe("notion");
-      expect(signIn.definition.label?.start?.({})).toBe("Sign in to Notion");
+      expect(labelCallbacks(signIn.definition.label)?.start?.({})).toBe("Sign in to Notion");
       expect(signIn.definition.approval).toBeUndefined();
       const parked = await connect();
       expect(isAuthorizationSignal(parked)).toBe(true);

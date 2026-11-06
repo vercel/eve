@@ -14,7 +14,7 @@ import type { PreparedToolBehavior } from "#tools/behavior.js";
  */
 export interface HarnessToolDefinition {
   readonly availableInSubagents?: boolean;
-  readonly label?: InternalToolLabelDefinition;
+  readonly label?: InternalToolLabelDefinition | false;
   readonly behavior?: PreparedToolBehavior;
   /** Kept out of the model's tool list; the model reaches it through `eve__search` and `eve__tool`. */
   readonly deferred?: boolean;
