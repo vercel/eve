@@ -14,7 +14,9 @@
 
 import {
   truncateCardBodyText,
+  SLACK_BLOCK_KIT_PLAIN_TEXT_MAX_LENGTH,
   SLACK_SECTION_TEXT_MAX_LENGTH,
+  truncateMessageText,
   truncateModalTitle,
   truncatePlainText,
   truncateSectionText,
@@ -78,6 +80,12 @@ const TOOL_INPUT_CODE_PREFIX = "```\n";
 const TOOL_INPUT_SUFFIX = "\n```";
 const ANSWERED_TEXT_PREFIX = ":white_check_mark: *";
 const ANSWERED_TEXT_SUFFIX = "*";
+/**
+ * Room the full-text option list gets in all. Slack documents no length cap for rich text, so it
+ * borrows the section cap to keep a long dropdown's card well inside Slack's message limits.
+ */
+const OPTION_LIST_MAX_LENGTH = SLACK_SECTION_TEXT_MAX_LENGTH;
+const OPTION_DESCRIPTION_SEPARATOR = ": ";
 
 type SlackInteractionOption = NonNullable<Interaction["request"]["options"]>[number];
 type CardButtonOption = Pick<SlackInteractionOption, "id" | "label" | "style">;
@@ -245,7 +253,12 @@ export function renderInteractionBlocks(
             options: options.map(buildOption),
             placeholder: { type: "plain_text", text: "Choose an option" },
           };
-    return [prompt, ...details, { type: "actions", elements: [widget] }];
+    return [
+      prompt,
+      ...details,
+      ...renderOptionTextBlocks(options),
+      { type: "actions", elements: [widget] },
+    ];
   }
 
   if (options && options.length > 0) {
@@ -311,9 +324,19 @@ export function renderInteractionPostParts(
  * that appear in the blocks.
  */
 export function formatInteractionFallbackText(request: Interaction): string {
-  const prompt = escapeSlackText(request.request.prompt);
+  const lines = [escapeSlackText(request.request.prompt)];
   const details = formatToolInputDetails(request);
-  return details === undefined ? prompt : `${prompt}\n${details}`;
+  if (details !== undefined) lines.push(details);
+  const { display, options = [] } = request.request;
+  if (display === "select" && optionTextIsCut(options)) {
+    for (const option of options) {
+      const description = option.description
+        ? `${OPTION_DESCRIPTION_SEPARATOR}${option.description}`
+        : "";
+      lines.push(`• ${escapeSlackText(`${option.label}${description}`)}`);
+    }
+  }
+  return truncateMessageText(lines.join("\n"));
 }
 
 /**
@@ -415,6 +438,53 @@ function buildOption(opt: SlackInteractionOption): Record<string, unknown> {
     option.description = { text: description, type: "plain_text" };
   }
   return option;
+}
+
+/** Whether Slack's option fields would cut any option's text, so the card also lists it in full. */
+function optionTextIsCut(options: readonly SlackInteractionOption[]): boolean {
+  return options.some(
+    (option) =>
+      option.label.length > SLACK_BLOCK_KIT_PLAIN_TEXT_MAX_LENGTH ||
+      (option.description?.length ?? 0) > SLACK_BLOCK_KIT_PLAIN_TEXT_MAX_LENGTH,
+  );
+}
+
+/**
+ * Every option's label and description in full when the widget would cut any of them, so no one
+ * picks an option without reading its tradeoff. Rich text shows the model's words literally.
+ */
+function renderOptionTextBlocks(options: readonly SlackInteractionOption[]): BlockKitBlock[] {
+  if (!optionTextIsCut(options)) return [];
+  const budget = Math.floor(OPTION_LIST_MAX_LENGTH / options.length);
+  return [
+    {
+      type: "rich_text",
+      elements: [
+        {
+          type: "rich_text_list",
+          style: "bullet",
+          elements: options.map((option) => renderOptionTextSection(option, budget)),
+        },
+      ],
+    },
+  ];
+}
+
+function renderOptionTextSection(
+  option: SlackInteractionOption,
+  budget: number,
+): Record<string, unknown> {
+  const label = truncateWithEllipsis(option.label, budget);
+  const elements: Record<string, unknown>[] = [
+    { type: "text", text: label, style: { bold: true } },
+  ];
+  const room = budget - label.length;
+  // Below this, a cut description would be only its separator and the ellipsis.
+  if (option.description && room > OPTION_DESCRIPTION_SEPARATOR.length + 3) {
+    const text = `${OPTION_DESCRIPTION_SEPARATOR}${option.description}`;
+    elements.push({ type: "text", text: truncateWithEllipsis(text, room) });
+  }
+  return { type: "rich_text_section", elements };
 }
 
 function renderInteractionCardBlock(

@@ -19,6 +19,7 @@ import {
   ANSWER_ACTION_PREFIX,
   renderInteractionBlocks,
 } from "#public/channels/slack/index.js";
+import { escapeSlackText } from "#compiled/@chat-adapter/slack/format.js";
 import {
   SLACK_CARD_BODY_TEXT_MAX_LENGTH,
   SLACK_SECTION_TEXT_MAX_LENGTH,
@@ -394,6 +395,74 @@ describe("renderInteractionBlocks", () => {
       value: "weekly",
       description: { type: "plain_text", text: "Best for low-volume reports" },
     });
+    expect(blocks).toHaveLength(2);
+  });
+
+  // Slack cuts option text at 75 characters, but `ask_question` allows 200-character descriptions.
+  it("shows the full text of options Slack's option fields would cut", () => {
+    const description = `${"A".repeat(90)} IMPORTANT: selecting this option loses *data* & <cache>.`;
+    const label = `Keep the ${"b".repeat(64)} label (Recommended)`;
+    const request = makeRequest({
+      display: "select",
+      options: [
+        { id: "one", label, description },
+        { id: "two", label: "Option two", description: "No data is lost." },
+      ],
+    });
+
+    const blocks = renderInteractionBlocks(request);
+
+    expect(blocks.map((block) => block.type)).toEqual(["section", "rich_text", "actions"]);
+    expect(blocks[1]).toEqual({
+      type: "rich_text",
+      elements: [
+        {
+          type: "rich_text_list",
+          style: "bullet",
+          elements: [
+            {
+              type: "rich_text_section",
+              elements: [
+                { type: "text", text: label, style: { bold: true } },
+                { type: "text", text: `: ${description}` },
+              ],
+            },
+            {
+              type: "rich_text_section",
+              elements: [
+                { type: "text", text: "Option two", style: { bold: true } },
+                { type: "text", text: ": No data is lost." },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const widget = (blocks[2] as { elements: [{ options: Array<Record<string, unknown>> }] })
+      .elements[0];
+    expect(widget.options.map((option) => option.value)).toEqual(["one", "two"]);
+    for (const option of widget.options) {
+      expect(JSON.stringify(option)).not.toMatch(/"text":"[^"]{76,}"/u);
+    }
+    expect(formatInteractionFallbackText(request)).toBe(
+      `Pick one\n• ${label}: ${escapeSlackText(description)}\n• Option two: No data is lost.`,
+    );
+  });
+
+  it("keeps the full-text option list within its budget for a long dropdown", () => {
+    const options = Array.from({ length: 100 }, (_, i) => ({
+      id: `o${i}`,
+      label: `Option ${i}`,
+      description: `${i} ${"d".repeat(500)}`,
+    }));
+
+    const blocks = renderInteractionBlocks(makeRequest({ display: "select", options }));
+
+    expect(blocks.map((block) => block.type)).toEqual(["section", "rich_text", "actions"]);
+    const texts = JSON.stringify(blocks[1]).match(/"text":"[^"]*"/gu) ?? [];
+    const length = texts.reduce((sum, text) => sum + JSON.parse(`{${text}}`).text.length, 0);
+    expect(length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
+    expect(JSON.stringify(blocks[1])).toContain("Option 99");
   });
 
   it("falls back to a static_select dropdown when the option count exceeds the radio limit", () => {
