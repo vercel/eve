@@ -103,9 +103,7 @@ import z from "zod";
 
 export default defineTool({
   description: "Look up an order by ID",
-  inputSchema: z.object({
-    orderId: z.string(),
-  }),
+  inputSchema: z.object({ orderId: z.string() }),
   async execute(input) {
     const res = await fetch(
       \`\${process.env.ORDERS_API_URL}/orders/\${input.orderId}\`
@@ -125,8 +123,7 @@ import { z } from "zod";
 import { pageOnCall } from "../lib/pager";
 
 export default defineDynamic((ctx) =>
-  ctx.session.auth.current?.attributes
-    .plan === "enterprise"
+  ctx.session.auth.current?.attributes.plan === "enterprise"
     ? defineTool({
         description: "Page the on-call engineer.",
         inputSchema: z.object({ summary: z.string() }),
@@ -135,7 +132,7 @@ export default defineDynamic((ctx) =>
     : null,
 );`,
     results: { enterprise: "Can page on-call", pro: null },
-    planLines: { enterprise: [9, 10, 11, 12, 13], pro: [14] },
+    planLines: { enterprise: [8, 9, 10, 11, 12], pro: [13] },
   },
   {
     name: "channels/",

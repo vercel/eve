@@ -210,7 +210,7 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
 
         {/* Code panel: fixed height so the card never reflows; the code
                 area flexes to fill whatever the description leaves. */}
-        <div className="flex min-h-[514px] min-w-0 flex-col">
+        <div className="flex min-h-[480px] min-w-0 flex-col">
           <div className="flex h-12 items-center border-b px-4">
             <span className="font-medium text-gray-1000 text-sm">{selected.fileName}</span>
           </div>
