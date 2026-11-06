@@ -103,6 +103,7 @@
   "SlackSlashCommandContext",
   "SlackThread",
   "SlackThreadMessage",
+  "SlackToolContext",
   "SlackTransportOptions",
   "SlackUploadFilesOptions",
   "SlackUploadFilesResult",
@@ -130,5 +131,6 @@
   "resolveSlackBotToken",
   "slackChannel",
   "slackCodeChannelContinuationToken",
-  "slackContinuationToken"
+  "slackContinuationToken",
+  "slackToolContext"
 ]

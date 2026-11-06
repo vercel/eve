@@ -21,6 +21,7 @@ import { SessionNotActiveError } from "#channel/session-not-active-error.js";
 import type { ChannelContext } from "#shared/channel-context.js";
 import type { Delivery } from "#shared/delivery.js";
 import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
+import { registerSlackChannelTransport } from "#public/channels/slack/channel-transport.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
@@ -379,6 +380,8 @@ export interface SlackInstrumentationMetadata extends Record<string, unknown> {
   readonly teamId: string | null;
   readonly threadTs: string | null;
   readonly triggeringUserId: string | null;
+  /** ts of the Slack message that started the active turn. */
+  readonly triggeringMessageTs?: string | null;
   /** `true` in a code channel session; absent elsewhere. */
   readonly codeChannel?: true;
 }
@@ -1182,10 +1185,10 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
         teamId: state.teamId,
         threadTs: state.threadTs,
         triggeringUserId: state.triggeringUserId ?? null,
-        // Unlisted in SlackInstrumentationMetadata, so not public API: openCodeChannel() locates
-        // the conversation with these whatever auth the session runs as.
-        installationTeamId: state.installationTeamId ?? null,
         triggeringMessageTs: state.triggeringMessageTs ?? null,
+        // Unlisted in SlackInstrumentationMetadata, so not public API: openCodeChannel() and
+        // slackToolContext() pick the installation's credentials with it.
+        installationTeamId: state.installationTeamId ?? null,
         ...(state.codeChannel === true && { codeChannel: true }),
       };
     },
@@ -1265,6 +1268,10 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     externalCredentials: credentials?.vercelConnect,
     manifest: manifest.build(channelName),
   }));
+  registerSlackChannelTransport(channel, {
+    api,
+    botToken: config.credentials?.botToken,
+  });
   return channel;
 }
 

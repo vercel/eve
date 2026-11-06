@@ -3,6 +3,8 @@ export {
   type SlackCodeChannelOpenResult,
 } from "#public/channels/slack/open-code-channel.js";
 
+export { slackToolContext, type SlackToolContext } from "#public/channels/slack/tool-context.js";
+
 export {
   slackChannel,
   type SlackApiResponse,
