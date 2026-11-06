@@ -17,6 +17,8 @@
   "ChannelCreateResult",
   "ChannelDefinition",
   "ChannelDelivery",
+  "ChannelEventComposition",
+  "ChannelEventCompositionMode",
   "ChannelEventContext",
   "ChannelEvents",
   "ChannelFrom",
@@ -26,6 +28,8 @@
   "ChannelSendOptions",
   "ChannelSource",
   "CommittedLine",
+  "ComposableChannelEvent",
+  "ComposableChannelEvents",
   "ConversationEnvironment",
   "DELETE",
   "DisabledRouteSentinel",
@@ -68,9 +72,12 @@
   "WebSocketUpgradeRequest",
   "WebSocketUpgradeResult",
   "WebSocketUpgradeServerBridge",
+  "afterDefault",
   "attachmentError",
+  "beforeDefault",
   "createWebSocketUpgradeServer",
   "defineChannel",
   "disableRoute",
-  "isChannel"
+  "isChannel",
+  "replaceDefault"
 ]

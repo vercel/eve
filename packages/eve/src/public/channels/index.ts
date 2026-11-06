@@ -56,6 +56,15 @@ export {
   type ChannelEventContext,
   type CommittedLine,
 } from "#public/definitions/channel.js";
+export {
+  afterDefault,
+  beforeDefault,
+  replaceDefault,
+  type ChannelEventComposition,
+  type ChannelEventCompositionMode,
+  type ComposableChannelEvent,
+  type ComposableChannelEvents,
+} from "#public/channels/compose-events.js";
 export { attachmentError } from "#public/channels/attachment-error.js";
 export type {
   FetchFileContext,

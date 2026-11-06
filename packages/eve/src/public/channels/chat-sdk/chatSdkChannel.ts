@@ -1,3 +1,7 @@
+import {
+  composeChannelEvents,
+  type ComposableChannelEvents,
+} from "#public/channels/compose-events.js";
 import { sessionTables } from "#protocol/session-projection/session-view.js";
 import { failureNotice } from "#public/channels/reply.js";
 import { callLabel, showsActivity } from "#protocol/session-projection/selectors.js";
@@ -232,7 +236,7 @@ export interface ChatSdkChannelConfig<
   /** Extra Chat SDK webhook options. eve owns `waitUntil`. */
   readonly webhook?: Omit<WebhookOptions, "waitUntil">;
   /** Optional eve event handlers. Supplied handlers replace built-in defaults. */
-  readonly events?: ChatSdkChannelEvents<TAdapters>;
+  readonly events?: ComposableChannelEvents<ChatSdkChannelEvents<TAdapters>>;
   /**
    * Prefix for default eve HITL button action ids. Change this if your Chat SDK
    * app already uses the `eve_input:` prefix.
@@ -318,10 +322,11 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
   const streaming = config.streaming ?? true;
   const streamingEditIntervalMs =
     config.streamingEditIntervalMs ?? DEFAULT_STREAMING_EDIT_INTERVAL_MS;
-  const mergedEvents: ChatSdkChannelEvents<TAdapters> = {
-    ...defaultEvents<TAdapters>(inputActionPrefix),
-    ...config.events,
-  };
+  const mergedEvents = composeChannelEvents(
+    "chatSdkChannel",
+    defaultEvents<TAdapters>(inputActionPrefix),
+    config.events,
+  );
 
   bot.onAction(async (event: ActionEvent) => {
     const response = decodeInputAction(event.actionId, inputActionPrefix, event.value);

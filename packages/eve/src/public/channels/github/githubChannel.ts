@@ -1,3 +1,7 @@
+import {
+  composeChannelEvents,
+  type ComposableChannelEvents,
+} from "#public/channels/compose-events.js";
 import type { ChannelEventContext, ChannelEventOf } from "#public/definitions/channel.js";
 import type { SessionEvent } from "#protocol/session-event.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
@@ -19,6 +23,7 @@ import {
 } from "#public/channels/github/auth.js";
 import { GITHUB_CHANNEL_DEFAULT_ROUTE } from "#public/channels/github/constants.js";
 import { createDefaultEvents, defaultOnComment } from "#public/channels/github/defaults.js";
+import { composeGitHubHooks, type GitHubHandlers } from "#public/channels/github/handlers.js";
 import {
   parseGitHubWebhookEvent,
   type GitHubCheckRunEvent,
@@ -128,8 +133,10 @@ type GitHubEventHandler<T extends SessionEvent["type"]> = (
  * Event handlers for `githubChannel({ events })`. The channel installs built-in
  * handlers for `turn.started` (eyes reaction plus repo checkout),
  * `content.completed` (posts the reply), `interaction.opened` and `interaction.settled`
- * (post each prompt in turn), and `session.ended`/`turn.settled` (posts an error comment). A handler supplied
- * here replaces the built-in for that key rather than running alongside it.
+ * (post each prompt in turn), and `session.ended`/`turn.settled` (posts an error comment). Wrap a
+ * handler in `beforeDefault()` or `afterDefault()` to run it alongside the built-in, or in
+ * `replaceDefault()` to drop the built-in. A plain handler still replaces the built-in and logs a
+ * deprecation warning.
  */
 export interface GitHubChannelEvents {
   readonly "call.progress"?: GitHubEventHandler<"call.progress">;
@@ -156,7 +163,13 @@ export interface GitHubChannelConfig {
    */
   readonly botName?: GitHubBotName;
   readonly credentials?: GitHubChannelCredentials;
-  readonly events?: GitHubChannelEvents;
+  readonly events?: ComposableChannelEvents<GitHubChannelEvents>;
+  /**
+   * Webhook handlers contributed by extensions or shared modules. Each inbound hook runs this
+   * config's own handler first, then each entry in list order; every handler sees the event, a
+   * throw is logged and skipped, and the first non-null result dispatches the one turn.
+   */
+  readonly handlers?: readonly GitHubHandlers[];
   readonly progress?: GitHubProgressConfig;
   readonly pullRequestContext?: GitHubPullRequestContextConfig;
   readonly route?: string;
@@ -233,15 +246,21 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     credentials: config.credentials,
   });
   const dispatchOptions = { botName };
-  const mergedEvents: GitHubChannelEvents = {
-    ...createDefaultEvents({
+  const hooks = composeGitHubHooks({
+    ...config,
+    onComment:
+      config.onComment ?? ((ctx, comment) => defaultOnComment(ctx, comment, dispatchOptions)),
+  });
+  const mergedEvents = composeChannelEvents(
+    "githubChannel",
+    createDefaultEvents({
       api: config.api,
       botName,
       credentials: config.credentials,
       progress: config.progress,
     }),
-    ...config.events,
-  };
+    config.events,
+  );
 
   const channel = defineChannel<GitHubChannelState, GitHubChannelContext, GitHubReceiveTarget>({
     turnPolicy: config.turnPolicy,
@@ -299,9 +318,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
                 botName,
                 config,
                 event,
-                handler:
-                  config.onComment ??
-                  ((ctx, comment) => defaultOnComment(ctx, comment, dispatchOptions)),
+                handler: hooks.onComment,
                 from,
               }),
             );
@@ -314,74 +331,72 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
                 botName,
                 config,
                 event,
-                handler:
-                  config.onComment ??
-                  ((ctx, comment) => defaultOnComment(ctx, comment, dispatchOptions)),
+                handler: hooks.onComment,
                 from,
               }),
             );
             return jsonOk({ ok: true });
           }
 
-          if (event.kind === "issues" && config.onIssue !== undefined) {
+          if (event.kind === "issues" && hooks.onIssue !== undefined) {
             waitUntil(
               dispatchIssue({
                 botName,
                 config,
                 event,
-                handler: config.onIssue,
+                handler: hooks.onIssue,
                 from,
               }),
             );
             return jsonOk({ ok: true });
           }
 
-          if (event.kind === "pull_request" && config.onPullRequest !== undefined) {
+          if (event.kind === "pull_request" && hooks.onPullRequest !== undefined) {
             waitUntil(
               dispatchPullRequest({
                 botName,
                 config,
                 event,
-                handler: config.onPullRequest,
+                handler: hooks.onPullRequest,
                 from,
               }),
             );
             return jsonOk({ ok: true });
           }
 
-          if (event.kind === "check_suite" && config.onCheckSuite !== undefined) {
+          if (event.kind === "check_suite" && hooks.onCheckSuite !== undefined) {
             waitUntil(
               dispatchCheckSuite({
                 botName,
                 config,
                 event,
-                handler: config.onCheckSuite,
+                handler: hooks.onCheckSuite,
                 from,
               }),
             );
             return jsonOk({ ok: true });
           }
 
-          if (event.kind === "check_run" && config.onCheckRun !== undefined) {
+          if (event.kind === "check_run" && hooks.onCheckRun !== undefined) {
             waitUntil(
               dispatchCheckRun({
                 botName,
                 config,
                 event,
-                handler: config.onCheckRun,
+                handler: hooks.onCheckRun,
                 from,
               }),
             );
             return jsonOk({ ok: true });
           }
 
-          if (event.kind === "workflow_run" && config.onWorkflowRun !== undefined) {
+          if (event.kind === "workflow_run" && hooks.onWorkflowRun !== undefined) {
             waitUntil(
               dispatchWorkflowRun({
                 botName,
                 config,
                 event,
-                handler: config.onWorkflowRun,
+                handler: hooks.onWorkflowRun,
                 from,
               }),
             );

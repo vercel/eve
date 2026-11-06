@@ -1,3 +1,4 @@
+import type { ComposableChannelEvents } from "#public/channels/compose-events.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import { sameEnvironmentVercelOidc } from "#public/channels/same-environment-oidc.js";
@@ -73,7 +74,7 @@ export interface PhotonIMessageChannelConfig {
   /** Lazy Photon project credentials, such as `connectPhotonCredentials(...)`. */
   readonly credentials: PhotonIMessageChannelCredentials;
   /** Per-event overrides for the underlying Chat SDK channel. */
-  readonly events?: ChatSdkChannelEvents<{ imessage: iMessageAdapter }>;
+  readonly events?: ComposableChannelEvents<ChatSdkChannelEvents<{ imessage: iMessageAdapter }>>;
   /** Inbound message policy. Defaults to dispatching with the Photon message author's user auth. */
   readonly onMessage?: (
     ctx: PhotonInboundMessageContext,

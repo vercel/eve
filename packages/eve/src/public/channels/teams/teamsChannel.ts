@@ -1,3 +1,7 @@
+import {
+  composeChannelEvents,
+  type ComposableChannelEvents,
+} from "#public/channels/compose-events.js";
 import type { SessionHistoryMessage } from "#shared/session-history.js";
 import type { TeamsChannelCredentials } from "#public/channels/teams/credentials.js";
 export type { TeamsChannelCredentials } from "#public/channels/teams/credentials.js";
@@ -208,7 +212,7 @@ export interface TeamsChannelConfig {
   /** Bot Connector credentials (app id/password, tenant id, custom token provider, or a webhook verifier). Falls back to `MICROSOFT_APP_*`/`TEAMS_APP_*` env vars when omitted. */
   readonly credentials?: TeamsChannelCredentials;
   /** Overrides merged over the built-in event handlers (typing, replies, HITL cards, auth cards, terminal errors). */
-  readonly events?: TeamsChannelEvents;
+  readonly events?: ComposableChannelEvents<TeamsChannelEvents>;
   /** Inbound attachment handling. File ingestion is off unless `enabled: true`. */
   readonly files?: TeamsFilesConfig;
   /** Override the default webhook route path (`/eve/v1/teams`). */
@@ -296,7 +300,7 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
   const onMessage = config.onMessage ?? defaultOnMessage;
   const onAnswers =
     config.onAnswers ?? (config.onMessage === undefined ? defaultOnAnswers : rejectInput);
-  const mergedEvents: TeamsChannelEvents = { ...defaultEvents, ...config.events };
+  const mergedEvents = composeChannelEvents("teamsChannel", defaultEvents, config.events);
 
   return defineChannel<
     TeamsChannelState,
