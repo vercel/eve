@@ -223,9 +223,15 @@ describe("slackTurn", () => {
     );
   });
 
-  it("offers no user token without userAuth or to a caller who isn't a person", async () => {
+  it("offers no user token without userAuth, to a caller who isn't a person, or in a scheduled run", async () => {
     const person = buildSlackAuthContext({ channelId: "C0CHANNEL1", userId: "U0ALICE" });
     const bot = buildSlackAuthContext({ channelId: "C0CHANNEL1", userId: "B0BOT", isBot: true });
+    const scheduled = {
+      ...toolContext(person),
+      session: { auth: { current: person }, schedule: { definition: "daily-digest" } },
+    };
+
+    await expect(slackTurn(scheduled, { userAuth }).userRequest()).resolves.toBeUndefined();
 
     await expect(slackTurn(toolContext(person), {}).userRequest()).resolves.toBeUndefined();
     await expect(slackTurn(toolContext(bot), { userAuth }).userRequest()).resolves.toBeUndefined();

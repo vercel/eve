@@ -21,7 +21,8 @@ export interface SlackTurn {
   readonly request: SlackRequest;
   /**
    * Calls Slack with the caller's own user token, signing them in first when they have none.
-   * Resolves to undefined when the mount sets no `userAuth` or the caller isn't a person.
+   * Resolves to undefined when the mount sets no `userAuth`, the caller isn't a person, or the
+   * turn is a scheduled run.
    */
   readonly userRequest: () => Promise<SlackRequest | undefined>;
   readonly authorize: (
@@ -41,7 +42,10 @@ export function defaultAuthorize({ tool, channelId, slack }: SlackSearchAccessRe
 
 /** The parts of the tool context a Slack tool call reads. */
 export type SlackTurnContext = Pick<ToolContext, "getToken" | "requireAuth"> & {
-  readonly session: { readonly auth: { readonly current: SessionAuthContext | null } };
+  readonly session: {
+    readonly auth: { readonly current: SessionAuthContext | null };
+    readonly schedule?: ToolContext["session"]["schedule"];
+  };
 };
 
 function attribute(auth: SessionAuthContext, name: string): string | undefined {
@@ -124,8 +128,9 @@ export function slackTurn(ctx: SlackTurnContext, config: SlackSearchExtensionCon
     actionToken,
     request,
     async userRequest() {
-      // Only a person can sign in; schedules and service callers keep the bot-token results.
-      if (!userAuth || auth?.principalType !== "user") return undefined;
+      // Only a person who is there can sign in. Service callers and scheduled runs, including ones
+      // that run as the person who created them, keep the bot-token results.
+      if (!userAuth || auth?.principalType !== "user" || ctx.session.schedule) return undefined;
       const { token } = await ctx.getToken(userAuth);
       const withUserToken: SlackRequest = async (operation, body) => {
         const response = await callSlackApi({ api: config.api, botToken: token, operation, body });

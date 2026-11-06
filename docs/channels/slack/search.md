@@ -66,7 +66,7 @@ With `userAuth`, the tools use the caller's own Slack user token when:
 - the action token expired partway through the turn;
 - `read_conversation` reaches a public channel the bot isn't in.
 
-The first time, eve asks the person to sign in to Slack, waits, and then runs the tool again. If Slack later rejects the token, eve asks them to sign in again. Only a person can sign in, so schedules and other non-user callers keep the bot-token behavior. In a turn from Slack, the tools use a person's token only when it belongs to that turn's workspace. If they signed in from another workspace, the tools keep the bot-token behavior. A user token still reads public channels only: search sends `channel_types: public_channel`, and reads refuse private channels and DMs, even ones the person belongs to. `authorize` applies to these reads too.
+The first time, eve asks the person to sign in to Slack, waits, and then runs the tool again. If Slack later rejects the token, eve asks them to sign in again. Only a person who is there can sign in, so scheduled runs, even ones that run as the person who created them, and other non-user callers keep the bot-token behavior. In a turn from Slack, the tools use a person's token only when it belongs to that turn's workspace. If they signed in from another workspace, the tools keep the bot-token behavior. A user token still reads public channels only: search sends `channel_types: public_channel`, and reads refuse private channels and DMs, even ones the person belongs to. `authorize` applies to these reads too.
 
 Give the user sign-in these Slack user token scopes: `search:read.public`, `channels:read`, and `channels:history`.
 
