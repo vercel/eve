@@ -419,12 +419,17 @@ async function permalinkFor(request: SlackRequest, channel: string, ts: string) 
   }
 }
 
-async function latestMessageTs(request: SlackRequest, channel: string) {
+/** The channel's newest message, or undefined when Slack couldn't say. */
+async function emptyWindowCheck(
+  request: SlackRequest,
+  channel: string,
+): Promise<{ readonly channelLatestTs?: string } | undefined> {
   try {
     const response = await call(request, "conversations.history", { channel, limit: 1 });
-    return records(response.messages)
+    const channelLatestTs = records(response.messages)
       .map((message) => str(message.ts))
       .find(Boolean);
+    return { channelLatestTs };
   } catch {
     return undefined;
   }
@@ -520,7 +525,7 @@ export async function readSlackConversation(
   // message tells them apart, so the model does not report "no activity" by mistake.
   const emptyWindow =
     !threadTs && messages.length === 0 && (oldest || latest)
-      ? { channelLatestTs: await latestMessageTs(request, channelId) }
+      ? await emptyWindowCheck(request, channelId)
       : undefined;
   const anchor = threadTs ?? messages[0]?.ts;
 

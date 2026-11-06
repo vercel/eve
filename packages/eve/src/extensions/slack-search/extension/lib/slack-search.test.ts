@@ -382,6 +382,29 @@ describe("readSlackConversation", () => {
     await expect(read()).resolves.toMatchObject({ channel: { id: "C0LAUNCHB" } });
   });
 
+  it("says nothing about the channel's activity when the empty-window check fails", async () => {
+    let historyCalls = 0;
+    const request: SlackRequest = async (operation) => {
+      if (operation === "conversations.info") return { ok: true, channel: { is_member: true } };
+      if (operation === "conversations.history") {
+        historyCalls += 1;
+        return historyCalls === 1
+          ? { ok: true, messages: [] }
+          : { ok: false, error: "fatal_error" };
+      }
+      return { ok: false, error: "unknown_method" };
+    };
+
+    const read = await readSlackConversation(
+      request,
+      { channel: "C0QUIET01", oldest: "2026-01-01T00:00:00Z" },
+      options,
+    );
+
+    expect(read).toMatchObject({ messages: [] });
+    expect("emptyWindow" in read && read.emptyWindow).toBeFalsy();
+  });
+
   it("rejects a time window that ends before it starts", async () => {
     const slack = fakeSlack({});
 
