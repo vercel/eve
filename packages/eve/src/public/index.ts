@@ -11,8 +11,6 @@ export {
   type AgentModelOptionsDefinition,
   type AgentReasoningDefinition,
   type AgentStaticModelDefinition,
-  type AgentSchedulesDefinition,
-  type AgentVercelSchedulesMode,
   type AgentWorkflowDefinition,
   type AgentWorkflowRetentionDefinition,
   type AgentWorkflowWorldDefinition,

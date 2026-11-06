@@ -3,7 +3,6 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { createEveWorkflowQueueTrigger } from "#internal/workflow/queue-namespace.js";
 import type { HostRouteTable, HostRouteVercelFunction } from "#internal/nitro/host/host-routes.js";
-import type { AgentVercelSchedulesMode } from "#shared/agent-definition.js";
 import { createEveScheduleQueueTrigger } from "#internal/schedules/consumer-route.js";
 import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/flow-route.js";
 import {
@@ -33,7 +32,7 @@ export function createEveVercelOptions(input: {
   enabled: boolean;
   publicRoutePrefix?: string;
   routeTable: Pick<HostRouteTable, "cronHandlerRoute" | "routes">;
-  schedules?: AgentVercelSchedulesMode;
+  vercelSchedules?: boolean;
   workspaceMember?: boolean;
 }) {
   if (!input.enabled) {
@@ -68,8 +67,9 @@ export function createEveVercelOptions(input: {
     ...(input.routeTable.cronHandlerRoute !== undefined && {
       cronHandlerRoute: input.routeTable.cronHandlerRoute,
     }),
-    // Explicit, so an inherited `NITRO_VERCEL_SCHEDULES` can't switch delivery.
-    schedules: input.schedules ?? false,
+    // Schedules run through a private function only Vercel Schedules can invoke.
+    // Explicit, so an inherited `NITRO_VERCEL_SCHEDULES` can't change delivery.
+    schedules: input.vercelSchedules === true ? ("private" as const) : (false as const),
     functionRules: Object.fromEntries(
       Object.entries(QUEUE_TRIGGERS).flatMap(([vercelFunction, createTrigger]) =>
         input.routeTable.routes

@@ -80,7 +80,7 @@ type HostRoute =
 export interface HostRouteTable {
   readonly routes: readonly HostRoute[];
   readonly scheduleTasks: readonly ScheduleRegistration[];
-  /** The Vercel cron path; the Vercel preset registers its handler. */
+  /** The Vercel Cron Jobs path; the Vercel preset registers its handler. */
   readonly cronHandlerRoute?: string;
 }
 
@@ -90,6 +90,8 @@ interface HostRouteTableInput {
   readonly mode: "development" | "production";
   readonly scheduleRegistrations: readonly ScheduleRegistration[];
   readonly vercel: boolean;
+  /** Vercel Schedules invokes a private function, so no cron route is needed. */
+  readonly vercelSchedules?: boolean;
 }
 
 /** Every route, task, and cron path eve's Nitro host serves, in registration order. */
@@ -151,7 +153,9 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
   return {
     routes: routes.map((route) => withHeadAllow(route, routes)),
     scheduleTasks,
-    ...(scheduleTasks.length > 0 && input.vercel && { cronHandlerRoute: createCronHandlerRoute() }),
+    ...(scheduleTasks.length > 0 &&
+      input.vercel &&
+      input.vercelSchedules !== true && { cronHandlerRoute: createCronHandlerRoute() }),
   };
 }
 

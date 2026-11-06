@@ -372,24 +372,6 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow('"experimental.workflow.retention" must be 0 or "default"');
   });
 
-  it.each(["private", "public", false] as const)("accepts Vercel schedules mode %j", (value) => {
-    const definition = normalizeAgentDefinition(
-      { model: "openai/gpt-5.5", experimental: { schedules: { vercel: value } } },
-      FAILURE_MESSAGE,
-    );
-
-    expect(definition.experimental?.schedules).toEqual({ vercel: value });
-  });
-
-  it.each(["cron", true, null])("rejects invalid Vercel schedules mode %j", (value) => {
-    expect(() =>
-      normalizeAgentDefinition(
-        { model: "openai/gpt-5.5", experimental: { schedules: { vercel: value } } },
-        FAILURE_MESSAGE,
-      ),
-    ).toThrow('"experimental.schedules.vercel" must be "private", "public", or false.');
-  });
-
   it.each([true, false])("rejects the removed subagentPersistentSessions flag", (value) => {
     expect(() =>
       normalizeAgentDefinition(

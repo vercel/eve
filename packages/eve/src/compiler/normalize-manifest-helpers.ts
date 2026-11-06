@@ -72,11 +72,6 @@ export function assertRootOnlyConfig(
       `Workflow world configuration is only supported on the root agent config. Remove "experimental.workflow.world" from "${agentId}".`,
     );
   }
-  if (config.experimental?.schedules !== undefined) {
-    throw new Error(
-      `Schedule delivery configuration is only supported on the root agent config. Remove "experimental.schedules" from "${agentId}".`,
-    );
-  }
 }
 
 export function assertApplicationOverlayCanApplyToAllNodes(logicalPaths: readonly string[]): void {

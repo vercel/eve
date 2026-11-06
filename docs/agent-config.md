@@ -485,7 +485,6 @@ World's default.
 Retention applies per agent. A [subagent](./subagents) with its own session uses
 its own explicit value or derives retention from its resolved trace decision,
 including any inherited content ceiling. `experimental.workflow.world` is root-only.
-`experimental.schedules` is root-only too.
 
 At `0`, supporting Worlds delete run and step inputs, outputs, and errors;
 event payloads; and stream contents when the run reaches a terminal state. The
@@ -511,7 +510,7 @@ All other `defineAgent` fields are optional. For the exported types, see the [Ty
 | `reasoning`    | `AgentReasoningDefinition`            | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                                                                                       |
 | `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call, and [`promptCache`](#prompt-caching) settings.                                                                                                                                                                                                               |
 | `limits`       | `AgentLimitsDefinition`               | field-specific   | eve's [runtime limits](#runtime-limits).                                                                                                                                                                                                                                                                            |
-| `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins: [`schedules.vercel`](./schedules#vercel-schedules), [`workflow.world`](#workflow-world), [`workflow.modelCallsPerStep`](#workflow-checkpoint-batching), and [`workflow.retention`](#run-data-retention).                                                                                          |
+| `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins: [`workflow.world`](#workflow-world), [`workflow.modelCallsPerStep`](#workflow-checkpoint-batching), and [`workflow.retention`](#run-data-retention).                                                                                                                                              |
 | `build`        | `{ externalDependencies?: string[] }` | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages unbundled and includes them in the hosted output.                                                                                                                                                                                     |
 | `tool`         | `boolean \| "deferred"`               | `true`           | Exposes this agent to its parent model as a tool. `"deferred"` hides it from the tool list until the model finds it with `eve__search` and calls it with `eve__tool`. On the root agent, controls the built-in `agent` tool. With `false`, authored workflow tools can still call a subagent through `ctx.agent()`. |
 

@@ -167,7 +167,7 @@ describe("createEveVercelOptions", () => {
     );
   });
 
-  it("keeps Vercel Cron Jobs unless the agent opts into Vercel Schedules", () => {
+  it("runs schedules through private Vercel Schedules only when asked", () => {
     expect(
       createEveVercelOptions({ agentName: "test-agent", enabled: true, routeTable })?.schedules,
     ).toBe(false);
@@ -176,7 +176,7 @@ describe("createEveVercelOptions", () => {
         agentName: "test-agent",
         enabled: true,
         routeTable,
-        schedules: "private",
+        vercelSchedules: true,
       })?.schedules,
     ).toBe("private");
   });

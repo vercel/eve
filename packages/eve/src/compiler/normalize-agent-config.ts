@@ -200,10 +200,6 @@ function normalizeExperimentalDefinition(
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
 
-  if (experimental.schedules !== undefined) {
-    compiledExperimental.schedules = { vercel: experimental.schedules.vercel };
-  }
-
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {
       modelCallsPerStep: experimental.workflow.modelCallsPerStep,

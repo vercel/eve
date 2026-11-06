@@ -295,12 +295,6 @@ async function buildApplicationInWorkspace(
         ),
       )
     : undefined;
-  const schedulesMode = preparedHost.compileResult.manifest.config.experimental?.schedules?.vercel;
-  if (schedulesMode && (servicePrefix !== undefined || options.vercelServiceOutput !== undefined)) {
-    throw new Error(
-      `"experimental.schedules.vercel" is not supported yet when eve builds as a Vercel service, such as with withEve. Remove it to deliver schedules with Vercel Cron Jobs.`,
-    );
-  }
   // A service routed at the protocol path has no additional public mount.
   // Keep servicePrefix intact for function-output routing below.
   const normalizedServicePrefix = normalizePublicRoutePrefix(servicePrefix);
@@ -323,6 +317,7 @@ async function buildApplicationInWorkspace(
       kind: "production",
       preset: isVercelBuild ? "vercel" : undefined,
       publicRoutePrefix,
+      vercelService: servicePrefix !== undefined || options.vercelServiceOutput !== undefined,
       workspaceMember: options.workspaceMember,
     },
     { buildDir: workspace.nitro.buildDir, outputDir: workspace.publication.output.stagedDir },
