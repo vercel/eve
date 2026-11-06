@@ -141,8 +141,9 @@ export function createScopes(input: {
   ): TraceReference | undefined {
     const ids = telemetry.ids;
     if (!input.durable || ids === undefined) return undefined;
-    // Re-executed model calls and memory reads are new work and get new IDs.
-    if (data.type === "model" || data.type === "memory") return undefined;
+    // Re-executed model calls, decisions, and memory reads are new work and get new IDs.
+    if (data.type === "model" || data.type === "decision" || data.type === "memory")
+      return undefined;
     if (data.type === "activation" && parent !== undefined)
       return {
         traceId: parent.traceId,

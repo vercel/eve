@@ -9,6 +9,7 @@ export const invocationName = (name?: string) =>
   name === undefined ? "invoke_agent" : `invoke_agent ${name}`;
 const modelName = (name: string) => `chat ${name}`;
 const toolName = (name: string) => `execute_tool ${name}`;
+const decisionName = (modelId: string) => `decision ${modelId}`;
 const SPAN_NAMES = {
   approval: "agent.approval",
   step: "agent.step",
@@ -276,6 +277,24 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
         : { ...data, options: { ...data.options, request: undefined } };
     },
   },
+  decision: {
+    parents: ["activation", "step", "tool"],
+    prepare({ options }, context) {
+      return {
+        name: decisionName(options.modelId),
+        kind: "CLIENT",
+        attributes: {
+          // A decision made outside any run has no run identity to record.
+          ...(context.identity.runId === "" ? undefined : context.attributes),
+          ...namingAttributes(decisionName(options.modelId), "decision"),
+          "gen_ai.agent.name": context.identity.agentName,
+          "gen_ai.operation.name": "decision",
+          "gen_ai.provider.name": options.provider,
+          "gen_ai.request.model": options.modelId,
+        },
+      };
+    },
+  },
   memory: {
     parents: ["activation", "step", "tool"],
     prepare({ options }, context) {
@@ -353,7 +372,10 @@ export function completeScope(
   if (result.usage !== undefined)
     applyAttributes(
       span,
-      usageAttributes(result.usage, data.type === "activation" || data.type === "model"),
+      usageAttributes(
+        result.usage,
+        data.type === "activation" || data.type === "model" || data.type === "decision",
+      ),
     );
   kind(data).complete?.(span, data, result, { capture, startTimeMs, serializer, outcome });
   if (result.failed) span.fail(result.error, result.errorCode);
