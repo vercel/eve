@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { existsSync, statSync, unlinkSync, type Stats } from "node:fs";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
@@ -171,13 +171,46 @@ async function writeEveDevServerRegistry(
   );
 }
 
+function removeOwnedEveDevServerLock(lockPath: string, ownedStat: Stats): void {
+  try {
+    // Keep the identity check and unlink together, without yielding to another waiter.
+    const currentStat = statSync(lockPath);
+    if (currentStat.dev === ownedStat.dev && currentStat.ino === ownedStat.ino) {
+      unlinkSync(lockPath);
+    }
+  } catch (error) {
+    if (!isNodeErrorWithCode(error, "ENOENT")) {
+      throw error;
+    }
+  }
+}
+
+function isLockOwnerAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !isNodeErrorWithCode(error, "ESRCH");
+  }
+}
+
 async function removeStaleEveDevServerLock(lockPath: string): Promise<void> {
   try {
-    const lockStat = await stat(lockPath);
-    if (Date.now() - lockStat.mtimeMs > DEV_SERVER_STALE_LOCK_MS) {
-      await rm(lockPath, {
-        force: true,
-      });
+    const lockFile = await open(lockPath, "r");
+    try {
+      const lockStat = await lockFile.stat();
+      if (Date.now() - lockStat.mtimeMs <= DEV_SERVER_STALE_LOCK_MS) {
+        return;
+      }
+
+      const pid = Number((await lockFile.readFile("utf8")).trim());
+      if (Number.isSafeInteger(pid) && pid > 0 && isLockOwnerAlive(pid)) {
+        return;
+      }
+
+      removeOwnedEveDevServerLock(lockPath, lockStat);
+    } finally {
+      await lockFile.close();
     }
   } catch (error) {
     if (!isNodeErrorWithCode(error, "ENOENT")) {
@@ -202,14 +235,21 @@ async function acquireEveDevServerLock(
   while (true) {
     try {
       const lockFile = await open(lockPath, "wx");
-      await lockFile.writeFile(`${String(process.pid)}\n`);
-      await lockFile.close();
+      try {
+        await lockFile.writeFile(`${String(process.pid)}\n`);
+        const lockStat = await lockFile.stat();
 
-      return async () => {
-        await rm(lockPath, {
-          force: true,
-        });
-      };
+        return async () => {
+          try {
+            removeOwnedEveDevServerLock(lockPath, lockStat);
+          } finally {
+            await lockFile.close();
+          }
+        };
+      } catch (error) {
+        await lockFile.close();
+        throw error;
+      }
     } catch (error) {
       if (!isNodeErrorWithCode(error, "EEXIST")) {
         throw error;
