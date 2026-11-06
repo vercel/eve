@@ -1,3 +1,5 @@
+import type { Runtime } from "#channel/types.js";
+import { usesWorldHost, worldHostRuntime } from "#internal/nitro/routes/world-host.js";
 import { expectScheduleRun, ScheduleDispatcher } from "#channel/schedule.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
@@ -39,6 +41,7 @@ export async function dispatchScheduleTask(
   return await dispatchScheduleTaskFromArtifacts(
     taskName,
     resolveNitroCompiledArtifactsSource(config),
+    usesWorldHost(config) ? await worldHostRuntime(config) : undefined,
   );
 }
 
@@ -49,13 +52,15 @@ export async function dispatchScheduleTask(
 export async function dispatchScheduleTaskFromArtifacts(
   taskName: string,
   compiledArtifactsSource: RuntimeCompiledArtifactsSource,
+  /** Where its sessions start: Workflow's runtime unless the server runs a World host. */
+  hostRuntime?: Runtime,
 ): Promise<{ scheduleId: string; sessionIds: readonly string[] }> {
   const schedule = await loadResolvedCompiledScheduleByTaskName(taskName, {
     compiledArtifactsSource,
   });
 
   const bundle = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
-  const runtime = createWorkflowRuntime({ compiledArtifactsSource });
+  const runtime = hostRuntime ?? createWorkflowRuntime({ compiledArtifactsSource });
   const dispatcher = new ScheduleDispatcher({
     runtime,
     channels: bundle.graph.root.channels,

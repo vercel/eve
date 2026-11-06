@@ -126,6 +126,7 @@ export async function createRun(
   kind: EntityKind,
   key: string,
   meta: unknown,
+  options: { readonly purgeOnEnd?: boolean } = {},
 ): Promise<Writer | undefined> {
   const runId = runIdOf(kind, key);
   // First, as it loads a World that loads lazily, whose capabilities are known from then on.
@@ -139,6 +140,11 @@ export async function createRun(
         input: encoder.encode(JSON.stringify(meta ?? {})),
         workflowName: kind.workflowName,
         ...(kind.executionContext !== undefined && { executionContext: kind.executionContext }),
+        // A run whose retention is zero has its data deleted by the World once it ends.
+        ...(options.purgeOnEnd === true && {
+          allowReservedAttributes: true,
+          attributes: { $retention: "0" },
+        }),
       },
       eventType: "run_created",
       ...(specVersion !== undefined && { specVersion }),

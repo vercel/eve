@@ -1,4 +1,5 @@
 import { createChannelAddress } from "#channel/channel-address.js";
+import { RunExpiredError } from "#compiled/@workflow/errors/index.js";
 import { ScheduleDispatcher } from "#channel/schedule.js";
 import type { Runtime, SessionAuthContext } from "#channel/types.js";
 import { codeAgentOf } from "#embed/agent.js";
@@ -37,6 +38,7 @@ import { worldDurableHost } from "./durable-host.js";
 import { fireDueSchedules } from "./dynamic-schedules.js";
 import { registerWorldScheduleStore, worldScheduleStore } from "./schedule-store.js";
 import { sessionActivation, type SessionMessage, type SessionStart } from "./driver.js";
+import { prepareInitialEntry } from "#execution/initial-entry.js";
 import { createFrontRuntime } from "./front.js";
 
 // A World host (experimental): agents defined in code, whose sessions run only when something
@@ -81,6 +83,11 @@ export interface WorldHostOptions {
    * its origin, such as a deployment's URL. Without one, a tool that needs a sign-in can't ask.
    */
   readonly callbackBaseUrl?: string;
+  /**
+   * The queue namespace its activations travel in: a deployed agent's own (its queue function's
+   * trigger names it). A default shared by World hosts otherwise.
+   */
+  readonly queueNamespace?: string;
   /** Told how each delivery that ran a session ended, and how long it ran. */
   readonly observe?: (delivery: {
     readonly sessionId: string;
@@ -165,14 +172,35 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
   }
   for (const [name, source] of Object.entries(options.compiledAgents ?? {}))
     add(name, { compiled: source });
-  const entities = sessionEntities(world);
+  const entities = sessionEntities(world, options.queueNamespace);
   const activation = entities.activation;
   if (activation === undefined) throw new Error("A World host needs a World with a queue.");
   const fronts = new Map<string, Runtime>();
   const runtime = (agent: string): Runtime => {
     if (!agents.has(agent)) throw new Error(`This host has no agent "${agent}".`);
     let front = fronts.get(agent);
-    if (front === undefined) fronts.set(agent, (front = createFrontRuntime({ agent, entities })));
+    if (front === undefined)
+      fronts.set(
+        agent,
+        (front = createFrontRuntime({
+          agent,
+          entities,
+          // As the session's start will decide it: its agent's retention, or its trace capture.
+          async purgesOnEnd(input) {
+            const hosted = agents.get(agent)!;
+            const config =
+              "compiled" in hosted
+                ? { compiledArtifactsSource: hosted.compiled }
+                : { agent: hosted.code };
+            const release = "code" in hosted ? holdSessionAgent(hosted.code) : () => {};
+            try {
+              return (await prepareInitialEntry(config, input)).entry.retention === 0;
+            } finally {
+              release();
+            }
+          },
+        })),
+      );
     return front;
   };
   const lineStore = entityLineStore(entities);
@@ -228,6 +256,7 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
       },
       ...(options.callbackBaseUrl !== undefined && { callbackBaseUrl: options.callbackBaseUrl }),
       entities,
+      runtime: (name) => runtime(name),
       world,
     }),
     {
@@ -324,10 +353,18 @@ export function createWorldHost(options: WorldHostOptions): WorldHost {
 
 /** A session's stream as its entity's, for readers in any process. */
 function entityLineStore(entities: Entities): SessionLineStore {
+  // A purged session's stream may have chunks left behind on its World: none of it is read.
+  const assertReadable = async (sessionId: string) => {
+    if (await entities.purged(sessionId))
+      throw new RunExpiredError("Session history is no longer available.", sessionId, "completed");
+  };
   return {
-    async assertReadable() {},
+    assertReadable,
     readable: (sessionId, startIndex) => entities.read(sessionId, startIndex),
-    tail: async (sessionId) => (await entities.streamLength(sessionId)) - 1,
+    async tail(sessionId) {
+      await assertReadable(sessionId);
+      return (await entities.streamLength(sessionId)) - 1;
+    },
   };
 }
 

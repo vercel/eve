@@ -113,6 +113,8 @@ export interface InProcessRuntime extends Runtime {
   nextTimer(): number | undefined;
   /** Lets running steps finish and starts no other, so `dispose` stops at a step boundary. */
   drain(): Promise<void>;
+  /** Whether `sessionId` ran here and ended (not stopped by a suspension). */
+  ended(sessionId: string): boolean;
   /**
    * Delivers `payload` to the hook `token` names, physical or logical, as a callback route's
    * resume would: `delivered`, `gone` for one it held once, `undefined` for one it never held.
@@ -226,12 +228,16 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
     return record;
   };
 
+  // Sessions that ended here, rather than stopped by a suspension.
+  const endedHere = new Set<string>();
   const run = (record: HostedSession, boot: SessionBoot, inbox: SessionInboxHandle): void => {
     const { sessionId } = boot;
     const loop = startPreparedSession(boot, inbox, host.sessionHost(record));
     sessions.set(sessionId, { loop, record });
     const session = loop.finished.then(
-      () => undefined,
+      () => {
+        if (!host.suspended()) endedHere.add(sessionId);
+      },
       (error: unknown) => {
         // Another process continued the session: nothing of this one's reached the World after.
         if (isTakenOver(error))
@@ -298,6 +304,8 @@ function runtimeOn(host: InProcessHost, config: SessionRuntimeConfig): InProcess
     nextTimer: () => timers.next(),
 
     drain: () => host.drain(),
+
+    ended: (sessionId) => endedHere.has(sessionId),
 
     async deliver(token, payload) {
       return (await host.inboxes.deliver(logicalSessionInboxToken(token) ?? token, payload))?.kind;
