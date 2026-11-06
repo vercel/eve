@@ -18,9 +18,11 @@ import {
   nextLinePosition,
   recordPublishedLine,
 } from "#harness/session-machine/current.js";
+import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
 import {
   createInstrumentationHooks,
   type InstrumentationProviderDefinition,
+  type InstrumentationScope,
 } from "#instrumentation/lifecycle.js";
 import {
   createInstrumentationHandleEvent,
@@ -102,6 +104,8 @@ function session(
     /** Commits as a step that relays an exchange for a child session or a workflow run. */
     relay: (...facts: SessionEvent[]) =>
       contextStorage.run(ctx, () => relayHandle(commitOf(facts))),
+    /** Runs a tool's `execute` the way the AI SDK bridge does, inside its call's span. */
+    runTool: otel.runInContext,
     async spans(): Promise<readonly ReadableSpan[]> {
       await provider.forceFlush();
       return exporter.getFinishedSpans();
@@ -371,6 +375,7 @@ describe("a session's spans, from its committed lines", () => {
       const span = exported.find((each) => each.name === "agent.approval");
       expect(span?.attributes["agent.approval.kind"]).toBe(kind);
       expect(span?.attributes["eve.connection.name"]).toBe(connection);
+      expect(span?.attributes["gen_ai.agent.name"]).toBe("weather");
       expect(JSON.stringify(span?.attributes)).not.toContain("oauth");
     },
   );
@@ -412,6 +417,86 @@ describe("a session's spans, from its committed lines", () => {
       expect(heard).toEqual([]);
     },
   );
+
+  it.each([
+    ["a failure's reason code", "failed", "access_denied", "access_denied"],
+    ["a failure's error message", "failed", "Calendar said: token abc123 is invalid", undefined],
+    // Alice sent a new message, so the sign-in ended without anyone refusing it.
+    ["a withdrawal's reason", "withdrawn", "superseded-by-message", undefined],
+  ])("records an authorization reason for %s", async (_, outcome, reason, recorded) => {
+    const { commit, spans } = session();
+    await commit(...opening.slice(0, 2));
+    await commit({
+      data: {
+        interactionId: "i_held",
+        request: { kind: "sign-in", prompt: "Sign in to Calendar", signIn: { name: "calendar" } },
+        subject: turn,
+      },
+      scope: turn,
+      type: "interaction.opened",
+    } as SessionEvent);
+    await commit({
+      data: { interactionId: "i_held", outcome, reason },
+      scope: turn,
+      type: "interaction.settled",
+    } as SessionEvent);
+    await commit(turnSettled({ outcome: "completed" }));
+
+    const span = (await spans()).find((each) => each.name === "agent.approval");
+    expect(span?.attributes["agent.approval.outcome"]).toBe(
+      outcome === "failed" ? "failed" : "ignored",
+    );
+    expect(span?.attributes["agent.connection.authorization.reason"]).toBe(recorded);
+    expect(JSON.stringify(span?.attributes)).not.toContain("abc123");
+  });
+
+  it("records which connection refused a call and why, even when the trace keeps no errors", async () => {
+    const scopes = new Map<string, InstrumentationScope>();
+    const { commit, runTool, spans } = session(
+      () => ({ emit: true, recordInputs: false, recordOutputs: false }),
+      undefined,
+      undefined,
+      undefined,
+      [
+        {
+          name: "scopes",
+          events: { "call.requested": (event) => void scopes.set(event.callId, event.scope) },
+        },
+      ],
+    );
+    await commit(...opening);
+    await commit(requested("call_gh", "code__gh"));
+    // A turn a schedule started can't ask Alice to sign in, so the call fails without a prompt.
+    const refused = new ConnectionAuthorizationFailedError("github", {
+      message: "Alice has no GitHub token in this run.",
+      reason: "sign_in_unavailable",
+      retryable: false,
+    });
+    await expect(
+      runTool(
+        {
+          callId: "call_gh",
+          idempotencyKey: "tool:call_gh",
+          scope: scopes.get("call_gh")!,
+          toolName: "code__gh",
+          type: "tool.call",
+        },
+        () => Promise.reject(refused),
+      ),
+    ).rejects.toBe(refused);
+    await commit(
+      settled("call_gh", {
+        error: { code: "ACTION_RESULT_FAILED", message: refused.message, name: refused.name },
+        outcome: "failed",
+      }),
+    );
+    await commit(turnSettled({ outcome: "completed" }));
+
+    const tool = (await spans()).find((span) => span.name === "execute_tool code__gh");
+    expect(tool?.attributes["eve.connection.name"]).toBe("github");
+    expect(tool?.attributes["agent.connection.authorization.reason"]).toBe("sign_in_unavailable");
+    expect(JSON.stringify(tool?.attributes)).not.toContain("Alice");
+  });
 
   it.each([
     {
