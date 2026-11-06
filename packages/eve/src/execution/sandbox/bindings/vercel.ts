@@ -213,13 +213,19 @@ export function createVercelSandbox(
         input: ensureSessionInput,
         session: await ensureSession(ensureSessionInput),
       });
-      // Template-less sessions run base setup with open egress, so the policy
-      // from open() or else the environment applies only once it finishes.
+      /*
+       * Template-less sessions run base setup with open egress, so the policy
+       * from open() or else the environment applies only once it finishes.
+       * An existing sandbox gets it too: the open that created it may have
+       * stopped before applying it, or may still be running base setup.
+       */
       const networkPolicy = sessionCreateOptions.networkPolicy;
-      if (session.created && artifact.snapshotId === undefined && networkPolicy !== undefined) {
+      if (artifact.snapshotId === undefined && networkPolicy !== undefined) {
         try {
           await applyInitialVercelNetworkPolicy(session.sandbox, networkPolicy);
         } catch (error) {
+          // An existing sandbox may hold session work; failing the open keeps it unused.
+          if (!session.created) throw error;
           try {
             await deleteNamedVercelSandbox({
               createOptions: sessionCreateOptions,
@@ -256,7 +262,8 @@ export function createVercelSandbox(
 /**
  * The session's sandbox name. Sandbox names are unique within a Vercel
  * project, so the session id alone keeps it stable across deployments and
- * open options; those apply only when the sandbox is created.
+ * open options; those apply only when the sandbox is created, except a
+ * template-less session's network policy, which applies after base setup.
  */
 function vercelSessionName(sessionId: string): string {
   return `eve-sbx-vercel-${createSandboxProviderIdentity({ sessionId, version: 2 }).slice(0, 32)}`;

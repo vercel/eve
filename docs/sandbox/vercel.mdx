@@ -53,7 +53,7 @@ Outside Vercel and without a linked project, such as in CI or on a self-hosted s
 
 ## Live sandbox options
 
-`open()` accepts Vercel compute resources, timeout, environment variables, network policy, and Drive mounts. They apply only when eve creates the sandbox. Reopening the sandbox or resuming it keeps the original environment variables, mounts, and network policy. Pass `env` to `run()` or `spawn()` to override a variable for one command, or call `setNetworkPolicy()` to change the live policy.
+`open()` accepts Vercel compute resources, timeout, environment variables, network policy, and Drive mounts. They apply only when eve creates the sandbox. Reopening the sandbox or resuming it keeps the original environment variables, mounts, and network policy. A sandbox created without a snapshot is the exception for network policy: it starts with open network access for base setup, so eve applies the network policy from `open()` or the environment after base setup each time the selector opens the sandbox, including the retry after a failed initialization. Pass `env` to `run()` or `spawn()` to override a variable for one command, or call `setNetworkPolicy()` to change the live policy.
 
 Set `image`, `source`, `tags`, project credentials, and `fetch` on the environment, because `open()` doesn't accept them. eve sets the sandbox's name and persistence itself.
 

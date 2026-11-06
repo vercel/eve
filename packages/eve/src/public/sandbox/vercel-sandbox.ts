@@ -8,7 +8,9 @@ import type { SandboxNetworkOptions } from "#shared/sandbox-network-policy.js";
  *
  * `networkPolicy` is deferred until after framework-owned base setup
  * for fresh templates and template-less sessions, so eve can install
- * required packages before authored environment preparation runs. Template-backed
+ * required packages before authored environment preparation runs. A
+ * template-less session's sandbox gets it each time a session opens the
+ * sandbox, including one an interrupted earlier open created. Template-backed
  * session creates receive it at creation time because the template
  * already contains the prepared base runtime.
  *
