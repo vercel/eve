@@ -36,6 +36,8 @@ description of what it owns. Pick the source that owns the answer:
 - Use `search_slack` for past discussions, decisions, and who said what in
   public channels. Its authorization expires a few minutes after the message,
   so run every search you expect to need before reading results in depth.
+  Use `read_slack_conversation` to read a match's thread or a channel someone
+  names.
 
 ## Write for Slack
 

@@ -23,6 +23,7 @@ agent/
   skills/company-context/SKILL.md # fill in your teams, glossary, and sources
   tools/no_reply.ts              # lets the agent stay quiet in followed threads
   tools/search_slack.ts          # searches public Slack channels
+  tools/read_slack_conversation.ts # reads a public channel or thread
   sandbox.ts                     # Vercel Sandbox with coding tools installed
   lib/slack.ts                   # shared Slack credentials and workspace check
   lib/github.ts                  # GitHub connector and firewall credential broker
@@ -42,7 +43,8 @@ agent/
 - **Slack search.** `search_slack` uses Slack's
   [Real-time Search API](https://docs.slack.dev/apis/web-api/real-time-search-api)
   to find relevant messages in public channels, best match first, with
-  permalinks the agent cites. See [Slack search](#slack-search).
+  permalinks the agent cites, and `read_slack_conversation` reads a match's
+  thread or a named channel. See [Slack search](#slack-search).
 - **Workspace gate.** With `SLACK_TEAM_ID` set, only members of your workspace
   can start a conversation, so guests in Slack Connect channels can't.
 - **Memory.** Two [file memory](https://eve.dev/docs/memory/file) slots: a
@@ -88,7 +90,8 @@ To follow threads without a mention, the Slack app also needs the
 connector's **Advanced** settings under **Trigger Event Types** and **Bot
 Scopes**. Without them, people mention the agent for each follow-up.
 
-For Slack search, also add the `search:read.public` bot scope the same way.
+For Slack search and reading channels, also add the `search:read.public` and
+`channels:read` bot scopes the same way.
 
 Invite the app to a channel and mention it. Model calls use AI Gateway through
 the linked project, or `AI_GATEWAY_API_KEY` in `.env.local`.
@@ -105,6 +108,11 @@ doesn't work in scheduled tasks, followed-thread replies without a mention, or
 non-Slack channels, and the token expires a few minutes after the message. The
 tool tells the agent when search is unavailable so it reports the gap instead
 of claiming nothing was found.
+
+`agent/tools/read_slack_conversation.ts` reads one public channel's recent
+messages, or one thread, with the bot token. It needs no action token, so it
+also works in scheduled tasks, but Slack only lets the bot read channels it has
+been invited to. It refuses private channels and DMs.
 
 The Slack channel copies the token into each turn's auth as the `action_token`
 attribute. That copy is a temporary workaround in `agent/channels/slack.ts`,

@@ -1,4 +1,5 @@
 import { connectSlackCredentials } from "@vercel/connect/eve";
+import { callSlackApi } from "eve/channels/slack";
 
 // SLACK_CONNECTOR is provisioned by `eve add channel/slack` or the "Deploy with
 // Vercel" button. To create one yourself, run
@@ -19,4 +20,19 @@ export function isHomeTeam(teamId: string | undefined): boolean {
 /** The workspace that issued a Slack-derived auth context, from its `slack:<team>` issuer. */
 export function slackTeamId(auth: { readonly issuer?: string } | null | undefined) {
   return auth?.issuer?.startsWith("slack:") ? auth.issuer.slice("slack:".length) : undefined;
+}
+
+/** Calls the Slack Web API with the app's bot token for one workspace. Resolves to Slack's JSON. */
+export async function callSlack<T extends object = Record<string, unknown>>(
+  teamId: string,
+  operation: string,
+  body: Record<string, unknown>,
+) {
+  const response = await callSlackApi({
+    botToken: slackCredentials.botToken,
+    context: { teamId },
+    operation,
+    body,
+  });
+  return response as { ok: boolean; error?: string } & Partial<T>;
 }
