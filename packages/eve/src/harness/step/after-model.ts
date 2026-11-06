@@ -123,6 +123,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   if (workflowToolCalls.length > 0 || approvalRequests.length > 0 || authorizationInterrupt) {
     const { sequence, stepIndex, turnId } = step.position();
     const dispatched = collectWorkflowCalls({
+      clearances: result.policyApprovals ?? {},
       session: step.session,
       toolCalls: workflowToolCalls,
       tools: input.catalog,
@@ -134,10 +135,7 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
       // A suspended response commits once every call it made has a result, so a call that will
       // never get one is answered now.
       messages: answerCallsThatWontRun(responseMessages, result),
-      tasks: dispatched.workflowRequests.map((task) => ({
-        ...task,
-        clearedBy: result.policyApprovals?.[task.callId]?.clearedBy,
-      })),
+      tasks: dispatched.workflowRequests,
     };
     if (approvalRequests.length > 0) {
       await askStepApprovals(step, { ...parked, requests: approvalRequests, tools: input.catalog });

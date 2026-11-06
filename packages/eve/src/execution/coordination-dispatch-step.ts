@@ -23,7 +23,14 @@ import {
   startsEveryRun,
   startTaskRun,
 } from "#execution/tasks/start.js";
-import { readTaskTable, type TaskTable } from "#execution/tasks/table.js";
+import {
+  readTaskTable,
+  removeTask,
+  writeTaskTable,
+  type TaskTable,
+} from "#execution/tasks/table.js";
+import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
+import { hasWorkflowAdmission } from "#harness/workflow-admission.js";
 import { captureAgentSessionContext } from "#execution/agent-sessions/context.js";
 import { sessionView } from "#harness/session-machine/commit.js";
 import {
@@ -33,7 +40,7 @@ import {
   type TaskCallStart,
 } from "#harness/session-machine/transitions.js";
 import { storedProjection } from "#harness/session-machine/view.js";
-import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { HarnessSessionBase } from "#harness/types.js";
 import { copyView, foldLine } from "#protocol/session-projection/fold.js";
 import type { SessionView } from "#protocol/session-projection/tables.js";
@@ -91,9 +98,30 @@ async function dispatchCoordination(
   // shadow is never saved: limits count work actually started earlier in the batch without
   // introducing a private lifecycle counter or treating undispatched intents as queued work.
   const admissionView = copyView(storedProjection(session.state).view);
+  const admitted: RuntimeWorkflowTaskRequest[] = [];
+  for (const task of prepared.plan) {
+    if (hasWorkflowAdmission(task)) {
+      admitted.push(task);
+      continue;
+    }
+    const result = createRuntimeToolResultFromValue({
+      callId: task.callId,
+      toolName: task.toolName,
+      output: { code: "TOOL_EXECUTION_DENIED", message: "The call was not admitted to run." },
+      isError: true,
+    });
+    results.push(result);
+    refused.push({ policy: "approval", result });
+    if (task.entry.entryPoint === "task" || task.entry.entryPoint === "serve") {
+      nextSession = writeTaskTable(
+        nextSession,
+        removeTask(readTaskTable(nextSession.state), task.entry.taskId),
+      );
+    }
+  }
 
   const starts = withPrestartedRuns(
-    prepared.plan.map((task) => ({
+    admitted.map((task) => ({
       agentContext: captureAgentSessionContext(prepared, task.callId),
       auth: {
         current: prepared.auth,
@@ -102,10 +130,10 @@ async function dispatchCoordination(
       batchEvent: batch.event,
       owner: input.workflowToolRunOwner,
       parentSession: prepared.parentSession,
-      session,
+      session: nextSession,
       task,
     })),
-    readTaskTable(session.state),
+    readTaskTable(nextSession.state),
     admissionView,
   );
 
