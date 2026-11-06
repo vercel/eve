@@ -15,3 +15,8 @@ export const homeTeamId = process.env.SLACK_TEAM_ID?.trim() || undefined;
 export function isHomeTeam(teamId: string | undefined): boolean {
   return homeTeamId === undefined || teamId === homeTeamId;
 }
+
+/** The workspace that issued a Slack-derived auth context, from its `slack:<team>` issuer. */
+export function slackTeamId(auth: { readonly issuer?: string } | null | undefined) {
+  return auth?.issuer?.startsWith("slack:") ? auth.issuer.slice("slack:".length) : undefined;
+}

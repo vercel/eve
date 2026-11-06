@@ -2,7 +2,7 @@ import { callSlackApi } from "eve/channels/slack";
 import { defineDynamicSchedules } from "eve/experimental/schedules";
 import { z } from "zod";
 import slack from "../channels/slack.ts";
-import { isHomeTeam, slackCredentials } from "../lib/slack.ts";
+import { isHomeTeam, slackCredentials, slackTeamId } from "../lib/slack.ts";
 
 interface TaskPayload {
   readonly task: string;
@@ -62,7 +62,7 @@ export default defineDynamicSchedules({
     if (auth?.authenticator !== "slack-webhook" || auth.principalType !== "user") {
       throw new Error("Schedules can only be created from a Slack message.");
     }
-    const teamId = auth.issuer?.startsWith("slack:") ? auth.issuer.slice(6) : undefined;
+    const teamId = slackTeamId(auth);
     const userId = attribute(auth.attributes, "user_id");
     const channelId = attribute(auth.attributes, "channel_id");
     const threadTs = attribute(auth.attributes, "thread_ts");

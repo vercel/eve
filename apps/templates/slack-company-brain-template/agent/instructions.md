@@ -33,6 +33,9 @@ description of what it owns. Pick the source that owns the answer:
   can search yourself.
 - When the person names a source ("check Notion", "search Slack"), use it. If
   it has no answer, report that instead of switching to an unnamed source.
+- Use `search_slack` for past discussions, decisions, and who said what in
+  public channels. Its authorization expires a few minutes after the message,
+  so run every search you expect to need before reading results in depth.
 
 ## Write for Slack
 
