@@ -15,7 +15,9 @@ agent/
   agent.ts                       # model selection
   instructions.md                # grounding, source routing, and Slack style
   channels/slack.ts              # mentions and DMs, thread context, workspace gate
+  schedules/tasks.ts             # schedules people create by asking in Slack
   skills/company-context/SKILL.md # fill in your teams, glossary, and sources
+  lib/slack.ts                   # shared Slack credentials and workspace check
 ```
 
 - **Grounded answers.** The instructions tell the agent to answer
@@ -25,6 +27,10 @@ agent/
   last spoke, with sender names.
 - **Workspace gate.** With `SLACK_TEAM_ID` set, only members of your workspace
   can start a conversation, so guests in Slack Connect channels can't.
+- **Scheduled tasks.** People can ask for recurring or one-time work, such as
+  "every Monday at 9, summarize last week's open questions here". Results post
+  in the conversation where the schedule was created. See
+  [Scheduled tasks](#scheduled-tasks).
 - **Built-in eve Slack behavior.** Threads are sessions, the thread status shows
   progress, and approvals and questions appear as buttons.
 
@@ -48,6 +54,44 @@ pnpm exec eve deploy
 
 Invite the app to a channel and mention it. Model calls use AI Gateway through
 the linked project, or `AI_GATEWAY_API_KEY` in `.env.local`.
+
+## Scheduled tasks
+
+`agent/schedules/tasks.ts` uses eve's experimental
+[dynamic schedules](https://eve.dev/docs/experimental/dynamic-schedules). It
+gives the agent `schedule__tasks__create`, `list`, `update`, `delete`, and
+related tools, so people manage schedules by asking:
+
+> @brain every weekday at 9am Pacific, post a summary of yesterday's open
+> questions in this channel
+>
+> @brain remind me in this thread in 2 hours to check the deploy
+>
+> @brain what schedules do I have?
+
+How it works:
+
+- **Where results go.** `preparePayload` saves the Slack conversation the
+  request came from (and the thread, for "reply here" requests) from the trusted
+  Slack session. The model can't choose another destination. Create a schedule
+  from a DM to get results in that DM.
+- **Who it runs as.** Each run is a new session that runs as the person who
+  created the schedule, so per-person connections use their access. Before each
+  run, `auth` checks with Slack that the account is still active and, with
+  `SLACK_TEAM_ID` set, still in your workspace.
+- **Who can manage it.** Each person sees and changes only their own schedules.
+  Creating or changing one asks for approval in Slack first. Set `approval` in
+  the definition to change that.
+- **No one is present.** Scheduled runs can't wait for questions or approvals,
+  so the task text has to be complete, and tools that need approval can't wait for it.
+
+On Vercel, Vercel Schedules stores and fires schedules. Preview and production
+schedules are separate. Under `eve dev` schedules are stored in memory and never
+fire on their own; ask the agent to run one now (`invoke`) to test it.
+
+To add another kind of schedule, such as one that always posts to a fixed team
+channel, add another file under `agent/schedules/` with its own `inputSchema`
+and `preparePayload`.
 
 ## Grow the brain
 
