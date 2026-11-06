@@ -13,7 +13,7 @@ import {
   waitingOnTasks,
   withMoreCalls,
 } from "#public/channels/slack/action-status.js";
-import { slackSessionTargetOf } from "#public/channels/slack/api.js";
+import { slackSessionTargetOf, type SlackApiResponse } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext, slackUserIdForPrincipal } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
@@ -245,6 +245,18 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
   const recipientUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
   const challengeUrl = event.url;
 
+  // Without a thread, a public status would post top-level in the channel. The person who must
+  // sign in gets the prompt in a DM instead, and the channel sees nothing.
+  if (
+    recipientUserId &&
+    (challengeUrl || event.instructions) &&
+    !channel.slack.codeChannel &&
+    channel.slack.threadTs === "" &&
+    (await showSlackSignInDirectMessage(event, recipientUserId, channel))
+  ) {
+    return;
+  }
+
   // Post a public, link-free status so everyone in the thread can see
   // the session is blocked and later see it complete. The challenge
   // itself remains private.
@@ -302,7 +314,107 @@ export async function showSlackSignIn(event: SignIn, channel: SlackEventContext)
   }
 }
 
-async function settleSlackSignIn(
+/**
+ * Sends a sign-in prompt to `recipientUserId`'s DM and records it so the settled handler can edit
+ * it. Returns whether it was sent; a failure leaves the caller to post in the channel as before.
+ */
+async function showSlackSignInDirectMessage(
+  event: SignIn,
+  recipientUserId: string,
+  channel: SlackEventContext,
+): Promise<boolean> {
+  // Keyed by interaction: a later sign-in for the same connection is a new prompt with a new link.
+  const pending = channel.state.pendingAuthDirectMessages ?? {};
+  if (pending[event.interactionId] !== undefined) return true;
+  const { channelId } = channel.slack;
+  const prompt = {
+    displayName: event.displayName,
+    instructions: event.instructions,
+    // A DM session's prompt lands in that same DM, so naming it would point back at itself.
+    requestedInChannelId: channelId && !isSlackDirectMessageId(channelId) ? channelId : undefined,
+    url: event.url,
+    userCode: event.userCode,
+  };
+  // Posting to a user ID lands in their DM with the app and needs only `chat:write`, which every
+  // install has. `conversations.open` would also need `im:write`.
+  let response: SlackApiResponse;
+  try {
+    response = await channel.slack.request("chat.postMessage", {
+      blocks: buildAuthEphemeralBlocks(prompt),
+      channel: recipientUserId,
+      text: buildAuthEphemeralText(prompt),
+      unfurl_links: false,
+      unfurl_media: false,
+    });
+  } catch (error) {
+    log.warn("Slack auth direct message delivery failed", { name: event.name, error });
+    return false;
+  }
+  if (response.ok !== true) {
+    log.warn("Slack auth direct message delivery failed", {
+      name: event.name,
+      error: response.error ?? "unknown_error",
+    });
+    return false;
+  }
+  const { channel: dmChannelId, ts } = response;
+  if (typeof dmChannelId !== "string" || !dmChannelId || typeof ts !== "string" || !ts) {
+    // The prompt went out, so the channel still gets nothing, but its outcome can't be shown.
+    log.warn("Slack auth direct message has no channel or ts to edit", { name: event.name });
+    return true;
+  }
+  channel.state.pendingAuthDirectMessages = {
+    ...pending,
+    [event.interactionId]: { channelId: dmChannelId, ts },
+  };
+  return true;
+}
+
+/** Slack DM conversation ids start with `D`. */
+function isSlackDirectMessageId(channelId: string): boolean {
+  return channelId.startsWith("D");
+}
+
+/**
+ * Replaces a DM sign-in prompt with its outcome, which also removes the Connect button. When the
+ * edit fails, deletes the prompt so its link can't be used after the sign-in ended.
+ */
+async function settleSlackSignInDirectMessage(
+  event: SignIn,
+  message: { readonly channelId: string; readonly ts: string },
+  text: string,
+  channel: SlackEventContext,
+): Promise<void> {
+  const target = { channel: message.channelId, ts: message.ts };
+  try {
+    const updated = await channel.slack.request("chat.update", {
+      ...target,
+      blocks: [{ type: "section", text: { type: "mrkdwn", text } }],
+      text,
+    });
+    if (updated.ok === true) return;
+    log.warn("Slack auth direct message edit failed", {
+      name: event.name,
+      error: updated.error ?? "unknown_error",
+    });
+  } catch (error) {
+    log.warn("Slack auth direct message edit failed", { name: event.name, error });
+  }
+  try {
+    const deleted = await channel.slack.request("chat.delete", target);
+    if (deleted.ok !== true) {
+      log.warn("Slack auth direct message delete failed", {
+        name: event.name,
+        error: deleted.error ?? "unknown_error",
+      });
+    }
+  } catch (error) {
+    log.warn("Slack auth direct message delete failed", { name: event.name, error });
+  }
+}
+
+/** A settled sign-in: edits what {@link showSlackSignIn} posted to show the outcome. */
+export async function settleSlackSignIn(
   event: SignIn,
   settled: InteractionSettledData,
   channel: SlackEventContext,
@@ -312,15 +424,24 @@ async function settleSlackSignIn(
     await showStatus(channel, `Connected to ${displayName}. Resuming...`, { force: true });
   }
 
-  const pending = channel.state.pendingAuthMessageTs ?? {};
-  const ts = pending[event.name];
-  if (ts === undefined) return;
-
   const text = buildAuthCompletedText({
     displayName,
     outcome: settled.outcome,
     reason: settled.reason,
   });
+
+  const directMessages = channel.state.pendingAuthDirectMessages ?? {};
+  const directMessage = directMessages[event.interactionId];
+  if (directMessage !== undefined) {
+    await settleSlackSignInDirectMessage(event, directMessage, text, channel);
+    const next = { ...directMessages };
+    delete next[event.interactionId];
+    channel.state.pendingAuthDirectMessages = next;
+  }
+
+  const pending = channel.state.pendingAuthMessageTs ?? {};
+  const ts = pending[event.name];
+  if (ts === undefined) return;
 
   try {
     await channel.slack.request("chat.update", {

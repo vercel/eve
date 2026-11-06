@@ -76,6 +76,11 @@ export function buildAuthCompletedText(input: {
 interface AuthEphemeralPrompt {
   readonly displayName: string;
   readonly instructions?: string;
+  /**
+   * The channel the request came from, when the prompt goes to a DM instead of that channel's
+   * thread. It tells the person what needs the sign-in.
+   */
+  readonly requestedInChannelId?: string;
   readonly url?: string;
   readonly userCode?: string;
 }
@@ -92,10 +97,13 @@ export function buildAuthEphemeralBlocks(
     readonly cancel?: SignInCancelTarget;
   },
 ): unknown[] {
+  const origin = hasText(input.requestedInChannelId)
+    ? ` This is for your request in <#${input.requestedInChannelId}>.`
+    : "";
   const intro =
     input.cancel === undefined
-      ? `*Connect ${input.displayName}*\nTo continue, I need access to your ${input.displayName} account.`
-      : `*Connect ${input.displayName}*\nI've paused until you connect your ${input.displayName} account or cancel.`;
+      ? `*Connect ${input.displayName}*\nTo continue, I need access to your ${input.displayName} account.${origin}`
+      : `*Connect ${input.displayName}*\nI've paused until you connect your ${input.displayName} account or cancel.${origin}`;
   const blocks: unknown[] = [
     {
       type: "section",
