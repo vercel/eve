@@ -387,7 +387,7 @@ Without gates, every watched message costs a full agent turn: the agent's instru
 
 What you trade for those savings is recall. A gate can drop a message the agent would have answered well. The two gates trade differently:
 
-- **Follow gate.** A dropped reply is a person talking to an agent that ignores them. Keep `FOLLOW_SKIP_BELOW` low, fail open, and let the agent's model filter the rest with `no_reply`.
+- **Follow gate.** A dropped reply is a person talking to an agent that ignores them. Keep `FOLLOW_SKIP_BELOW` low, fail open, and let the agent's model filter the rest with `no_reply`. See [The gate saves cost; the agent decides whether to reply](#the-gate-saves-cost-the-agent-decides-whether-to-reply).
 - **Join gate.** A dropped message is a question the agent didn't volunteer on, which people rarely notice. An unwanted reply is noticed every time. Keep `JOIN_AT` high and fail closed.
 
 Lower `JOIN_AT` or broaden a goal only when your logs show real questions being filtered.
