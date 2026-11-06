@@ -15,6 +15,8 @@ We have a few interlinked goals here:
 - Once we're able to do this, it feels natural to want to be able to invoke that agent purely in process without a build step or any sort of heavy machinery.
 - If we're able to invoke this agent in process, is it a big leap to allow us to deploy these agents durably without going through an `eve build` at all?
 
+I've sketched out implementations of all of the above, and it ends up feeling very achievable. But for any of this to work, we need to at the very least allow for non-Workflow hosts to be able to drive sessions for these new use cases. Once we do that, the question is if it makes sense to keep the Workflow host around at all.
+
 ## Coupling to Workflow
 
 Currently, every deployed eve session is a Workflow run, associated with the deployment that kicked it off.
@@ -30,7 +32,9 @@ This leads to the following costs:
 
 - **Compilation**: We needed all code to be available on disk at compile time so that we could run the Workflow transform. This obviously does not fit with a code-defined agent that could be doing arbitrarily complex things to generate an agent.
 - **No in-process mode**: All sessions required a server and the Workflow runtime, including tests and the TUI.
-- **Deployment pinning**: You can't safely replay an arbitrary event log against potentially different code, so old deployments need to stick around to handle new messages to idle sessions. eve compensates for this with a deployment handoff: when a newer deployment sends a message to an idle session, the old run writes a versioned checkpoint and starts a successor run on the new deployment, which takes over the session (same id, new run). The successor migrates a recent checkpoint in place. When the format changed too much for that, it imports the session instead, keeping its identity, state and conversation, and runs a compaction pass over the conversation before continuing. So a handoff sometimes compacts, depending on how far the format moved. A checkpoint too old for either stays on its old deployment. Separately, a session that compacts moves to a fresh run on its own deployment, so no single run's event log grows forever. But sessions can still become stranded if deployments aged out, or on non-Vercel worlds that don't allow for multiple active deployments.
+- **Deployment pinning**: You can't safely replay an arbitrary event log against potentially different code, so old deployments need to stick around to handle new messages to idle sessions.
+  - eve compensates for this with a deployment handoff: when a newer deployment sends a message to an idle session, the old run writes a versioned checkpoint and starts a successor run on the new deployment, which takes over the session (same id, new run).
+  - Sessions can still become stranded if deployments aged out, or on non-Vercel worlds that don't allow for multiple active deployments.
 
 The deployment handoff logic is quite complex:
 
