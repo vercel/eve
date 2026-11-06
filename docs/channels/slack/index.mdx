@@ -233,6 +233,31 @@ export default slackChannel({
 
 This adds the `users:read` scope, plus `users:read.email` with `email: true`, so reinstall the Slack app after enabling it. It's off by default because names and emails then reach model context, session history, and traces. See [Add sender names and emails](/docs/channels/slack/reference#add-sender-names-and-emails) for caching and custom lookups.
 
+## React with emoji
+
+Mount the bundled `eve/extensions/slack-reactions` extension to let the agent add and remove emoji reactions. Pass it the same credentials as the Slack channel:
+
+```ts title="agent/extensions/slack-reactions.ts"
+import { connectSlackCredentials } from "@vercel/connect/eve";
+import slackReactions from "eve/extensions/slack-reactions";
+
+export default slackReactions({
+  credentials: connectSlackCredentials("slack/my-agent"),
+});
+```
+
+On turns from `agent/channels/slack.ts`, the model gets `slack-reactions__react_with_emoji` and `slack-reactions__remove_emoji_reaction`. Both act on the message that triggered the turn by default. The model can also pass the timestamp or permalink of an earlier message in the same channel. `remove_emoji_reaction` removes only the agent's own reactions. The tools aren't offered on other channels.
+
+The bot token needs the `reactions:write` scope. Add it under **OAuth & Permissions** in [Slack app settings](https://api.slack.com/apps), then reinstall the app. Without `credentials`, the extension reads `SLACK_BOT_TOKEN`.
+
+The tool descriptions tell the model that a reaction alone can answer banter or a bare "thanks". To let the agent end those turns without posting, also add the [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
+
+Other options:
+
+- `api`: the channel's `api` option, when the channel uses a [different Slack API host](/docs/channels/slack/reference#point-the-channel-at-a-different-slack-api-host).
+- `scope`: `(channel) => { channelId, messageTs? } | null`, deciding where the tools appear and which message they target by default. Set it when the Slack channel file has another name, or to offer reactions in fewer places. Return `null` to leave the tools out.
+- `searchEmoji`: `(query, limit) => Promise<{ name }[]>`, matching custom workspace emoji to the mood the model describes. The model always names a standard emoji too, which is used when the search finds nothing or Slack rejects the custom one.
+
 ## Human-in-the-loop interactions
 
 By default, [tool approvals](/docs/human-in-the-loop) and questions from `ctx.ask()` appear in the thread as buttons and selects. Once someone answers, the card shows the answer and who gave it. When a tool needs a connection the person hasn't authorized, the sign-in link goes to them in an ephemeral message, and the thread shows a status without the link.

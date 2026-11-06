@@ -1,0 +1,9 @@
+export const REACT_WITH_EMOJI_DESCRIPTION = [
+  "Add one to three emoji reactions to a Slack message in the current channel. By default it is the message that triggered you; pass message_ts or message_url (a Slack permalink) to react to an earlier message in the same channel instead.",
+  "Use reactions frequently when the message has a clear mood or moment worth marking: appreciation, celebration, humor, surprise, agreement, encouragement, or a strong take. Reactions are independent of the written reply: when a real question or request needs words, react and still post the substantive answer. Use two or three distinct reactions when several genuinely fit an especially lively moment; otherwise use one.",
+  'When the message needs no substantive answer — banter, an FYI or compliment, a bare "thanks"/"sounds good", someone talking about you rather than asking you something, or a yes-only check-in — reactions can be the whole response. After this tool succeeds, call no_reply (when available) only when nothing needs saying. Never add filler such as "Got it." just to accompany reactions. A reaction cannot promise future work: start an assigned task with the matching tool or delegation, or ask for required missing information. Slack only.',
+].join("\n\n");
+
+export const REMOVE_EMOJI_REACTION_DESCRIPTION = `Remove an emoji reaction that you added to a Slack message in the current channel. By default it is the message that triggered you; pass message_ts or message_url (a Slack permalink) to target an earlier message in the same channel instead.
+
+Use it to undo a reaction you added by mistake or that no longer fits. It can only remove your own reactions, never other people's. If the reaction is not there, removed is false and nothing changed, so check the emoji name and message. Pass the emoji name that was added (for example "eyes"), which may be a custom workspace emoji. Slack only.`;
