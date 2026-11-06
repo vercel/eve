@@ -143,6 +143,7 @@ export function createHostSpec(
       enabled: preset === "vercel",
       publicRoutePrefix: mode.kind === "production" ? mode.publicRoutePrefix : undefined,
       routeTable: routes,
+      schedules: manifest.config.experimental?.schedules?.vercel,
       workspaceMember: mode.kind === "production" ? mode.workspaceMember : undefined,
     }),
     websocket: development || routes.routes.some((route) => route.method === "WEBSOCKET"),

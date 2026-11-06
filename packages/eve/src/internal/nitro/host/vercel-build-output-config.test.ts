@@ -166,4 +166,18 @@ describe("createEveVercelOptions", () => {
       },
     );
   });
+
+  it("keeps Vercel Cron Jobs unless the agent opts into Vercel Schedules", () => {
+    expect(
+      createEveVercelOptions({ agentName: "test-agent", enabled: true, routeTable })?.schedules,
+    ).toBe(false);
+    expect(
+      createEveVercelOptions({
+        agentName: "test-agent",
+        enabled: true,
+        routeTable,
+        schedules: "private",
+      })?.schedules,
+    ).toBe("private");
+  });
 });
