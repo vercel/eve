@@ -71,6 +71,21 @@ describe("component Markdown export", () => {
     );
   });
 
+  it("expands the ambient listening flow into an ordered list", async () => {
+    const processor = await configuredProcessor();
+    const tree = processor.parse("<AmbientListeningFlow />");
+    const markdown = toMarkdown(tree, {
+      extensions: (processor.data() as { toMarkdownExtensions?: Options[] }).toMarkdownExtensions,
+    });
+
+    expect(markdown).toContain(
+      "1. **Free checks** (`onMessage`): Is it in a followed thread or a watched channel?",
+    );
+    expect(markdown).toContain("  - Maybe, or unsure: continue to agent");
+    expect(markdown).toContain("  - No: `no_reply`");
+    expect(markdown).not.toContain("<AmbientListeningFlow");
+  });
+
   it("renders use case cards as Markdown lists with their titles and links", async () => {
     const processor = await configuredProcessor();
     const source = [

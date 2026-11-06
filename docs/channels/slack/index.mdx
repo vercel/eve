@@ -177,7 +177,7 @@ export default slackChannel({
 
 An ignored message never starts a turn. Once `decide` lets a message through, its thread has a session, so later replies take the followed-thread branch without another decision call. If `decide` throws, eve drops the message; catch the error and return `{ auth }` to answer anyway. See [Classify ambient replies with a decision model](/docs/channels/slack/reference#classify-ambient-replies-with-a-decision-model) for choosing the decision model.
 
-For a production setup with per-channel goals, a separate gate for followed threads, confidence thresholds, and monitoring, see [Ambient Listening in Slack](/docs/patterns/ambient-listening).
+For a fuller setup with per-channel goals, instructions for staying silent, a decision model that filters out clearly unintended messages, and monitoring, see [Ambient Listening in Slack](/docs/patterns/ambient-listening).
 
 ## Handle message edits
 
