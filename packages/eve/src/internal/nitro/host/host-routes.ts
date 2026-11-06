@@ -80,8 +80,8 @@ type HostRoute =
 export interface HostScheduleTask extends ScheduleRegistration {
   /**
    * The Nitro task name, which Vercel Schedules also uses as the schedule
-   * name. It leads with the agent name so the agents in one Vercel project
-   * never share a schedule name.
+   * name. A Vercel service build leads it with the agent name, because the
+   * agents in one project share a deployment and its schedule names.
    */
   readonly nitroTaskName: string;
 }
@@ -97,6 +97,8 @@ interface HostRouteTableInput {
   readonly mode: "development" | "production";
   readonly scheduleRegistrations: readonly ScheduleRegistration[];
   readonly vercel: boolean;
+  /** Built as one service of a multi-service Vercel project. */
+  readonly vercelService?: boolean;
 }
 
 /** Every route, task, and cron path eve's Nitro host serves, in registration order. */
@@ -156,7 +158,7 @@ export function createHostRouteTable(input: HostRouteTableInput): HostRouteTable
 
   const scheduleTasks = (development ? [] : input.scheduleRegistrations).map((task) => ({
     ...task,
-    nitroTaskName: `${manifest.config.name}.${task.taskName}`,
+    nitroTaskName: input.vercelService ? `${manifest.config.name}.${task.taskName}` : task.taskName,
   }));
   return {
     routes: routes.map((route) => withHeadAllow(route, routes)),

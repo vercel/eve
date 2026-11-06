@@ -316,6 +316,7 @@ async function buildApplicationInWorkspace(
       kind: "production",
       preset: isVercelBuild ? "vercel" : undefined,
       publicRoutePrefix,
+      vercelService: servicePrefix !== undefined || options.vercelServiceOutput !== undefined,
       workspaceMember: options.workspaceMember,
     },
     { buildDir: workspace.nitro.buildDir, outputDir: workspace.publication.output.stagedDir },

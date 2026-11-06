@@ -327,15 +327,15 @@ describe("rendered host routes", () => {
     });
 
     expect(host.routes.experimental).toEqual({ tasks: true });
-    // Nitro task names lead with the agent; eve's own task name stays unchanged.
     expect(host.routes.scheduledTasks).toEqual({
-      "0 0 * * *": ["probe-agent.daily", "probe-agent.digest"],
-      "0 0 * * 0": "probe-agent.weekly",
+      "0 0 * * *": ["daily", "digest"],
+      "0 0 * * 0": "weekly",
     });
-    const task = (await host.load(host.routes.tasks["probe-agent.daily"]!.handler)) as {
+    const task = (await host.load(host.routes.tasks.daily!.handler)) as {
       run(event: { name: string }): Promise<unknown>;
     };
-    expect(await task.run({ name: "probe-agent.daily" })).toEqual({ result: "ran daily" });
+    // The task dispatches eve's own task name, whatever Nitro calls it.
+    expect(await task.run({ name: "any-nitro-name" })).toEqual({ result: "ran daily" });
     expect(routeModules.dispatchScheduleTask).toHaveBeenCalledWith("daily", artifactsConfig);
   });
 });

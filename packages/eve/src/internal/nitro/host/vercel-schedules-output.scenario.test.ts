@@ -49,7 +49,7 @@ describe("Vercel schedule delivery", () => {
 
     expect(config.crons ?? []).toEqual([]);
     expect(config.schedules).toEqual({
-      [`schedules-agent.${DIGEST_TASK_NAME}`]: { schedule: "0 9 * * *", function: "_vercel/tasks" },
+      [DIGEST_TASK_NAME]: { schedule: "0 9 * * *", function: "_vercel/tasks" },
     });
     expect(functionConfig.experimentalTriggers).toEqual([{ type: "schedule/v1beta" }]);
     expect(config.routes).not.toContainEqual(expect.objectContaining({ dest: "/_vercel/tasks" }));
