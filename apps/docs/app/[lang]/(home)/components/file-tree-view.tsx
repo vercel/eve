@@ -115,18 +115,18 @@ const FEATURES = [
   {
     title: "Static",
     text: "Plain files that stay the same for every session. Most of an agent never needs more.",
-    doc: { label: "Project Structure", href: "/docs/concepts/project-structure" },
+    href: "/docs/concepts/project-structure",
   },
   {
     title: "Dynamic",
     // Every kind of file can be dynamic, not only the ones this example makes dynamic.
     text: "Instructions, skills, tools, subagents, connections, and models can all resolve per session.",
-    doc: { label: "Dynamic Capabilities", href: "/docs/guides/dynamic-capabilities" },
+    href: "/docs/guides/dynamic-capabilities",
   },
   {
     title: "Multi-tenant",
     text: "One agent serves every customer, each with the plan, data, and access that fits them.",
-    doc: { label: "Multi-Tenant Auth", href: "/docs/patterns/multi-tenant-auth" },
+    href: "/docs/patterns/multi-tenant-auth",
   },
 ];
 
@@ -286,17 +286,22 @@ export function FileTreeView({ items }: { items: FileTreeItem[] }) {
         <div className="md:hidden">{mobile}</div>
         <div className="hidden md:block">{board}</div>
       </div>
+      {/* Each item links to its docs as a whole, like the feature cards further down the page. */}
       <ul className="m-0 grid list-none gap-5 p-0 md:grid-cols-3 md:gap-x-6 xl:col-span-3 xl:row-start-2 xl:grid-cols-1 xl:content-start xl:pl-4">
         {FEATURES.map((feature) => (
-          <li className="flex flex-col gap-1" key={feature.title}>
-            <span className="font-[450] text-copy-16 text-gray-1000">{feature.title}</span>
-            <span className="text-pretty text-copy-16 text-gray-900">{feature.text}</span>
-            {/* Styled like vercel.com/blog's inline links (geistcn's marketing-inline Link). */}
-            <PrefetchLink
-              className="mt-1 w-fit text-copy-16 text-gray-1000 underline decoration-gray-700 decoration-1 underline-offset-4 outline-offset-4 outline-(--ds-focus-color) hover:decoration-inherit focus-visible:outline-2"
-              href={feature.doc.href}
-            >
-              Learn more<span className="sr-only"> about {feature.doc.label}</span>
+          <li key={feature.title}>
+            <PrefetchLink className="group flex flex-col gap-1" href={feature.href}>
+              <span className="flex items-center gap-3 font-[450] text-copy-16 text-gray-1000">
+                {feature.title}
+                <IconChevronRightSmall
+                  aria-hidden
+                  className="-ml-1 -translate-x-px transition-transform group-hover:translate-x-0"
+                  size={14}
+                />
+              </span>
+              <span className="text-pretty text-copy-16 text-gray-900 transition-colors group-hover:text-gray-1000">
+                {feature.text}
+              </span>
             </PrefetchLink>
           </li>
         ))}
