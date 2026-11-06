@@ -1,65 +1,64 @@
 import type { JSX } from "react";
 import {
-  type AmbientOutcome,
-  type AmbientStage,
+  type AmbientBranch,
   ambientListeningFlow,
+  ambientListeningRoot,
 } from "@/lib/geistdocs/ambient-listening-flow";
 
-function Outcome({ outcome }: { outcome: AmbientOutcome }): JSX.Element {
+function Branches({ branches }: { branches: readonly AmbientBranch[] }): JSX.Element {
   return (
-    <div className="flex min-w-0 items-baseline justify-between gap-3 rounded-lg px-3 py-2 material-small">
-      <span className="text-copy-13 text-gray-900">{outcome.when}</span>
-      {outcome.code ? (
-        <code className="bg-transparent! p-0! text-copy-13! text-gray-1000!">{outcome.result}</code>
-      ) : (
-        <span className="text-right text-copy-14 text-gray-1000">{outcome.result}</span>
-      )}
-    </div>
-  );
-}
-
-function Stage({ stage, next }: { stage: AmbientStage; next?: AmbientStage }): JSX.Element {
-  return (
-    <section className="flex min-w-0 flex-col gap-4 rounded-xl border border-gray-alpha-400 bg-background-100 p-4 sm:p-5">
-      <div className="flex flex-col gap-1">
-        <span className="font-medium text-copy-14 text-gray-1000">{stage.title}</span>
-        <code className="w-fit bg-transparent! p-0! text-copy-13! text-gray-900!">
-          {stage.where}
-        </code>
-      </div>
-      <p className="m-0! text-copy-16 text-gray-1000">{stage.question}</p>
-      <div className="mt-auto flex flex-col gap-2">
-        {stage.stops.map((stop) => (
-          <Outcome key={stop.when} outcome={stop} />
-        ))}
-        {stage.passes && next ? (
-          <div className="flex items-baseline justify-between gap-3 px-3 py-2 text-copy-13 text-gray-900">
-            <span>{stage.passes}</span>
-            <span aria-hidden>
-              <span className="lg:hidden">↓</span>
-              <span className="hidden lg:inline">→</span>
-            </span>
-            <span className="sr-only">continues to {next.title}</span>
-          </div>
-        ) : null}
-      </div>
-    </section>
+    <ul className="m-0! ml-2! list-none p-0!">
+      {branches.map((branch, index) => {
+        const last = index === branches.length - 1;
+        return (
+          <li key={branch.label} className={`relative m-0! pt-3 pl-7 ${last ? "" : "pb-0"}`}>
+            <span
+              aria-hidden
+              className={`absolute top-0 left-0 w-px bg-gray-alpha-500 ${last ? "h-[23px]" : "h-full"}`}
+            />
+            <span aria-hidden className="absolute top-[22px] left-0 h-px w-5 bg-gray-alpha-500" />
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="text-copy-14 text-gray-1000">{branch.label}</span>
+              {branch.where ? (
+                <code className="bg-transparent! p-0! text-copy-13! text-gray-900!">
+                  {branch.where}
+                </code>
+              ) : null}
+              {branch.result ? (
+                <span className="flex items-baseline gap-2">
+                  <span aria-hidden className="text-copy-14 text-gray-700">
+                    →
+                  </span>
+                  {branch.code ? (
+                    <code className="bg-transparent! p-0! font-medium text-copy-13! text-gray-1000!">
+                      {branch.result}
+                    </code>
+                  ) : (
+                    <span className="font-medium text-copy-14 text-gray-1000">{branch.result}</span>
+                  )}
+                </span>
+              ) : null}
+            </div>
+            {branch.children ? <Branches branches={branch.children} /> : null}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
 /**
  * Shows how an unmentioned message moves through free checks, the decision
- * model, and the agent's own judgment.
+ * model, and the agent's own judgment, as a tree of outcomes.
  */
 export function AmbientListeningFlow(): JSX.Element {
   return (
     <figure
       aria-label="How an ambient agent decides whether to reply"
-      className="my-8 grid w-full min-w-0 items-stretch gap-4 lg:grid-cols-3"
+      className="my-8 w-full min-w-0 rounded-xl border border-gray-alpha-400 bg-background-100 p-5 sm:p-6"
     >
-      {ambientListeningFlow.map((stage, index) => (
-        <Stage key={stage.title} stage={stage} next={ambientListeningFlow[index + 1]} />
-      ))}
+      <span className="font-medium text-copy-14 text-gray-1000">{ambientListeningRoot}</span>
+      <Branches branches={ambientListeningFlow} />
     </figure>
   );
 }
