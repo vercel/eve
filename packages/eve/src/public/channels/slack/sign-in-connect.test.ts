@@ -7,6 +7,10 @@ import {
   buildAuthEphemeralBlocks,
   SIGN_IN_CONNECT_ACTION_ID,
 } from "#public/channels/slack/connections.js";
+import {
+  dispatchSignInCancel,
+  SIGN_IN_CANCEL_ACTION_ID,
+} from "#public/channels/slack/sign-in-cancel.js";
 import { dispatchSignInConnect } from "#public/channels/slack/sign-in-connect.js";
 import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
 
@@ -33,8 +37,42 @@ const waitingOnLinear: SessionEvent[] = [
   } as SessionEvent,
 ];
 
-function settled(outcome: "accepted" | "failed", interactionId = "sign-in-1"): SessionEvent {
-  return { data: { interactionId, outcome }, type: "interaction.settled" } as SessionEvent;
+function settled(
+  outcome: "accepted" | "failed" | "withdrawn",
+  interactionId = "sign-in-1",
+  reason?: string,
+): SessionEvent {
+  return {
+    data: { interactionId, outcome, ...(reason !== undefined && { reason }) },
+    type: "interaction.settled",
+  } as SessionEvent;
+}
+
+/** A session stream that stays open, like the deployed one, until the test pushes or closes it. */
+function liveStream(events: readonly SessionEvent[]) {
+  let controller!: ReadableStreamDefaultController<SessionEvent>;
+  const stream = new ReadableStream<SessionEvent>({
+    start(opened) {
+      controller = opened;
+      for (const event of events) opened.enqueue(event);
+    },
+  });
+  return { push: (event: SessionEvent) => controller.enqueue(event), stream };
+}
+
+const CANCEL_URL = "https://hooks.slack.com/actions/T1/2/cancel";
+
+function cancelClick(): Record<string, unknown> {
+  return {
+    actions: [
+      {
+        action_id: SIGN_IN_CANCEL_ACTION_ID,
+        value: JSON.stringify({ channelId: "C1", threadTs: "1.2", turnId }),
+      },
+    ],
+    response_url: CANCEL_URL,
+    type: "block_actions",
+  };
 }
 
 function createRuntime(events: readonly SessionEvent[]): Runtime {
@@ -50,7 +88,7 @@ function createRuntime(events: readonly SessionEvent[]): Runtime {
 }
 
 /** The click Slack sends for the prompt's Connect button, read back from the button it posted. */
-function connectClick(): Record<string, unknown> {
+function connectClick(userId = "U1"): Record<string, unknown> {
   const blocks = buildAuthEphemeralBlocks({
     connect: target,
     displayName: "Linear",
@@ -61,6 +99,7 @@ function connectClick(): Record<string, unknown> {
     actions: [{ action_id: button.action_id, type: "button", value: button.value }],
     response_url: RESPONSE_URL,
     type: "block_actions",
+    user: { id: userId },
   };
 }
 
@@ -123,6 +162,78 @@ describe("dispatchSignInConnect", () => {
       replace_original: true,
       text: ":x: Linear authorization failed",
     });
+  });
+
+  it("follows a live session and updates the prompt once the sign-in settles later", async () => {
+    const fetchMock = stubFetch();
+    const live = liveStream(waitingOnLinear);
+    const runtime = createRuntime([]);
+    vi.mocked(runtime.getEventStream).mockResolvedValue(live.stream as never);
+    const { resolveSession } = createChannelOperations<SlackChannelState>({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      runtime,
+    });
+    const tasks: Promise<unknown>[] = [];
+
+    expect(
+      dispatchSignInConnect(connectClick(), { resolveSession, waitUntil: (t) => tasks.push(t) }),
+    ).toBe(true);
+    await vi.waitFor(() => expect(runtime.getEventStream).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    live.push(settled("accepted"));
+    await Promise.all(tasks);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body as string)).toEqual({
+      replace_original: true,
+      text: ":white_check_mark: Linear connected",
+    });
+  });
+
+  it("shows Connect then Cancel as cancelled while Cancel removes the prompt", async () => {
+    const fetchMock = stubFetch();
+    const live = liveStream(waitingOnLinear);
+    const runtime = createRuntime([]);
+    vi.mocked(runtime.getEventStream).mockResolvedValue(live.stream as never);
+    vi.mocked(runtime.dispatchContinuation).mockImplementation(async () => {
+      live.push(settled("withdrawn", "sign-in-1", "turn-cancelled"));
+      return { sessionId: "sess_1", status: "accepted" } as never;
+    });
+    const { from, resolveSession } = createChannelOperations<SlackChannelState>({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      runtime,
+    });
+    const tasks: Promise<unknown>[] = [];
+    const waitUntil = (task: Promise<unknown>) => tasks.push(task);
+
+    dispatchSignInConnect(connectClick(), { resolveSession, waitUntil });
+    await vi.waitFor(() => expect(runtime.getEventStream).toHaveBeenCalled());
+    dispatchSignInCancel(cancelClick(), { from, waitUntil });
+    await Promise.all(tasks);
+
+    const posts = fetchMock.mock.calls.map(([url, init]) => [url, JSON.parse(init.body)]);
+    expect(posts).toHaveLength(2);
+    expect(posts).toContainEqual([CANCEL_URL, { delete_original: true }]);
+    expect(posts).toContainEqual([
+      RESPONSE_URL,
+      { replace_original: true, text: "Linear sign-in cancelled" },
+    ]);
+  });
+
+  it("sends the session no command, whoever clicks Connect", async () => {
+    stubFetch();
+    const runtime = createRuntime([...waitingOnLinear, settled("accepted")]);
+
+    await clickConnect(runtime, connectClick("U2"));
+
+    expect(runtime.dispatchContinuation).not.toHaveBeenCalled();
+    expect(runtime.dispatchSession).not.toHaveBeenCalled();
+    expect(runtime.createSession).not.toHaveBeenCalled();
+    expect(runtime.getEventStream).toHaveBeenCalledTimes(1);
   });
 
   it("leaves the prompt alone while the sign-in stays open or another one settles", async () => {

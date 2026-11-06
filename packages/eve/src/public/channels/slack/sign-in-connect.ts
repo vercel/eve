@@ -39,6 +39,8 @@ export function parseSignInConnectTarget(value: unknown): SignInConnectTarget | 
  * settles, the private prompt shows how it ended. Slack can't edit an ephemeral message except
  * through the `response_url` of a click on it, and the session can't hold that URL while its turn
  * waits, so the click's handler follows the session until the sign-in settles. It only reads.
+ * `waitUntil` lasts only as long as the webhook function (Vercel's default `maxDuration` is 300s),
+ * so a sign-in finished after that leaves the prompt as it was.
  * Returns false for any other interaction.
  */
 export function dispatchSignInConnect(
