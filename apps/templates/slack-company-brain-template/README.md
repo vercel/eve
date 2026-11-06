@@ -15,6 +15,7 @@ agent/
   agent.ts                       # model selection
   instructions.md                # grounding, source routing, and Slack style
   channels/slack.ts              # mentions, DMs, followed threads, workspace gate
+  extensions/code.ts             # eve's code extension: work with files and code in a sandbox
   schedules/tasks.ts             # schedules people create by asking in Slack
   skills/company-context/SKILL.md # fill in your teams, glossary, and sources
   tools/no_reply.ts              # lets the agent stay quiet in followed threads
@@ -37,6 +38,9 @@ agent/
   "every Monday at 9, summarize last week's open questions here". Results post
   in the conversation where the schedule was created. See
   [Scheduled tasks](#scheduled-tasks).
+- **Code and files.** The [code extension](https://eve.dev/docs/code-extension)
+  lets the agent run scripts, analyze attached files such as CSVs or logs, and
+  read or write code in a sandbox.
 - **Built-in eve Slack behavior.** Threads are sessions, the thread status shows
   progress, and approvals and questions appear as buttons.
 
@@ -205,9 +209,12 @@ name. See [Tools](https://eve.dev/docs/tools).
 ### Mount an extension
 
 Extensions bundle tools, skills, subagents, and instructions into one package
-you mount under `agent/extensions/`. eve ships some, such as
-`eve/extensions/code` for working in a sandbox. Browse more with
-`pnpm exec eve registry list`. See [Extensions](https://eve.dev/docs/extensions).
+you mount under `agent/extensions/`. This template already mounts
+`eve/extensions/code`; delete `agent/extensions/code.ts` if your brain shouldn't
+run code. To let it open pull requests too, mount `eve/extensions/git` next to
+it (see [Publish with the git extension](https://eve.dev/docs/code-extension#publish-with-the-git-extension)).
+Browse more with `pnpm exec eve registry list`. See
+[Extensions](https://eve.dev/docs/extensions).
 
 ### Change Slack behavior
 
@@ -233,6 +240,9 @@ such as `pnpm exec eve add memory/file`. See [Memory](https://eve.dev/docs/memor
   connections, and use app-scoped auth only for content everyone may see.
 - **Set `SLACK_TEAM_ID`.** Without it, anyone Slack delivers a message from,
   including Slack Connect guests, can start a conversation.
+- **Sandboxed code may reach the network.** Depending on the sandbox, code the
+  agent runs can make outbound requests. Don't put credentials in the sandbox, and set a network policy if
+  you need to restrict egress. See [Sandbox](https://eve.dev/docs/sandbox).
 - **Keep checks in sensitive tools.** The channel gate decides who can start a
   turn. A tool that reads or changes sensitive data should check
   `ctx.session.auth` itself.
