@@ -14,9 +14,10 @@ specialists (subagents).
 agent/
   agent.ts                       # model selection
   instructions.md                # grounding, source routing, and Slack style
-  channels/slack.ts              # mentions and DMs, thread context, workspace gate
+  channels/slack.ts              # mentions, DMs, followed threads, workspace gate
   schedules/tasks.ts             # schedules people create by asking in Slack
   skills/company-context/SKILL.md # fill in your teams, glossary, and sources
+  tools/no_reply.ts              # lets the agent stay quiet in followed threads
   lib/slack.ts                   # shared Slack credentials and workspace check
 ```
 
@@ -25,6 +26,11 @@ agent/
   inline, and say when nothing answers the question.
 - **Thread context.** Each mention also sees the replies posted since the agent
   last spoke, with sender names.
+- **Followed threads.** Once someone brings the agent into a thread, it sees
+  later replies without a mention and answers only when a reply is meant for
+  it. Otherwise it calls `no_reply` and leaves no trace. Top-level channel
+  messages still need a mention. This needs extra Slack events; see
+  [Get started](#get-started).
 - **Workspace gate.** With `SLACK_TEAM_ID` set, only members of your workspace
   can start a conversation, so guests in Slack Connect channels can't.
 - **Scheduled tasks.** People can ask for recurring or one-time work, such as
@@ -51,6 +57,12 @@ Vercel project's environment too, then deploy:
 ```bash
 pnpm exec eve deploy
 ```
+
+To follow threads without a mention, the Slack app also needs the
+`message.channels` event and `channels:history` scope (and `message.groups` and
+`groups:history` for private channels). With Vercel Connect, add them in the
+connector's **Advanced** settings under **Trigger Event Types** and **Bot
+Scopes**. Without them, people mention the agent for each follow-up.
 
 Invite the app to a channel and mention it. Model calls use AI Gateway through
 the linked project, or `AI_GATEWAY_API_KEY` in `.env.local`.
@@ -202,8 +214,8 @@ you mount under `agent/extensions/`. eve ships some, such as
 `agent/channels/slack.ts` decides who reaches the agent and what each message
 carries. The Slack docs cover common next steps:
 
-- [Reply without a mention](https://eve.dev/docs/channels/slack#reply-without-a-mention)
-  in threads the agent is already in.
+- [Join new conversations](https://eve.dev/docs/channels/slack#reply-without-a-mention)
+  in channels you choose, using a decision model to screen messages.
 - [Restrict access](https://eve.dev/docs/channels/slack#restrict-access) to
   specific people or channels.
 - [Start conversations proactively](https://eve.dev/docs/channels/slack#start-conversations-proactively)
